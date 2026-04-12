@@ -626,6 +626,29 @@ const App: React.FC = () => {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            onClick={() => { setEditMode((v) => !v); setFocusIndex(-1); }}
+            title="Toggle edit mode"
+            style={{
+              height: 32,
+              padding: "0 10px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: editMode ? "#9df8ff" : "#fff",
+              border: `1px solid ${editMode ? "#0f7f8b" : UI_THEME.line}`,
+              borderRadius: 8,
+              cursor: "pointer",
+              fontSize: 11,
+              color: "#0b3c44",
+              fontWeight: 700,
+              letterSpacing: "0.06em",
+              fontFamily: "'IBM Plex Mono', monospace",
+            }}
+          >
+            {editMode ? "EDIT: ON" : "EDIT: OFF"}
+          </button>
+
           {/* Add module — always visible */}
           <button
             onClick={() => { addWidget(); setEditMode(true); setFocusIndex(-1); }}
