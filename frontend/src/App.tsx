@@ -41,7 +41,58 @@ const INITIAL_WIDGETS: Widget[] = [
 ];
 
 // ── Helpers ──
-function clamp(v: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, v)); }
+function clamp(v: number, lo: number, hi: number) {
+  if (lo > hi) return lo;
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function coerceWidget(value: unknown): Widget | null {
+  if (!isObject(value)) return null;
+  const { id, x, y, w, h, title, color, accent } = value;
+  if (
+    typeof id !== "string" ||
+    typeof x !== "number" ||
+    typeof y !== "number" ||
+    typeof w !== "number" ||
+    typeof h !== "number" ||
+    typeof title !== "string" ||
+    typeof color !== "string" ||
+    typeof accent !== "string"
+  ) {
+    return null;
+  }
+  return {
+    id,
+    x: Math.max(0, Math.round(x)),
+    y: Math.max(0, Math.round(y)),
+    w: Math.max(MIN_W, Math.round(w)),
+    h: Math.max(MIN_H, Math.round(h)),
+    title,
+    color,
+    accent,
+  };
+}
+
+function sanitizeWidgets(value: unknown): Widget[] | null {
+  if (!Array.isArray(value)) return null;
+  const seen = new Set<string>();
+  const cleaned: Widget[] = [];
+  for (const item of value) {
+    const widget = coerceWidget(item);
+    if (!widget || seen.has(widget.id)) continue;
+    seen.add(widget.id);
+    cleaned.push(widget);
+  }
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+function isHexColor(value: unknown): value is string {
+  return typeof value === "string" && /^#[0-9A-F]{6}$/i.test(value);
+}
 
 function getPointer(e: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent) {
   if ("touches" in e && e.touches.length > 0) return { px: e.touches[0].clientX, py: e.touches[0].clientY };
@@ -54,13 +105,30 @@ const WIDGET_KEY   = "grid-dashboard-v7";
 const SETTINGS_KEY = "grid-dashboard-settings";
 
 function loadWidgets(): Widget[] | null {
-  try { const s = localStorage.getItem(WIDGET_KEY); return s ? JSON.parse(s) : null; } catch { return null; }
+  try {
+    const raw = localStorage.getItem(WIDGET_KEY);
+    if (!raw) return null;
+    return sanitizeWidgets(JSON.parse(raw));
+  } catch {
+    return null;
+  }
 }
 function saveWidgets(w: Widget[]) {
   try { localStorage.setItem(WIDGET_KEY, JSON.stringify(w)); } catch {}
 }
 function loadSettings(): { bgColor?: string; crossColor?: string } {
-  try { const s = localStorage.getItem(SETTINGS_KEY); return s ? JSON.parse(s) : {}; } catch { return {}; }
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!isObject(parsed)) return {};
+    return {
+      bgColor: isHexColor(parsed.bgColor) ? parsed.bgColor : undefined,
+      crossColor: isHexColor(parsed.crossColor) ? parsed.crossColor : undefined,
+    };
+  } catch {
+    return {};
+  }
 }
 function saveSettings(s: { bgColor: string; crossColor: string }) {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
@@ -267,13 +335,18 @@ const IconEdit = ({ on }: { on: boolean }) => (
 
 // ── Main App ──
 let widgetCounter = 0;
+const createWidgetId = () => {
+  widgetCounter++;
+  return { id: `widget-${Date.now()}-${widgetCounter}`, counter: widgetCounter };
+};
 
 const App: React.FC = () => {
   const [widgets, setWidgets] = useState<Widget[]>(loadWidgets() || INITIAL_WIDGETS);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
-  const [bgColor, setBgColor] = useState(() => loadSettings().bgColor || "#f2f1ec");
-  const [crossColor, setCrossColor] = useState(() => loadSettings().crossColor || "#000000");
+  const initialSettingsRef = useRef(loadSettings());
+  const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || "#f2f1ec");
+  const [crossColor, setCrossColor] = useState(() => initialSettingsRef.current.crossColor || "#000000");
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   // Context menus
@@ -299,14 +372,14 @@ const App: React.FC = () => {
 
   // ── Widget CRUD ──
   const addWidget = useCallback(() => {
-    widgetCounter++;
-    const palette = PALETTES[widgetCounter % PALETTES.length];
+    const { id, counter } = createWidgetId();
+    const palette = PALETTES[counter % PALETTES.length];
     setWidgets((prev) => [...prev, {
-      id: `widget-${Date.now()}-${widgetCounter}`,
-      x: 1 + (widgetCounter % 4) * 2,
-      y: 1 + (widgetCounter % 3) * 2,
+      id,
+      x: 1 + (counter % 4) * 2,
+      y: 1 + (counter % 3) * 2,
       w: 10, h: 8,
-      title: `Widget ${widgetCounter}`,
+      title: `Widget ${counter}`,
       ...palette,
     }]);
   }, []);
@@ -319,12 +392,12 @@ const App: React.FC = () => {
     setWidgets((prev) => {
       const src = prev.find((w) => w.id === id);
       if (!src) return prev;
-      widgetCounter++;
+      const next = createWidgetId();
       return [...prev, {
         ...src,
-        id: `widget-${Date.now()}-${widgetCounter}`,
-        x: Math.min(src.x + 2, gridCols - src.w),
-        y: Math.min(src.y + 2, gridRows - src.h),
+        id: next.id,
+        x: clamp(src.x + 2, 0, gridCols - src.w),
+        y: clamp(src.y + 2, 0, gridRows - src.h),
       }];
     });
   }, [gridCols, gridRows]);
