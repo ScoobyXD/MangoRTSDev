@@ -5,7 +5,7 @@ import type { Widget, DragState, ResizeEdges } from "./types";
 // ── Grid constants ──
 const CELL_SIZE = 28;
 const HEADER_H = 48;
-const CROSS_ARM = 4;
+const CROSS_ARM = 2;
 const MIN_W = 3;
 const MIN_H = 3;
 const HANDLE = 6;
@@ -13,36 +13,36 @@ const CORNER_SIZE = 14;
 
 // ── Color palettes for new widgets ──
 const PALETTES = [
-  { color: "#e4e4e1", accent: "#161616" },
-  { color: "#dbdedd", accent: "#1a2925" },
-  { color: "#dedbd6", accent: "#29231a" },
-  { color: "#d8d9de", accent: "#1b1e2a" },
-  { color: "#e1ddd9", accent: "#2a2119" },
-  { color: "#dfe2dc", accent: "#1d2720" },
-  { color: "#e2dddf", accent: "#2c1f24" },
-  { color: "#dddede", accent: "#202020" },
-  { color: "#dfddd8", accent: "#25211a" },
-  { color: "#dadada", accent: "#191919" },
+  { color: "#c7f4f4", accent: "#00a9b7" },
+  { color: "#ffd2ad", accent: "#ff6a00" },
+  { color: "#b7f0ff", accent: "#0098d8" },
+  { color: "#ffc89b", accent: "#ff5a00" },
+  { color: "#baf8ee", accent: "#00a78b" },
+  { color: "#ffd9b8", accent: "#ff7d00" },
+  { color: "#c9f1ff", accent: "#00a0c6" },
+  { color: "#ffcf9f", accent: "#ff6200" },
+  { color: "#baf2ff", accent: "#009cc9" },
+  { color: "#ffd7a6", accent: "#ff6f00" },
 ];
 
 const THEME = {
-  surface: "#ececea",
-  panel: "rgba(244,244,242,0.78)",
-  line: "rgba(0,0,0,0.26)",
-  text: "#090909",
-  subtext: "#4a4a4a",
+  surface: "#f7fffe",
+  panel: "#ff6a00",
+  line: "rgba(12, 67, 74, 0.45)",
+  text: "#041d22",
+  subtext: "#0b5058",
 };
 
 // ── Initial layout ──
 const INITIAL_WIDGETS: Widget[] = [
-  { id: "w-revenue", kind: "revenue",       x: 2,  y: 1,  w: 12, h: 9,  title: "Revenue",        color: "#e2e3df", accent: "#141414" },
-  { id: "w-users", kind: "users",           x: 14, y: 1,  w: 14, h: 9,  title: "Active Users",   color: "#dddeda", accent: "#121212" },
-  { id: "w-alerts", kind: "alerts",         x: 30, y: 1,  w: 12, h: 14, title: "Alerts",         color: "#dfddd7", accent: "#191919" },
-  { id: "w-tasks", kind: "tasks",           x: 2,  y: 10, w: 10, h: 10, title: "Tasks",          color: "#d9d9d9", accent: "#171717" },
-  { id: "w-chart", kind: "chart",           x: 12, y: 10, w: 16, h: 12, title: "Analytics",      color: "#dcdcdc", accent: "#121212" },
-  { id: "w-orders", kind: "orders",         x: 2,  y: 20, w: 10, h: 10, title: "Recent Orders",  color: "#dbddd9", accent: "#161616" },
-  { id: "w-notifications", kind: "notifications",  x: 12, y: 22, w: 12, h: 10, title: "Notifications",  color: "#dfdcdb", accent: "#171717" },
-  { id: "w-map", kind: "map",               x: 28, y: 15, w: 14, h: 17, title: "Map View",       color: "#dbddd8", accent: "#1a1a1a" },
+  { id: "w-revenue", kind: "revenue",       x: 2,  y: 1,  w: 12, h: 9,  title: "Revenue",        color: "#c9f8f3", accent: "#00a7b5" },
+  { id: "w-users", kind: "users",           x: 14, y: 1,  w: 14, h: 9,  title: "Active Users",   color: "#bfeeff", accent: "#0097d2" },
+  { id: "w-alerts", kind: "alerts",         x: 30, y: 1,  w: 12, h: 14, title: "Alerts",         color: "#ffd4b0", accent: "#ff6200" },
+  { id: "w-tasks", kind: "tasks",           x: 2,  y: 10, w: 10, h: 10, title: "Tasks",          color: "#c7f6f0", accent: "#00a589" },
+  { id: "w-chart", kind: "chart",           x: 12, y: 10, w: 16, h: 12, title: "Analytics",      color: "#c7f0ff", accent: "#00a0cc" },
+  { id: "w-orders", kind: "orders",         x: 2,  y: 20, w: 10, h: 10, title: "Recent Orders",  color: "#ffd9b7", accent: "#ff7000" },
+  { id: "w-notifications", kind: "notifications",  x: 12, y: 22, w: 12, h: 10, title: "Notifications",  color: "#bdf3ff", accent: "#0098c6" },
+  { id: "w-map", kind: "map",               x: 28, y: 15, w: 14, h: 17, title: "Map View",       color: "#ffd1a3", accent: "#ff6600" },
 ];
 
 // ── Helpers ──
@@ -172,7 +172,7 @@ const GridCrosses: React.FC<{ cols: number; rows: number; stepX: number; stepY: 
         width={width}
         height={height}
       >
-        <path d={path} stroke={color} strokeWidth="0.8" fill="none" opacity="0.2" />
+        <path d={path} stroke={color} strokeWidth="0.55" fill="none" opacity="0.28" />
       </svg>
     );
   }
@@ -368,8 +368,8 @@ const App: React.FC = () => {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const initialSettingsRef = useRef(loadSettings());
-  const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || "#ececea");
-  const [crossColor, setCrossColor] = useState(() => initialSettingsRef.current.crossColor || "#1a1a1a");
+  const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || "#f7fffe");
+  const [crossColor, setCrossColor] = useState(() => initialSettingsRef.current.crossColor || "#00a8b8");
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   // Context menus
@@ -597,8 +597,8 @@ const App: React.FC = () => {
           )}
           {editMode && (
             <span style={{
-              fontSize: 10, fontWeight: 700, color: "#0f0f0f",
-              background: "#dcdcd9", border: "1px solid rgba(0,0,0,0.35)", borderRadius: 2, padding: "3px 8px",
+              fontSize: 10, fontWeight: 700, color: "#003c45",
+              background: "#9df8ff", border: "1px solid rgba(0,94,104,0.7)", borderRadius: 2, padding: "3px 8px",
               letterSpacing: "0.1em", fontFamily: "'IBM Plex Mono', monospace",
             }}>
               EDIT MODE
