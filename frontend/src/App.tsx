@@ -12,18 +12,23 @@ const HANDLE = 6;
 const CORNER_SIZE = 14;
 
 // ── Color palettes for new widgets ──
-const PALETTES = [
-  { color: "#c7f4f4", accent: "#00a9b7" },
-  { color: "#ffd2ad", accent: "#ff6a00" },
-  { color: "#b7f0ff", accent: "#0098d8" },
-  { color: "#ffc89b", accent: "#ff5a00" },
-  { color: "#baf8ee", accent: "#00a78b" },
-  { color: "#ffd9b8", accent: "#ff7d00" },
-  { color: "#c9f1ff", accent: "#00a0c6" },
-  { color: "#ffcf9f", accent: "#ff6200" },
-  { color: "#baf2ff", accent: "#009cc9" },
-  { color: "#ffd7a6", accent: "#ff6f00" },
-];
+const COLORWAYS = {
+  teal: { color: "#bfffff", accent: "#00aebe", text: "#07181b", tagBg: "#00aebe", tagText: "#021013" },
+  orange: { color: "#ffd0a4", accent: "#ff6a00", text: "#221006", tagBg: "#ff6a00", tagText: "#180901" },
+  white: { color: "#ffffff", accent: "#00aebe", text: "#111111", tagBg: "#ffffff", tagText: "#111111" },
+  black: { color: "#0c0c0c", accent: "#ffffff", text: "#ffffff", tagBg: "#ffffff", tagText: "#050505" },
+} as const;
+type ColorwayKey = keyof typeof COLORWAYS;
+
+const COLORWAY_ORDER: ColorwayKey[] = ["teal", "orange", "white", "black"];
+
+const THEME = {
+  surface: "#f7fffe",
+  panel: "#ff6a00",
+  line: "rgba(12, 67, 74, 0.45)",
+  text: "#041d22",
+  subtext: "#0b5058",
+};
 
 const THEME = {
   surface: "#f7fffe",
@@ -35,14 +40,14 @@ const THEME = {
 
 // ── Initial layout ──
 const INITIAL_WIDGETS: Widget[] = [
-  { id: "w-revenue", kind: "revenue",       x: 2,  y: 1,  w: 12, h: 9,  title: "Revenue",        color: "#c9f8f3", accent: "#00a7b5" },
-  { id: "w-users", kind: "users",           x: 14, y: 1,  w: 14, h: 9,  title: "Active Users",   color: "#bfeeff", accent: "#0097d2" },
-  { id: "w-alerts", kind: "alerts",         x: 30, y: 1,  w: 12, h: 14, title: "Alerts",         color: "#ffd4b0", accent: "#ff6200" },
-  { id: "w-tasks", kind: "tasks",           x: 2,  y: 10, w: 10, h: 10, title: "Tasks",          color: "#c7f6f0", accent: "#00a589" },
-  { id: "w-chart", kind: "chart",           x: 12, y: 10, w: 16, h: 12, title: "Analytics",      color: "#c7f0ff", accent: "#00a0cc" },
-  { id: "w-orders", kind: "orders",         x: 2,  y: 20, w: 10, h: 10, title: "Recent Orders",  color: "#ffd9b7", accent: "#ff7000" },
-  { id: "w-notifications", kind: "notifications",  x: 12, y: 22, w: 12, h: 10, title: "Notifications",  color: "#bdf3ff", accent: "#0098c6" },
-  { id: "w-map", kind: "map",               x: 28, y: 15, w: 14, h: 17, title: "Map View",       color: "#ffd1a3", accent: "#ff6600" },
+  { id: "w-revenue", theme: "teal", kind: "revenue",       x: 2,  y: 1,  w: 12, h: 9,  title: "Revenue",        color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "w-users", theme: "teal", kind: "users",           x: 14, y: 1,  w: 14, h: 9,  title: "Active Users",   color: COLORWAYS.white.color, accent: COLORWAYS.teal.accent },
+  { id: "w-alerts", theme: "orange", kind: "alerts",       x: 30, y: 1,  w: 12, h: 14, title: "Alerts",         color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+  { id: "w-tasks", theme: "black", kind: "tasks",          x: 2,  y: 10, w: 10, h: 10, title: "Tasks",          color: COLORWAYS.black.color, accent: COLORWAYS.black.accent },
+  { id: "w-chart", theme: "white", kind: "chart",          x: 12, y: 10, w: 16, h: 12, title: "Analytics",      color: COLORWAYS.white.color, accent: COLORWAYS.teal.accent },
+  { id: "w-orders", theme: "orange", kind: "orders",       x: 2,  y: 20, w: 10, h: 10, title: "Recent Orders",  color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+  { id: "w-notifications", theme: "teal", kind: "notifications",  x: 12, y: 22, w: 12, h: 10, title: "Notifications",  color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "w-map", theme: "white", kind: "map",              x: 28, y: 15, w: 14, h: 17, title: "Map View",       color: COLORWAYS.white.color, accent: COLORWAYS.orange.accent },
 ];
 
 // ── Helpers ──
@@ -55,9 +60,13 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function isColorway(value: unknown): value is ColorwayKey {
+  return typeof value === "string" && value in COLORWAYS;
+}
+
 function coerceWidget(value: unknown): Widget | null {
   if (!isObject(value)) return null;
-  const { id, kind, x, y, w, h, title, color, accent } = value;
+  const { id, kind, theme, x, y, w, h, title, color, accent } = value;
   if (
     typeof id !== "string" ||
     typeof kind !== "string" ||
@@ -74,6 +83,7 @@ function coerceWidget(value: unknown): Widget | null {
   return {
     id,
     kind,
+    theme: isColorway(theme) ? theme : "teal",
     x: Math.max(0, Math.round(x)),
     y: Math.max(0, Math.round(y)),
     w: Math.max(MIN_W, Math.round(w)),
@@ -209,6 +219,7 @@ interface WidgetCardProps {
 const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, editMode, onDragStart, onResizeStart, onContextMenu, onHeaderClick, onOpenDetail }) => {
   const { title, color, accent, w, h } = widget;
   const Content = CONTENT_MAP[widget.kind];
+  const theme = COLORWAYS[widget.theme ?? "teal"];
 
   return (
     <div
@@ -229,6 +240,7 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
         userSelect: "none",
         zIndex: isDragging ? 100 : 1,
         opacity: isDragging ? 0.92 : 1,
+        color: theme.text,
       }}
       onMouseDown={(e) => {
         if (!editMode || (e.target as HTMLElement).dataset.handle) return;
@@ -245,7 +257,7 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
         style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}
         onClick={(e) => !editMode && onHeaderClick(e, widget.id)}
       >
-        <span style={{ fontSize: 10, fontWeight: 700, color: "#f1f1ee", textTransform: "uppercase", letterSpacing: "0.1em", background: "#0f0f0f", padding: "2px 6px" }}>{title}</span>
+        <span style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px" }}>{title}</span>
         <span style={{
           fontSize: 10, fontWeight: 700, color: accent,
           background: "transparent", border: `1px solid ${accent}`,
@@ -255,14 +267,14 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
           {w}×{h}
         </span>
       </div>
-      <div style={{ flex: 1, padding: "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace", color: "#111" }}>
+      <div style={{ flex: 1, padding: "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace", color: "inherit" }}>
         {Content ? <Content accent={accent} /> : (
           <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}>
             <span style={{ fontSize: 13, color: accent }}>{widget.title}</span>
           </div>
         )}
       </div>
-      <div style={{ position: "absolute", right: 2, top: 2, fontSize: 10, color: "#222", fontFamily: "'IBM Plex Mono', monospace" }}>×</div>
+      <div style={{ position: "absolute", right: 2, top: 2, fontSize: 10, color: accent, fontFamily: "'IBM Plex Mono', monospace" }}>×</div>
       {editMode && HANDLES.map((h, i) => (
         <div
           key={i}
@@ -400,19 +412,26 @@ const App: React.FC = () => {
   useEffect(() => { saveSettings({ bgColor, crossColor }); }, [bgColor, crossColor]);
 
   // ── Widget CRUD ──
+  const applyColorway = useCallback((widget: Widget, theme: ColorwayKey): Widget => {
+    const swatch = COLORWAYS[theme];
+    return { ...widget, theme, color: swatch.color, accent: swatch.accent };
+  }, []);
+
   const addWidget = useCallback((kind = "chart") => {
     const template = WIDGET_LIBRARY.find((item) => item.kind === kind);
     if (!template) return;
     const { id, counter } = createWidgetId();
-    const palette = PALETTES[counter % PALETTES.length];
+    const theme = COLORWAY_ORDER[counter % COLORWAY_ORDER.length];
     setWidgets((prev) => [...prev, {
       id,
       kind,
+      theme,
       x: 1 + (counter % 4) * 2,
       y: 1 + (counter % 3) * 2,
       w: template.defaultW, h: template.defaultH,
       title: template.label,
-      ...palette,
+      color: COLORWAYS[theme].color,
+      accent: COLORWAYS[theme].accent,
     }]);
   }, []);
 
@@ -433,15 +452,19 @@ const App: React.FC = () => {
       const src = prev.find((w) => w.id === id);
       if (!src) return prev;
       const next = createWidgetId();
-      return [...prev, {
+      return [...prev, applyColorway({
         ...src,
         id: next.id,
         kind: src.kind,
         x: clamp(src.x + 2, 0, gridCols - src.w),
         y: clamp(src.y + 2, 0, gridRows - src.h),
-      }];
+      }, src.theme ?? "teal")];
     });
-  }, [gridCols, gridRows]);
+  }, [applyColorway, gridCols, gridRows]);
+
+  const setWidgetTheme = useCallback((id: string, theme: ColorwayKey) => {
+    setWidgets((prev) => prev.map((w) => (w.id === id ? applyColorway(w, theme) : w)));
+  }, [applyColorway]);
 
   // ── Context menus ──
   const onWidgetContextMenu = useCallback((e: React.MouseEvent, id: string) => {
@@ -701,6 +724,21 @@ const App: React.FC = () => {
           <button style={menuBtnBase} onClick={() => { duplicateWidget(widgetMenu.id); closeMenus(); }} {...hoverHandlers}>
             <IconDuplicate /> Duplicate
           </button>
+          <MenuDivider />
+          <div style={{ padding: "6px 16px 4px", fontSize: 10, letterSpacing: "0.08em", color: "#555", fontFamily: "'IBM Plex Mono', monospace" }}>
+            COLORWAY
+          </div>
+          {COLORWAY_ORDER.map((theme) => (
+            <button
+              key={theme}
+              style={menuBtnBase}
+              onClick={() => { setWidgetTheme(widgetMenu.id, theme); closeMenus(); }}
+              {...hoverHandlers}
+            >
+              <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} />
+              {theme.toUpperCase()}
+            </button>
+          ))}
           <MenuDivider />
           <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { deleteWidget(widgetMenu.id); closeMenus(); }} {...hoverHandlers}>
             <IconTrash /> Delete

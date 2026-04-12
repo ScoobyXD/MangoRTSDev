@@ -1,6 +1,6 @@
 import React from "react";
 
-const divider = { borderBottom: "1px solid #222", padding: "5px 0" };
+const divider = { borderBottom: "1px solid currentColor", padding: "5px 0" };
 
 export const RevenueContent: React.FC<{ accent: string }> = ({ accent }) => (
   <div style={{ display: "grid", gap: 6 }}>
