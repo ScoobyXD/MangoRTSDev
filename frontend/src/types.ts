@@ -1,5 +1,7 @@
 export interface Widget {
   id: string;
+  kind: string;
+  theme?: "teal" | "orange" | "white" | "black";
   x: number;
   y: number;
   w: number;
