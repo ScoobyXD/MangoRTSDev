@@ -22,15 +22,7 @@ type ColorwayKey = keyof typeof COLORWAYS;
 
 const COLORWAY_ORDER: ColorwayKey[] = ["teal", "orange", "white", "black"];
 
-const THEME = {
-  surface: "#f7fffe",
-  panel: "#ff6a00",
-  line: "rgba(12, 67, 74, 0.45)",
-  text: "#041d22",
-  subtext: "#0b5058",
-};
-
-const THEME = {
+const UI_THEME = {
   surface: "#f7fffe",
   panel: "#ff6a00",
   line: "rgba(12, 67, 74, 0.45)",
@@ -594,18 +586,18 @@ const App: React.FC = () => {
   }, []);
 
   return (
-    <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: bgColor || THEME.surface }}>
+    <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: bgColor || UI_THEME.surface }}>
       {/* ── Header ── */}
       <header style={{
         height: HEADER_H, padding: "0 20px",
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        background: THEME.panel,
+        background: UI_THEME.panel,
         backdropFilter: "blur(10px)",
-        borderBottom: `1px solid ${THEME.line}`,
+        borderBottom: `1px solid ${UI_THEME.line}`,
         zIndex: 200, position: "relative",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 800, color: THEME.text, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+          <h1 style={{ fontSize: 18, fontWeight: 800, color: UI_THEME.text, letterSpacing: "0.04em", textTransform: "uppercase" }}>
             Dashboard
           </h1>
           {focusedWidgetId && (
@@ -627,7 +619,7 @@ const App: React.FC = () => {
               EDIT MODE
             </span>
           )}
-          <span style={{ fontSize: 12, color: THEME.subtext, letterSpacing: "0.03em" }}>
+          <span style={{ fontSize: 12, color: UI_THEME.subtext, letterSpacing: "0.03em" }}>
             {editMode ? "Drag to move · Edges to resize · Right-click for options" : `${gridCols}×${gridRows} grid`}
           </span>
         </div>
@@ -640,7 +632,7 @@ const App: React.FC = () => {
             style={{
               width: 32, height: 32,
               display: "flex", alignItems: "center", justifyContent: "center",
-              background: "#fff", border: `1px solid ${THEME.line}`,
+              background: "#fff", border: `1px solid ${UI_THEME.line}`,
               borderRadius: 8, cursor: "pointer", fontSize: 20, color: "#555",
               fontWeight: 300, lineHeight: 1,
             }}
