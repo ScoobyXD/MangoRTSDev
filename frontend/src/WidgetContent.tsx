@@ -147,15 +147,3 @@ export const MapContent: React.FC<{ accent: string }> = ({ accent }) => (
     </div>
   </div>
 );
-
-/* ── Content registry ── */
-export const CONTENT_MAP: Record<string, React.FC<{ accent: string }>> = {
-  revenue: RevenueContent,
-  users: UsersContent,
-  alerts: AlertsContent,
-  tasks: TasksContent,
-  chart: ChartContent,
-  orders: OrdersContent,
-  notifications: NotificationsContent,
-  map: MapContent,
-};
