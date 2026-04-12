@@ -30,6 +30,14 @@ const THEME = {
   subtext: "#0b5058",
 };
 
+const THEME = {
+  surface: "#f7fffe",
+  panel: "#ff6a00",
+  line: "rgba(12, 67, 74, 0.45)",
+  text: "#041d22",
+  subtext: "#0b5058",
+};
+
 // ── Initial layout ──
 const INITIAL_WIDGETS: Widget[] = [
   { id: "w-revenue", theme: "teal", kind: "revenue",       x: 2,  y: 1,  w: 12, h: 9,  title: "Revenue",        color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
