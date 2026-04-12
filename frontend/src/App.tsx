@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { CONTENT_MAP } from "./WidgetContent";
+import { CONTENT_MAP, WIDGET_LIBRARY } from "./widgets";
 import type { Widget, DragState, ResizeEdges } from "./types";
 
 // ── Grid constants ──
@@ -28,20 +28,81 @@ const PALETTES = [
   { color: "#EDE7F6", accent: "#4527A0" },
 ];
 
+const THEME = {
+  surface: "#f3f3f1",
+  panel: "rgba(255,255,255,0.62)",
+  line: "rgba(10,10,10,0.18)",
+  text: "#121212",
+  subtext: "#595959",
+};
+
 // ── Initial layout ──
 const INITIAL_WIDGETS: Widget[] = [
-  { id: "revenue",       x: 2,  y: 1,  w: 12, h: 9,  title: "Revenue",        color: "#E8F5E9", accent: "#2E7D32" },
-  { id: "users",          x: 14, y: 1,  w: 14, h: 9,  title: "Active Users",   color: "#E3F2FD", accent: "#1565C0" },
-  { id: "alerts",         x: 30, y: 1,  w: 12, h: 14, title: "Alerts",         color: "#FFF3E0", accent: "#E65100" },
-  { id: "tasks",          x: 2,  y: 10, w: 10, h: 10, title: "Tasks",          color: "#F3E5F5", accent: "#6A1B9A" },
-  { id: "chart",          x: 12, y: 10, w: 16, h: 12, title: "Analytics",      color: "#ECEFF1", accent: "#37474F" },
-  { id: "orders",         x: 2,  y: 20, w: 10, h: 10, title: "Recent Orders",  color: "#E0F7FA", accent: "#00695C" },
-  { id: "notifications",  x: 12, y: 22, w: 12, h: 10, title: "Notifications",  color: "#FCE4EC", accent: "#AD1457" },
-  { id: "map",            x: 28, y: 15, w: 14, h: 17, title: "Map View",       color: "#F1F8E9", accent: "#558B2F" },
+  { id: "w-revenue", kind: "revenue",       x: 2,  y: 1,  w: 12, h: 9,  title: "Revenue",        color: "#DCE9DE", accent: "#1f8a4c" },
+  { id: "w-users", kind: "users",           x: 14, y: 1,  w: 14, h: 9,  title: "Active Users",   color: "#d8e3ea", accent: "#2f6f9a" },
+  { id: "w-alerts", kind: "alerts",         x: 30, y: 1,  w: 12, h: 14, title: "Alerts",         color: "#eadfcd", accent: "#b05d1e" },
+  { id: "w-tasks", kind: "tasks",           x: 2,  y: 10, w: 10, h: 10, title: "Tasks",          color: "#dfd7e6", accent: "#6f2ea8" },
+  { id: "w-chart", kind: "chart",           x: 12, y: 10, w: 16, h: 12, title: "Analytics",      color: "#d9dde0", accent: "#41535e" },
+  { id: "w-orders", kind: "orders",         x: 2,  y: 20, w: 10, h: 10, title: "Recent Orders",  color: "#d6e9e4", accent: "#0f7968" },
+  { id: "w-notifications", kind: "notifications",  x: 12, y: 22, w: 12, h: 10, title: "Notifications",  color: "#e8d7e2", accent: "#9a356f" },
+  { id: "w-map", kind: "map",               x: 28, y: 15, w: 14, h: 17, title: "Map View",       color: "#dde6d8", accent: "#5e8d3a" },
 ];
 
 // ── Helpers ──
-function clamp(v: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, v)); }
+function clamp(v: number, lo: number, hi: number) {
+  if (lo > hi) return lo;
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function coerceWidget(value: unknown): Widget | null {
+  if (!isObject(value)) return null;
+  const { id, kind, x, y, w, h, title, color, accent } = value;
+  if (
+    typeof id !== "string" ||
+    typeof kind !== "string" ||
+    typeof x !== "number" ||
+    typeof y !== "number" ||
+    typeof w !== "number" ||
+    typeof h !== "number" ||
+    typeof title !== "string" ||
+    typeof color !== "string" ||
+    typeof accent !== "string"
+  ) {
+    return null;
+  }
+  return {
+    id,
+    kind,
+    x: Math.max(0, Math.round(x)),
+    y: Math.max(0, Math.round(y)),
+    w: Math.max(MIN_W, Math.round(w)),
+    h: Math.max(MIN_H, Math.round(h)),
+    title,
+    color,
+    accent,
+  };
+}
+
+function sanitizeWidgets(value: unknown): Widget[] | null {
+  if (!Array.isArray(value)) return null;
+  const seen = new Set<string>();
+  const cleaned: Widget[] = [];
+  for (const item of value) {
+    const widget = coerceWidget(item);
+    if (!widget || seen.has(widget.id)) continue;
+    seen.add(widget.id);
+    cleaned.push(widget);
+  }
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+function isHexColor(value: unknown): value is string {
+  return typeof value === "string" && /^#[0-9A-F]{6}$/i.test(value);
+}
 
 function getPointer(e: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent) {
   if ("touches" in e && e.touches.length > 0) return { px: e.touches[0].clientX, py: e.touches[0].clientY };
@@ -54,21 +115,38 @@ const WIDGET_KEY   = "grid-dashboard-v7";
 const SETTINGS_KEY = "grid-dashboard-settings";
 
 function loadWidgets(): Widget[] | null {
-  try { const s = localStorage.getItem(WIDGET_KEY); return s ? JSON.parse(s) : null; } catch { return null; }
+  try {
+    const raw = localStorage.getItem(WIDGET_KEY);
+    if (!raw) return null;
+    return sanitizeWidgets(JSON.parse(raw));
+  } catch {
+    return null;
+  }
 }
 function saveWidgets(w: Widget[]) {
   try { localStorage.setItem(WIDGET_KEY, JSON.stringify(w)); } catch {}
 }
 function loadSettings(): { bgColor?: string; crossColor?: string } {
-  try { const s = localStorage.getItem(SETTINGS_KEY); return s ? JSON.parse(s) : {}; } catch { return {}; }
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!isObject(parsed)) return {};
+    return {
+      bgColor: isHexColor(parsed.bgColor) ? parsed.bgColor : undefined,
+      crossColor: isHexColor(parsed.crossColor) ? parsed.crossColor : undefined,
+    };
+  } catch {
+    return {};
+  }
 }
 function saveSettings(s: { bgColor: string; crossColor: string }) {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
 }
 
 // ── Grid crosses ──
-const GridCrosses: React.FC<{ cols: number; rows: number; color: string }> = React.memo(
-  ({ cols, rows, color }) => {
+const GridCrosses: React.FC<{ cols: number; rows: number; width: number; height: number; color: string }> = React.memo(
+  ({ cols, rows, width, height, color }) => {
     const path = useMemo(() => {
       const a = CROSS_ARM;
       const parts: string[] = [];
@@ -79,14 +157,23 @@ const GridCrosses: React.FC<{ cols: number; rows: number; color: string }> = Rea
           parts.push(`M${x} ${y - a}v${a * 2}M${x - a} ${y}h${a * 2}`);
         }
       }
+      for (let r = 0; r <= rows; r++) {
+        const y = r * CELL_SIZE;
+        parts.push(`M${width} ${y - a}v${a * 2}`);
+      }
+      for (let c = 0; c <= cols; c++) {
+        const x = c * CELL_SIZE;
+        parts.push(`M${x - a} ${height}h${a * 2}`);
+      }
+      parts.push(`M${width - a} ${height}h${a * 2}M${width} ${height - a}v${a * 2}`);
       return parts.join("");
-    }, [cols, rows]);
+    }, [cols, rows, width, height]);
 
     return (
       <svg
         style={{ position: "absolute", top: 0, left: 0, overflow: "visible", pointerEvents: "none" }}
-        width={cols * CELL_SIZE}
-        height={rows * CELL_SIZE}
+        width={width}
+        height={height}
       >
         <path d={path} stroke={color} strokeWidth="0.8" fill="none" opacity="0.2" />
       </svg>
@@ -120,7 +207,7 @@ interface WidgetCardProps {
 
 const WidgetCard: React.FC<WidgetCardProps> = ({ widget, isDragging, editMode, onDragStart, onResizeStart, onContextMenu }) => {
   const { title, color, accent, w, h } = widget;
-  const Content = CONTENT_MAP[widget.id];
+  const Content = CONTENT_MAP[widget.kind];
 
   return (
     <div
@@ -131,9 +218,9 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, isDragging, editMode, o
         width: w * CELL_SIZE,
         height: h * CELL_SIZE,
         background: color,
-        borderRadius: 14,
-        border: `1.5px solid ${accent}20`,
-        boxShadow: isDragging ? "0 14px 44px rgba(0,0,0,0.16)" : "0 2px 10px rgba(0,0,0,0.05)",
+        borderRadius: 6,
+        border: `1px solid ${accent}55`,
+        boxShadow: isDragging ? "0 12px 30px rgba(0,0,0,0.2)" : "0 2px 8px rgba(0,0,0,0.08)",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
@@ -152,7 +239,7 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, isDragging, editMode, o
       }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, widget.id); }}
     >
-      <div style={{ padding: "12px 14px 4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ padding: "10px 12px 4px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${accent}22` }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: "0.08em" }}>
           {title}
         </span>
@@ -267,18 +354,24 @@ const IconEdit = ({ on }: { on: boolean }) => (
 
 // ── Main App ──
 let widgetCounter = 0;
+const createWidgetId = () => {
+  widgetCounter++;
+  return { id: `widget-${Date.now()}-${widgetCounter}`, counter: widgetCounter };
+};
 
 const App: React.FC = () => {
   const [widgets, setWidgets] = useState<Widget[]>(loadWidgets() || INITIAL_WIDGETS);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
-  const [bgColor, setBgColor] = useState(() => loadSettings().bgColor || "#f2f1ec");
-  const [crossColor, setCrossColor] = useState(() => loadSettings().crossColor || "#000000");
+  const initialSettingsRef = useRef(loadSettings());
+  const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || "#f2f1ec");
+  const [crossColor, setCrossColor] = useState(() => initialSettingsRef.current.crossColor || "#000000");
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   // Context menus
   const [widgetMenu, setWidgetMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number } | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const dragRef = useRef<DragState | null>(null);
 
@@ -298,15 +391,18 @@ const App: React.FC = () => {
   useEffect(() => { saveSettings({ bgColor, crossColor }); }, [bgColor, crossColor]);
 
   // ── Widget CRUD ──
-  const addWidget = useCallback(() => {
-    widgetCounter++;
-    const palette = PALETTES[widgetCounter % PALETTES.length];
+  const addWidget = useCallback((kind = "chart") => {
+    const template = WIDGET_LIBRARY.find((item) => item.kind === kind);
+    if (!template) return;
+    const { id, counter } = createWidgetId();
+    const palette = PALETTES[counter % PALETTES.length];
     setWidgets((prev) => [...prev, {
-      id: `widget-${Date.now()}-${widgetCounter}`,
-      x: 1 + (widgetCounter % 4) * 2,
-      y: 1 + (widgetCounter % 3) * 2,
-      w: 10, h: 8,
-      title: `Widget ${widgetCounter}`,
+      id,
+      kind,
+      x: 1 + (counter % 4) * 2,
+      y: 1 + (counter % 3) * 2,
+      w: template.defaultW, h: template.defaultH,
+      title: template.label,
       ...palette,
     }]);
   }, []);
@@ -319,12 +415,13 @@ const App: React.FC = () => {
     setWidgets((prev) => {
       const src = prev.find((w) => w.id === id);
       if (!src) return prev;
-      widgetCounter++;
+      const next = createWidgetId();
       return [...prev, {
         ...src,
-        id: `widget-${Date.now()}-${widgetCounter}`,
-        x: Math.min(src.x + 2, gridCols - src.w),
-        y: Math.min(src.y + 2, gridRows - src.h),
+        id: next.id,
+        kind: src.kind,
+        x: clamp(src.x + 2, 0, gridCols - src.w),
+        y: clamp(src.y + 2, 0, gridRows - src.h),
       }];
     });
   }, [gridCols, gridRows]);
@@ -345,6 +442,7 @@ const App: React.FC = () => {
   const closeMenus = useCallback(() => {
     setWidgetMenu(null);
     setCanvasMenu(null);
+    setPickerOpen(false);
   }, []);
 
   // ── Drag / Resize ──
@@ -432,18 +530,18 @@ const App: React.FC = () => {
   }, []);
 
   return (
-    <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: bgColor }}>
+    <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: bgColor || THEME.surface }}>
       {/* ── Header ── */}
       <header style={{
         height: HEADER_H, padding: "0 20px",
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        background: editMode ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.35)",
-        backdropFilter: "blur(14px)",
-        borderBottom: `1px solid rgba(0,0,0,${editMode ? 0.08 : 0.04})`,
+        background: THEME.panel,
+        backdropFilter: "blur(10px)",
+        borderBottom: `1px solid ${THEME.line}`,
         zIndex: 200, position: "relative",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 800, color: "#222", letterSpacing: "-0.02em" }}>
+          <h1 style={{ fontSize: 18, fontWeight: 800, color: THEME.text, letterSpacing: "0.04em", textTransform: "uppercase" }}>
             Dashboard
           </h1>
           {editMode && (
@@ -455,7 +553,7 @@ const App: React.FC = () => {
               EDIT MODE
             </span>
           )}
-          <span style={{ fontSize: 12, color: "#999" }}>
+          <span style={{ fontSize: 12, color: THEME.subtext, letterSpacing: "0.03em" }}>
             {editMode ? "Drag to move · Edges to resize · Right-click for options" : `${gridCols}×${gridRows} grid`}
           </span>
         </div>
@@ -463,12 +561,12 @@ const App: React.FC = () => {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {/* Add widget — always visible */}
           <button
-            onClick={addWidget}
+            onClick={() => setPickerOpen((v) => !v)}
             title="Add widget"
             style={{
               width: 32, height: 32,
               display: "flex", alignItems: "center", justifyContent: "center",
-              background: "#fff", border: "1px solid #ddd",
+              background: "#fff", border: `1px solid ${THEME.line}`,
               borderRadius: 8, cursor: "pointer", fontSize: 20, color: "#555",
               fontWeight: 300, lineHeight: 1,
             }}
@@ -506,7 +604,7 @@ const App: React.FC = () => {
         style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }}
         onContextMenu={onCanvasContextMenu}
       >
-        <GridCrosses cols={gridCols} rows={gridRows} color={crossColor} />
+        <GridCrosses cols={gridCols} rows={gridRows} width={viewSize.w} height={canvasH} color={crossColor} />
 
         {widgets.map((w) => (
           <WidgetCard
@@ -520,6 +618,25 @@ const App: React.FC = () => {
           />
         ))}
       </div>
+
+      {pickerOpen && (
+        <FloatingMenu x={Math.max(16, viewSize.w - 260)} y={58} onClose={() => setPickerOpen(false)}>
+          <div style={{ padding: "8px 12px 4px", fontSize: 11, letterSpacing: "0.08em", color: "#666", textTransform: "uppercase" }}>
+            Widget Library
+          </div>
+          {WIDGET_LIBRARY.map((item) => (
+            <button
+              key={item.kind}
+              style={menuBtnBase}
+              onClick={() => { addWidget(item.kind); setPickerOpen(false); }}
+              {...hoverHandlers}
+            >
+              <span style={{ fontWeight: 700 }}>{item.label}</span>
+              <span style={{ marginLeft: "auto", opacity: 0.55 }}>{item.defaultW}×{item.defaultH}</span>
+            </button>
+          ))}
+        </FloatingMenu>
+      )}
 
       {/* ── Widget context menu ── */}
       {widgetMenu && (
