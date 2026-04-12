@@ -13,14 +13,14 @@ const CORNER_SIZE = 14;
 
 // ── Color palettes for new widgets ──
 const COLORWAYS = {
-  teal: { color: "#bfffff", accent: "#00aebe", text: "#07181b", tagBg: "#00aebe", tagText: "#021013" },
-  orange: { color: "#ffd0a4", accent: "#ff6a00", text: "#221006", tagBg: "#ff6a00", tagText: "#180901" },
-  white: { color: "#ffffff", accent: "#00aebe", text: "#111111", tagBg: "#ffffff", tagText: "#111111" },
+  teal: { color: "#00b7c7", accent: "#003b42", text: "#071010", tagBg: "#071010", tagText: "#ffffff" },
+  orange: { color: "#ff6a00", accent: "#5a2200", text: "#120900", tagBg: "#120900", tagText: "#ffffff" },
+  white: { color: "#ffffff", accent: "#111111", text: "#111111", tagBg: "#111111", tagText: "#ffffff" },
   black: { color: "#0c0c0c", accent: "#ffffff", text: "#ffffff", tagBg: "#ffffff", tagText: "#050505" },
 } as const;
 type ColorwayKey = keyof typeof COLORWAYS;
 
-const COLORWAY_ORDER: ColorwayKey[] = ["teal", "orange", "white", "black"];
+const COLORWAY_ORDER: ColorwayKey[] = ["teal", "orange", "white"];
 
 const UI_THEME = {
   surface: "#f7fffe",
@@ -33,13 +33,13 @@ const UI_THEME = {
 // ── Initial layout ──
 const INITIAL_WIDGETS: Widget[] = [
   { id: "w-revenue", theme: "teal", kind: "revenue",       x: 2,  y: 1,  w: 12, h: 9,  title: "Revenue",        color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-users", theme: "teal", kind: "users",           x: 14, y: 1,  w: 14, h: 9,  title: "Active Users",   color: COLORWAYS.white.color, accent: COLORWAYS.teal.accent },
+  { id: "w-users", theme: "orange", kind: "users",         x: 14, y: 1,  w: 14, h: 9,  title: "Active Users",   color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
   { id: "w-alerts", theme: "orange", kind: "alerts",       x: 30, y: 1,  w: 12, h: 14, title: "Alerts",         color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
-  { id: "w-tasks", theme: "black", kind: "tasks",          x: 2,  y: 10, w: 10, h: 10, title: "Tasks",          color: COLORWAYS.black.color, accent: COLORWAYS.black.accent },
-  { id: "w-chart", theme: "white", kind: "chart",          x: 12, y: 10, w: 16, h: 12, title: "Analytics",      color: COLORWAYS.white.color, accent: COLORWAYS.teal.accent },
+  { id: "w-tasks", theme: "teal", kind: "tasks",           x: 2,  y: 10, w: 10, h: 10, title: "Tasks",          color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "w-chart", theme: "white", kind: "chart",          x: 12, y: 10, w: 16, h: 12, title: "Analytics",      color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
   { id: "w-orders", theme: "orange", kind: "orders",       x: 2,  y: 20, w: 10, h: 10, title: "Recent Orders",  color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
-  { id: "w-notifications", theme: "teal", kind: "notifications",  x: 12, y: 22, w: 12, h: 10, title: "Notifications",  color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-map", theme: "white", kind: "map",              x: 28, y: 15, w: 14, h: 17, title: "Map View",       color: COLORWAYS.white.color, accent: COLORWAYS.orange.accent },
+  { id: "w-notifications", theme: "orange", kind: "notifications",  x: 12, y: 22, w: 12, h: 10, title: "Notifications",  color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+  { id: "w-map", theme: "teal", kind: "map",               x: 28, y: 15, w: 14, h: 17, title: "Map View",       color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
 ];
 
 // ── Helpers ──
