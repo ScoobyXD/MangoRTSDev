@@ -47,3 +47,23 @@ React 18 · TypeScript strict · Vite · Zero deps beyond React
 - Header/top bar should emphasize neon orange.
 - Use teal-blue as the main complementary accent across grid/widget UI elements.
 - Approved widget colorways (until changed): **teal / neon orange / white / black** only.
+
+## New Product Primitive: Case Hub
+
+This app now includes a **Case Hub** widget built around a central work object called a **Case**.
+
+### Naming options
+- **Case** (recommended)
+- Work Item
+- Thread
+- Ops Card
+
+### What a Case is
+A Case is the source of truth for one piece of work. Everything related to that work should be attachable or linkable in one place.
+
+### Case Hub widget goals
+- Create a Case quickly.
+- Assign a visible responsible person.
+- Add notes and links (email/doc/URL context).
+- Create child cases linked to a parent case.
+- Let leadership monitor progress remotely from one object.
