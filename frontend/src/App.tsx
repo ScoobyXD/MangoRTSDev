@@ -219,9 +219,9 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
         width: w * stepX,
         height: h * stepY,
         background: color,
-        borderRadius: 2,
-        border: `1px solid ${accent}55`,
-        boxShadow: isDragging ? "0 12px 30px rgba(0,0,0,0.2)" : "0 2px 8px rgba(0,0,0,0.08)",
+        borderRadius: 0,
+        border: `1px solid ${accent}`,
+        boxShadow: isDragging ? "0 10px 24px rgba(0,0,0,0.16)" : "none",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
@@ -242,28 +242,27 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
       onDoubleClick={() => { if (!editMode) onOpenDetail(widget.id); }}
     >
       <div
-        style={{ padding: "10px 12px 4px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${accent}22`, cursor: !editMode ? "pointer" : "inherit" }}
+        style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}
         onClick={(e) => !editMode && onHeaderClick(e, widget.id)}
       >
-        <span style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'IBM Plex Mono', monospace" }}>
-          {title}
-        </span>
+        <span style={{ fontSize: 10, fontWeight: 700, color: "#f1f1ee", textTransform: "uppercase", letterSpacing: "0.1em", background: "#0f0f0f", padding: "2px 6px" }}>{title}</span>
         <span style={{
           fontSize: 10, fontWeight: 700, color: accent,
-          background: `${accent}10`, border: `1px solid ${accent}35`,
-          borderRadius: 2, padding: "2px 6px",
+          background: "transparent", border: `1px solid ${accent}`,
+          borderRadius: 0, padding: "1px 4px",
           letterSpacing: "0.08em", fontVariantNumeric: "tabular-nums", fontFamily: "'IBM Plex Mono', monospace",
         }}>
           {w}×{h}
         </span>
       </div>
-      <div style={{ flex: 1, padding: "4px 14px 12px", overflow: "hidden" }}>
+      <div style={{ flex: 1, padding: "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace", color: "#111" }}>
         {Content ? <Content accent={accent} /> : (
           <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}>
             <span style={{ fontSize: 13, color: accent }}>{widget.title}</span>
           </div>
         )}
       </div>
+      <div style={{ position: "absolute", right: 2, top: 2, fontSize: 10, color: "#222", fontFamily: "'IBM Plex Mono', monospace" }}>×</div>
       {editMode && HANDLES.map((h, i) => (
         <div
           key={i}
