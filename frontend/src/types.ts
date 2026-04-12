@@ -1,5 +1,6 @@
 export interface Widget {
   id: string;
+  kind: string;
   x: number;
   y: number;
   w: number;
