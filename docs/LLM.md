@@ -39,3 +39,11 @@ Widget `onContextMenu` calls `e.stopPropagation()` to prevent canvas menu from o
 ## Stack
 
 React 18 · TypeScript strict · Vite · Zero deps beyond React
+
+## Visual Direction (Important)
+
+- Do **not** use muted / desaturated “sad” color palettes.
+- Primary brand direction is **vibrant teal-blue + bright neon orange**.
+- Header/top bar should emphasize neon orange.
+- Use teal-blue as the main complementary accent across grid/widget UI elements.
+- Approved widget colorways (until changed): **teal / neon orange / white / black** only.
