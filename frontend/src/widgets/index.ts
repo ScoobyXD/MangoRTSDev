@@ -28,7 +28,7 @@ export const WIDGET_LIBRARY: WidgetTemplate[] = [
   { kind: "orders", label: "Recent Orders", defaultW: 10, defaultH: 9, render: OrdersContent },
   { kind: "notifications", label: "Notifications", defaultW: 12, defaultH: 8, render: NotificationsContent },
   { kind: "map", label: "Map View", defaultW: 10, defaultH: 15, render: MapContent },
-  { kind: "case_hub", label: "Case Hub", defaultW: 14, defaultH: 14, render: CaseHubContent },
+  { kind: "case_hub", label: "Case Module", defaultW: 14, defaultH: 14, render: CaseHubContent },
 ];
 
 export const CONTENT_MAP: Record<string, React.FC<{ accent: string }>> = Object.fromEntries(

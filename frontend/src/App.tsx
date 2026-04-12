@@ -40,7 +40,7 @@ const INITIAL_WIDGETS: Widget[] = [
   { id: "w-orders", theme: "orange", kind: "orders",       x: 2,  y: 20, w: 10, h: 10, title: "Recent Orders",  color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
   { id: "w-notifications", theme: "orange", kind: "notifications",  x: 12, y: 22, w: 12, h: 10, title: "Notifications",  color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
   { id: "w-map", theme: "teal", kind: "map",               x: 28, y: 15, w: 14, h: 17, title: "Map View",       color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-case-hub", theme: "white", kind: "case_hub",    x: 24, y: 22, w: 18, h: 10, title: "Case Hub",       color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  { id: "w-case-hub", theme: "white", kind: "case_hub",    x: 24, y: 22, w: 18, h: 10, title: "Case Module",    color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
 ];
 
 // ── Helpers ──
@@ -626,10 +626,10 @@ const App: React.FC = () => {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {/* Add widget — always visible */}
+          {/* Add module — always visible */}
           <button
             onClick={() => { addWidget(); setEditMode(true); setFocusIndex(-1); }}
-            title="Add widget"
+            title="Add module"
             style={{
               width: 32, height: 32,
               display: "flex", alignItems: "center", justifyContent: "center",
@@ -696,7 +696,7 @@ const App: React.FC = () => {
       {typeMenu && (
         <FloatingMenu x={typeMenu.x} y={typeMenu.y} onClose={closeMenus}>
           <div style={{ padding: "8px 12px 4px", fontSize: 11, letterSpacing: "0.08em", color: "#666", textTransform: "uppercase" }}>
-            Widget Type
+            Module Type
           </div>
           {WIDGET_LIBRARY.map((item) => (
             <button

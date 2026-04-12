@@ -117,6 +117,7 @@ export const CaseHubContent: React.FC<{ accent: string }> = ({ accent }) => {
   const [ownerDraft, setOwnerDraft] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [linkDraft, setLinkDraft] = useState("");
+  const [quickDraft, setQuickDraft] = useState("");
   const [childDraft, setChildDraft] = useState("");
 
   const selected = records.find((item) => item.id === selectedId) ?? null;
@@ -155,10 +156,11 @@ export const CaseHubContent: React.FC<{ accent: string }> = ({ accent }) => {
   };
 
   const childCount = useMemo(() => records.filter((item) => item.parentId === selected?.id).length, [records, selected?.id]);
+  const isLikelyUrl = (value: string) => /^https?:\/\//i.test(value.trim());
 
   return (
     <div style={{ display: "grid", gap: 6, fontSize: 11 }}>
-      <div style={{ fontSize: 12, textTransform: "uppercase" }}>[ Case Hub ]</div>
+      <div style={{ fontSize: 12, textTransform: "uppercase" }}>[ Case Module ]</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
         <input value={newCaseTitle} onChange={(e) => setNewCaseTitle(e.target.value)} placeholder="Create case..." />
         <button onClick={() => { createCase(newCaseTitle, null); setNewCaseTitle(""); }}>Add</button>
@@ -190,11 +192,53 @@ export const CaseHubContent: React.FC<{ accent: string }> = ({ accent }) => {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
+            <input
+              value={quickDraft}
+              onChange={(e) => setQuickDraft(e.target.value)}
+              placeholder="Quick add note or paste URL"
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || !quickDraft.trim()) return;
+                const value = quickDraft.trim();
+                updateSelected((item) => (
+                  isLikelyUrl(value)
+                    ? { ...item, links: [value, ...item.links] }
+                    : { ...item, notes: [value, ...item.notes] }
+                ));
+                setQuickDraft("");
+              }}
+            />
+            <button onClick={() => {
+              if (!quickDraft.trim()) return;
+              const value = quickDraft.trim();
+              updateSelected((item) => (
+                isLikelyUrl(value)
+                  ? { ...item, links: [value, ...item.links] }
+                  : { ...item, notes: [value, ...item.notes] }
+              ));
+              setQuickDraft("");
+            }}>Quick</button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
             <input value={childDraft} onChange={(e) => setChildDraft(e.target.value)} placeholder="Create child case" />
             <button onClick={() => { createCase(childDraft, selected.id); setChildDraft(""); }}>Child</button>
           </div>
 
           <div style={{ ...divider }}>Children: {childCount} · Notes: {selected.notes.length} · Links: {selected.links.length}</div>
+          <div style={{ display: "grid", gap: 2 }}>
+            {selected.links.slice(0, 4).map((link, index) => (
+              <div key={`${link}-${index}`} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4, alignItems: "center" }}>
+                <span style={{ ...divider, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🔗 {link}</span>
+                <button onClick={() => updateSelected((item) => ({ ...item, links: item.links.filter((_, i) => i !== index) }))}>×</button>
+              </div>
+            ))}
+            {selected.notes.slice(0, 4).map((note, index) => (
+              <div key={`${note}-${index}`} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4, alignItems: "center" }}>
+                <span style={{ ...divider, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>• {note}</span>
+                <button onClick={() => updateSelected((item) => ({ ...item, notes: item.notes.filter((_, i) => i !== index) }))}>×</button>
+              </div>
+            ))}
+          </div>
           <button onClick={deleteSelected}>Delete case</button>
         </div>
       ) : (
