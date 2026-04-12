@@ -70,11 +70,11 @@ export const UsersContent: React.FC<{ accent: string }> = ({ accent }) => (
 
 export const AlertsContent: React.FC<{ accent: string }> = ({ accent }) => {
   const items = [
-    { text: "CPU > 90% on app-2", dot: "#d32f2f" },
-    { text: "Disk full on db-3", dot: "#f57c00" },
-    { text: "SSL cert expiring in 4d", dot: "#f57c00" },
-    { text: "Memory spike resolved", dot: "#66bb6a" },
-    { text: "Deploy v2.4.1 complete", dot: "#66bb6a" },
+    { text: "CPU > 90% on app-2", dot: "#1d1d1d" },
+    { text: "Disk full on db-3", dot: "#404040" },
+    { text: "SSL cert expiring in 4d", dot: "#404040" },
+    { text: "Memory spike resolved", dot: "#6a6a6a" },
+    { text: "Deploy v2.4.1 complete", dot: "#6a6a6a" },
   ];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
@@ -108,9 +108,9 @@ export const ChartContent: React.FC<{ accent: string }> = ({ accent }) => (
 
 export const OrdersContent: React.FC<{ accent: string }> = ({ accent }) => {
   const orders = [
-    { id: "#4012", status: "Shipped", color: "#2E7D32" },
-    { id: "#4011", status: "Processing", color: "#F57C00" },
-    { id: "#4010", status: "Delivered", color: "#1565C0" },
+    { id: "#4012", status: "Shipped", color: "#1d1d1d" },
+    { id: "#4011", status: "Processing", color: "#3d3d3d" },
+    { id: "#4010", status: "Delivered", color: "#2a2a2a" },
     { id: "#4009", status: "Refunded", color: "#999" },
   ];
   return (

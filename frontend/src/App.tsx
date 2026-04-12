@@ -13,36 +13,36 @@ const CORNER_SIZE = 14;
 
 // ── Color palettes for new widgets ──
 const PALETTES = [
-  { color: "#E8F5E9", accent: "#2E7D32" },
-  { color: "#E3F2FD", accent: "#1565C0" },
-  { color: "#FFF3E0", accent: "#E65100" },
-  { color: "#F3E5F5", accent: "#6A1B9A" },
-  { color: "#ECEFF1", accent: "#37474F" },
-  { color: "#E0F7FA", accent: "#00695C" },
-  { color: "#FCE4EC", accent: "#AD1457" },
-  { color: "#F1F8E9", accent: "#558B2F" },
-  { color: "#FFF8E1", accent: "#F57F17" },
-  { color: "#EDE7F6", accent: "#4527A0" },
+  { color: "#e4e4e1", accent: "#161616" },
+  { color: "#dbdedd", accent: "#1a2925" },
+  { color: "#dedbd6", accent: "#29231a" },
+  { color: "#d8d9de", accent: "#1b1e2a" },
+  { color: "#e1ddd9", accent: "#2a2119" },
+  { color: "#dfe2dc", accent: "#1d2720" },
+  { color: "#e2dddf", accent: "#2c1f24" },
+  { color: "#dddede", accent: "#202020" },
+  { color: "#dfddd8", accent: "#25211a" },
+  { color: "#dadada", accent: "#191919" },
 ];
 
 const THEME = {
-  surface: "#f3f3f1",
-  panel: "rgba(255,255,255,0.62)",
-  line: "rgba(10,10,10,0.18)",
-  text: "#121212",
-  subtext: "#595959",
+  surface: "#ececea",
+  panel: "rgba(244,244,242,0.78)",
+  line: "rgba(0,0,0,0.26)",
+  text: "#090909",
+  subtext: "#4a4a4a",
 };
 
 // ── Initial layout ──
 const INITIAL_WIDGETS: Widget[] = [
-  { id: "w-revenue", kind: "revenue",       x: 2,  y: 1,  w: 12, h: 9,  title: "Revenue",        color: "#DCE9DE", accent: "#1f8a4c" },
-  { id: "w-users", kind: "users",           x: 14, y: 1,  w: 14, h: 9,  title: "Active Users",   color: "#d8e3ea", accent: "#2f6f9a" },
-  { id: "w-alerts", kind: "alerts",         x: 30, y: 1,  w: 12, h: 14, title: "Alerts",         color: "#eadfcd", accent: "#b05d1e" },
-  { id: "w-tasks", kind: "tasks",           x: 2,  y: 10, w: 10, h: 10, title: "Tasks",          color: "#dfd7e6", accent: "#6f2ea8" },
-  { id: "w-chart", kind: "chart",           x: 12, y: 10, w: 16, h: 12, title: "Analytics",      color: "#d9dde0", accent: "#41535e" },
-  { id: "w-orders", kind: "orders",         x: 2,  y: 20, w: 10, h: 10, title: "Recent Orders",  color: "#d6e9e4", accent: "#0f7968" },
-  { id: "w-notifications", kind: "notifications",  x: 12, y: 22, w: 12, h: 10, title: "Notifications",  color: "#e8d7e2", accent: "#9a356f" },
-  { id: "w-map", kind: "map",               x: 28, y: 15, w: 14, h: 17, title: "Map View",       color: "#dde6d8", accent: "#5e8d3a" },
+  { id: "w-revenue", kind: "revenue",       x: 2,  y: 1,  w: 12, h: 9,  title: "Revenue",        color: "#e2e3df", accent: "#141414" },
+  { id: "w-users", kind: "users",           x: 14, y: 1,  w: 14, h: 9,  title: "Active Users",   color: "#dddeda", accent: "#121212" },
+  { id: "w-alerts", kind: "alerts",         x: 30, y: 1,  w: 12, h: 14, title: "Alerts",         color: "#dfddd7", accent: "#191919" },
+  { id: "w-tasks", kind: "tasks",           x: 2,  y: 10, w: 10, h: 10, title: "Tasks",          color: "#d9d9d9", accent: "#171717" },
+  { id: "w-chart", kind: "chart",           x: 12, y: 10, w: 16, h: 12, title: "Analytics",      color: "#dcdcdc", accent: "#121212" },
+  { id: "w-orders", kind: "orders",         x: 2,  y: 20, w: 10, h: 10, title: "Recent Orders",  color: "#dbddd9", accent: "#161616" },
+  { id: "w-notifications", kind: "notifications",  x: 12, y: 22, w: 12, h: 10, title: "Notifications",  color: "#dfdcdb", accent: "#171717" },
+  { id: "w-map", kind: "map",               x: 28, y: 15, w: 14, h: 17, title: "Map View",       color: "#dbddd8", accent: "#1a1a1a" },
 ];
 
 // ── Helpers ──
@@ -219,7 +219,7 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
         width: w * stepX,
         height: h * stepY,
         background: color,
-        borderRadius: 6,
+        borderRadius: 2,
         border: `1px solid ${accent}55`,
         boxShadow: isDragging ? "0 12px 30px rgba(0,0,0,0.2)" : "0 2px 8px rgba(0,0,0,0.08)",
         display: "flex",
@@ -245,14 +245,14 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
         style={{ padding: "10px 12px 4px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${accent}22`, cursor: !editMode ? "pointer" : "inherit" }}
         onClick={(e) => !editMode && onHeaderClick(e, widget.id)}
       >
-        <span style={{ fontSize: 12, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'IBM Plex Mono', monospace" }}>
           {title}
         </span>
         <span style={{
-          fontSize: 11, fontWeight: 700, color: accent,
-          background: `${accent}12`, border: `1px solid ${accent}28`,
-          borderRadius: 6, padding: "2px 8px",
-          letterSpacing: "0.03em", fontVariantNumeric: "tabular-nums",
+          fontSize: 10, fontWeight: 700, color: accent,
+          background: `${accent}10`, border: `1px solid ${accent}35`,
+          borderRadius: 2, padding: "2px 6px",
+          letterSpacing: "0.08em", fontVariantNumeric: "tabular-nums", fontFamily: "'IBM Plex Mono', monospace",
         }}>
           {w}×{h}
         </span>
@@ -329,7 +329,7 @@ const FloatingMenu: React.FC<{
 const menuBtnBase: React.CSSProperties = {
   display: "flex", alignItems: "center", gap: 10,
   width: "100%", padding: "9px 16px",
-  fontSize: 13, fontWeight: 500,
+  fontSize: 12, fontWeight: 600, letterSpacing: "0.04em", fontFamily: "'IBM Plex Mono', monospace",
   background: "none", border: "none",
   color: "#333", cursor: "pointer", textAlign: "left",
 };
@@ -369,8 +369,8 @@ const App: React.FC = () => {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const initialSettingsRef = useRef(loadSettings());
-  const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || "#f2f1ec");
-  const [crossColor, setCrossColor] = useState(() => initialSettingsRef.current.crossColor || "#000000");
+  const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || "#ececea");
+  const [crossColor, setCrossColor] = useState(() => initialSettingsRef.current.crossColor || "#1a1a1a");
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   // Context menus
@@ -598,9 +598,9 @@ const App: React.FC = () => {
           )}
           {editMode && (
             <span style={{
-              fontSize: 11, fontWeight: 600, color: "#1565C0",
-              background: "#E3F2FD", borderRadius: 5, padding: "3px 10px",
-              letterSpacing: "0.03em",
+              fontSize: 10, fontWeight: 700, color: "#0f0f0f",
+              background: "#dcdcd9", border: "1px solid rgba(0,0,0,0.35)", borderRadius: 2, padding: "3px 8px",
+              letterSpacing: "0.1em", fontFamily: "'IBM Plex Mono', monospace",
             }}>
               EDIT MODE
             </span>
