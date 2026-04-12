@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 
 const divider = { borderBottom: "1px solid currentColor", padding: "5px 0" };
 
@@ -82,3 +82,124 @@ export const MapContent: React.FC<{ accent: string }> = ({ accent }) => (
     <div style={{ fontSize: 12 }}>Latency avg: 43ms</div>
   </div>
 );
+
+type CaseRecord = {
+  id: string;
+  title: string;
+  responsible: string;
+  parentId: string | null;
+  notes: string[];
+  links: string[];
+};
+
+const CASE_STORE_KEY = "grid-dashboard-case-widget-v1";
+
+function makeId() {
+  return `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function loadCases(): CaseRecord[] {
+  try {
+    const raw = localStorage.getItem(CASE_STORE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item) => item && typeof item.id === "string" && typeof item.title === "string");
+  } catch {
+    return [];
+  }
+}
+
+export const CaseHubContent: React.FC<{ accent: string }> = ({ accent }) => {
+  const [records, setRecords] = useState<CaseRecord[]>(() => loadCases());
+  const [selectedId, setSelectedId] = useState<string>(records[0]?.id ?? "");
+  const [newCaseTitle, setNewCaseTitle] = useState("");
+  const [ownerDraft, setOwnerDraft] = useState("");
+  const [noteDraft, setNoteDraft] = useState("");
+  const [linkDraft, setLinkDraft] = useState("");
+  const [childDraft, setChildDraft] = useState("");
+
+  const selected = records.find((item) => item.id === selectedId) ?? null;
+
+  const save = (next: CaseRecord[]) => {
+    setRecords(next);
+    localStorage.setItem(CASE_STORE_KEY, JSON.stringify(next));
+  };
+
+  const createCase = (title: string, parentId: string | null = null) => {
+    if (!title.trim()) return;
+    const nextItem: CaseRecord = {
+      id: makeId(),
+      title: title.trim(),
+      responsible: parentId ? "" : "Unassigned",
+      parentId,
+      notes: [],
+      links: [],
+    };
+    const next = [nextItem, ...records];
+    save(next);
+    setSelectedId(nextItem.id);
+  };
+
+  const updateSelected = (updater: (item: CaseRecord) => CaseRecord) => {
+    if (!selected) return;
+    const next = records.map((item) => (item.id === selected.id ? updater(item) : item));
+    save(next);
+  };
+
+  const deleteSelected = () => {
+    if (!selected) return;
+    const next = records.filter((item) => item.id !== selected.id && item.parentId !== selected.id);
+    save(next);
+    setSelectedId(next[0]?.id ?? "");
+  };
+
+  const childCount = useMemo(() => records.filter((item) => item.parentId === selected?.id).length, [records, selected?.id]);
+
+  return (
+    <div style={{ display: "grid", gap: 6, fontSize: 11 }}>
+      <div style={{ fontSize: 12, textTransform: "uppercase" }}>[ Case Hub ]</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
+        <input value={newCaseTitle} onChange={(e) => setNewCaseTitle(e.target.value)} placeholder="Create case..." />
+        <button onClick={() => { createCase(newCaseTitle, null); setNewCaseTitle(""); }}>Add</button>
+      </div>
+
+      <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
+        <option value="">Select case</option>
+        {records.map((item) => (
+          <option key={item.id} value={item.id}>{item.parentId ? "↳ " : ""}{item.title}</option>
+        ))}
+      </select>
+
+      {selected ? (
+        <div style={{ display: "grid", gap: 4, borderTop: `1px solid ${accent}`, paddingTop: 4 }}>
+          <div style={{ ...divider }}>Owner: {selected.responsible || "Unassigned"}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
+            <input value={ownerDraft} onChange={(e) => setOwnerDraft(e.target.value)} placeholder="Set responsible" />
+            <button onClick={() => { updateSelected((item) => ({ ...item, responsible: ownerDraft.trim() || item.responsible })); setOwnerDraft(""); }}>Set</button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
+            <input value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Add note" />
+            <button onClick={() => { if (noteDraft.trim()) updateSelected((item) => ({ ...item, notes: [noteDraft.trim(), ...item.notes] })); setNoteDraft(""); }}>Note</button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
+            <input value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} placeholder="Link email/doc URL" />
+            <button onClick={() => { if (linkDraft.trim()) updateSelected((item) => ({ ...item, links: [linkDraft.trim(), ...item.links] })); setLinkDraft(""); }}>Link</button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
+            <input value={childDraft} onChange={(e) => setChildDraft(e.target.value)} placeholder="Create child case" />
+            <button onClick={() => { createCase(childDraft, selected.id); setChildDraft(""); }}>Child</button>
+          </div>
+
+          <div style={{ ...divider }}>Children: {childCount} · Notes: {selected.notes.length} · Links: {selected.links.length}</div>
+          <button onClick={deleteSelected}>Delete case</button>
+        </div>
+      ) : (
+        <div style={{ ...divider }}>No case selected.</div>
+      )}
+    </div>
+  );
+};
