@@ -252,7 +252,8 @@ const App: React.FC = () => {
   const loaded = useMemo(() => loadViews(), []);
   const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(loaded.activeId);
-  const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
+  const [movingTabId, setMovingTabId] = useState<string | null>(null);
+  const [isDraggingTab, setIsDraggingTab] = useState(false);
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
@@ -266,6 +267,7 @@ const App: React.FC = () => {
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
 
   const dragRef = useRef<DragState | null>(null);
+  const tabDragRef = useRef<{ id: string; startX: number; startY: number } | null>(null);
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId) ?? tabs[0], [tabs, activeTabId]);
   const widgets = activeTab?.widgets ?? [];
@@ -354,6 +356,27 @@ const App: React.FC = () => {
     });
   }, [tabs.length, activeTabId]);
 
+
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const drag = tabDragRef.current;
+      if (!drag || isDraggingTab) return;
+      const moved = Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY);
+      if (moved > 4) setIsDraggingTab(true);
+    };
+    const onUp = () => {
+      tabDragRef.current = null;
+      setMovingTabId(null);
+      setIsDraggingTab(false);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [isDraggingTab]);
   useEffect(() => {
     const onMove = (e: MouseEvent | TouchEvent) => {
       const d = dragRef.current;
@@ -398,16 +421,18 @@ const App: React.FC = () => {
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              draggable
-              onDragStart={() => setDraggingTabId(tab.id)}
-              onDragEnd={() => setDraggingTabId(null)}
-              onDragOver={(e) => e.preventDefault()}
-              onDragEnter={(e) => {
-                e.preventDefault();
-                if (!draggingTabId || draggingTabId === tab.id) return;
+              onMouseDown={(e) => {
+                if ((e.target as HTMLElement).tagName === "INPUT") return;
+                tabDragRef.current = { id: tab.id, startX: e.clientX, startY: e.clientY };
+                setMovingTabId(tab.id);
+                setActiveTabId(tab.id);
+                setEditMode(false);
+              }}
+              onMouseEnter={() => {
+                if (!isDraggingTab || !movingTabId || movingTabId === tab.id) return;
                 setTabs((prev) => {
                   const list = [...prev];
-                  const from = list.findIndex((t) => t.id === draggingTabId);
+                  const from = list.findIndex((t) => t.id === movingTabId);
                   const to = list.findIndex((t) => t.id === tab.id);
                   if (from < 0 || to < 0) return prev;
                   const [item] = list.splice(from, 1);
@@ -415,11 +440,10 @@ const App: React.FC = () => {
                   return list;
                 });
               }}
-              onDrop={() => setDraggingTabId(null)}
               onContextMenu={(e) => { e.preventDefault(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
               onDoubleClick={() => startRenamingTab(tab.id)}
-              onClick={() => { setActiveTabId(tab.id); setEditMode(false); }}
-              style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? "1px solid #08343a" : "1px solid rgba(8,52,58,0.35)", background: activeTabId === tab.id ? "#ffffff" : "rgba(255,255,255,0.65)", borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease", opacity: draggingTabId === tab.id ? 0.55 : 1 }}
+              onClick={() => { if (isDraggingTab) return; setActiveTabId(tab.id); setEditMode(false); }}
+              style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? "1px solid #08343a" : "1px solid rgba(8,52,58,0.35)", background: activeTabId === tab.id ? "#ffffff" : "rgba(255,255,255,0.65)", borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
             >
               {renamingTabId === tab.id ? (
                 <input
