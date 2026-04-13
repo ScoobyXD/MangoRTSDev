@@ -206,11 +206,14 @@ const PlacementSplash: React.FC<{
       }
     }
 
+    const sizeFactor = Math.min(1.5, Math.log2(Math.max(widget.w, widget.h) + 1) / 4);
+    const edgeSpan = () => 2 + Math.floor(rand() * 2) + (rand() < 0.25 + sizeFactor * 0.12 ? 1 : 0);
+    const armSpan = () => 1 + Math.floor(rand() * 3) + (rand() < 0.22 + sizeFactor * 0.08 ? 1 : 0);
     const radii = {
-      left: 2 + Math.floor(rand() * 3),
-      right: 2 + Math.floor(rand() * 3),
-      top: 2 + Math.floor(rand() * 3),
-      bottom: 2 + Math.floor(rand() * 3),
+      left: edgeSpan(),
+      right: edgeSpan(),
+      top: edgeSpan(),
+      bottom: edgeSpan(),
     };
     const left = clamp(widget.x - radii.left, 0, Math.max(0, cols - 1));
     const right = clamp(widget.x + widget.w - 1 + radii.right, 0, Math.max(0, cols - 1));
@@ -231,16 +234,20 @@ const PlacementSplash: React.FC<{
       }
     };
 
-    addArm(widget.x + Math.floor(rand() * widget.w), top, 0, -1, 1 + Math.floor(rand() * 4));
-    addArm(widget.x + Math.floor(rand() * widget.w), bottom, 0, 1, 1 + Math.floor(rand() * 4));
-    addArm(left, widget.y + Math.floor(rand() * widget.h), -1, 0, 1 + Math.floor(rand() * 4));
-    addArm(right, widget.y + Math.floor(rand() * widget.h), 1, 0, 1 + Math.floor(rand() * 4));
+    addArm(widget.x + Math.floor(rand() * widget.w), top, 0, -1, armSpan());
+    addArm(widget.x + Math.floor(rand() * widget.w), bottom, 0, 1, armSpan());
+    addArm(left, widget.y + Math.floor(rand() * widget.h), -1, 0, armSpan());
+    addArm(right, widget.y + Math.floor(rand() * widget.h), 1, 0, armSpan());
 
     for (let y = top; y <= bottom; y++) {
       for (let x = left; x <= right; x++) {
         const insideWidget = x >= widget.x && x < widget.x + widget.w && y >= widget.y && y < widget.y + widget.h;
-        const distance = Math.hypot(x + 0.5 - centerX, y + 0.5 - centerY);
-        const withinCore = distance <= 3.8 + rand() * 1.8;
+        const gapLeft = widget.x - (x + 1);
+        const gapRight = x - (widget.x + widget.w) + 1;
+        const gapTop = widget.y - (y + 1);
+        const gapBottom = y - (widget.y + widget.h) + 1;
+        const edgeDistance = Math.max(0, gapLeft, gapRight, gapTop, gapBottom);
+        const withinCore = edgeDistance <= 2 + rand() * 1.1 + sizeFactor * 0.5;
         const splashNoise = rand() > 0.14;
         const inShape = withinCore && splashNoise;
         const isArm = extraCells.has(`${x},${y}`);
