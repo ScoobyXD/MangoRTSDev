@@ -206,11 +206,13 @@ const PlacementSplash: React.FC<{
       }
     }
 
+    const scale = Math.max(0.85, Math.sqrt((widget.w * widget.h) / 4));
+    const scaledSpan = (min: number, variance: number) => Math.max(1, Math.round((min + Math.floor(rand() * variance)) * scale));
     const radii = {
-      left: 2 + Math.floor(rand() * 3),
-      right: 2 + Math.floor(rand() * 3),
-      top: 2 + Math.floor(rand() * 3),
-      bottom: 2 + Math.floor(rand() * 3),
+      left: scaledSpan(2, 3),
+      right: scaledSpan(2, 3),
+      top: scaledSpan(2, 3),
+      bottom: scaledSpan(2, 3),
     };
     const left = clamp(widget.x - radii.left, 0, Math.max(0, cols - 1));
     const right = clamp(widget.x + widget.w - 1 + radii.right, 0, Math.max(0, cols - 1));
@@ -231,16 +233,16 @@ const PlacementSplash: React.FC<{
       }
     };
 
-    addArm(widget.x + Math.floor(rand() * widget.w), top, 0, -1, 1 + Math.floor(rand() * 4));
-    addArm(widget.x + Math.floor(rand() * widget.w), bottom, 0, 1, 1 + Math.floor(rand() * 4));
-    addArm(left, widget.y + Math.floor(rand() * widget.h), -1, 0, 1 + Math.floor(rand() * 4));
-    addArm(right, widget.y + Math.floor(rand() * widget.h), 1, 0, 1 + Math.floor(rand() * 4));
+    addArm(widget.x + Math.floor(rand() * widget.w), top, 0, -1, scaledSpan(1, 4));
+    addArm(widget.x + Math.floor(rand() * widget.w), bottom, 0, 1, scaledSpan(1, 4));
+    addArm(left, widget.y + Math.floor(rand() * widget.h), -1, 0, scaledSpan(1, 4));
+    addArm(right, widget.y + Math.floor(rand() * widget.h), 1, 0, scaledSpan(1, 4));
 
     for (let y = top; y <= bottom; y++) {
       for (let x = left; x <= right; x++) {
         const insideWidget = x >= widget.x && x < widget.x + widget.w && y >= widget.y && y < widget.y + widget.h;
         const distance = Math.hypot(x + 0.5 - centerX, y + 0.5 - centerY);
-        const withinCore = distance <= 3.8 + rand() * 1.8;
+        const withinCore = distance <= (3.8 + rand() * 1.8) * scale;
         const splashNoise = rand() > 0.14;
         const inShape = withinCore && splashNoise;
         const isArm = extraCells.has(`${x},${y}`);
