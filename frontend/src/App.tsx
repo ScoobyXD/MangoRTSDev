@@ -2,7 +2,6 @@ import React, { useState, useRef, useCallback, useEffect, useMemo } from "react"
 import { CONTENT_MAP, WIDGET_LIBRARY } from "./widgets";
 import type { Widget, DragState, ResizeEdges } from "./types";
 
-// ── Grid constants ──
 const CELL_SIZE = 28;
 const HEADER_H = 48;
 const CROSS_ARM = 2;
@@ -11,16 +10,15 @@ const MIN_H = 3;
 const HANDLE = 6;
 const CORNER_SIZE = 14;
 
-// ── Color palettes for new widgets ──
 const COLORWAYS = {
-  teal: { color: "#00b7c7", accent: "#003b42", text: "#071010", tagBg: "#071010", tagText: "#ffffff" },
+  teal: { color: "#6fe7ee", accent: "#0a6c78", text: "#062126", tagBg: "#062126", tagText: "#ffffff" },
   orange: { color: "#ff6a00", accent: "#5a2200", text: "#120900", tagBg: "#120900", tagText: "#ffffff" },
   white: { color: "#ffffff", accent: "#111111", text: "#111111", tagBg: "#111111", tagText: "#ffffff" },
   black: { color: "#0c0c0c", accent: "#ffffff", text: "#ffffff", tagBg: "#ffffff", tagText: "#050505" },
 } as const;
-type ColorwayKey = keyof typeof COLORWAYS;
 
-const COLORWAY_ORDER: ColorwayKey[] = ["teal", "orange", "white"];
+type ColorwayKey = keyof typeof COLORWAYS;
+const COLORWAY_ORDER: ColorwayKey[] = ["teal", "orange", "white", "black"];
 
 const UI_THEME = {
   surface: "#f7fffe",
@@ -30,20 +28,24 @@ const UI_THEME = {
   subtext: "#0b5058",
 };
 
-// ── Initial layout ──
 const INITIAL_WIDGETS: Widget[] = [
-  { id: "w-revenue", theme: "teal", kind: "revenue",       x: 2,  y: 1,  w: 12, h: 9,  title: "Revenue",        color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-users", theme: "orange", kind: "users",         x: 14, y: 1,  w: 14, h: 9,  title: "Active Users",   color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
-  { id: "w-alerts", theme: "orange", kind: "alerts",       x: 30, y: 1,  w: 12, h: 14, title: "Alerts",         color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
-  { id: "w-tasks", theme: "teal", kind: "tasks",           x: 2,  y: 10, w: 10, h: 10, title: "Tasks",          color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-chart", theme: "white", kind: "chart",          x: 12, y: 10, w: 16, h: 12, title: "Analytics",      color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
-  { id: "w-orders", theme: "orange", kind: "orders",       x: 2,  y: 20, w: 10, h: 10, title: "Recent Orders",  color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
-  { id: "w-notifications", theme: "orange", kind: "notifications",  x: 12, y: 22, w: 12, h: 10, title: "Notifications",  color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
-  { id: "w-map", theme: "teal", kind: "map",               x: 28, y: 15, w: 14, h: 17, title: "Map View",       color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-case-hub", theme: "white", kind: "case_hub",    x: 24, y: 22, w: 18, h: 10, title: "Case Module",    color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  { id: "w-revenue", theme: "teal", kind: "revenue", x: 2, y: 1, w: 12, h: 9, title: "Revenue", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "w-users", theme: "orange", kind: "users", x: 14, y: 1, w: 14, h: 9, title: "Active Users", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+  { id: "w-alerts", theme: "orange", kind: "alerts", x: 30, y: 1, w: 12, h: 14, title: "Alerts", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+  { id: "w-tasks", theme: "teal", kind: "tasks", x: 2, y: 10, w: 10, h: 10, title: "Tasks", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "w-chart", theme: "white", kind: "chart", x: 12, y: 10, w: 16, h: 12, title: "Analytics", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  { id: "w-orders", theme: "orange", kind: "orders", x: 2, y: 20, w: 10, h: 10, title: "Recent Orders", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+  { id: "w-notifications", theme: "orange", kind: "notifications", x: 12, y: 22, w: 12, h: 10, title: "Notifications", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+  { id: "w-map", theme: "teal", kind: "map", x: 28, y: 15, w: 14, h: 17, title: "Map View", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "w-case-hub", theme: "white", kind: "case_hub", x: 24, y: 22, w: 18, h: 10, title: "Case Module", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
 ];
 
-// ── Helpers ──
+interface ViewTab {
+  id: string;
+  name: string;
+  widgets: Widget[];
+}
+
 function clamp(v: number, lo: number, hi: number) {
   if (lo > hi) return lo;
   return Math.max(lo, Math.min(hi, v));
@@ -57,22 +59,18 @@ function isColorway(value: unknown): value is ColorwayKey {
   return typeof value === "string" && value in COLORWAYS;
 }
 
+function isHexColor(value: unknown): value is string {
+  return typeof value === "string" && /^#[0-9A-F]{6}$/i.test(value);
+}
+
 function coerceWidget(value: unknown): Widget | null {
   if (!isObject(value)) return null;
   const { id, kind, theme, x, y, w, h, title, color, accent } = value;
   if (
-    typeof id !== "string" ||
-    typeof kind !== "string" ||
-    typeof x !== "number" ||
-    typeof y !== "number" ||
-    typeof w !== "number" ||
-    typeof h !== "number" ||
-    typeof title !== "string" ||
-    typeof color !== "string" ||
-    typeof accent !== "string"
-  ) {
-    return null;
-  }
+    typeof id !== "string" || typeof kind !== "string" || typeof x !== "number" || typeof y !== "number" ||
+    typeof w !== "number" || typeof h !== "number" || typeof title !== "string" || typeof color !== "string" || typeof accent !== "string"
+  ) return null;
+
   return {
     id,
     kind,
@@ -87,8 +85,8 @@ function coerceWidget(value: unknown): Widget | null {
   };
 }
 
-function sanitizeWidgets(value: unknown): Widget[] | null {
-  if (!Array.isArray(value)) return null;
+function sanitizeWidgets(value: unknown): Widget[] {
+  if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
   const cleaned: Widget[] = [];
   for (const item of value) {
@@ -97,11 +95,7 @@ function sanitizeWidgets(value: unknown): Widget[] | null {
     seen.add(widget.id);
     cleaned.push(widget);
   }
-  return cleaned.length > 0 ? cleaned : null;
-}
-
-function isHexColor(value: unknown): value is string {
-  return typeof value === "string" && /^#[0-9A-F]{6}$/i.test(value);
+  return cleaned;
 }
 
 function getPointer(e: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent) {
@@ -110,22 +104,37 @@ function getPointer(e: React.MouseEvent | React.TouchEvent | MouseEvent | TouchE
   return { px: 0, py: 0 };
 }
 
-// ── Persistence ──
-const WIDGET_KEY   = "grid-dashboard-v7";
+const VIEWS_KEY = "grid-dashboard-views-v1";
 const SETTINGS_KEY = "grid-dashboard-settings";
 
-function loadWidgets(): Widget[] | null {
+function loadViews(): { tabs: ViewTab[]; activeId: string } {
+  const fallback = { tabs: [{ id: "view-default", name: "Main View", widgets: INITIAL_WIDGETS }], activeId: "view-default" };
   try {
-    const raw = localStorage.getItem(WIDGET_KEY);
-    if (!raw) return null;
-    return sanitizeWidgets(JSON.parse(raw));
+    const raw = localStorage.getItem(VIEWS_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    if (!isObject(parsed) || !Array.isArray(parsed.tabs) || typeof parsed.activeId !== "string") return fallback;
+
+    const tabs = parsed.tabs
+      .map((tab) => {
+        if (!isObject(tab) || typeof tab.id !== "string" || typeof tab.name !== "string") return null;
+        const widgets = sanitizeWidgets(tab.widgets);
+        return { id: tab.id, name: tab.name, widgets } satisfies ViewTab;
+      })
+      .filter((tab): tab is ViewTab => !!tab);
+
+    if (tabs.length === 0) return fallback;
+    const activeId = tabs.some((tab) => tab.id === parsed.activeId) ? parsed.activeId : tabs[0].id;
+    return { tabs, activeId };
   } catch {
-    return null;
+    return fallback;
   }
 }
-function saveWidgets(w: Widget[]) {
-  try { localStorage.setItem(WIDGET_KEY, JSON.stringify(w)); } catch {}
+
+function saveViews(tabs: ViewTab[], activeId: string) {
+  try { localStorage.setItem(VIEWS_KEY, JSON.stringify({ tabs, activeId })); } catch {}
 }
+
 function loadSettings(): { bgColor?: string; crossColor?: string } {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
@@ -140,11 +149,11 @@ function loadSettings(): { bgColor?: string; crossColor?: string } {
     return {};
   }
 }
+
 function saveSettings(s: { bgColor: string; crossColor: string }) {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
 }
 
-// ── Grid crosses ──
 const GridCrosses: React.FC<{ cols: number; rows: number; stepX: number; stepY: number; width: number; height: number; color: string }> = React.memo(
   ({ cols, rows, stepX, stepY, width, height, color }) => {
     const path = useMemo(() => {
@@ -157,45 +166,28 @@ const GridCrosses: React.FC<{ cols: number; rows: number; stepX: number; stepY: 
           parts.push(`M${x} ${y - a}v${a * 2}M${x - a} ${y}h${a * 2}`);
         }
       }
-      for (let r = 0; r <= rows; r++) {
-        const y = r * stepY;
-        parts.push(`M${width} ${y - a}v${a * 2}`);
-      }
-      for (let c = 0; c <= cols; c++) {
-        const x = c * stepX;
-        parts.push(`M${x - a} ${height}h${a * 2}`);
-      }
+      for (let r = 0; r <= rows; r++) parts.push(`M${width} ${r * stepY - a}v${a * 2}`);
+      for (let c = 0; c <= cols; c++) parts.push(`M${c * stepX - a} ${height}h${a * 2}`);
       parts.push(`M${width - a} ${height}h${a * 2}M${width} ${height - a}v${a * 2}`);
       return parts.join("");
     }, [cols, rows, stepX, stepY, width, height]);
 
-    return (
-      <svg
-        style={{ position: "absolute", top: 0, left: 0, overflow: "visible", pointerEvents: "none" }}
-        width={width}
-        height={height}
-      >
-        <path d={path} stroke={color} strokeWidth="0.55" fill="none" opacity="0.28" />
-      </svg>
-    );
+    return <svg style={{ position: "absolute", top: 0, left: 0, overflow: "visible", pointerEvents: "none" }} width={width} height={height}><path d={path} stroke={color} strokeWidth="0.55" fill="none" opacity="0.28" /></svg>;
   }
 );
 
-// ── Resize handle definitions ──
 type HandleDef = { edges: ResizeEdges; cursor: string; style: React.CSSProperties };
-
 const HANDLES: HandleDef[] = [
-  { edges: { top: true, left: true },     cursor: "nwse-resize", style: { top: -HANDLE/2, left: -HANDLE/2, width: CORNER_SIZE, height: CORNER_SIZE, zIndex: 2 } },
-  { edges: { top: true, right: true },    cursor: "nesw-resize", style: { top: -HANDLE/2, right: -HANDLE/2, width: CORNER_SIZE, height: CORNER_SIZE, zIndex: 2 } },
-  { edges: { bottom: true, left: true },  cursor: "nesw-resize", style: { bottom: -HANDLE/2, left: -HANDLE/2, width: CORNER_SIZE, height: CORNER_SIZE, zIndex: 2 } },
-  { edges: { bottom: true, right: true }, cursor: "nwse-resize", style: { bottom: -HANDLE/2, right: -HANDLE/2, width: CORNER_SIZE, height: CORNER_SIZE, zIndex: 2 } },
-  { edges: { top: true },    cursor: "ns-resize",  style: { top: -HANDLE/2, left: CORNER_SIZE, right: CORNER_SIZE, height: HANDLE, zIndex: 1 } },
-  { edges: { bottom: true }, cursor: "ns-resize",  style: { bottom: -HANDLE/2, left: CORNER_SIZE, right: CORNER_SIZE, height: HANDLE, zIndex: 1 } },
-  { edges: { left: true },   cursor: "ew-resize",  style: { left: -HANDLE/2, top: CORNER_SIZE, bottom: CORNER_SIZE, width: HANDLE, zIndex: 1 } },
-  { edges: { right: true },  cursor: "ew-resize",  style: { right: -HANDLE/2, top: CORNER_SIZE, bottom: CORNER_SIZE, width: HANDLE, zIndex: 1 } },
+  { edges: { top: true, left: true }, cursor: "nwse-resize", style: { top: -HANDLE / 2, left: -HANDLE / 2, width: CORNER_SIZE, height: CORNER_SIZE, zIndex: 2 } },
+  { edges: { top: true, right: true }, cursor: "nesw-resize", style: { top: -HANDLE / 2, right: -HANDLE / 2, width: CORNER_SIZE, height: CORNER_SIZE, zIndex: 2 } },
+  { edges: { bottom: true, left: true }, cursor: "nesw-resize", style: { bottom: -HANDLE / 2, left: -HANDLE / 2, width: CORNER_SIZE, height: CORNER_SIZE, zIndex: 2 } },
+  { edges: { bottom: true, right: true }, cursor: "nwse-resize", style: { bottom: -HANDLE / 2, right: -HANDLE / 2, width: CORNER_SIZE, height: CORNER_SIZE, zIndex: 2 } },
+  { edges: { top: true }, cursor: "ns-resize", style: { top: -HANDLE / 2, left: CORNER_SIZE, right: CORNER_SIZE, height: HANDLE, zIndex: 1 } },
+  { edges: { bottom: true }, cursor: "ns-resize", style: { bottom: -HANDLE / 2, left: CORNER_SIZE, right: CORNER_SIZE, height: HANDLE, zIndex: 1 } },
+  { edges: { left: true }, cursor: "ew-resize", style: { left: -HANDLE / 2, top: CORNER_SIZE, bottom: CORNER_SIZE, width: HANDLE, zIndex: 1 } },
+  { edges: { right: true }, cursor: "ew-resize", style: { right: -HANDLE / 2, top: CORNER_SIZE, bottom: CORNER_SIZE, width: HANDLE, zIndex: 1 } },
 ];
 
-// ── Widget card ──
 interface WidgetCardProps {
   widget: Widget;
   stepX: number;
@@ -210,166 +202,58 @@ interface WidgetCardProps {
 }
 
 const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, editMode, onDragStart, onResizeStart, onContextMenu, onHeaderClick, onOpenDetail }) => {
-  const { title, color, accent, w, h } = widget;
   const Content = CONTENT_MAP[widget.kind];
   const theme = COLORWAYS[widget.theme ?? "teal"];
-
   return (
     <div
-      style={{
-        position: "absolute",
-        left: widget.x * stepX,
-        top: widget.y * stepY,
-        width: w * stepX,
-        height: h * stepY,
-        background: color,
-        borderRadius: 0,
-        border: `1px solid ${accent}`,
-        boxShadow: isDragging ? "0 10px 24px rgba(0,0,0,0.16)" : "none",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-        cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default",
-        userSelect: "none",
-        zIndex: isDragging ? 100 : 1,
-        opacity: isDragging ? 0.92 : 1,
-        color: theme.text,
-      }}
-      onMouseDown={(e) => {
-        if (!editMode || (e.target as HTMLElement).dataset.handle) return;
-        onDragStart(e, widget.id);
-      }}
-      onTouchStart={(e) => {
-        if (!editMode || (e.target as HTMLElement).dataset.handle) return;
-        onDragStart(e, widget.id);
-      }}
+      style={{ position: "absolute", left: widget.x * stepX, top: widget.y * stepY, width: widget.w * stepX, height: widget.h * stepY, background: widget.color, border: `1px solid ${widget.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
+      onMouseDown={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
+      onTouchStart={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, widget.id); }}
       onDoubleClick={() => { if (!editMode) onOpenDetail(widget.id); }}
     >
-      <div
-        style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}
-        onClick={(e) => !editMode && onHeaderClick(e, widget.id)}
-      >
-        <span style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px" }}>{title}</span>
-        <span style={{
-          fontSize: 10, fontWeight: 700, color: accent,
-          background: "transparent", border: `1px solid ${accent}`,
-          borderRadius: 0, padding: "1px 4px",
-          letterSpacing: "0.08em", fontVariantNumeric: "tabular-nums", fontFamily: "'IBM Plex Mono', monospace",
-        }}>
-          {w}×{h}
-        </span>
+      <div style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${widget.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }} onClick={(e) => !editMode && onHeaderClick(e, widget.id)}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px" }}>{widget.title}</span>
       </div>
-      <div style={{ flex: 1, padding: "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace", color: "inherit" }}>
-        {Content ? <Content accent={accent} /> : (
-          <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}>
-            <span style={{ fontSize: 13, color: accent }}>{widget.title}</span>
-          </div>
-        )}
+      <div style={{ flex: 1, padding: "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
+        {Content ? <Content accent={widget.accent} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: widget.accent }}>{widget.title}</span></div>}
       </div>
-      <div style={{ position: "absolute", right: 2, top: 2, fontSize: 10, color: accent, fontFamily: "'IBM Plex Mono', monospace" }}>×</div>
-      {editMode && HANDLES.map((h, i) => (
-        <div
-          key={i}
-          data-handle="true"
-          onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, widget.id, h.edges); }}
-          onTouchStart={(e) => { e.stopPropagation(); onResizeStart(e, widget.id, h.edges); }}
-          style={{ position: "absolute", cursor: h.cursor, ...h.style }}
-        />
-      ))}
+      {editMode && HANDLES.map((h, i) => <div key={i} data-handle="true" onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, widget.id, h.edges); }} onTouchStart={(e) => { e.stopPropagation(); onResizeStart(e, widget.id, h.edges); }} style={{ position: "absolute", cursor: h.cursor, ...h.style }} />)}
     </div>
   );
 };
 
-// ── Floating menu (shared by widget + canvas context menus) ──
-const FloatingMenu: React.FC<{
-  x: number;
-  y: number;
-  onClose: () => void;
-  children: React.ReactNode;
-}> = ({ x, y, onClose, children }) => {
+const FloatingMenu: React.FC<{ x: number; y: number; onClose: () => void; children: React.ReactNode }> = ({ x, y, onClose, children }) => {
   const menuRef = useRef<HTMLDivElement>(null);
-
-  // Clamp position so menu stays on-screen
   const [pos, setPos] = useState({ x, y });
   useEffect(() => {
     if (!menuRef.current) return;
     const rect = menuRef.current.getBoundingClientRect();
-    const nx = x + rect.width > window.innerWidth ? window.innerWidth - rect.width - 8 : x;
-    const ny = y + rect.height > window.innerHeight ? window.innerHeight - rect.height - 8 : y;
-    if (nx !== x || ny !== y) setPos({ x: nx, y: ny });
+    setPos({ x: Math.min(x, window.innerWidth - rect.width - 8), y: Math.min(y, window.innerHeight - rect.height - 8) });
   }, [x, y]);
-
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
-    };
+    const handler = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose(); };
     const timer = setTimeout(() => window.addEventListener("mousedown", handler), 0);
     return () => { clearTimeout(timer); window.removeEventListener("mousedown", handler); };
   }, [onClose]);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  return (
-    <div
-      ref={menuRef}
-      style={{
-        position: "fixed", left: pos.x, top: pos.y,
-        background: "#fff", border: "1px solid #e0e0e0",
-        borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.12)",
-        padding: "4px 0", zIndex: 1000, minWidth: 190,
-      }}
-    >
-      {children}
-    </div>
-  );
+  return <div ref={menuRef} style={{ position: "fixed", left: pos.x, top: pos.y, background: "#fff", border: "1px solid #e0e0e0", borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.12)", padding: "4px 0", zIndex: 1000, minWidth: 190 }}>{children}</div>;
 };
 
-// Menu button style helper
-const menuBtnBase: React.CSSProperties = {
-  display: "flex", alignItems: "center", gap: 10,
-  width: "100%", padding: "9px 16px",
-  fontSize: 12, fontWeight: 600, letterSpacing: "0.04em", fontFamily: "'IBM Plex Mono', monospace",
-  background: "none", border: "none",
-  color: "#333", cursor: "pointer", textAlign: "left",
-};
-const hoverHandlers = {
-  onMouseEnter: (e: React.MouseEvent) => { (e.currentTarget as HTMLElement).style.background = "#f5f5f5"; },
-  onMouseLeave: (e: React.MouseEvent) => { (e.currentTarget as HTMLElement).style.background = "none"; },
-};
+const menuBtnBase: React.CSSProperties = { display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 16px", fontSize: 12, fontWeight: 600, letterSpacing: "0.04em", fontFamily: "'IBM Plex Mono', monospace", background: "none", border: "none", color: "#333", cursor: "pointer", textAlign: "left" };
+const hoverHandlers = { onMouseEnter: (e: React.MouseEvent) => { (e.currentTarget as HTMLElement).style.background = "#f5f5f5"; }, onMouseLeave: (e: React.MouseEvent) => { (e.currentTarget as HTMLElement).style.background = "none"; } };
 
-const MenuDivider = () => <div style={{ height: 1, background: "#eee", margin: "3px 0" }} />;
-
-// ── Icons ──
-const IconDuplicate = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-  </svg>
-);
-const IconTrash = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c62828" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
-  </svg>
-);
-const IconEdit = ({ on }: { on: boolean }) => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={on ? "#1565C0" : "#555"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-  </svg>
-);
-
-// ── Main App ──
 let widgetCounter = 0;
-const createWidgetId = () => {
-  widgetCounter++;
-  return { id: `widget-${Date.now()}-${widgetCounter}`, counter: widgetCounter };
-};
+let tabCounter = 0;
+const createWidgetId = () => `widget-${Date.now()}-${++widgetCounter}`;
+const createTabId = () => `view-${Date.now()}-${++tabCounter}`;
 
 const App: React.FC = () => {
-  const [widgets, setWidgets] = useState<Widget[]>(loadWidgets() || INITIAL_WIDGETS);
+  const loaded = useMemo(() => loadViews(), []);
+  const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
+  const [activeTabId, setActiveTabId] = useState<string>(loaded.activeId);
+  const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
+
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const initialSettingsRef = useRef(loadSettings());
@@ -377,15 +261,18 @@ const App: React.FC = () => {
   const [crossColor, setCrossColor] = useState(() => initialSettingsRef.current.crossColor || "#00a8b8");
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
-  // Context menus
   const [widgetMenu, setWidgetMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number } | null>(null);
-  const [typeMenu, setTypeMenu] = useState<{ x: number; y: number; id: string } | null>(null);
-  const [focusTrail, setFocusTrail] = useState<string[]>([]);
-  const [focusIndex, setFocusIndex] = useState(-1);
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
 
   const dragRef = useRef<DragState | null>(null);
-  const focusedWidgetId = focusIndex >= 0 ? focusTrail[focusIndex] : null;
+
+  const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId) ?? tabs[0], [tabs, activeTabId]);
+  const widgets = activeTab?.widgets ?? [];
+
+  const updateActiveWidgets = useCallback((updater: (prev: Widget[]) => Widget[]) => {
+    setTabs((prev) => prev.map((tab) => (tab.id === activeTabId ? { ...tab, widgets: updater(tab.widgets) } : tab)));
+  }, [activeTabId]);
 
   useEffect(() => {
     const onResize = () => setViewSize({ w: window.innerWidth, h: window.innerHeight });
@@ -393,18 +280,15 @@ const App: React.FC = () => {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // ── Use floor so grid never exceeds viewport ──
+  useEffect(() => { saveViews(tabs, activeTabId); }, [tabs, activeTabId]);
+  useEffect(() => { saveSettings({ bgColor, crossColor }); }, [bgColor, crossColor]);
+
   const canvasH = viewSize.h - HEADER_H;
   const gridCols = Math.max(1, Math.round(viewSize.w / CELL_SIZE));
   const gridRows = Math.max(1, Math.round(canvasH / CELL_SIZE));
   const stepX = viewSize.w / gridCols;
   const stepY = canvasH / gridRows;
 
-  // Persist
-  useEffect(() => { saveWidgets(widgets); }, [widgets]);
-  useEffect(() => { saveSettings({ bgColor, crossColor }); }, [bgColor, crossColor]);
-
-  // ── Widget CRUD ──
   const applyColorway = useCallback((widget: Widget, theme: ColorwayKey): Widget => {
     const swatch = COLORWAYS[theme];
     return { ...widget, theme, color: swatch.color, accent: swatch.accent };
@@ -413,123 +297,45 @@ const App: React.FC = () => {
   const addWidget = useCallback((kind = "chart") => {
     const template = WIDGET_LIBRARY.find((item) => item.kind === kind);
     if (!template) return;
-    const { id, counter } = createWidgetId();
-    const theme = COLORWAY_ORDER[counter % COLORWAY_ORDER.length];
-    setWidgets((prev) => [...prev, {
-      id,
-      kind,
-      theme,
-      x: 1 + (counter % 4) * 2,
-      y: 1 + (counter % 3) * 2,
-      w: template.defaultW, h: template.defaultH,
-      title: template.label,
-      color: COLORWAYS[theme].color,
-      accent: COLORWAYS[theme].accent,
-    }]);
-  }, []);
-
-  const deleteWidget = useCallback((id: string) => {
-    setWidgets((prev) => prev.filter((w) => w.id !== id));
-  }, []);
-
-  const setWidgetKind = useCallback((id: string, kind: string) => {
-    const template = WIDGET_LIBRARY.find((item) => item.kind === kind);
-    if (!template) return;
-    setWidgets((prev) => prev.map((w) => (
-      w.id === id ? { ...w, kind, title: template.label } : w
-    )));
-  }, []);
+    const id = createWidgetId();
+    const theme = COLORWAY_ORDER[(widgetCounter + 1) % COLORWAY_ORDER.length];
+    updateActiveWidgets((prev) => [...prev, { id, kind, theme, x: 1, y: 1, w: template.defaultW, h: template.defaultH, title: template.label, color: COLORWAYS[theme].color, accent: COLORWAYS[theme].accent }]);
+  }, [updateActiveWidgets]);
 
   const duplicateWidget = useCallback((id: string) => {
-    setWidgets((prev) => {
+    updateActiveWidgets((prev) => {
       const src = prev.find((w) => w.id === id);
       if (!src) return prev;
-      const next = createWidgetId();
-      return [...prev, applyColorway({
-        ...src,
-        id: next.id,
-        kind: src.kind,
-        x: clamp(src.x + 2, 0, gridCols - src.w),
-        y: clamp(src.y + 2, 0, gridRows - src.h),
-      }, src.theme ?? "teal")];
+      return [...prev, { ...src, id: createWidgetId(), x: clamp(src.x + 2, 0, gridCols - src.w), y: clamp(src.y + 2, 0, gridRows - src.h) }];
     });
-  }, [applyColorway, gridCols, gridRows]);
+  }, [gridCols, gridRows, updateActiveWidgets]);
 
-  const setWidgetTheme = useCallback((id: string, theme: ColorwayKey) => {
-    setWidgets((prev) => prev.map((w) => (w.id === id ? applyColorway(w, theme) : w)));
-  }, [applyColorway]);
+  const closeMenus = useCallback(() => { setWidgetMenu(null); setCanvasMenu(null); setTabMenu(null); }, []);
 
-  // ── Context menus ──
-  const onWidgetContextMenu = useCallback((e: React.MouseEvent, id: string) => {
-    e.preventDefault();
-    setCanvasMenu(null);
-    setTypeMenu(null);
-    setWidgetMenu({ x: e.clientX, y: e.clientY, id });
-  }, []);
+  const addTab = useCallback(() => {
+    const id = createTabId();
+    const newTab: ViewTab = { id, name: `View ${tabs.length + 1}`, widgets: [] };
+    setTabs((prev) => [...prev, newTab]);
+    setActiveTabId(id);
+    setEditMode(true);
+  }, [tabs.length]);
 
-  const onCanvasContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setWidgetMenu(null);
-    setTypeMenu(null);
-    setCanvasMenu({ x: e.clientX, y: e.clientY });
-  }, []);
+  const renameTab = useCallback((id: string) => {
+    const tab = tabs.find((t) => t.id === id);
+    if (!tab) return;
+    const next = window.prompt("Rename view", tab.name)?.trim();
+    if (!next) return;
+    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, name: next } : t)));
+  }, [tabs]);
 
-  const onWidgetHeaderClick = useCallback((e: React.MouseEvent, id: string) => {
-    if (focusedWidgetId) return;
-    e.preventDefault();
-    e.stopPropagation();
-    setWidgetMenu(null);
-    setCanvasMenu(null);
-    setTypeMenu({ x: e.clientX, y: e.clientY, id });
-  }, [focusedWidgetId]);
-
-  const closeMenus = useCallback(() => {
-    setWidgetMenu(null);
-    setCanvasMenu(null);
-    setTypeMenu(null);
-  }, []);
-
-  const openWidgetDetail = useCallback((id: string) => {
-    setFocusTrail((prev) => [...prev.slice(0, focusIndex + 1), id]);
-    setFocusIndex((idx) => idx + 1);
-  }, [focusIndex]);
-
-  const goBackDetail = useCallback(() => {
-    setFocusIndex((idx) => Math.max(-1, idx - 1));
-  }, []);
-
-  const goForwardDetail = useCallback(() => {
-    setFocusIndex((idx) => Math.min(focusTrail.length - 1, idx + 1));
-  }, [focusTrail.length]);
-
-  // ── Drag / Resize ──
-  const onDragStart = useCallback((e: React.MouseEvent | React.TouchEvent, id: string) => {
-    if (!editMode) return;
-    e.preventDefault();
-    const { px, py } = getPointer(e);
-    const widget = widgets.find((w) => w.id === id);
-    if (!widget) return;
-    dragRef.current = {
-      id, mode: "drag", edges: {},
-      startMouseX: px, startMouseY: py,
-      origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h,
-    };
-    setDraggingId(id);
-  }, [widgets, editMode]);
-
-  const onResizeStart = useCallback((e: React.MouseEvent | React.TouchEvent, id: string, edges: ResizeEdges) => {
-    if (!editMode) return;
-    e.preventDefault();
-    const { px, py } = getPointer(e);
-    const widget = widgets.find((w) => w.id === id);
-    if (!widget) return;
-    dragRef.current = {
-      id, mode: "resize", edges,
-      startMouseX: px, startMouseY: py,
-      origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h,
-    };
-    setDraggingId(id);
-  }, [widgets, editMode]);
+  const deleteTab = useCallback((id: string) => {
+    if (tabs.length === 1) return;
+    setTabs((prev) => {
+      const filtered = prev.filter((t) => t.id !== id);
+      if (activeTabId === id && filtered[0]) setActiveTabId(filtered[0].id);
+      return filtered;
+    });
+  }, [tabs.length, activeTabId]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent | TouchEvent) => {
@@ -540,35 +346,18 @@ const App: React.FC = () => {
       const dCols = Math.round((px - d.startMouseX) / stepX);
       const dRows = Math.round((py - d.startMouseY) / stepY);
 
-      setWidgets((prev) =>
-        prev.map((w) => {
-          if (w.id !== d.id) return w;
-          if (d.mode === "drag") {
-            return {
-              ...w,
-              x: clamp(d.origX + dCols, 0, gridCols - w.w),
-              y: clamp(d.origY + dRows, 0, gridRows - w.h),
-            };
-          }
-          let x = d.origX, y = d.origY, nw = d.origW, nh = d.origH;
-          if (d.edges.right)  nw = clamp(d.origW + dCols, MIN_W, gridCols - d.origX);
-          if (d.edges.bottom) nh = clamp(d.origH + dRows, MIN_H, gridRows - d.origY);
-          if (d.edges.left) {
-            const shift = clamp(dCols, -d.origX, d.origW - MIN_W);
-            x = d.origX + shift;
-            nw = d.origW - shift;
-          }
-          if (d.edges.top) {
-            const shift = clamp(dRows, -d.origY, d.origH - MIN_H);
-            y = d.origY + shift;
-            nh = d.origH - shift;
-          }
-          return { ...w, x, y, w: nw, h: nh };
-        })
-      );
+      updateActiveWidgets((prev) => prev.map((w) => {
+        if (w.id !== d.id) return w;
+        if (d.mode === "drag") return { ...w, x: clamp(d.origX + dCols, 0, gridCols - w.w), y: clamp(d.origY + dRows, 0, gridRows - w.h) };
+        let x = d.origX, y = d.origY, nw = d.origW, nh = d.origH;
+        if (d.edges.right) nw = clamp(d.origW + dCols, MIN_W, gridCols - d.origX);
+        if (d.edges.bottom) nh = clamp(d.origH + dRows, MIN_H, gridRows - d.origY);
+        if (d.edges.left) { const shift = clamp(dCols, -d.origX, d.origW - MIN_W); x = d.origX + shift; nw = d.origW - shift; }
+        if (d.edges.top) { const shift = clamp(dRows, -d.origY, d.origH - MIN_H); y = d.origY + shift; nh = d.origH - shift; }
+        return { ...w, x, y, w: nw, h: nh };
+      }));
     };
     const onEnd = () => { dragRef.current = null; setDraggingId(null); };
-
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onEnd);
     window.addEventListener("touchmove", onMove, { passive: false });
@@ -579,211 +368,115 @@ const App: React.FC = () => {
       window.removeEventListener("touchmove", onMove);
       window.removeEventListener("touchend", onEnd);
     };
-  }, [gridCols, gridRows, stepX, stepY]);
-
-  const handleReset = useCallback(() => {
-    setWidgets(INITIAL_WIDGETS);
-    localStorage.removeItem(WIDGET_KEY);
-  }, []);
+  }, [gridCols, gridRows, stepX, stepY, updateActiveWidgets]);
 
   return (
     <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: bgColor || UI_THEME.surface }}>
-      {/* ── Header ── */}
-      <header style={{
-        height: HEADER_H, padding: "0 20px",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        background: UI_THEME.panel,
-        backdropFilter: "blur(10px)",
-        borderBottom: `1px solid ${UI_THEME.line}`,
-        zIndex: 200, position: "relative",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 800, color: UI_THEME.text, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-            Dashboard
-          </h1>
-          {focusedWidgetId && (
-            <>
-              <button onClick={goBackDetail} style={{ border: "1px solid #ccc", background: "#fff", borderRadius: 6, padding: "2px 8px", cursor: "pointer" }}>
-                ←
-              </button>
-              <button onClick={goForwardDetail} style={{ border: "1px solid #ccc", background: "#fff", borderRadius: 6, padding: "2px 8px", cursor: "pointer" }}>
-                →
-              </button>
-            </>
-          )}
-          {editMode && (
-            <span style={{
-              fontSize: 10, fontWeight: 700, color: "#003c45",
-              background: "#9df8ff", border: "1px solid rgba(0,94,104,0.7)", borderRadius: 2, padding: "3px 8px",
-              letterSpacing: "0.1em", fontFamily: "'IBM Plex Mono', monospace",
-            }}>
-              EDIT MODE
-            </span>
-          )}
-          <span style={{ fontSize: 12, color: UI_THEME.subtext, letterSpacing: "0.03em" }}>
-            {editMode ? "Drag to move · Edges to resize · Right-click for options" : `${gridCols}×${gridRows} grid`}
-          </span>
+      <header style={{ height: HEADER_H, padding: "0 20px", display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", background: UI_THEME.panel, borderBottom: `1px solid ${UI_THEME.line}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <h1 style={{ fontSize: 18, fontWeight: 800, color: UI_THEME.text, letterSpacing: "0.04em", textTransform: "uppercase", margin: 0 }}>Dashboard</h1>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button
-            onClick={() => { setEditMode((v) => !v); setFocusIndex(-1); }}
-            title="Toggle edit mode"
-            style={{
-              height: 32,
-              padding: "0 10px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: editMode ? "#9df8ff" : "#fff",
-              border: `1px solid ${editMode ? "#0f7f8b" : UI_THEME.line}`,
-              borderRadius: 8,
-              cursor: "pointer",
-              fontSize: 11,
-              color: "#0b3c44",
-              fontWeight: 700,
-              letterSpacing: "0.06em",
-              fontFamily: "'IBM Plex Mono', monospace",
-            }}
-          >
+        <div style={{ display: "flex", alignItems: "center", gap: 6, justifySelf: "center", maxWidth: "55vw", overflowX: "auto", padding: "2px 4px" }}>
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              draggable
+              onDragStart={() => setDraggingTabId(tab.id)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => {
+                if (!draggingTabId || draggingTabId === tab.id) return;
+                setTabs((prev) => {
+                  const list = [...prev];
+                  const from = list.findIndex((t) => t.id === draggingTabId);
+                  const to = list.findIndex((t) => t.id === tab.id);
+                  if (from < 0 || to < 0) return prev;
+                  const [item] = list.splice(from, 1);
+                  list.splice(to, 0, item);
+                  return list;
+                });
+                setDraggingTabId(null);
+              }}
+              onContextMenu={(e) => { e.preventDefault(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
+              onDoubleClick={() => renameTab(tab.id)}
+              onClick={() => { setActiveTabId(tab.id); setEditMode(false); }}
+              style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? "1px solid #08343a" : "1px solid rgba(8,52,58,0.35)", background: activeTabId === tab.id ? "#ffffff" : "rgba(255,255,255,0.65)", borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", cursor: "pointer", whiteSpace: "nowrap" }}
+            >
+              {tab.name}
+            </button>
+          ))}
+          <button onClick={addTab} title="New view tab" style={{ width: 30, height: 30, border: "1px solid rgba(8,52,58,0.35)", borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: 20, lineHeight: 1 }}>+</button>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end" }}>
+          <button onClick={() => setEditMode((v) => !v)} style={{ height: 32, padding: "0 10px", background: editMode ? "#9df8ff" : "#fff", border: `1px solid ${editMode ? "#0f7f8b" : UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
             {editMode ? "EDIT: ON" : "EDIT: OFF"}
           </button>
-
-          {/* Add module — always visible */}
-          <button
-            onClick={() => { addWidget(); setEditMode(true); setFocusIndex(-1); }}
-            title="Add module"
-            style={{
-              width: 32, height: 32,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              background: "#fff", border: `1px solid ${UI_THEME.line}`,
-              borderRadius: 8, cursor: "pointer", fontSize: 20, color: "#555",
-              fontWeight: 300, lineHeight: 1,
-            }}
-          >
-            +
-          </button>
-
-          {/* Edit-mode config */}
-          {editMode && (
-            <>
-              <div style={{ width: 1, height: 20, background: "#ddd" }} />
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#666", cursor: "pointer" }}>
-                BG
-                <div style={{ position: "relative", width: 22, height: 22, borderRadius: 6, border: "1px solid #ccc", overflow: "hidden" }}>
-                  <div style={{ width: "100%", height: "100%", background: bgColor }} />
-                  <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)}
-                    style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%" }} />
-                </div>
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#666", cursor: "pointer" }}>
-                Grid
-                <div style={{ position: "relative", width: 22, height: 22, borderRadius: 6, border: "1px solid #ccc", overflow: "hidden" }}>
-                  <div style={{ width: "100%", height: "100%", background: crossColor }} />
-                  <input type="color" value={crossColor} onChange={(e) => setCrossColor(e.target.value)}
-                    style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%" }} />
-                </div>
-              </label>
-            </>
-          )}
+          <button onClick={() => { addWidget(); setEditMode(true); }} style={{ width: 32, height: 32, background: "#fff", border: `1px solid ${UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 20 }}>+</button>
         </div>
       </header>
 
-      {/* ── Canvas ── */}
-      <div
-        style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }}
-        onContextMenu={onCanvasContextMenu}
-      >
+      <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setWidgetMenu(null); }}>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
-
-        {(focusedWidgetId
-          ? widgets.filter((w) => w.id === focusedWidgetId).map((w) => ({ ...w, x: 0, y: 0, w: gridCols, h: gridRows }))
-          : widgets
-        ).map((w) => (
+        {widgets.map((w) => (
           <WidgetCard
             key={w.id}
             widget={w}
             stepX={stepX}
             stepY={stepY}
             isDragging={draggingId === w.id}
-            editMode={focusedWidgetId ? false : editMode}
-            onDragStart={onDragStart}
-            onResizeStart={onResizeStart}
-            onContextMenu={onWidgetContextMenu}
-            onHeaderClick={onWidgetHeaderClick}
-            onOpenDetail={openWidgetDetail}
+            editMode={editMode}
+            onDragStart={(e, id) => {
+              if (!editMode) return;
+              e.preventDefault();
+              const { px, py } = getPointer(e);
+              const widget = widgets.find((ww) => ww.id === id);
+              if (!widget) return;
+              dragRef.current = { id, mode: "drag", edges: {}, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
+              setDraggingId(id);
+            }}
+            onResizeStart={(e, id, edges) => {
+              if (!editMode) return;
+              e.preventDefault();
+              const { px, py } = getPointer(e);
+              const widget = widgets.find((ww) => ww.id === id);
+              if (!widget) return;
+              dragRef.current = { id, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
+              setDraggingId(id);
+            }}
+            onContextMenu={(e, id) => { e.preventDefault(); setWidgetMenu({ x: e.clientX, y: e.clientY, id }); setCanvasMenu(null); }}
+            onHeaderClick={() => {}}
+            onOpenDetail={() => {}}
           />
         ))}
       </div>
 
-      {typeMenu && (
-        <FloatingMenu x={typeMenu.x} y={typeMenu.y} onClose={closeMenus}>
-          <div style={{ padding: "8px 12px 4px", fontSize: 11, letterSpacing: "0.08em", color: "#666", textTransform: "uppercase" }}>
-            Module Type
-          </div>
-          {WIDGET_LIBRARY.map((item) => (
-            <button
-              key={item.kind}
-              style={menuBtnBase}
-              onClick={() => { setWidgetKind(typeMenu.id, item.kind); closeMenus(); }}
-              {...hoverHandlers}
-            >
-              {item.label}
-            </button>
-          ))}
+      {tabMenu && (
+        <FloatingMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
+          <button style={menuBtnBase} onClick={() => { renameTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
+          <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
         </FloatingMenu>
       )}
 
-      {/* ── Widget context menu ── */}
       {widgetMenu && (
         <FloatingMenu x={widgetMenu.x} y={widgetMenu.y} onClose={closeMenus}>
-          <button style={menuBtnBase} onClick={() => { duplicateWidget(widgetMenu.id); closeMenus(); }} {...hoverHandlers}>
-            <IconDuplicate /> Duplicate
-          </button>
-          <MenuDivider />
-          <div style={{ padding: "6px 16px 4px", fontSize: 10, letterSpacing: "0.08em", color: "#555", fontFamily: "'IBM Plex Mono', monospace" }}>
-            COLORWAY
-          </div>
+          <button style={menuBtnBase} onClick={() => { duplicateWidget(widgetMenu.id); closeMenus(); }} {...hoverHandlers}>Duplicate</button>
           {COLORWAY_ORDER.map((theme) => (
-            <button
-              key={theme}
-              style={menuBtnBase}
-              onClick={() => { setWidgetTheme(widgetMenu.id, theme); closeMenus(); }}
-              {...hoverHandlers}
-            >
-              <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} />
-              {theme.toUpperCase()}
+            <button key={theme} style={menuBtnBase} onClick={() => {
+              updateActiveWidgets((prev) => prev.map((w) => (w.id === widgetMenu.id ? applyColorway(w, theme) : w)));
+              closeMenus();
+            }} {...hoverHandlers}>
+              <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} /> {theme.toUpperCase()}
             </button>
           ))}
-          <MenuDivider />
-          <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { deleteWidget(widgetMenu.id); closeMenus(); }} {...hoverHandlers}>
-            <IconTrash /> Delete
-          </button>
+          <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { updateActiveWidgets((prev) => prev.filter((w) => w.id !== widgetMenu.id)); closeMenus(); }} {...hoverHandlers}>Delete</button>
         </FloatingMenu>
       )}
 
-      {/* ── Canvas context menu ── */}
       {canvasMenu && (
         <FloatingMenu x={canvasMenu.x} y={canvasMenu.y} onClose={closeMenus}>
-          <button
-            style={menuBtnBase}
-            onClick={() => { setEditMode((v) => !v); closeMenus(); }}
-            {...hoverHandlers}
-          >
-            <IconEdit on={editMode} />
-            <span>Edit Mode: <strong style={{ color: editMode ? "#1565C0" : "#999" }}>{editMode ? "On" : "Off"}</strong></span>
-          </button>
-          {editMode && (
-            <>
-              <MenuDivider />
-              <button style={menuBtnBase} onClick={() => { handleReset(); closeMenus(); }} {...hoverHandlers}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 105.64-12.36L1 10" />
-                </svg>
-                Reset Layout
-              </button>
-            </>
-          )}
+          <button style={menuBtnBase} onClick={() => { setEditMode((v) => !v); closeMenus(); }} {...hoverHandlers}>Toggle Edit Mode</button>
+          <button style={menuBtnBase} onClick={() => { setBgColor("#f7fffe"); setCrossColor("#00a8b8"); closeMenus(); }} {...hoverHandlers}>Reset Colors</button>
         </FloatingMenu>
       )}
     </div>
