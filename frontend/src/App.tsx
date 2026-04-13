@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { CONTENT_MAP, WIDGET_LIBRARY } from "./widgets";
 import type { Widget, DragState, ResizeEdges } from "./types";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
 const CELL_SIZE = 28;
 const HEADER_H = 48;
@@ -44,6 +45,17 @@ interface ViewTab {
   id: string;
   name: string;
   widgets: Widget[];
+}
+
+interface DashboardSnapshot {
+  tabs: ViewTab[];
+  activeTabId: string;
+  bgColor: string;
+  crossColor: string;
+  headerBgColor: string;
+  headerTextColor: string;
+  tabBgColor: string;
+  tabTextColor: string;
 }
 
 function clamp(v: number, lo: number, hi: number) {
@@ -322,21 +334,24 @@ interface WidgetCardProps {
   stepX: number;
   stepY: number;
   isDragging: boolean;
+  isSelected: boolean;
   editMode: boolean;
   onDragStart: (e: React.MouseEvent | React.TouchEvent, id: string) => void;
   onResizeStart: (e: React.MouseEvent | React.TouchEvent, id: string, edges: ResizeEdges) => void;
   onContextMenu: (e: React.MouseEvent, id: string) => void;
   onModuleNameClick: (e: React.MouseEvent, id: string) => void;
+  onSelect: (id: string) => void;
 }
 
-const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick }) => {
+const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect }) => {
   const Content = CONTENT_MAP[widget.kind];
   const theme = COLORWAYS[widget.theme ?? "teal"];
   return (
     <div
-      style={{ position: "absolute", left: widget.x * stepX, top: widget.y * stepY, width: widget.w * stepX, height: widget.h * stepY, background: widget.color, border: `1px solid ${widget.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
-      onMouseDown={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
-      onTouchStart={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
+      style={{ position: "absolute", left: widget.x * stepX, top: widget.y * stepY, width: widget.w * stepX, height: widget.h * stepY, background: widget.color, border: isSelected ? "2px solid #111" : `1px solid ${widget.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => { onSelect(widget.id); if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
+      onTouchStart={(e) => { onSelect(widget.id); if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, widget.id); }}
     >
       <div
@@ -390,6 +405,7 @@ const App: React.FC = () => {
   const [isDraggingTab, setIsDraggingTab] = useState(false);
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const initialSettingsRef = useRef(loadSettings());
   const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || "#f7fffe");
@@ -408,13 +424,48 @@ const App: React.FC = () => {
 
   const dragRef = useRef<DragState | null>(null);
   const tabDragRef = useRef<{ id: string; startX: number; startY: number } | null>(null);
+  const copiedWidgetRef = useRef<Widget | null>(null);
+  const undoStackRef = useRef<DashboardSnapshot[]>([]);
+  const redoStackRef = useRef<DashboardSnapshot[]>([]);
+  const lastSnapshotRef = useRef<DashboardSnapshot | null>(null);
+  const restoringRef = useRef(false);
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId) ?? tabs[0], [tabs, activeTabId]);
   const widgets = activeTab?.widgets ?? [];
 
+  useEffect(() => {
+    if (!selectedWidgetId) return;
+    if (!widgets.some((w) => w.id === selectedWidgetId)) setSelectedWidgetId(null);
+  }, [widgets, selectedWidgetId]);
+
   const updateActiveWidgets = useCallback((updater: (prev: Widget[]) => Widget[]) => {
     setTabs((prev) => prev.map((tab) => (tab.id === activeTabId ? { ...tab, widgets: updater(tab.widgets) } : tab)));
   }, [activeTabId]);
+
+  const buildSnapshot = useCallback((): DashboardSnapshot => ({
+    tabs,
+    activeTabId,
+    bgColor,
+    crossColor,
+    headerBgColor,
+    headerTextColor,
+    tabBgColor,
+    tabTextColor,
+  }), [tabs, activeTabId, bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor]);
+
+  const applySnapshot = useCallback((snapshot: DashboardSnapshot) => {
+    restoringRef.current = true;
+    setTabs(snapshot.tabs);
+    setActiveTabId(snapshot.activeTabId);
+    setBgColor(snapshot.bgColor);
+    setCrossColor(snapshot.crossColor);
+    setHeaderBgColor(snapshot.headerBgColor);
+    setHeaderTextColor(snapshot.headerTextColor);
+    setTabBgColor(snapshot.tabBgColor);
+    setTabTextColor(snapshot.tabTextColor);
+    lastSnapshotRef.current = snapshot;
+    setTimeout(() => { restoringRef.current = false; }, 0);
+  }, []);
 
   useEffect(() => {
     const onResize = () => setViewSize({ w: window.innerWidth, h: window.innerHeight });
@@ -424,6 +475,23 @@ const App: React.FC = () => {
 
   useEffect(() => { saveViews(tabs, activeTabId); }, [tabs, activeTabId]);
   useEffect(() => { saveSettings({ bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor }); }, [bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor]);
+  useEffect(() => {
+    const snapshot = buildSnapshot();
+    if (restoringRef.current) {
+      lastSnapshotRef.current = snapshot;
+      return;
+    }
+    const last = lastSnapshotRef.current;
+    if (!last) {
+      lastSnapshotRef.current = snapshot;
+      return;
+    }
+    if (JSON.stringify(last) === JSON.stringify(snapshot)) return;
+    undoStackRef.current.push(last);
+    if (undoStackRef.current.length > 120) undoStackRef.current.shift();
+    redoStackRef.current = [];
+    lastSnapshotRef.current = snapshot;
+  }, [buildSnapshot]);
 
   const canvasH = viewSize.h - HEADER_H;
   const gridCols = Math.max(1, Math.round(viewSize.w / CELL_SIZE));
@@ -453,6 +521,59 @@ const App: React.FC = () => {
   }, [gridCols, gridRows, updateActiveWidgets]);
 
   const closeMenus = useCallback(() => { setWidgetMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); }, []);
+
+  const deleteSelectedWidget = useCallback(() => {
+    if (!selectedWidgetId) return;
+    updateActiveWidgets((prev) => prev.filter((w) => w.id !== selectedWidgetId));
+    setSelectedWidgetId(null);
+  }, [selectedWidgetId, updateActiveWidgets]);
+
+  const copySelectedWidget = useCallback(() => {
+    if (!selectedWidgetId) return;
+    const target = widgets.find((w) => w.id === selectedWidgetId);
+    if (!target) return;
+    copiedWidgetRef.current = { ...target };
+  }, [selectedWidgetId, widgets]);
+
+  const pasteWidget = useCallback(() => {
+    const copied = copiedWidgetRef.current;
+    if (!copied) return;
+    const id = createWidgetId();
+    const pasted: Widget = {
+      ...copied,
+      id,
+      x: clamp(copied.x + 2, 0, gridCols - copied.w),
+      y: clamp(copied.y + 2, 0, gridRows - copied.h),
+    };
+    updateActiveWidgets((prev) => [...prev, pasted]);
+    setSelectedWidgetId(id);
+  }, [gridCols, gridRows, updateActiveWidgets]);
+
+  const undo = useCallback(() => {
+    if (undoStackRef.current.length === 0) return;
+    const current = buildSnapshot();
+    const previous = undoStackRef.current.pop();
+    if (!previous) return;
+    redoStackRef.current.push(current);
+    applySnapshot(previous);
+  }, [applySnapshot, buildSnapshot]);
+
+  const redo = useCallback(() => {
+    if (redoStackRef.current.length === 0) return;
+    const current = buildSnapshot();
+    const next = redoStackRef.current.pop();
+    if (!next) return;
+    undoStackRef.current.push(current);
+    applySnapshot(next);
+  }, [applySnapshot, buildSnapshot]);
+
+  useKeyboardShortcuts({
+    deleteSelection: deleteSelectedWidget,
+    copySelection: copySelectedWidget,
+    pasteSelection: pasteWidget,
+    undo,
+    redo,
+  });
 
   const addTab = useCallback(() => {
     const id = createTabId();
@@ -597,7 +718,7 @@ const App: React.FC = () => {
                   return list;
                 });
               }}
-              onContextMenu={(e) => { e.preventDefault(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
+              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
               onDoubleClick={() => startRenamingTab(tab.id)}
               onClick={() => { if (isDraggingTab) return; setActiveTabId(tab.id); setEditMode(false); }}
               style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? `1px solid ${tabTextColor}` : "1px solid rgba(8,52,58,0.35)", background: activeTabId === tab.id ? tabBgColor : `${tabBgColor}B3`, color: tabTextColor, borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
@@ -629,7 +750,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setHeaderMenu(null); setWidgetMenu(null); setModuleTypeMenu(null); }}>
+      <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onClick={() => setSelectedWidgetId(null)} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setHeaderMenu(null); setWidgetMenu(null); setModuleTypeMenu(null); }}>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
         {editMode && draggingId && (() => {
           const activeWidget = widgets.find((w) => w.id === draggingId);
@@ -643,6 +764,7 @@ const App: React.FC = () => {
             stepX={stepX}
             stepY={stepY}
             isDragging={draggingId === w.id}
+            isSelected={selectedWidgetId === w.id}
             editMode={editMode}
             onDragStart={(e, id) => {
               if (!editMode) return;
@@ -667,8 +789,10 @@ const App: React.FC = () => {
               setWidgetMenu(null);
               setHeaderMenu(null);
               setCanvasMenu(null);
+              setSelectedWidgetId(id);
               setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
             }}
+            onSelect={setSelectedWidgetId}
           />
         ))}
       </div>

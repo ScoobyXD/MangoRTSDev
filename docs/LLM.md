@@ -31,8 +31,17 @@ Menus use `FloatingMenu` with outside-click handling:
 2. **Module type menu** (single-click module name tag): pick any module type from `WIDGET_LIBRARY`
 3. **Canvas menu** (right-click empty space): Toggle Edit Mode (shows current ON/OFF state), Canvas Color, Plus Color
 4. **Header menu** (right-click top header bar): Header Bar color, Header Text color, Tab Box color, Tab Text color
+5. **Tab menu** (right-click a view tab): Rename View, Delete View (delete disabled when only one tab remains)
 
 Widget `onContextMenu` calls `e.stopPropagation()` to prevent canvas menu from opening.
+
+## Keyboard Controls
+
+- **Delete / Backspace**: delete selected module
+- **Ctrl/Cmd + C**: copy selected module
+- **Ctrl/Cmd + V**: paste copied module with a small offset
+- **Ctrl/Cmd + Z**: undo
+- **Ctrl/Cmd + Y** or **Ctrl/Cmd + Shift + Z**: redo
 
 ## Persistence
 
