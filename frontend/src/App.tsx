@@ -176,6 +176,69 @@ const GridCrosses: React.FC<{ cols: number; rows: number; stepX: number; stepY: 
   }
 );
 
+const PlacementSplash: React.FC<{
+  widget: Widget;
+  widgets: Widget[];
+  cols: number;
+  rows: number;
+  stepX: number;
+  stepY: number;
+}> = React.memo(({ widget, widgets, cols, rows, stepX, stepY }) => {
+  const cells = useMemo(() => {
+    const occupied = new Set<string>();
+    for (const other of widgets) {
+      if (other.id === widget.id) continue;
+      for (let y = other.y; y < other.y + other.h; y++) {
+        for (let x = other.x; x < other.x + other.w; x++) {
+          occupied.add(`${x},${y}`);
+        }
+      }
+    }
+
+    const radius = 3;
+    const left = clamp(widget.x - radius, 0, Math.max(0, cols - 1));
+    const right = clamp(widget.x + widget.w - 1 + radius, 0, Math.max(0, cols - 1));
+    const top = clamp(widget.y - radius, 0, Math.max(0, rows - 1));
+    const bottom = clamp(widget.y + widget.h - 1 + radius, 0, Math.max(0, rows - 1));
+
+    const result: { x: number; y: number; distance: number }[] = [];
+    const centerX = widget.x + widget.w / 2;
+    const centerY = widget.y + widget.h / 2;
+    for (let y = top; y <= bottom; y++) {
+      for (let x = left; x <= right; x++) {
+        const insideWidget = x >= widget.x && x < widget.x + widget.w && y >= widget.y && y < widget.y + widget.h;
+        if (insideWidget || occupied.has(`${x},${y}`)) continue;
+        const dist = Math.hypot(x + 0.5 - centerX, y + 0.5 - centerY);
+        result.push({ x, y, distance: dist });
+      }
+    }
+    return result;
+  }, [widget, widgets, cols, rows]);
+
+  return (
+    <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 50 }}>
+      {cells.map((cell) => {
+        const opacity = clamp(0.34 - cell.distance * 0.03, 0.08, 0.34);
+        return (
+          <div
+            key={`${cell.x}-${cell.y}`}
+            style={{
+              position: "absolute",
+              left: cell.x * stepX + 1.5,
+              top: cell.y * stepY + 1.5,
+              width: Math.max(2, stepX - 3),
+              height: Math.max(2, stepY - 3),
+              border: "1px solid rgba(7, 86, 94, 0.55)",
+              background: `rgba(111, 231, 238, ${opacity})`,
+              boxShadow: "0 0 0 1px rgba(255,255,255,0.18) inset",
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+});
+
 type HandleDef = { edges: ResizeEdges; cursor: string; style: React.CSSProperties };
 const HANDLES: HandleDef[] = [
   { edges: { top: true, left: true }, cursor: "nwse-resize", style: { top: -HANDLE / 2, left: -HANDLE / 2, width: CORNER_SIZE, height: CORNER_SIZE, zIndex: 2 } },
@@ -474,6 +537,11 @@ const App: React.FC = () => {
 
       <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setWidgetMenu(null); }}>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
+        {editMode && draggingId && (() => {
+          const activeWidget = widgets.find((w) => w.id === draggingId);
+          if (!activeWidget) return null;
+          return <PlacementSplash widget={activeWidget} widgets={widgets} cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} />;
+        })()}
         {widgets.map((w) => (
           <WidgetCard
             key={w.id}
