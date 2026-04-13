@@ -12,6 +12,7 @@ Drag-and-drop grid dashboard. React + TypeScript + Vite. Zero external libraries
 - **8-directional resize** — all 4 edges + all 4 corners. Left/top edges move origin inversely. Min 3×3. Edit mode only.
 - **Edit mode via canvas right-click** — right-click blank canvas → "Edit Mode: On/Off" toggle. No edit button in header. Edit mode shows blue badge in header + color pickers.
 - **Widget right-click menu** — Duplicate / Delete. Works in any mode (edit or not).
+- **Header double-click module switcher** — double-click a module header to open a module-type picker menu and swap the module kind/title in place.
 - **Add widget (+)** — always-visible button in header. Works in any mode.
 - **Nothing auto-moves, instant snapping, no transitions**
 
@@ -27,7 +28,8 @@ newSize = origSize - shift
 
 Two separate menus, both use `FloatingMenu` component with outside-click and Escape handling:
 1. **Widget menu** (right-click widget): Duplicate, Delete — always available
-2. **Canvas menu** (right-click empty space): Edit Mode toggle, Reset Layout (edit mode only)
+2. **Module type menu** (double-click module header): pick any module type from `WIDGET_LIBRARY`
+3. **Canvas menu** (right-click empty space): Edit Mode toggle, Reset Layout (edit mode only)
 
 Widget `onContextMenu` calls `e.stopPropagation()` to prevent canvas menu from opening.
 

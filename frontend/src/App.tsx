@@ -323,10 +323,10 @@ interface WidgetCardProps {
   onResizeStart: (e: React.MouseEvent | React.TouchEvent, id: string, edges: ResizeEdges) => void;
   onContextMenu: (e: React.MouseEvent, id: string) => void;
   onHeaderClick: (e: React.MouseEvent, id: string) => void;
-  onOpenDetail: (id: string) => void;
+  onHeaderDoubleClick: (e: React.MouseEvent, id: string) => void;
 }
 
-const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, editMode, onDragStart, onResizeStart, onContextMenu, onHeaderClick, onOpenDetail }) => {
+const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, editMode, onDragStart, onResizeStart, onContextMenu, onHeaderClick, onHeaderDoubleClick }) => {
   const Content = CONTENT_MAP[widget.kind];
   const theme = COLORWAYS[widget.theme ?? "teal"];
   return (
@@ -335,9 +335,17 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
       onMouseDown={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
       onTouchStart={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, widget.id); }}
-      onDoubleClick={() => { if (!editMode) onOpenDetail(widget.id); }}
     >
-      <div style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${widget.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }} onClick={(e) => !editMode && onHeaderClick(e, widget.id)}>
+      <div
+        style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${widget.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}
+        onClick={(e) => !editMode && onHeaderClick(e, widget.id)}
+        onDoubleClick={(e) => {
+          if (editMode) return;
+          e.preventDefault();
+          e.stopPropagation();
+          onHeaderDoubleClick(e, widget.id);
+        }}
+      >
         <span style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px" }}>{widget.title}</span>
       </div>
       <div style={{ flex: 1, padding: "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
@@ -388,6 +396,7 @@ const App: React.FC = () => {
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [widgetMenu, setWidgetMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [moduleTypeMenu, setModuleTypeMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number } | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
 
@@ -437,7 +446,7 @@ const App: React.FC = () => {
     });
   }, [gridCols, gridRows, updateActiveWidgets]);
 
-  const closeMenus = useCallback(() => { setWidgetMenu(null); setCanvasMenu(null); setTabMenu(null); }, []);
+  const closeMenus = useCallback(() => { setWidgetMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setTabMenu(null); }, []);
 
   const addTab = useCallback(() => {
     const id = createTabId();
@@ -644,9 +653,13 @@ const App: React.FC = () => {
               dragRef.current = { id, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
               setDraggingId(id);
             }}
-            onContextMenu={(e, id) => { e.preventDefault(); setWidgetMenu({ x: e.clientX, y: e.clientY, id }); setCanvasMenu(null); }}
+            onContextMenu={(e, id) => { e.preventDefault(); setWidgetMenu({ x: e.clientX, y: e.clientY, id }); setModuleTypeMenu(null); setCanvasMenu(null); }}
             onHeaderClick={() => {}}
-            onOpenDetail={() => {}}
+            onHeaderDoubleClick={(e, id) => {
+              setWidgetMenu(null);
+              setCanvasMenu(null);
+              setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
+            }}
           />
         ))}
       </div>
@@ -670,6 +683,24 @@ const App: React.FC = () => {
             </button>
           ))}
           <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { updateActiveWidgets((prev) => prev.filter((w) => w.id !== widgetMenu.id)); closeMenus(); }} {...hoverHandlers}>Delete</button>
+        </FloatingMenu>
+      )}
+
+      {moduleTypeMenu && (
+        <FloatingMenu x={moduleTypeMenu.x} y={moduleTypeMenu.y} onClose={closeMenus}>
+          {WIDGET_LIBRARY.map((item) => (
+            <button
+              key={item.kind}
+              style={menuBtnBase}
+              onClick={() => {
+                updateActiveWidgets((prev) => prev.map((w) => (w.id === moduleTypeMenu.id ? { ...w, kind: item.kind, title: item.label } : w)));
+                closeMenus();
+              }}
+              {...hoverHandlers}
+            >
+              {item.label}
+            </button>
+          ))}
         </FloatingMenu>
       )}
 
