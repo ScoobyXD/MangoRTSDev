@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { CONTENT_MAP, WIDGET_LIBRARY } from "./widgets";
 import type { Widget, DragState, ResizeEdges } from "./types";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
 const CELL_SIZE = 28;
 const HEADER_H = 48;
@@ -44,6 +45,17 @@ interface ViewTab {
   id: string;
   name: string;
   widgets: Widget[];
+}
+
+interface DashboardSnapshot {
+  tabs: ViewTab[];
+  activeTabId: string;
+  bgColor: string;
+  crossColor: string;
+  headerBgColor: string;
+  headerTextColor: string;
+  tabBgColor: string;
+  tabTextColor: string;
 }
 
 function clamp(v: number, lo: number, hi: number) {
@@ -139,7 +151,7 @@ function saveViews(tabs: ViewTab[], activeId: string) {
   try { localStorage.setItem(VIEWS_KEY, JSON.stringify({ tabs, activeId })); } catch {}
 }
 
-function loadSettings(): { bgColor?: string; crossColor?: string } {
+function loadSettings(): { bgColor?: string; crossColor?: string; headerBgColor?: string; headerTextColor?: string; tabBgColor?: string; tabTextColor?: string } {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return {};
@@ -148,13 +160,17 @@ function loadSettings(): { bgColor?: string; crossColor?: string } {
     return {
       bgColor: isHexColor(parsed.bgColor) ? parsed.bgColor : undefined,
       crossColor: isHexColor(parsed.crossColor) ? parsed.crossColor : undefined,
+      headerBgColor: isHexColor(parsed.headerBgColor) ? parsed.headerBgColor : undefined,
+      headerTextColor: isHexColor(parsed.headerTextColor) ? parsed.headerTextColor : undefined,
+      tabBgColor: isHexColor(parsed.tabBgColor) ? parsed.tabBgColor : undefined,
+      tabTextColor: isHexColor(parsed.tabTextColor) ? parsed.tabTextColor : undefined,
     };
   } catch {
     return {};
   }
 }
 
-function saveSettings(s: { bgColor: string; crossColor: string }) {
+function saveSettings(s: { bgColor: string; crossColor: string; headerBgColor: string; headerTextColor: string; tabBgColor: string; tabTextColor: string }) {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
 }
 
@@ -206,11 +222,14 @@ const PlacementSplash: React.FC<{
       }
     }
 
+    const sizeFactor = Math.min(1.5, Math.log2(Math.max(widget.w, widget.h) + 1) / 4);
+    const edgeSpan = () => (rand() < 0.72 - sizeFactor * 0.08 ? 2 : 3);
+    const armSpan = () => 1 + Math.floor(rand() * 3) + (rand() < 0.18 + sizeFactor * 0.08 ? 2 : 0);
     const radii = {
-      left: 2 + Math.floor(rand() * 3),
-      right: 2 + Math.floor(rand() * 3),
-      top: 2 + Math.floor(rand() * 3),
-      bottom: 2 + Math.floor(rand() * 3),
+      left: edgeSpan(),
+      right: edgeSpan(),
+      top: edgeSpan(),
+      bottom: edgeSpan(),
     };
     const left = clamp(widget.x - radii.left, 0, Math.max(0, cols - 1));
     const right = clamp(widget.x + widget.w - 1 + radii.right, 0, Math.max(0, cols - 1));
@@ -231,16 +250,21 @@ const PlacementSplash: React.FC<{
       }
     };
 
-    addArm(widget.x + Math.floor(rand() * widget.w), top, 0, -1, 1 + Math.floor(rand() * 4));
-    addArm(widget.x + Math.floor(rand() * widget.w), bottom, 0, 1, 1 + Math.floor(rand() * 4));
-    addArm(left, widget.y + Math.floor(rand() * widget.h), -1, 0, 1 + Math.floor(rand() * 4));
-    addArm(right, widget.y + Math.floor(rand() * widget.h), 1, 0, 1 + Math.floor(rand() * 4));
+    addArm(widget.x + Math.floor(rand() * widget.w), top, 0, -1, armSpan());
+    addArm(widget.x + Math.floor(rand() * widget.w), bottom, 0, 1, armSpan());
+    addArm(left, widget.y + Math.floor(rand() * widget.h), -1, 0, armSpan());
+    addArm(right, widget.y + Math.floor(rand() * widget.h), 1, 0, armSpan());
 
     for (let y = top; y <= bottom; y++) {
       for (let x = left; x <= right; x++) {
         const insideWidget = x >= widget.x && x < widget.x + widget.w && y >= widget.y && y < widget.y + widget.h;
-        const distance = Math.hypot(x + 0.5 - centerX, y + 0.5 - centerY);
-        const withinCore = distance <= 3.8 + rand() * 1.8;
+        const gapLeft = widget.x - (x + 1);
+        const gapRight = x - (widget.x + widget.w) + 1;
+        const gapTop = widget.y - (y + 1);
+        const gapBottom = y - (widget.y + widget.h) + 1;
+        const edgeDistance = Math.max(0, gapLeft, gapRight, gapTop, gapBottom);
+        const coreThickness = Math.min(2.9, 1.75 + rand() * 0.7 + sizeFactor * 0.15);
+        const withinCore = edgeDistance <= coreThickness;
         const splashNoise = rand() > 0.14;
         const inShape = withinCore && splashNoise;
         const isArm = extraCells.has(`${x},${y}`);
@@ -310,27 +334,35 @@ interface WidgetCardProps {
   stepX: number;
   stepY: number;
   isDragging: boolean;
+  isSelected: boolean;
   editMode: boolean;
   onDragStart: (e: React.MouseEvent | React.TouchEvent, id: string) => void;
   onResizeStart: (e: React.MouseEvent | React.TouchEvent, id: string, edges: ResizeEdges) => void;
   onContextMenu: (e: React.MouseEvent, id: string) => void;
-  onHeaderClick: (e: React.MouseEvent, id: string) => void;
-  onOpenDetail: (id: string) => void;
+  onModuleNameClick: (e: React.MouseEvent, id: string) => void;
+  onSelect: (id: string) => void;
 }
 
-const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, editMode, onDragStart, onResizeStart, onContextMenu, onHeaderClick, onOpenDetail }) => {
+const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect }) => {
   const Content = CONTENT_MAP[widget.kind];
   const theme = COLORWAYS[widget.theme ?? "teal"];
   return (
     <div
-      style={{ position: "absolute", left: widget.x * stepX, top: widget.y * stepY, width: widget.w * stepX, height: widget.h * stepY, background: widget.color, border: `1px solid ${widget.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
-      onMouseDown={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
-      onTouchStart={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
+      style={{ position: "absolute", left: widget.x * stepX, top: widget.y * stepY, width: widget.w * stepX, height: widget.h * stepY, background: widget.color, border: isSelected ? "2px solid #111" : `1px solid ${widget.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => { onSelect(widget.id); if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
+      onTouchStart={(e) => { onSelect(widget.id); if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, widget.id); }}
-      onDoubleClick={() => { if (!editMode) onOpenDetail(widget.id); }}
     >
-      <div style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${widget.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }} onClick={(e) => !editMode && onHeaderClick(e, widget.id)}>
-        <span style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px" }}>{widget.title}</span>
+      <div
+        style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${widget.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}
+      >
+        <span
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onModuleNameClick(e, widget.id); }}
+          style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px", cursor: "pointer" }}
+        >
+          {widget.title}
+        </span>
       </div>
       <div style={{ flex: 1, padding: "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
         {Content ? <Content accent={widget.accent} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: widget.accent }}>{widget.title}</span></div>}
@@ -373,25 +405,67 @@ const App: React.FC = () => {
   const [isDraggingTab, setIsDraggingTab] = useState(false);
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const initialSettingsRef = useRef(loadSettings());
   const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || "#f7fffe");
   const [crossColor, setCrossColor] = useState(() => initialSettingsRef.current.crossColor || "#00a8b8");
+  const [headerBgColor, setHeaderBgColor] = useState(() => initialSettingsRef.current.headerBgColor || UI_THEME.panel);
+  const [headerTextColor, setHeaderTextColor] = useState(() => initialSettingsRef.current.headerTextColor || UI_THEME.text);
+  const [tabBgColor, setTabBgColor] = useState(() => initialSettingsRef.current.tabBgColor || "#ffffff");
+  const [tabTextColor, setTabTextColor] = useState(() => initialSettingsRef.current.tabTextColor || "#08343a");
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [widgetMenu, setWidgetMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [moduleTypeMenu, setModuleTypeMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number } | null>(null);
+  const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number } | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
 
   const dragRef = useRef<DragState | null>(null);
   const tabDragRef = useRef<{ id: string; startX: number; startY: number } | null>(null);
+  const copiedWidgetRef = useRef<Widget | null>(null);
+  const undoStackRef = useRef<DashboardSnapshot[]>([]);
+  const redoStackRef = useRef<DashboardSnapshot[]>([]);
+  const lastSnapshotRef = useRef<DashboardSnapshot | null>(null);
+  const restoringRef = useRef(false);
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId) ?? tabs[0], [tabs, activeTabId]);
   const widgets = activeTab?.widgets ?? [];
 
+  useEffect(() => {
+    if (!selectedWidgetId) return;
+    if (!widgets.some((w) => w.id === selectedWidgetId)) setSelectedWidgetId(null);
+  }, [widgets, selectedWidgetId]);
+
   const updateActiveWidgets = useCallback((updater: (prev: Widget[]) => Widget[]) => {
     setTabs((prev) => prev.map((tab) => (tab.id === activeTabId ? { ...tab, widgets: updater(tab.widgets) } : tab)));
   }, [activeTabId]);
+
+  const buildSnapshot = useCallback((): DashboardSnapshot => ({
+    tabs,
+    activeTabId,
+    bgColor,
+    crossColor,
+    headerBgColor,
+    headerTextColor,
+    tabBgColor,
+    tabTextColor,
+  }), [tabs, activeTabId, bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor]);
+
+  const applySnapshot = useCallback((snapshot: DashboardSnapshot) => {
+    restoringRef.current = true;
+    setTabs(snapshot.tabs);
+    setActiveTabId(snapshot.activeTabId);
+    setBgColor(snapshot.bgColor);
+    setCrossColor(snapshot.crossColor);
+    setHeaderBgColor(snapshot.headerBgColor);
+    setHeaderTextColor(snapshot.headerTextColor);
+    setTabBgColor(snapshot.tabBgColor);
+    setTabTextColor(snapshot.tabTextColor);
+    lastSnapshotRef.current = snapshot;
+    setTimeout(() => { restoringRef.current = false; }, 0);
+  }, []);
 
   useEffect(() => {
     const onResize = () => setViewSize({ w: window.innerWidth, h: window.innerHeight });
@@ -400,7 +474,24 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => { saveViews(tabs, activeTabId); }, [tabs, activeTabId]);
-  useEffect(() => { saveSettings({ bgColor, crossColor }); }, [bgColor, crossColor]);
+  useEffect(() => { saveSettings({ bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor }); }, [bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor]);
+  useEffect(() => {
+    const snapshot = buildSnapshot();
+    if (restoringRef.current) {
+      lastSnapshotRef.current = snapshot;
+      return;
+    }
+    const last = lastSnapshotRef.current;
+    if (!last) {
+      lastSnapshotRef.current = snapshot;
+      return;
+    }
+    if (JSON.stringify(last) === JSON.stringify(snapshot)) return;
+    undoStackRef.current.push(last);
+    if (undoStackRef.current.length > 120) undoStackRef.current.shift();
+    redoStackRef.current = [];
+    lastSnapshotRef.current = snapshot;
+  }, [buildSnapshot]);
 
   const canvasH = viewSize.h - HEADER_H;
   const gridCols = Math.max(1, Math.round(viewSize.w / CELL_SIZE));
@@ -429,7 +520,60 @@ const App: React.FC = () => {
     });
   }, [gridCols, gridRows, updateActiveWidgets]);
 
-  const closeMenus = useCallback(() => { setWidgetMenu(null); setCanvasMenu(null); setTabMenu(null); }, []);
+  const closeMenus = useCallback(() => { setWidgetMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); }, []);
+
+  const deleteSelectedWidget = useCallback(() => {
+    if (!selectedWidgetId) return;
+    updateActiveWidgets((prev) => prev.filter((w) => w.id !== selectedWidgetId));
+    setSelectedWidgetId(null);
+  }, [selectedWidgetId, updateActiveWidgets]);
+
+  const copySelectedWidget = useCallback(() => {
+    if (!selectedWidgetId) return;
+    const target = widgets.find((w) => w.id === selectedWidgetId);
+    if (!target) return;
+    copiedWidgetRef.current = { ...target };
+  }, [selectedWidgetId, widgets]);
+
+  const pasteWidget = useCallback(() => {
+    const copied = copiedWidgetRef.current;
+    if (!copied) return;
+    const id = createWidgetId();
+    const pasted: Widget = {
+      ...copied,
+      id,
+      x: clamp(copied.x + 2, 0, gridCols - copied.w),
+      y: clamp(copied.y + 2, 0, gridRows - copied.h),
+    };
+    updateActiveWidgets((prev) => [...prev, pasted]);
+    setSelectedWidgetId(id);
+  }, [gridCols, gridRows, updateActiveWidgets]);
+
+  const undo = useCallback(() => {
+    if (undoStackRef.current.length === 0) return;
+    const current = buildSnapshot();
+    const previous = undoStackRef.current.pop();
+    if (!previous) return;
+    redoStackRef.current.push(current);
+    applySnapshot(previous);
+  }, [applySnapshot, buildSnapshot]);
+
+  const redo = useCallback(() => {
+    if (redoStackRef.current.length === 0) return;
+    const current = buildSnapshot();
+    const next = redoStackRef.current.pop();
+    if (!next) return;
+    undoStackRef.current.push(current);
+    applySnapshot(next);
+  }, [applySnapshot, buildSnapshot]);
+
+  useKeyboardShortcuts({
+    deleteSelection: deleteSelectedWidget,
+    copySelection: copySelectedWidget,
+    pasteSelection: pasteWidget,
+    undo,
+    redo,
+  });
 
   const addTab = useCallback(() => {
     const id = createTabId();
@@ -543,9 +687,12 @@ const App: React.FC = () => {
 
   return (
     <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: bgColor || UI_THEME.surface }}>
-      <header style={{ height: HEADER_H, padding: "0 20px", display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", background: UI_THEME.panel, borderBottom: `1px solid ${UI_THEME.line}` }}>
+      <header
+        style={{ height: HEADER_H, padding: "0 20px", display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", background: headerBgColor, borderBottom: `1px solid ${UI_THEME.line}` }}
+        onContextMenu={(e) => { e.preventDefault(); setHeaderMenu({ x: e.clientX, y: e.clientY }); setCanvasMenu(null); setWidgetMenu(null); setModuleTypeMenu(null); }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <h1 style={{ fontWeight: 800, color: UI_THEME.text, letterSpacing: "0.04em", textTransform: "uppercase", margin: 0, lineHeight: 1 }}><span style={{ fontSize: 18 }}>Mango</span><span style={{ fontSize: 23, marginLeft: 2 }}>OS</span></h1>
+          <h1 style={{ fontWeight: 800, color: headerTextColor, letterSpacing: "0.04em", textTransform: "uppercase", margin: 0, lineHeight: 1 }}><span style={{ fontSize: 18 }}>Mango</span><span style={{ fontSize: 23, marginLeft: 2 }}>OS</span></h1>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 6, justifySelf: "center", maxWidth: "55vw", overflowX: "auto", padding: "2px 4px" }}>
@@ -571,10 +718,10 @@ const App: React.FC = () => {
                   return list;
                 });
               }}
-              onContextMenu={(e) => { e.preventDefault(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
+              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
               onDoubleClick={() => startRenamingTab(tab.id)}
               onClick={() => { if (isDraggingTab) return; setActiveTabId(tab.id); setEditMode(false); }}
-              style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? "1px solid #08343a" : "1px solid rgba(8,52,58,0.35)", background: activeTabId === tab.id ? "#ffffff" : "rgba(255,255,255,0.65)", borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
+              style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? `1px solid ${tabTextColor}` : "1px solid rgba(8,52,58,0.35)", background: activeTabId === tab.id ? tabBgColor : `${tabBgColor}B3`, color: tabTextColor, borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
             >
               {renamingTabId === tab.id ? (
                 <input
@@ -592,18 +739,18 @@ const App: React.FC = () => {
               ) : tab.name}
             </button>
           ))}
-          <button onClick={addTab} title="New view tab" style={{ width: 30, height: 30, border: "1px solid rgba(8,52,58,0.35)", borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: 20, lineHeight: 1 }}>+</button>
+          <button onClick={addTab} title="New view tab" style={{ width: 30, height: 30, border: "1px solid rgba(8,52,58,0.35)", borderRadius: 8, background: tabBgColor, color: tabTextColor, cursor: "pointer", fontSize: 20, lineHeight: 1 }}>+</button>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end" }}>
-          <button onClick={() => setEditMode((v) => !v)} style={{ height: 32, padding: "0 10px", background: editMode ? "#9df8ff" : "#fff", border: `1px solid ${editMode ? "#0f7f8b" : UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+          <button onClick={() => setEditMode((v) => !v)} style={{ height: 32, padding: "0 10px", background: editMode ? "#9df8ff" : tabBgColor, color: tabTextColor, border: `1px solid ${editMode ? "#0f7f8b" : UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
             {editMode ? "EDIT: ON" : "EDIT: OFF"}
           </button>
-          <button onClick={() => { addWidget(); setEditMode(true); }} style={{ width: 32, height: 32, background: "#fff", border: `1px solid ${UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 20 }}>+</button>
+          <button onClick={() => { addWidget(); setEditMode(true); }} style={{ width: 32, height: 32, background: tabBgColor, color: tabTextColor, border: `1px solid ${UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 20 }}>+</button>
         </div>
       </header>
 
-      <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setWidgetMenu(null); }}>
+      <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onClick={() => setSelectedWidgetId(null)} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setHeaderMenu(null); setWidgetMenu(null); setModuleTypeMenu(null); }}>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
         {editMode && draggingId && (() => {
           const activeWidget = widgets.find((w) => w.id === draggingId);
@@ -617,6 +764,7 @@ const App: React.FC = () => {
             stepX={stepX}
             stepY={stepY}
             isDragging={draggingId === w.id}
+            isSelected={selectedWidgetId === w.id}
             editMode={editMode}
             onDragStart={(e, id) => {
               if (!editMode) return;
@@ -636,9 +784,15 @@ const App: React.FC = () => {
               dragRef.current = { id, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
               setDraggingId(id);
             }}
-            onContextMenu={(e, id) => { e.preventDefault(); setWidgetMenu({ x: e.clientX, y: e.clientY, id }); setCanvasMenu(null); }}
-            onHeaderClick={() => {}}
-            onOpenDetail={() => {}}
+            onContextMenu={(e, id) => { e.preventDefault(); setWidgetMenu({ x: e.clientX, y: e.clientY, id }); setModuleTypeMenu(null); setCanvasMenu(null); }}
+            onModuleNameClick={(e, id) => {
+              setWidgetMenu(null);
+              setHeaderMenu(null);
+              setCanvasMenu(null);
+              setSelectedWidgetId(id);
+              setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
+            }}
+            onSelect={setSelectedWidgetId}
           />
         ))}
       </div>
@@ -665,9 +819,58 @@ const App: React.FC = () => {
         </FloatingMenu>
       )}
 
+      {moduleTypeMenu && (
+        <FloatingMenu x={moduleTypeMenu.x} y={moduleTypeMenu.y} onClose={closeMenus}>
+          {WIDGET_LIBRARY.map((item) => (
+            <button
+              key={item.kind}
+              style={menuBtnBase}
+              onClick={() => {
+                updateActiveWidgets((prev) => prev.map((w) => (w.id === moduleTypeMenu.id ? { ...w, kind: item.kind, title: item.label } : w)));
+                closeMenus();
+              }}
+              {...hoverHandlers}
+            >
+              {item.label}
+            </button>
+          ))}
+        </FloatingMenu>
+      )}
+
       {canvasMenu && (
         <FloatingMenu x={canvasMenu.x} y={canvasMenu.y} onClose={closeMenus}>
-          <button style={menuBtnBase} onClick={() => { setEditMode((v) => !v); closeMenus(); }} {...hoverHandlers}>Toggle Edit Mode</button>
+          <button style={menuBtnBase} onClick={() => { setEditMode((v) => !v); closeMenus(); }} {...hoverHandlers}>
+            Toggle Edit Mode (Now: {editMode ? "ON" : "OFF"})
+          </button>
+          <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>
+            Canvas Color
+            <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} />
+          </label>
+          <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>
+            Plus Color
+            <input type="color" value={crossColor} onChange={(e) => setCrossColor(e.target.value)} />
+          </label>
+        </FloatingMenu>
+      )}
+
+      {headerMenu && (
+        <FloatingMenu x={headerMenu.x} y={headerMenu.y} onClose={closeMenus}>
+          <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>
+            Header Bar
+            <input type="color" value={headerBgColor} onChange={(e) => setHeaderBgColor(e.target.value)} />
+          </label>
+          <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>
+            Header Text
+            <input type="color" value={headerTextColor} onChange={(e) => setHeaderTextColor(e.target.value)} />
+          </label>
+          <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>
+            Tab Box
+            <input type="color" value={tabBgColor} onChange={(e) => setTabBgColor(e.target.value)} />
+          </label>
+          <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>
+            Tab Text
+            <input type="color" value={tabTextColor} onChange={(e) => setTabTextColor(e.target.value)} />
+          </label>
         </FloatingMenu>
       )}
     </div>
