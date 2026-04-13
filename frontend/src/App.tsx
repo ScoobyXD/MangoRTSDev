@@ -51,6 +51,10 @@ function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+function widgetsOverlap(a: Widget, b: Widget) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -175,6 +179,119 @@ const GridCrosses: React.FC<{ cols: number; rows: number; stepX: number; stepY: 
     return <svg style={{ position: "absolute", top: 0, left: 0, overflow: "visible", pointerEvents: "none" }} width={width} height={height}><path d={path} stroke={color} strokeWidth="0.55" fill="none" opacity="0.28" /></svg>;
   }
 );
+
+const PlacementSplash: React.FC<{
+  widget: Widget;
+  widgets: Widget[];
+  cols: number;
+  rows: number;
+  stepX: number;
+  stepY: number;
+}> = React.memo(({ widget, widgets, cols, rows, stepX, stepY }) => {
+  const cells = useMemo(() => {
+    let seed = widget.x * 73856093 + widget.y * 19349663;
+    for (let i = 0; i < widget.id.length; i++) seed = (seed * 33 + widget.id.charCodeAt(i)) >>> 0;
+    const rand = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+
+    const occupied = new Set<string>();
+    for (const other of widgets) {
+      if (other.id === widget.id) continue;
+      for (let y = other.y; y < other.y + other.h; y++) {
+        for (let x = other.x; x < other.x + other.w; x++) {
+          occupied.add(`${x},${y}`);
+        }
+      }
+    }
+
+    const radii = {
+      left: 2 + Math.floor(rand() * 3),
+      right: 2 + Math.floor(rand() * 3),
+      top: 2 + Math.floor(rand() * 3),
+      bottom: 2 + Math.floor(rand() * 3),
+    };
+    const left = clamp(widget.x - radii.left, 0, Math.max(0, cols - 1));
+    const right = clamp(widget.x + widget.w - 1 + radii.right, 0, Math.max(0, cols - 1));
+    const top = clamp(widget.y - radii.top, 0, Math.max(0, rows - 1));
+    const bottom = clamp(widget.y + widget.h - 1 + radii.bottom, 0, Math.max(0, rows - 1));
+
+    const result: { x: number; y: number; distance: number }[] = [];
+    const seen = new Set<string>();
+    const centerX = widget.x + widget.w / 2;
+    const centerY = widget.y + widget.h / 2;
+    const extraCells = new Set<string>();
+    const addArm = (startX: number, startY: number, dx: number, dy: number, len: number) => {
+      for (let i = 1; i <= len; i++) {
+        const x = startX + dx * i;
+        const y = startY + dy * i;
+        if (x < 0 || y < 0 || x >= cols || y >= rows) break;
+        extraCells.add(`${x},${y}`);
+      }
+    };
+
+    addArm(widget.x + Math.floor(rand() * widget.w), top, 0, -1, 1 + Math.floor(rand() * 4));
+    addArm(widget.x + Math.floor(rand() * widget.w), bottom, 0, 1, 1 + Math.floor(rand() * 4));
+    addArm(left, widget.y + Math.floor(rand() * widget.h), -1, 0, 1 + Math.floor(rand() * 4));
+    addArm(right, widget.y + Math.floor(rand() * widget.h), 1, 0, 1 + Math.floor(rand() * 4));
+
+    for (let y = top; y <= bottom; y++) {
+      for (let x = left; x <= right; x++) {
+        const insideWidget = x >= widget.x && x < widget.x + widget.w && y >= widget.y && y < widget.y + widget.h;
+        const distance = Math.hypot(x + 0.5 - centerX, y + 0.5 - centerY);
+        const withinCore = distance <= 3.8 + rand() * 1.8;
+        const splashNoise = rand() > 0.14;
+        const inShape = withinCore && splashNoise;
+        const isArm = extraCells.has(`${x},${y}`);
+        if (insideWidget || occupied.has(`${x},${y}`) || (!inShape && !isArm)) continue;
+        const dist = Math.hypot(x + 0.5 - centerX, y + 0.5 - centerY);
+        const key = `${x},${y}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push({ x, y, distance: dist });
+      }
+    }
+
+    for (const cell of extraCells) {
+      const [xRaw, yRaw] = cell.split(",");
+      const x = Number(xRaw);
+      const y = Number(yRaw);
+      if (occupied.has(cell)) continue;
+      const insideWidget = x >= widget.x && x < widget.x + widget.w && y >= widget.y && y < widget.y + widget.h;
+      if (insideWidget) continue;
+      const dist = Math.hypot(x + 0.5 - centerX, y + 0.5 - centerY);
+      if (seen.has(cell)) continue;
+      seen.add(cell);
+      result.push({ x, y, distance: dist });
+    }
+
+    return result;
+  }, [widget, widgets, cols, rows]);
+
+  return (
+    <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 50 }}>
+      {cells.map((cell) => {
+        const opacity = clamp(0.34 - cell.distance * 0.03, 0.08, 0.34);
+        return (
+          <div
+            key={`${cell.x}-${cell.y}`}
+            style={{
+              position: "absolute",
+              left: cell.x * stepX + 1.5,
+              top: cell.y * stepY + 1.5,
+              width: Math.max(2, stepX - 3),
+              height: Math.max(2, stepY - 3),
+              border: "1px solid rgba(7, 86, 94, 0.55)",
+              background: `rgba(111, 231, 238, ${opacity})`,
+              boxShadow: "0 0 0 1px rgba(255,255,255,0.18) inset",
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+});
 
 type HandleDef = { edges: ResizeEdges; cursor: string; style: React.CSSProperties };
 const HANDLES: HandleDef[] = [
@@ -397,7 +514,21 @@ const App: React.FC = () => {
         return { ...w, x, y, w: nw, h: nh };
       }));
     };
-    const onEnd = () => { dragRef.current = null; setDraggingId(null); };
+    const onEnd = () => {
+      const d = dragRef.current;
+      if (d) {
+        updateActiveWidgets((prev) => prev.map((w) => {
+          if (w.id !== d.id) return w;
+          const overlaps = prev.some((candidate) => candidate.id !== w.id && widgetsOverlap(w, candidate));
+          if (!overlaps) return w;
+          return d.mode === "drag"
+            ? { ...w, x: d.origX, y: d.origY }
+            : { ...w, x: d.origX, y: d.origY, w: d.origW, h: d.origH };
+        }));
+      }
+      dragRef.current = null;
+      setDraggingId(null);
+    };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onEnd);
     window.addEventListener("touchmove", onMove, { passive: false });
@@ -474,6 +605,11 @@ const App: React.FC = () => {
 
       <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setWidgetMenu(null); }}>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
+        {editMode && draggingId && (() => {
+          const activeWidget = widgets.find((w) => w.id === draggingId);
+          if (!activeWidget) return null;
+          return <PlacementSplash widget={activeWidget} widgets={widgets} cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} />;
+        })()}
         {widgets.map((w) => (
           <WidgetCard
             key={w.id}
