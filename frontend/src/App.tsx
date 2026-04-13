@@ -391,7 +391,7 @@ const App: React.FC = () => {
     <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: bgColor || UI_THEME.surface }}>
       <header style={{ height: HEADER_H, padding: "0 20px", display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", background: UI_THEME.panel, borderBottom: `1px solid ${UI_THEME.line}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 800, color: UI_THEME.text, letterSpacing: "0.04em", textTransform: "uppercase", margin: 0 }}>MangoOS</h1>
+          <h1 style={{ fontWeight: 800, color: UI_THEME.text, letterSpacing: "0.04em", textTransform: "uppercase", margin: 0, lineHeight: 1 }}><span style={{ fontSize: 18 }}>Mango</span><span style={{ fontSize: 23, marginLeft: 2 }}>OS</span></h1>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 6, justifySelf: "center", maxWidth: "55vw", overflowX: "auto", padding: "2px 4px" }}>
@@ -400,8 +400,10 @@ const App: React.FC = () => {
               key={tab.id}
               draggable
               onDragStart={() => setDraggingTabId(tab.id)}
+              onDragEnd={() => setDraggingTabId(null)}
               onDragOver={(e) => e.preventDefault()}
-              onDrop={() => {
+              onDragEnter={(e) => {
+                e.preventDefault();
                 if (!draggingTabId || draggingTabId === tab.id) return;
                 setTabs((prev) => {
                   const list = [...prev];
@@ -412,12 +414,12 @@ const App: React.FC = () => {
                   list.splice(to, 0, item);
                   return list;
                 });
-                setDraggingTabId(null);
               }}
+              onDrop={() => setDraggingTabId(null)}
               onContextMenu={(e) => { e.preventDefault(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
               onDoubleClick={() => startRenamingTab(tab.id)}
               onClick={() => { setActiveTabId(tab.id); setEditMode(false); }}
-              style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? "1px solid #08343a" : "1px solid rgba(8,52,58,0.35)", background: activeTabId === tab.id ? "#ffffff" : "rgba(255,255,255,0.65)", borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", cursor: "pointer", whiteSpace: "nowrap" }}
+              style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? "1px solid #08343a" : "1px solid rgba(8,52,58,0.35)", background: activeTabId === tab.id ? "#ffffff" : "rgba(255,255,255,0.65)", borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease", opacity: draggingTabId === tab.id ? 0.55 : 1 }}
             >
               {renamingTabId === tab.id ? (
                 <input
