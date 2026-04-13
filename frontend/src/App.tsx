@@ -320,13 +320,30 @@ const App: React.FC = () => {
     setEditMode(true);
   }, [tabs.length]);
 
-  const renameTab = useCallback((id: string) => {
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+  const [renamingValue, setRenamingValue] = useState("");
+
+  const startRenamingTab = useCallback((id: string) => {
     const tab = tabs.find((t) => t.id === id);
     if (!tab) return;
-    const next = window.prompt("Rename view", tab.name)?.trim();
-    if (!next) return;
-    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, name: next } : t)));
+    setRenamingTabId(id);
+    setRenamingValue(tab.name);
   }, [tabs]);
+
+  const commitRenameTab = useCallback(() => {
+    if (!renamingTabId) return;
+    const next = renamingValue.trim();
+    if (next) {
+      setTabs((prev) => prev.map((t) => (t.id === renamingTabId ? { ...t, name: next } : t)));
+    }
+    setRenamingTabId(null);
+    setRenamingValue("");
+  }, [renamingTabId, renamingValue]);
+
+  const cancelRenameTab = useCallback(() => {
+    setRenamingTabId(null);
+    setRenamingValue("");
+  }, []);
 
   const deleteTab = useCallback((id: string) => {
     if (tabs.length === 1) return;
@@ -374,7 +391,7 @@ const App: React.FC = () => {
     <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: bgColor || UI_THEME.surface }}>
       <header style={{ height: HEADER_H, padding: "0 20px", display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", background: UI_THEME.panel, borderBottom: `1px solid ${UI_THEME.line}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 800, color: UI_THEME.text, letterSpacing: "0.04em", textTransform: "uppercase", margin: 0 }}>Dashboard</h1>
+          <h1 style={{ fontSize: 18, fontWeight: 800, color: UI_THEME.text, letterSpacing: "0.04em", textTransform: "uppercase", margin: 0 }}>MangoOS</h1>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 6, justifySelf: "center", maxWidth: "55vw", overflowX: "auto", padding: "2px 4px" }}>
@@ -398,11 +415,24 @@ const App: React.FC = () => {
                 setDraggingTabId(null);
               }}
               onContextMenu={(e) => { e.preventDefault(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
-              onDoubleClick={() => renameTab(tab.id)}
+              onDoubleClick={() => startRenamingTab(tab.id)}
               onClick={() => { setActiveTabId(tab.id); setEditMode(false); }}
               style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? "1px solid #08343a" : "1px solid rgba(8,52,58,0.35)", background: activeTabId === tab.id ? "#ffffff" : "rgba(255,255,255,0.65)", borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", cursor: "pointer", whiteSpace: "nowrap" }}
             >
-              {tab.name}
+              {renamingTabId === tab.id ? (
+                <input
+                  autoFocus
+                  value={renamingValue}
+                  onChange={(e) => setRenamingValue(e.target.value)}
+                  onBlur={commitRenameTab}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitRenameTab();
+                    if (e.key === "Escape") cancelRenameTab();
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ width: 92, border: "1px solid #0a6c78", background: "#fff", borderRadius: 4, padding: "2px 5px", fontSize: 11, fontWeight: 700 }}
+                />
+              ) : tab.name}
             </button>
           ))}
           <button onClick={addTab} title="New view tab" style={{ width: 30, height: 30, border: "1px solid rgba(8,52,58,0.35)", borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: 20, lineHeight: 1 }}>+</button>
@@ -453,7 +483,7 @@ const App: React.FC = () => {
 
       {tabMenu && (
         <FloatingMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
-          <button style={menuBtnBase} onClick={() => { renameTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
+          <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
         </FloatingMenu>
       )}
@@ -476,7 +506,6 @@ const App: React.FC = () => {
       {canvasMenu && (
         <FloatingMenu x={canvasMenu.x} y={canvasMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { setEditMode((v) => !v); closeMenus(); }} {...hoverHandlers}>Toggle Edit Mode</button>
-          <button style={menuBtnBase} onClick={() => { setBgColor("#f7fffe"); setCrossColor("#00a8b8"); closeMenus(); }} {...hoverHandlers}>Reset Colors</button>
         </FloatingMenu>
       )}
     </div>
