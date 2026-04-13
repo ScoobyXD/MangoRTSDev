@@ -207,8 +207,8 @@ const PlacementSplash: React.FC<{
     }
 
     const sizeFactor = Math.min(1.5, Math.log2(Math.max(widget.w, widget.h) + 1) / 4);
-    const edgeSpan = () => 2 + Math.floor(rand() * 2) + (rand() < 0.25 + sizeFactor * 0.12 ? 1 : 0);
-    const armSpan = () => 1 + Math.floor(rand() * 3) + (rand() < 0.22 + sizeFactor * 0.08 ? 1 : 0);
+    const edgeSpan = () => (rand() < 0.72 - sizeFactor * 0.08 ? 2 : 3);
+    const armSpan = () => 1 + Math.floor(rand() * 3) + (rand() < 0.18 + sizeFactor * 0.08 ? 2 : 0);
     const radii = {
       left: edgeSpan(),
       right: edgeSpan(),
@@ -247,7 +247,8 @@ const PlacementSplash: React.FC<{
         const gapTop = widget.y - (y + 1);
         const gapBottom = y - (widget.y + widget.h) + 1;
         const edgeDistance = Math.max(0, gapLeft, gapRight, gapTop, gapBottom);
-        const withinCore = edgeDistance <= 2 + rand() * 1.1 + sizeFactor * 0.5;
+        const coreThickness = Math.min(2.9, 1.75 + rand() * 0.7 + sizeFactor * 0.15);
+        const withinCore = edgeDistance <= coreThickness;
         const splashNoise = rand() > 0.14;
         const inShape = withinCore && splashNoise;
         const isArm = extraCells.has(`${x},${y}`);
