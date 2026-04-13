@@ -139,7 +139,7 @@ function saveViews(tabs: ViewTab[], activeId: string) {
   try { localStorage.setItem(VIEWS_KEY, JSON.stringify({ tabs, activeId })); } catch {}
 }
 
-function loadSettings(): { bgColor?: string; crossColor?: string } {
+function loadSettings(): { bgColor?: string; crossColor?: string; headerBgColor?: string; headerTextColor?: string; tabBgColor?: string; tabTextColor?: string } {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return {};
@@ -148,13 +148,17 @@ function loadSettings(): { bgColor?: string; crossColor?: string } {
     return {
       bgColor: isHexColor(parsed.bgColor) ? parsed.bgColor : undefined,
       crossColor: isHexColor(parsed.crossColor) ? parsed.crossColor : undefined,
+      headerBgColor: isHexColor(parsed.headerBgColor) ? parsed.headerBgColor : undefined,
+      headerTextColor: isHexColor(parsed.headerTextColor) ? parsed.headerTextColor : undefined,
+      tabBgColor: isHexColor(parsed.tabBgColor) ? parsed.tabBgColor : undefined,
+      tabTextColor: isHexColor(parsed.tabTextColor) ? parsed.tabTextColor : undefined,
     };
   } catch {
     return {};
   }
 }
 
-function saveSettings(s: { bgColor: string; crossColor: string }) {
+function saveSettings(s: { bgColor: string; crossColor: string; headerBgColor: string; headerTextColor: string; tabBgColor: string; tabTextColor: string }) {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
 }
 
@@ -322,11 +326,10 @@ interface WidgetCardProps {
   onDragStart: (e: React.MouseEvent | React.TouchEvent, id: string) => void;
   onResizeStart: (e: React.MouseEvent | React.TouchEvent, id: string, edges: ResizeEdges) => void;
   onContextMenu: (e: React.MouseEvent, id: string) => void;
-  onHeaderClick: (e: React.MouseEvent, id: string) => void;
-  onHeaderDoubleClick: (e: React.MouseEvent, id: string) => void;
+  onModuleNameClick: (e: React.MouseEvent, id: string) => void;
 }
 
-const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, editMode, onDragStart, onResizeStart, onContextMenu, onHeaderClick, onHeaderDoubleClick }) => {
+const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick }) => {
   const Content = CONTENT_MAP[widget.kind];
   const theme = COLORWAYS[widget.theme ?? "teal"];
   return (
@@ -338,15 +341,13 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
     >
       <div
         style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${widget.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}
-        onClick={(e) => !editMode && onHeaderClick(e, widget.id)}
-        onDoubleClick={(e) => {
-          if (editMode) return;
-          e.preventDefault();
-          e.stopPropagation();
-          onHeaderDoubleClick(e, widget.id);
-        }}
       >
-        <span style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px" }}>{widget.title}</span>
+        <span
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onModuleNameClick(e, widget.id); }}
+          style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px", cursor: "pointer" }}
+        >
+          {widget.title}
+        </span>
       </div>
       <div style={{ flex: 1, padding: "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
         {Content ? <Content accent={widget.accent} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: widget.accent }}>{widget.title}</span></div>}
@@ -393,11 +394,16 @@ const App: React.FC = () => {
   const initialSettingsRef = useRef(loadSettings());
   const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || "#f7fffe");
   const [crossColor, setCrossColor] = useState(() => initialSettingsRef.current.crossColor || "#00a8b8");
+  const [headerBgColor, setHeaderBgColor] = useState(() => initialSettingsRef.current.headerBgColor || UI_THEME.panel);
+  const [headerTextColor, setHeaderTextColor] = useState(() => initialSettingsRef.current.headerTextColor || UI_THEME.text);
+  const [tabBgColor, setTabBgColor] = useState(() => initialSettingsRef.current.tabBgColor || "#ffffff");
+  const [tabTextColor, setTabTextColor] = useState(() => initialSettingsRef.current.tabTextColor || "#08343a");
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [widgetMenu, setWidgetMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [moduleTypeMenu, setModuleTypeMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number } | null>(null);
+  const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number } | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
 
   const dragRef = useRef<DragState | null>(null);
@@ -417,7 +423,7 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => { saveViews(tabs, activeTabId); }, [tabs, activeTabId]);
-  useEffect(() => { saveSettings({ bgColor, crossColor }); }, [bgColor, crossColor]);
+  useEffect(() => { saveSettings({ bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor }); }, [bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor]);
 
   const canvasH = viewSize.h - HEADER_H;
   const gridCols = Math.max(1, Math.round(viewSize.w / CELL_SIZE));
@@ -446,7 +452,7 @@ const App: React.FC = () => {
     });
   }, [gridCols, gridRows, updateActiveWidgets]);
 
-  const closeMenus = useCallback(() => { setWidgetMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setTabMenu(null); }, []);
+  const closeMenus = useCallback(() => { setWidgetMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); }, []);
 
   const addTab = useCallback(() => {
     const id = createTabId();
@@ -560,9 +566,12 @@ const App: React.FC = () => {
 
   return (
     <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: bgColor || UI_THEME.surface }}>
-      <header style={{ height: HEADER_H, padding: "0 20px", display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", background: UI_THEME.panel, borderBottom: `1px solid ${UI_THEME.line}` }}>
+      <header
+        style={{ height: HEADER_H, padding: "0 20px", display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", background: headerBgColor, borderBottom: `1px solid ${UI_THEME.line}` }}
+        onContextMenu={(e) => { e.preventDefault(); setHeaderMenu({ x: e.clientX, y: e.clientY }); setCanvasMenu(null); setWidgetMenu(null); setModuleTypeMenu(null); }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <h1 style={{ fontWeight: 800, color: UI_THEME.text, letterSpacing: "0.04em", textTransform: "uppercase", margin: 0, lineHeight: 1 }}><span style={{ fontSize: 18 }}>Mango</span><span style={{ fontSize: 23, marginLeft: 2 }}>OS</span></h1>
+          <h1 style={{ fontWeight: 800, color: headerTextColor, letterSpacing: "0.04em", textTransform: "uppercase", margin: 0, lineHeight: 1 }}><span style={{ fontSize: 18 }}>Mango</span><span style={{ fontSize: 23, marginLeft: 2 }}>OS</span></h1>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 6, justifySelf: "center", maxWidth: "55vw", overflowX: "auto", padding: "2px 4px" }}>
@@ -591,7 +600,7 @@ const App: React.FC = () => {
               onContextMenu={(e) => { e.preventDefault(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
               onDoubleClick={() => startRenamingTab(tab.id)}
               onClick={() => { if (isDraggingTab) return; setActiveTabId(tab.id); setEditMode(false); }}
-              style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? "1px solid #08343a" : "1px solid rgba(8,52,58,0.35)", background: activeTabId === tab.id ? "#ffffff" : "rgba(255,255,255,0.65)", borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
+              style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? `1px solid ${tabTextColor}` : "1px solid rgba(8,52,58,0.35)", background: activeTabId === tab.id ? tabBgColor : `${tabBgColor}B3`, color: tabTextColor, borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
             >
               {renamingTabId === tab.id ? (
                 <input
@@ -609,18 +618,18 @@ const App: React.FC = () => {
               ) : tab.name}
             </button>
           ))}
-          <button onClick={addTab} title="New view tab" style={{ width: 30, height: 30, border: "1px solid rgba(8,52,58,0.35)", borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: 20, lineHeight: 1 }}>+</button>
+          <button onClick={addTab} title="New view tab" style={{ width: 30, height: 30, border: "1px solid rgba(8,52,58,0.35)", borderRadius: 8, background: tabBgColor, color: tabTextColor, cursor: "pointer", fontSize: 20, lineHeight: 1 }}>+</button>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end" }}>
-          <button onClick={() => setEditMode((v) => !v)} style={{ height: 32, padding: "0 10px", background: editMode ? "#9df8ff" : "#fff", border: `1px solid ${editMode ? "#0f7f8b" : UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+          <button onClick={() => setEditMode((v) => !v)} style={{ height: 32, padding: "0 10px", background: editMode ? "#9df8ff" : tabBgColor, color: tabTextColor, border: `1px solid ${editMode ? "#0f7f8b" : UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
             {editMode ? "EDIT: ON" : "EDIT: OFF"}
           </button>
-          <button onClick={() => { addWidget(); setEditMode(true); }} style={{ width: 32, height: 32, background: "#fff", border: `1px solid ${UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 20 }}>+</button>
+          <button onClick={() => { addWidget(); setEditMode(true); }} style={{ width: 32, height: 32, background: tabBgColor, color: tabTextColor, border: `1px solid ${UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 20 }}>+</button>
         </div>
       </header>
 
-      <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setWidgetMenu(null); }}>
+      <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setHeaderMenu(null); setWidgetMenu(null); setModuleTypeMenu(null); }}>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
         {editMode && draggingId && (() => {
           const activeWidget = widgets.find((w) => w.id === draggingId);
@@ -654,9 +663,9 @@ const App: React.FC = () => {
               setDraggingId(id);
             }}
             onContextMenu={(e, id) => { e.preventDefault(); setWidgetMenu({ x: e.clientX, y: e.clientY, id }); setModuleTypeMenu(null); setCanvasMenu(null); }}
-            onHeaderClick={() => {}}
-            onHeaderDoubleClick={(e, id) => {
+            onModuleNameClick={(e, id) => {
               setWidgetMenu(null);
+              setHeaderMenu(null);
               setCanvasMenu(null);
               setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
             }}
@@ -706,7 +715,38 @@ const App: React.FC = () => {
 
       {canvasMenu && (
         <FloatingMenu x={canvasMenu.x} y={canvasMenu.y} onClose={closeMenus}>
-          <button style={menuBtnBase} onClick={() => { setEditMode((v) => !v); closeMenus(); }} {...hoverHandlers}>Toggle Edit Mode</button>
+          <button style={menuBtnBase} onClick={() => { setEditMode((v) => !v); closeMenus(); }} {...hoverHandlers}>
+            Toggle Edit Mode (Now: {editMode ? "ON" : "OFF"})
+          </button>
+          <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>
+            Canvas Color
+            <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} />
+          </label>
+          <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>
+            Plus Color
+            <input type="color" value={crossColor} onChange={(e) => setCrossColor(e.target.value)} />
+          </label>
+        </FloatingMenu>
+      )}
+
+      {headerMenu && (
+        <FloatingMenu x={headerMenu.x} y={headerMenu.y} onClose={closeMenus}>
+          <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>
+            Header Bar
+            <input type="color" value={headerBgColor} onChange={(e) => setHeaderBgColor(e.target.value)} />
+          </label>
+          <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>
+            Header Text
+            <input type="color" value={headerTextColor} onChange={(e) => setHeaderTextColor(e.target.value)} />
+          </label>
+          <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>
+            Tab Box
+            <input type="color" value={tabBgColor} onChange={(e) => setTabBgColor(e.target.value)} />
+          </label>
+          <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>
+            Tab Text
+            <input type="color" value={tabTextColor} onChange={(e) => setTabTextColor(e.target.value)} />
+          </label>
         </FloatingMenu>
       )}
     </div>

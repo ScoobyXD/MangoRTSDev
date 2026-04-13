@@ -12,7 +12,7 @@ Drag-and-drop grid dashboard. React + TypeScript + Vite. Zero external libraries
 - **8-directional resize** — all 4 edges + all 4 corners. Left/top edges move origin inversely. Min 3×3. Edit mode only.
 - **Edit mode via canvas right-click** — right-click blank canvas → "Edit Mode: On/Off" toggle. No edit button in header. Edit mode shows blue badge in header + color pickers.
 - **Widget right-click menu** — Duplicate / Delete. Works in any mode (edit or not).
-- **Header double-click module switcher** — double-click a module header to open a module-type picker menu and swap the module kind/title in place.
+- **Module-name click switcher** — single-click the module name tag (not the full header row) to open a module-type picker and swap kind/title in place. Works in edit and non-edit mode.
 - **Add widget (+)** — always-visible button in header. Works in any mode.
 - **Nothing auto-moves, instant snapping, no transitions**
 
@@ -26,10 +26,11 @@ newSize = origSize - shift
 
 ## Context Menus
 
-Two separate menus, both use `FloatingMenu` component with outside-click and Escape handling:
+Menus use `FloatingMenu` with outside-click handling:
 1. **Widget menu** (right-click widget): Duplicate, Delete — always available
-2. **Module type menu** (double-click module header): pick any module type from `WIDGET_LIBRARY`
-3. **Canvas menu** (right-click empty space): Edit Mode toggle, Reset Layout (edit mode only)
+2. **Module type menu** (single-click module name tag): pick any module type from `WIDGET_LIBRARY`
+3. **Canvas menu** (right-click empty space): Toggle Edit Mode (shows current ON/OFF state), Canvas Color, Plus Color
+4. **Header menu** (right-click top header bar): Header Bar color, Header Text color, Tab Box color, Tab Text color
 
 Widget `onContextMenu` calls `e.stopPropagation()` to prevent canvas menu from opening.
 
