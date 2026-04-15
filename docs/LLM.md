@@ -1,8 +1,10 @@
 # Grid Dashboard UI — Context for LLMs
 
 ## What This Project Is
+A new category of work software called an RTS, named after the video game genre. 
+It's a combination of communication, work objects, processes, and execution all in one.
+A half-decent analogy is an internal Bloombergy terminal on steroids with video game ui.
 
-Drag-and-drop grid dashboard. React + TypeScript + Vite. Zero external libraries. Fullscreen canvas, no scrolling.
 
 ## Key Behaviors
 
@@ -21,6 +23,7 @@ Drag-and-drop grid dashboard. React + TypeScript + Vite. Zero external libraries
 Use this checklist before editing features so existing behavior is not accidentally removed.
 
 ### 1) Layout, Grid, and Rendering
+- Drag-and-drop grid dashboard. React + TypeScript + Vite. Zero external libraries. Fullscreen canvas, no scrolling.
 - Fullscreen app layout (`100vw × 100vh`) with no page scroll.
 - Top header bar + canvas body area.
 - Canvas grid based on cell math (`CELL_SIZE = 28`), with `gridCols/gridRows` derived from viewport and header height.
