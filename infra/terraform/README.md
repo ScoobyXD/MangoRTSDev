@@ -84,7 +84,44 @@ docker push "$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/mangoos-staging-search-ap
 
 ---
 
-## 2) Configure Terraform variables
+## 2) Choose DB strategy first (important)
+
+Given your screenshot (Aurora already created in **Northern California / us-west-1**), do this:
+
+- **Recommended now:** keep your existing DB and wire infra to it.
+- **Do not delete it yet** unless you are certain the networking/parameter setup is wrong and recreation is faster.
+
+Use one of these modes:
+
+### Mode A — Reuse your existing Aurora (recommended for your current situation)
+
+Set:
+
+- `create_aurora = false`
+- `existing_db_host`
+- `existing_db_port`
+- `existing_db_name`
+- `existing_db_user`
+- `existing_db_password_secret_arn`
+- `existing_db_security_group_id`
+
+Terraform will:
+
+- skip creating a new Aurora cluster
+- still create ECS + networking + S3 + SQS
+- open security group ingress from ECS tasks to your existing DB SG on 5432.
+
+### Mode B — Create a brand new Aurora with Terraform
+
+Keep `create_aurora = true` and set:
+
+- `aurora_database_name`
+- `aurora_master_username`
+- `aurora_master_password`
+
+---
+
+## 3) Configure Terraform variables
 
 ```bash
 cd /workspace/MangoOSDev/infra/terraform
@@ -99,7 +136,7 @@ Update `terraform.tfvars`:
 
 ---
 
-## 3) Deploy infrastructure
+## 4) Deploy infrastructure
 
 ```bash
 terraform init
@@ -122,7 +159,7 @@ Save:
 
 ---
 
-## 4) Run database schema
+## 5) Run database schema
 
 Use your preferred migration strategy. Quick path with psql:
 
@@ -136,7 +173,7 @@ psql "host=<aurora_endpoint> port=5432 dbname=mangoos user=mango_admin sslmode=r
 
 ---
 
-## 5) Wire runtime environment (if not fully in task defs yet)
+## 6) Wire runtime environment (if not fully in task defs yet)
 
 Current task defs already pass baseline env vars. If app logic expands, add:
 
@@ -147,7 +184,7 @@ Current task defs already pass baseline env vars. If app logic expands, add:
 
 ---
 
-## 6) Smoke test
+## 7) Smoke test
 
 ```bash
 ALB_DNS=$(terraform output -raw alb_dns_name)
@@ -160,7 +197,24 @@ curl -i -X POST "http://$ALB_DNS/v1/cases" \
 
 ---
 
-## 7) What you still must do on your end (important)
+## 8) Custom DB configuration checklist (what you asked for)
+
+For custom Aurora tuning in your existing cluster, review/update:
+
+1. **Parameter group**:
+   - `rds.force_ssl=1`
+   - `log_min_duration_statement` (start with 200ms)
+   - `shared_preload_libraries` if needed later.
+2. **Backup retention window** and preferred maintenance window.
+3. **Performance Insights** enabled.
+4. **Serverless v2 min/max ACU** sized for your expected burst profile.
+5. **DB subnet group** includes at least two AZs for resilience.
+6. **Security groups** only allow app SG inbound on 5432.
+7. **Deletion protection** enabled for non-ephemeral envs.
+
+---
+
+## 9) What you still must do on your end (important)
 
 1. **Domain + TLS**: Add Route53 record + ACM certificate + HTTPS listener on ALB.
 2. **Auth**: Add Cognito or external IdP and enforce authN/authZ middleware in Go API.
@@ -182,7 +236,7 @@ curl -i -X POST "http://$ALB_DNS/v1/cases" \
 
 ---
 
-## 8) Suggested execution order for your next 48 hours
+## 10) Suggested execution order for your next 48 hours
 
 1. Deploy this Terraform stack in `staging`.
 2. Migrate DB + verify create/get case.
@@ -192,3 +246,20 @@ curl -i -X POST "http://$ALB_DNS/v1/cases" \
 6. Run load test and tune hot queries/indexes.
 
 This gets you from concept to a real cloud substrate rapidly, while leaving clear hardening steps before production.
+
+---
+
+## What to do now (your side)
+
+In `terraform.tfvars`, set `create_aurora = false` and fill:
+
+- `existing_db_host`
+- `existing_db_port`
+- `existing_db_name`
+- `existing_db_user`
+- `existing_db_password_secret_arn`
+- `existing_db_security_group_id`
+
+Keep your existing Aurora, custom-configure it, and run Terraform for the rest (ECS, VPC, ALB, S3, SQS, etc.).
+
+Apply your schema after connectivity is in place.

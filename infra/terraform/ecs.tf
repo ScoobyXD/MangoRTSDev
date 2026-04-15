@@ -179,14 +179,15 @@ resource "aws_ecs_task_definition" "case_api" {
       }]
       environment = [
         { name = "MIRAEOPUS_ADDR", value = ":${var.container_port}" },
-        { name = "DB_HOST", value = aws_rds_cluster.aurora.endpoint },
-        { name = "DB_NAME", value = var.aurora_database_name },
-        { name = "DB_USER", value = var.aurora_master_username },
+        { name = "DB_HOST", value = local.db_host },
+        { name = "DB_PORT", value = tostring(local.db_port) },
+        { name = "DB_NAME", value = local.db_name },
+        { name = "DB_USER", value = local.db_user },
         { name = "ARTIFACTS_BUCKET", value = aws_s3_bucket.artifacts.bucket },
         { name = "SEARCH_INDEX_QUEUE_URL", value = aws_sqs_queue.search_index_updates.id }
       ]
       secrets = [
-        { name = "DB_PASSWORD", valueFrom = aws_secretsmanager_secret_version.aurora_password.arn }
+        { name = "DB_PASSWORD", valueFrom = local.db_password_secret_arn }
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -220,13 +221,14 @@ resource "aws_ecs_task_definition" "search_api" {
       }]
       environment = [
         { name = "MIRAEOPUS_ADDR", value = ":${var.container_port}" },
-        { name = "DB_HOST", value = aws_rds_cluster.aurora.endpoint },
-        { name = "DB_NAME", value = var.aurora_database_name },
-        { name = "DB_USER", value = var.aurora_master_username },
+        { name = "DB_HOST", value = local.db_host },
+        { name = "DB_PORT", value = tostring(local.db_port) },
+        { name = "DB_NAME", value = local.db_name },
+        { name = "DB_USER", value = local.db_user },
         { name = "SEARCH_INDEX_QUEUE_URL", value = aws_sqs_queue.search_index_updates.id }
       ]
       secrets = [
-        { name = "DB_PASSWORD", valueFrom = aws_secretsmanager_secret_version.aurora_password.arn }
+        { name = "DB_PASSWORD", valueFrom = local.db_password_secret_arn }
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -285,10 +287,14 @@ resource "aws_ecs_service" "search_api" {
 }
 
 resource "aws_secretsmanager_secret" "aurora_password" {
+  count = var.create_aurora ? 1 : 0
+
   name = "${local.name_prefix}/aurora/master-password"
 }
 
 resource "aws_secretsmanager_secret_version" "aurora_password" {
-  secret_id     = aws_secretsmanager_secret.aurora_password.id
+  count = var.create_aurora ? 1 : 0
+
+  secret_id     = aws_secretsmanager_secret.aurora_password[0].id
   secret_string = var.aurora_master_password
 }

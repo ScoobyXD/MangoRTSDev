@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "AWS region for all infrastructure."
   type        = string
-  default     = "us-east-1"
+  default     = "us-west-1"
 }
 
 variable "project_name" {
@@ -80,6 +80,12 @@ variable "aurora_database_name" {
   default     = "mangoos"
 }
 
+variable "create_aurora" {
+  description = "Whether Terraform should create a new Aurora cluster. Set false to reuse an existing cluster."
+  type        = bool
+  default     = true
+}
+
 variable "aurora_master_username" {
   description = "Aurora cluster master username."
   type        = string
@@ -90,6 +96,7 @@ variable "aurora_master_password" {
   description = "Aurora cluster master password."
   type        = string
   sensitive   = true
+  default     = null
 }
 
 variable "aurora_instance_class" {
@@ -100,6 +107,42 @@ variable "aurora_instance_class" {
 variable "aurora_instances" {
   type    = number
   default = 2
+}
+
+variable "existing_db_host" {
+  description = "Existing Aurora writer endpoint when create_aurora=false."
+  type        = string
+  default     = null
+}
+
+variable "existing_db_port" {
+  description = "Existing Aurora port when create_aurora=false."
+  type        = number
+  default     = 5432
+}
+
+variable "existing_db_name" {
+  description = "Existing Aurora database name when create_aurora=false."
+  type        = string
+  default     = null
+}
+
+variable "existing_db_user" {
+  description = "Existing Aurora DB username when create_aurora=false."
+  type        = string
+  default     = null
+}
+
+variable "existing_db_password_secret_arn" {
+  description = "Secrets Manager secret ARN containing DB password when create_aurora=false."
+  type        = string
+  default     = null
+}
+
+variable "existing_db_security_group_id" {
+  description = "Security group ID attached to existing Aurora cluster; used to allow ECS ingress when create_aurora=false."
+  type        = string
+  default     = null
 }
 
 variable "extra_tags" {

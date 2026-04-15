@@ -39,6 +39,8 @@ resource "aws_security_group" "ecs_services" {
 }
 
 resource "aws_security_group" "aurora" {
+  count = var.create_aurora ? 1 : 0
+
   name        = "${local.name_prefix}-aurora"
   description = "Aurora PostgreSQL ingress"
   vpc_id      = aws_vpc.main.id
@@ -56,4 +58,15 @@ resource "aws_security_group" "aurora" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+}
+
+resource "aws_security_group_rule" "ecs_to_existing_aurora" {
+  count = var.create_aurora ? 0 : 1
+
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  security_group_id        = var.existing_db_security_group_id
+  source_security_group_id = aws_security_group.ecs_services.id
 }

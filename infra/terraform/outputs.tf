@@ -4,8 +4,8 @@ output "alb_dns_name" {
 }
 
 output "aurora_endpoint" {
-  value       = aws_rds_cluster.aurora.endpoint
-  description = "Aurora writer endpoint."
+  value       = local.db_host
+  description = "Aurora writer endpoint (created or existing)."
 }
 
 output "artifacts_bucket" {
