@@ -257,6 +257,7 @@ Amazon Web Services provides managed building blocks for all three pillars:
 - Metrics and dashboards: Amazon CloudWatch Metrics and dashboards.
 - Tracing: Amazon X-Ray and OpenTelemetry collectors on Amazon Elastic Container Service.
 - Alerts and escalation: Amazon CloudWatch Alarms integrated with notification and on-call workflows.
+- We will also be using AWS for the Postgresql Aurora and EC2, basically a lot of this app will run on AWS.
 
 ### Alert quality standards
 - Every alert must have a clear owner and runbook link.
