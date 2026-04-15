@@ -7,15 +7,15 @@ Ship a production-lean first release with a browser frontend, a real backend, se
 - Keep one frontend service and one backend service for week one delivery speed.
 - Keep one relational database cluster.
 - Keep one cache cluster only if measured hot path latency requires it.
-- Keep one object storage bucket for attachments.
-- Keep one container orchestration platform.
+- Keep one object storage bucket for attachments. (this is not needed right now, only needed after messaging is made)
+- Keep one container orchestration platform. (this might not actually be needed at first, we'll see)
 - Avoid multi-region, Kubernetes, and advanced streaming in this first release window.
 
 ## Microservice-first compromise
 To satisfy early service boundaries without heavy overhead:
 - Create two backend services from day one:
   1. case-api (authoritative write and read service for case data)
-  2. search-api (index and search read service)
+  2. search-api (index and search read service) (okay maybe not this at first, this can be made later)
 - Run both services in the same repository and same cloud account.
 - Share a small common package only for contract types, not business logic.
 
