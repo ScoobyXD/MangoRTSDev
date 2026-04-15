@@ -7,7 +7,7 @@ Ship a production-lean first release with a browser frontend, a real backend, se
 MangoOS is a real-time operational system for enterprise work, inspired by real-time strategy interfaces.
 The core belief is that company work is sequential and algorithmic, and can be modeled as ordered logic gates with explicit state transitions.
 The product unifies communication, work context, and execution in one operational surface so teams do not depend on fragmented tools.
-The system analogy is explicit: MangoOS is a real-time strategy game style internal Bloomberg terminal on steroids with a video game user interface.
+The system analogy on what an RTS is: An internal Bloomberg terminal on steroids with video game ui.
 
 ### What this system is replacing
 - Scattered context across chat, email, and disconnected work tools.
