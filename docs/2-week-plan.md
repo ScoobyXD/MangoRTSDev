@@ -3,19 +3,156 @@
 ## Objective
 Ship a production-lean first release with a browser frontend, a real backend, secure cloud basics, and end-to-end flow coverage for critical user journeys.
 
+## Product philosophy and operating thesis
+MangoOS is a real-time operational system for enterprise work, inspired by real-time strategy interfaces.
+The core belief is that company work is sequential and algorithmic, and can be modeled as ordered logic gates with explicit state transitions.
+The product unifies communication, work context, and execution in one operational surface so teams do not depend on fragmented tools.
+The system analogy is explicit: MangoOS is a real-time strategy game style internal Bloomberg terminal on steroids with a video game user interface.
+
+### What this system is replacing
+- Scattered context across chat, email, and disconnected work tools.
+- One-dimensional notification streams with poor ownership visibility.
+- Manual status handoffs that hide blockers and dependencies.
+
+### What this system must provide
+- One canonical home for each piece of work.
+- Explicit process states, ownership, and dependencies.
+- Real-time visibility of what is happening now, what is blocked, and what should execute next.
+- Full history of operations and state changes for auditability and learning.
+
+## Canonical terminology for this project
+Use the following terms in requirements, design, and implementation artifacts.
+
+### Core primitives
+1. Node.
+2. Logic Gate.
+3. Message.
+4. Operation.
+5. Execute (verb for commanding an operation).
+
+Flow is not a primitive. Flow is a structure composed from connected logic gates.
+
+### Node terminology note
+For a node currently inside a logic gate, use both terms until naming is finalized:
+- Workpiece.
+- Dimension.
+
+Implementation note: maintain compatibility fields or aliases for both names in design documents and interface contracts until the final naming decision is made.
+
+### Message semantics
+- Not every message creates a node.
+- Not every message creates a logic gate.
+- Every message should be linkable to a node, a logic gate, or both.
+- Recommendation systems for automatic linking are explicitly later-stage work.
+
+### Operation semantics
+A successful execute command should produce one or more of the following effects:
+- Add, remove, or update information on a node.
+- Change logic gate state.
+- Move a workpiece or dimension to the next logic gate.
+- Emit timeline and audit records.
+- Update subscribed user interface modules in real time.
+
+### Logic Gate status language
+Use this baseline state vocabulary:
+- Idle (open to take work).
+- Loaded (work accepted, pending processing).
+- Blocked (waiting on dependency).
+- Processing (actively executing operation).
+- Output Ready (finished and ready to hand off).
+- Failed (execution failed and needs intervention).
+
+### Required Logic Gate definition fields
+Each logic gate must define:
+- Input contract.
+- Output contract.
+- Acceptance rules.
+- Failure rules.
+- Retry and escalation behavior.
+- Edit history.
+
+## User interface architecture direction
+The user interface is a customizable module canvas.
+Users can create, move, resize, and configure modules, then build saved views from those modules.
+This is a design requirement, not an optional enhancement.
+
+Required module families for architecture planning:
+- Node Tree module.
+- Logic Gate module.
+- Message module.
+- Inventory module.
+- Operation execution module.
+
+## Composable modeling as a core feature
+The platform must function as a composable building system, similar to lego bricks for enterprise operations.
+This is a core product requirement.
+
+### Composable Node modeling requirements
+- Users must be able to create nodes quickly.
+- Users must be able to define parent-child relationships between nodes.
+- Users must be able to link peer nodes to represent dependencies, references, and shared context.
+- Users must be able to add, remove, and update node relationships without destructive data loss.
+
+### Composable Logic Gate modeling requirements
+- Users must be able to create logic gates visually.
+- Users must be able to link logic gates into ordered and branching process networks.
+- Users must be able to edit logic gate relationships over time while preserving history.
+
+### Node to Logic Gate linkage requirements
+- Users must be able to assign workpieces or dimensions into logic gates.
+- Users must be able to view where each node currently resides in the logic gate network.
+- Users must be able to move workpieces or dimensions through logic gates using execute operations.
+
+### Why this is strategically important
+- It converts tribal process knowledge into explicit, searchable, and editable system logic.
+- It creates a visual and auditable representation of company workflows.
+- It prepares companies for reliable automation and future agent execution.
+
+### Repetitive workflow automation direction
+- Frequently repeated work should be schedulable as reusable node and logic gate templates.
+- Scheduled executions should instantiate new workpieces or dimensions and route them through predefined logic gate paths.
+- Automation should start with human-supervised execution, then progress to agent-led execution with policy controls.
+
+### Management optimization value
+A complete visual of logic gate networks and workpiece or dimension movement enables leadership to:
+- question every requirement,
+- remove unnecessary steps,
+- simplify and speed up operations,
+- reduce blockers and handoff failures,
+- continuously improve process design based on observed system behavior.
+
+
+### Measurement and management intelligence requirements
+The platform must make quantitative management visible and actionable:
+- Measure inputs, outputs, throughput, cycle time, blocker duration, and completion quality by logic gate and by team.
+- Measure productivity trends across workpieces or dimensions and process stages.
+- Measure operation success and failure rates, retries, and escalation frequency.
+- Maintain list-based standard operating procedures linked to real execution paths.
+- Compare pre-change and post-change performance to determine net positive or net negative impact.
+- Provide real-time organization-wide status visibility so management can act without waiting for reports.
+
+### Why this is useful for agents
+Agents require structured context, explicit process state, and measurable outcomes to operate reliably.
+This architecture provides exactly that:
+- Nodes plus logic gates define clear objectives and dependencies.
+- Operations and execute events provide deterministic state transitions.
+- Message linkage keeps communication context connected to work state.
+- Measurements and historical outcomes provide feedback loops for planning, policy tuning, and autonomous execution confidence.
+- Standard operating procedures become executable workflows that agents can follow, validate, and improve over time.
+
 ## Scope lock
 - Keep one frontend service and one backend service for week one delivery speed.
 - Keep one relational database cluster.
 - Keep one cache cluster only if measured hot path latency requires it.
-- Keep one object storage bucket for attachments. (this is not needed right now, only needed after messaging is made)
-- Keep one container orchestration platform. (this might not actually be needed at first, we'll see)
+- Keep one object storage bucket for attachments.
+- Keep one container orchestration platform.
 - Avoid multi-region, Kubernetes, and advanced streaming in this first release window.
 
 ## Microservice-first compromise
 To satisfy early service boundaries without heavy overhead:
 - Create two backend services from day one:
   1. case-api (authoritative write and read service for case data)
-  2. search-api (index and search read service) (okay maybe not this at first, this can be made later)
+  2. search-api (index and search read service)
 - Run both services in the same repository and same cloud account.
 - Share a small common package only for contract types, not business logic.
 
