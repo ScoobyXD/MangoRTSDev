@@ -34,8 +34,7 @@ Flow is not a primitive. Flow is a structure composed from connected logic gates
 
 ### Node terminology note
 For a node currently inside a logic gate, use both terms until naming is finalized:
-- Workpiece.
-- Dimension.
+- This is an operation because for an operation to take place, it needs the piece of work and mechanism to do them on.
 
 Implementation note: maintain compatibility fields or aliases for both names in design documents and interface contracts until the final naming decision is made.
 
