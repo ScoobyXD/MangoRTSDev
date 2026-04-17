@@ -131,7 +131,22 @@ b_position (ENUM or TEXT+CHECK)
 
 =========================================================================================================
 
+Eventually the operation and the logic gate/node might need to answer:
 
+Problem: it can’t cleanly answer core runtime questions:
 
+Is it queued vs running vs finished vs failed?
 
+What type of operation was executed?
 
+Who/what executed it (user/system/agent)?
+
+Was this a retry?
+
+Is this duplicate command (idempotency)?
+
+Why did it fail?
+
+You’ll need those almost immediately.
+
+=========================================================================================================
