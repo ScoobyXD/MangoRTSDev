@@ -57,7 +57,7 @@ Use this baseline state vocabulary:
 - Idle (open to take work).
 - Loaded (work accepted, pending processing).
 - Blocked (waiting on dependency).
-- Processing (actively executing operation).
+- Processing (actively executing operation, this is the only point in time an operation happens).
 - Output Ready (finished and ready to hand off).
 - Failed (execution failed and needs intervention).
 

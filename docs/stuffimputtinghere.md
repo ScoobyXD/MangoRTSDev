@@ -71,3 +71,67 @@ Your docs already prescribe this measure/tune approach and Aurora/Postgres direc
 
 =========================================================================================================
 
+About the “under 100ms” target
+Schema helps, but schema alone doesn’t guarantee 100ms.
+Your own latency docs are right: most misses come from query shape, N+1s, missing indexes, no pooling, and poor observability—not AWS itself. 
+
+So: this schema can support sub-100ms if you also do:
+
+bounded/paginated queries,
+
+no N+1 graph fetches,
+
+pooling + same-AZ placement,
+
+p95/p99 tracing and slow query logging from day one. 
+
+=========================================================================================================
+
+Performance: ENUM vs TEXT vs JSON (practical reality)
+ENUM
+Usually same speed or slightly better than TEXT for comparisons.
+
+Stored compactly internally (not long strings).
+
+Very index-friendly.
+
+So using ENUM for A Position / B Position is not a slowdown concern.
+
+JSON/JSONB (especially in hot filters)
+Reading a JSON field itself is fine.
+
+But filtering/joining on values inside JSON (position->>'a' = 'parent') is usually slower than filtering on normal columns, unless you add expression/GIN indexes.
+
+If JSON is long, you pay more I/O and sometimes decompression overhead; that hurts p95/p99 on hot paths.
+
+Big takeaway: JSON is flexible, but hot-path predicates should be normal columns.
+
+“Can I just have 1 position JSON column with A and B inside?”
+Yes, technically possible. Example:
+
+{"a":"parent","b":"child"}
+But for hot relationship queries, I would not do that as your primary model.
+
+Why:
+
+Harder to enforce strict DB rules (valid pairs, typo prevention).
+
+Harder to index as efficiently as two scalar columns.
+
+More complex SQL for simple filters.
+
+More likely to regress when query volume grows.
+
+Given you said relationships will be hot, keep:
+
+a_position (ENUM or TEXT+CHECK)
+
+b_position (ENUM or TEXT+CHECK)
+
+
+=========================================================================================================
+
+
+
+
+
