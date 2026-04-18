@@ -25,6 +25,8 @@ Required DB env vars when using PostgreSQL:
 - `DB_NAME` (default `postgres`)
 - `DB_SSLMODE` (default `require`)
 
+`DB_HOST` must be the raw Aurora endpoint hostname (not prefixed with `host=`).
+
 ## Bootstrap canonical schema
 
 ### Windows PowerShell (recommended for Windows laptops)

@@ -8,7 +8,14 @@ if (-not $env:PGPASSWORD) { throw "Set PGPASSWORD first" }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $schemaPath = Join-Path $repoRoot "backend/db/schema.sql"
+$dbHost = $env:DB_HOST.Trim()
+if ($dbHost.StartsWith("host=")) {
+  $dbHost = $dbHost.Substring(5)
+}
 
-psql "host=$($env:DB_HOST) port=$($env:DB_PORT) dbname=$($env:DB_NAME) user=$($env:DB_USER) sslmode=require" -v ON_ERROR_STOP=1 -f $schemaPath
+psql -h $dbHost -p $env:DB_PORT -U $env:DB_USER -d $env:DB_NAME --set=sslmode=require -v ON_ERROR_STOP=1 -f $schemaPath
+if ($LASTEXITCODE -ne 0) {
+  throw "psql failed with exit code $LASTEXITCODE"
+}
 
 Write-Host "✅ canonical schema applied from backend/db/schema.sql"

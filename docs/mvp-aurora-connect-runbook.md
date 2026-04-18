@@ -35,11 +35,17 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ## 3) Copy values from AWS Console (exactly)
 
 In AWS Console, open **RDS -> Databases -> your Aurora cluster** and copy:
-- **Writer endpoint** -> `DB_HOST`
+- **Writer endpoint only** (just the hostname, no `host=` prefix) -> `DB_HOST`
 - **Port** (usually `5432`) -> `DB_PORT`
 - **DB username** -> `DB_USER`
 - **DB name** (or use `postgres`) -> `DB_NAME`
 - **DB password** -> `PGPASSWORD` and `DB_PASSWORD`
+
+Example of valid `DB_HOST`:
+- `miraerts-northerncalifornia-devcluster.cluster-xxxxxxxx.us-west-1.rds.amazonaws.com`
+
+Do **not** set it like:
+- `host=miraerts-northerncalifornia-devcluster.cluster-xxxxxxxx.us-west-1.rds.amazonaws.com`
 
 ## 4) Set environment variables in PowerShell
 
@@ -119,3 +125,4 @@ Ensure ECS task env vars are present:
 - Keep `APP_ENV=staging|prod` so DB failures are fail-fast.
 - Always include `company_id` in requests and query filters.
 - If you launch PowerShell as a new window, re-set env vars (they are per-session unless persisted).
+- If you see `could not translate host name "host=..."`, your `DB_HOST` included `host=` by mistake. Set only the raw endpoint hostname and rerun step 5.

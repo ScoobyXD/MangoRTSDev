@@ -6,8 +6,9 @@ set -euo pipefail
 : "${DB_NAME:?set DB_NAME}"
 : "${DB_USER:?set DB_USER}"
 : "${PGPASSWORD:?set PGPASSWORD}"
+DB_HOST="${DB_HOST#host=}"
 
-psql "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=require" -v ON_ERROR_STOP=1 <<'SQL'
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 <<'SQL'
 select current_database() as db, current_user as role, now() as ts;
 
 select to_regclass('public.nodes') as nodes,
