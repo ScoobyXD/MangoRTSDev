@@ -27,6 +27,13 @@ Required DB env vars when using PostgreSQL:
 
 `DB_HOST` must be the raw Aurora endpoint hostname (not prefixed with `host=`).
 
+If you ever see `sql: unknown driver "postgres"`, run:
+
+```bash
+cd backend
+go mod tidy
+```
+
 ## Bootstrap canonical schema
 
 ### Windows PowerShell (recommended for Windows laptops)

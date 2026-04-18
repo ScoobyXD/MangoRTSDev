@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	httpapi "miraeopus/backend/internal/http"
 	"miraeopus/backend/internal/store"
 )
