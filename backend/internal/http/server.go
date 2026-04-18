@@ -5,8 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
-	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
 
@@ -21,8 +21,11 @@ func NewServer(repo store.Repository) *Server {
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
-	mux.HandleFunc("/v1/cases", s.handleCases)
-	mux.HandleFunc("/v1/cases/", s.handleCaseSubresource)
+	mux.HandleFunc("/v1/nodes", s.handleNodes)
+	mux.HandleFunc("/v1/nodes/", s.handleNodeSubresource)
+	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
+	mux.HandleFunc("/v1/operations", s.handleOperations)
+	mux.HandleFunc("/v1/operations/", s.handleOperationByID)
 	return mux
 }
 
@@ -30,155 +33,205 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (s *Server) handleCases(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
 	var req struct {
-		Title    string  `json:"title"`
-		Owner    string  `json:"owner"`
-		ParentID *string `json:"parent_id"`
+		CompanyID string `json:"company_id"`
+		Header    string `json:"header"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	if strings.TrimSpace(req.Title) == "" {
-		writeError(w, http.StatusBadRequest, "title_required")
+	if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Header) == "" {
+		writeError(w, http.StatusBadRequest, "company_id_and_header_required")
 		return
 	}
-	if strings.TrimSpace(req.Owner) == "" {
-		req.Owner = "unassigned"
-	}
-	created, err := s.repo.CreateCase(req.Title, req.Owner, req.ParentID)
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "parent_case_not_found")
-		return
-	}
+
+	item, err := s.repo.CreateNode(req.CompanyID, req.Header)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_create_case")
+		writeError(w, http.StatusInternalServerError, "failed_to_create_node")
 		return
 	}
-	writeJSON(w, http.StatusCreated, created)
+	writeJSON(w, http.StatusCreated, item)
 }
 
-func (s *Server) handleCaseSubresource(w http.ResponseWriter, r *http.Request) {
-	trimmed := strings.TrimPrefix(r.URL.Path, "/v1/cases/")
+func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/v1/nodes/")
 	parts := strings.Split(trimmed, "/")
 	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	caseID := parts[0]
+	nodeID := parts[0]
 
 	if len(parts) == 1 {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
 		}
-		result, err := s.repo.GetCase(caseID)
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		item, err := s.repo.GetNode(companyID, nodeID)
 		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "case_not_found")
+			writeError(w, http.StatusNotFound, "node_not_found")
 			return
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_load_case")
+			writeError(w, http.StatusInternalServerError, "failed_to_load_node")
 			return
 		}
-		writeJSON(w, http.StatusOK, result)
+		writeJSON(w, http.StatusOK, item)
 		return
 	}
 
-	switch parts[1] {
-	case "artifacts":
-		s.handleArtifacts(caseID, parts, w, r)
-	case "children":
-		s.handleChildren(caseID, w, r)
-	default:
-		writeError(w, http.StatusNotFound, "not_found")
-	}
-}
-
-func (s *Server) handleArtifacts(caseID string, parts []string, w http.ResponseWriter, r *http.Request) {
-	if len(parts) == 2 && r.Method == http.MethodPost {
+	if len(parts) == 2 && parts[1] == "information" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
 		var req struct {
-			Type      domain.ArtifactType `json:"type"`
-			SourceRef string              `json:"source_ref"`
-			Content   string              `json:"content"`
-			CreatedBy string              `json:"created_by"`
+			CompanyID   string `json:"company_id"`
+			Type        string `json:"type"`
+			Information string `json:"information"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
 			return
 		}
-		if req.CreatedBy == "" {
-			req.CreatedBy = "system"
+		if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Type) == "" {
+			writeError(w, http.StatusBadRequest, "company_id_and_type_required")
+			return
 		}
-		artifact, err := s.repo.AddArtifact(caseID, store.AddArtifactInput{
-			Type:      req.Type,
-			SourceRef: req.SourceRef,
-			Content:   req.Content,
-			CreatedBy: req.CreatedBy,
-		})
+
+		item, err := s.repo.AddNodeInformation(req.CompanyID, nodeID, req.Type, req.Information)
 		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "case_not_found")
+			writeError(w, http.StatusNotFound, "node_not_found")
 			return
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_add_artifact")
+			writeError(w, http.StatusInternalServerError, "failed_to_add_node_information")
 			return
 		}
-		writeJSON(w, http.StatusCreated, artifact)
+		writeJSON(w, http.StatusCreated, item)
 		return
 	}
 
-	if len(parts) == 3 && r.Method == http.MethodDelete {
-		if err := s.repo.DeleteArtifact(caseID, parts[2]); err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				writeError(w, http.StatusNotFound, "artifact_not_found")
-				return
-			}
-			writeError(w, http.StatusInternalServerError, "failed_to_delete_artifact")
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
-	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+	writeError(w, http.StatusNotFound, "not_found")
 }
 
-func (s *Server) handleChildren(caseID string, w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
 	var req struct {
-		Title string `json:"title"`
-		Owner string `json:"owner"`
+		CompanyID string `json:"company_id"`
+		Header    string `json:"header"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	if strings.TrimSpace(req.Title) == "" {
-		writeError(w, http.StatusBadRequest, "title_required")
+	if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Header) == "" {
+		writeError(w, http.StatusBadRequest, "company_id_and_header_required")
 		return
 	}
-	if strings.TrimSpace(req.Owner) == "" {
-		req.Owner = "unassigned"
+	item, err := s.repo.CreateLogicGate(req.CompanyID, req.Header)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_create_logic_gate")
+		return
 	}
-	created, err := s.repo.CreateCase(req.Title, req.Owner, &caseID)
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) handleOperations(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		CompanyID      string  `json:"company_id"`
+		NodeID         *string `json:"node_id"`
+		LogicGateID    *string `json:"logic_gate_id"`
+		Status         string  `json:"status"`
+		StartTimestamp string  `json:"start_timestamp"`
+		EndTimestamp   *string `json:"end_timestamp"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Status) == "" || strings.TrimSpace(req.StartTimestamp) == "" {
+		writeError(w, http.StatusBadRequest, "company_id_status_start_timestamp_required")
+		return
+	}
+	start, err := time.Parse(time.RFC3339, req.StartTimestamp)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_start_timestamp")
+		return
+	}
+	var end *time.Time
+	if req.EndTimestamp != nil && strings.TrimSpace(*req.EndTimestamp) != "" {
+		parsed, parseErr := time.Parse(time.RFC3339, *req.EndTimestamp)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid_end_timestamp")
+			return
+		}
+		end = &parsed
+	}
+
+	item, err := s.repo.CreateOperation(store.CreateOperationInput{
+		CompanyID:      req.CompanyID,
+		NodeID:         req.NodeID,
+		LogicGateID:    req.LogicGateID,
+		Status:         req.Status,
+		StartTimestamp: start,
+		EndTimestamp:   end,
+	})
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "case_not_found")
+		writeError(w, http.StatusNotFound, "referenced_node_or_logic_gate_not_found")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_create_child")
+		writeError(w, http.StatusInternalServerError, "failed_to_create_operation")
 		return
 	}
-	writeJSON(w, http.StatusCreated, created)
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) handleOperationByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	operationID := strings.TrimPrefix(r.URL.Path, "/v1/operations/")
+	if strings.TrimSpace(operationID) == "" {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+
+	item, err := s.repo.GetOperation(companyID, operationID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "operation_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_operation")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
