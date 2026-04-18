@@ -6,8 +6,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	httpapi "miraeopus/backend/internal/http"
 	"miraeopus/backend/internal/store"
 )
@@ -36,9 +38,15 @@ func main() {
 
 func buildRepository() (store.Repository, func()) {
 	host := os.Getenv("DB_HOST")
+	allowFallback := strings.EqualFold(os.Getenv("ALLOW_INMEMORY_FALLBACK"), "true")
+	appEnv := getenvDefault("APP_ENV", "dev")
+
 	if host == "" {
-		log.Println("using in-memory repository (DB_HOST not set)")
-		return store.NewMemoryRepo(), func() {}
+		if appEnv == "dev" || allowFallback {
+			log.Println("using in-memory repository (DB_HOST not set, dev/fallback mode)")
+			return store.NewMemoryRepo(), func() {}
+		}
+		log.Fatal("DB_HOST is required when APP_ENV is not dev")
 	}
 
 	port := getenvDefault("DB_PORT", "5432")
@@ -50,13 +58,19 @@ func buildRepository() (store.Repository, func()) {
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s", host, port, user, password, dbName, sslMode)
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
-		log.Printf("failed to open postgres (%v), falling back to in-memory repository", err)
-		return store.NewMemoryRepo(), func() {}
+		if appEnv == "dev" || allowFallback {
+			log.Printf("failed to open postgres (%v), falling back to in-memory repository", err)
+			return store.NewMemoryRepo(), func() {}
+		}
+		log.Fatalf("failed to open postgres in %s: %v", appEnv, err)
 	}
 	if err := db.Ping(); err != nil {
-		log.Printf("failed to connect postgres (%v), falling back to in-memory repository", err)
 		_ = db.Close()
-		return store.NewMemoryRepo(), func() {}
+		if appEnv == "dev" || allowFallback {
+			log.Printf("failed to connect postgres (%v), falling back to in-memory repository", err)
+			return store.NewMemoryRepo(), func() {}
+		}
+		log.Fatalf("failed to connect postgres in %s: %v", appEnv, err)
 	}
 
 	log.Printf("using postgres repository host=%s db=%s sslmode=%s", host, dbName, sslMode)
