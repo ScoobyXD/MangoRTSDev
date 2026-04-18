@@ -16,20 +16,43 @@ This document captures the **exact schema structure** shown in your spreadsheet 
 -- ENUMS
 -- ==========================================================
 
-create type if not exists node_relationship_position as enum ('Parent', 'Child', 'Peer');
-create type if not exists logic_gate_relationship_position as enum ('Input', 'Output');
-create type if not exists info_type as enum (
-  'Text box',
-  'Checklist',
-  'Status',
-  'Due date',
-  'Employee name',
-  'PDF',
-  'PNG',
-  'MOV',
-  'Hyperlink'
-);
-create type if not exists operation_status as enum ('In Progress', 'Success', 'Failed');
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'node_relationship_position') then
+    create type node_relationship_position as enum ('Parent', 'Child', 'Peer');
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'logic_gate_relationship_position') then
+    create type logic_gate_relationship_position as enum ('Input', 'Output');
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'info_type') then
+    create type info_type as enum (
+      'Text box',
+      'Checklist',
+      'Status',
+      'Due date',
+      'Employee name',
+      'PDF',
+      'PNG',
+      'MOV',
+      'Hyperlink'
+    );
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'operation_status') then
+    create type operation_status as enum ('In Progress', 'Success', 'Failed');
+  end if;
+end $$;
 
 -- ==========================================================
 -- NODE SCHEMA

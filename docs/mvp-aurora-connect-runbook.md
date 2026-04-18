@@ -126,3 +126,4 @@ Ensure ECS task env vars are present:
 - Always include `company_id` in requests and query filters.
 - If you launch PowerShell as a new window, re-set env vars (they are per-session unless persisted).
 - If you see `could not translate host name "host=..."`, your `DB_HOST` included `host=` by mistake. Set only the raw endpoint hostname and rerun step 5.
+- If you see `syntax error at or near "not"` on `create type if not exists`, pull latest repo changes and rerun; the schema now uses PostgreSQL-compatible `DO $$` guards for enum creation.
