@@ -27,11 +27,16 @@ Required DB env vars when using PostgreSQL:
 
 `DB_HOST` must be the raw Aurora endpoint hostname (not prefixed with `host=`).
 
-If you ever see `sql: unknown driver "postgres"`, run:
+If you ever see `sql: unknown driver "postgres"`, the backend is being opened with the wrong
+driver name. This project uses the pgx stdlib SQL driver (`github.com/jackc/pgx/v5/stdlib`), so
+the driver passed to `sql.Open` must be `pgx`, not `postgres`.
+
+To verify your local checkout has dependencies and builds:
 
 ```bash
 cd backend
 go mod tidy
+go test ./...
 ```
 
 ## Bootstrap canonical schema
