@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -13,163 +12,143 @@ import (
 var ErrNotFound = errors.New("not found")
 
 type Repository interface {
-	CreateCase(title, owner string, parentID *string) (domain.Case, error)
-	GetCase(id string) (domain.CaseWithRelations, error)
-	AddArtifact(caseID string, in AddArtifactInput) (domain.Artifact, error)
-	DeleteArtifact(caseID, artifactID string) error
+	CreateNode(companyID, header string) (domain.Node, error)
+	GetNode(companyID, nodeID string) (domain.Node, error)
+	AddNodeInformation(companyID, nodeID, infoType, information string) (domain.NodeInformation, error)
+	CreateLogicGate(companyID, header string) (domain.LogicGate, error)
+	CreateOperation(in CreateOperationInput) (domain.Operation, error)
+	GetOperation(companyID, operationID string) (domain.Operation, error)
 }
 
-type AddArtifactInput struct {
-	Type      domain.ArtifactType
-	SourceRef string
-	Content   string
-	CreatedBy string
+type CreateOperationInput struct {
+	CompanyID      string
+	NodeID         *string
+	LogicGateID    *string
+	Status         string
+	StartTimestamp time.Time
+	EndTimestamp   *time.Time
 }
 
 type MemoryRepo struct {
 	mu         sync.RWMutex
-	cases      map[string]domain.Case
-	artifacts  map[string]domain.Artifact
-	activities map[string][]domain.Activity
-	caseSeq    int
-	artifactSeq int
-	activitySeq int
+	nodes      map[string]domain.Node
+	nodeInfo   map[string][]domain.NodeInformation
+	logicGates map[string]domain.LogicGate
+	operations map[string]domain.Operation
 }
 
 func NewMemoryRepo() *MemoryRepo {
 	return &MemoryRepo{
-		cases:      map[string]domain.Case{},
-		artifacts:  map[string]domain.Artifact{},
-		activities: map[string][]domain.Activity{},
+		nodes:      map[string]domain.Node{},
+		nodeInfo:   map[string][]domain.NodeInformation{},
+		logicGates: map[string]domain.LogicGate{},
+		operations: map[string]domain.Operation{},
 	}
 }
 
-func (r *MemoryRepo) nextCaseID() string {
-	r.caseSeq++
-	return fmt.Sprintf("case_%06d", r.caseSeq)
+func key(companyID, id string) string {
+	return companyID + ":" + id
 }
 
-func (r *MemoryRepo) nextArtifactID() string {
-	r.artifactSeq++
-	return fmt.Sprintf("artifact_%06d", r.artifactSeq)
-}
-
-func (r *MemoryRepo) nextActivityID() string {
-	r.activitySeq++
-	return fmt.Sprintf("activity_%06d", r.activitySeq)
-}
-
-func (r *MemoryRepo) CreateCase(title, owner string, parentID *string) (domain.Case, error) {
+func (r *MemoryRepo) CreateNode(companyID, header string) (domain.Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if parentID != nil {
-		if _, ok := r.cases[*parentID]; !ok {
-			return domain.Case{}, ErrNotFound
-		}
+	n := domain.Node{
+		CompanyID:        companyID,
+		NodeID:           newUUIDv7String(),
+		Header:           header,
+		CreatedTimestamp: time.Now().UTC(),
 	}
-
-	now := time.Now().UTC()
-	c := domain.Case{
-		ID:        r.nextCaseID(),
-		Title:     title,
-		Owner:     owner,
-		Status:    domain.CaseStatusNew,
-		ParentID:  parentID,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	r.cases[c.ID] = c
-	r.appendActivityLocked(c.ID, "case_created", fmt.Sprintf("title=%q", title), owner)
-	if parentID != nil {
-		r.appendActivityLocked(*parentID, "child_case_created", c.ID, owner)
-	}
-	return c, nil
+	r.nodes[key(companyID, n.NodeID)] = n
+	return n, nil
 }
 
-func (r *MemoryRepo) GetCase(id string) (domain.CaseWithRelations, error) {
+func (r *MemoryRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	c, ok := r.cases[id]
+	n, ok := r.nodes[key(companyID, nodeID)]
 	if !ok {
-		return domain.CaseWithRelations{}, ErrNotFound
+		return domain.Node{}, ErrNotFound
 	}
-
-	children := make([]domain.Case, 0)
-	for _, candidate := range r.cases {
-		if candidate.ParentID != nil && *candidate.ParentID == id {
-			children = append(children, candidate)
-		}
-	}
-	sort.Slice(children, func(i, j int) bool { return children[i].CreatedAt.Before(children[j].CreatedAt) })
-
-	artifacts := make([]domain.Artifact, 0)
-	for _, artifact := range r.artifacts {
-		if artifact.CaseID == id {
-			artifacts = append(artifacts, artifact)
-		}
-	}
-	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].CreatedAt.Before(artifacts[j].CreatedAt) })
-
-	activities := append([]domain.Activity(nil), r.activities[id]...)
-
-	return domain.CaseWithRelations{Case: c, Children: children, Artifacts: artifacts, Activities: activities}, nil
+	return n, nil
 }
 
-func (r *MemoryRepo) AddArtifact(caseID string, in AddArtifactInput) (domain.Artifact, error) {
+func (r *MemoryRepo) AddNodeInformation(companyID, nodeID, infoType, information string) (domain.NodeInformation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	c, ok := r.cases[caseID]
-	if !ok {
-		return domain.Artifact{}, ErrNotFound
+	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
+		return domain.NodeInformation{}, ErrNotFound
 	}
-
 	now := time.Now().UTC()
-	a := domain.Artifact{
-		ID:        r.nextArtifactID(),
-		CaseID:    caseID,
-		Type:      in.Type,
-		SourceRef: in.SourceRef,
-		Content:   in.Content,
-		CreatedBy: in.CreatedBy,
-		CreatedAt: now,
+	item := domain.NodeInformation{
+		CompanyID:        companyID,
+		InformationID:    newUUIDv7String(),
+		NodeID:           nodeID,
+		Type:             infoType,
+		Information:      information,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
 	}
-	r.artifacts[a.ID] = a
-	c.UpdatedAt = now
-	r.cases[caseID] = c
-	r.appendActivityLocked(caseID, "artifact_added", fmt.Sprintf("%s:%s", a.Type, a.ID), in.CreatedBy)
-	return a, nil
+	k := key(companyID, nodeID)
+	r.nodeInfo[k] = append(r.nodeInfo[k], item)
+	sort.Slice(r.nodeInfo[k], func(i, j int) bool {
+		return r.nodeInfo[k][i].CreatedTimestamp.Before(r.nodeInfo[k][j].CreatedTimestamp)
+	})
+	return item, nil
 }
 
-func (r *MemoryRepo) DeleteArtifact(caseID, artifactID string) error {
+func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	c, ok := r.cases[caseID]
-	if !ok {
-		return ErrNotFound
+	item := domain.LogicGate{
+		CompanyID:        companyID,
+		LogicGateID:      newUUIDv7String(),
+		Header:           header,
+		CreatedTimestamp: time.Now().UTC(),
 	}
-	a, ok := r.artifacts[artifactID]
-	if !ok || a.CaseID != caseID {
-		return ErrNotFound
-	}
-	delete(r.artifacts, artifactID)
-	c.UpdatedAt = time.Now().UTC()
-	r.cases[caseID] = c
-	r.appendActivityLocked(caseID, "artifact_deleted", artifactID, "system")
-	return nil
+	r.logicGates[key(companyID, item.LogicGateID)] = item
+	return item, nil
 }
 
-func (r *MemoryRepo) appendActivityLocked(caseID, eventType, payload, createdBy string) {
-	activity := domain.Activity{
-		ID:        r.nextActivityID(),
-		CaseID:    caseID,
-		EventType: eventType,
-		Payload:   payload,
-		CreatedBy: createdBy,
-		CreatedAt: time.Now().UTC(),
+func (r *MemoryRepo) CreateOperation(in CreateOperationInput) (domain.Operation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if in.NodeID != nil {
+		if _, ok := r.nodes[key(in.CompanyID, *in.NodeID)]; !ok {
+			return domain.Operation{}, ErrNotFound
+		}
 	}
-	r.activities[caseID] = append(r.activities[caseID], activity)
+	if in.LogicGateID != nil {
+		if _, ok := r.logicGates[key(in.CompanyID, *in.LogicGateID)]; !ok {
+			return domain.Operation{}, ErrNotFound
+		}
+	}
+
+	item := domain.Operation{
+		CompanyID:      in.CompanyID,
+		OperationID:    newUUIDv7String(),
+		NodeID:         in.NodeID,
+		LogicGateID:    in.LogicGateID,
+		Status:         in.Status,
+		StartTimestamp: in.StartTimestamp,
+		EndTimestamp:   in.EndTimestamp,
+	}
+	r.operations[key(in.CompanyID, item.OperationID)] = item
+	return item, nil
+}
+
+func (r *MemoryRepo) GetOperation(companyID, operationID string) (domain.Operation, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	item, ok := r.operations[key(companyID, operationID)]
+	if !ok {
+		return domain.Operation{}, ErrNotFound
+	}
+	return item, nil
 }

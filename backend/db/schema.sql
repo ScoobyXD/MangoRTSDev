@@ -1,34 +1,122 @@
--- PostgreSQL-first schema for Case source-of-truth backend.
+-- Canonical Aurora PostgreSQL schema for MVP.
 
-create table if not exists cases (
-  id text primary key,
-  parent_id text references cases(id) on delete cascade,
-  title text not null,
-  owner text not null,
-  status text not null default 'new',
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'node_relationship_position') then
+    create type node_relationship_position as enum ('Parent', 'Child', 'Peer');
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'logic_gate_relationship_position') then
+    create type logic_gate_relationship_position as enum ('Input', 'Output');
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'info_type') then
+    create type info_type as enum (
+      'Text box',
+      'Checklist',
+      'Status',
+      'Due date',
+      'Employee name',
+      'PDF',
+      'PNG',
+      'MOV',
+      'Hyperlink'
+    );
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'operation_status') then
+    create type operation_status as enum ('In Progress', 'Success', 'Failed');
+  end if;
+end $$;
+
+create table if not exists nodes (
+  company_id uuid not null,
+  node_id uuid not null,
+  header text not null,
+  created_timestamp timestamptz not null,
+  primary key (company_id, node_id)
 );
 
-create table if not exists case_artifacts (
-  id text primary key,
-  case_id text not null references cases(id) on delete cascade,
-  type text not null,
-  source_ref text not null default '',
-  content text not null default '',
-  created_by text not null,
-  created_at timestamptz not null default now()
+create table if not exists node_relationships (
+  company_id uuid not null,
+  node_relationship_id uuid not null,
+  node_id_a uuid not null,
+  node_id_b uuid not null,
+  a_position node_relationship_position not null,
+  b_position node_relationship_position not null,
+  created_timestamp timestamptz not null,
+  primary key (company_id, node_relationship_id),
+  foreign key (company_id, node_id_a) references nodes (company_id, node_id),
+  foreign key (company_id, node_id_b) references nodes (company_id, node_id)
 );
 
-create table if not exists case_activities (
-  id text primary key,
-  case_id text not null references cases(id) on delete cascade,
-  event_type text not null,
-  payload text not null,
-  created_by text not null,
-  created_at timestamptz not null default now()
+create table if not exists node_information (
+  company_id uuid not null,
+  information_id uuid not null,
+  node_id uuid not null,
+  type info_type not null,
+  information text not null,
+  created_timestamp timestamptz not null,
+  updated_timestamp timestamptz not null,
+  primary key (company_id, information_id),
+  foreign key (company_id, node_id) references nodes (company_id, node_id)
 );
 
-create index if not exists idx_cases_parent_id on cases(parent_id);
-create index if not exists idx_case_artifacts_case_id on case_artifacts(case_id);
-create index if not exists idx_case_activities_case_id on case_activities(case_id);
+create table if not exists logic_gates (
+  company_id uuid not null,
+  logic_gate_id uuid not null,
+  header text not null,
+  created_timestamp timestamptz not null,
+  primary key (company_id, logic_gate_id)
+);
+
+create table if not exists logic_gate_relationships (
+  company_id uuid not null,
+  logic_gate_relationship_id uuid not null,
+  logic_gate_id_a uuid not null,
+  logic_gate_id_b uuid not null,
+  a_position logic_gate_relationship_position not null,
+  b_position logic_gate_relationship_position not null,
+  created_timestamp timestamptz not null,
+  primary key (company_id, logic_gate_relationship_id),
+  foreign key (company_id, logic_gate_id_a) references logic_gates (company_id, logic_gate_id),
+  foreign key (company_id, logic_gate_id_b) references logic_gates (company_id, logic_gate_id)
+);
+
+create table if not exists logic_gate_information (
+  company_id uuid not null,
+  information_id uuid not null,
+  logic_gate_id uuid not null,
+  type info_type not null,
+  information text not null,
+  created_timestamp timestamptz not null,
+  updated_timestamp timestamptz not null,
+  primary key (company_id, information_id),
+  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
+);
+
+create table if not exists operations (
+  company_id uuid not null,
+  operation_id uuid not null,
+  node_id uuid,
+  logic_gate_id uuid,
+  status operation_status not null,
+  start_timestamp timestamptz not null,
+  end_timestamp timestamptz,
+  primary key (company_id, operation_id),
+  foreign key (company_id, node_id) references nodes (company_id, node_id),
+  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
+);
+
+create index if not exists idx_node_information_node on node_information(company_id, node_id);
+create index if not exists idx_operations_node on operations(company_id, node_id);
+create index if not exists idx_operations_logic_gate on operations(company_id, logic_gate_id);
