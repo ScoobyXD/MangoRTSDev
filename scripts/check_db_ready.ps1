@@ -10,7 +10,7 @@ if ($dbHost.StartsWith("host=")) {
   $dbHost = $dbHost.Substring(5)
 }
 
-$query = @"
+$query = @'
 select current_database() as db, current_user as role, now() as ts;
 
 select to_regclass('public.nodes') as nodes,
@@ -27,7 +27,7 @@ begin
     raise exception 'canonical schema tables are missing; run apply_canonical_schema first';
   end if;
 end $$;
-"@
+'@
 
 psql -h $dbHost -p $env:DB_PORT -U $env:DB_USER -d $env:DB_NAME --set=sslmode=require -v ON_ERROR_STOP=1 -c $query
 if ($LASTEXITCODE -ne 0) {
