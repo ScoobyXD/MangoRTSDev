@@ -147,6 +147,28 @@ This architecture provides exactly that:
 - Keep one container orchestration platform.
 - Avoid multi-region, Kubernetes, and advanced streaming in this first release window.
 
+## Canonical database schema decision (locked)
+- The **only** schema to implement for Aurora PostgreSQL is: `docs/aurora-postgresql-schema.md`.
+- Treat `backend/db/schema.sql` as legacy bootstrap SQL for old case tables and do not use it for the new production model.
+- All migrations, seed scripts, repository code, and API contracts must map to:
+  - `nodes`
+  - `node_relationships`
+  - `node_information`
+  - `logic_gates`
+  - `logic_gate_relationships`
+  - `logic_gate_information`
+  - `operations`
+- Tenant isolation is still required via `company_id` on every table path.
+
+### Existing Aurora cluster guidance
+- If the current Aurora cluster is healthy and empty, **do not delete it just to start over**.
+- Reuse it and apply the canonical schema from `docs/aurora-postgresql-schema.md`.
+- Recreate only if there is a hard misconfiguration you cannot safely fix in-place (wrong VPC/subnets/security controls/engine setup).
+- Terraform and Docker are optional sequencing choices for now:
+  - Terraform helps you standardize and reproduce infra.
+  - Docker helps you package and deploy services.
+  - Neither is required to run SQL migrations against an already running Aurora cluster.
+
 ## Microservice-first compromise
 To satisfy early service boundaries without heavy overhead:
 - Create two backend services from day one:
@@ -167,18 +189,18 @@ To satisfy early service boundaries without heavy overhead:
 
 ### Day 1
 - Freeze product scope and critical flows.
-- Confirm data model for case, child case, artifact, and activity.
+- Confirm relational contracts for node, logic gate, relationship, information, and operation primitives.
 - Confirm service contracts for case-api and search-api.
 
 ### Day 2
 - Create environment files and local container compose.
 - Add health checks and baseline structured request logging.
-- Add database migration folder and first migration.
+- Add database migration folder and first migration that creates the canonical Aurora schema from `docs/aurora-postgresql-schema.md`.
 
 ### Day 3
-- Implement relational database repository for case-api.
+- Implement relational database repository for the canonical node and logic gate schema.
 - Keep in-memory repository for fast local demos and tests.
-- Add create case and get case endpoints using relational persistence.
+- Add create and read endpoints backed by canonical relational persistence.
 
 ### Day 4
 - Add artifact add and artifact delete endpoints with activity logging.
@@ -187,7 +209,7 @@ To satisfy early service boundaries without heavy overhead:
 
 ### Day 5
 - Add authentication middleware and role checks.
-- Add tenant scoping key to every business table and query.
+- Enforce tenant scoping (`company_id`) on every query and mutation path.
 - Add audit log table for sensitive actions.
 
 ### Day 6
