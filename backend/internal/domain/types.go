@@ -2,57 +2,36 @@ package domain
 
 import "time"
 
-type CaseStatus string
-
-const (
-	CaseStatusNew        CaseStatus = "new"
-	CaseStatusInProgress CaseStatus = "in_progress"
-	CaseStatusBlocked    CaseStatus = "blocked"
-	CaseStatusDone       CaseStatus = "done"
-)
-
-type Case struct {
-	ID        string     `json:"id"`
-	ParentID  *string    `json:"parent_id,omitempty"`
-	Title     string     `json:"title"`
-	Owner     string     `json:"owner"`
-	Status    CaseStatus `json:"status"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+type Node struct {
+	CompanyID        string    `json:"company_id"`
+	NodeID           string    `json:"node_id"`
+	Header           string    `json:"header"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
-type ArtifactType string
-
-const (
-	ArtifactEmail   ArtifactType = "email"
-	ArtifactMessage ArtifactType = "message"
-	ArtifactDoc     ArtifactType = "doc"
-	ArtifactURL     ArtifactType = "url"
-	ArtifactNote    ArtifactType = "note"
-)
-
-type Artifact struct {
-	ID         string       `json:"id"`
-	CaseID     string       `json:"case_id"`
-	Type       ArtifactType `json:"type"`
-	SourceRef  string       `json:"source_ref"`
-	Content    string       `json:"content"`
-	CreatedBy  string       `json:"created_by"`
-	CreatedAt  time.Time    `json:"created_at"`
+type NodeInformation struct {
+	CompanyID        string    `json:"company_id"`
+	InformationID    string    `json:"information_id"`
+	NodeID           string    `json:"node_id"`
+	Type             string    `json:"type"`
+	Information      string    `json:"information"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
-type Activity struct {
-	ID        string    `json:"id"`
-	CaseID    string    `json:"case_id"`
-	EventType string    `json:"event_type"`
-	Payload   string    `json:"payload"`
-	CreatedBy string    `json:"created_by"`
-	CreatedAt time.Time `json:"created_at"`
+type LogicGate struct {
+	CompanyID        string    `json:"company_id"`
+	LogicGateID      string    `json:"logic_gate_id"`
+	Header           string    `json:"header"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
-type CaseWithRelations struct {
-	Case       Case       `json:"case"`
-	Children   []Case     `json:"children"`
-	Artifacts  []Artifact `json:"artifacts"`
-	Activities []Activity `json:"activities"`
+type Operation struct {
+	CompanyID      string     `json:"company_id"`
+	OperationID    string     `json:"operation_id"`
+	NodeID         *string    `json:"node_id,omitempty"`
+	LogicGateID    *string    `json:"logic_gate_id,omitempty"`
+	Status         string     `json:"status"`
+	StartTimestamp time.Time  `json:"start_timestamp"`
+	EndTimestamp   *time.Time `json:"end_timestamp,omitempty"`
 }
