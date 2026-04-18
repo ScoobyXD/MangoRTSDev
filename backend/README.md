@@ -27,9 +27,18 @@ Required DB env vars when using PostgreSQL:
 
 ## Bootstrap canonical schema
 
+### Windows PowerShell (recommended for Windows laptops)
+
+```powershell
+./scripts/apply_canonical_schema.ps1
+./scripts/check_db_ready.ps1
+```
+
+### macOS/Linux
+
 ```bash
-../scripts/apply_canonical_schema.sh
-../scripts/check_db_ready.sh
+./scripts/apply_canonical_schema.sh
+./scripts/check_db_ready.sh
 ```
 
 Or directly:

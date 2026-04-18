@@ -1,4 +1,6 @@
-# MVP Runbook: Connect App to Existing Aurora PostgreSQL
+# MVP Runbook: Connect App to Existing Aurora PostgreSQL (**Windows-first**)
+
+You are on **Windows**. These instructions are written for Windows PowerShell first.
 
 This runbook assumes you already have an Aurora PostgreSQL cluster and want to keep it.
 
@@ -11,71 +13,96 @@ Only recreate if there is a hard issue you cannot safely repair in-place:
 - wrong security model
 - wrong engine family/version policy for your org
 
-## 2) Prepare DB credentials and connectivity
+## 2) Install tools on Windows
 
-Set these env vars locally (or in CI runner / bastion host):
+You need:
+- PostgreSQL client tools (`psql`) available in PowerShell
+- Go installed
 
-```bash
-export DB_HOST='<aurora-writer-endpoint>'
-export DB_PORT='5432'
-export DB_NAME='postgres'
-export DB_USER='<db-user>'
-export PGPASSWORD='<db-password>'
+Quick check in PowerShell:
+
+```powershell
+psql --version
+go version
 ```
 
-Network requirements:
-- Aurora SG must allow inbound 5432 from your app SG (or temporary admin host)
-- Route/NACL/VPC path must permit traffic
+If PowerShell blocks script execution, run:
 
-## 3) Apply canonical schema
-
-```bash
-./scripts/apply_canonical_schema.sh
-./scripts/check_db_ready.sh
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-## 4) Run backend against Aurora
+## 3) Copy values from AWS Console (exactly)
 
-```bash
-export APP_ENV=staging
-export DB_HOST='<aurora-writer-endpoint>'
-export DB_PORT='5432'
-export DB_USER='<db-user>'
-export DB_PASSWORD='<db-password>'
-export DB_NAME='postgres'
-export DB_SSLMODE='require'
+In AWS Console, open **RDS -> Databases -> your Aurora cluster** and copy:
+- **Writer endpoint** -> `DB_HOST`
+- **Port** (usually `5432`) -> `DB_PORT`
+- **DB username** -> `DB_USER`
+- **DB name** (or use `postgres`) -> `DB_NAME`
+- **DB password** -> `PGPASSWORD` and `DB_PASSWORD`
 
+## 4) Set environment variables in PowerShell
+
+Run this in a PowerShell window from repo root:
+
+```powershell
+$env:DB_HOST = "<aurora-writer-endpoint>"
+$env:DB_PORT = "5432"
+$env:DB_NAME = "postgres"
+$env:DB_USER = "<db-user>"
+$env:PGPASSWORD = "<db-password>"
+$env:DB_PASSWORD = $env:PGPASSWORD
+$env:DB_SSLMODE = "require"
+$env:APP_ENV = "staging"
+```
+
+## 5) Apply canonical schema + verify tables (Windows)
+
+From repo root:
+
+```powershell
+./scripts/apply_canonical_schema.ps1
+./scripts/check_db_ready.ps1
+```
+
+## 6) Start backend against Aurora (Windows)
+
+```powershell
 cd backend
 go run ./cmd/miraeopus-api
 ```
 
-## 5) Smoke test canonical API
+## 7) Smoke test API (PowerShell)
 
-```bash
-COMPANY_ID='11111111-1111-1111-1111-111111111111'
+Open a second PowerShell window at repo root and run:
 
-NODE_JSON=$(curl -sS -X POST http://localhost:8080/v1/nodes \
-  -H 'content-type: application/json' \
-  -d "{\"company_id\":\"$COMPANY_ID\",\"header\":\"MVP launch critical path\"}")
+```powershell
+$companyId = "11111111-1111-1111-1111-111111111111"
 
-echo "$NODE_JSON"
-NODE_ID=$(echo "$NODE_JSON" | sed -n 's/.*"node_id":"\([^"]*\)".*/\1/p')
+$nodePayload = @{ company_id = $companyId; header = "MVP launch critical path" } | ConvertTo-Json
+$nodeResp = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/v1/nodes" -ContentType "application/json" -Body $nodePayload
+$nodeResp | ConvertTo-Json -Depth 6
 
-curl -sS -X POST "http://localhost:8080/v1/nodes/$NODE_ID/information" \
-  -H 'content-type: application/json' \
-  -d "{\"company_id\":\"$COMPANY_ID\",\"type\":\"Status\",\"information\":\"In Progress\"}"
+$nodeId = $nodeResp.node_id
 
-OP_JSON=$(curl -sS -X POST http://localhost:8080/v1/operations \
-  -H 'content-type: application/json' \
-  -d "{\"company_id\":\"$COMPANY_ID\",\"node_id\":\"$NODE_ID\",\"status\":\"In Progress\",\"start_timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}")
+$infoPayload = @{ company_id = $companyId; type = "Status"; information = "In Progress" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "http://localhost:8080/v1/nodes/$nodeId/information" -ContentType "application/json" -Body $infoPayload | ConvertTo-Json -Depth 6
 
-echo "$OP_JSON"
-OP_ID=$(echo "$OP_JSON" | sed -n 's/.*"operation_id":"\([^"]*\)".*/\1/p')
+$opPayload = @{
+  company_id = $companyId
+  node_id = $nodeId
+  status = "In Progress"
+  start_timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+} | ConvertTo-Json
 
-curl -sS "http://localhost:8080/v1/operations/$OP_ID?company_id=$COMPANY_ID"
+$opResp = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/v1/operations" -ContentType "application/json" -Body $opPayload
+$opResp | ConvertTo-Json -Depth 6
+
+$opId = $opResp.operation_id
+Invoke-RestMethod -Method Get -Uri "http://localhost:8080/v1/operations/$opId?company_id=$companyId" | ConvertTo-Json -Depth 6
 ```
 
-## 6) ECS wiring (when ready)
+## 8) ECS wiring (when ready)
 
 Ensure ECS task env vars are present:
 - `DB_HOST`
@@ -86,8 +113,9 @@ Ensure ECS task env vars are present:
 - `DB_SSLMODE=require`
 - `APP_ENV=staging` or `APP_ENV=prod`
 
-## 7) MVP policy guardrails for enterprise pilots
+## 9) Safety guardrails for enterprise pilots
 
 - Never run pilot data in in-memory fallback mode.
 - Keep `APP_ENV=staging|prod` so DB failures are fail-fast.
 - Always include `company_id` in requests and query filters.
+- If you launch PowerShell as a new window, re-set env vars (they are per-session unless persisted).
