@@ -23,6 +23,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/v1/nodes", s.handleNodes)
 	mux.HandleFunc("/v1/nodes/", s.handleNodeSubresource)
+	mux.HandleFunc("/v1/node-relationships", s.handleNodeRelationships)
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
 	mux.HandleFunc("/v1/operations", s.handleOperations)
 	mux.HandleFunc("/v1/operations/", s.handleOperationByID)
@@ -87,7 +88,17 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_load_node")
 			return
 		}
-		writeJSON(w, http.StatusOK, item)
+		details, err := s.repo.GetNodeDetails(companyID, nodeID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "node_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_node")
+			return
+		}
+		details.Node = item
+		writeJSON(w, http.StatusOK, details)
 		return
 	}
 
@@ -124,6 +135,44 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeError(w, http.StatusNotFound, "not_found")
+}
+
+func (s *Server) handleNodeRelationships(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		CompanyID string `json:"company_id"`
+		NodeIDA   string `json:"node_id_a"`
+		NodeIDB   string `json:"node_id_b"`
+		APosition string `json:"a_position"`
+		BPosition string `json:"b_position"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.NodeIDA) == "" || strings.TrimSpace(req.NodeIDB) == "" {
+		writeError(w, http.StatusBadRequest, "company_id_node_ids_required")
+		return
+	}
+	validPositions := map[string]bool{"Parent": true, "Child": true, "Peer": true}
+	if !validPositions[req.APosition] || !validPositions[req.BPosition] {
+		writeError(w, http.StatusBadRequest, "invalid_relationship_position")
+		return
+	}
+
+	item, err := s.repo.CreateNodeRelationship(req.CompanyID, req.NodeIDA, req.NodeIDB, req.APosition, req.BPosition)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "node_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_create_node_relationship")
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
 }
 
 func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
