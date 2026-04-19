@@ -11,6 +11,16 @@ go run ./cmd/miraeopus-api
 
 Server starts on `:8080` by default.
 
+If you also want to use the UI, start the frontend in a second terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Then open the printed Vite URL (usually `http://localhost:5173`).
+
 ## Where env vars are stored
 
 This backend reads variables from your **process environment** at runtime (`os.Getenv`), not from a
