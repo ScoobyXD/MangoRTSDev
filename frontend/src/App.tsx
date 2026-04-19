@@ -6,13 +6,52 @@ type NodeInfoRecord = {
   information: string;
 };
 
-type NodeRelationshipRecord = {
-  node_relationship_id: string;
-  node_id_a: string;
-  node_id_b: string;
-  a_position: "Parent" | "Child" | "Peer";
-  b_position: "Parent" | "Child" | "Peer";
-};
+const INITIAL_WIDGETS: Widget[] = [
+  { id: "w-revenue", theme: "teal", kind: "revenue", x: 2, y: 1, w: 12, h: 9, title: "Revenue", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "w-users", theme: "orange", kind: "users", x: 14, y: 1, w: 14, h: 9, title: "Active Users", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+  { id: "w-alerts", theme: "orange", kind: "alerts", x: 30, y: 1, w: 12, h: 14, title: "Alerts", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+  { id: "w-tasks", theme: "teal", kind: "tasks", x: 2, y: 10, w: 10, h: 10, title: "Tasks", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "w-chart", theme: "white", kind: "chart", x: 12, y: 10, w: 16, h: 12, title: "Analytics", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  { id: "w-orders", theme: "orange", kind: "orders", x: 2, y: 20, w: 10, h: 10, title: "Recent Orders", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+  { id: "w-notifications", theme: "orange", kind: "notifications", x: 12, y: 22, w: 12, h: 10, title: "Notifications", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+  { id: "w-map", theme: "teal", kind: "map", x: 28, y: 15, w: 14, h: 17, title: "Map View", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "w-case-hub", theme: "white", kind: "case_hub", x: 24, y: 22, w: 18, h: 10, title: "Case Module", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  { id: "w-node-module", theme: "white", kind: "node_module", x: 2, y: 31, w: 18, h: 14, title: "Node Module", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+];
+
+interface ViewTab {
+  id: string;
+  name: string;
+  widgets: Widget[];
+}
+
+interface DashboardSnapshot {
+  tabs: ViewTab[];
+  activeTabId: string;
+  bgColor: string;
+  crossColor: string;
+  headerBgColor: string;
+  headerTextColor: string;
+  tabBgColor: string;
+  tabTextColor: string;
+}
+
+function clamp(v: number, lo: number, hi: number) {
+  if (lo > hi) return lo;
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function widgetsOverlap(a: Widget, b: Widget) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isColorway(value: unknown): value is ColorwayKey {
+  return typeof value === "string" && value in COLORWAYS;
+}
 
 type NodeSummary = {
   node_id: string;
