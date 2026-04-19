@@ -1,5 +1,11 @@
 # MangoOS AWS One-Shot Bootstrap (ECS + Aurora + S3 + SQS)
 
+Need the shortest path? See `docs/deploy-staging-step-by-step.md` for a simplified checklist and
+the helper scripts:
+
+- `scripts/release_staging.sh`
+- `scripts/release_staging.ps1`
+
 This folder is a **production-lean first pass** to deploy the architecture from `docs/2-week-plan.md` in one shot:
 
 - VPC with public/private subnets

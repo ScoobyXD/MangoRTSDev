@@ -11,6 +11,56 @@ go run ./cmd/miraeopus-api
 
 Server starts on `:8080` by default.
 
+## Where env vars are stored
+
+This backend reads variables from your **process environment** at runtime (`os.Getenv`), not from a
+database table and not from a committed config file by default.
+
+- If you set env vars in your current terminal session, they live only for that session.
+- If you set env vars with a user/system profile setting, they persist across sessions.
+
+Quick examples:
+
+### Windows PowerShell (current terminal only)
+
+```powershell
+$env:APP_ENV="staging"
+$env:DB_HOST="your-aurora-endpoint.rds.amazonaws.com"
+$env:DB_PORT="5432"
+$env:DB_USER="postgres"
+$env:DB_PASSWORD="your-password"
+$env:DB_NAME="postgres"
+$env:DB_SSLMODE="require"
+go run ./cmd/miraeopus-api
+```
+
+### macOS/Linux (current terminal only)
+
+```bash
+export APP_ENV=staging
+export DB_HOST=your-aurora-endpoint.rds.amazonaws.com
+export DB_PORT=5432
+export DB_USER=postgres
+export DB_PASSWORD=your-password
+export DB_NAME=postgres
+export DB_SSLMODE=require
+go run ./cmd/miraeopus-api
+```
+
+A template is provided at `backend/.env.example` so you can copy values in one place.
+Note: the app does **not** auto-load `.env`; you still need to export/set vars before `go run`.
+
+## Professional setup (startup/enterprise)
+
+Using PowerShell exports is fine for quick local runs, but not how you should run staging/prod.
+
+- **Local development**: use `backend/.env.example` as a template, then load from your shell profile or tool like `direnv`.
+- **Containers (ECS/Fargate)**: inject non-secret values as env vars and secrets (like `DB_PASSWORD`) from AWS Secrets Manager.
+- **Staging/Production**: keep secrets in a managed secret store, grant access via IAM task role, rotate credentials, and avoid manual terminal exports.
+
+This repo already follows that production pattern in Terraform task definitions (environment + secrets).
+See `infra/terraform/ecs.tf` and `docs/backend-production-config.md` for the exact approach.
+
 ## Database mode and safety behavior
 
 - `APP_ENV=dev` (default): if `DB_HOST` is missing/unreachable, backend can fall back to in-memory repo.
@@ -27,11 +77,16 @@ Required DB env vars when using PostgreSQL:
 
 `DB_HOST` must be the raw Aurora endpoint hostname (not prefixed with `host=`).
 
-If you ever see `sql: unknown driver "postgres"`, run:
+If you ever see `sql: unknown driver "postgres"`, the backend is being opened with the wrong
+driver name. This project uses the pgx stdlib SQL driver (`github.com/jackc/pgx/v5/stdlib`), so
+the driver passed to `sql.Open` must be `pgx`, not `postgres`.
+
+To verify your local checkout has dependencies and builds:
 
 ```bash
 cd backend
 go mod tidy
+go test ./...
 ```
 
 ## Bootstrap canonical schema

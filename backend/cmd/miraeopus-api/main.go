@@ -56,7 +56,7 @@ func buildRepository() (store.Repository, func()) {
 	sslMode := getenvDefault("DB_SSLMODE", "require")
 
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s", host, port, user, password, dbName, sslMode)
-	db, err := sql.Open("postgres", dsn)
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		if appEnv == "dev" || allowFallback {
 			log.Printf("failed to open postgres (%v), falling back to in-memory repository", err)
