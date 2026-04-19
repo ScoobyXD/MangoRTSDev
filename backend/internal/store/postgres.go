@@ -48,6 +48,84 @@ func (r *PostgresRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	return item, nil
 }
 
+func (r *PostgresRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error) {
+	node, err := r.GetNode(companyID, nodeID)
+	if err != nil {
+		return domain.NodeDetails{}, err
+	}
+
+	ctx := context.Background()
+	infoRows, err := r.db.QueryContext(ctx,
+		`select company_id, information_id, node_id, type::text, information, created_timestamp, updated_timestamp
+		 from node_information
+		 where company_id=$1 and node_id=$2
+		 order by created_timestamp asc`,
+		companyID, nodeID,
+	)
+	if err != nil {
+		return domain.NodeDetails{}, err
+	}
+	defer infoRows.Close()
+
+	information := make([]domain.NodeInformation, 0)
+	for infoRows.Next() {
+		var item domain.NodeInformation
+		if err := infoRows.Scan(
+			&item.CompanyID,
+			&item.InformationID,
+			&item.NodeID,
+			&item.Type,
+			&item.Information,
+			&item.CreatedTimestamp,
+			&item.UpdatedTimestamp,
+		); err != nil {
+			return domain.NodeDetails{}, err
+		}
+		information = append(information, item)
+	}
+	if err := infoRows.Err(); err != nil {
+		return domain.NodeDetails{}, err
+	}
+
+	relRows, err := r.db.QueryContext(ctx,
+		`select company_id, node_relationship_id, node_id_a, node_id_b, a_position::text, b_position::text, created_timestamp
+		 from node_relationships
+		 where company_id=$1 and (node_id_a=$2 or node_id_b=$2)
+		 order by created_timestamp asc`,
+		companyID, nodeID,
+	)
+	if err != nil {
+		return domain.NodeDetails{}, err
+	}
+	defer relRows.Close()
+
+	relationships := make([]domain.NodeRelationship, 0)
+	for relRows.Next() {
+		var item domain.NodeRelationship
+		if err := relRows.Scan(
+			&item.CompanyID,
+			&item.NodeRelationshipID,
+			&item.NodeIDA,
+			&item.NodeIDB,
+			&item.APosition,
+			&item.BPosition,
+			&item.CreatedTimestamp,
+		); err != nil {
+			return domain.NodeDetails{}, err
+		}
+		relationships = append(relationships, item)
+	}
+	if err := relRows.Err(); err != nil {
+		return domain.NodeDetails{}, err
+	}
+
+	return domain.NodeDetails{
+		Node:          node,
+		Information:   information,
+		Relationships: relationships,
+	}, nil
+}
+
 func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, information string) (domain.NodeInformation, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -94,6 +172,59 @@ func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, informati
 
 	if err := tx.Commit(); err != nil {
 		return domain.NodeInformation{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.NodeRelationship{}, err
+	}
+	defer tx.Rollback()
+
+	for _, candidate := range []string{nodeIDA, nodeIDB} {
+		var exists bool
+		if err := tx.QueryRowContext(ctx,
+			`select exists(select 1 from nodes where company_id=$1 and node_id=$2)`,
+			companyID, candidate,
+		).Scan(&exists); err != nil {
+			return domain.NodeRelationship{}, err
+		}
+		if !exists {
+			return domain.NodeRelationship{}, ErrNotFound
+		}
+	}
+
+	item := domain.NodeRelationship{
+		CompanyID:          companyID,
+		NodeRelationshipID: newUUIDv7String(),
+		NodeIDA:            nodeIDA,
+		NodeIDB:            nodeIDB,
+		APosition:          aPosition,
+		BPosition:          bPosition,
+	}
+	if err := tx.QueryRowContext(ctx,
+		`insert into node_relationships
+		 (company_id, node_relationship_id, node_id_a, node_id_b, a_position, b_position, created_timestamp)
+		 values ($1, $2, $3, $4, $5::node_relationship_position, $6::node_relationship_position, now())
+		 returning company_id, node_relationship_id, node_id_a, node_id_b, a_position::text, b_position::text, created_timestamp`,
+		item.CompanyID, item.NodeRelationshipID, item.NodeIDA, item.NodeIDB, item.APosition, item.BPosition,
+	).Scan(
+		&item.CompanyID,
+		&item.NodeRelationshipID,
+		&item.NodeIDA,
+		&item.NodeIDB,
+		&item.APosition,
+		&item.BPosition,
+		&item.CreatedTimestamp,
+	); err != nil {
+		return domain.NodeRelationship{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return domain.NodeRelationship{}, err
 	}
 	return item, nil
 }

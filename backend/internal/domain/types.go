@@ -9,6 +9,16 @@ type Node struct {
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
+type NodeRelationship struct {
+	CompanyID          string    `json:"company_id"`
+	NodeRelationshipID string    `json:"node_relationship_id"`
+	NodeIDA            string    `json:"node_id_a"`
+	NodeIDB            string    `json:"node_id_b"`
+	APosition          string    `json:"a_position"`
+	BPosition          string    `json:"b_position"`
+	CreatedTimestamp   time.Time `json:"created_timestamp"`
+}
+
 type NodeInformation struct {
 	CompanyID        string    `json:"company_id"`
 	InformationID    string    `json:"information_id"`
@@ -17,6 +27,12 @@ type NodeInformation struct {
 	Information      string    `json:"information"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type NodeDetails struct {
+	Node          Node               `json:"node"`
+	Information   []NodeInformation  `json:"information"`
+	Relationships []NodeRelationship `json:"relationships"`
 }
 
 type LogicGate struct {

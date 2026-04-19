@@ -14,7 +14,9 @@ var ErrNotFound = errors.New("not found")
 type Repository interface {
 	CreateNode(companyID, header string) (domain.Node, error)
 	GetNode(companyID, nodeID string) (domain.Node, error)
+	GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error)
 	AddNodeInformation(companyID, nodeID, infoType, information string) (domain.NodeInformation, error)
+	CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error)
 	CreateLogicGate(companyID, header string) (domain.LogicGate, error)
 	CreateOperation(in CreateOperationInput) (domain.Operation, error)
 	GetOperation(companyID, operationID string) (domain.Operation, error)
@@ -33,6 +35,7 @@ type MemoryRepo struct {
 	mu         sync.RWMutex
 	nodes      map[string]domain.Node
 	nodeInfo   map[string][]domain.NodeInformation
+	nodeRels   map[string][]domain.NodeRelationship
 	logicGates map[string]domain.LogicGate
 	operations map[string]domain.Operation
 }
@@ -41,6 +44,7 @@ func NewMemoryRepo() *MemoryRepo {
 	return &MemoryRepo{
 		nodes:      map[string]domain.Node{},
 		nodeInfo:   map[string][]domain.NodeInformation{},
+		nodeRels:   map[string][]domain.NodeRelationship{},
 		logicGates: map[string]domain.LogicGate{},
 		operations: map[string]domain.Operation{},
 	}
@@ -98,6 +102,61 @@ func (r *MemoryRepo) AddNodeInformation(companyID, nodeID, infoType, information
 		return r.nodeInfo[k][i].CreatedTimestamp.Before(r.nodeInfo[k][j].CreatedTimestamp)
 	})
 	return item, nil
+}
+
+func (r *MemoryRepo) CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.nodes[key(companyID, nodeIDA)]; !ok {
+		return domain.NodeRelationship{}, ErrNotFound
+	}
+	if _, ok := r.nodes[key(companyID, nodeIDB)]; !ok {
+		return domain.NodeRelationship{}, ErrNotFound
+	}
+
+	item := domain.NodeRelationship{
+		CompanyID:          companyID,
+		NodeRelationshipID: newUUIDv7String(),
+		NodeIDA:            nodeIDA,
+		NodeIDB:            nodeIDB,
+		APosition:          aPosition,
+		BPosition:          bPosition,
+		CreatedTimestamp:   time.Now().UTC(),
+	}
+	r.nodeRels[companyID] = append(r.nodeRels[companyID], item)
+	return item, nil
+}
+
+func (r *MemoryRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	node, ok := r.nodes[key(companyID, nodeID)]
+	if !ok {
+		return domain.NodeDetails{}, ErrNotFound
+	}
+
+	info := append([]domain.NodeInformation{}, r.nodeInfo[key(companyID, nodeID)]...)
+	sort.Slice(info, func(i, j int) bool {
+		return info[i].CreatedTimestamp.Before(info[j].CreatedTimestamp)
+	})
+
+	relationships := make([]domain.NodeRelationship, 0)
+	for _, rel := range r.nodeRels[companyID] {
+		if rel.NodeIDA == nodeID || rel.NodeIDB == nodeID {
+			relationships = append(relationships, rel)
+		}
+	}
+	sort.Slice(relationships, func(i, j int) bool {
+		return relationships[i].CreatedTimestamp.Before(relationships[j].CreatedTimestamp)
+	})
+
+	return domain.NodeDetails{
+		Node:          node,
+		Information:   info,
+		Relationships: relationships,
+	}, nil
 }
 
 func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate, error) {
