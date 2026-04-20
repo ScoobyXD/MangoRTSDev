@@ -119,6 +119,7 @@ type NodeDetails = {
 type NodeDirection = "left" | "right" | "top" | "bottom";
 type NodePosition = { x: number; y: number };
 type RelationshipAnchor = { from: NodeDirection; to: NodeDirection };
+type NodeCanvasState = { zoom: number; pan: { x: number; y: number }; selectedNodeID: string; nodePositions: Record<string, NodePosition> };
 
 const INFO_TYPES = [
   "Text box",
@@ -135,6 +136,7 @@ const INFO_TYPES = [
 const NODE_W = 148;
 const NODE_H = 96;
 const MINI_GRID = 12;
+const SESSION_NODE_CANVAS_STATE = new Map<string, NodeCanvasState>();
 
 function trimOrEmpty(value: string): string {
   return value.trim();
@@ -162,10 +164,11 @@ function relationFromDirection(direction: NodeDirection): { a: "Parent" | "Child
   return { a: "Child", b: "Parent" };
 }
 
-export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
+export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
-  const canvasStateKey = `node-canvas-state-v1:${companyID}`;
+  const scopedCanvasStateKey = widgetId ? `node-canvas-state-v3:${companyID}:${widgetId}` : `node-canvas-state-v3:${companyID}:default`;
+  const legacyCanvasStateKey = `node-canvas-state-v2:${companyID}`;
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1000, height: 560 });
@@ -189,6 +192,13 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
   const [infoDraft, setInfoDraft] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [detailsPanelNodeID, setDetailsPanelNodeID] = useState<string>("");
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
+  const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeID: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[] } | null>(null);
+  const [panelRect, setPanelRect] = useState({ x: 0, y: 10, width: 340, height: 360 });
+  const [panelDrag, setPanelDrag] = useState<{ pointerID: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const [panelResize, setPanelResize] = useState<{ pointerID: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
 
   const [dragState, setDragState] = useState<{ nodeIDs: string[]; pointerID: number; offsets: Record<string, { x: number; y: number }> } | null>(null);
   const [panState, setPanState] = useState<{ pointerID: number; startMouseX: number; startMouseY: number; startPanX: number; startPanY: number } | null>(null);
@@ -200,10 +210,23 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     active: false,
   });
   const [selectionPointerID, setSelectionPointerID] = useState<number | null>(null);
+  const restoredSelectionRef = useRef<string>("");
 
   useEffect(() => {
+    const cached = SESSION_NODE_CANVAS_STATE.get(scopedCanvasStateKey);
+    if (cached) {
+      setZoom(clamp(cached.zoom, 0.45, 2.7));
+      setPan(cached.pan);
+      setPanInitialized(true);
+      restoredSelectionRef.current = cached.selectedNodeID;
+      setSelectedNodeID(cached.selectedNodeID);
+      setSelectedNodeIDs(cached.selectedNodeID ? new Set([cached.selectedNodeID]) : new Set());
+      setNodePositions(cached.nodePositions);
+      setRestoredViewport(true);
+      return;
+    }
     try {
-      const raw = localStorage.getItem(canvasStateKey);
+      const raw = localStorage.getItem(scopedCanvasStateKey) ?? localStorage.getItem(legacyCanvasStateKey);
       if (!raw) {
         setRestoredViewport(true);
         return;
@@ -211,6 +234,7 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
       const parsed = JSON.parse(raw) as {
         zoom?: number;
         pan?: { x?: number; y?: number };
+        selectedNodeID?: string;
         nodePositions?: Record<string, { x?: number; y?: number }>;
       };
       if (typeof parsed.zoom === "number" && Number.isFinite(parsed.zoom)) {
@@ -219,6 +243,11 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
       if (parsed.pan && typeof parsed.pan.x === "number" && typeof parsed.pan.y === "number") {
         setPan({ x: parsed.pan.x, y: parsed.pan.y });
         setPanInitialized(true);
+      }
+      if (typeof parsed.selectedNodeID === "string") {
+        restoredSelectionRef.current = parsed.selectedNodeID;
+        setSelectedNodeID(parsed.selectedNodeID);
+        setSelectedNodeIDs(parsed.selectedNodeID ? new Set([parsed.selectedNodeID]) : new Set());
       }
       if (parsed.nodePositions && typeof parsed.nodePositions === "object") {
         const sanitized: Record<string, NodePosition> = {};
@@ -238,7 +267,7 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     } finally {
       setRestoredViewport(true);
     }
-  }, [canvasStateKey]);
+  }, [legacyCanvasStateKey, scopedCanvasStateKey]);
 
   const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const response = await fetch(`${apiBase}${path}`, {
@@ -273,15 +302,20 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
       const payload = await requestJSON<{ nodes: NodeRecord[] }>(`/v1/nodes?company_id=${encodeURIComponent(companyID)}`);
       const nextNodes = payload.nodes ?? [];
       setNodes(nextNodes);
-      if (!selectedNodeID && nextNodes.length > 0) {
-        setSelectedNodeID(nextNodes[0].node_id);
-        setSelectedNodeIDs(new Set([nextNodes[0].node_id]));
+
+      const hasSelection = selectedNodeID && nextNodes.some((item) => item.node_id === selectedNodeID);
+      if (hasSelection) return;
+
+      const restoredSelection = restoredSelectionRef.current;
+      if (restoredSelection && nextNodes.some((item) => item.node_id === restoredSelection)) {
+        setSelectedNodeID(restoredSelection);
+        setSelectedNodeIDs(new Set([restoredSelection]));
+        return;
       }
-      if (selectedNodeID && !nextNodes.some((item) => item.node_id === selectedNodeID)) {
-        const fallback = nextNodes[0]?.node_id ?? "";
-        setSelectedNodeID(fallback);
-        setSelectedNodeIDs(fallback ? new Set([fallback]) : new Set());
-      }
+
+      const fallback = nextNodes[0]?.node_id ?? "";
+      setSelectedNodeID(fallback);
+      setSelectedNodeIDs(fallback ? new Set([fallback]) : new Set());
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_load_nodes");
     } finally {
@@ -339,6 +373,11 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
   }, [selectedNodeID]);
 
   useEffect(() => {
+    if (!detailsPanelNodeID) return;
+    void loadDetails(detailsPanelNodeID);
+  }, [detailsPanelNodeID]);
+
+  useEffect(() => {
     const resize = () => {
       const bounds = viewportRef.current?.getBoundingClientRect();
       if (!bounds) return;
@@ -360,11 +399,13 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
   useEffect(() => {
     if (!restoredViewport) return;
     try {
-      localStorage.setItem(canvasStateKey, JSON.stringify({ zoom, pan, nodePositions }));
+      const nextState = { zoom, pan, selectedNodeID, nodePositions };
+      SESSION_NODE_CANVAS_STATE.set(scopedCanvasStateKey, nextState);
+      localStorage.setItem(scopedCanvasStateKey, JSON.stringify(nextState));
     } catch {
       // ignore local storage quota/security errors
     }
-  }, [canvasStateKey, restoredViewport, zoom, pan, nodePositions]);
+  }, [scopedCanvasStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions]);
 
   useEffect(() => {
     setNodePositions((previous) => {
@@ -489,7 +530,7 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     };
   }, [selectionPointerID, selectionBox, nodes, nodePositions, zoom, pan.x, pan.y]);
 
-  const createNode = async (header: string): Promise<NodeRecord | null> => {
+  const createNode = async (header: string, worldPos?: { x: number; y: number }): Promise<NodeRecord | null> => {
     const value = trimOrEmpty(header);
     if (!value) return null;
     setError("");
@@ -501,6 +542,15 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
       await loadNodes();
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
+      if (worldPos) {
+        setNodePositions((previous) => ({
+          ...previous,
+          [node.node_id]: {
+            x: clamp(snapToGrid(worldPos.x - NODE_W / 2), 0, WORLD_W - NODE_W),
+            y: clamp(snapToGrid(worldPos.y - NODE_H / 2), 0, WORLD_H - NODE_H),
+          },
+        }));
+      }
       return node;
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node");
@@ -516,11 +566,7 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     if (!node) return;
 
     try {
-      const pair = direction === "left" || direction === "right"
-        ? { a: "Peer", b: "Peer" }
-        : direction === "top"
-          ? { a: "Child", b: "Parent" }
-          : { a: "Parent", b: "Child" };
+      const pair = relationFromDirection(direction);
 
       const relationship = await requestJSON<NodeRelationship>("/v1/node-relationships", {
         method: "POST",
@@ -558,29 +604,30 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
       await loadGraphRelationships([...nodes, node]);
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
+      setDetailsPanelNodeID(node.node_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node_relationship");
     }
   };
 
-  const deleteSelectedNode = async () => {
-    if (!selectedNodeID) return;
+  const deleteNode = async (nodeID: string) => {
+    if (!nodeID) return;
     setError("");
     try {
-      await requestJSON<{ status: string }>(`/v1/nodes/${selectedNodeID}?company_id=${encodeURIComponent(companyID)}`, {
+      await requestJSON<{ status: string }>(`/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}`, {
         method: "DELETE",
       });
-      const removedID = selectedNodeID;
-      setDetails(null);
+      setDetails((current) => (current?.node.node_id === nodeID ? null : current));
+      if (detailsPanelNodeID === nodeID) setDetailsPanelNodeID("");
       await loadNodes();
       setSelectedNodeIDs((previous) => {
         const next = new Set(previous);
-        next.delete(removedID);
+        next.delete(nodeID);
         return next;
       });
       setNodePositions((previous) => {
         const next = { ...previous };
-        delete next[removedID];
+        delete next[nodeID];
         return next;
       });
     } catch (err) {
@@ -588,11 +635,34 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     }
   };
 
-  const addInformation = async () => {
-    if (!selectedNodeID || !trimOrEmpty(infoDraft)) return;
+  const deleteNodes = async (nodeIDs: string[]) => {
+    const unique = Array.from(new Set(nodeIDs.filter(Boolean)));
+    if (unique.length === 0) return;
     setError("");
     try {
-      await requestJSON<NodeInformation>(`/v1/nodes/${selectedNodeID}/information`, {
+      await Promise.all(unique.map((nodeID) => requestJSON<{ status: string }>(`/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}`, {
+        method: "DELETE",
+      })));
+      setDetails((current) => (current && unique.includes(current.node.node_id) ? null : current));
+      if (detailsPanelNodeID && unique.includes(detailsPanelNodeID)) setDetailsPanelNodeID("");
+      await loadNodes();
+      setSelectedNodeID("");
+      setSelectedNodeIDs(new Set());
+      setNodePositions((previous) => {
+        const next = { ...previous };
+        for (const id of unique) delete next[id];
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_delete_node");
+    }
+  };
+
+  const addInformation = async (nodeID: string) => {
+    if (!nodeID || !trimOrEmpty(infoDraft)) return;
+    setError("");
+    try {
+      await requestJSON<NodeInformation>(`/v1/nodes/${nodeID}/information`, {
         method: "POST",
         body: JSON.stringify({
           company_id: companyID,
@@ -601,19 +671,66 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
         }),
       });
       setInfoDraft("");
-      await loadDetails(selectedNodeID);
+      await loadDetails(nodeID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_add_node_information");
     }
   };
 
-  const selectedNode = useMemo(() => nodes.find((item) => item.node_id === selectedNodeID) ?? null, [nodes, selectedNodeID]);
+  useEffect(() => {
+    if (!panelDrag) return;
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== panelDrag.pointerID || !viewportRef.current) return;
+      const dx = event.clientX - panelDrag.startX;
+      const dy = event.clientY - panelDrag.startY;
+      const bounds = viewportRef.current.getBoundingClientRect();
+      const maxX = Math.max(0, bounds.width - panelRect.width - 8);
+      const maxY = Math.max(0, bounds.height - 56);
+      setPanelRect((previous) => ({ ...previous, x: clamp(panelDrag.originX + dx, 0, maxX), y: clamp(panelDrag.originY + dy, 8, maxY) }));
+    };
+    const onUp = (event: PointerEvent) => { if (event.pointerId === panelDrag.pointerID) setPanelDrag(null); };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [panelDrag, panelRect.width]);
 
+  useEffect(() => {
+    if (!panelResize) return;
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== panelResize.pointerID || !viewportRef.current) return;
+      const bounds = viewportRef.current.getBoundingClientRect();
+      const nextW = clamp(panelResize.originW + (event.clientX - panelResize.startX), 260, Math.max(260, bounds.width - panelRect.x - 8));
+      const nextH = clamp(panelResize.originH + (event.clientY - panelResize.startY), 220, Math.max(220, bounds.height - panelRect.y - 8));
+      setPanelRect((previous) => ({ ...previous, width: nextW, height: nextH }));
+    };
+    const onUp = (event: PointerEvent) => { if (event.pointerId === panelResize.pointerID) setPanelResize(null); };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [panelResize, panelRect.x, panelRect.y]);
+
+  const detailsPanelNode = useMemo(() => nodes.find((item) => item.node_id === detailsPanelNodeID) ?? null, [nodes, detailsPanelNodeID]);
   const nodeByID = useMemo(() => Object.fromEntries(nodes.map((node) => [node.node_id, node])), [nodes]);
+
+  useEffect(() => {
+    if (!detailsPanelNode || !viewportRef.current) return;
+    const bounds = viewportRef.current.getBoundingClientRect();
+    setPanelRect((previous) => ({
+      ...previous,
+      x: previous.x === 0 ? Math.max(0, bounds.width - previous.width - 12) : clamp(previous.x, 0, Math.max(0, bounds.width - previous.width - 8)),
+      y: clamp(previous.y, 8, Math.max(8, bounds.height - 56)),
+    }));
+  }, [detailsPanelNode]);
 
   const getAnchorPoint = (nodeID: string, side: NodeDirection) => {
     const pos = nodePositions[nodeID];
-    if (!pos) return { x: 0, y: 0 };
+    if (!pos) return null;
     if (side === "left") return { x: pos.x, y: pos.y + NODE_H / 2 };
     if (side === "right") return { x: pos.x + NODE_W, y: pos.y + NODE_H / 2 };
     if (side === "top") return { x: pos.x + NODE_W / 2, y: pos.y };
@@ -632,11 +749,12 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
 
   const connectionPaths = useMemo(() => {
     return relationships
-      .filter((rel) => nodeByID[rel.node_id_a] && nodeByID[rel.node_id_b])
+      .filter((rel) => nodeByID[rel.node_id_a] && nodeByID[rel.node_id_b] && nodePositions[rel.node_id_a] && nodePositions[rel.node_id_b])
       .map((rel) => {
         const anchor = inferAnchor(rel);
         const from = getAnchorPoint(rel.node_id_a, anchor.from);
         const to = getAnchorPoint(rel.node_id_b, anchor.to);
+        if (!from || !to) return null;
         const lane = MINI_GRID * 2;
         const fromOut = anchor.from === "left" ? { x: from.x - lane, y: from.y }
           : anchor.from === "right" ? { x: from.x + lane, y: from.y }
@@ -650,21 +768,18 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
         const cornerA = horizontalFirst ? { x: toIn.x, y: fromOut.y } : { x: fromOut.x, y: toIn.y };
         const points = [from, fromOut, cornerA, toIn, to].map((point) => ({ x: snapToGrid(point.x), y: snapToGrid(point.y) }));
         return { id: rel.node_relationship_id, points };
-      });
+      })
+      .filter((path): path is { id: string; points: { x: number; y: number }[] } => !!path);
   }, [relationships, nodeByID, nodePositions, relationshipAnchors]);
 
   return (
-    <div style={{ display: "grid", gap: 8, fontSize: 11, height: "100%", gridTemplateRows: "auto auto 1fr auto auto" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ fontSize: 12, textTransform: "uppercase", fontWeight: 700 }}>[ Node Canvas ]</div>
-        <div style={{ fontSize: 10, opacity: 0.75 }}>Drag to pan canvas · mouse wheel to zoom · Ctrl+drag to box-select.</div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6 }}>
-        <input value={newNodeHeader} onChange={(e) => setNewNodeHeader(e.target.value)} placeholder="Create node header" />
-        <button onClick={() => { void createNode(newNodeHeader); setNewNodeHeader(""); }}>Add</button>
-      </div>
-
+    <div
+      style={{ display: "grid", gap: 6, fontSize: 11, height: "100%", gridTemplateRows: "1fr" }}
+      onPointerDownCapture={() => {
+        setContextMenu(null);
+        setNodeContextMenu(null);
+      }}
+    >
       <div
         ref={viewportRef}
         style={{
@@ -673,7 +788,20 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
           borderRadius: 10,
           overflow: "hidden",
           minHeight: 560,
+          height: "100%",
           backgroundColor: "rgba(255,255,255,0.78)",
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setNodeContextMenu(null);
+          if (!viewportRef.current) return;
+          const bounds = viewportRef.current.getBoundingClientRect();
+          const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
+          const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
+          const worldX = clamp((localX - pan.x) / zoom, 0, WORLD_W);
+          const worldY = clamp((localY - pan.y) / zoom, 0, WORLD_H);
+          setContextMenu({ x: localX, y: localY, worldX, worldY });
         }}
         onWheel={(event) => {
           event.preventDefault();
@@ -702,8 +830,10 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
             return;
           }
 
-          setSelectedNodeIDs(new Set());
-          setSelectedNodeID("");
+          if (!(event.target as HTMLElement).closest("[data-node-card='true']")) {
+            setSelectedNodeIDs(new Set());
+            setSelectedNodeID("");
+          }
           setPanState({
             pointerID: event.pointerId,
             startMouseX: event.clientX,
@@ -750,6 +880,7 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
             return (
               <div
                 key={node.node_id}
+                data-node-card="true"
                 style={{
                   position: "absolute",
                   left: position.x,
@@ -767,6 +898,25 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
                   userSelect: "none",
                   cursor: dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab",
                   zIndex: isPrimary ? 5 : 4,
+                }}
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                  setDetailsPanelNodeID(node.node_id);
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const bounds = viewportRef.current?.getBoundingClientRect();
+                  if (!bounds) return;
+                  const nextIDs = selectedNodeIDs.has(node.node_id) ? Array.from(selectedNodeIDs) : [node.node_id];
+                  setSelectedNodeID(node.node_id);
+                  setSelectedNodeIDs(new Set(nextIDs));
+                  setContextMenu(null);
+                  setNodeContextMenu({
+                    x: clamp(event.clientX - bounds.left, 0, bounds.width),
+                    y: clamp(event.clientY - bounds.top, 0, bounds.height),
+                    nodeID: node.node_id,
+                  });
                 }}
                 onPointerDown={(event) => {
                   event.stopPropagation();
@@ -798,7 +948,7 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
                   <div>Info: {details?.node.node_id === node.node_id ? details.information.length : "-"}</div>
                   <div>Rel: {details?.node.node_id === node.node_id ? details.relationships.length : "-"}</div>
                 </div>
-                <div style={{ padding: "4px 8px", fontSize: 9, opacity: 0.7 }}>drag to move</div>
+                <div style={{ padding: "4px 8px", fontSize: 9, opacity: 0.7 }}>drag to move · double-click for details</div>
 
                 {([
                   ["left", { left: -10, top: "50%", transform: "translate(-50%, -50%)" }],
@@ -854,12 +1004,145 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
             }}
           />
         )}
+
+        {contextMenu && (
+          <div
+            style={{
+              position: "absolute",
+              left: contextMenu.x,
+              top: contextMenu.y,
+              transform: "translate(8px, 8px)",
+              background: "rgba(255,255,255,0.95)",
+              border: `1px solid ${accent}`,
+              borderRadius: 8,
+              padding: 4,
+              zIndex: 40,
+              boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <button
+              style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px" }}
+              onClick={() => {
+                const title = trimOrEmpty(newNodeHeader) || "New node";
+                void createNode(title, { x: contextMenu.worldX, y: contextMenu.worldY });
+                if (!trimOrEmpty(newNodeHeader)) setNewNodeHeader("");
+                setContextMenu(null);
+              }}
+            >
+              Create new node
+            </button>
+          </div>
+        )}
+
+        {nodeContextMenu && (
+          <div
+            style={{
+              position: "absolute",
+              left: nodeContextMenu.x,
+              top: nodeContextMenu.y,
+              transform: "translate(8px, 8px)",
+              background: "rgba(255,255,255,0.95)",
+              border: `1px solid ${accent}`,
+              borderRadius: 8,
+              padding: 4,
+              zIndex: 41,
+              boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
+              display: "grid",
+              gap: 2,
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", textAlign: "left" }} onClick={() => { setDetailsPanelNodeID(nodeContextMenu.nodeID); setNodeContextMenu(null); }}>
+              Edit node
+            </button>
+            <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", color: "#a20026", textAlign: "left" }} onClick={() => { const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID]; setConfirmDelete({ nodeIDs: ids }); setNodeContextMenu(null); }}>
+              Delete node
+            </button>
+          </div>
+        )}
+
+        {!!detailsPanelNode && (
+          <div
+            style={{
+              position: "absolute",
+              top: panelRect.y,
+              left: panelRect.x,
+              width: panelRect.width,
+              height: panelRect.height,
+              overflow: "auto",
+              zIndex: 35,
+              borderRadius: 10,
+              border: `1px solid ${accent}`,
+              background: "rgba(255,255,255,0.06)",
+              backdropFilter: "blur(16px) saturate(130%)",
+              boxShadow: "0 12px 34px rgba(0,0,0,0.18), inset 0 0 0 1px rgba(255,255,255,0.35)",
+              padding: 10,
+              display: "grid",
+              gap: 8,
+            }}
+          >
+            <div
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, cursor: "move" }}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                setPanelDrag({ pointerID: event.pointerId, startX: event.clientX, startY: event.clientY, originX: panelRect.x, originY: panelRect.y });
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase" }}>{detailsPanelNode.header}</div>
+              <button onClick={() => setDetailsPanelNodeID("")} style={{ border: `1px solid ${accent}`, background: "#fff", borderRadius: 6, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ fontSize: 10, opacity: 0.8 }}>ID: {detailsPanelNode.node_id}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 6 }}>
+              <input value={infoDraft} onChange={(e) => setInfoDraft(e.target.value)} placeholder="Add node information" />
+              <select value={infoType} onChange={(e) => setInfoType(e.target.value as (typeof INFO_TYPES)[number])}>
+                {INFO_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+              </select>
+              <button onClick={() => { void addInformation(detailsPanelNode.node_id); }}>Info</button>
+            </div>
+            <button onClick={() => { void deleteNode(detailsPanelNode.node_id); }} style={{ justifySelf: "start" }}>Delete node</button>
+            {loading && <div style={{ ...divider }}>Syncing with API...</div>}
+            {error && <div style={{ ...divider, color: "#b00020" }}>Error: {error}</div>}
+            <div>
+              <div style={{ ...divider, fontSize: 12 }}>[ relationships ]</div>
+              <div style={{ display: "grid", gap: 2, maxHeight: 110, overflow: "auto" }}>
+                {(details?.node.node_id === detailsPanelNode.node_id ? details.relationships : []).length === 0
+                  ? <div style={{ ...divider }}>No relationships</div>
+                  : (details?.relationships ?? []).map((rel) => (
+                    <div key={rel.node_relationship_id} style={{ ...divider, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {rel.node_id_a.slice(0, 6)}({rel.a_position}) → {rel.node_id_b.slice(0, 6)}({rel.b_position})
+                    </div>
+                  ))}
+              </div>
+            </div>
+            <div>
+              <div style={{ ...divider, fontSize: 12 }}>[ information ]</div>
+              <div style={{ display: "grid", gap: 2, maxHeight: 130, overflow: "auto" }}>
+                {(details?.node.node_id === detailsPanelNode.node_id ? details.information : []).length === 0
+                  ? <div style={{ ...divider }}>No information</div>
+                  : (details?.information ?? []).map((info) => (
+                    <div key={info.information_id} style={{ ...divider, whiteSpace: "normal", overflowWrap: "anywhere" }}>
+                      {info.type}: {info.information}
+                    </div>
+                  ))}
+              </div>
+            </div>
+            <div
+              style={{ position: "absolute", right: 2, bottom: 2, width: 12, height: 12, cursor: "nwse-resize", borderRight: `2px solid ${accent}`, borderBottom: `2px solid ${accent}` }}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                setPanelResize({ pointerID: event.pointerId, startX: event.clientX, startY: event.clientY, originW: panelRect.width, originH: panelRect.height });
+              }}
+            />
+          </div>
+        )}
+
         {selectedNodeIDs.size > 1 && !selectionBox.active && (
           <div
             style={{
               position: "absolute",
               top: 10,
-              right: 10,
+              left: 10,
               zIndex: 30,
               background: "rgba(0,0,0,0.75)",
               color: "#fff",
@@ -871,56 +1154,18 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
             Group selected: {selectedNodeIDs.size}
           </div>
         )}
-      </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 200px) 1fr auto auto", gap: 6 }}>
-        <select value={selectedNodeID} onChange={(e) => { setSelectedNodeID(e.target.value); setSelectedNodeIDs(new Set([e.target.value])); }}>
-          <option value="">Select node</option>
-          {nodes.map((item) => (
-            <option key={item.node_id} value={item.node_id}>{item.header}</option>
-          ))}
-        </select>
-        <input value={infoDraft} onChange={(e) => setInfoDraft(e.target.value)} placeholder="Add selected-node information" disabled={!selectedNodeID} />
-        <select value={infoType} onChange={(e) => setInfoType(e.target.value as (typeof INFO_TYPES)[number])} disabled={!selectedNodeID}>
-          {INFO_TYPES.map((type) => (
-            <option key={type} value={type}>{type}</option>
-          ))}
-        </select>
-        <button onClick={() => { void addInformation(); }} disabled={!selectedNodeID}>Info</button>
-      </div>
-
-      <div style={{ display: "grid", gap: 6 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontSize: 10, opacity: 0.8 }}>Company: {companyID} · Zoom: {(zoom * 100).toFixed(0)}%</div>
-          {selectedNode && <button onClick={() => { void deleteSelectedNode(); }}>Delete “{selectedNode.header}”</button>}
-        </div>
-
-        {loading && <div style={{ ...divider }}>Syncing with API...</div>}
-        {error && <div style={{ ...divider, color: "#b00020" }}>Error: {error}</div>}
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <div>
-            <div style={{ ...divider, fontSize: 12 }}>[ relationships ]</div>
-            <div style={{ display: "grid", gap: 2, maxHeight: 86, overflow: "auto" }}>
-              {(details?.relationships ?? []).length === 0 ? <div style={{ ...divider }}>No relationships</div> : details?.relationships.map((rel) => (
-                <div key={rel.node_relationship_id} style={{ ...divider, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {rel.node_id_a.slice(0, 6)}({rel.a_position}) → {rel.node_id_b.slice(0, 6)}({rel.b_position})
-                </div>
-              ))}
+        {confirmDelete && (
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 60, display: "grid", placeItems: "center" }}>
+            <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: `1px solid ${accent}`, background: "rgba(255,255,255,0.92)", padding: 12, display: "grid", gap: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 700 }}>Are you sure you want to delete {confirmDelete.nodeIDs.length} node{confirmDelete.nodeIDs.length === 1 ? "" : "s"}?</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <button onClick={() => { void deleteNodes(confirmDelete.nodeIDs); setConfirmDelete(null); }} style={{ border: `1px solid ${accent}`, background: "#d8fff6", cursor: "pointer", fontWeight: 700 }}>Yes</button>
+                <button onClick={() => setConfirmDelete(null)} style={{ border: `1px solid ${accent}`, background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
+              </div>
             </div>
           </div>
-
-          <div>
-            <div style={{ ...divider, fontSize: 12 }}>[ information ]</div>
-            <div style={{ display: "grid", gap: 2, maxHeight: 86, overflow: "auto" }}>
-              {(details?.information ?? []).length === 0 ? <div style={{ ...divider }}>No information</div> : details?.information.map((info) => (
-                <div key={info.information_id} style={{ ...divider, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {info.type}: {info.information}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
