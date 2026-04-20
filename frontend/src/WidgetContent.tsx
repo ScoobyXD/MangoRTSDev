@@ -151,6 +151,15 @@ function snapToGrid(value: number): number {
   return Math.round(value / MINI_GRID) * MINI_GRID;
 }
 
+function safeContains(container: HTMLElement | null, target: EventTarget | null): boolean {
+  if (!container || !target || !(target instanceof Node)) return false;
+  try {
+    return container.contains(target);
+  } catch {
+    return false;
+  }
+}
+
 function oppositeSide(direction: NodeDirection): NodeDirection {
   if (direction === "left") return "right";
   if (direction === "right") return "left";
@@ -533,8 +542,12 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   useEffect(() => {
     const onWindowPointerDown = () => {
-      setContextMenu(null);
-      setNodeContextMenu(null);
+      try {
+        setContextMenu(null);
+        setNodeContextMenu(null);
+      } catch {
+        // defensive no-op to avoid global handler crashes
+      }
     };
     window.addEventListener("pointerdown", onWindowPointerDown, true);
     return () => window.removeEventListener("pointerdown", onWindowPointerDown, true);
@@ -542,9 +555,12 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   useEffect(() => {
     const onWindowPointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && viewportRef.current?.contains(target)) return;
-      setCanvasActive(false);
+      try {
+        if (safeContains(viewportRef.current, event.target)) return;
+        setCanvasActive(false);
+      } catch {
+        setCanvasActive(false);
+      }
     };
     window.addEventListener("pointerdown", onWindowPointerDown, true);
     return () => window.removeEventListener("pointerdown", onWindowPointerDown, true);
