@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const divider = { borderBottom: "1px solid currentColor", padding: "5px 0" };
 
@@ -177,6 +177,182 @@ function relationFromDirection(direction: NodeDirection): { a: "Parent" | "Child
   if (direction === "top") return { a: "Parent", b: "Child" };
   return { a: "Child", b: "Parent" };
 }
+
+type NodeDocBox = { local_id: string; x: number; y: number; information_id?: string; information: string };
+
+function parseDocBox(info: NodeInformation): NodeDocBox | null {
+  if (info.type !== "Text box") return null;
+  try {
+    const parsed = JSON.parse(info.information) as { local_id?: string; x?: number; y?: number; text?: string };
+    if (typeof parsed?.x !== "number" || typeof parsed?.y !== "number" || typeof parsed?.text !== "string") return null;
+    return {
+      local_id: typeof parsed.local_id === "string" && parsed.local_id.trim() ? parsed.local_id : info.information_id,
+      x: parsed.x,
+      y: parsed.y,
+      information_id: info.information_id,
+      information: parsed.text,
+    };
+  } catch {
+    return { local_id: info.information_id, x: 24, y: 56, information_id: info.information_id, information: info.information };
+  }
+}
+
+export const NodeDocContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
+  const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
+  const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
+  const scope = widgetId?.trim() ? widgetId : "global";
+  const docHeader = `Node Doc::${scope}`;
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [docNode, setDocNode] = useState<NodeRecord | null>(null);
+  const [boxes, setBoxes] = useState<NodeDocBox[]>([]);
+  const [activeBoxID, setActiveBoxID] = useState<string>("");
+  const [placing, setPlacing] = useState<{ id: string; pointerID: number; dx: number; dy: number } | null>(null);
+  const [error, setError] = useState("");
+
+  const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
+    const response = await fetch(`${apiBase}${path}`, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    });
+    if (!response.ok) throw new Error(await response.text() || `Request failed (${response.status})`);
+    if (response.status === 204) return undefined as T;
+    return response.json() as Promise<T>;
+  }, [apiBase]);
+
+  const saveBox = useCallback(async (nodeID: string, box: NodeDocBox) => {
+    const payload = JSON.stringify({ local_id: box.local_id, x: box.x, y: box.y, text: box.information });
+    const created = await requestJSON<NodeInformation>(`/v1/nodes/${nodeID}/information`, {
+      method: "POST",
+      body: JSON.stringify({ company_id: companyID, type: "Text box", information: payload }),
+    });
+    setBoxes((prev) => prev.map((item) => (item.local_id === box.local_id ? { ...item, information_id: created.information_id } : item)));
+  }, [companyID, requestJSON]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setError("");
+        const payload = await requestJSON<{ nodes: NodeRecord[] }>(`/v1/nodes?company_id=${encodeURIComponent(companyID)}`);
+        let node = payload.nodes.find((item) => item.header === docHeader) ?? null;
+        if (!node) {
+          node = await requestJSON<NodeRecord>("/v1/nodes", {
+            method: "POST",
+            body: JSON.stringify({ company_id: companyID, header: docHeader }),
+          });
+        }
+        if (cancelled) return;
+        setDocNode(node);
+        const details = await requestJSON<NodeDetails>(`/v1/nodes/${node.node_id}?company_id=${encodeURIComponent(companyID)}`);
+        if (cancelled) return;
+        const latestByBox = new Map<string, NodeDocBox>();
+        const orderedInfo = [...details.information].sort((a, b) => new Date(a.updated_timestamp).getTime() - new Date(b.updated_timestamp).getTime());
+        for (const info of orderedInfo) {
+          const parsed = parseDocBox(info);
+          if (!parsed) continue;
+          latestByBox.set(parsed.local_id, parsed);
+        }
+        const nextBoxes = Array.from(latestByBox.values());
+        setBoxes(nextBoxes);
+        if (nextBoxes.length > 0) setActiveBoxID(nextBoxes[nextBoxes.length - 1].local_id);
+      } catch (cause) {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load Node Doc");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [companyID, docHeader, requestJSON]);
+
+  useEffect(() => {
+    if (!placing || !canvasRef.current) return;
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== placing.pointerID || !canvasRef.current) return;
+      const bounds = canvasRef.current.getBoundingClientRect();
+      const x = clamp(event.clientX - bounds.left - placing.dx, 8, Math.max(8, bounds.width - 140));
+      const y = clamp(event.clientY - bounds.top - placing.dy, 34, Math.max(34, bounds.height - 40));
+      setBoxes((prev) => prev.map((item) => (item.local_id === placing.id ? { ...item, x, y } : item)));
+    };
+    const onUp = () => {
+      const moved = boxes.find((item) => item.local_id === placing.id);
+      if (docNode && moved) void saveBox(docNode.node_id, moved);
+      setPlacing(null);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+  }, [boxes, docNode, placing, saveBox]);
+
+  const createBox = useCallback((initialText: string, x = 24, y = 56) => {
+    const localID = `docbox-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`;
+    const next: NodeDocBox = { local_id: localID, x, y, information: initialText };
+    setBoxes((prev) => [...prev, next]);
+    setActiveBoxID(localID);
+    if (docNode) void saveBox(docNode.node_id, next);
+  }, [docNode, saveBox]);
+
+  return (
+    <div
+      ref={canvasRef}
+      style={{ position: "relative", width: "100%", height: "100%", background: "#ffffff", color: "#0d1a1e", overflow: "hidden" }}
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
+        const current = boxes.find((item) => item.local_id === activeBoxID);
+        if (current) return;
+        createBox(event.key);
+        event.preventDefault();
+      }}
+    >
+      <div style={{ position: "absolute", top: 8, left: 10, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: accent }}>
+        Node Doc
+      </div>
+      {boxes.map((box) => (
+        <textarea
+          key={box.local_id}
+          value={box.information}
+          onFocus={() => setActiveBoxID(box.local_id)}
+          onChange={(event) => {
+            const value = event.target.value;
+            setBoxes((prev) => prev.map((item) => (item.local_id === box.local_id ? { ...item, information: value } : item)));
+          }}
+          onBlur={() => {
+            if (!docNode) return;
+            const latest = boxes.find((item) => item.local_id === box.local_id);
+            if (latest) void saveBox(docNode.node_id, latest);
+          }}
+          style={{
+            position: "absolute",
+            left: box.x,
+            top: box.y,
+            minWidth: 240,
+            width: "min(540px, calc(100% - 40px))",
+            minHeight: 36,
+            border: "none",
+            outline: box.local_id === activeBoxID ? `1px solid ${accent}` : "1px solid transparent",
+            background: "transparent",
+            resize: "none",
+            color: "#111",
+            fontSize: 15,
+            lineHeight: 1.45,
+            fontFamily: "'Manrope', 'Helvetica Neue', sans-serif",
+            padding: "2px 4px",
+          }}
+        />
+      ))}
+      {boxes.map((box) => (
+        <div
+          key={`${box.local_id}-handle`}
+          style={{ position: "absolute", left: box.x - 12, top: box.y + 6, width: 8, height: 22, borderRadius: 999, background: "rgba(0,0,0,0.16)", cursor: "grab" }}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            setActiveBoxID(box.local_id);
+            setPlacing({ id: box.local_id, pointerID: event.pointerId, dx: event.clientX - (canvasRef.current?.getBoundingClientRect().left ?? 0) - box.x, dy: event.clientY - (canvasRef.current?.getBoundingClientRect().top ?? 0) - box.y });
+          }}
+        />
+      ))}
+      {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020" }}>{error}</div>}
+    </div>
+  );
+};
 
 export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";

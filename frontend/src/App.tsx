@@ -29,6 +29,11 @@ const UI_THEME = {
   subtext: "#0b5058",
 };
 
+const NODE_SUBMODULES = [
+  { kind: "nodes-canvas", label: "Node Canvas" },
+  { kind: "node-doc", label: "Node Doc" },
+] as const;
+
 const INITIAL_WIDGETS: Widget[] = [
   { id: "w-revenue", theme: "teal", kind: "revenue", x: 2, y: 1, w: 12, h: 9, title: "Revenue", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
   { id: "w-users", theme: "orange", kind: "users", x: 14, y: 1, w: 14, h: 9, title: "Active Users", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
@@ -38,7 +43,7 @@ const INITIAL_WIDGETS: Widget[] = [
   { id: "w-orders", theme: "orange", kind: "orders", x: 2, y: 20, w: 10, h: 10, title: "Recent Orders", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
   { id: "w-notifications", theme: "orange", kind: "notifications", x: 12, y: 22, w: 12, h: 10, title: "Notifications", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
   { id: "w-map", theme: "teal", kind: "map", x: 28, y: 15, w: 14, h: 17, title: "Map View", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-nodes", theme: "white", kind: "nodes", x: 24, y: 22, w: 18, h: 10, title: "Nodes", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  { id: "w-nodes", theme: "white", kind: "nodes-canvas", x: 24, y: 22, w: 18, h: 10, title: "Node Canvas", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
 ];
 
 interface ViewTab {
@@ -346,7 +351,7 @@ interface WidgetCardProps {
 const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect }) => {
   const Content = CONTENT_MAP[widget.kind];
   const theme = COLORWAYS[widget.theme ?? "teal"];
-  const isNodesWidget = widget.kind === "nodes";
+  const isNodesWidget = widget.kind === "nodes" || widget.kind === "nodes-canvas" || widget.kind === "node-doc";
   return (
     <div
       style={{ position: "absolute", left: widget.x * stepX, top: widget.y * stepY, width: widget.w * stepX, height: widget.h * stepY, background: widget.color, border: isSelected ? "2px solid #111" : `1px solid ${widget.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
@@ -419,6 +424,7 @@ const App: React.FC = () => {
 
   const [widgetMenu, setWidgetMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [moduleTypeMenu, setModuleTypeMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [showNodesSubmenu, setShowNodesSubmenu] = useState(false);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number } | null>(null);
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number } | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -521,7 +527,7 @@ const App: React.FC = () => {
     });
   }, [gridCols, gridRows, updateActiveWidgets]);
 
-  const closeMenus = useCallback(() => { setWidgetMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); }, []);
+  const closeMenus = useCallback(() => { setWidgetMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); setShowNodesSubmenu(false); }, []);
 
   const deleteSelectedWidget = useCallback(() => {
     if (!selectedWidgetId) return;
@@ -785,11 +791,12 @@ const App: React.FC = () => {
               dragRef.current = { id, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
               setDraggingId(id);
             }}
-            onContextMenu={(e, id) => { e.preventDefault(); setWidgetMenu({ x: e.clientX, y: e.clientY, id }); setModuleTypeMenu(null); setCanvasMenu(null); }}
+            onContextMenu={(e, id) => { e.preventDefault(); setWidgetMenu({ x: e.clientX, y: e.clientY, id }); setModuleTypeMenu(null); setCanvasMenu(null); setShowNodesSubmenu(false); }}
             onModuleNameClick={(e, id) => {
               setWidgetMenu(null);
               setHeaderMenu(null);
               setCanvasMenu(null);
+              setShowNodesSubmenu(false);
               setSelectedWidgetId(id);
               setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
             }}
@@ -822,7 +829,7 @@ const App: React.FC = () => {
 
       {moduleTypeMenu && (
         <FloatingMenu x={moduleTypeMenu.x} y={moduleTypeMenu.y} onClose={closeMenus}>
-          {WIDGET_LIBRARY.map((item) => (
+          {WIDGET_LIBRARY.filter((item) => item.kind !== "nodes-canvas" && item.kind !== "node-doc").map((item) => (
             <button
               key={item.kind}
               style={menuBtnBase}
@@ -835,6 +842,49 @@ const App: React.FC = () => {
               {item.label}
             </button>
           ))}
+          <div style={{ position: "relative" }} onMouseLeave={() => setShowNodesSubmenu(false)}>
+            <button
+              style={{ ...menuBtnBase, justifyContent: "space-between", width: "100%" }}
+              onMouseMove={() => setShowNodesSubmenu(true)}
+              onFocus={() => setShowNodesSubmenu(true)}
+              onClick={() => setShowNodesSubmenu((value) => !value)}
+              {...hoverHandlers}
+            >
+              <span>Nodes</span>
+              <span style={{ fontSize: 10, opacity: 0.72 }}>▶</span>
+            </button>
+            {showNodesSubmenu && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: "100%",
+                  top: -4,
+                  marginLeft: 4,
+                  background: "#fff",
+                  border: "1px solid #e0e0e0",
+                  borderRadius: 10,
+                  boxShadow: "0 6px 24px rgba(0,0,0,0.12)",
+                  padding: "4px 0",
+                  minWidth: 180,
+                  zIndex: 1001,
+                }}
+              >
+                {NODE_SUBMODULES.map((item) => (
+                  <button
+                    key={item.kind}
+                    style={menuBtnBase}
+                    onClick={() => {
+                      updateActiveWidgets((prev) => prev.map((w) => (w.id === moduleTypeMenu.id ? { ...w, kind: item.kind, title: item.label } : w)));
+                      closeMenus();
+                    }}
+                    {...hoverHandlers}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </FloatingMenu>
       )}
 
