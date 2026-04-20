@@ -1,12 +1,15 @@
 # Nodes Module (Frontend) — Feature Documentation
 
-This document captures the full behavior and implementation details currently present in the **Nodes** widget/module.
+This document captures the full behavior and implementation details currently present in the **Nodes** family of modules:
+
+- **Node Canvas** (`nodes-canvas`, legacy `nodes`)
+- **Node Doc** (`node-doc`)
 
 ---
 
 ## 1) Purpose
 
-The Nodes module provides a visual “canvas-inside-canvas” experience inside a dashboard widget where users can:
+The Nodes modules provide a visual “canvas-inside-canvas” experience plus linked node documentation inside dashboard widgets where users can:
 
 - create and delete nodes,
 - create directional relationships from side handles,
@@ -16,6 +19,8 @@ The Nodes module provides a visual “canvas-inside-canvas” experience inside 
 - view relationship lines between nodes,
 - add node information records,
 - and keep node layout/view state persisted locally.
+- link a Node Canvas module to a Node Doc module,
+- and edit text-box notes in Node Doc that attach to whichever node is currently selected in the linked Node Canvas.
 
 ---
 
@@ -98,8 +103,9 @@ Nodes are positioned in **world coordinates**, while pan/zoom transform the worl
 
 ### 4.4 Multi-select
 
-- `Ctrl + drag` on canvas creates marquee selection box.
+- `Shift + drag` **or** `Ctrl + drag` on canvas creates marquee selection box.
 - Nodes intersecting the box become selected.
+- `Shift + click` **or** `Ctrl + click` on node cards toggles nodes in/out of the current selection set.
 - Visual indicators:
   - selected border/outline/glow,
   - selected dot marker on card,
@@ -162,9 +168,9 @@ Relationships are visualized with SVG polylines in world space.
 
 ## 8) Local persistence (layout + viewport)
 
-The module persists canvas state in `localStorage` keyed per company:
+The module persists canvas state in `localStorage` keyed per company and widget scope:
 
-- Key format: `node-canvas-state-v2:<companyID>`
+- Key format: `node-canvas-state-v3:<companyID>:<widgetId-or-global>`
 - Stored fields:
   - `zoom`
   - `pan`
@@ -187,13 +193,53 @@ This keeps layout and viewport stable when switching views and reopening the mod
 
 ---
 
-## 9) Controls and panels in module UI
+## 9) Node Doc module (linked documentation surface)
 
-### Top controls
+`NodeDocContent` is a blank document-like canvas that creates movable text boxes and stores their contents as `Text box` records in `node_information`.
 
-- `[ Node Canvas ]` label, input, and add button aligned on one row.
+### 9.1 Linking model
 
-### Main canvas
+- Node Doc is linked to Node Canvas at widget level using:
+  - localStorage key: `node-doc-widget-links-v1`
+  - value: map of `nodeDocWidgetId -> nodeCanvasWidgetId`
+- Linking is triggered from module context menu action:
+  - `Link nodes: <dynamic titles joined by " + ">`
+- Link action is enabled when selection contains exactly:
+  - one Node Canvas module (`nodes-canvas` or legacy `nodes`)
+  - one Node Doc module (`node-doc`)
+
+### 9.2 Module multi-select behavior (for linking)
+
+- Widget/module selection is additive with `Shift + click` or `Ctrl + click`.
+- Right-click on an already-selected module preserves the multi-selection.
+- Selection capture runs in pointer capture phase to avoid nested module interactions dropping selection.
+
+### 9.3 Selected-node sync
+
+Once linked, Node Doc polls the linked canvas state key:
+
+- `node-canvas-state-v3:<companyID>:<linkedCanvasWidgetId>`
+
+and reads `selectedNodeID`. That selected node becomes the active storage target for Node Doc.
+
+### 9.4 Node Doc persistence behavior
+
+- Load:
+  - `GET /v1/nodes/:node_id?company_id=...`
+  - parse `information` rows where `type === "Text box"`
+  - keep latest record per `local_id` by timestamp order
+- Save:
+  - `POST /v1/nodes/:node_id/information`
+  - payload stores JSON `{ local_id, x, y, text }` as `information`
+- UI states:
+  - if not linked: prompt user to link modules
+  - if linked but no selected node: prompt user to select a node in linked Node Canvas
+
+---
+
+## 10) Controls and panels in module UI
+
+### Node Canvas main surface
 
 - Canvas consumes almost all remaining widget height (bottom utility rows removed).
 - World grid, relationship lines, node cards, side `+` actions, selection box, and group badge.
@@ -202,7 +248,7 @@ This keeps layout and viewport stable when switching views and reopening the mod
 - Right-click on a node opens node actions (`Edit node`, `Delete node`).
 - Delete key support for selected node(s), guarded by themed confirmation modal.
 
-### Right overlay details panel
+### Node Canvas right overlay details panel
 
 - Double-clicking a node opens a translucent “glass” panel anchored to the right side.
 - Panel can be dragged and resized.
@@ -215,7 +261,16 @@ This keeps layout and viewport stable when switching views and reopening the mod
 
 ---
 
-## 10) Teal theme update
+### Node Doc surface
+
+- Top-left module label (`Node Doc`).
+- Blank document area with no extra dashboard chrome inside the module body.
+- Typing creates a text box when none is active.
+- Text boxes are movable and persist position/content to the selected linked node.
+
+---
+
+## 11) Teal theme update
 
 App-level `teal` colorway currently uses:
 
@@ -227,7 +282,7 @@ This is the requested teal update used by teal-themed modules.
 
 ---
 
-## 11) Known scope notes
+## 12) Known scope notes
 
 - Node layout persistence is frontend-local (browser localStorage), not backend-persisted.
 - Relationship anchor memory for side-origin is strongest for in-session-created links; fallback inference handles existing links.
@@ -235,7 +290,7 @@ This is the requested teal update used by teal-themed modules.
 
 ---
 
-## 12) File ownership (current implementation)
+## 13) File ownership (current implementation)
 
 Primary implementation is in:
 
