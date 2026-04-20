@@ -31,6 +31,34 @@ func (r *PostgresRepo) CreateNode(companyID, header string) (domain.Node, error)
 	return item, nil
 }
 
+func (r *PostgresRepo) ListNodes(companyID string) ([]domain.Node, error) {
+	ctx := context.Background()
+	rows, err := r.db.QueryContext(ctx,
+		`select company_id, node_id, header, created_timestamp
+		 from nodes
+		 where company_id=$1
+		 order by created_timestamp asc`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.Node, 0)
+	for rows.Next() {
+		var item domain.Node
+		if err := rows.Scan(&item.CompanyID, &item.NodeID, &item.Header, &item.CreatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (r *PostgresRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	ctx := context.Background()
 	var item domain.Node
@@ -46,6 +74,49 @@ func (r *PostgresRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 		return domain.Node{}, err
 	}
 	return item, nil
+}
+
+func (r *PostgresRepo) DeleteNode(companyID, nodeID string) error {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx,
+		`delete from node_relationships
+		 where company_id=$1 and (node_id_a=$2 or node_id_b=$2)`,
+		companyID, nodeID,
+	); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`delete from node_information
+		 where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
+	); err != nil {
+		return err
+	}
+
+	deletedNode, err := tx.ExecContext(ctx,
+		`delete from nodes
+		 where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := deletedNode.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+
+	return tx.Commit()
 }
 
 func (r *PostgresRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error) {

@@ -35,29 +35,45 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-	var req struct {
-		CompanyID string `json:"company_id"`
-		Header    string `json:"header"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
-		return
-	}
-	if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Header) == "" {
-		writeError(w, http.StatusBadRequest, "company_id_and_header_required")
+	if r.Method == http.MethodGet {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		items, err := s.repo.ListNodes(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"nodes": items})
 		return
 	}
 
-	item, err := s.repo.CreateNode(req.CompanyID, req.Header)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_create_node")
+	if r.Method == http.MethodPost {
+		var req struct {
+			CompanyID string `json:"company_id"`
+			Header    string `json:"header"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Header) == "" {
+			writeError(w, http.StatusBadRequest, "company_id_and_header_required")
+			return
+		}
+
+		item, err := s.repo.CreateNode(req.CompanyID, req.Header)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_create_node")
+			return
+		}
+		writeJSON(w, http.StatusCreated, item)
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+
+	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 }
 
 func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +86,22 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 	nodeID := parts[0]
 
 	if len(parts) == 1 {
+		if r.Method == http.MethodDelete {
+			companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+			if companyID == "" {
+				writeError(w, http.StatusBadRequest, "company_id_required")
+				return
+			}
+			if err := s.repo.DeleteNode(companyID, nodeID); errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "node_not_found")
+				return
+			} else if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_delete_node")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+			return
+		}
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
