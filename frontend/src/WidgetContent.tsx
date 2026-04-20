@@ -181,7 +181,8 @@ function relationFromDirection(direction: NodeDirection): { a: "Parent" | "Child
 export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
-  const canvasStateKey = `node-canvas-state-v2:${companyID}`;
+  const canvasScope = widgetId?.trim() ? widgetId : "global";
+  const canvasStateKey = `node-canvas-state-v3:${companyID}:${canvasScope}`;
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1000, height: 560 });

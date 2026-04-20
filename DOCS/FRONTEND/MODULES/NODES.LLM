@@ -5,6 +5,14 @@ This document tracks technical behavior for the **frontend node module** impleme
 
 ## Current UX behavior (updated)
 
+### 0) Node position reset root cause + fix
+- **Root cause:** node canvas state persistence key was previously scoped only by `company_id` (`node-canvas-state-v2:${companyID}`).
+- In multi-tab/multi-widget usage, different Nodes widgets (or views) could overwrite each other’s cached `nodePositions` in local/session storage.
+- Once one view wrote a default/auto-laid-out map, switching back to another view restored that overwritten map, which looked like nodes snapping to a top-left line.
+- **Fix:** state key is now scoped by both company and widget instance:
+  - `node-canvas-state-v3:${companyID}:${widgetId || "global"}`
+- Result: each Nodes widget keeps an isolated layout cache, so tab/module switching no longer clobbers previously arranged node positions.
+
 ### 1) Node right-click menu auto-dismiss rules
 - The node context menu (`Edit node` / `Delete node`) is stored in `nodeContextMenu`.
 - The canvas context menu (`Create new node`) is stored in `contextMenu`.
