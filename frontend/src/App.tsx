@@ -29,6 +29,12 @@ const UI_THEME = {
   subtext: "#0b5058",
 };
 
+const NODE_SUBMODULES = [
+  { kind: "nodes-canvas", label: "Node Canvas" },
+  { kind: "node-doc", label: "Node Doc" },
+] as const;
+const NODE_DOC_LINKS_KEY = "node-doc-widget-links-v1";
+
 const INITIAL_WIDGETS: Widget[] = [
   { id: "w-revenue", theme: "teal", kind: "revenue", x: 2, y: 1, w: 12, h: 9, title: "Revenue", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
   { id: "w-users", theme: "orange", kind: "users", x: 14, y: 1, w: 14, h: 9, title: "Active Users", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
@@ -38,7 +44,7 @@ const INITIAL_WIDGETS: Widget[] = [
   { id: "w-orders", theme: "orange", kind: "orders", x: 2, y: 20, w: 10, h: 10, title: "Recent Orders", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
   { id: "w-notifications", theme: "orange", kind: "notifications", x: 12, y: 22, w: 12, h: 10, title: "Notifications", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
   { id: "w-map", theme: "teal", kind: "map", x: 28, y: 15, w: 14, h: 17, title: "Map View", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-nodes", theme: "white", kind: "nodes", x: 24, y: 22, w: 18, h: 10, title: "Nodes", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  { id: "w-nodes", theme: "white", kind: "nodes-canvas", x: 24, y: 22, w: 18, h: 10, title: "Node Canvas", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
 ];
 
 interface ViewTab {
@@ -172,6 +178,20 @@ function loadSettings(): { bgColor?: string; crossColor?: string; headerBgColor?
 
 function saveSettings(s: { bgColor: string; crossColor: string; headerBgColor: string; headerTextColor: string; tabBgColor: string; tabTextColor: string }) {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
+}
+
+function loadNodeDocLinks(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(NODE_DOC_LINKS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string")
+    );
+  } catch {
+    return {};
+  }
 }
 
 const GridCrosses: React.FC<{ cols: number; rows: number; stepX: number; stepY: number; width: number; height: number; color: string }> = React.memo(
@@ -340,32 +360,53 @@ interface WidgetCardProps {
   onResizeStart: (e: React.MouseEvent | React.TouchEvent, id: string, edges: ResizeEdges) => void;
   onContextMenu: (e: React.MouseEvent, id: string) => void;
   onModuleNameClick: (e: React.MouseEvent, id: string) => void;
-  onSelect: (id: string) => void;
+  onSelect: (event: React.MouseEvent | React.TouchEvent, id: string) => void;
+  isLinked: boolean;
 }
 
-const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect }) => {
+const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked }) => {
   const Content = CONTENT_MAP[widget.kind];
   const theme = COLORWAYS[widget.theme ?? "teal"];
+  const isNodesWidget = widget.kind === "nodes" || widget.kind === "nodes-canvas" || widget.kind === "node-doc";
   return (
     <div
       style={{ position: "absolute", left: widget.x * stepX, top: widget.y * stepY, width: widget.w * stepX, height: widget.h * stepY, background: widget.color, border: isSelected ? "2px solid #111" : `1px solid ${widget.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
       onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => { onSelect(widget.id); if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
-      onTouchStart={(e) => { onSelect(widget.id); if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
+      onMouseDownCapture={(e) => {
+        if (e.button !== 0) return;
+        onSelect(e, widget.id);
+      }}
+      onTouchStartCapture={(e) => onSelect(e, widget.id)}
+      onMouseDown={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
+      onTouchStart={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, widget.id); }}
     >
-      <div
-        style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${widget.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}
-      >
-        <span
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onModuleNameClick(e, widget.id); }}
-          style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px", cursor: "pointer" }}
-        >
-          {widget.title}
-        </span>
+      <div style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${widget.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onModuleNameClick(e, widget.id); }}
+            style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px", cursor: "pointer" }}
+          >
+            {widget.title}
+          </span>
+          {isLinked && (
+            <span
+              aria-label="linked module"
+              title="Linked"
+              style={{
+                width: 14,
+                height: 16,
+                border: `1px solid ${widget.accent}`,
+                clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
+                background: "rgba(255,255,255,0.35)",
+                display: "inline-block",
+              }}
+            />
+          )}
+        </div>
       </div>
-      <div style={{ flex: 1, padding: "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
-        {Content ? <Content accent={widget.accent} widgetId={widget.id} hideTopControls={widget.kind === "nodes"} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: widget.accent }}>{widget.title}</span></div>}
+      <div style={{ flex: 1, padding: isNodesWidget ? 0 : "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
+        {Content ? <Content accent={widget.accent} widgetId={widget.id} hideTopControls={isNodesWidget} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: widget.accent }}>{widget.title}</span></div>}
       </div>
       {editMode && HANDLES.map((h, i) => <div key={i} data-handle="true" onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, widget.id, h.edges); }} onTouchStart={(e) => { e.stopPropagation(); onResizeStart(e, widget.id, h.edges); }} style={{ position: "absolute", cursor: h.cursor, ...h.style }} />)}
     </div>
@@ -406,6 +447,7 @@ const App: React.FC = () => {
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
+  const [selectedWidgetIds, setSelectedWidgetIds] = useState<Set<string>>(new Set());
   const [editMode, setEditMode] = useState(false);
   const initialSettingsRef = useRef(loadSettings());
   const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || "#f7fffe");
@@ -414,10 +456,12 @@ const App: React.FC = () => {
   const [headerTextColor, setHeaderTextColor] = useState(() => initialSettingsRef.current.headerTextColor || UI_THEME.text);
   const [tabBgColor, setTabBgColor] = useState(() => initialSettingsRef.current.tabBgColor || "#ffffff");
   const [tabTextColor, setTabTextColor] = useState(() => initialSettingsRef.current.tabTextColor || "#08343a");
+  const [nodeDocLinks, setNodeDocLinks] = useState<Record<string, string>>(() => loadNodeDocLinks());
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [widgetMenu, setWidgetMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [moduleTypeMenu, setModuleTypeMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [showNodesSubmenu, setShowNodesSubmenu] = useState(false);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number } | null>(null);
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number } | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -437,6 +481,10 @@ const App: React.FC = () => {
     if (!selectedWidgetId) return;
     if (!widgets.some((w) => w.id === selectedWidgetId)) setSelectedWidgetId(null);
   }, [widgets, selectedWidgetId]);
+  useEffect(() => {
+    const ids = new Set(widgets.map((widget) => widget.id));
+    setSelectedWidgetIds((prev) => new Set(Array.from(prev).filter((id) => ids.has(id))));
+  }, [widgets]);
 
   const updateActiveWidgets = useCallback((updater: (prev: Widget[]) => Widget[]) => {
     setTabs((prev) => prev.map((tab) => (tab.id === activeTabId ? { ...tab, widgets: updater(tab.widgets) } : tab)));
@@ -520,13 +568,53 @@ const App: React.FC = () => {
     });
   }, [gridCols, gridRows, updateActiveWidgets]);
 
-  const closeMenus = useCallback(() => { setWidgetMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); }, []);
+  const closeMenus = useCallback(() => { setWidgetMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); setShowNodesSubmenu(false); }, []);
+
+  const saveNodeDocLink = useCallback((docWidgetID: string, canvasWidgetID: string) => {
+    setNodeDocLinks((prev) => {
+      const next = { ...prev, [docWidgetID]: canvasWidgetID };
+      try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const selectedWidgets = useMemo(() => widgets.filter((widget) => selectedWidgetIds.has(widget.id)), [widgets, selectedWidgetIds]);
+  const linkablePair = useMemo(() => {
+    const pool = selectedWidgets.length > 0 ? selectedWidgets : (selectedWidgetId ? widgets.filter((widget) => widget.id === selectedWidgetId) : []);
+    if (pool.length !== 2) return null;
+    const canvas = pool.find((widget) => widget.kind === "nodes" || widget.kind === "nodes-canvas");
+    const doc = pool.find((widget) => widget.kind === "node-doc");
+    if (!canvas || !doc) return null;
+    return { canvas, doc };
+  }, [selectedWidgetId, selectedWidgets, widgets]);
+
+  const linkSelectedNodeModules = useCallback(() => {
+    if (!linkablePair) return;
+    saveNodeDocLink(linkablePair.doc.id, linkablePair.canvas.id);
+  }, [linkablePair, saveNodeDocLink]);
+  const linkNodesLabel = useMemo(() => {
+    const pool = selectedWidgets.length > 1 ? selectedWidgets : (linkablePair ? [linkablePair.canvas, linkablePair.doc] : []);
+    if (pool.length === 0) return "Node Canvas + Node Doc";
+    return pool.map((widget) => widget.title).join(" + ");
+  }, [linkablePair, selectedWidgets]);
+  const linkedWidgetIDs = useMemo(() => {
+    const ids = new Set<string>();
+    const widgetIDs = new Set(widgets.map((widget) => widget.id));
+    for (const [docWidgetID, canvasWidgetID] of Object.entries(nodeDocLinks)) {
+      if (!widgetIDs.has(docWidgetID) || !widgetIDs.has(canvasWidgetID)) continue;
+      ids.add(docWidgetID);
+      ids.add(canvasWidgetID);
+    }
+    return ids;
+  }, [nodeDocLinks, widgets]);
 
   const deleteSelectedWidget = useCallback(() => {
-    if (!selectedWidgetId) return;
-    updateActiveWidgets((prev) => prev.filter((w) => w.id !== selectedWidgetId));
+    const ids = selectedWidgetIds.size > 0 ? selectedWidgetIds : (selectedWidgetId ? new Set([selectedWidgetId]) : new Set<string>());
+    if (ids.size === 0) return;
+    updateActiveWidgets((prev) => prev.filter((w) => !ids.has(w.id)));
     setSelectedWidgetId(null);
-  }, [selectedWidgetId, updateActiveWidgets]);
+    setSelectedWidgetIds(new Set());
+  }, [selectedWidgetId, selectedWidgetIds, updateActiveWidgets]);
 
   const copySelectedWidget = useCallback(() => {
     if (!selectedWidgetId) return;
@@ -547,6 +635,7 @@ const App: React.FC = () => {
     };
     updateActiveWidgets((prev) => [...prev, pasted]);
     setSelectedWidgetId(id);
+    setSelectedWidgetIds(new Set([id]));
   }, [gridCols, gridRows, updateActiveWidgets]);
 
   const undo = useCallback(() => {
@@ -750,7 +839,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onClick={() => setSelectedWidgetId(null)} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setHeaderMenu(null); setWidgetMenu(null); setModuleTypeMenu(null); }}>
+      <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onClick={() => { setSelectedWidgetId(null); setSelectedWidgetIds(new Set()); }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setHeaderMenu(null); setWidgetMenu(null); setModuleTypeMenu(null); setShowNodesSubmenu(false); }}>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
         {editMode && draggingId && (() => {
           const activeWidget = widgets.find((w) => w.id === draggingId);
@@ -764,7 +853,8 @@ const App: React.FC = () => {
             stepX={stepX}
             stepY={stepY}
             isDragging={draggingId === w.id}
-            isSelected={selectedWidgetId === w.id}
+            isSelected={selectedWidgetIds.has(w.id)}
+            isLinked={linkedWidgetIDs.has(w.id)}
             editMode={editMode}
             onDragStart={(e, id) => {
               if (!editMode) return;
@@ -784,15 +874,42 @@ const App: React.FC = () => {
               dragRef.current = { id, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
               setDraggingId(id);
             }}
-            onContextMenu={(e, id) => { e.preventDefault(); setWidgetMenu({ x: e.clientX, y: e.clientY, id }); setModuleTypeMenu(null); setCanvasMenu(null); }}
+            onContextMenu={(e, id) => {
+              e.preventDefault();
+              if (!selectedWidgetIds.has(id)) {
+                setSelectedWidgetIds(new Set([id]));
+                setSelectedWidgetId(id);
+              }
+              setWidgetMenu({ x: e.clientX, y: e.clientY, id });
+              setModuleTypeMenu(null);
+              setCanvasMenu(null);
+              setShowNodesSubmenu(false);
+            }}
             onModuleNameClick={(e, id) => {
               setWidgetMenu(null);
               setHeaderMenu(null);
               setCanvasMenu(null);
+              setShowNodesSubmenu(false);
               setSelectedWidgetId(id);
+              setSelectedWidgetIds(new Set([id]));
               setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
             }}
-            onSelect={setSelectedWidgetId}
+            onSelect={(event, id) => {
+              const additiveSelect = "ctrlKey" in event ? (!!event.ctrlKey || !!event.shiftKey) : false;
+              if (!additiveSelect) {
+                setSelectedWidgetId(id);
+                setSelectedWidgetIds(new Set([id]));
+                return;
+              }
+              setSelectedWidgetId(id);
+              setSelectedWidgetIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(id)) next.delete(id);
+                else next.add(id);
+                if (next.size === 0) next.add(id);
+                return next;
+              });
+            }}
           />
         ))}
       </div>
@@ -807,6 +924,14 @@ const App: React.FC = () => {
       {widgetMenu && (
         <FloatingMenu x={widgetMenu.x} y={widgetMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { duplicateWidget(widgetMenu.id); closeMenus(); }} {...hoverHandlers}>Duplicate</button>
+          <button
+            style={{ ...menuBtnBase, color: linkablePair ? "#111" : "#999" }}
+            disabled={!linkablePair}
+            onClick={() => { linkSelectedNodeModules(); closeMenus(); }}
+            {...hoverHandlers}
+          >
+            Link nodes: {linkNodesLabel}
+          </button>
           {COLORWAY_ORDER.map((theme) => (
             <button key={theme} style={menuBtnBase} onClick={() => {
               updateActiveWidgets((prev) => prev.map((w) => (w.id === widgetMenu.id ? applyColorway(w, theme) : w)));
@@ -821,7 +946,7 @@ const App: React.FC = () => {
 
       {moduleTypeMenu && (
         <FloatingMenu x={moduleTypeMenu.x} y={moduleTypeMenu.y} onClose={closeMenus}>
-          {WIDGET_LIBRARY.map((item) => (
+          {WIDGET_LIBRARY.filter((item) => item.kind !== "nodes-canvas" && item.kind !== "node-doc").map((item) => (
             <button
               key={item.kind}
               style={menuBtnBase}
@@ -834,6 +959,49 @@ const App: React.FC = () => {
               {item.label}
             </button>
           ))}
+          <div style={{ position: "relative" }} onMouseLeave={() => setShowNodesSubmenu(false)}>
+            <button
+              style={{ ...menuBtnBase, justifyContent: "space-between", width: "100%" }}
+              onMouseMove={() => setShowNodesSubmenu(true)}
+              onFocus={() => setShowNodesSubmenu(true)}
+              onClick={() => setShowNodesSubmenu((value) => !value)}
+              {...hoverHandlers}
+            >
+              <span>Nodes</span>
+              <span style={{ fontSize: 10, opacity: 0.72 }}>▶</span>
+            </button>
+            {showNodesSubmenu && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: "100%",
+                  top: -4,
+                  marginLeft: 4,
+                  background: "#fff",
+                  border: "1px solid #e0e0e0",
+                  borderRadius: 10,
+                  boxShadow: "0 6px 24px rgba(0,0,0,0.12)",
+                  padding: "4px 0",
+                  minWidth: 180,
+                  zIndex: 1001,
+                }}
+              >
+                {NODE_SUBMODULES.map((item) => (
+                  <button
+                    key={item.kind}
+                    style={menuBtnBase}
+                    onClick={() => {
+                      updateActiveWidgets((prev) => prev.map((w) => (w.id === moduleTypeMenu.id ? { ...w, kind: item.kind, title: item.label } : w)));
+                      closeMenus();
+                    }}
+                    {...hoverHandlers}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </FloatingMenu>
       )}
 
