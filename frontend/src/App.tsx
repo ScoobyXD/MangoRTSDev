@@ -364,7 +364,14 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
           {widget.title}
         </span>
       </div>
-      <div style={{ flex: 1, padding: "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
+      <div
+        style={{
+          flex: 1,
+          padding: widget.kind === "nodes" ? 0 : "8px 10px",
+          overflow: "hidden",
+          fontFamily: "'IBM Plex Mono', monospace",
+        }}
+      >
         {Content ? <Content accent={widget.accent} widgetId={widget.id} hideTopControls={widget.kind === "nodes"} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: widget.accent }}>{widget.title}</span></div>}
       </div>
       {editMode && HANDLES.map((h, i) => <div key={i} data-handle="true" onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, widget.id, h.edges); }} onTouchStart={(e) => { e.stopPropagation(); onResizeStart(e, widget.id, h.edges); }} style={{ position: "absolute", cursor: h.cursor, ...h.style }} />)}
