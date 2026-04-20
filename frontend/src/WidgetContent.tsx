@@ -169,7 +169,8 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1000, height: 560 });
   const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 28, y: 28 });
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [panInitialized, setPanInitialized] = useState(false);
 
   const WORLD_W = 3200;
   const WORLD_H = 2200;
@@ -306,6 +307,14 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
   }, []);
+
+  useEffect(() => {
+    if (panInitialized) return;
+    const centeredX = canvasSize.width / 2 - (WORLD_W * zoom) / 2;
+    const centeredY = canvasSize.height / 2 - (WORLD_H * zoom) / 2;
+    setPan({ x: centeredX, y: centeredY });
+    setPanInitialized(true);
+  }, [panInitialized, canvasSize.width, canvasSize.height, zoom]);
 
   useEffect(() => {
     setNodePositions((previous) => {
@@ -643,6 +652,8 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
             return;
           }
 
+          setSelectedNodeIDs(new Set());
+          setSelectedNodeID("");
           setPanState({
             pointerID: event.pointerId,
             startMouseX: event.clientX,
@@ -698,9 +709,11 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
                   borderRadius: 8,
                   border: `1px solid ${isSelected ? accent : "#505050"}`,
                   background: isSelected ? "#ffffff" : "rgba(252,252,252,0.93)",
+                  outline: isSelected ? `2px solid ${accent}` : "none",
+                  outlineOffset: isSelected ? 1 : 0,
                   display: "grid",
                   gridTemplateRows: "auto 1fr auto",
-                  boxShadow: isSelected ? "0 8px 20px rgba(0,0,0,0.18)" : "0 4px 12px rgba(0,0,0,0.12)",
+                  boxShadow: isSelected ? "0 0 0 3px rgba(111,231,238,0.32), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
                   userSelect: "none",
                   cursor: dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab",
                   zIndex: isPrimary ? 5 : 4,
@@ -727,6 +740,9 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
                 <div style={{ borderBottom: "1px solid currentColor", padding: "8px 8px 7px", fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>
                   <div style={{ whiteSpace: "normal", overflowWrap: "anywhere", maxHeight: 28, overflow: "hidden" }}>{node.header}</div>
                 </div>
+                {isSelected && (
+                  <div style={{ position: "absolute", top: 6, right: 6, width: 12, height: 12, borderRadius: 999, background: accent, opacity: 0.85 }} />
+                )}
                 <div style={{ padding: "5px 8px", fontSize: 10, display: "grid", gap: 2 }}>
                   <div>ID: {node.node_id.slice(0, 8)}</div>
                   <div>Info: {details?.node.node_id === node.node_id ? details.information.length : "-"}</div>
@@ -787,6 +803,23 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
               zIndex: 20,
             }}
           />
+        )}
+        {selectedNodeIDs.size > 1 && !selectionBox.active && (
+          <div
+            style={{
+              position: "absolute",
+              top: 10,
+              right: 10,
+              zIndex: 30,
+              background: "rgba(0,0,0,0.75)",
+              color: "#fff",
+              padding: "4px 8px",
+              borderRadius: 6,
+              fontSize: 10,
+            }}
+          >
+            Group selected: {selectedNodeIDs.size}
+          </div>
         )}
       </div>
 
