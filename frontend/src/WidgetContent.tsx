@@ -1123,12 +1123,24 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               height: panelRect.height,
               overflow: "auto",
               zIndex: 35,
-              borderRadius: 10,
-              border: `1px solid ${accent}`,
-              background: "rgba(255,255,255,0.34)",
-              backdropFilter: "blur(20px) saturate(108%)",
-              boxShadow: "0 12px 34px rgba(0,0,0,0.2), inset 0 0 0 1px rgba(255,255,255,0.45)",
-              padding: 10,
+              borderRadius: 16,
+              border: "1px solid rgba(255,255,255,0.35)",
+              background: `
+                linear-gradient(
+                  135deg,
+                  rgba(255,255,255,0.18) 0%,
+                  rgba(255,255,255,0.08) 50%,
+                  rgba(255,255,255,0.14) 100%
+                )
+              `,
+              backdropFilter: "blur(30px) saturate(180%)",
+              WebkitBackdropFilter: "blur(30px) saturate(180%)",
+              boxShadow: `
+                0 8px 32px rgba(0,0,0,0.18),
+                inset 0 1px 0 rgba(255,255,255,0.6),
+                inset 0 -1px 0 rgba(255,255,255,0.15)
+              `,
+              padding: 12,
               display: "grid",
               gap: 8,
             }}
