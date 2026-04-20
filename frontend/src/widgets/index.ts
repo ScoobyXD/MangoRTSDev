@@ -16,7 +16,7 @@ export interface WidgetTemplate {
   label: string;
   defaultW: number;
   defaultH: number;
-  render: React.FC<{ accent: string }>;
+  render: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }>;
 }
 
 export const WIDGET_LIBRARY: WidgetTemplate[] = [
@@ -31,6 +31,6 @@ export const WIDGET_LIBRARY: WidgetTemplate[] = [
   { kind: "nodes", label: "Nodes", defaultW: 16, defaultH: 14, render: NodesContent },
 ];
 
-export const CONTENT_MAP: Record<string, React.FC<{ accent: string }>> = Object.fromEntries(
+export const CONTENT_MAP: Record<string, React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }>> = Object.fromEntries(
   WIDGET_LIBRARY.map((widget) => [widget.kind, widget.render])
 );

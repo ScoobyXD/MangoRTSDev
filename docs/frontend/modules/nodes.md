@@ -199,10 +199,13 @@ This keeps layout and viewport stable when switching views and reopening the mod
 - World grid, relationship lines, node cards, side `+` actions, selection box, and group badge.
 - In-canvas instruction text.
 - Right-click context menu with `Create new node` at cursor location.
+- Right-click on a node opens node actions (`Edit node`, `Delete node`).
+- Delete key support for selected node(s), guarded by themed confirmation modal.
 
 ### Right overlay details panel
 
 - Double-clicking a node opens a translucent “glass” panel anchored to the right side.
+- Panel can be dragged and resized.
 - Panel contains:
   - add information controls,
   - delete node action,
@@ -238,4 +241,3 @@ Primary implementation is in:
 
 - `frontend/src/WidgetContent.tsx` (Nodes module behavior)
 - `frontend/src/App.tsx` (teal colorway config)
-

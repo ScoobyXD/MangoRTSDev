@@ -119,6 +119,7 @@ type NodeDetails = {
 type NodeDirection = "left" | "right" | "top" | "bottom";
 type NodePosition = { x: number; y: number };
 type RelationshipAnchor = { from: NodeDirection; to: NodeDirection };
+type NodeCanvasState = { zoom: number; pan: { x: number; y: number }; selectedNodeID: string; nodePositions: Record<string, NodePosition> };
 
 const INFO_TYPES = [
   "Text box",
@@ -135,6 +136,7 @@ const INFO_TYPES = [
 const NODE_W = 148;
 const NODE_H = 96;
 const MINI_GRID = 12;
+const SESSION_NODE_CANVAS_STATE = new Map<string, NodeCanvasState>();
 
 function trimOrEmpty(value: string): string {
   return value.trim();
@@ -162,7 +164,7 @@ function relationFromDirection(direction: NodeDirection): { a: "Parent" | "Child
   return { a: "Child", b: "Parent" };
 }
 
-export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
+export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const canvasStateKey = `node-canvas-state-v2:${companyID}`;
@@ -191,6 +193,12 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
   const [loading, setLoading] = useState(false);
   const [detailsPanelNodeID, setDetailsPanelNodeID] = useState<string>("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
+  const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeID: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[] } | null>(null);
+  const [canvasActive, setCanvasActive] = useState(false);
+  const [panelRect, setPanelRect] = useState({ x: 0, y: 10, width: 340, height: 360 });
+  const [panelDrag, setPanelDrag] = useState<{ pointerID: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const [panelResize, setPanelResize] = useState<{ pointerID: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
 
   const [dragState, setDragState] = useState<{ nodeIDs: string[]; pointerID: number; offsets: Record<string, { x: number; y: number }> } | null>(null);
   const [panState, setPanState] = useState<{ pointerID: number; startMouseX: number; startMouseY: number; startPanX: number; startPanY: number } | null>(null);
@@ -205,6 +213,18 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
   const restoredSelectionRef = useRef<string>("");
 
   useEffect(() => {
+    const cached = SESSION_NODE_CANVAS_STATE.get(canvasStateKey);
+    if (cached) {
+      setZoom(clamp(cached.zoom, 0.45, 2.7));
+      setPan(cached.pan);
+      setPanInitialized(true);
+      restoredSelectionRef.current = cached.selectedNodeID;
+      setSelectedNodeID(cached.selectedNodeID);
+      setSelectedNodeIDs(cached.selectedNodeID ? new Set([cached.selectedNodeID]) : new Set());
+      setNodePositions(cached.nodePositions);
+      setRestoredViewport(true);
+      return;
+    }
     try {
       const raw = localStorage.getItem(canvasStateKey);
       if (!raw) {
@@ -379,7 +399,9 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
   useEffect(() => {
     if (!restoredViewport) return;
     try {
-      localStorage.setItem(canvasStateKey, JSON.stringify({ zoom, pan, selectedNodeID, nodePositions }));
+      const nextState = { zoom, pan, selectedNodeID, nodePositions };
+      SESSION_NODE_CANVAS_STATE.set(canvasStateKey, nextState);
+      localStorage.setItem(canvasStateKey, JSON.stringify(nextState));
     } catch {
       // ignore local storage quota/security errors
     }
@@ -509,10 +531,35 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
   }, [selectionPointerID, selectionBox, nodes, nodePositions, zoom, pan.x, pan.y]);
 
   useEffect(() => {
-    const onWindowPointerDown = () => setContextMenu(null);
+    const onWindowPointerDown = () => {
+      setContextMenu(null);
+      setNodeContextMenu(null);
+    };
     window.addEventListener("pointerdown", onWindowPointerDown);
     return () => window.removeEventListener("pointerdown", onWindowPointerDown);
   }, []);
+
+  useEffect(() => {
+    const onWindowPointerDown = (event: PointerEvent) => {
+      if (viewportRef.current?.contains(event.target as Node)) return;
+      setCanvasActive(false);
+    };
+    window.addEventListener("pointerdown", onWindowPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onWindowPointerDown, true);
+  }, []);
+
+  useEffect(() => {
+    if (!widgetId) return;
+    const eventName = `nodes:create:${widgetId}`;
+    const onCreate = (event: Event) => {
+      const custom = event as CustomEvent<{ header?: string }>;
+      const header = trimOrEmpty(custom.detail?.header ?? "");
+      if (!header) return;
+      void createNode(header);
+    };
+    window.addEventListener(eventName, onCreate as EventListener);
+    return () => window.removeEventListener(eventName, onCreate as EventListener);
+  }, [widgetId]);
 
   const createNode = async (header: string, worldPos?: { x: number; y: number }): Promise<NodeRecord | null> => {
     const value = trimOrEmpty(header);
@@ -619,6 +666,29 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     }
   };
 
+  const deleteNodes = async (nodeIDs: string[]) => {
+    const unique = Array.from(new Set(nodeIDs.filter(Boolean)));
+    if (unique.length === 0) return;
+    setError("");
+    try {
+      await Promise.all(unique.map((nodeID) => requestJSON<{ status: string }>(`/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}`, {
+        method: "DELETE",
+      })));
+      setDetails((current) => (current && unique.includes(current.node.node_id) ? null : current));
+      if (detailsPanelNodeID && unique.includes(detailsPanelNodeID)) setDetailsPanelNodeID("");
+      await loadNodes();
+      setSelectedNodeID("");
+      setSelectedNodeIDs(new Set());
+      setNodePositions((previous) => {
+        const next = { ...previous };
+        for (const id of unique) delete next[id];
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_delete_node");
+    }
+  };
+
   const addInformation = async (nodeID: string) => {
     if (!nodeID || !trimOrEmpty(infoDraft)) return;
     setError("");
@@ -638,8 +708,75 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     }
   };
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!canvasActive) return;
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+      }
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      const nodeIDs = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : (selectedNodeID ? [selectedNodeID] : []);
+      if (nodeIDs.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setConfirmDelete({ nodeIDs });
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [canvasActive, selectedNodeID, selectedNodeIDs]);
+
+  useEffect(() => {
+    if (!panelDrag) return;
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== panelDrag.pointerID || !viewportRef.current) return;
+      const dx = event.clientX - panelDrag.startX;
+      const dy = event.clientY - panelDrag.startY;
+      const bounds = viewportRef.current.getBoundingClientRect();
+      const maxX = Math.max(0, bounds.width - panelRect.width - 8);
+      const maxY = Math.max(0, bounds.height - 56);
+      setPanelRect((previous) => ({ ...previous, x: clamp(panelDrag.originX + dx, 0, maxX), y: clamp(panelDrag.originY + dy, 8, maxY) }));
+    };
+    const onUp = (event: PointerEvent) => { if (event.pointerId === panelDrag.pointerID) setPanelDrag(null); };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [panelDrag, panelRect.width]);
+
+  useEffect(() => {
+    if (!panelResize) return;
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== panelResize.pointerID || !viewportRef.current) return;
+      const bounds = viewportRef.current.getBoundingClientRect();
+      const nextW = clamp(panelResize.originW + (event.clientX - panelResize.startX), 260, Math.max(260, bounds.width - panelRect.x - 8));
+      const nextH = clamp(panelResize.originH + (event.clientY - panelResize.startY), 220, Math.max(220, bounds.height - panelRect.y - 8));
+      setPanelRect((previous) => ({ ...previous, width: nextW, height: nextH }));
+    };
+    const onUp = (event: PointerEvent) => { if (event.pointerId === panelResize.pointerID) setPanelResize(null); };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [panelResize, panelRect.x, panelRect.y]);
+
   const detailsPanelNode = useMemo(() => nodes.find((item) => item.node_id === detailsPanelNodeID) ?? null, [nodes, detailsPanelNodeID]);
   const nodeByID = useMemo(() => Object.fromEntries(nodes.map((node) => [node.node_id, node])), [nodes]);
+
+  useEffect(() => {
+    if (!detailsPanelNode || !viewportRef.current) return;
+    const bounds = viewportRef.current.getBoundingClientRect();
+    setPanelRect((previous) => ({
+      ...previous,
+      x: previous.x === 0 ? Math.max(0, bounds.width - previous.width - 12) : clamp(previous.x, 0, Math.max(0, bounds.width - previous.width - 8)),
+      y: clamp(previous.y, 8, Math.max(8, bounds.height - 56)),
+    }));
+  }, [detailsPanelNode]);
 
   const getAnchorPoint = (nodeID: string, side: NodeDirection) => {
     const pos = nodePositions[nodeID];
@@ -686,12 +823,14 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
   }, [relationships, nodeByID, nodePositions, relationshipAnchors]);
 
   return (
-    <div style={{ display: "grid", gap: 6, fontSize: 11, height: "100%", gridTemplateRows: "auto 1fr" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, alignItems: "center" }}>
-        <div style={{ fontSize: 12, textTransform: "uppercase", fontWeight: 700 }}>[ Node Canvas ]</div>
-        <input value={newNodeHeader} onChange={(e) => setNewNodeHeader(e.target.value)} placeholder="Create node header" />
-        <button onClick={() => { void createNode(newNodeHeader); setNewNodeHeader(""); }}>Add</button>
-      </div>
+    <div style={{ display: "grid", gap: 6, fontSize: 11, height: "100%", gridTemplateRows: hideTopControls ? "1fr" : "auto 1fr" }}>
+      {!hideTopControls && (
+        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, alignItems: "center" }}>
+          <div style={{ fontSize: 12, textTransform: "uppercase", fontWeight: 700 }}>[ Node Canvas ]</div>
+          <input value={newNodeHeader} onChange={(e) => setNewNodeHeader(e.target.value)} placeholder="Create node header" />
+          <button onClick={() => { void createNode(newNodeHeader); setNewNodeHeader(""); }}>Add</button>
+        </div>
+      )}
 
       <div
         ref={viewportRef}
@@ -707,6 +846,8 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
         onContextMenu={(event) => {
           event.preventDefault();
           event.stopPropagation();
+          setCanvasActive(true);
+          setNodeContextMenu(null);
           if (!viewportRef.current) return;
           const bounds = viewportRef.current.getBoundingClientRect();
           const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
@@ -730,6 +871,7 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
         }}
         onPointerDown={(event) => {
           if (!viewportRef.current) return;
+          setCanvasActive(true);
           const bounds = viewportRef.current.getBoundingClientRect();
           const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
           const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
@@ -742,8 +884,10 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
             return;
           }
 
-          setSelectedNodeIDs(new Set());
-          setSelectedNodeID("");
+          if (!(event.target as HTMLElement).closest("[data-node-card='true']")) {
+            setSelectedNodeIDs(new Set());
+            setSelectedNodeID("");
+          }
           setPanState({
             pointerID: event.pointerId,
             startMouseX: event.clientX,
@@ -790,6 +934,7 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
             return (
               <div
                 key={node.node_id}
+                data-node-card="true"
                 style={{
                   position: "absolute",
                   left: position.x,
@@ -811,6 +956,22 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
                 onDoubleClick={(event) => {
                   event.stopPropagation();
                   setDetailsPanelNodeID(node.node_id);
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setCanvasActive(true);
+                  const bounds = viewportRef.current?.getBoundingClientRect();
+                  if (!bounds) return;
+                  const nextIDs = selectedNodeIDs.has(node.node_id) ? Array.from(selectedNodeIDs) : [node.node_id];
+                  setSelectedNodeID(node.node_id);
+                  setSelectedNodeIDs(new Set(nextIDs));
+                  setContextMenu(null);
+                  setNodeContextMenu({
+                    x: clamp(event.clientX - bounds.left, 0, bounds.width),
+                    y: clamp(event.clientY - bounds.top, 0, bounds.height),
+                    nodeID: node.node_id,
+                  });
                 }}
                 onPointerDown={(event) => {
                   event.stopPropagation();
@@ -929,27 +1090,60 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
           </div>
         )}
 
+        {nodeContextMenu && (
+          <div
+            style={{
+              position: "absolute",
+              left: nodeContextMenu.x,
+              top: nodeContextMenu.y,
+              transform: "translate(8px, 8px)",
+              background: "rgba(255,255,255,0.95)",
+              border: `1px solid ${accent}`,
+              borderRadius: 8,
+              padding: 4,
+              zIndex: 41,
+              boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
+              display: "grid",
+              gap: 2,
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", textAlign: "left" }} onClick={() => { setDetailsPanelNodeID(nodeContextMenu.nodeID); setNodeContextMenu(null); }}>
+              Edit node
+            </button>
+            <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", color: "#a20026", textAlign: "left" }} onClick={() => { const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID]; setConfirmDelete({ nodeIDs: ids }); setNodeContextMenu(null); }}>
+              Delete node
+            </button>
+          </div>
+        )}
+
         {!!detailsPanelNode && (
           <div
             style={{
               position: "absolute",
-              top: 10,
-              right: 10,
-              width: "min(34vw, 340px)",
-              maxHeight: "calc(100% - 20px)",
+              top: panelRect.y,
+              left: panelRect.x,
+              width: panelRect.width,
+              height: panelRect.height,
               overflow: "auto",
               zIndex: 35,
               borderRadius: 10,
               border: `1px solid ${accent}`,
-              background: "rgba(255,255,255,0.62)",
-              backdropFilter: "blur(8px)",
-              boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
+              background: "linear-gradient(145deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08))",
+              backdropFilter: "blur(14px) saturate(120%)",
+              boxShadow: "0 12px 34px rgba(0,0,0,0.22), inset 0 0 0 1px rgba(255,255,255,0.25)",
               padding: 10,
               display: "grid",
               gap: 8,
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <div
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, cursor: "move" }}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                setPanelDrag({ pointerID: event.pointerId, startX: event.clientX, startY: event.clientY, originX: panelRect.x, originY: panelRect.y });
+              }}
+            >
               <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase" }}>{detailsPanelNode.header}</div>
               <button onClick={() => setDetailsPanelNodeID("")} style={{ border: `1px solid ${accent}`, background: "#fff", borderRadius: 6, cursor: "pointer" }}>✕</button>
             </div>
@@ -988,6 +1182,13 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
                   ))}
               </div>
             </div>
+            <div
+              style={{ position: "absolute", right: 2, bottom: 2, width: 12, height: 12, cursor: "nwse-resize", borderRight: `2px solid ${accent}`, borderBottom: `2px solid ${accent}` }}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                setPanelResize({ pointerID: event.pointerId, startX: event.clientX, startY: event.clientY, originW: panelRect.width, originH: panelRect.height });
+              }}
+            />
           </div>
         )}
 
@@ -1009,9 +1210,17 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
           </div>
         )}
 
-        <div style={{ position: "absolute", top: 10, left: 10, fontSize: 10, opacity: 0.7, zIndex: 25 }}>
-          Drag to pan · mouse wheel to zoom · Ctrl+drag to box-select · Right-click to create node.
-        </div>
+        {confirmDelete && (
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 60, display: "grid", placeItems: "center" }}>
+            <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: `1px solid ${accent}`, background: "rgba(255,255,255,0.92)", padding: 12, display: "grid", gap: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 700 }}>Are you sure you want to delete {confirmDelete.nodeIDs.length} node{confirmDelete.nodeIDs.length === 1 ? "" : "s"}?</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <button onClick={() => { void deleteNodes(confirmDelete.nodeIDs); setConfirmDelete(null); }} style={{ border: `1px solid ${accent}`, background: "#d8fff6", cursor: "pointer", fontWeight: 700 }}>Yes</button>
+                <button onClick={() => setConfirmDelete(null)} style={{ border: `1px solid ${accent}`, background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
