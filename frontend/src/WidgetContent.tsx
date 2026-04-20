@@ -137,6 +137,7 @@ const INFO_TYPES = [
 const NODE_W = 148;
 const NODE_H = 96;
 const MINI_GRID = 12;
+const NODE_INFO_LABEL_COLOR = "rgba(157, 224, 227, 0.72)";
 const SESSION_NODE_CANVAS_STATE = new Map<string, NodeCanvasState>();
 const PANEL_MIN_WIDTH = 300;
 const PANEL_MIN_HEIGHT = 220;
@@ -178,7 +179,7 @@ function relationFromDirection(direction: NodeDirection): { a: "Parent" | "Child
   return { a: "Child", b: "Parent" };
 }
 
-export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
+export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent: _accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const canvasScope = widgetId?.trim() ? widgetId : "global";
@@ -877,17 +878,15 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   }, [relationships, nodeByID, nodePositions, relationshipAnchors]);
 
   return (
-    <div style={{ display: "grid", gap: 6, fontSize: 11, height: "100%", gridTemplateRows: "1fr" }}>
+    <div style={{ fontSize: 11, height: "100%" }}>
       <div
         ref={viewportRef}
         style={{
           position: "relative",
-          border: `1px solid ${accent}`,
-          borderRadius: 10,
           overflow: "hidden",
-          minHeight: 560,
           height: "100%",
-          backgroundColor: "rgba(255,255,255,0.78)",
+          width: "100%",
+          backgroundColor: "#ffffff",
         }}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -954,9 +953,10 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             height: WORLD_H,
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: "0 0",
-            backgroundImage: `linear-gradient(to right, rgba(17,17,17,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(17,17,17,0.08) 1px, transparent 1px)`,
+            backgroundImage: `linear-gradient(to right, rgba(17,17,17,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(17,17,17,0.06) 1px, transparent 1px)`,
             backgroundSize: `${MINI_GRID}px ${MINI_GRID}px`,
             backgroundPosition: "-1px -1px",
+            color: NODE_INFO_LABEL_COLOR,
           }}
         >
           <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 1 }}>
@@ -965,7 +965,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 key={path.id}
                 points={path.points.map((point) => `${point.x},${point.y}`).join(" ")}
                 fill="none"
-                stroke={accent}
+                stroke={NODE_INFO_LABEL_COLOR}
                 strokeWidth={1.6}
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -990,13 +990,14 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                   width: NODE_W,
                   height: NODE_H,
                   borderRadius: 8,
-                  border: `1px solid ${isSelected ? accent : "#505050"}`,
-                  background: isSelected ? "#ffffff" : "rgba(252,252,252,0.93)",
-                  outline: isSelected ? `2px solid ${accent}` : "none",
+                  border: `1px solid ${NODE_INFO_LABEL_COLOR}`,
+                  background: "#ffffff",
+                  color: NODE_INFO_LABEL_COLOR,
+                  outline: isSelected ? `2px solid ${NODE_INFO_LABEL_COLOR}` : "none",
                   outlineOffset: isSelected ? 1 : 0,
                   display: "grid",
                   gridTemplateRows: "auto 1fr auto",
-                  boxShadow: isSelected ? "0 0 0 3px rgba(111,231,238,0.32), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
+                  boxShadow: isSelected ? "0 0 0 3px rgba(157, 224, 227, 0.25), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
                   userSelect: "none",
                   cursor: dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab",
                   zIndex: isPrimary ? 5 : 4,
@@ -1046,7 +1047,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                   <div style={{ whiteSpace: "normal", overflowWrap: "anywhere", maxHeight: 28, overflow: "hidden" }}>{node.header}</div>
                 </div>
                 {isSelected && (
-                  <div style={{ position: "absolute", top: 6, right: 6, width: 12, height: 12, borderRadius: 999, background: accent, opacity: 0.85 }} />
+                  <div style={{ position: "absolute", top: 6, right: 6, width: 12, height: 12, borderRadius: 999, background: NODE_INFO_LABEL_COLOR, opacity: 0.9 }} />
                 )}
                 <div style={{ padding: "5px 8px", fontSize: 10, display: "grid", gap: 2 }}>
                   <div>ID: {node.node_id.slice(0, 8)}</div>
@@ -1075,9 +1076,9 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                       width: 20,
                       height: 20,
                       borderRadius: 999,
-                      border: `1px solid ${accent}`,
+                      border: `1px solid ${NODE_INFO_LABEL_COLOR}`,
                       background: "#ffffff",
-                      color: accent,
+                      color: NODE_INFO_LABEL_COLOR,
                       display: isPrimary ? "grid" : "none",
                       placeItems: "center",
                       fontSize: 14,
@@ -1102,8 +1103,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               top: Math.min(selectionBox.startY, selectionBox.currentY),
               width: Math.abs(selectionBox.currentX - selectionBox.startX),
               height: Math.abs(selectionBox.currentY - selectionBox.startY),
-              border: `1px dashed ${accent}`,
-              backgroundColor: "rgba(111,231,238,0.2)",
+              border: `1px dashed ${NODE_INFO_LABEL_COLOR}`,
+              backgroundColor: "rgba(157, 224, 227, 0.2)",
               pointerEvents: "none",
               zIndex: 20,
             }}
@@ -1118,7 +1119,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               top: contextMenu.y,
               transform: "translate(8px, 8px)",
               background: "rgba(255,255,255,0.95)",
-              border: `1px solid ${accent}`,
+              border: `1px solid ${NODE_INFO_LABEL_COLOR}`,
               borderRadius: 8,
               padding: 4,
               zIndex: 40,
@@ -1148,7 +1149,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               top: nodeContextMenu.y,
               transform: "translate(8px, 8px)",
               background: "rgba(255,255,255,0.95)",
-              border: `1px solid ${accent}`,
+              border: `1px solid ${NODE_INFO_LABEL_COLOR}`,
               borderRadius: 8,
               padding: 4,
               zIndex: 41,
@@ -1182,14 +1183,15 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               zIndex: 35,
               borderRadius: 16,
               border: "1px solid rgba(255,255,255,0.35)",
-              backgroundColor: "rgba(157, 224, 227, 0.72)",
+              backgroundColor: NODE_INFO_LABEL_COLOR,
               background: `
                 linear-gradient(
                   135deg,
-                  rgba(255,255,255,0.18) 0%,
-                  rgba(255,255,255,0.08) 50%,
-                  rgba(255,255,255,0.14) 100%
-                )
+                  rgba(180, 244, 247, 0.34) 0%,
+                  rgba(157, 224, 227, 0.72) 52%,
+                  rgba(129, 205, 209, 0.5) 100%
+                ),
+                ${NODE_INFO_LABEL_COLOR}
               `,
               backdropFilter: "blur(30px) saturate(180%)",
               WebkitBackdropFilter: "blur(30px) saturate(180%)",
@@ -1293,11 +1295,11 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
         {confirmDelete && (
           <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 60, display: "grid", placeItems: "center" }}>
-            <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: `1px solid ${accent}`, background: "rgba(255,255,255,0.92)", padding: 12, display: "grid", gap: 10 }}>
+            <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: `1px solid ${NODE_INFO_LABEL_COLOR}`, background: "rgba(255,255,255,0.92)", padding: 12, display: "grid", gap: 10 }}>
               <div style={{ fontSize: 12, fontWeight: 700 }}>Are you sure you want to delete {confirmDelete.nodeIDs.length} node{confirmDelete.nodeIDs.length === 1 ? "" : "s"}?</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <button onClick={() => { void deleteNodes(confirmDelete.nodeIDs); setConfirmDelete(null); }} style={{ border: `1px solid ${accent}`, background: "#d8fff6", cursor: "pointer", fontWeight: 700 }}>Yes</button>
-                <button onClick={() => setConfirmDelete(null)} style={{ border: `1px solid ${accent}`, background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
+                <button onClick={() => { void deleteNodes(confirmDelete.nodeIDs); setConfirmDelete(null); }} style={{ border: `1px solid ${NODE_INFO_LABEL_COLOR}`, background: "#d8fff6", cursor: "pointer", fontWeight: 700 }}>Yes</button>
+                <button onClick={() => setConfirmDelete(null)} style={{ border: `1px solid ${NODE_INFO_LABEL_COLOR}`, background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
               </div>
             </div>
           </div>
