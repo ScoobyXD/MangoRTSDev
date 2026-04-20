@@ -542,7 +542,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   useEffect(() => {
     const onWindowPointerDown = (event: PointerEvent) => {
-      if (viewportRef.current?.contains(event.target as Node)) return;
+      const target = event.target;
+      if (target instanceof Node && viewportRef.current?.contains(target)) return;
       setCanvasActive(false);
     };
     window.addEventListener("pointerdown", onWindowPointerDown, true);

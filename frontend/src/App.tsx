@@ -343,6 +343,26 @@ interface WidgetCardProps {
   onSelect: (id: string) => void;
 }
 
+class WidgetErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    // keep app usable even if one widget crashes
+    console.error("widget_render_error", error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <div style={{ fontSize: 11, padding: 8, color: "#b00020" }}>Module failed to render. Please reload this tab.</div>;
+    }
+    return this.props.children;
+  }
+}
+
 const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect }) => {
   const Content = CONTENT_MAP[widget.kind];
   const theme = COLORWAYS[widget.theme ?? "teal"];
@@ -395,7 +415,9 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
         )}
       </div>
       <div style={{ flex: 1, padding: "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
-        {Content ? <Content accent={widget.accent} widgetId={widget.id} hideTopControls={isNodes} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: widget.accent }}>{widget.title}</span></div>}
+        {Content
+          ? <WidgetErrorBoundary><Content accent={widget.accent} widgetId={widget.id} hideTopControls={isNodes} /></WidgetErrorBoundary>
+          : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: widget.accent }}>{widget.title}</span></div>}
       </div>
       {editMode && HANDLES.map((h, i) => <div key={i} data-handle="true" onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, widget.id, h.edges); }} onTouchStart={(e) => { e.stopPropagation(); onResizeStart(e, widget.id, h.edges); }} style={{ position: "absolute", cursor: h.cursor, ...h.style }} />)}
     </div>
