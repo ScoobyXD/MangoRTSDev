@@ -5,6 +5,23 @@ This document tracks technical behavior for the **frontend node module** impleme
 
 ## Current UX behavior (updated)
 
+### 0) Node position reset root cause + fix
+- **Root cause:** node canvas state persistence key was previously scoped only by `company_id` (`node-canvas-state-v2:${companyID}`).
+- In multi-tab/multi-widget usage, different Nodes widgets (or views) could overwrite each other’s cached `nodePositions` in local/session storage.
+- Once one view wrote a default/auto-laid-out map, switching back to another view restored that overwritten map, which looked like nodes snapping to a top-left line.
+- **Fix:** state key is now scoped by both company and widget instance:
+  - `node-canvas-state-v3:${companyID}:${widgetId || "global"}`
+- Result: each Nodes widget keeps an isolated layout cache, so tab/module switching no longer clobbers previously arranged node positions.
+
+### 0.1) Fast tab-switch race that still caused overwrite
+- A second overwrite path existed during rapid tab/module switching:
+  - `nodes` starts as `[]` on mount.
+  - the layout normalization effect ran immediately and rebuilt `nodePositions` from `nodes`.
+  - because `nodes` was empty at that moment, it replaced positions with `{}`.
+  - persistence effect then saved that empty map, so when nodes finished loading they were re-laid out in the default row.
+- **Fix:** when `nodes.length === 0`, the normalization effect now returns previous positions unchanged (does not clear the map).
+- Result: quick tab switching no longer wipes persisted node positions before data load completes.
+
 ### 1) Node right-click menu auto-dismiss rules
 - The node context menu (`Edit node` / `Delete node`) is stored in `nodeContextMenu`.
 - The canvas context menu (`Create new node`) is stored in `contextMenu`.
@@ -17,15 +34,51 @@ This document tracks technical behavior for the **frontend node module** impleme
     - `setNodeContextMenu(null)`
 - Result: if the user right-clicks a node and then clicks another node (or another spot in the viewport), the old menu disappears immediately.
 
-### 2) Right-side info/details panel visual treatment
+### 2) Right-side info/details panel visual treatment + typography
 - The details panel is shown when `detailsPanelNode` is present.
-- Updated glass styling to a neutral frosted-glass look that does not read as blue:
-  - `background: rgba(255,255,255,0.34)`
-  - `backdropFilter: blur(20px) saturate(108%)`
-  - brighter inset edge (`rgba(255,255,255,0.45)`) for a glass rim
-- Result: panel reads as colorless/clear glass with stronger frost, instead of tinting blue from the canvas underneath.
+- Updated styling to a richer frosted-glass look:
+  - stronger gradient layers
+  - `backdropFilter: blur(30px) saturate(180%)`
+  - updated inset highlights and shadowing
+- Added typography treatment:
+  - default panel font uses **Space Grotesk**
+  - metadata / list rows use **JetBrains Mono**
+  - section labels use uppercase + wider tracking
+- Added Google font links in `frontend/index.html` for:
+  - `Space Grotesk`
+  - `JetBrains Mono`
+- Result: panel now has the intended modern glass+mono visual system.
 
-### 3) Node module top header controls removed
+### 3) Details panel overflow + horizontal scrollbar fix
+- The details panel now uses:
+  - `boxSizing: "border-box"`
+  - `overflowY: "auto"`
+  - `overflowX: "hidden"`
+- Panel base tint now includes `backgroundColor: rgba(157, 224, 227, 0.72)` beneath the glass gradient so the panel keeps a consistent aqua identity.
+- The input/select/button row was updated with `minmax(0, 1fr)` and `minWidth: 0` on the input, plus compact button sizing.
+- Result: no accidental horizontal overflow strip at the bottom; panel content fits within panel width correctly.
+
+### 3.1) Details panel scrollbar aesthetics
+- Added a dedicated class (`node-details-panel`) for custom scrollbar styling in `frontend/src/index.css`.
+- Scrollbar visuals now match panel aesthetics:
+  - thin width
+  - soft translucent track
+  - rounded teal thumb with subtle gradient and hover state
+- Implemented for both Firefox (`scrollbar-width`, `scrollbar-color`) and WebKit browsers (`::-webkit-scrollbar*` rules).
+
+### 4) Details panel drag + full edge/corner resizing
+- Existing drag behavior remains on the panel header (`cursor: move` + `panelDrag` state).
+- Resizing now supports all sides and corners via dedicated invisible handles:
+  - Corners: top-left, top-right, bottom-left, bottom-right
+  - Edges: top, right, bottom, left
+- Resize state now tracks:
+  - pointer position start
+  - panel origin x/y/width/height
+  - active edges being resized
+- During resize, panel dimensions are clamped to minimums and viewport bounds, with position adjusted for top/left handles.
+- Result: user can resize the informational panel from any edge or corner, not only bottom-right.
+
+### 5) Node module top header controls removed
 - Removed node-header controls from both locations that previously showed create affordances:
   - widget header strip in `App.tsx` (Node Canvas label + input + plus button)
   - top controls row in `NodesContent`
@@ -41,7 +94,9 @@ This document tracks technical behavior for the **frontend node module** impleme
 - `nodeContextMenu`: node right-click menu state
 - `detailsPanelNodeID` / `detailsPanelNode`: controls right-side info panel visibility/content
 - `newNodeHeader`: still used for context-menu node creation fallback naming
+- `panelDrag`: drag state for moving details panel
+- `panelResize`: active resize state with edge/corner metadata
 
 ## Primary implementation file
 - `frontend/src/WidgetContent.tsx`
-- `frontend/src/App.tsx`
+- `frontend/index.html`
