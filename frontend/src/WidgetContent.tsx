@@ -117,6 +117,7 @@ type NodeDetails = {
 };
 
 type NodeDirection = "left" | "right" | "top" | "bottom";
+type PanelEdge = "top" | "right" | "bottom" | "left";
 type NodePosition = { x: number; y: number };
 type RelationshipAnchor = { from: NodeDirection; to: NodeDirection };
 type NodeCanvasState = { zoom: number; pan: { x: number; y: number }; selectedNodeID: string; nodePositions: Record<string, NodePosition> };
@@ -137,6 +138,19 @@ const NODE_W = 148;
 const NODE_H = 96;
 const MINI_GRID = 12;
 const SESSION_NODE_CANVAS_STATE = new Map<string, NodeCanvasState>();
+const PANEL_MIN_WIDTH = 300;
+const PANEL_MIN_HEIGHT = 220;
+
+const panelResizeHandles: { key: string; edges: Partial<Record<PanelEdge, true>>; cursor: string; style: React.CSSProperties }[] = [
+  { key: "top-left", edges: { top: true, left: true }, cursor: "nwse-resize", style: { top: -6, left: -6, width: 12, height: 12 } },
+  { key: "top-right", edges: { top: true, right: true }, cursor: "nesw-resize", style: { top: -6, right: -6, width: 12, height: 12 } },
+  { key: "bottom-left", edges: { bottom: true, left: true }, cursor: "nesw-resize", style: { bottom: -6, left: -6, width: 12, height: 12 } },
+  { key: "bottom-right", edges: { bottom: true, right: true }, cursor: "nwse-resize", style: { bottom: -6, right: -6, width: 12, height: 12 } },
+  { key: "top", edges: { top: true }, cursor: "ns-resize", style: { top: -4, left: 14, right: 14, height: 8 } },
+  { key: "bottom", edges: { bottom: true }, cursor: "ns-resize", style: { bottom: -4, left: 14, right: 14, height: 8 } },
+  { key: "left", edges: { left: true }, cursor: "ew-resize", style: { left: -4, top: 14, bottom: 14, width: 8 } },
+  { key: "right", edges: { right: true }, cursor: "ew-resize", style: { right: -4, top: 14, bottom: 14, width: 8 } },
+];
 
 function trimOrEmpty(value: string): string {
   return value.trim();
@@ -198,7 +212,16 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [canvasActive, setCanvasActive] = useState(false);
   const [panelRect, setPanelRect] = useState({ x: 0, y: 10, width: 340, height: 360 });
   const [panelDrag, setPanelDrag] = useState<{ pointerID: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const [panelResize, setPanelResize] = useState<{ pointerID: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
+  const [panelResize, setPanelResize] = useState<{
+    pointerID: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    originW: number;
+    originH: number;
+    edges: Partial<Record<PanelEdge, true>>;
+  } | null>(null);
 
   const [dragState, setDragState] = useState<{ nodeIDs: string[]; pointerID: number; offsets: Record<string, { x: number; y: number }> } | null>(null);
   const [panState, setPanState] = useState<{ pointerID: number; startMouseX: number; startMouseY: number; startPanX: number; startPanY: number } | null>(null);
@@ -752,9 +775,38 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     const onMove = (event: PointerEvent) => {
       if (event.pointerId !== panelResize.pointerID || !viewportRef.current) return;
       const bounds = viewportRef.current.getBoundingClientRect();
-      const nextW = clamp(panelResize.originW + (event.clientX - panelResize.startX), 260, Math.max(260, bounds.width - panelRect.x - 8));
-      const nextH = clamp(panelResize.originH + (event.clientY - panelResize.startY), 220, Math.max(220, bounds.height - panelRect.y - 8));
-      setPanelRect((previous) => ({ ...previous, width: nextW, height: nextH }));
+      const dx = event.clientX - panelResize.startX;
+      const dy = event.clientY - panelResize.startY;
+      const maxX = Math.max(0, bounds.width - 8);
+      const maxY = Math.max(8, bounds.height - 8);
+
+      let nextX = panelResize.originX;
+      let nextY = panelResize.originY;
+      let nextW = panelResize.originW;
+      let nextH = panelResize.originH;
+
+      if (panelResize.edges.right) nextW = panelResize.originW + dx;
+      if (panelResize.edges.bottom) nextH = panelResize.originH + dy;
+      if (panelResize.edges.left) {
+        nextX = panelResize.originX + dx;
+        nextW = panelResize.originW - dx;
+      }
+      if (panelResize.edges.top) {
+        nextY = panelResize.originY + dy;
+        nextH = panelResize.originH - dy;
+      }
+
+      nextW = clamp(nextW, PANEL_MIN_WIDTH, maxX);
+      nextH = clamp(nextH, PANEL_MIN_HEIGHT, maxY - 8);
+      nextX = clamp(nextX, 0, maxX - nextW);
+      nextY = clamp(nextY, 8, maxY - nextH);
+
+      if (panelResize.edges.left) nextX = panelResize.originX + (panelResize.originW - nextW);
+      if (panelResize.edges.top) nextY = panelResize.originY + (panelResize.originH - nextH);
+      nextX = clamp(nextX, 0, maxX - nextW);
+      nextY = clamp(nextY, 8, maxY - nextH);
+
+      setPanelRect({ x: nextX, y: nextY, width: nextW, height: nextH });
     };
     const onUp = (event: PointerEvent) => { if (event.pointerId === panelResize.pointerID) setPanelResize(null); };
     window.addEventListener("pointermove", onMove);
@@ -763,7 +815,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [panelResize, panelRect.x, panelRect.y]);
+  }, [panelResize]);
 
   const detailsPanelNode = useMemo(() => nodes.find((item) => item.node_id === detailsPanelNodeID) ?? null, [nodes, detailsPanelNodeID]);
   const nodeByID = useMemo(() => Object.fromEntries(nodes.map((node) => [node.node_id, node])), [nodes]);
@@ -1115,16 +1167,20 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
         {!!detailsPanelNode && (
           <div
+            className="node-details-panel"
             style={{
               position: "absolute",
               top: panelRect.y,
               left: panelRect.x,
               width: panelRect.width,
               height: panelRect.height,
-              overflow: "auto",
+              boxSizing: "border-box",
+              overflowY: "auto",
+              overflowX: "hidden",
               zIndex: 35,
               borderRadius: 16,
               border: "1px solid rgba(255,255,255,0.35)",
+              backgroundColor: "rgba(157, 224, 227, 0.72)",
               background: `
                 linear-gradient(
                   135deg,
@@ -1143,6 +1199,9 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               padding: 12,
               display: "grid",
               gap: 8,
+              fontFamily: "'Space Grotesk', system-ui, sans-serif",
+              color: "#1a1a1a",
+              letterSpacing: "0.01em",
             }}
           >
             <div
@@ -1152,51 +1211,63 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 setPanelDrag({ pointerID: event.pointerId, startX: event.clientX, startY: event.clientY, originX: panelRect.x, originY: panelRect.y });
               }}
             >
-              <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase" }}>{detailsPanelNode.header}</div>
-              <button onClick={() => setDetailsPanelNodeID("")} style={{ border: `1px solid ${accent}`, background: "#fff", borderRadius: 6, cursor: "pointer" }}>✕</button>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.14em" }}>{detailsPanelNode.header}</div>
+              <button onClick={() => setDetailsPanelNodeID("")} style={{ border: "1px solid rgba(0,0,0,0.15)", background: "rgba(255,255,255,0.4)", borderRadius: 6, cursor: "pointer", width: 22, height: 22, fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, lineHeight: 1, padding: 0 }}>✕</button>
             </div>
-            <div style={{ fontSize: 10, opacity: 0.8 }}>ID: {detailsPanelNode.node_id}</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 6 }}>
-              <input value={infoDraft} onChange={(e) => setInfoDraft(e.target.value)} placeholder="Add node information" />
-              <select value={infoType} onChange={(e) => setInfoType(e.target.value as (typeof INFO_TYPES)[number])}>
+            <div style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 10, fontWeight: 500, opacity: 0.6, letterSpacing: "0.02em" }}>ID: {detailsPanelNode.node_id}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", gap: 6, alignItems: "center", minWidth: 0 }}>
+              <input value={infoDraft} onChange={(e) => setInfoDraft(e.target.value)} placeholder="Add node information" style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 13, fontWeight: 400, padding: "6px 10px", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 6, background: "rgba(255,255,255,0.45)", outline: "none", minWidth: 0, width: "100%" }} />
+              <select value={infoType} onChange={(e) => setInfoType(e.target.value as (typeof INFO_TYPES)[number])} style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, fontWeight: 500, padding: "6px 8px", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 6, background: "rgba(255,255,255,0.45)", cursor: "pointer", maxWidth: "100%" }}>
                 {INFO_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
               </select>
-              <button onClick={() => { void addInformation(detailsPanelNode.node_id); }}>Info</button>
+              <button onClick={() => { void addInformation(detailsPanelNode.node_id); }} style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, fontWeight: 600, padding: "6px 10px", border: "1px solid rgba(0,0,0,0.15)", borderRadius: 6, background: "rgba(255,255,255,0.55)", cursor: "pointer", letterSpacing: "0.02em", whiteSpace: "nowrap" }}>Info</button>
             </div>
-            <button onClick={() => { void deleteNode(detailsPanelNode.node_id); }} style={{ justifySelf: "start" }}>Delete node</button>
-            {loading && <div style={{ ...divider }}>Syncing with API...</div>}
-            {error && <div style={{ ...divider, color: "#b00020" }}>Error: {error}</div>}
+            <button onClick={() => { void deleteNode(detailsPanelNode.node_id); }} style={{ justifySelf: "start", fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, fontWeight: 600, padding: "6px 12px", border: "1px solid rgba(180,0,30,0.25)", borderRadius: 6, background: "rgba(255,255,255,0.45)", color: "#b00020", cursor: "pointer", letterSpacing: "0.02em" }}>Delete node</button>
+            {loading && <div style={{ ...divider, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>Syncing with API...</div>}
+            {error && <div style={{ ...divider, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: "#b00020" }}>Error: {error}</div>}
             <div>
-              <div style={{ ...divider, fontSize: 12 }}>[ relationships ]</div>
+              <div style={{ ...divider, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.18em", opacity: 0.7, marginBottom: 4 }}>[ relationships ]</div>
               <div style={{ display: "grid", gap: 2, maxHeight: 110, overflow: "auto" }}>
                 {(details?.node.node_id === detailsPanelNode.node_id ? details.relationships : []).length === 0
-                  ? <div style={{ ...divider }}>No relationships</div>
+                  ? <div style={{ ...divider, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, opacity: 0.55 }}>No relationships</div>
                   : (details?.relationships ?? []).map((rel) => (
-                    <div key={rel.node_relationship_id} style={{ ...divider, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    <div key={rel.node_relationship_id} style={{ ...divider, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {rel.node_id_a.slice(0, 6)}({rel.a_position}) → {rel.node_id_b.slice(0, 6)}({rel.b_position})
                     </div>
                   ))}
               </div>
             </div>
             <div>
-              <div style={{ ...divider, fontSize: 12 }}>[ information ]</div>
+              <div style={{ ...divider, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.18em", opacity: 0.7, marginBottom: 4 }}>[ information ]</div>
               <div style={{ display: "grid", gap: 2, maxHeight: 130, overflow: "auto" }}>
                 {(details?.node.node_id === detailsPanelNode.node_id ? details.information : []).length === 0
-                  ? <div style={{ ...divider }}>No information</div>
+                  ? <div style={{ ...divider, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, opacity: 0.55 }}>No information</div>
                   : (details?.information ?? []).map((info) => (
-                    <div key={info.information_id} style={{ ...divider, whiteSpace: "normal", overflowWrap: "anywhere" }}>
+                    <div key={info.information_id} style={{ ...divider, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 500, whiteSpace: "normal", overflowWrap: "anywhere" }}>
                       {info.type}: {info.information}
                     </div>
                   ))}
               </div>
             </div>
-            <div
-              style={{ position: "absolute", right: 2, bottom: 2, width: 12, height: 12, cursor: "nwse-resize", borderRight: `2px solid ${accent}`, borderBottom: `2px solid ${accent}` }}
-              onPointerDown={(event) => {
-                event.stopPropagation();
-                setPanelResize({ pointerID: event.pointerId, startX: event.clientX, startY: event.clientY, originW: panelRect.width, originH: panelRect.height });
-              }}
-            />
+            {panelResizeHandles.map((handle) => (
+              <div
+                key={handle.key}
+                style={{ position: "absolute", ...handle.style, cursor: handle.cursor, zIndex: 2 }}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  setPanelResize({
+                    pointerID: event.pointerId,
+                    startX: event.clientX,
+                    startY: event.clientY,
+                    originX: panelRect.x,
+                    originY: panelRect.y,
+                    originW: panelRect.width,
+                    originH: panelRect.height,
+                    edges: handle.edges,
+                  });
+                }}
+              />
+            ))}
           </div>
         )}
 
