@@ -151,6 +151,15 @@ function snapToGrid(value: number): number {
   return Math.round(value / MINI_GRID) * MINI_GRID;
 }
 
+function safeContains(container: HTMLElement | null, target: EventTarget | null): boolean {
+  if (!container || !target || !(target instanceof Node)) return false;
+  try {
+    return container.contains(target);
+  } catch {
+    return false;
+  }
+}
+
 function oppositeSide(direction: NodeDirection): NodeDirection {
   if (direction === "left") return "right";
   if (direction === "right") return "left";
@@ -818,6 +827,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         }}
         onPointerDown={(event) => {
           if (!viewportRef.current) return;
+          setCanvasActive(true);
           const bounds = viewportRef.current.getBoundingClientRect();
           const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
           const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
