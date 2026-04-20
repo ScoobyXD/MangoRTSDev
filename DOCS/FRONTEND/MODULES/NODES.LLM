@@ -1,0 +1,47 @@
+# Node Module (LLM Notes)
+
+## Scope
+This document tracks technical behavior for the **frontend node module** implemented in `frontend/src/WidgetContent.tsx` (`NodesContent`).
+
+## Current UX behavior (updated)
+
+### 1) Node right-click menu auto-dismiss rules
+- The node context menu (`Edit node` / `Delete node`) is stored in `nodeContextMenu`.
+- The canvas context menu (`Create new node`) is stored in `contextMenu`.
+- Both menus are now dismissed on any regular left-click / pointer-down interaction on the node viewport:
+  - In the viewport `onPointerDown`, we now call:
+    - `setContextMenu(null)`
+    - `setNodeContextMenu(null)`
+  - In each node card `onPointerDown`, we also call:
+    - `setContextMenu(null)`
+    - `setNodeContextMenu(null)`
+- Result: if the user right-clicks a node and then clicks another node (or another spot in the viewport), the old menu disappears immediately.
+
+### 2) Right-side info/details panel visual treatment
+- The details panel is shown when `detailsPanelNode` is present.
+- Updated glass styling to a neutral frosted-glass look that does not read as blue:
+  - `background: rgba(255,255,255,0.34)`
+  - `backdropFilter: blur(20px) saturate(108%)`
+  - brighter inset edge (`rgba(255,255,255,0.45)`) for a glass rim
+- Result: panel reads as colorless/clear glass with stronger frost, instead of tinting blue from the canvas underneath.
+
+### 3) Node module top header controls removed
+- Removed node-header controls from both locations that previously showed create affordances:
+  - widget header strip in `App.tsx` (Node Canvas label + input + plus button)
+  - top controls row in `NodesContent`
+- The removed controls previously included:
+  - `[ Node Canvas ]` label
+  - input textbox (`Create node header`)
+  - add button / plus action
+- The node module now renders only the viewport/canvas area (`gridTemplateRows: "1fr"`), and widget header only shows the module tag.
+- Node creation remains available via context actions (e.g., right-click canvas + `Create new node`, or linked-node `+` handles).
+
+## State variables relevant to these edits
+- `contextMenu`: canvas right-click menu state
+- `nodeContextMenu`: node right-click menu state
+- `detailsPanelNodeID` / `detailsPanelNode`: controls right-side info panel visibility/content
+- `newNodeHeader`: still used for context-menu node creation fallback naming
+
+## Primary implementation file
+- `frontend/src/WidgetContent.tsx`
+- `frontend/src/App.tsx`
