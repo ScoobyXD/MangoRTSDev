@@ -164,10 +164,11 @@ Relationships are visualized with SVG polylines in world space.
 
 The module persists canvas state in `localStorage` keyed per company:
 
-- Key format: `node-canvas-state-v1:<companyID>`
+- Key format: `node-canvas-state-v2:<companyID>`
 - Stored fields:
   - `zoom`
   - `pan`
+  - `selectedNodeID`
   - `nodePositions`
 
 ### Restore behavior
@@ -180,7 +181,7 @@ On mount:
 
 ### Save behavior
 
-Whenever restored state is active, writes latest `{ zoom, pan, nodePositions }` back to localStorage.
+Whenever restored state is active, writes latest `{ zoom, pan, selectedNodeID, nodePositions }` back to localStorage.
 
 This keeps layout and viewport stable when switching views and reopening the module.
 
@@ -190,32 +191,27 @@ This keeps layout and viewport stable when switching views and reopening the mod
 
 ### Top controls
 
-- Create node input + add button
-- Instruction text for pan/zoom/box-select usage
+- `[ Node Canvas ]` label, input, and add button aligned on one row.
 
 ### Main canvas
 
-- World grid
-- Relationship lines
-- Node cards
-- Side `+` actions
-- Box-select overlay
-- Group-selected badge
+- Canvas consumes almost all remaining widget height (bottom utility rows removed).
+- World grid, relationship lines, node cards, side `+` actions, selection box, and group badge.
+- In-canvas instruction text.
+- Right-click context menu with `Create new node` at cursor location.
+- Right-click on a node opens node actions (`Edit node`, `Delete node`).
+- Delete key support for selected node(s), guarded by themed confirmation modal.
 
-### Bottom controls
+### Right overlay details panel
 
-- Node selector dropdown
-- Information input
-- Information type selector
-- Add info button
-- Delete selected node button
-- Status text (company + zoom)
-
-### Details panels
-
-- Relationships list for selected node
-- Information list for selected node
-- Loading/error feedback
+- Double-clicking a node opens a translucent “glass” panel anchored to the right side.
+- Panel can be dragged and resized.
+- Panel contains:
+  - add information controls,
+  - delete node action,
+  - relationships list,
+  - information list,
+  - loading/error feedback.
 
 ---
 
@@ -245,4 +241,3 @@ Primary implementation is in:
 
 - `frontend/src/WidgetContent.tsx` (Nodes module behavior)
 - `frontend/src/App.tsx` (teal colorway config)
-
