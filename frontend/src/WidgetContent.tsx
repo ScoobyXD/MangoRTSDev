@@ -165,6 +165,16 @@ function snapToGrid(value: number): number {
   return Math.round(value / MINI_GRID) * MINI_GRID;
 }
 
+function hexToRGBA(hex: string, alpha: number): string {
+  const value = hex.replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(value)) return `rgba(17,17,17,${alpha})`;
+  const int = Number.parseInt(value, 16);
+  const r = (int >> 16) & 255;
+  const g = (int >> 8) & 255;
+  const b = int & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function oppositeSide(direction: NodeDirection): NodeDirection {
   if (direction === "left") return "right";
   if (direction === "right") return "left";
@@ -235,6 +245,10 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   });
   const [selectionPointerID, setSelectionPointerID] = useState<number | null>(null);
   const restoredSelectionRef = useRef<string>("");
+  const labelTone = accent;
+  const lineTone = hexToRGBA(accent, 0.28);
+  const subtleTone = hexToRGBA(accent, 0.1);
+  const strongTone = hexToRGBA(accent, 0.2);
 
   useEffect(() => {
     const cached = SESSION_NODE_CANVAS_STATE.get(canvasStateKey);
@@ -877,17 +891,18 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   }, [relationships, nodeByID, nodePositions, relationshipAnchors]);
 
   return (
-    <div style={{ display: "grid", gap: 6, fontSize: 11, height: "100%", gridTemplateRows: "1fr" }}>
+    <div style={{ display: "grid", gap: 0, fontSize: 11, height: "100%", gridTemplateRows: "1fr" }}>
       <div
         ref={viewportRef}
         style={{
           position: "relative",
-          border: `1px solid ${accent}`,
-          borderRadius: 10,
+          border: "none",
+          borderRadius: 0,
           overflow: "hidden",
-          minHeight: 560,
+          minHeight: 0,
           height: "100%",
-          backgroundColor: "rgba(255,255,255,0.78)",
+          backgroundColor: "#ffffff",
+          color: labelTone,
         }}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -954,7 +969,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             height: WORLD_H,
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: "0 0",
-            backgroundImage: `linear-gradient(to right, rgba(17,17,17,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(17,17,17,0.08) 1px, transparent 1px)`,
+            backgroundColor: "#ffffff",
+            backgroundImage: `linear-gradient(to right, ${lineTone} 1px, transparent 1px), linear-gradient(to bottom, ${lineTone} 1px, transparent 1px)`,
             backgroundSize: `${MINI_GRID}px ${MINI_GRID}px`,
             backgroundPosition: "-1px -1px",
           }}
@@ -969,7 +985,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 strokeWidth={1.6}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                opacity={0.72}
+                opacity={0.9}
               />
             ))}
           </svg>
@@ -990,13 +1006,13 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                   width: NODE_W,
                   height: NODE_H,
                   borderRadius: 8,
-                  border: `1px solid ${isSelected ? accent : "#505050"}`,
+                  border: `1px solid ${isSelected ? accent : hexToRGBA(accent, 0.55)}`,
                   background: isSelected ? "#ffffff" : "rgba(252,252,252,0.93)",
                   outline: isSelected ? `2px solid ${accent}` : "none",
                   outlineOffset: isSelected ? 1 : 0,
                   display: "grid",
                   gridTemplateRows: "auto 1fr auto",
-                  boxShadow: isSelected ? "0 0 0 3px rgba(111,231,238,0.32), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
+                  boxShadow: isSelected ? `0 0 0 3px ${strongTone}, 0 8px 20px rgba(0,0,0,0.2)` : "0 4px 12px rgba(0,0,0,0.12)",
                   userSelect: "none",
                   cursor: dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab",
                   zIndex: isPrimary ? 5 : 4,
@@ -1103,7 +1119,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               width: Math.abs(selectionBox.currentX - selectionBox.startX),
               height: Math.abs(selectionBox.currentY - selectionBox.startY),
               border: `1px dashed ${accent}`,
-              backgroundColor: "rgba(111,231,238,0.2)",
+              backgroundColor: subtleTone,
               pointerEvents: "none",
               zIndex: 20,
             }}
@@ -1181,14 +1197,14 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               overflowX: "hidden",
               zIndex: 35,
               borderRadius: 16,
-              border: "1px solid rgba(255,255,255,0.35)",
-              backgroundColor: "rgba(157, 224, 227, 0.72)",
+              border: `1px solid ${hexToRGBA(accent, 0.35)}`,
+              backgroundColor: hexToRGBA(accent, 0.16),
               background: `
                 linear-gradient(
                   135deg,
-                  rgba(255,255,255,0.18) 0%,
-                  rgba(255,255,255,0.08) 50%,
-                  rgba(255,255,255,0.14) 100%
+                  ${hexToRGBA(accent, 0.18)} 0%,
+                  ${hexToRGBA(accent, 0.08)} 50%,
+                  ${hexToRGBA(accent, 0.14)} 100%
                 )
               `,
               backdropFilter: "blur(30px) saturate(180%)",
@@ -1202,7 +1218,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               display: "grid",
               gap: 8,
               fontFamily: "'Space Grotesk', system-ui, sans-serif",
-              color: "#1a1a1a",
+              color: labelTone,
               letterSpacing: "0.01em",
             }}
           >
