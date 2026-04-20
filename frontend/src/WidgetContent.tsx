@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const divider = { borderBottom: "1px solid currentColor", padding: "5px 0" };
 
@@ -116,6 +116,9 @@ type NodeDetails = {
   relationships: NodeRelationship[];
 };
 
+type NodeDirection = "left" | "right" | "top" | "bottom";
+type NodePosition = { x: number; y: number };
+
 const INFO_TYPES = [
   "Text box",
   "Checklist",
@@ -128,26 +131,43 @@ const INFO_TYPES = [
   "Hyperlink",
 ] as const;
 
-const RELATIONSHIP_POSITIONS = ["Peer", "Parent", "Child"] as const;
+const NODE_W = 132;
+const NODE_H = 88;
+const MINI_GRID = 12;
 
 function trimOrEmpty(value: string): string {
   return value.trim();
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  if (minimum > maximum) return minimum;
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+function relationFromDirection(direction: NodeDirection): { a: "Parent" | "Child" | "Peer"; b: "Parent" | "Child" | "Peer" } {
+  if (direction === "left" || direction === "right") return { a: "Peer", b: "Peer" };
+  if (direction === "top") return { a: "Parent", b: "Child" };
+  return { a: "Child", b: "Parent" };
 }
 
 export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
 
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 800, height: 420 });
+  const [nodePositions, setNodePositions] = useState<Record<string, NodePosition>>({});
+
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [selectedNodeID, setSelectedNodeID] = useState<string>("");
   const [details, setDetails] = useState<NodeDetails | null>(null);
   const [newNodeHeader, setNewNodeHeader] = useState("");
-  const [relationHeader, setRelationHeader] = useState("");
-  const [relationPosition, setRelationPosition] = useState<(typeof RELATIONSHIP_POSITIONS)[number]>("Peer");
   const [infoType, setInfoType] = useState<(typeof INFO_TYPES)[number]>("Text box");
   const [infoDraft, setInfoDraft] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const [dragState, setDragState] = useState<{ nodeID: string; pointerID: number; offsetX: number; offsetY: number } | null>(null);
 
   const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const response = await fetch(`${apiBase}${path}`, {
@@ -180,12 +200,13 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     setError("");
     try {
       const payload = await requestJSON<{ nodes: NodeRecord[] }>(`/v1/nodes?company_id=${encodeURIComponent(companyID)}`);
-      setNodes(payload.nodes ?? []);
-      if (!selectedNodeID && payload.nodes.length > 0) {
-        setSelectedNodeID(payload.nodes[0].node_id);
+      const nextNodes = payload.nodes ?? [];
+      setNodes(nextNodes);
+      if (!selectedNodeID && nextNodes.length > 0) {
+        setSelectedNodeID(nextNodes[0].node_id);
       }
-      if (selectedNodeID && !payload.nodes.some((item) => item.node_id === selectedNodeID)) {
-        setSelectedNodeID(payload.nodes[0]?.node_id ?? "");
+      if (selectedNodeID && !nextNodes.some((item) => item.node_id === selectedNodeID)) {
+        setSelectedNodeID(nextNodes[0]?.node_id ?? "");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_load_nodes");
@@ -220,6 +241,65 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     void loadDetails(selectedNodeID);
   }, [selectedNodeID]);
 
+  useEffect(() => {
+    const resize = () => {
+      const bounds = canvasRef.current?.getBoundingClientRect();
+      if (!bounds) return;
+      setCanvasSize({ width: Math.max(200, Math.floor(bounds.width)), height: Math.max(220, Math.floor(bounds.height)) });
+    };
+
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+
+  useEffect(() => {
+    const maxX = Math.max(0, canvasSize.width - NODE_W);
+    const maxY = Math.max(0, canvasSize.height - NODE_H);
+
+    setNodePositions((previous) => {
+      const next: Record<string, NodePosition> = {};
+      for (const [index, node] of nodes.entries()) {
+        const existing = previous[node.node_id];
+        if (existing) {
+          next[node.node_id] = { x: clamp(existing.x, 0, maxX), y: clamp(existing.y, 0, maxY) };
+          continue;
+        }
+        const perRow = Math.max(1, Math.floor(canvasSize.width / (NODE_W + 24)));
+        const x = (index % perRow) * (NODE_W + 24) + 16;
+        const y = Math.floor(index / perRow) * (NODE_H + 24) + 16;
+        next[node.node_id] = { x: clamp(x, 0, maxX), y: clamp(y, 0, maxY) };
+      }
+      return next;
+    });
+  }, [nodes, canvasSize.width, canvasSize.height]);
+
+  useEffect(() => {
+    if (!dragState) return;
+
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== dragState.pointerID || !canvasRef.current) return;
+      const bounds = canvasRef.current.getBoundingClientRect();
+      const maxX = Math.max(0, bounds.width - NODE_W);
+      const maxY = Math.max(0, bounds.height - NODE_H);
+      const x = clamp(event.clientX - bounds.left - dragState.offsetX, 0, maxX);
+      const y = clamp(event.clientY - bounds.top - dragState.offsetY, 0, maxY);
+      setNodePositions((previous) => ({ ...previous, [dragState.nodeID]: { x, y } }));
+    };
+
+    const onUp = (event: PointerEvent) => {
+      if (event.pointerId === dragState.pointerID) setDragState(null);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [dragState]);
+
   const createNode = async (header: string): Promise<NodeRecord | null> => {
     const value = trimOrEmpty(header);
     if (!value) return null;
@@ -238,31 +318,45 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     }
   };
 
-  const createLinkedNode = async () => {
-    if (!selectedNodeID) return;
-    const node = await createNode(relationHeader);
+  const createLinkedNode = async (sourceNodeID: string, direction: NodeDirection) => {
+    const sourceNode = nodes.find((node) => node.node_id === sourceNodeID);
+    if (!sourceNode) return;
+
+    const node = await createNode(`${sourceNode.header} ${direction}`);
     if (!node) return;
 
-    const pair = relationPosition === "Peer"
-      ? { a: "Peer", b: "Peer" }
-      : relationPosition === "Parent"
-        ? { a: "Parent", b: "Child" }
-        : { a: "Child", b: "Parent" };
-
     try {
+      const pair = relationFromDirection(direction);
       await requestJSON<NodeRelationship>("/v1/node-relationships", {
         method: "POST",
         body: JSON.stringify({
           company_id: companyID,
-          node_id_a: selectedNodeID,
+          node_id_a: sourceNodeID,
           node_id_b: node.node_id,
           a_position: pair.a,
           b_position: pair.b,
         }),
       });
-      setRelationHeader("");
-      await loadDetails(selectedNodeID);
-      await loadDetails(node.node_id);
+
+      const origin = nodePositions[sourceNodeID] ?? { x: 24, y: 24 };
+      const gap = 154;
+      const shift =
+        direction === "left" ? { x: -gap, y: 0 }
+          : direction === "right" ? { x: gap, y: 0 }
+            : direction === "top" ? { x: 0, y: -116 }
+              : { x: 0, y: 116 };
+
+      const maxX = Math.max(0, canvasSize.width - NODE_W);
+      const maxY = Math.max(0, canvasSize.height - NODE_H);
+      setNodePositions((previous) => ({
+        ...previous,
+        [node.node_id]: {
+          x: clamp(origin.x + shift.x, 0, maxX),
+          y: clamp(origin.y + shift.y, 0, maxY),
+        },
+      }));
+
+      await loadDetails(sourceNodeID);
       setSelectedNodeID(node.node_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node_relationship");
@@ -282,6 +376,11 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
       if (selectedNodeID === removedID) {
         setSelectedNodeID("");
       }
+      setNodePositions((previous) => {
+        const next = { ...previous };
+        delete next[removedID];
+        return next;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_delete_node");
     }
@@ -306,77 +405,176 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     }
   };
 
-  return (
-    <div style={{ display: "grid", gap: 6, fontSize: 11 }}>
-      <div style={{ fontSize: 12, textTransform: "uppercase" }}>[ Nodes ]</div>
-      <div style={{ ...divider }}>Company: {companyID}</div>
+  const selectedNode = useMemo(
+    () => nodes.find((item) => item.node_id === selectedNodeID) ?? null,
+    [nodes, selectedNodeID]
+  );
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
+  return (
+    <div style={{ display: "grid", gap: 8, fontSize: 11, height: "100%", gridTemplateRows: "auto auto 1fr auto auto" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ fontSize: 12, textTransform: "uppercase", fontWeight: 700 }}>[ Node Canvas ]</div>
+        <div style={{ fontSize: 10, opacity: 0.75 }}>Drag nodes and use + handles to create relationships.</div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6 }}>
         <input value={newNodeHeader} onChange={(e) => setNewNodeHeader(e.target.value)} placeholder="Create node header" />
         <button onClick={() => { void createNode(newNodeHeader); setNewNodeHeader(""); }}>Add</button>
       </div>
 
-      <select value={selectedNodeID} onChange={(e) => setSelectedNodeID(e.target.value)}>
-        <option value="">Select node</option>
-        {nodes.map((item) => (
-          <option key={item.node_id} value={item.node_id}>{item.header}</option>
-        ))}
-      </select>
+      <div
+        ref={canvasRef}
+        style={{
+          position: "relative",
+          border: `1px solid ${accent}`,
+          borderRadius: 10,
+          overflow: "hidden",
+          minHeight: 240,
+          backgroundColor: "rgba(255,255,255,0.78)",
+          backgroundImage: `linear-gradient(to right, rgba(17,17,17,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(17,17,17,0.08) 1px, transparent 1px)`,
+          backgroundSize: `${MINI_GRID}px ${MINI_GRID}px`,
+          backgroundPosition: "-1px -1px",
+        }}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        {nodes.length === 0 && (
+          <div style={{ position: "absolute", inset: 0, display: "grid", placeContent: "center", textAlign: "center", gap: 4, fontSize: 11, opacity: 0.8 }}>
+            <div style={{ fontSize: 12, fontWeight: 700 }}>Blank node canvas</div>
+            <div>Add a node to start placing blocks.</div>
+          </div>
+        )}
 
-      {selectedNodeID && (
-        <div style={{ display: "grid", gap: 4 }}>
-          <button onClick={() => { void deleteSelectedNode(); }}>Delete selected node</button>
+        {nodes.map((node) => {
+          const position = nodePositions[node.node_id] ?? { x: 12, y: 12 };
+          const isSelected = node.node_id === selectedNodeID;
 
-          <div style={{ display: "grid", gridTemplateColumns: "95px 1fr auto", gap: 4 }}>
-            <select value={relationPosition} onChange={(e) => setRelationPosition(e.target.value as (typeof RELATIONSHIP_POSITIONS)[number])}>
-              {RELATIONSHIP_POSITIONS.map((position) => (
-                <option key={position} value={position}>{position}</option>
+          return (
+            <div
+              key={node.node_id}
+              style={{
+                position: "absolute",
+                left: position.x,
+                top: position.y,
+                width: NODE_W,
+                height: NODE_H,
+                borderRadius: 8,
+                border: `1px solid ${isSelected ? accent : "#505050"}`,
+                background: isSelected ? "#ffffff" : "rgba(252,252,252,0.93)",
+                display: "grid",
+                gridTemplateRows: "auto 1fr auto",
+                boxShadow: isSelected ? "0 8px 20px rgba(0,0,0,0.18)" : "0 4px 12px rgba(0,0,0,0.12)",
+                userSelect: "none",
+                cursor: dragState?.nodeID === node.node_id ? "grabbing" : "grab",
+              }}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                const bounds = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
+                setSelectedNodeID(node.node_id);
+                setDragState({
+                  nodeID: node.node_id,
+                  pointerID: event.pointerId,
+                  offsetX: event.clientX - bounds.left,
+                  offsetY: event.clientY - bounds.top,
+                });
+              }}
+            >
+              <div style={{ ...divider, padding: "6px 8px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {node.header}
+              </div>
+              <div style={{ padding: "5px 8px", fontSize: 10, display: "grid", gap: 2 }}>
+                <div>ID: {node.node_id.slice(0, 8)}</div>
+                <div>Info: {details?.node.node_id === node.node_id ? details.information.length : "-"}</div>
+                <div>Rel: {details?.node.node_id === node.node_id ? details.relationships.length : "-"}</div>
+              </div>
+              <div style={{ padding: "4px 8px", fontSize: 9, opacity: 0.7 }}>drag to move</div>
+
+              {([
+                ["left", { left: -10, top: "50%", transform: "translate(-50%, -50%)" }],
+                ["right", { right: -10, top: "50%", transform: "translate(50%, -50%)" }],
+                ["top", { top: -10, left: "50%", transform: "translate(-50%, -50%)" }],
+                ["bottom", { bottom: -10, left: "50%", transform: "translate(-50%, 50%)" }],
+              ] as const).map(([direction, sideStyle]) => (
+                <button
+                  key={direction}
+                  title={`Create ${direction} node`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void createLinkedNode(node.node_id, direction);
+                  }}
+                  style={{
+                    position: "absolute",
+                    ...sideStyle,
+                    width: 20,
+                    height: 20,
+                    borderRadius: 999,
+                    border: `1px solid ${accent}`,
+                    background: "#ffffff",
+                    color: accent,
+                    display: isSelected ? "grid" : "none",
+                    placeItems: "center",
+                    fontSize: 14,
+                    lineHeight: 1,
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  +
+                </button>
               ))}
-            </select>
-            <input value={relationHeader} onChange={(e) => setRelationHeader(e.target.value)} placeholder="New related node header" />
-            <button onClick={() => { void createLinkedNode(); }}>Create</button>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 200px) 1fr auto auto", gap: 6 }}>
+        <select value={selectedNodeID} onChange={(e) => setSelectedNodeID(e.target.value)}>
+          <option value="">Select node</option>
+          {nodes.map((item) => (
+            <option key={item.node_id} value={item.node_id}>{item.header}</option>
+          ))}
+        </select>
+        <input value={infoDraft} onChange={(e) => setInfoDraft(e.target.value)} placeholder="Add selected-node information" disabled={!selectedNodeID} />
+        <select value={infoType} onChange={(e) => setInfoType(e.target.value as (typeof INFO_TYPES)[number])} disabled={!selectedNodeID}>
+          {INFO_TYPES.map((type) => (
+            <option key={type} value={type}>{type}</option>
+          ))}
+        </select>
+        <button onClick={() => { void addInformation(); }} disabled={!selectedNodeID}>Info</button>
+      </div>
+
+      <div style={{ display: "grid", gap: 6 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ fontSize: 10, opacity: 0.8 }}>Company: {companyID}</div>
+          {selectedNode && <button onClick={() => { void deleteSelectedNode(); }}>Delete “{selectedNode.header}”</button>}
+        </div>
+
+        {loading && <div style={{ ...divider }}>Syncing with API...</div>}
+        {error && <div style={{ ...divider, color: "#b00020" }}>Error: {error}</div>}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div>
+            <div style={{ ...divider, fontSize: 12 }}>[ relationships ]</div>
+            <div style={{ display: "grid", gap: 2, maxHeight: 86, overflow: "auto" }}>
+              {(details?.relationships ?? []).length === 0 ? <div style={{ ...divider }}>No relationships</div> : details?.relationships.map((rel) => (
+                <div key={rel.node_relationship_id} style={{ ...divider, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {rel.node_id_a.slice(0, 6)}({rel.a_position}) → {rel.node_id_b.slice(0, 6)}({rel.b_position})
+                </div>
+              ))}
+            </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "120px 1fr auto", gap: 4 }}>
-            <select value={infoType} onChange={(e) => setInfoType(e.target.value as (typeof INFO_TYPES)[number])}>
-              {INFO_TYPES.map((type) => (
-                <option key={type} value={type}>{type}</option>
+          <div>
+            <div style={{ ...divider, fontSize: 12 }}>[ information ]</div>
+            <div style={{ display: "grid", gap: 2, maxHeight: 86, overflow: "auto" }}>
+              {(details?.information ?? []).length === 0 ? <div style={{ ...divider }}>No information</div> : details?.information.map((info) => (
+                <div key={info.information_id} style={{ ...divider, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {info.type}: {info.information}
+                </div>
               ))}
-            </select>
-            <input value={infoDraft} onChange={(e) => setInfoDraft(e.target.value)} placeholder="Add node information" />
-            <button onClick={() => { void addInformation(); }}>Info</button>
+            </div>
           </div>
         </div>
-      )}
-
-      {loading && <div style={{ ...divider }}>Syncing with API...</div>}
-      {error && <div style={{ ...divider, color: "#b00020" }}>Error: {error}</div>}
-
-      <div style={{ ...divider, fontSize: 12 }}>[ nodes table ]</div>
-      <div style={{ display: "grid", gap: 2, maxHeight: 130, overflow: "auto" }}>
-        {nodes.length === 0 ? <div style={{ ...divider }}>No nodes</div> : nodes.map((node) => (
-          <div key={node.node_id} style={{ ...divider, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {node.header} · {node.node_id.slice(0, 8)}
-          </div>
-        ))}
-      </div>
-
-      <div style={{ ...divider, fontSize: 12 }}>[ node_relationships table ]</div>
-      <div style={{ display: "grid", gap: 2, maxHeight: 130, overflow: "auto" }}>
-        {(details?.relationships ?? []).length === 0 ? <div style={{ ...divider }}>No relationships</div> : details?.relationships.map((rel) => (
-          <div key={rel.node_relationship_id} style={{ ...divider, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {rel.node_id_a.slice(0, 6)}({rel.a_position}) → {rel.node_id_b.slice(0, 6)}({rel.b_position})
-          </div>
-        ))}
-      </div>
-
-      <div style={{ ...divider, fontSize: 12 }}>[ node_information table ]</div>
-      <div style={{ display: "grid", gap: 2, maxHeight: 130, overflow: "auto" }}>
-        {(details?.information ?? []).length === 0 ? <div style={{ ...divider }}>No information</div> : details?.information.map((info) => (
-          <div key={info.information_id} style={{ ...divider, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {info.type}: {info.information}
-          </div>
-        ))}
       </div>
     </div>
   );
