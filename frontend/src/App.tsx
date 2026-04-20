@@ -357,7 +357,10 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
     <div
       style={{ position: "absolute", left: widget.x * stepX, top: widget.y * stepY, width: widget.w * stepX, height: widget.h * stepY, background: widget.color, border: isSelected ? "2px solid #111" : `1px solid ${widget.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
       onClick={(e) => e.stopPropagation()}
-      onMouseDownCapture={(e) => onSelect(e, widget.id)}
+      onMouseDownCapture={(e) => {
+        if (e.button !== 0) return;
+        onSelect(e, widget.id);
+      }}
       onTouchStartCapture={(e) => onSelect(e, widget.id)}
       onMouseDown={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
       onTouchStart={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
@@ -560,6 +563,11 @@ const App: React.FC = () => {
     if (!linkablePair) return;
     saveNodeDocLink(linkablePair.doc.id, linkablePair.canvas.id);
   }, [linkablePair, saveNodeDocLink]);
+  const linkNodesLabel = useMemo(() => {
+    const pool = selectedWidgets.length > 1 ? selectedWidgets : (linkablePair ? [linkablePair.canvas, linkablePair.doc] : []);
+    if (pool.length === 0) return "Node Canvas + Node Doc";
+    return pool.map((widget) => widget.title).join(" + ");
+  }, [linkablePair, selectedWidgets]);
 
   const deleteSelectedWidget = useCallback(() => {
     const ids = selectedWidgetIds.size > 0 ? selectedWidgetIds : (selectedWidgetId ? new Set([selectedWidgetId]) : new Set<string>());
@@ -882,7 +890,7 @@ const App: React.FC = () => {
             onClick={() => { linkSelectedNodeModules(); closeMenus(); }}
             {...hoverHandlers}
           >
-            Link nodes: Node Canvas and Node Doc
+            Link nodes: {linkNodesLabel}
           </button>
           {COLORWAY_ORDER.map((theme) => (
             <button key={theme} style={menuBtnBase} onClick={() => {
