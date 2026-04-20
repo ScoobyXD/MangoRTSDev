@@ -433,6 +433,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   useEffect(() => {
     setNodePositions((previous) => {
+      if (nodes.length === 0) return previous;
       const next: Record<string, NodePosition> = {};
       for (const [index, node] of nodes.entries()) {
         const existing = previous[node.node_id];
