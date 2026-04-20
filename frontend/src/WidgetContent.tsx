@@ -179,6 +179,7 @@ function relationFromDirection(direction: NodeDirection): { a: "Parent" | "Child
 }
 
 type NodeDocBox = { local_id: string; x: number; y: number; information_id?: string; information: string };
+const NODE_DOC_LINKS_KEY = "node-doc-widget-links-v1";
 
 function parseDocBox(info: NodeInformation): NodeDocBox | null {
   if (info.type !== "Text box") return null;
@@ -201,9 +202,9 @@ export const NodeDocContent: React.FC<{ accent: string; widgetId?: string; hideT
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const scope = widgetId?.trim() ? widgetId : "global";
-  const docHeader = `Node Doc::${scope}`;
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const [docNode, setDocNode] = useState<NodeRecord | null>(null);
+  const [linkedCanvasWidgetID, setLinkedCanvasWidgetID] = useState("");
+  const [linkedNodeID, setLinkedNodeID] = useState("");
   const [boxes, setBoxes] = useState<NodeDocBox[]>([]);
   const [activeBoxID, setActiveBoxID] = useState<string>("");
   const [placing, setPlacing] = useState<{ id: string; pointerID: number; dx: number; dy: number } | null>(null);
@@ -219,6 +220,29 @@ export const NodeDocContent: React.FC<{ accent: string; widgetId?: string; hideT
     return response.json() as Promise<T>;
   }, [apiBase]);
 
+  const readLinkedCanvasWidgetID = useCallback((): string => {
+    try {
+      const raw = localStorage.getItem(NODE_DOC_LINKS_KEY);
+      if (!raw) return "";
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      return typeof parsed[scope] === "string" ? parsed[scope] : "";
+    } catch {
+      return "";
+    }
+  }, [scope]);
+
+  const readSelectedNodeFromCanvas = useCallback((canvasWidgetID: string): string => {
+    if (!canvasWidgetID) return "";
+    try {
+      const raw = localStorage.getItem(`node-canvas-state-v3:${companyID}:${canvasWidgetID}`);
+      if (!raw) return "";
+      const parsed = JSON.parse(raw) as { selectedNodeID?: string };
+      return typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "";
+    } catch {
+      return "";
+    }
+  }, [companyID]);
+
   const saveBox = useCallback(async (nodeID: string, box: NodeDocBox) => {
     const payload = JSON.stringify({ local_id: box.local_id, x: box.x, y: box.y, text: box.information });
     const created = await requestJSON<NodeInformation>(`/v1/nodes/${nodeID}/information`, {
@@ -229,21 +253,32 @@ export const NodeDocContent: React.FC<{ accent: string; widgetId?: string; hideT
   }, [companyID, requestJSON]);
 
   useEffect(() => {
+    setLinkedCanvasWidgetID(readLinkedCanvasWidgetID());
+    const timer = window.setInterval(() => {
+      setLinkedCanvasWidgetID(readLinkedCanvasWidgetID());
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [readLinkedCanvasWidgetID]);
+
+  useEffect(() => {
+    setLinkedNodeID(readSelectedNodeFromCanvas(linkedCanvasWidgetID));
+    const timer = window.setInterval(() => {
+      setLinkedNodeID(readSelectedNodeFromCanvas(linkedCanvasWidgetID));
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [linkedCanvasWidgetID, readSelectedNodeFromCanvas]);
+
+  useEffect(() => {
     let cancelled = false;
+    if (!linkedNodeID) {
+      setBoxes([]);
+      setActiveBoxID("");
+      return;
+    }
     (async () => {
       try {
         setError("");
-        const payload = await requestJSON<{ nodes: NodeRecord[] }>(`/v1/nodes?company_id=${encodeURIComponent(companyID)}`);
-        let node = payload.nodes.find((item) => item.header === docHeader) ?? null;
-        if (!node) {
-          node = await requestJSON<NodeRecord>("/v1/nodes", {
-            method: "POST",
-            body: JSON.stringify({ company_id: companyID, header: docHeader }),
-          });
-        }
-        if (cancelled) return;
-        setDocNode(node);
-        const details = await requestJSON<NodeDetails>(`/v1/nodes/${node.node_id}?company_id=${encodeURIComponent(companyID)}`);
+        const details = await requestJSON<NodeDetails>(`/v1/nodes/${linkedNodeID}?company_id=${encodeURIComponent(companyID)}`);
         if (cancelled) return;
         const latestByBox = new Map<string, NodeDocBox>();
         const orderedInfo = [...details.information].sort((a, b) => new Date(a.updated_timestamp).getTime() - new Date(b.updated_timestamp).getTime());
@@ -256,11 +291,11 @@ export const NodeDocContent: React.FC<{ accent: string; widgetId?: string; hideT
         setBoxes(nextBoxes);
         if (nextBoxes.length > 0) setActiveBoxID(nextBoxes[nextBoxes.length - 1].local_id);
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load Node Doc");
+        if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load linked node information");
       }
     })();
     return () => { cancelled = true; };
-  }, [companyID, docHeader, requestJSON]);
+  }, [companyID, linkedNodeID, requestJSON]);
 
   useEffect(() => {
     if (!placing || !canvasRef.current) return;
@@ -273,21 +308,21 @@ export const NodeDocContent: React.FC<{ accent: string; widgetId?: string; hideT
     };
     const onUp = () => {
       const moved = boxes.find((item) => item.local_id === placing.id);
-      if (docNode && moved) void saveBox(docNode.node_id, moved);
+      if (linkedNodeID && moved) void saveBox(linkedNodeID, moved);
       setPlacing(null);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     return () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
-  }, [boxes, docNode, placing, saveBox]);
+  }, [boxes, linkedNodeID, placing, saveBox]);
 
   const createBox = useCallback((initialText: string, x = 24, y = 56) => {
     const localID = `docbox-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`;
     const next: NodeDocBox = { local_id: localID, x, y, information: initialText };
     setBoxes((prev) => [...prev, next]);
     setActiveBoxID(localID);
-    if (docNode) void saveBox(docNode.node_id, next);
-  }, [docNode, saveBox]);
+    if (linkedNodeID) void saveBox(linkedNodeID, next);
+  }, [linkedNodeID, saveBox]);
 
   return (
     <div
@@ -315,9 +350,9 @@ export const NodeDocContent: React.FC<{ accent: string; widgetId?: string; hideT
             setBoxes((prev) => prev.map((item) => (item.local_id === box.local_id ? { ...item, information: value } : item)));
           }}
           onBlur={() => {
-            if (!docNode) return;
+            if (!linkedNodeID) return;
             const latest = boxes.find((item) => item.local_id === box.local_id);
-            if (latest) void saveBox(docNode.node_id, latest);
+            if (latest) void saveBox(linkedNodeID, latest);
           }}
           style={{
             position: "absolute",
@@ -350,6 +385,8 @@ export const NodeDocContent: React.FC<{ accent: string; widgetId?: string; hideT
         />
       ))}
       {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020" }}>{error}</div>}
+      {!linkedCanvasWidgetID && <div style={{ position: "absolute", top: 36, left: 10, fontSize: 11, opacity: 0.72 }}>Right-click selected modules and use “Link nodes”.</div>}
+      {linkedCanvasWidgetID && !linkedNodeID && <div style={{ position: "absolute", top: 36, left: 10, fontSize: 11, opacity: 0.72 }}>Select a node in Node Canvas (Ctrl+click modules to multi-select and link).</div>}
     </div>
   );
 };

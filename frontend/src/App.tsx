@@ -33,6 +33,7 @@ const NODE_SUBMODULES = [
   { kind: "nodes-canvas", label: "Node Canvas" },
   { kind: "node-doc", label: "Node Doc" },
 ] as const;
+const NODE_DOC_LINKS_KEY = "node-doc-widget-links-v1";
 
 const INITIAL_WIDGETS: Widget[] = [
   { id: "w-revenue", theme: "teal", kind: "revenue", x: 2, y: 1, w: 12, h: 9, title: "Revenue", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
@@ -345,7 +346,7 @@ interface WidgetCardProps {
   onResizeStart: (e: React.MouseEvent | React.TouchEvent, id: string, edges: ResizeEdges) => void;
   onContextMenu: (e: React.MouseEvent, id: string) => void;
   onModuleNameClick: (e: React.MouseEvent, id: string) => void;
-  onSelect: (id: string) => void;
+  onSelect: (event: React.MouseEvent | React.TouchEvent, id: string) => void;
 }
 
 const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect }) => {
@@ -356,8 +357,8 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
     <div
       style={{ position: "absolute", left: widget.x * stepX, top: widget.y * stepY, width: widget.w * stepX, height: widget.h * stepY, background: widget.color, border: isSelected ? "2px solid #111" : `1px solid ${widget.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
       onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => { onSelect(widget.id); if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
-      onTouchStart={(e) => { onSelect(widget.id); if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
+      onMouseDown={(e) => { onSelect(e, widget.id); if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
+      onTouchStart={(e) => { onSelect(e, widget.id); if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, widget.id); }}
     >
       <div
@@ -412,6 +413,7 @@ const App: React.FC = () => {
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
+  const [selectedWidgetIds, setSelectedWidgetIds] = useState<Set<string>>(new Set());
   const [editMode, setEditMode] = useState(false);
   const initialSettingsRef = useRef(loadSettings());
   const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || "#f7fffe");
@@ -444,6 +446,10 @@ const App: React.FC = () => {
     if (!selectedWidgetId) return;
     if (!widgets.some((w) => w.id === selectedWidgetId)) setSelectedWidgetId(null);
   }, [widgets, selectedWidgetId]);
+  useEffect(() => {
+    const ids = new Set(widgets.map((widget) => widget.id));
+    setSelectedWidgetIds((prev) => new Set(Array.from(prev).filter((id) => ids.has(id))));
+  }, [widgets]);
 
   const updateActiveWidgets = useCallback((updater: (prev: Widget[]) => Widget[]) => {
     setTabs((prev) => prev.map((tab) => (tab.id === activeTabId ? { ...tab, widgets: updater(tab.widgets) } : tab)));
@@ -529,11 +535,37 @@ const App: React.FC = () => {
 
   const closeMenus = useCallback(() => { setWidgetMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); setShowNodesSubmenu(false); }, []);
 
+  const saveNodeDocLink = useCallback((docWidgetID: string, canvasWidgetID: string) => {
+    try {
+      const raw = localStorage.getItem(NODE_DOC_LINKS_KEY);
+      const parsed = raw ? JSON.parse(raw) as Record<string, string> : {};
+      parsed[docWidgetID] = canvasWidgetID;
+      localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(parsed));
+    } catch {}
+  }, []);
+
+  const selectedWidgets = useMemo(() => widgets.filter((widget) => selectedWidgetIds.has(widget.id)), [widgets, selectedWidgetIds]);
+  const linkablePair = useMemo(() => {
+    const pool = selectedWidgets.length > 0 ? selectedWidgets : (selectedWidgetId ? widgets.filter((widget) => widget.id === selectedWidgetId) : []);
+    if (pool.length !== 2) return null;
+    const canvas = pool.find((widget) => widget.kind === "nodes" || widget.kind === "nodes-canvas");
+    const doc = pool.find((widget) => widget.kind === "node-doc");
+    if (!canvas || !doc) return null;
+    return { canvas, doc };
+  }, [selectedWidgetId, selectedWidgets, widgets]);
+
+  const linkSelectedNodeModules = useCallback(() => {
+    if (!linkablePair) return;
+    saveNodeDocLink(linkablePair.doc.id, linkablePair.canvas.id);
+  }, [linkablePair, saveNodeDocLink]);
+
   const deleteSelectedWidget = useCallback(() => {
-    if (!selectedWidgetId) return;
-    updateActiveWidgets((prev) => prev.filter((w) => w.id !== selectedWidgetId));
+    const ids = selectedWidgetIds.size > 0 ? selectedWidgetIds : (selectedWidgetId ? new Set([selectedWidgetId]) : new Set<string>());
+    if (ids.size === 0) return;
+    updateActiveWidgets((prev) => prev.filter((w) => !ids.has(w.id)));
     setSelectedWidgetId(null);
-  }, [selectedWidgetId, updateActiveWidgets]);
+    setSelectedWidgetIds(new Set());
+  }, [selectedWidgetId, selectedWidgetIds, updateActiveWidgets]);
 
   const copySelectedWidget = useCallback(() => {
     if (!selectedWidgetId) return;
@@ -554,6 +586,7 @@ const App: React.FC = () => {
     };
     updateActiveWidgets((prev) => [...prev, pasted]);
     setSelectedWidgetId(id);
+    setSelectedWidgetIds(new Set([id]));
   }, [gridCols, gridRows, updateActiveWidgets]);
 
   const undo = useCallback(() => {
@@ -757,7 +790,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onClick={() => setSelectedWidgetId(null)} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setHeaderMenu(null); setWidgetMenu(null); setModuleTypeMenu(null); }}>
+      <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onClick={() => { setSelectedWidgetId(null); setSelectedWidgetIds(new Set()); }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setHeaderMenu(null); setWidgetMenu(null); setModuleTypeMenu(null); setShowNodesSubmenu(false); }}>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
         {editMode && draggingId && (() => {
           const activeWidget = widgets.find((w) => w.id === draggingId);
@@ -771,7 +804,7 @@ const App: React.FC = () => {
             stepX={stepX}
             stepY={stepY}
             isDragging={draggingId === w.id}
-            isSelected={selectedWidgetId === w.id}
+            isSelected={selectedWidgetIds.has(w.id)}
             editMode={editMode}
             onDragStart={(e, id) => {
               if (!editMode) return;
@@ -791,16 +824,42 @@ const App: React.FC = () => {
               dragRef.current = { id, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
               setDraggingId(id);
             }}
-            onContextMenu={(e, id) => { e.preventDefault(); setWidgetMenu({ x: e.clientX, y: e.clientY, id }); setModuleTypeMenu(null); setCanvasMenu(null); setShowNodesSubmenu(false); }}
+            onContextMenu={(e, id) => {
+              e.preventDefault();
+              if (!selectedWidgetIds.has(id)) {
+                setSelectedWidgetIds(new Set([id]));
+                setSelectedWidgetId(id);
+              }
+              setWidgetMenu({ x: e.clientX, y: e.clientY, id });
+              setModuleTypeMenu(null);
+              setCanvasMenu(null);
+              setShowNodesSubmenu(false);
+            }}
             onModuleNameClick={(e, id) => {
               setWidgetMenu(null);
               setHeaderMenu(null);
               setCanvasMenu(null);
               setShowNodesSubmenu(false);
               setSelectedWidgetId(id);
+              setSelectedWidgetIds(new Set([id]));
               setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
             }}
-            onSelect={setSelectedWidgetId}
+            onSelect={(event, id) => {
+              const ctrlSelect = "ctrlKey" in event && !!event.ctrlKey;
+              if (!ctrlSelect) {
+                setSelectedWidgetId(id);
+                setSelectedWidgetIds(new Set([id]));
+                return;
+              }
+              setSelectedWidgetId(id);
+              setSelectedWidgetIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(id)) next.delete(id);
+                else next.add(id);
+                if (next.size === 0) next.add(id);
+                return next;
+              });
+            }}
           />
         ))}
       </div>
@@ -815,6 +874,14 @@ const App: React.FC = () => {
       {widgetMenu && (
         <FloatingMenu x={widgetMenu.x} y={widgetMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { duplicateWidget(widgetMenu.id); closeMenus(); }} {...hoverHandlers}>Duplicate</button>
+          <button
+            style={{ ...menuBtnBase, color: linkablePair ? "#111" : "#999" }}
+            disabled={!linkablePair}
+            onClick={() => { linkSelectedNodeModules(); closeMenus(); }}
+            {...hoverHandlers}
+          >
+            Link nodes
+          </button>
           {COLORWAY_ORDER.map((theme) => (
             <button key={theme} style={menuBtnBase} onClick={() => {
               updateActiveWidgets((prev) => prev.map((w) => (w.id === widgetMenu.id ? applyColorway(w, theme) : w)));
