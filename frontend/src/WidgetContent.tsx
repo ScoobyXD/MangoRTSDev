@@ -164,7 +164,7 @@ function relationFromDirection(direction: NodeDirection): { a: "Parent" | "Child
   return { a: "Child", b: "Parent" };
 }
 
-export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls }) => {
+export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const canvasStateKey = `node-canvas-state-v2:${companyID}`;
@@ -823,15 +823,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   }, [relationships, nodeByID, nodePositions, relationshipAnchors]);
 
   return (
-    <div style={{ display: "grid", gap: 6, fontSize: 11, height: "100%", gridTemplateRows: hideTopControls ? "1fr" : "auto 1fr" }}>
-      {!hideTopControls && (
-        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, alignItems: "center" }}>
-          <div style={{ fontSize: 12, textTransform: "uppercase", fontWeight: 700 }}>[ Node Canvas ]</div>
-          <input value={newNodeHeader} onChange={(e) => setNewNodeHeader(e.target.value)} placeholder="Create node header" />
-          <button onClick={() => { void createNode(newNodeHeader); setNewNodeHeader(""); }}>Add</button>
-        </div>
-      )}
-
+    <div style={{ display: "grid", gap: 6, fontSize: 11, height: "100%", gridTemplateRows: "1fr" }}>
       <div
         ref={viewportRef}
         style={{
@@ -872,6 +864,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         onPointerDown={(event) => {
           if (!viewportRef.current) return;
           setCanvasActive(true);
+          setContextMenu(null);
+          setNodeContextMenu(null);
           const bounds = viewportRef.current.getBoundingClientRect();
           const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
           const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
@@ -976,6 +970,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 onPointerDown={(event) => {
                   event.stopPropagation();
                   if (event.ctrlKey) return;
+                  setContextMenu(null);
+                  setNodeContextMenu(null);
                   const bounds = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
 
                   const nextIDs = selectedNodeIDs.has(node.node_id) ? Array.from(selectedNodeIDs) : [node.node_id];
@@ -1129,9 +1125,9 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               zIndex: 35,
               borderRadius: 10,
               border: `1px solid ${accent}`,
-              background: "linear-gradient(145deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08))",
-              backdropFilter: "blur(14px) saturate(120%)",
-              boxShadow: "0 12px 34px rgba(0,0,0,0.22), inset 0 0 0 1px rgba(255,255,255,0.25)",
+              background: "rgba(255,255,255,0.06)",
+              backdropFilter: "blur(18px) saturate(115%)",
+              boxShadow: "0 12px 34px rgba(0,0,0,0.22), inset 0 0 0 1px rgba(255,255,255,0.18)",
               padding: 10,
               display: "grid",
               gap: 8,

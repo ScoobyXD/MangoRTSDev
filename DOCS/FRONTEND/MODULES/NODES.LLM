@@ -1,0 +1,43 @@
+# Node Module (LLM Notes)
+
+## Scope
+This document tracks technical behavior for the **frontend node module** implemented in `frontend/src/WidgetContent.tsx` (`NodesContent`).
+
+## Current UX behavior (updated)
+
+### 1) Node right-click menu auto-dismiss rules
+- The node context menu (`Edit node` / `Delete node`) is stored in `nodeContextMenu`.
+- The canvas context menu (`Create new node`) is stored in `contextMenu`.
+- Both menus are now dismissed on any regular left-click / pointer-down interaction on the node viewport:
+  - In the viewport `onPointerDown`, we now call:
+    - `setContextMenu(null)`
+    - `setNodeContextMenu(null)`
+  - In each node card `onPointerDown`, we also call:
+    - `setContextMenu(null)`
+    - `setNodeContextMenu(null)`
+- Result: if the user right-clicks a node and then clicks another node (or another spot in the viewport), the old menu disappears immediately.
+
+### 2) Right-side info/details panel visual treatment
+- The details panel is shown when `detailsPanelNode` is present.
+- Updated glass styling to be substantially more translucent / colorless:
+  - `background: rgba(255,255,255,0.06)`
+  - `backdropFilter: blur(18px) saturate(115%)`
+  - subtle edge via inset shadow for glass rim
+- Result: panel appears as see-through frosted glass instead of an opaque white panel.
+
+### 3) Node module top header controls removed
+- Removed the top controls row from `NodesContent` that previously included:
+  - `[ Node Canvas ]` label
+  - input textbox (`Create node header`)
+  - `Add` button
+- The node module now renders only the viewport/canvas area (`gridTemplateRows: "1fr"`).
+- Node creation remains available via context actions (e.g., right-click canvas + `Create new node`, or linked-node `+` handles).
+
+## State variables relevant to these edits
+- `contextMenu`: canvas right-click menu state
+- `nodeContextMenu`: node right-click menu state
+- `detailsPanelNodeID` / `detailsPanelNode`: controls right-side info panel visibility/content
+- `newNodeHeader`: still used for context-menu node creation fallback naming
+
+## Primary implementation file
+- `frontend/src/WidgetContent.tsx`
