@@ -877,16 +877,14 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   }, [relationships, nodeByID, nodePositions, relationshipAnchors]);
 
   return (
-    <div style={{ display: "grid", gap: 6, fontSize: 11, height: "100%", gridTemplateRows: "1fr" }}>
+    <div style={{ fontSize: 11, height: "100%" }}>
       <div
         ref={viewportRef}
         style={{
           position: "relative",
-          border: `1px solid ${accent}`,
-          borderRadius: 10,
           overflow: "hidden",
-          minHeight: 560,
           height: "100%",
+          width: "100%",
           backgroundColor: "rgba(255,255,255,0.78)",
         }}
         onContextMenu={(event) => {
