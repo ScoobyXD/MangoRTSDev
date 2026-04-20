@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 
 const divider = { borderBottom: "1px solid currentColor", padding: "5px 0" };
 
@@ -83,71 +83,71 @@ export const MapContent: React.FC<{ accent: string }> = ({ accent }) => (
   </div>
 );
 
-type CaseRecord = {
-  id: string;
-  title: string;
-  responsible: string;
-  parentId: string | null;
+type NodeRecord = {
+  company_id: string;
+  node_id: string;
+  header: string;
+  created_timestamp: string;
 };
 
-type CaseArtifact = {
-  id: string;
-  type: "email" | "message" | "doc" | "url" | "note";
-  content: string;
-  source_ref: string;
+type NodeRelationship = {
+  company_id: string;
+  node_relationship_id: string;
+  node_id_a: string;
+  node_id_b: string;
+  a_position: "Parent" | "Child" | "Peer";
+  b_position: "Parent" | "Child" | "Peer";
+  created_timestamp: string;
 };
 
-type CaseDetails = {
-  case: {
-    id: string;
-    title: string;
-    owner: string;
-  };
-  children: Array<{ id: string; title: string }>;
-  artifacts: CaseArtifact[];
-  activities: Array<{ id: string; event_type: string; payload: string; created_at: string }>;
+type NodeInformation = {
+  company_id: string;
+  information_id: string;
+  node_id: string;
+  type: string;
+  information: string;
+  created_timestamp: string;
+  updated_timestamp: string;
 };
 
-const CASE_INDEX_KEY = "grid-dashboard-case-index-v1";
+type NodeDetails = {
+  node: NodeRecord;
+  information: NodeInformation[];
+  relationships: NodeRelationship[];
+};
 
-function loadCaseIndex(): CaseRecord[] {
-  try {
-    const raw = localStorage.getItem(CASE_INDEX_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((item) => item && typeof item.id === "string" && typeof item.title === "string")
-      .map((item) => ({
-        id: item.id,
-        title: item.title,
-        responsible: typeof item.responsible === "string" ? item.responsible : "Unassigned",
-        parentId: typeof item.parentId === "string" ? item.parentId : null,
-      }));
-  } catch {
-    return [];
-  }
+const INFO_TYPES = [
+  "Text box",
+  "Checklist",
+  "Status",
+  "Due date",
+  "Employee name",
+  "PDF",
+  "PNG",
+  "MOV",
+  "Hyperlink",
+] as const;
+
+const RELATIONSHIP_POSITIONS = ["Peer", "Parent", "Child"] as const;
+
+function trimOrEmpty(value: string): string {
+  return value.trim();
 }
 
-function saveCaseIndex(records: CaseRecord[]) {
-  localStorage.setItem(CASE_INDEX_KEY, JSON.stringify(records));
-}
+export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
+  const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
+  const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
 
-export const CaseHubContent: React.FC<{ accent: string }> = ({ accent }) => {
-  const [records, setRecords] = useState<CaseRecord[]>(() => loadCaseIndex());
-  const [selectedId, setSelectedId] = useState<string>(records[0]?.id ?? "");
-  const [selectedDetails, setSelectedDetails] = useState<CaseDetails | null>(null);
-  const [newCaseTitle, setNewCaseTitle] = useState<string>("");
-  const [ownerDraft, setOwnerDraft] = useState("");
-  const [noteDraft, setNoteDraft] = useState("");
-  const [linkDraft, setLinkDraft] = useState("");
-  const [quickDraft, setQuickDraft] = useState("");
-  const [childDraft, setChildDraft] = useState("");
+  const [nodes, setNodes] = useState<NodeRecord[]>([]);
+  const [selectedNodeID, setSelectedNodeID] = useState<string>("");
+  const [details, setDetails] = useState<NodeDetails | null>(null);
+  const [newNodeHeader, setNewNodeHeader] = useState("");
+  const [relationHeader, setRelationHeader] = useState("");
+  const [relationPosition, setRelationPosition] = useState<(typeof RELATIONSHIP_POSITIONS)[number]>("Peer");
+  const [infoType, setInfoType] = useState<(typeof INFO_TYPES)[number]>("Text box");
+  const [infoDraft, setInfoDraft] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string>("");
-  const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "";
-
-  const selected = records.find((item) => item.id === selectedId) ?? null;
 
   const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const response = await fetch(`${apiBase}${path}`, {
@@ -157,6 +157,7 @@ export const CaseHubContent: React.FC<{ accent: string }> = ({ accent }) => {
         ...(init?.headers || {}),
       },
     });
+
     if (!response.ok) {
       let reason = `request_failed_${response.status}`;
       try {
@@ -167,203 +168,216 @@ export const CaseHubContent: React.FC<{ accent: string }> = ({ accent }) => {
       }
       throw new Error(reason);
     }
+
+    if (response.status === 204) {
+      return {} as T;
+    }
     return response.json() as Promise<T>;
   };
 
-  const save = (next: CaseRecord[]) => {
-    setRecords(next);
-    saveCaseIndex(next);
-  };
-
-  const createCase = async (title: string, parentId: string | null = null) => {
-    if (!title.trim()) return;
+  const loadNodes = async () => {
+    setLoading(true);
     setError("");
     try {
-      const payload = parentId
-        ? await requestJSON<{ id: string; title: string; owner: string }>(`/v1/cases/${parentId}/children`, {
-          method: "POST",
-          body: JSON.stringify({ title: title.trim(), owner: ownerDraft.trim() || "unassigned" }),
-        })
-        : await requestJSON<{ id: string; title: string; owner: string }>("/v1/cases", {
-          method: "POST",
-          body: JSON.stringify({ title: title.trim(), owner: ownerDraft.trim() || "unassigned" }),
-        });
-
-      const nextItem: CaseRecord = {
-        id: payload.id,
-        title: payload.title,
-        responsible: payload.owner,
-        parentId,
-      };
-      const deduped = [nextItem, ...records.filter((item) => item.id !== nextItem.id)];
-      save(deduped);
-      setSelectedId(nextItem.id);
-      setOwnerDraft("");
+      const payload = await requestJSON<{ nodes: NodeRecord[] }>(`/v1/nodes?company_id=${encodeURIComponent(companyID)}`);
+      setNodes(payload.nodes ?? []);
+      if (!selectedNodeID && payload.nodes.length > 0) {
+        setSelectedNodeID(payload.nodes[0].node_id);
+      }
+      if (selectedNodeID && !payload.nodes.some((item) => item.node_id === selectedNodeID)) {
+        setSelectedNodeID(payload.nodes[0]?.node_id ?? "");
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_create_case");
+      setError(err instanceof Error ? err.message : "failed_to_load_nodes");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const rememberSelected = (titleFallback?: string) => {
-    if (!selected) return;
-    const next = records.map((item) => (
-      item.id === selected.id
-        ? { ...item, title: selectedDetails?.case?.title || titleFallback || item.title, responsible: selectedDetails?.case?.owner || item.responsible }
-        : item
-    ));
-    save(next);
-  };
-
-  const deleteSelected = () => {
-    if (!selected) return;
-    const next = records.filter((item) => item.id !== selected.id);
-    save(next);
-    setSelectedId(next[0]?.id ?? "");
-    setSelectedDetails(null);
-  };
-
-  const reloadSelected = async () => {
-    if (!selectedId) {
-      setSelectedDetails(null);
+  const loadDetails = async (nodeID: string) => {
+    if (!nodeID) {
+      setDetails(null);
       return;
     }
     setLoading(true);
     setError("");
     try {
-      const details = await requestJSON<CaseDetails>(`/v1/cases/${selectedId}`);
-      setSelectedDetails(details);
+      const payload = await requestJSON<NodeDetails>(`/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}`);
+      setDetails(payload);
     } catch (err) {
-      setSelectedDetails(null);
-      setError(err instanceof Error ? err.message : "failed_to_load_case");
+      setDetails(null);
+      setError(err instanceof Error ? err.message : "failed_to_load_node");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    void reloadSelected();
-  }, [selectedId]);
+    void loadNodes();
+  }, []);
 
   useEffect(() => {
-    if (!selectedId || !selectedDetails) return;
-    rememberSelected(selectedDetails.case.title);
-  }, [selectedDetails?.case.id, selectedDetails?.case.title, selectedDetails?.case.owner]);
+    void loadDetails(selectedNodeID);
+  }, [selectedNodeID]);
 
-  const addArtifact = async (type: CaseArtifact["type"], value: string) => {
-    if (!selectedId || !value.trim()) return;
+  const createNode = async (header: string): Promise<NodeRecord | null> => {
+    const value = trimOrEmpty(header);
+    if (!value) return null;
     setError("");
     try {
-      await requestJSON(`/v1/cases/${selectedId}/artifacts`, {
+      const node = await requestJSON<NodeRecord>("/v1/nodes", {
+        method: "POST",
+        body: JSON.stringify({ company_id: companyID, header: value }),
+      });
+      await loadNodes();
+      setSelectedNodeID(node.node_id);
+      return node;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_create_node");
+      return null;
+    }
+  };
+
+  const createLinkedNode = async () => {
+    if (!selectedNodeID) return;
+    const node = await createNode(relationHeader);
+    if (!node) return;
+
+    const pair = relationPosition === "Peer"
+      ? { a: "Peer", b: "Peer" }
+      : relationPosition === "Parent"
+        ? { a: "Parent", b: "Child" }
+        : { a: "Child", b: "Parent" };
+
+    try {
+      await requestJSON<NodeRelationship>("/v1/node-relationships", {
         method: "POST",
         body: JSON.stringify({
-          type,
-          content: value.trim(),
-          source_ref: type === "url" ? value.trim() : "",
-          created_by: "ui",
+          company_id: companyID,
+          node_id_a: selectedNodeID,
+          node_id_b: node.node_id,
+          a_position: pair.a,
+          b_position: pair.b,
         }),
       });
-      await reloadSelected();
+      setRelationHeader("");
+      await loadDetails(selectedNodeID);
+      await loadDetails(node.node_id);
+      setSelectedNodeID(node.node_id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_add_artifact");
+      setError(err instanceof Error ? err.message : "failed_to_create_node_relationship");
     }
   };
 
-  const deleteArtifact = async (artifactID: string) => {
-    if (!selectedId) return;
+  const deleteSelectedNode = async () => {
+    if (!selectedNodeID) return;
     setError("");
     try {
-      await requestJSON(`/v1/cases/${selectedId}/artifacts/${artifactID}`, { method: "DELETE" });
-      await reloadSelected();
+      await requestJSON<{ status: string }>(`/v1/nodes/${selectedNodeID}?company_id=${encodeURIComponent(companyID)}`, {
+        method: "DELETE",
+      });
+      setDetails(null);
+      const removedID = selectedNodeID;
+      await loadNodes();
+      if (selectedNodeID === removedID) {
+        setSelectedNodeID("");
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_delete_artifact");
+      setError(err instanceof Error ? err.message : "failed_to_delete_node");
     }
   };
 
-  const noteArtifacts = selectedDetails?.artifacts?.filter((item) => item.type === "note") ?? [];
-  const linkArtifacts = selectedDetails?.artifacts?.filter((item) => item.type === "url") ?? [];
-  const childCount = selectedDetails?.children?.length ?? 0;
-  const isLikelyUrl = (value: string) => /^https?:\/\//i.test(value.trim());
+  const addInformation = async () => {
+    if (!selectedNodeID || !trimOrEmpty(infoDraft)) return;
+    setError("");
+    try {
+      await requestJSON<NodeInformation>(`/v1/nodes/${selectedNodeID}/information`, {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyID,
+          type: infoType,
+          information: trimOrEmpty(infoDraft),
+        }),
+      });
+      setInfoDraft("");
+      await loadDetails(selectedNodeID);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_add_node_information");
+    }
+  };
 
   return (
     <div style={{ display: "grid", gap: 6, fontSize: 11 }}>
-      <div style={{ fontSize: 12, textTransform: "uppercase" }}>[ Case Module ]</div>
+      <div style={{ fontSize: 12, textTransform: "uppercase" }}>[ Nodes ]</div>
+      <div style={{ ...divider }}>Company: {companyID}</div>
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
-        <input value={newCaseTitle} onChange={(e) => setNewCaseTitle(e.target.value)} placeholder="Create case..." />
-        <button onClick={() => { void createCase(newCaseTitle, null); setNewCaseTitle(""); }}>Add</button>
+        <input value={newNodeHeader} onChange={(e) => setNewNodeHeader(e.target.value)} placeholder="Create node header" />
+        <button onClick={() => { void createNode(newNodeHeader); setNewNodeHeader(""); }}>Add</button>
       </div>
 
-      <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
-        <option value="">Select case</option>
-        {records.map((item) => (
-          <option key={item.id} value={item.id}>{item.parentId ? "↳ " : ""}{item.title}</option>
+      <select value={selectedNodeID} onChange={(e) => setSelectedNodeID(e.target.value)}>
+        <option value="">Select node</option>
+        {nodes.map((item) => (
+          <option key={item.node_id} value={item.node_id}>{item.header}</option>
         ))}
       </select>
 
-      {selected ? (
-        <div style={{ display: "grid", gap: 4, borderTop: `1px solid ${accent}`, paddingTop: 4 }}>
-          <div style={{ ...divider }}>Owner: {selectedDetails?.case.owner || selected.responsible || "Unassigned"}</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
-            <input value={ownerDraft} onChange={(e) => setOwnerDraft(e.target.value)} placeholder="Owner used on new cases/children" />
-            <button onClick={() => setOwnerDraft("")}>Clear</button>
+      {selectedNodeID && (
+        <div style={{ display: "grid", gap: 4 }}>
+          <button onClick={() => { void deleteSelectedNode(); }}>Delete selected node</button>
+
+          <div style={{ display: "grid", gridTemplateColumns: "95px 1fr auto", gap: 4 }}>
+            <select value={relationPosition} onChange={(e) => setRelationPosition(e.target.value as (typeof RELATIONSHIP_POSITIONS)[number])}>
+              {RELATIONSHIP_POSITIONS.map((position) => (
+                <option key={position} value={position}>{position}</option>
+              ))}
+            </select>
+            <input value={relationHeader} onChange={(e) => setRelationHeader(e.target.value)} placeholder="New related node header" />
+            <button onClick={() => { void createLinkedNode(); }}>Create</button>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
-            <input value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Add note" />
-            <button onClick={() => { void addArtifact("note", noteDraft); setNoteDraft(""); }}>Note</button>
+          <div style={{ display: "grid", gridTemplateColumns: "120px 1fr auto", gap: 4 }}>
+            <select value={infoType} onChange={(e) => setInfoType(e.target.value as (typeof INFO_TYPES)[number])}>
+              {INFO_TYPES.map((type) => (
+                <option key={type} value={type}>{type}</option>
+              ))}
+            </select>
+            <input value={infoDraft} onChange={(e) => setInfoDraft(e.target.value)} placeholder="Add node information" />
+            <button onClick={() => { void addInformation(); }}>Info</button>
           </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
-            <input value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} placeholder="Link email/doc URL" />
-            <button onClick={() => { void addArtifact("url", linkDraft); setLinkDraft(""); }}>Link</button>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
-            <input
-              value={quickDraft}
-              onChange={(e) => setQuickDraft(e.target.value)}
-              placeholder="Quick add note or paste URL"
-              onKeyDown={(e) => {
-                if (e.key !== "Enter" || !quickDraft.trim()) return;
-                const value = quickDraft.trim();
-                void addArtifact(isLikelyUrl(value) ? "url" : "note", value);
-                setQuickDraft("");
-              }}
-            />
-            <button onClick={() => {
-              if (!quickDraft.trim()) return;
-              const value = quickDraft.trim();
-              void addArtifact(isLikelyUrl(value) ? "url" : "note", value);
-              setQuickDraft("");
-            }}>Quick</button>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4 }}>
-            <input value={childDraft} onChange={(e) => setChildDraft(e.target.value)} placeholder="Create child case" />
-            <button onClick={() => { void createCase(childDraft, selected.id); setChildDraft(""); }}>Child</button>
-          </div>
-
-          <div style={{ ...divider }}>Children: {childCount} · Notes: {noteArtifacts.length} · Links: {linkArtifacts.length}</div>
-          {loading && <div style={{ ...divider }}>Loading case from API...</div>}
-          {error && <div style={{ ...divider, color: "#b00020" }}>Error: {error}</div>}
-          <div style={{ display: "grid", gap: 2 }}>
-            {linkArtifacts.slice(0, 4).map((artifact) => (
-              <div key={artifact.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4, alignItems: "center" }}>
-                <span style={{ ...divider, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🔗 {artifact.content}</span>
-                <button onClick={() => { void deleteArtifact(artifact.id); }}>×</button>
-              </div>
-            ))}
-            {noteArtifacts.slice(0, 4).map((artifact) => (
-              <div key={artifact.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 4, alignItems: "center" }}>
-                <span style={{ ...divider, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>• {artifact.content}</span>
-                <button onClick={() => { void deleteArtifact(artifact.id); }}>×</button>
-              </div>
-            ))}
-          </div>
-          <button onClick={deleteSelected}>Remove from local list</button>
         </div>
-      ) : (
-        <div style={{ ...divider }}>No case selected.</div>
       )}
+
+      {loading && <div style={{ ...divider }}>Syncing with API...</div>}
+      {error && <div style={{ ...divider, color: "#b00020" }}>Error: {error}</div>}
+
+      <div style={{ ...divider, fontSize: 12 }}>[ nodes table ]</div>
+      <div style={{ display: "grid", gap: 2, maxHeight: 130, overflow: "auto" }}>
+        {nodes.length === 0 ? <div style={{ ...divider }}>No nodes</div> : nodes.map((node) => (
+          <div key={node.node_id} style={{ ...divider, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {node.header} · {node.node_id.slice(0, 8)}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ ...divider, fontSize: 12 }}>[ node_relationships table ]</div>
+      <div style={{ display: "grid", gap: 2, maxHeight: 130, overflow: "auto" }}>
+        {(details?.relationships ?? []).length === 0 ? <div style={{ ...divider }}>No relationships</div> : details?.relationships.map((rel) => (
+          <div key={rel.node_relationship_id} style={{ ...divider, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {rel.node_id_a.slice(0, 6)}({rel.a_position}) → {rel.node_id_b.slice(0, 6)}({rel.b_position})
+          </div>
+        ))}
+      </div>
+
+      <div style={{ ...divider, fontSize: 12 }}>[ node_information table ]</div>
+      <div style={{ display: "grid", gap: 2, maxHeight: 130, overflow: "auto" }}>
+        {(details?.information ?? []).length === 0 ? <div style={{ ...divider }}>No information</div> : details?.information.map((info) => (
+          <div key={info.information_id} style={{ ...divider, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {info.type}: {info.information}
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

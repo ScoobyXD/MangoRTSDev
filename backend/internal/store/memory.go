@@ -13,7 +13,9 @@ var ErrNotFound = errors.New("not found")
 
 type Repository interface {
 	CreateNode(companyID, header string) (domain.Node, error)
+	ListNodes(companyID string) ([]domain.Node, error)
 	GetNode(companyID, nodeID string) (domain.Node, error)
+	DeleteNode(companyID, nodeID string) error
 	GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error)
 	AddNodeInformation(companyID, nodeID, infoType, information string) (domain.NodeInformation, error)
 	CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error)
@@ -68,6 +70,22 @@ func (r *MemoryRepo) CreateNode(companyID, header string) (domain.Node, error) {
 	return n, nil
 }
 
+func (r *MemoryRepo) ListNodes(companyID string) ([]domain.Node, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.Node, 0)
+	for _, node := range r.nodes {
+		if node.CompanyID == companyID {
+			items = append(items, node)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
+	return items, nil
+}
+
 func (r *MemoryRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -77,6 +95,29 @@ func (r *MemoryRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 		return domain.Node{}, ErrNotFound
 	}
 	return n, nil
+}
+
+func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	k := key(companyID, nodeID)
+	if _, ok := r.nodes[k]; !ok {
+		return ErrNotFound
+	}
+
+	delete(r.nodes, k)
+	delete(r.nodeInfo, k)
+
+	filtered := make([]domain.NodeRelationship, 0, len(r.nodeRels[companyID]))
+	for _, rel := range r.nodeRels[companyID] {
+		if rel.NodeIDA == nodeID || rel.NodeIDB == nodeID {
+			continue
+		}
+		filtered = append(filtered, rel)
+	}
+	r.nodeRels[companyID] = filtered
+	return nil
 }
 
 func (r *MemoryRepo) AddNodeInformation(companyID, nodeID, infoType, information string) (domain.NodeInformation, error) {
