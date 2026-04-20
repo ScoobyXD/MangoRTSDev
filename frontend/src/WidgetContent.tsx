@@ -118,6 +118,7 @@ type NodeDetails = {
 
 type NodeDirection = "left" | "right" | "top" | "bottom";
 type NodePosition = { x: number; y: number };
+type RelationshipAnchor = { from: NodeDirection; to: NodeDirection };
 
 const INFO_TYPES = [
   "Text box",
@@ -131,8 +132,8 @@ const INFO_TYPES = [
   "Hyperlink",
 ] as const;
 
-const NODE_W = 132;
-const NODE_H = 88;
+const NODE_W = 148;
+const NODE_H = 96;
 const MINI_GRID = 12;
 
 function trimOrEmpty(value: string): string {
@@ -142,6 +143,17 @@ function trimOrEmpty(value: string): string {
 function clamp(value: number, minimum: number, maximum: number): number {
   if (minimum > maximum) return minimum;
   return Math.max(minimum, Math.min(maximum, value));
+}
+
+function snapToGrid(value: number): number {
+  return Math.round(value / MINI_GRID) * MINI_GRID;
+}
+
+function oppositeSide(direction: NodeDirection): NodeDirection {
+  if (direction === "left") return "right";
+  if (direction === "right") return "left";
+  if (direction === "top") return "bottom";
+  return "top";
 }
 
 function relationFromDirection(direction: NodeDirection): { a: "Parent" | "Child" | "Peer"; b: "Parent" | "Child" | "Peer" } {
@@ -159,6 +171,8 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
   const [nodePositions, setNodePositions] = useState<Record<string, NodePosition>>({});
 
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
+  const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
+  const [relationshipAnchors, setRelationshipAnchors] = useState<Record<string, RelationshipAnchor>>({});
   const [selectedNodeID, setSelectedNodeID] = useState<string>("");
   const [details, setDetails] = useState<NodeDetails | null>(null);
   const [newNodeHeader, setNewNodeHeader] = useState("");
@@ -215,6 +229,25 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     }
   };
 
+  const loadGraphRelationships = async (graphNodes: NodeRecord[]) => {
+    if (graphNodes.length === 0) {
+      setRelationships([]);
+      return;
+    }
+    try {
+      const detailPayloads = await Promise.all(
+        graphNodes.map((node) => requestJSON<NodeDetails>(`/v1/nodes/${node.node_id}?company_id=${encodeURIComponent(companyID)}`))
+      );
+      const dedup = new Map<string, NodeRelationship>();
+      for (const detail of detailPayloads) {
+        for (const rel of detail.relationships ?? []) dedup.set(rel.node_relationship_id, rel);
+      }
+      setRelationships(Array.from(dedup.values()));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_load_relationships");
+    }
+  };
+
   const loadDetails = async (nodeID: string) => {
     if (!nodeID) {
       setDetails(null);
@@ -236,6 +269,10 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
   useEffect(() => {
     void loadNodes();
   }, []);
+
+  useEffect(() => {
+    void loadGraphRelationships(nodes);
+  }, [nodes]);
 
   useEffect(() => {
     void loadDetails(selectedNodeID);
@@ -262,12 +299,12 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
       for (const [index, node] of nodes.entries()) {
         const existing = previous[node.node_id];
         if (existing) {
-          next[node.node_id] = { x: clamp(existing.x, 0, maxX), y: clamp(existing.y, 0, maxY) };
+          next[node.node_id] = { x: clamp(snapToGrid(existing.x), 0, maxX), y: clamp(snapToGrid(existing.y), 0, maxY) };
           continue;
         }
         const perRow = Math.max(1, Math.floor(canvasSize.width / (NODE_W + 24)));
-        const x = (index % perRow) * (NODE_W + 24) + 16;
-        const y = Math.floor(index / perRow) * (NODE_H + 24) + 16;
+        const x = snapToGrid((index % perRow) * (NODE_W + 24) + 16);
+        const y = snapToGrid(Math.floor(index / perRow) * (NODE_H + 24) + 16);
         next[node.node_id] = { x: clamp(x, 0, maxX), y: clamp(y, 0, maxY) };
       }
       return next;
@@ -282,8 +319,8 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
       const bounds = canvasRef.current.getBoundingClientRect();
       const maxX = Math.max(0, bounds.width - NODE_W);
       const maxY = Math.max(0, bounds.height - NODE_H);
-      const x = clamp(event.clientX - bounds.left - dragState.offsetX, 0, maxX);
-      const y = clamp(event.clientY - bounds.top - dragState.offsetY, 0, maxY);
+      const x = clamp(snapToGrid(event.clientX - bounds.left - dragState.offsetX), 0, maxX);
+      const y = clamp(snapToGrid(event.clientY - bounds.top - dragState.offsetY), 0, maxY);
       setNodePositions((previous) => ({ ...previous, [dragState.nodeID]: { x, y } }));
     };
 
@@ -327,7 +364,7 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
 
     try {
       const pair = relationFromDirection(direction);
-      await requestJSON<NodeRelationship>("/v1/node-relationships", {
+      const relationship = await requestJSON<NodeRelationship>("/v1/node-relationships", {
         method: "POST",
         body: JSON.stringify({
           company_id: companyID,
@@ -351,12 +388,17 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
       setNodePositions((previous) => ({
         ...previous,
         [node.node_id]: {
-          x: clamp(origin.x + shift.x, 0, maxX),
-          y: clamp(origin.y + shift.y, 0, maxY),
+          x: clamp(snapToGrid(origin.x + shift.x), 0, maxX),
+          y: clamp(snapToGrid(origin.y + shift.y), 0, maxY),
         },
+      }));
+      setRelationshipAnchors((previous) => ({
+        ...previous,
+        [relationship.node_relationship_id]: { from: direction, to: oppositeSide(direction) },
       }));
 
       await loadDetails(sourceNodeID);
+      await loadGraphRelationships([...nodes, node]);
       setSelectedNodeID(node.node_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node_relationship");
@@ -410,6 +452,56 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     [nodes, selectedNodeID]
   );
 
+  const nodeByID = useMemo(() => Object.fromEntries(nodes.map((node) => [node.node_id, node])), [nodes]);
+
+  const getAnchorPoint = (nodeID: string, side: NodeDirection) => {
+    const pos = nodePositions[nodeID];
+    if (!pos) return { x: 0, y: 0 };
+    if (side === "left") return { x: pos.x, y: pos.y + NODE_H / 2 };
+    if (side === "right") return { x: pos.x + NODE_W, y: pos.y + NODE_H / 2 };
+    if (side === "top") return { x: pos.x + NODE_W / 2, y: pos.y };
+    return { x: pos.x + NODE_W / 2, y: pos.y + NODE_H };
+  };
+
+  const inferAnchor = (relationship: NodeRelationship): RelationshipAnchor => {
+    if (relationshipAnchors[relationship.node_relationship_id]) return relationshipAnchors[relationship.node_relationship_id];
+    if (relationship.a_position === "Parent" && relationship.b_position === "Child") return { from: "top", to: "bottom" };
+    if (relationship.a_position === "Child" && relationship.b_position === "Parent") return { from: "bottom", to: "top" };
+    const a = nodePositions[relationship.node_id_a];
+    const b = nodePositions[relationship.node_id_b];
+    if (!a || !b) return { from: "right", to: "left" };
+    return b.x >= a.x ? { from: "right", to: "left" } : { from: "left", to: "right" };
+  };
+
+  const connectionPaths = useMemo(() => {
+    const maxX = canvasSize.width;
+    const maxY = canvasSize.height;
+    return relationships
+      .filter((rel) => nodeByID[rel.node_id_a] && nodeByID[rel.node_id_b])
+      .map((rel) => {
+        const anchor = inferAnchor(rel);
+        const from = getAnchorPoint(rel.node_id_a, anchor.from);
+        const to = getAnchorPoint(rel.node_id_b, anchor.to);
+        const lane = MINI_GRID * 2;
+        const fromOut = anchor.from === "left" ? { x: from.x - lane, y: from.y }
+          : anchor.from === "right" ? { x: from.x + lane, y: from.y }
+            : anchor.from === "top" ? { x: from.x, y: from.y - lane }
+              : { x: from.x, y: from.y + lane };
+        const toIn = anchor.to === "left" ? { x: to.x - lane, y: to.y }
+          : anchor.to === "right" ? { x: to.x + lane, y: to.y }
+            : anchor.to === "top" ? { x: to.x, y: to.y - lane }
+              : { x: to.x, y: to.y + lane };
+
+        const horizontalFirst = anchor.from === "left" || anchor.from === "right";
+        const cornerA = horizontalFirst ? { x: toIn.x, y: fromOut.y } : { x: fromOut.x, y: toIn.y };
+        const points = [from, fromOut, cornerA, toIn, to].map((point) => ({
+          x: clamp(snapToGrid(point.x), 0, maxX),
+          y: clamp(snapToGrid(point.y), 0, maxY),
+        }));
+        return { id: rel.node_relationship_id, points };
+      });
+  }, [relationships, nodeByID, nodePositions, canvasSize.width, canvasSize.height, relationshipAnchors]);
+
   return (
     <div style={{ display: "grid", gap: 8, fontSize: 11, height: "100%", gridTemplateRows: "auto auto 1fr auto auto" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -437,6 +529,21 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
         }}
         onPointerDown={(event) => event.stopPropagation()}
       >
+        <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 1 }}>
+          {connectionPaths.map((path) => (
+            <polyline
+              key={path.id}
+              points={path.points.map((point) => `${point.x},${point.y}`).join(" ")}
+              fill="none"
+              stroke={accent}
+              strokeWidth={1.6}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.72}
+            />
+          ))}
+        </svg>
+
         {nodes.length === 0 && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeContent: "center", textAlign: "center", gap: 4, fontSize: 11, opacity: 0.8 }}>
             <div style={{ fontSize: 12, fontWeight: 700 }}>Blank node canvas</div>
@@ -465,6 +572,7 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
                 boxShadow: isSelected ? "0 8px 20px rgba(0,0,0,0.18)" : "0 4px 12px rgba(0,0,0,0.12)",
                 userSelect: "none",
                 cursor: dragState?.nodeID === node.node_id ? "grabbing" : "grab",
+                zIndex: isSelected ? 5 : 4,
               }}
               onPointerDown={(event) => {
                 event.stopPropagation();
@@ -478,8 +586,8 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
                 });
               }}
             >
-              <div style={{ ...divider, padding: "6px 8px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {node.header}
+              <div style={{ borderBottom: "1px solid currentColor", padding: "8px 8px 7px", fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>
+                <div style={{ whiteSpace: "normal", overflowWrap: "anywhere", maxHeight: 28, overflow: "hidden" }}>{node.header}</div>
               </div>
               <div style={{ padding: "5px 8px", fontSize: 10, display: "grid", gap: 2 }}>
                 <div>ID: {node.node_id.slice(0, 8)}</div>
