@@ -38,7 +38,7 @@ const INITIAL_WIDGETS: Widget[] = [
   { id: "w-orders", theme: "orange", kind: "orders", x: 2, y: 20, w: 10, h: 10, title: "Recent Orders", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
   { id: "w-notifications", theme: "orange", kind: "notifications", x: 12, y: 22, w: 12, h: 10, title: "Notifications", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
   { id: "w-map", theme: "teal", kind: "map", x: 28, y: 15, w: 14, h: 17, title: "Map View", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-case-hub", theme: "white", kind: "case_hub", x: 24, y: 22, w: 18, h: 10, title: "Case Module", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  { id: "w-nodes", theme: "white", kind: "nodes", x: 24, y: 22, w: 18, h: 10, title: "Nodes", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
 ];
 
 interface ViewTab {
