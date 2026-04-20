@@ -12,7 +12,7 @@ const HANDLE = 6;
 const CORNER_SIZE = 14;
 
 const COLORWAYS = {
-  teal: { color: "#6fe7ee", accent: "#0a6c78", text: "#062126", tagBg: "#062126", tagText: "#ffffff" },
+  teal: { color: "#00d5ff", accent: "#006f85", text: "#042028", tagBg: "#042028", tagText: "#ffffff" },
   orange: { color: "#ff6a00", accent: "#5a2200", text: "#120900", tagBg: "#120900", tagText: "#ffffff" },
   white: { color: "#ffffff", accent: "#111111", text: "#111111", tagBg: "#111111", tagText: "#ffffff" },
   black: { color: "#0c0c0c", accent: "#ffffff", text: "#ffffff", tagBg: "#ffffff", tagText: "#050505" },

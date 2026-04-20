@@ -165,12 +165,14 @@ function relationFromDirection(direction: NodeDirection): { a: "Parent" | "Child
 export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
+  const canvasStateKey = `node-canvas-state-v1:${companyID}`;
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1000, height: 560 });
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [panInitialized, setPanInitialized] = useState(false);
+  const [restoredViewport, setRestoredViewport] = useState(false);
 
   const WORLD_W = 3200;
   const WORLD_H = 2200;
@@ -198,6 +200,45 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
     active: false,
   });
   const [selectionPointerID, setSelectionPointerID] = useState<number | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(canvasStateKey);
+      if (!raw) {
+        setRestoredViewport(true);
+        return;
+      }
+      const parsed = JSON.parse(raw) as {
+        zoom?: number;
+        pan?: { x?: number; y?: number };
+        nodePositions?: Record<string, { x?: number; y?: number }>;
+      };
+      if (typeof parsed.zoom === "number" && Number.isFinite(parsed.zoom)) {
+        setZoom(clamp(parsed.zoom, 0.45, 2.7));
+      }
+      if (parsed.pan && typeof parsed.pan.x === "number" && typeof parsed.pan.y === "number") {
+        setPan({ x: parsed.pan.x, y: parsed.pan.y });
+        setPanInitialized(true);
+      }
+      if (parsed.nodePositions && typeof parsed.nodePositions === "object") {
+        const sanitized: Record<string, NodePosition> = {};
+        for (const [key, value] of Object.entries(parsed.nodePositions)) {
+          if (!value) continue;
+          const x = typeof value.x === "number" ? value.x : 0;
+          const y = typeof value.y === "number" ? value.y : 0;
+          sanitized[key] = {
+            x: clamp(snapToGrid(x), 0, WORLD_W - NODE_W),
+            y: clamp(snapToGrid(y), 0, WORLD_H - NODE_H),
+          };
+        }
+        setNodePositions(sanitized);
+      }
+    } catch {
+      // ignore local cache parse errors
+    } finally {
+      setRestoredViewport(true);
+    }
+  }, [canvasStateKey]);
 
   const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const response = await fetch(`${apiBase}${path}`, {
@@ -309,12 +350,21 @@ export const NodesContent: React.FC<{ accent: string }> = ({ accent }) => {
   }, []);
 
   useEffect(() => {
-    if (panInitialized) return;
+    if (panInitialized || !restoredViewport) return;
     const centeredX = canvasSize.width / 2 - (WORLD_W * zoom) / 2;
     const centeredY = canvasSize.height / 2 - (WORLD_H * zoom) / 2;
     setPan({ x: centeredX, y: centeredY });
     setPanInitialized(true);
-  }, [panInitialized, canvasSize.width, canvasSize.height, zoom]);
+  }, [panInitialized, restoredViewport, canvasSize.width, canvasSize.height, zoom]);
+
+  useEffect(() => {
+    if (!restoredViewport) return;
+    try {
+      localStorage.setItem(canvasStateKey, JSON.stringify({ zoom, pan, nodePositions }));
+    } catch {
+      // ignore local storage quota/security errors
+    }
+  }, [canvasStateKey, restoredViewport, zoom, pan, nodePositions]);
 
   useEffect(() => {
     setNodePositions((previous) => {
