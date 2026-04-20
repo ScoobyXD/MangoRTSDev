@@ -1167,6 +1167,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
         {!!detailsPanelNode && (
           <div
+            className="node-details-panel"
             style={{
               position: "absolute",
               top: panelRect.y,
@@ -1179,6 +1180,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               zIndex: 35,
               borderRadius: 16,
               border: "1px solid rgba(255,255,255,0.35)",
+              backgroundColor: "rgba(157, 224, 227, 0.72)",
               background: `
                 linear-gradient(
                   135deg,

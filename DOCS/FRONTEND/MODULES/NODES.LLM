@@ -37,8 +37,17 @@ This document tracks technical behavior for the **frontend node module** impleme
   - `boxSizing: "border-box"`
   - `overflowY: "auto"`
   - `overflowX: "hidden"`
+- Panel base tint now includes `backgroundColor: rgba(157, 224, 227, 0.72)` beneath the glass gradient so the panel keeps a consistent aqua identity.
 - The input/select/button row was updated with `minmax(0, 1fr)` and `minWidth: 0` on the input, plus compact button sizing.
 - Result: no accidental horizontal overflow strip at the bottom; panel content fits within panel width correctly.
+
+### 3.1) Details panel scrollbar aesthetics
+- Added a dedicated class (`node-details-panel`) for custom scrollbar styling in `frontend/src/index.css`.
+- Scrollbar visuals now match panel aesthetics:
+  - thin width
+  - soft translucent track
+  - rounded teal thumb with subtle gradient and hover state
+- Implemented for both Firefox (`scrollbar-width`, `scrollbar-color`) and WebKit browsers (`::-webkit-scrollbar*` rules).
 
 ### 4) Details panel drag + full edge/corner resizing
 - Existing drag behavior remains on the panel header (`cursor: move` + `panelDrag` state).
