@@ -164,10 +164,11 @@ function relationFromDirection(direction: NodeDirection): { a: "Parent" | "Child
   return { a: "Child", b: "Parent" };
 }
 
-export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls }) => {
+export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
-  const canvasStateKey = `node-canvas-state-v2:${companyID}`;
+  const scopedCanvasStateKey = widgetId ? `node-canvas-state-v3:${companyID}:${widgetId}` : `node-canvas-state-v3:${companyID}:default`;
+  const legacyCanvasStateKey = `node-canvas-state-v2:${companyID}`;
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1000, height: 560 });
@@ -213,7 +214,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const restoredSelectionRef = useRef<string>("");
 
   useEffect(() => {
-    const cached = SESSION_NODE_CANVAS_STATE.get(canvasStateKey);
+    const cached = SESSION_NODE_CANVAS_STATE.get(scopedCanvasStateKey);
     if (cached) {
       setZoom(clamp(cached.zoom, 0.45, 2.7));
       setPan(cached.pan);
@@ -226,7 +227,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       return;
     }
     try {
-      const raw = localStorage.getItem(canvasStateKey);
+      const raw = localStorage.getItem(scopedCanvasStateKey) ?? localStorage.getItem(legacyCanvasStateKey);
       if (!raw) {
         setRestoredViewport(true);
         return;
@@ -267,7 +268,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     } finally {
       setRestoredViewport(true);
     }
-  }, [canvasStateKey]);
+  }, [legacyCanvasStateKey, scopedCanvasStateKey]);
 
   const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const response = await fetch(`${apiBase}${path}`, {
@@ -400,12 +401,12 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     if (!restoredViewport) return;
     try {
       const nextState = { zoom, pan, selectedNodeID, nodePositions };
-      SESSION_NODE_CANVAS_STATE.set(canvasStateKey, nextState);
-      localStorage.setItem(canvasStateKey, JSON.stringify(nextState));
+      SESSION_NODE_CANVAS_STATE.set(scopedCanvasStateKey, nextState);
+      localStorage.setItem(scopedCanvasStateKey, JSON.stringify(nextState));
     } catch {
       // ignore local storage quota/security errors
     }
-  }, [canvasStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions]);
+  }, [scopedCanvasStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions]);
 
   useEffect(() => {
     setNodePositions((previous) => {
@@ -535,8 +536,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       setContextMenu(null);
       setNodeContextMenu(null);
     };
-    window.addEventListener("pointerdown", onWindowPointerDown);
-    return () => window.removeEventListener("pointerdown", onWindowPointerDown);
+    window.addEventListener("pointerdown", onWindowPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onWindowPointerDown, true);
   }, []);
 
   useEffect(() => {
@@ -547,19 +548,6 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     window.addEventListener("pointerdown", onWindowPointerDown, true);
     return () => window.removeEventListener("pointerdown", onWindowPointerDown, true);
   }, []);
-
-  useEffect(() => {
-    if (!widgetId) return;
-    const eventName = `nodes:create:${widgetId}`;
-    const onCreate = (event: Event) => {
-      const custom = event as CustomEvent<{ header?: string }>;
-      const header = trimOrEmpty(custom.detail?.header ?? "");
-      if (!header) return;
-      void createNode(header);
-    };
-    window.addEventListener(eventName, onCreate as EventListener);
-    return () => window.removeEventListener(eventName, onCreate as EventListener);
-  }, [widgetId]);
 
   const createNode = async (header: string, worldPos?: { x: number; y: number }): Promise<NodeRecord | null> => {
     const value = trimOrEmpty(header);
@@ -823,15 +811,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   }, [relationships, nodeByID, nodePositions, relationshipAnchors]);
 
   return (
-    <div style={{ display: "grid", gap: 6, fontSize: 11, height: "100%", gridTemplateRows: hideTopControls ? "1fr" : "auto 1fr" }}>
-      {!hideTopControls && (
-        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, alignItems: "center" }}>
-          <div style={{ fontSize: 12, textTransform: "uppercase", fontWeight: 700 }}>[ Node Canvas ]</div>
-          <input value={newNodeHeader} onChange={(e) => setNewNodeHeader(e.target.value)} placeholder="Create node header" />
-          <button onClick={() => { void createNode(newNodeHeader); setNewNodeHeader(""); }}>Add</button>
-        </div>
-      )}
-
+    <div style={{ display: "grid", gap: 6, fontSize: 11, height: "100%", gridTemplateRows: "1fr" }}>
       <div
         ref={viewportRef}
         style={{
@@ -1129,9 +1109,9 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               zIndex: 35,
               borderRadius: 10,
               border: `1px solid ${accent}`,
-              background: "linear-gradient(145deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08))",
-              backdropFilter: "blur(14px) saturate(120%)",
-              boxShadow: "0 12px 34px rgba(0,0,0,0.22), inset 0 0 0 1px rgba(255,255,255,0.25)",
+              background: "rgba(255,255,255,0.06)",
+              backdropFilter: "blur(16px) saturate(130%)",
+              boxShadow: "0 12px 34px rgba(0,0,0,0.18), inset 0 0 0 1px rgba(255,255,255,0.35)",
               padding: 10,
               display: "grid",
               gap: 8,

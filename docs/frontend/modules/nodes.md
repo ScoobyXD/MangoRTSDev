@@ -162,9 +162,9 @@ Relationships are visualized with SVG polylines in world space.
 
 ## 8) Local persistence (layout + viewport)
 
-The module persists canvas state in `localStorage` keyed per company:
+The module persists canvas state in `localStorage` keyed per company and widget:
 
-- Key format: `node-canvas-state-v2:<companyID>`
+- Key format: `node-canvas-state-v3:<companyID>:<widgetID>`
 - Stored fields:
   - `zoom`
   - `pan`
@@ -189,15 +189,10 @@ This keeps layout and viewport stable when switching views and reopening the mod
 
 ## 9) Controls and panels in module UI
 
-### Top controls
-
-- `[ Node Canvas ]` label, input, and add button aligned on one row.
-
 ### Main canvas
 
 - Canvas consumes almost all remaining widget height (bottom utility rows removed).
 - World grid, relationship lines, node cards, side `+` actions, selection box, and group badge.
-- In-canvas instruction text.
 - Right-click context menu with `Create new node` at cursor location.
 - Right-click on a node opens node actions (`Edit node`, `Delete node`).
 - Delete key support for selected node(s), guarded by themed confirmation modal.

@@ -346,7 +346,6 @@ interface WidgetCardProps {
 const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect }) => {
   const Content = CONTENT_MAP[widget.kind];
   const theme = COLORWAYS[widget.theme ?? "teal"];
-  const [nodeHeaderDraft, setNodeHeaderDraft] = useState("");
   const isNodes = widget.kind === "nodes";
   return (
     <div
