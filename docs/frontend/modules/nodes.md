@@ -268,7 +268,9 @@ and reads `selectedNodeID`. That selected node becomes the active storage target
 - Top-left module label (`Node Doc`).
 - Blank document area with no extra dashboard chrome inside the module body.
 - Typing creates a text box when none is active.
-- Text boxes are movable and persist position/content to the selected linked node.
+- Double-clicking in blank space creates a new empty text box.
+- Text boxes are movable and resizable from all edges/corners.
+- Text boxes persist position, size, and content to the selected linked node.
 
 ---
 

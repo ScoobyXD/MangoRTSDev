@@ -390,18 +390,10 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
             {widget.title}
           </span>
           {isLinked && (
-            <span
-              aria-label="linked module"
-              title="Linked"
-              style={{
-                width: 14,
-                height: 16,
-                border: `1px solid ${widget.accent}`,
-                clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
-                background: "rgba(255,255,255,0.35)",
-                display: "inline-block",
-              }}
-            />
+            <svg aria-label="linked module" width="14" height="16" viewBox="0 0 14 16" style={{ display: "block" }}>
+              <title>Linked</title>
+              <polygon points="7,1 13,4.5 13,11.5 7,15 1,11.5 1,4.5" fill="none" stroke={widget.accent} strokeWidth="1.2" />
+            </svg>
           )}
         </div>
       </div>
