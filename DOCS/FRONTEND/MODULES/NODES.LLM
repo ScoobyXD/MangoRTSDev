@@ -17,15 +17,42 @@ This document tracks technical behavior for the **frontend node module** impleme
     - `setNodeContextMenu(null)`
 - Result: if the user right-clicks a node and then clicks another node (or another spot in the viewport), the old menu disappears immediately.
 
-### 2) Right-side info/details panel visual treatment
+### 2) Right-side info/details panel visual treatment + typography
 - The details panel is shown when `detailsPanelNode` is present.
-- Updated glass styling to a neutral frosted-glass look that does not read as blue:
-  - `background: rgba(255,255,255,0.34)`
-  - `backdropFilter: blur(20px) saturate(108%)`
-  - brighter inset edge (`rgba(255,255,255,0.45)`) for a glass rim
-- Result: panel reads as colorless/clear glass with stronger frost, instead of tinting blue from the canvas underneath.
+- Updated styling to a richer frosted-glass look:
+  - stronger gradient layers
+  - `backdropFilter: blur(30px) saturate(180%)`
+  - updated inset highlights and shadowing
+- Added typography treatment:
+  - default panel font uses **Space Grotesk**
+  - metadata / list rows use **JetBrains Mono**
+  - section labels use uppercase + wider tracking
+- Added Google font links in `frontend/index.html` for:
+  - `Space Grotesk`
+  - `JetBrains Mono`
+- Result: panel now has the intended modern glass+mono visual system.
 
-### 3) Node module top header controls removed
+### 3) Details panel overflow + horizontal scrollbar fix
+- The details panel now uses:
+  - `boxSizing: "border-box"`
+  - `overflowY: "auto"`
+  - `overflowX: "hidden"`
+- The input/select/button row was updated with `minmax(0, 1fr)` and `minWidth: 0` on the input, plus compact button sizing.
+- Result: no accidental horizontal overflow strip at the bottom; panel content fits within panel width correctly.
+
+### 4) Details panel drag + full edge/corner resizing
+- Existing drag behavior remains on the panel header (`cursor: move` + `panelDrag` state).
+- Resizing now supports all sides and corners via dedicated invisible handles:
+  - Corners: top-left, top-right, bottom-left, bottom-right
+  - Edges: top, right, bottom, left
+- Resize state now tracks:
+  - pointer position start
+  - panel origin x/y/width/height
+  - active edges being resized
+- During resize, panel dimensions are clamped to minimums and viewport bounds, with position adjusted for top/left handles.
+- Result: user can resize the informational panel from any edge or corner, not only bottom-right.
+
+### 5) Node module top header controls removed
 - Removed node-header controls from both locations that previously showed create affordances:
   - widget header strip in `App.tsx` (Node Canvas label + input + plus button)
   - top controls row in `NodesContent`
@@ -41,7 +68,9 @@ This document tracks technical behavior for the **frontend node module** impleme
 - `nodeContextMenu`: node right-click menu state
 - `detailsPanelNodeID` / `detailsPanelNode`: controls right-side info panel visibility/content
 - `newNodeHeader`: still used for context-menu node creation fallback naming
+- `panelDrag`: drag state for moving details panel
+- `panelResize`: active resize state with edge/corner metadata
 
 ## Primary implementation file
 - `frontend/src/WidgetContent.tsx`
-- `frontend/src/App.tsx`
+- `frontend/index.html`
