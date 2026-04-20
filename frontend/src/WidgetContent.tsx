@@ -205,6 +205,8 @@ export const NodeDocContent: React.FC<{ accent: string; widgetId?: string; hideT
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [linkedCanvasWidgetID, setLinkedCanvasWidgetID] = useState("");
   const [linkedNodeID, setLinkedNodeID] = useState("");
+  const [linkedNodeHeader, setLinkedNodeHeader] = useState("");
+  const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
   const [boxes, setBoxes] = useState<NodeDocBox[]>([]);
   const [activeBoxID, setActiveBoxID] = useState<string>("");
   const [placing, setPlacing] = useState<{ id: string; pointerID: number; dx: number; dy: number } | null>(null);
@@ -273,6 +275,8 @@ export const NodeDocContent: React.FC<{ accent: string; widgetId?: string; hideT
     if (!linkedNodeID) {
       setBoxes([]);
       setActiveBoxID("");
+      setLinkedNodeHeader("");
+      setLinkedNodeInfoPreview([]);
       return;
     }
     (async () => {
@@ -280,6 +284,12 @@ export const NodeDocContent: React.FC<{ accent: string; widgetId?: string; hideT
         setError("");
         const details = await requestJSON<NodeDetails>(`/v1/nodes/${linkedNodeID}?company_id=${encodeURIComponent(companyID)}`);
         if (cancelled) return;
+        setLinkedNodeHeader(details.node.header);
+        const nonText = details.information.filter((item) => item.type !== "Text box");
+        setLinkedNodeInfoPreview([
+          `Text boxes: ${details.information.length - nonText.length}`,
+          ...nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`),
+        ]);
         const latestByBox = new Map<string, NodeDocBox>();
         const orderedInfo = [...details.information].sort((a, b) => new Date(a.updated_timestamp).getTime() - new Date(b.updated_timestamp).getTime());
         for (const info of orderedInfo) {
@@ -337,9 +347,16 @@ export const NodeDocContent: React.FC<{ accent: string; widgetId?: string; hideT
         event.preventDefault();
       }}
     >
-      <div style={{ position: "absolute", top: 8, left: 10, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: accent }}>
-        Node Doc
-      </div>
+      {linkedNodeHeader && (
+        <div style={{ position: "absolute", top: 8, left: 10, right: 12, display: "grid", gap: 2, pointerEvents: "none" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: accent }}>
+            Node: {linkedNodeHeader}
+          </div>
+          <div style={{ fontSize: 10, opacity: 0.7 }}>
+            {linkedNodeInfoPreview.length > 0 ? linkedNodeInfoPreview.join(" • ") : "No non-text node information yet"}
+          </div>
+        </div>
+      )}
       {boxes.map((box) => (
         <textarea
           key={box.local_id}
@@ -385,8 +402,8 @@ export const NodeDocContent: React.FC<{ accent: string; widgetId?: string; hideT
         />
       ))}
       {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020" }}>{error}</div>}
-      {!linkedCanvasWidgetID && <div style={{ position: "absolute", top: 36, left: 10, fontSize: 11, opacity: 0.72 }}>Right-click selected modules and use “Link nodes”.</div>}
-      {linkedCanvasWidgetID && !linkedNodeID && <div style={{ position: "absolute", top: 36, left: 10, fontSize: 11, opacity: 0.72 }}>Select a node in Node Canvas (Shift/Ctrl-click modules to multi-select and link).</div>}
+      {!linkedCanvasWidgetID && <div style={{ position: "absolute", top: 12, left: 10, fontSize: 11, opacity: 0.72 }}>Right-click selected modules and use “Link nodes”.</div>}
+      {linkedCanvasWidgetID && !linkedNodeID && <div style={{ position: "absolute", top: 12, left: 10, fontSize: 11, opacity: 0.72 }}>Select a node in Node Canvas (Shift/Ctrl-click modules to multi-select and link).</div>}
     </div>
   );
 };

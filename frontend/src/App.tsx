@@ -180,6 +180,20 @@ function saveSettings(s: { bgColor: string; crossColor: string; headerBgColor: s
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
 }
 
+function loadNodeDocLinks(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(NODE_DOC_LINKS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string")
+    );
+  } catch {
+    return {};
+  }
+}
+
 const GridCrosses: React.FC<{ cols: number; rows: number; stepX: number; stepY: number; width: number; height: number; color: string }> = React.memo(
   ({ cols, rows, stepX, stepY, width, height, color }) => {
     const path = useMemo(() => {
@@ -347,9 +361,10 @@ interface WidgetCardProps {
   onContextMenu: (e: React.MouseEvent, id: string) => void;
   onModuleNameClick: (e: React.MouseEvent, id: string) => void;
   onSelect: (event: React.MouseEvent | React.TouchEvent, id: string) => void;
+  isLinked: boolean;
 }
 
-const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect }) => {
+const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked }) => {
   const Content = CONTENT_MAP[widget.kind];
   const theme = COLORWAYS[widget.theme ?? "teal"];
   const isNodesWidget = widget.kind === "nodes" || widget.kind === "nodes-canvas" || widget.kind === "node-doc";
@@ -366,15 +381,29 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
       onTouchStart={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, widget.id); }}
     >
-      <div
-        style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${widget.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}
-      >
-        <span
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onModuleNameClick(e, widget.id); }}
-          style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px", cursor: "pointer" }}
-        >
-          {widget.title}
-        </span>
+      <div style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${widget.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onModuleNameClick(e, widget.id); }}
+            style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px", cursor: "pointer" }}
+          >
+            {widget.title}
+          </span>
+          {isLinked && (
+            <span
+              aria-label="linked module"
+              title="Linked"
+              style={{
+                width: 14,
+                height: 16,
+                border: `1px solid ${widget.accent}`,
+                clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
+                background: "rgba(255,255,255,0.35)",
+                display: "inline-block",
+              }}
+            />
+          )}
+        </div>
       </div>
       <div style={{ flex: 1, padding: isNodesWidget ? 0 : "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
         {Content ? <Content accent={widget.accent} widgetId={widget.id} hideTopControls={isNodesWidget} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: widget.accent }}>{widget.title}</span></div>}
@@ -427,6 +456,7 @@ const App: React.FC = () => {
   const [headerTextColor, setHeaderTextColor] = useState(() => initialSettingsRef.current.headerTextColor || UI_THEME.text);
   const [tabBgColor, setTabBgColor] = useState(() => initialSettingsRef.current.tabBgColor || "#ffffff");
   const [tabTextColor, setTabTextColor] = useState(() => initialSettingsRef.current.tabTextColor || "#08343a");
+  const [nodeDocLinks, setNodeDocLinks] = useState<Record<string, string>>(() => loadNodeDocLinks());
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [widgetMenu, setWidgetMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -541,12 +571,11 @@ const App: React.FC = () => {
   const closeMenus = useCallback(() => { setWidgetMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); setShowNodesSubmenu(false); }, []);
 
   const saveNodeDocLink = useCallback((docWidgetID: string, canvasWidgetID: string) => {
-    try {
-      const raw = localStorage.getItem(NODE_DOC_LINKS_KEY);
-      const parsed = raw ? JSON.parse(raw) as Record<string, string> : {};
-      parsed[docWidgetID] = canvasWidgetID;
-      localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(parsed));
-    } catch {}
+    setNodeDocLinks((prev) => {
+      const next = { ...prev, [docWidgetID]: canvasWidgetID };
+      try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
   }, []);
 
   const selectedWidgets = useMemo(() => widgets.filter((widget) => selectedWidgetIds.has(widget.id)), [widgets, selectedWidgetIds]);
@@ -568,6 +597,16 @@ const App: React.FC = () => {
     if (pool.length === 0) return "Node Canvas + Node Doc";
     return pool.map((widget) => widget.title).join(" + ");
   }, [linkablePair, selectedWidgets]);
+  const linkedWidgetIDs = useMemo(() => {
+    const ids = new Set<string>();
+    const widgetIDs = new Set(widgets.map((widget) => widget.id));
+    for (const [docWidgetID, canvasWidgetID] of Object.entries(nodeDocLinks)) {
+      if (!widgetIDs.has(docWidgetID) || !widgetIDs.has(canvasWidgetID)) continue;
+      ids.add(docWidgetID);
+      ids.add(canvasWidgetID);
+    }
+    return ids;
+  }, [nodeDocLinks, widgets]);
 
   const deleteSelectedWidget = useCallback(() => {
     const ids = selectedWidgetIds.size > 0 ? selectedWidgetIds : (selectedWidgetId ? new Set([selectedWidgetId]) : new Set<string>());
@@ -815,6 +854,7 @@ const App: React.FC = () => {
             stepY={stepY}
             isDragging={draggingId === w.id}
             isSelected={selectedWidgetIds.has(w.id)}
+            isLinked={linkedWidgetIDs.has(w.id)}
             editMode={editMode}
             onDragStart={(e, id) => {
               if (!editMode) return;
