@@ -2,7 +2,164 @@
 
 This document captures the full behavior and implementation details currently present in the **Nodes** widget/module.
 
----
+------
+
+(from another doc)
+# Node Module (LLM Notes)
+
+## Scope
+This document tracks technical behavior for the **frontend node module** implemented in `frontend/src/WidgetContent.tsx` (`NodesContent`).
+
+## Current UX behavior (updated)
+
+### 0) Node position reset root cause + fix
+- **Root cause:** node canvas state persistence key was previously scoped only by `company_id` (`node-canvas-state-v2:${companyID}`).
+- In multi-tab/multi-widget usage, different Nodes widgets (or views) could overwrite each other’s cached `nodePositions` in local/session storage.
+- Once one view wrote a default/auto-laid-out map, switching back to another view restored that overwritten map, which looked like nodes snapping to a top-left line.
+- **Fix:** state key is now scoped by both company and widget instance:
+  - `node-canvas-state-v3:${companyID}:${widgetId || "global"}`
+- Result: each Nodes widget keeps an isolated layout cache, so tab/module switching no longer clobbers previously arranged node positions.
+
+### 0.1) Fast tab-switch race that still caused overwrite
+- A second overwrite path existed during rapid tab/module switching:
+  - `nodes` starts as `[]` on mount.
+  - the layout normalization effect ran immediately and rebuilt `nodePositions` from `nodes`.
+  - because `nodes` was empty at that moment, it replaced positions with `{}`.
+  - persistence effect then saved that empty map, so when nodes finished loading they were re-laid out in the default row.
+- **Fix:** when `nodes.length === 0`, the normalization effect now returns previous positions unchanged (does not clear the map).
+- Result: quick tab switching no longer wipes persisted node positions before data load completes.
+
+### 0.2) Maintenance guardrails (read this before changing node state logic)
+This section is the long-term contract that prevents regressions.
+
+#### A. Persistence key scope must stay widget-scoped
+- Keep `canvasStateKey` scoped by **company + widget**:
+  - `node-canvas-state-v3:${companyID}:${widgetId || "global"}`
+- Do **not** collapse back to company-only keys.
+- If key format changes in future:
+  1) bump version (`v4`, etc.),
+  2) keep old readers only if migration is required,
+  3) document migration behavior in this file.
+
+#### B. Never clear `nodePositions` just because `nodes` is temporarily empty
+- During mount and rapid tab switching, `nodes` can be `[]` before fetch resolves.
+- Any effect that derives `nodePositions` from `nodes` must treat this as a transient loading state.
+- Required invariant:
+  - if `nodes.length === 0`, preserve previous `nodePositions` map.
+- If you need true clearing behavior (e.g., hard reset action), gate it behind an explicit user/system intent flag, never implicit emptiness.
+
+#### C. Save/restore ordering invariants
+- Restore path:
+  1) read storage/session cache,
+  2) hydrate `nodePositions`/viewport selection,
+  3) only then allow normal persistence loop to write.
+- Write path:
+  - should write hydrated state, not transient bootstrap state.
+- Any change to `restoredViewport`, load timing, or state initialization must be tested against quick tab flips.
+
+#### D. Expected behavior under rapid tab/module switching
+- Switching tabs quickly should:
+  - preserve each widget’s prior layout,
+  - never snap all nodes into default row/line layout,
+  - avoid writing `{}` into storage unless an explicit reset was triggered.
+
+#### E. Regression test checklist (manual)
+Run this after touching node persistence/layout code:
+1) Arrange nodes in non-linear custom pattern.
+2) Switch tabs/modules quickly 10+ times.
+3) Reload page and verify pattern persists.
+4) Open a second Nodes widget and confirm its layout does not overwrite the first.
+5) Create/delete nodes, then switch tabs quickly again and confirm layout remains stable.
+6) Inspect storage entry and ensure `nodePositions` is non-empty when nodes exist.
+
+#### F. Logging/debug tips for future incidents
+- Log these together when debugging:
+  - `canvasStateKey`
+  - `nodes.length`
+  - `Object.keys(nodePositions).length`
+  - restore/write effect timestamps
+- If you see `nodes.length === 0` immediately followed by persisted `{}`, you are reintroducing the fast-switch race.
+
+### 1) Node right-click menu auto-dismiss rules
+- The node context menu (`Edit node` / `Delete node`) is stored in `nodeContextMenu`.
+- The canvas context menu (`Create new node`) is stored in `contextMenu`.
+- Both menus are now dismissed on any regular left-click / pointer-down interaction on the node viewport:
+  - In the viewport `onPointerDown`, we now call:
+    - `setContextMenu(null)`
+    - `setNodeContextMenu(null)`
+  - In each node card `onPointerDown`, we also call:
+    - `setContextMenu(null)`
+    - `setNodeContextMenu(null)`
+- Result: if the user right-clicks a node and then clicks another node (or another spot in the viewport), the old menu disappears immediately.
+
+### 2) Right-side info/details panel visual treatment + typography
+- The details panel is shown when `detailsPanelNode` is present.
+- Updated styling to a richer frosted-glass look:
+  - stronger gradient layers
+  - `backdropFilter: blur(30px) saturate(180%)`
+  - updated inset highlights and shadowing
+- Added typography treatment:
+  - default panel font uses **Space Grotesk**
+  - metadata / list rows use **JetBrains Mono**
+  - section labels use uppercase + wider tracking
+- Added Google font links in `frontend/index.html` for:
+  - `Space Grotesk`
+  - `JetBrains Mono`
+- Result: panel now has the intended modern glass+mono visual system.
+
+### 3) Details panel overflow + horizontal scrollbar fix
+- The details panel now uses:
+  - `boxSizing: "border-box"`
+  - `overflowY: "auto"`
+  - `overflowX: "hidden"`
+- Panel base tint now includes `backgroundColor: rgba(157, 224, 227, 0.72)` beneath the glass gradient so the panel keeps a consistent aqua identity.
+- The input/select/button row was updated with `minmax(0, 1fr)` and `minWidth: 0` on the input, plus compact button sizing.
+- Result: no accidental horizontal overflow strip at the bottom; panel content fits within panel width correctly.
+
+### 3.1) Details panel scrollbar aesthetics
+- Added a dedicated class (`node-details-panel`) for custom scrollbar styling in `frontend/src/index.css`.
+- Scrollbar visuals now match panel aesthetics:
+  - thin width
+  - soft translucent track
+  - rounded teal thumb with subtle gradient and hover state
+- Implemented for both Firefox (`scrollbar-width`, `scrollbar-color`) and WebKit browsers (`::-webkit-scrollbar*` rules).
+
+### 4) Details panel drag + full edge/corner resizing
+- Existing drag behavior remains on the panel header (`cursor: move` + `panelDrag` state).
+- Resizing now supports all sides and corners via dedicated invisible handles:
+  - Corners: top-left, top-right, bottom-left, bottom-right
+  - Edges: top, right, bottom, left
+- Resize state now tracks:
+  - pointer position start
+  - panel origin x/y/width/height
+  - active edges being resized
+- During resize, panel dimensions are clamped to minimums and viewport bounds, with position adjusted for top/left handles.
+- Result: user can resize the informational panel from any edge or corner, not only bottom-right.
+
+### 5) Node module top header controls removed
+- Removed node-header controls from both locations that previously showed create affordances:
+  - widget header strip in `App.tsx` (Node Canvas label + input + plus button)
+  - top controls row in `NodesContent`
+- The removed controls previously included:
+  - `[ Node Canvas ]` label
+  - input textbox (`Create node header`)
+  - add button / plus action
+- The node module now renders only the viewport/canvas area (`gridTemplateRows: "1fr"`), and widget header only shows the module tag.
+- Node creation remains available via context actions (e.g., right-click canvas + `Create new node`, or linked-node `+` handles).
+
+## State variables relevant to these edits
+- `contextMenu`: canvas right-click menu state
+- `nodeContextMenu`: node right-click menu state
+- `detailsPanelNodeID` / `detailsPanelNode`: controls right-side info panel visibility/content
+- `newNodeHeader`: still used for context-menu node creation fallback naming
+- `panelDrag`: drag state for moving details panel
+- `panelResize`: active resize state with edge/corner metadata
+
+## Primary implementation file
+- `frontend/src/WidgetContent.tsx`
+- `frontend/index.html`
+
+-------
 
 ## 1) Purpose
 
