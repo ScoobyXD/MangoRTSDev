@@ -346,6 +346,7 @@ interface WidgetCardProps {
 const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect }) => {
   const Content = CONTENT_MAP[widget.kind];
   const theme = COLORWAYS[widget.theme ?? "teal"];
+  const isNodes = widget.kind === "nodes";
   return (
     <div
       style={{ position: "absolute", left: widget.x * stepX, top: widget.y * stepY, width: widget.w * stepX, height: widget.h * stepY, background: widget.color, border: isSelected ? "2px solid #111" : `1px solid ${widget.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
@@ -365,7 +366,7 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
         </span>
       </div>
       <div style={{ flex: 1, padding: "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
-        {Content ? <Content accent={widget.accent} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: widget.accent }}>{widget.title}</span></div>}
+        {Content ? <Content accent={widget.accent} widgetId={widget.id} hideTopControls={isNodes} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: widget.accent }}>{widget.title}</span></div>}
       </div>
       {editMode && HANDLES.map((h, i) => <div key={i} data-handle="true" onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, widget.id, h.edges); }} onTouchStart={(e) => { e.stopPropagation(); onResizeStart(e, widget.id, h.edges); }} style={{ position: "absolute", cursor: h.cursor, ...h.style }} />)}
     </div>
