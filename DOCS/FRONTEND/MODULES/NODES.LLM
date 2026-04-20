@@ -19,18 +19,21 @@ This document tracks technical behavior for the **frontend node module** impleme
 
 ### 2) Right-side info/details panel visual treatment
 - The details panel is shown when `detailsPanelNode` is present.
-- Updated glass styling to be substantially more translucent / colorless:
-  - `background: rgba(255,255,255,0.06)`
-  - `backdropFilter: blur(18px) saturate(115%)`
-  - subtle edge via inset shadow for glass rim
-- Result: panel appears as see-through frosted glass instead of an opaque white panel.
+- Updated glass styling to a neutral frosted-glass look that does not read as blue:
+  - `background: rgba(255,255,255,0.34)`
+  - `backdropFilter: blur(20px) saturate(108%)`
+  - brighter inset edge (`rgba(255,255,255,0.45)`) for a glass rim
+- Result: panel reads as colorless/clear glass with stronger frost, instead of tinting blue from the canvas underneath.
 
 ### 3) Node module top header controls removed
-- Removed the top controls row from `NodesContent` that previously included:
+- Removed node-header controls from both locations that previously showed create affordances:
+  - widget header strip in `App.tsx` (Node Canvas label + input + plus button)
+  - top controls row in `NodesContent`
+- The removed controls previously included:
   - `[ Node Canvas ]` label
   - input textbox (`Create node header`)
-  - `Add` button
-- The node module now renders only the viewport/canvas area (`gridTemplateRows: "1fr"`).
+  - add button / plus action
+- The node module now renders only the viewport/canvas area (`gridTemplateRows: "1fr"`), and widget header only shows the module tag.
 - Node creation remains available via context actions (e.g., right-click canvas + `Create new node`, or linked-node `+` handles).
 
 ## State variables relevant to these edits
@@ -41,3 +44,4 @@ This document tracks technical behavior for the **frontend node module** impleme
 
 ## Primary implementation file
 - `frontend/src/WidgetContent.tsx`
+- `frontend/src/App.tsx`
