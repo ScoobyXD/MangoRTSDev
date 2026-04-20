@@ -364,6 +364,35 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
         >
           {widget.title}
         </span>
+        {isNodes && (
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", alignItems: "center", gap: 6, marginLeft: 8, flex: 1 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase" }}>[ Node Canvas ]</div>
+            <input
+              value={nodeHeaderDraft}
+              onChange={(e) => setNodeHeaderDraft(e.target.value)}
+              placeholder="Create node header"
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                const header = nodeHeaderDraft.trim();
+                if (!header) return;
+                window.dispatchEvent(new CustomEvent(`nodes:create:${widget.id}`, { detail: { header } }));
+                setNodeHeaderDraft("");
+              }}
+              style={{ width: "100%" }}
+            />
+            <button
+              onClick={() => {
+                const header = nodeHeaderDraft.trim();
+                if (!header) return;
+                window.dispatchEvent(new CustomEvent(`nodes:create:${widget.id}`, { detail: { header } }));
+                setNodeHeaderDraft("");
+              }}
+              style={{ height: 22, minWidth: 22 }}
+            >
+              +
+            </button>
+          </div>
+        )}
       </div>
       <div style={{ flex: 1, padding: "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
         {Content ? <Content accent={widget.accent} widgetId={widget.id} hideTopControls={isNodes} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: widget.accent }}>{widget.title}</span></div>}
