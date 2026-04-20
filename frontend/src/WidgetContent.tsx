@@ -386,7 +386,7 @@ export const NodeDocContent: React.FC<{ accent: string; widgetId?: string; hideT
       ))}
       {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020" }}>{error}</div>}
       {!linkedCanvasWidgetID && <div style={{ position: "absolute", top: 36, left: 10, fontSize: 11, opacity: 0.72 }}>Right-click selected modules and use “Link nodes”.</div>}
-      {linkedCanvasWidgetID && !linkedNodeID && <div style={{ position: "absolute", top: 36, left: 10, fontSize: 11, opacity: 0.72 }}>Select a node in Node Canvas (Ctrl+click modules to multi-select and link).</div>}
+      {linkedCanvasWidgetID && !linkedNodeID && <div style={{ position: "absolute", top: 36, left: 10, fontSize: 11, opacity: 0.72 }}>Select a node in Node Canvas (Shift/Ctrl-click modules to multi-select and link).</div>}
     </div>
   );
 };
@@ -1135,7 +1135,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
           const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
 
-          if (event.ctrlKey) {
+          if (event.ctrlKey || event.shiftKey) {
             event.preventDefault();
             event.stopPropagation();
             setSelectionPointerID(event.pointerId);
@@ -1234,7 +1234,15 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 }}
                 onPointerDown={(event) => {
                   event.stopPropagation();
-                  if (event.ctrlKey) return;
+                  if (event.ctrlKey || event.shiftKey) {
+                    event.preventDefault();
+                    const next = new Set(selectedNodeIDs);
+                    if (next.has(node.node_id)) next.delete(node.node_id);
+                    else next.add(node.node_id);
+                    setSelectedNodeIDs(next);
+                    setSelectedNodeID(next.has(node.node_id) ? node.node_id : (Array.from(next)[0] ?? ""));
+                    return;
+                  }
                   setContextMenu(null);
                   setNodeContextMenu(null);
                   const bounds = (event.currentTarget as HTMLDivElement).getBoundingClientRect();

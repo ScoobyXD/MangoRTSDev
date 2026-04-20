@@ -357,8 +357,10 @@ const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDraggin
     <div
       style={{ position: "absolute", left: widget.x * stepX, top: widget.y * stepY, width: widget.w * stepX, height: widget.h * stepY, background: widget.color, border: isSelected ? "2px solid #111" : `1px solid ${widget.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
       onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => { onSelect(e, widget.id); if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
-      onTouchStart={(e) => { onSelect(e, widget.id); if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
+      onMouseDownCapture={(e) => onSelect(e, widget.id)}
+      onTouchStartCapture={(e) => onSelect(e, widget.id)}
+      onMouseDown={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
+      onTouchStart={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, widget.id); }}
     >
       <div
@@ -845,8 +847,8 @@ const App: React.FC = () => {
               setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
             }}
             onSelect={(event, id) => {
-              const ctrlSelect = "ctrlKey" in event && !!event.ctrlKey;
-              if (!ctrlSelect) {
+              const additiveSelect = "ctrlKey" in event ? (!!event.ctrlKey || !!event.shiftKey) : false;
+              if (!additiveSelect) {
                 setSelectedWidgetId(id);
                 setSelectedWidgetIds(new Set([id]));
                 return;
@@ -880,7 +882,7 @@ const App: React.FC = () => {
             onClick={() => { linkSelectedNodeModules(); closeMenus(); }}
             {...hoverHandlers}
           >
-            Link nodes
+            Link nodes: Node Canvas and Node Doc
           </button>
           {COLORWAY_ORDER.map((theme) => (
             <button key={theme} style={menuBtnBase} onClick={() => {
