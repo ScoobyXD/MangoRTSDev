@@ -12,6 +12,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
   const [boxes, setBoxes] = useState<NodeDocBox[]>([]);
   const [activeBoxID, setActiveBoxID] = useState<string>("");
+  const [focusBoxID, setFocusBoxID] = useState<string>("");
   const [placing, setPlacing] = useState<{ id: string; pointerID: number; dx: number; dy: number } | null>(null);
   const [resizing, setResizing] = useState<{
     id: string;
@@ -184,6 +185,17 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     };
   }, [boxes, linkedNodeID, resizing, saveBox]);
 
+
+  useEffect(() => {
+    if (!focusBoxID) return;
+    const textarea = canvasRef.current?.querySelector<HTMLTextAreaElement>(`textarea[data-box-id="${focusBoxID}"]`);
+    if (!textarea) return;
+    textarea.focus();
+    const length = textarea.value.length;
+    textarea.setSelectionRange(length, length);
+    setFocusBoxID("");
+  }, [boxes, focusBoxID]);
+
   const createBox = useCallback((initialText: string, x?: number, y?: number) => {
     const baseX = typeof x === "number" ? x : 24 + (boxes.length % 6) * 18;
     const baseY = typeof y === "number" ? y : 56 + (boxes.length % 6) * 14;
@@ -191,6 +203,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const next: NodeDocBox = { local_id: localID, x: baseX, y: baseY, w: 320, h: 52, information: initialText };
     setBoxes((prev) => [...prev, next]);
     setActiveBoxID(localID);
+    setFocusBoxID(localID);
     if (linkedNodeID) void saveBox(linkedNodeID, next);
   }, [boxes.length, linkedNodeID, saveBox]);
 
@@ -227,6 +240,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       {boxes.map((box) => (
         <div key={box.local_id} style={{ position: "absolute", left: box.x, top: box.y, width: box.w, height: box.h, minWidth: NODE_DOC_MIN_W, minHeight: NODE_DOC_MIN_H }}>
           <textarea
+            data-box-id={box.local_id}
             value={box.information}
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}

@@ -34,9 +34,6 @@ const UI_THEME = {
   subtext: "#0b5058",
 };
 
-const NODE_SUBMODULES = [
-  { kind: "nodes-canvas", label: "Node Canvas" },
-] as const;
 
 const createDefaultNodeViewFrames = (): FrameDataModel[] => ([
   { id: "default-node-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 11, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
@@ -501,7 +498,6 @@ const App: React.FC = () => {
 
   const [frameRightClickMenu, setFrameRightClickMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [moduleTypeMenu, setModuleTypeMenu] = useState<{ x: number; y: number; id: string } | null>(null);
-  const [showNodesSubmenu, setShowNodesSubmenu] = useState(false);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number } | null>(null);
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number } | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -624,7 +620,7 @@ const App: React.FC = () => {
     });
   }, [gridCols, gridRows, updateActiveFrames]);
 
-  const closeMenus = useCallback(() => { setFrameRightClickMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); setShowNodesSubmenu(false); }, []);
+  const closeMenus = useCallback(() => { setFrameRightClickMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); }, []);
 
   const saveEditorLink = useCallback((docFrameID: string, canvasFrameID: string) => {
     setEditorLinks((prev) => {
@@ -1058,7 +1054,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <FrameCanvas style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onClick={() => { setSelectedFrameId(null); setSelectedFrameIds(new Set()); }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setHeaderMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); setShowNodesSubmenu(false); }}>
+      <FrameCanvas style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onClick={() => { setSelectedFrameId(null); setSelectedFrameIds(new Set()); }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setHeaderMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
         {editMode && draggingId && (() => {
           const activeFrame = frames.find((w) => w.id === draggingId);
@@ -1102,13 +1098,11 @@ const App: React.FC = () => {
                 setFrameRightClickMenu({ x: e.clientX, y: e.clientY, id });
                 setModuleTypeMenu(null);
                 setCanvasMenu(null);
-                setShowNodesSubmenu(false);
               }}
               onModuleNameClick={(e, id) => {
                 setFrameRightClickMenu(null);
                 setHeaderMenu(null);
                 setCanvasMenu(null);
-                setShowNodesSubmenu(false);
                 setSelectedFrameId(id);
                 setSelectedFrameIds(new Set([id]));
                 setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
@@ -1167,14 +1161,12 @@ const App: React.FC = () => {
                     setFrameRightClickMenu({ x: e.clientX, y: e.clientY, id });
                     setModuleTypeMenu(null);
                     setCanvasMenu(null);
-                    setShowNodesSubmenu(false);
-                  }}
+                      }}
                   onModuleNameClick={(e, id) => {
                     setFrameRightClickMenu(null);
                     setHeaderMenu(null);
                     setCanvasMenu(null);
-                    setShowNodesSubmenu(false);
-                    setSelectedFrameId(id);
+                        setSelectedFrameId(id);
                     setSelectedFrameIds(new Set([id]));
                     setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
                   }}
@@ -1256,9 +1248,6 @@ const App: React.FC = () => {
           y={moduleTypeMenu.y}
           moduleTypeMenuId={moduleTypeMenu.id}
           moduleLibrary={FRAME_MODULE_LIBRARY}
-          nodeSubmodules={NODE_SUBMODULES}
-          showNodesSubmenu={showNodesSubmenu}
-          setShowNodesSubmenu={setShowNodesSubmenu}
           menuBtnBase={menuBtnBase}
           hoverHandlers={hoverHandlers}
           onClose={closeMenus}
