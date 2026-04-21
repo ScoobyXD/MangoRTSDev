@@ -11,6 +11,7 @@ import {
 } from "../WidgetContent";
 import { NodesContent } from "./node/canvas";
 import { NodeDocContent } from "./node/doc";
+import { CompanyExplorerContent } from "./company-explorer";
 
 export interface ModuleTemplate {
   kind: string;
@@ -31,6 +32,7 @@ export const MODULE_LIBRARY: ModuleTemplate[] = [
   { kind: "map", label: "Map View", defaultW: 10, defaultH: 15, render: MapContent },
   { kind: "nodes-canvas", label: "Node Canvas", defaultW: 16, defaultH: 14, render: NodesContent },
   { kind: "node-doc", label: "Node Doc", defaultW: 16, defaultH: 14, render: NodeDocContent },
+  { kind: "company-explorer", label: "Company Explorer", defaultW: 18, defaultH: 14, render: CompanyExplorerContent },
 ];
 
 export const MODULE_CONTENT_MAP: Record<string, React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }>> = Object.fromEntries(
