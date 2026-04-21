@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, MINI_GRID, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeCanvasState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_CANVAS_STATE, clamp, divider, oppositeSide, relationFromDirection, snapToGrid, trimOrEmpty } from "../shared";
+import { INFO_TYPES, MINI_GRID, NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeCanvasState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_CANVAS_STATE, clamp, divider, oppositeSide, relationFromDirection, snapToGrid, trimOrEmpty } from "../shared";
 
 export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -58,6 +58,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   });
   const [selectionPointerID, setSelectionPointerID] = useState<number | null>(null);
   const restoredSelectionRef = useRef<string>("");
+  const explorerContextRef = useRef<number>(0);
 
   useEffect(() => {
     const cached = SESSION_NODE_CANVAS_STATE.get(canvasStateKey);
@@ -311,6 +312,29 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       window.removeEventListener("pointerup", onUp);
     };
   }, [dragState, pan.x, pan.y, zoom]);
+
+  useEffect(() => {
+    const explorerKey = `${NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${canvasScope}`;
+    const applyExplorerContext = () => {
+      try {
+        const raw = localStorage.getItem(explorerKey);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as { selectedNodeID?: string; ts?: number };
+        if (typeof parsed.ts !== "number" || parsed.ts <= explorerContextRef.current) return;
+        explorerContextRef.current = parsed.ts;
+        if (!parsed.selectedNodeID) return;
+        const exists = nodes.some((node) => node.node_id === parsed.selectedNodeID);
+        if (!exists) return;
+        setSelectedNodeID(parsed.selectedNodeID);
+        setSelectedNodeIDs(new Set([parsed.selectedNodeID]));
+      } catch {
+        // ignore malformed explorer context payload
+      }
+    };
+    applyExplorerContext();
+    const timer = window.setInterval(applyExplorerContext, 350);
+    return () => window.clearInterval(timer);
+  }, [companyID, canvasScope, nodes]);
 
   useEffect(() => {
     if (!panState) return;

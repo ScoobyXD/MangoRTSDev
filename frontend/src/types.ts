@@ -1,6 +1,7 @@
 export interface FrameDataModel {
   id: string;
   kind: string;
+  parentId?: string;
   theme?: "teal" | "orange" | "white" | "black";
   x: number;
   y: number;
@@ -23,6 +24,7 @@ export interface ResizeEdges {
 
 export interface DragState {
   id: string;
+  parentId?: string;
   mode: "drag" | "resize";
   edges: ResizeEdges;
   startMouseX: number;

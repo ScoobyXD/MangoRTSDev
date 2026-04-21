@@ -6,7 +6,7 @@ import ModulePickerMenu from "./menus/ModulePickerMenu";
 import { MODULE_CONTENT_MAP as CONTENT_MAP, MODULE_LIBRARY as FRAME_MODULE_LIBRARY } from "../modules";
 import type { FrameDataModel, DragState, ResizeEdges } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { NODE_DOC_LINKS_KEY } from "../modules/node/shared";
+import { EXPLORER_CANVAS_LINKS_KEY, NODE_DOC_LINKS_KEY } from "../modules/node/shared";
 
 const CELL_SIZE = 28;
 const HEADER_H = 48;
@@ -38,6 +38,18 @@ const NODE_SUBMODULES = [
   { kind: "nodes-canvas", label: "Node Canvas" },
   { kind: "node-doc", label: "Node Doc" },
 ] as const;
+
+const createDefaultNodeViewFrames = (): FrameDataModel[] => ([
+  { id: "default-node-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 11, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  { id: "default-node-canvas", theme: "teal", kind: "nodes-canvas", x: 12, y: 1, w: 20, h: 30, title: "Node Canvas", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "default-node-doc", theme: "orange", kind: "node-doc", x: 32, y: 1, w: 11, h: 30, title: "Node Doc", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+]);
+
+const createDefaultCompanyExplorerViewFrames = (): FrameDataModel[] => ([
+  { id: "default-company-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 12, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  { id: "default-company-details", theme: "teal", kind: "nodes-canvas", x: 13, y: 1, w: 18, h: 30, title: "Node Canvas", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "default-company-doc", theme: "orange", kind: "node-doc", x: 31, y: 1, w: 12, h: 30, title: "Node Doc", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+]);
 
 const INITIAL_WIDGETS: FrameDataModel[] = [
   { id: "w-revenue", theme: "teal", kind: "revenue", x: 2, y: 1, w: 12, h: 9, title: "Revenue", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
@@ -91,7 +103,7 @@ function isHexColor(value: unknown): value is string {
 
 function coerceFrame(value: unknown): FrameDataModel | null {
   if (!isObject(value)) return null;
-  const { id, kind, theme, x, y, w, h, title, color, accent } = value;
+  const { id, kind, parentId, theme, x, y, w, h, title, color, accent } = value;
   if (
     typeof id !== "string" || typeof kind !== "string" || typeof x !== "number" || typeof y !== "number" ||
     typeof w !== "number" || typeof h !== "number" || typeof title !== "string" || typeof color !== "string" || typeof accent !== "string"
@@ -100,6 +112,7 @@ function coerceFrame(value: unknown): FrameDataModel | null {
   return {
     id,
     kind,
+    parentId: typeof parentId === "string" && parentId.trim() ? parentId : undefined,
     theme: isColorway(theme) ? theme : "teal",
     x: Math.max(0, Math.round(x)),
     y: Math.max(0, Math.round(y)),
@@ -190,6 +203,20 @@ function saveSettings(s: { bgColor: string; crossColor: string; headerBgColor: s
 function loadNodeDocLinks(): Record<string, string> {
   try {
     const raw = localStorage.getItem(NODE_DOC_LINKS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string")
+    );
+  } catch {
+    return {};
+  }
+}
+
+function loadExplorerCanvasLinks(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(EXPLORER_CANVAS_LINKS_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
@@ -360,6 +387,8 @@ interface FrameCardProps {
   frame: FrameDataModel;
   stepX: number;
   stepY: number;
+  isChild?: boolean;
+  nestedChildren?: React.ReactNode;
   isDragging: boolean;
   isSelected: boolean;
   editMode: boolean;
@@ -371,22 +400,48 @@ interface FrameCardProps {
   isLinked: boolean;
 }
 
-const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked }) => {
+const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nestedChildren, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked }) => {
   const Content = CONTENT_MAP[frame.kind];
   const theme = COLORWAYS[frame.theme ?? "teal"];
   const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-canvas" || frame.kind === "node-doc";
+  const left = frame.x * stepX;
+  const top = frame.y * stepY;
+  const nested = !!isChild;
   return (
     <Frame
-      style={{ position: "absolute", left: frame.x * stepX, top: frame.y * stepY, width: frame.w * stepX, height: frame.h * stepY, background: frame.color, border: isSelected ? "2px solid #111" : `1px solid ${frame.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
+      data-child-frame={nested ? "true" : "false"}
+      style={{ position: "absolute", left, top, width: frame.w * stepX, height: frame.h * stepY, background: frame.color, border: isSelected ? "2px solid #111" : nested ? `1px dashed ${frame.accent}` : `1px solid ${frame.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: nested ? 200 : (isDragging ? 100 : 1), color: theme.text, boxShadow: nested ? "0 3px 16px rgba(0,0,0,0.18)" : undefined }}
       onClick={(e) => e.stopPropagation()}
       onMouseDownCapture={(e) => {
+        const target = e.target as HTMLElement;
+        if (!nested && target.closest('[data-child-frame="true"]')) return;
         if (e.button !== 0) return;
         onSelect(e, frame.id);
       }}
-      onTouchStartCapture={(e) => onSelect(e, frame.id)}
-      onMouseDown={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, frame.id); }}
-      onTouchStart={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, frame.id); }}
-      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, frame.id); }}
+      onTouchStartCapture={(e) => {
+        const target = e.target as HTMLElement;
+        if (!nested && target.closest('[data-child-frame="true"]')) return;
+        onSelect(e, frame.id);
+      }}
+      onMouseDown={(e) => {
+        const target = e.target as HTMLElement;
+        if (!nested && target.closest('[data-child-frame="true"]')) return;
+        if (!editMode || target.dataset.handle) return;
+        onDragStart(e, frame.id);
+      }}
+      onTouchStart={(e) => {
+        const target = e.target as HTMLElement;
+        if (!nested && target.closest('[data-child-frame="true"]')) return;
+        if (!editMode || target.dataset.handle) return;
+        onDragStart(e, frame.id);
+      }}
+      onContextMenu={(e) => {
+        const target = e.target as HTMLElement;
+        if (!nested && target.closest('[data-child-frame="true"]')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu(e, frame.id);
+      }}
     >
       <div style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${frame.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -407,6 +462,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isDragging, 
       <div style={{ flex: 1, padding: isNodesFrame ? 0 : "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
         {Content ? <Content accent={frame.accent} widgetId={frame.id} hideTopControls={isNodesFrame} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: frame.accent }}>{frame.title}</span></div>}
       </div>
+      {nestedChildren}
       {editMode && HANDLES.map((h, i) => <div key={i} data-handle="true" onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, frame.id, h.edges); }} onTouchStart={(e) => { e.stopPropagation(); onResizeStart(e, frame.id, h.edges); }} style={{ position: "absolute", cursor: h.cursor, ...h.style }} />)}
     </Frame>
   );
@@ -439,6 +495,7 @@ const App: React.FC = () => {
   const [tabBgColor, setTabBgColor] = useState(() => initialSettingsRef.current.tabBgColor || "#ffffff");
   const [tabTextColor, setTabTextColor] = useState(() => initialSettingsRef.current.tabTextColor || "#08343a");
   const [nodeDocLinks, setNodeDocLinks] = useState<Record<string, string>>(() => loadNodeDocLinks());
+  const [explorerCanvasLinks, setExplorerCanvasLinks] = useState<Record<string, string>>(() => loadExplorerCanvasLinks());
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [frameRightClickMenu, setFrameRightClickMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -458,6 +515,17 @@ const App: React.FC = () => {
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId) ?? tabs[0], [tabs, activeTabId]);
   const frames = activeTab?.frames ?? [];
+  const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
+  const childrenByParent = useMemo(() => {
+    const grouped = new Map<string, FrameDataModel[]>();
+    for (const frame of frames) {
+      if (!frame.parentId) continue;
+      const current = grouped.get(frame.parentId) ?? [];
+      current.push(frame);
+      grouped.set(frame.parentId, current);
+    }
+    return grouped;
+  }, [frames]);
 
   useEffect(() => {
     if (!selectedFrameId) return;
@@ -471,6 +539,11 @@ const App: React.FC = () => {
   const updateActiveFrames = useCallback((updater: (prev: FrameDataModel[]) => FrameDataModel[]) => {
     setTabs((prev) => prev.map((tab) => (tab.id === activeTabId ? { ...tab, frames: updater(tab.frames) } : tab)));
   }, [activeTabId]);
+  useEffect(() => {
+    const frameIDs = new Set(frames.map((frame) => frame.id));
+    if (!frames.some((frame) => frame.parentId && !frameIDs.has(frame.parentId))) return;
+    updateActiveFrames((previous) => previous.map((frame) => (frame.parentId && !frameIDs.has(frame.parentId) ? { ...frame, parentId: undefined } : frame)));
+  }, [frames, updateActiveFrames]);
 
   const buildSnapshot = useCallback((): DashboardSnapshot => ({
     tabs,
@@ -559,26 +632,50 @@ const App: React.FC = () => {
       return next;
     });
   }, []);
+  const saveExplorerCanvasLink = useCallback((explorerFrameID: string, canvasFrameID: string) => {
+    setExplorerCanvasLinks((prev) => {
+      const next = { ...prev, [explorerFrameID]: canvasFrameID };
+      try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
 
   const selectedFrames = useMemo(() => frames.filter((frame) => selectedFrameIds.has(frame.id)), [frames, selectedFrameIds]);
-  const linkablePair = useMemo(() => {
+  const linkPlan = useMemo(() => {
     const pool = selectedFrames.length > 0 ? selectedFrames : (selectedFrameId ? frames.filter((frame) => frame.id === selectedFrameId) : []);
-    if (pool.length !== 2) return null;
-    const canvas = pool.find((frame) => frame.kind === "nodes" || frame.kind === "nodes-canvas");
-    const doc = pool.find((frame) => frame.kind === "node-doc");
-    if (!canvas || !doc) return null;
-    return { canvas, doc };
+    if (pool.length < 2) return null;
+    const canvases = pool.filter((frame) => frame.kind === "nodes" || frame.kind === "nodes-canvas");
+    if (canvases.length !== 1) return null;
+    const docs = pool.filter((frame) => frame.kind === "node-doc");
+    const explorers = pool.filter((frame) => frame.kind === "company-explorer");
+    if (docs.length + explorers.length === 0) return null;
+    return { canvas: canvases[0], docs, explorers, pool };
   }, [selectedFrameId, selectedFrames, frames]);
 
   const linkSelectedNodeModules = useCallback(() => {
-    if (!linkablePair) return;
-    saveNodeDocLink(linkablePair.doc.id, linkablePair.canvas.id);
-  }, [linkablePair, saveNodeDocLink]);
-  const linkNodesLabel = useMemo(() => {
-    const pool = selectedFrames.length > 1 ? selectedFrames : (linkablePair ? [linkablePair.canvas, linkablePair.doc] : []);
-    if (pool.length === 0) return "Node Canvas + Node Doc";
-    return pool.map((frame) => frame.title).join(" + ");
-  }, [linkablePair, selectedFrames]);
+    if (!linkPlan) return;
+    const canvasID = linkPlan.canvas.id;
+    if (linkPlan.docs.length > 0) {
+      setNodeDocLinks((previous) => {
+        const next = { ...previous };
+        for (const doc of linkPlan.docs) next[doc.id] = canvasID;
+        try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+        return next;
+      });
+    }
+    if (linkPlan.explorers.length > 0) {
+      setExplorerCanvasLinks((previous) => {
+        const next = { ...previous };
+        for (const explorer of linkPlan.explorers) next[explorer.id] = canvasID;
+        try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+        return next;
+      });
+    }
+  }, [linkPlan]);
+  const linkModulesLabel = useMemo(() => {
+    if (!linkPlan) return "Select one Node Canvas + one/more Node Doc or Company Explorer";
+    return linkPlan.pool.map((frame) => frame.title).join(" + ");
+  }, [linkPlan]);
   const linkedFrameIDs = useMemo(() => {
     const ids = new Set<string>();
     const frameIDs = new Set(frames.map((frame) => frame.id));
@@ -587,8 +684,75 @@ const App: React.FC = () => {
       ids.add(docFrameID);
       ids.add(canvasFrameID);
     }
+    for (const [explorerFrameID, canvasFrameID] of Object.entries(explorerCanvasLinks)) {
+      if (!frameIDs.has(explorerFrameID) || !frameIDs.has(canvasFrameID)) continue;
+      ids.add(explorerFrameID);
+      ids.add(canvasFrameID);
+    }
     return ids;
-  }, [nodeDocLinks, frames]);
+  }, [nodeDocLinks, explorerCanvasLinks, frames]);
+  const frameInContextMenu = useMemo(() => {
+    if (!frameRightClickMenu) return null;
+    return frames.find((frame) => frame.id === frameRightClickMenu.id) ?? null;
+  }, [frameRightClickMenu, frames]);
+
+  useEffect(() => {
+    const frameIDs = new Set(tabs.flatMap((tab) => tab.frames.map((frame) => frame.id)));
+    setNodeDocLinks((previous) => {
+      const next = Object.fromEntries(Object.entries(previous).filter(([docID, canvasID]) => frameIDs.has(docID) && frameIDs.has(canvasID)));
+      if (JSON.stringify(previous) !== JSON.stringify(next)) {
+        try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+      }
+      return next;
+    });
+    setExplorerCanvasLinks((previous) => {
+      const next = Object.fromEntries(Object.entries(previous).filter(([explorerID, canvasID]) => frameIDs.has(explorerID) && frameIDs.has(canvasID)));
+      if (JSON.stringify(previous) !== JSON.stringify(next)) {
+        try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+      }
+      return next;
+    });
+  }, [tabs]);
+  useEffect(() => {
+    const groups: FrameDataModel[][] = [];
+    for (const parent of frames.filter((frame) => !frame.parentId)) {
+      const children = frames.filter((frame) => frame.parentId === parent.id);
+      if (children.length === 0) continue;
+      groups.push([parent, ...children]);
+    }
+
+    if (groups.length === 0) return;
+
+    const nextDocLinks = { ...nodeDocLinks };
+    const nextExplorerLinks = { ...explorerCanvasLinks };
+    let changedDoc = false;
+    let changedExplorer = false;
+
+    for (const group of groups) {
+      const canvases = group.filter((frame) => frame.kind === "nodes" || frame.kind === "nodes-canvas");
+      if (canvases.length !== 1) continue;
+      const canvasID = canvases[0].id;
+      for (const doc of group.filter((frame) => frame.kind === "node-doc")) {
+        if (nextDocLinks[doc.id] === canvasID) continue;
+        nextDocLinks[doc.id] = canvasID;
+        changedDoc = true;
+      }
+      for (const explorer of group.filter((frame) => frame.kind === "company-explorer")) {
+        if (nextExplorerLinks[explorer.id] === canvasID) continue;
+        nextExplorerLinks[explorer.id] = canvasID;
+        changedExplorer = true;
+      }
+    }
+
+    if (changedDoc) {
+      setNodeDocLinks(nextDocLinks);
+      try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(nextDocLinks)); } catch {}
+    }
+    if (changedExplorer) {
+      setExplorerCanvasLinks(nextExplorerLinks);
+      try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(nextExplorerLinks)); } catch {}
+    }
+  }, [frames, nodeDocLinks, explorerCanvasLinks]);
 
   const deleteSelectedFrame = useCallback(() => {
     const ids = selectedFrameIds.size > 0 ? selectedFrameIds : (selectedFrameId ? new Set([selectedFrameId]) : new Set<string>());
@@ -688,6 +852,53 @@ const App: React.FC = () => {
     });
   }, [tabs.length, activeTabId]);
 
+  const openDefaultNodeView = useCallback((tabID: string) => {
+    const framesForView = createDefaultNodeViewFrames();
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, frames: framesForView } : tab)));
+    setNodeDocLinks((previous) => {
+      const next = { ...previous, "default-node-doc": "default-node-canvas" };
+      try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+    setExplorerCanvasLinks((previous) => {
+      const next = { ...previous, "default-node-explorer": "default-node-canvas" };
+      try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+    setActiveTabId(tabID);
+    setEditMode(true);
+  }, []);
+
+  const openDefaultCompanyExplorerView = useCallback((tabID: string) => {
+    const framesForView = createDefaultCompanyExplorerViewFrames();
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, frames: framesForView } : tab)));
+    setNodeDocLinks((previous) => {
+      const next = { ...previous, "default-company-doc": "default-company-details" };
+      try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+    setExplorerCanvasLinks((previous) => {
+      const next = { ...previous, "default-company-explorer": "default-company-details" };
+      try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+    setActiveTabId(tabID);
+    setEditMode(true);
+  }, []);
+
+  const saveCurrentAsTemplate = useCallback((tabID: string) => {
+    const source = tabs.find((tab) => tab.id === tabID);
+    if (!source) return;
+    const id = createTabId();
+    const templateTab: ViewTab = {
+      id,
+      name: `${source.name} Template`,
+      frames: source.frames.map((frame) => ({ ...frame, id: createFrameId() })),
+    };
+    setTabs((previous) => [...previous, templateTab]);
+    setActiveTabId(id);
+  }, [tabs]);
+
 
 
   useEffect(() => {
@@ -720,10 +931,13 @@ const App: React.FC = () => {
 
       updateActiveFrames((prev) => prev.map((w) => {
         if (w.id !== d.id) return w;
-        if (d.mode === "drag") return { ...w, x: clamp(d.origX + dCols, 0, gridCols - w.w), y: clamp(d.origY + dRows, 0, gridRows - w.h) };
+        const parent = d.parentId ? prev.find((candidate) => candidate.id === d.parentId) : null;
+        const maxCols = parent ? parent.w : gridCols;
+        const maxRows = parent ? parent.h : gridRows;
+        if (d.mode === "drag") return { ...w, x: clamp(d.origX + dCols, 0, maxCols - w.w), y: clamp(d.origY + dRows, 0, maxRows - w.h) };
         let x = d.origX, y = d.origY, nw = d.origW, nh = d.origH;
-        if (d.edges.right) nw = clamp(d.origW + dCols, MIN_W, gridCols - d.origX);
-        if (d.edges.bottom) nh = clamp(d.origH + dRows, MIN_H, gridRows - d.origY);
+        if (d.edges.right) nw = clamp(d.origW + dCols, MIN_W, maxCols - d.origX);
+        if (d.edges.bottom) nh = clamp(d.origH + dRows, MIN_H, maxRows - d.origY);
         if (d.edges.left) { const shift = clamp(dCols, -d.origX, d.origW - MIN_W); x = d.origX + shift; nw = d.origW - shift; }
         if (d.edges.top) { const shift = clamp(dRows, -d.origY, d.origH - MIN_H); y = d.origY + shift; nh = d.origH - shift; }
         return { ...w, x, y, w: nw, h: nh };
@@ -732,14 +946,36 @@ const App: React.FC = () => {
     const onEnd = () => {
       const d = dragRef.current;
       if (d) {
-        updateActiveFrames((prev) => prev.map((w) => {
-          if (w.id !== d.id) return w;
-          const overlaps = prev.some((candidate) => candidate.id !== w.id && framesOverlap(w, candidate));
-          if (!overlaps) return w;
-          return d.mode === "drag"
-            ? { ...w, x: d.origX, y: d.origY }
-            : { ...w, x: d.origX, y: d.origY, w: d.origW, h: d.origH };
-        }));
+        updateActiveFrames((prev) => {
+          const target = prev.find((frame) => frame.id === d.id);
+          if (!target) return prev;
+
+          let next = prev.map((w) => {
+            if (w.id !== d.id) return w;
+            if (d.mode === "drag" && !d.parentId) return w;
+            const siblingOverlaps = prev.some((candidate) => {
+              if (candidate.id === w.id) return false;
+              const sameParent = (candidate.parentId ?? "") === (w.parentId ?? "");
+              return sameParent && framesOverlap(w, candidate);
+            });
+            if (!siblingOverlaps) return w;
+            return d.mode === "drag"
+              ? { ...w, x: d.origX, y: d.origY }
+              : { ...w, x: d.origX, y: d.origY, w: d.origW, h: d.origH };
+          });
+
+          if (d.mode !== "drag" || d.parentId) return next;
+          const moved = next.find((frame) => frame.id === d.id);
+          if (!moved) return next;
+          const host = next
+            .filter((frame) => !frame.parentId && frame.id !== moved.id)
+            .find((frame) => framesOverlap(frame, moved));
+          if (!host) return next;
+          const childX = clamp(moved.x - host.x, 0, Math.max(0, host.w - moved.w));
+          const childY = clamp(moved.y - host.y, 0, Math.max(0, host.h - moved.h));
+          next = next.map((frame) => (frame.id === moved.id ? { ...frame, parentId: host.id, x: childX, y: childY } : frame));
+          return next;
+        });
       }
       dragRef.current = null;
       setDraggingId(null);
@@ -828,71 +1064,139 @@ const App: React.FC = () => {
           if (!activeFrame) return null;
           return <PlacementSplash frame={activeFrame} frames={frames} cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} />;
         })()}
-        {frames.map((w) => (
-          <FrameCard
-            key={w.id}
-            frame={w}
-            stepX={stepX}
-            stepY={stepY}
-            isDragging={draggingId === w.id}
-            isSelected={selectedFrameIds.has(w.id)}
-            isLinked={linkedFrameIDs.has(w.id)}
-            editMode={editMode}
-            onDragStart={(e, id) => {
-              if (!editMode) return;
-              e.preventDefault();
-              const { px, py } = getPointer(e);
-              const widget = frames.find((ww) => ww.id === id);
-              if (!widget) return;
-              dragRef.current = { id, mode: "drag", edges: {}, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
-              setDraggingId(id);
-            }}
-            onResizeStart={(e, id, edges) => {
-              if (!editMode) return;
-              e.preventDefault();
-              const { px, py } = getPointer(e);
-              const widget = frames.find((ww) => ww.id === id);
-              if (!widget) return;
-              dragRef.current = { id, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
-              setDraggingId(id);
-            }}
-            onContextMenu={(e, id) => {
-              e.preventDefault();
-              if (!selectedFrameIds.has(id)) {
-                setSelectedFrameIds(new Set([id]));
-                setSelectedFrameId(id);
-              }
-              setFrameRightClickMenu({ x: e.clientX, y: e.clientY, id });
-              setModuleTypeMenu(null);
-              setCanvasMenu(null);
-              setShowNodesSubmenu(false);
-            }}
-            onModuleNameClick={(e, id) => {
-              setFrameRightClickMenu(null);
-              setHeaderMenu(null);
-              setCanvasMenu(null);
-              setShowNodesSubmenu(false);
-              setSelectedFrameId(id);
-              setSelectedFrameIds(new Set([id]));
-              setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
-            }}
-            onSelect={(event, id) => {
-              const additiveSelect = "ctrlKey" in event ? (!!event.ctrlKey || !!event.shiftKey) : false;
-              if (!additiveSelect) {
+        {rootFrames.map((w) => (
+          <React.Fragment key={w.id}>
+            <FrameCard
+              frame={w}
+              stepX={stepX}
+              stepY={stepY}
+              isDragging={draggingId === w.id}
+              isSelected={selectedFrameIds.has(w.id)}
+              isLinked={linkedFrameIDs.has(w.id) || !!childrenByParent.get(w.id)?.length}
+              editMode={editMode}
+              onDragStart={(e, id) => {
+                if (!editMode) return;
+                e.preventDefault();
+                const { px, py } = getPointer(e);
+                const widget = frames.find((ww) => ww.id === id);
+                if (!widget) return;
+                dragRef.current = { id, parentId: widget.parentId, mode: "drag", edges: {}, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
+                setDraggingId(id);
+              }}
+              onResizeStart={(e, id, edges) => {
+                if (!editMode) return;
+                e.preventDefault();
+                const { px, py } = getPointer(e);
+                const widget = frames.find((ww) => ww.id === id);
+                if (!widget) return;
+                dragRef.current = { id, parentId: widget.parentId, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
+                setDraggingId(id);
+              }}
+              onContextMenu={(e, id) => {
+                e.preventDefault();
+                if (!selectedFrameIds.has(id)) {
+                  setSelectedFrameIds(new Set([id]));
+                  setSelectedFrameId(id);
+                }
+                setFrameRightClickMenu({ x: e.clientX, y: e.clientY, id });
+                setModuleTypeMenu(null);
+                setCanvasMenu(null);
+                setShowNodesSubmenu(false);
+              }}
+              onModuleNameClick={(e, id) => {
+                setFrameRightClickMenu(null);
+                setHeaderMenu(null);
+                setCanvasMenu(null);
+                setShowNodesSubmenu(false);
                 setSelectedFrameId(id);
                 setSelectedFrameIds(new Set([id]));
-                return;
-              }
-              setSelectedFrameId(id);
-              setSelectedFrameIds((prev) => {
-                const next = new Set(prev);
-                if (next.has(id)) next.delete(id);
-                else next.add(id);
-                if (next.size === 0) next.add(id);
-                return next;
-              });
-            }}
-          />
+                setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
+              }}
+              onSelect={(event, id) => {
+                const additiveSelect = "ctrlKey" in event ? (!!event.ctrlKey || !!event.shiftKey) : false;
+                if (!additiveSelect) {
+                  setSelectedFrameId(id);
+                  setSelectedFrameIds(new Set([id]));
+                  return;
+                }
+                setSelectedFrameId(id);
+                setSelectedFrameIds((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(id)) next.delete(id);
+                  else next.add(id);
+                  if (next.size === 0) next.add(id);
+                  return next;
+                });
+              }}
+              nestedChildren={(childrenByParent.get(w.id) ?? []).map((child) => (
+                <FrameCard
+                  key={child.id}
+                  frame={child}
+                  isChild={true}
+                  stepX={stepX}
+                  stepY={stepY}
+                  isDragging={draggingId === child.id}
+                  isSelected={selectedFrameIds.has(child.id)}
+                  isLinked={true}
+                  editMode={editMode}
+                  onDragStart={(e, id) => {
+                    if (!editMode) return;
+                    e.preventDefault();
+                    const { px, py } = getPointer(e);
+                    const widget = frames.find((ww) => ww.id === id);
+                    if (!widget) return;
+                    dragRef.current = { id, parentId: widget.parentId, mode: "drag", edges: {}, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
+                    setDraggingId(id);
+                  }}
+                  onResizeStart={(e, id, edges) => {
+                    if (!editMode) return;
+                    e.preventDefault();
+                    const { px, py } = getPointer(e);
+                    const widget = frames.find((ww) => ww.id === id);
+                    if (!widget) return;
+                    dragRef.current = { id, parentId: widget.parentId, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
+                    setDraggingId(id);
+                  }}
+                  onContextMenu={(e, id) => {
+                    e.preventDefault();
+                    if (!selectedFrameIds.has(id)) {
+                      setSelectedFrameIds(new Set([id]));
+                      setSelectedFrameId(id);
+                    }
+                    setFrameRightClickMenu({ x: e.clientX, y: e.clientY, id });
+                    setModuleTypeMenu(null);
+                    setCanvasMenu(null);
+                    setShowNodesSubmenu(false);
+                  }}
+                  onModuleNameClick={(e, id) => {
+                    setFrameRightClickMenu(null);
+                    setHeaderMenu(null);
+                    setCanvasMenu(null);
+                    setShowNodesSubmenu(false);
+                    setSelectedFrameId(id);
+                    setSelectedFrameIds(new Set([id]));
+                    setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
+                  }}
+                  onSelect={(event, id) => {
+                    const additiveSelect = "ctrlKey" in event ? (!!event.ctrlKey || !!event.shiftKey) : false;
+                    if (!additiveSelect) {
+                      setSelectedFrameId(id);
+                      setSelectedFrameIds(new Set([id]));
+                      return;
+                    }
+                    setSelectedFrameId(id);
+                    setSelectedFrameIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(id)) next.delete(id);
+                      else next.add(id);
+                      if (next.size === 0) next.add(id);
+                      return next;
+                    });
+                  }}
+                />
+              ))}
+            />
+          </React.Fragment>
         ))}
       </FrameCanvas>
 
@@ -900,19 +1204,38 @@ const App: React.FC = () => {
         <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
+          <button style={menuBtnBase} onClick={() => { openDefaultNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Default Node View</button>
+          <button style={menuBtnBase} onClick={() => { openDefaultCompanyExplorerView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Default Company Explorer View</button>
+          <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>
         </FrameRightClickMenu>
       )}
 
       {frameRightClickMenu && (
         <FrameRightClickMenu x={frameRightClickMenu.x} y={frameRightClickMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { duplicateFrame(frameRightClickMenu.id); closeMenus(); }} {...hoverHandlers}>Duplicate</button>
+          {frameInContextMenu?.parentId && (
+            <button
+              style={menuBtnBase}
+              onClick={() => {
+                const parent = frames.find((frame) => frame.id === frameInContextMenu.parentId);
+                updateActiveFrames((previous) => previous.map((frame) => {
+                  if (frame.id !== frameInContextMenu.id || !parent) return frame;
+                  return { ...frame, parentId: undefined, x: parent.x + frame.x, y: parent.y + frame.y };
+                }));
+                closeMenus();
+              }}
+              {...hoverHandlers}
+            >
+              Detach Child Frame
+            </button>
+          )}
           <button
-            style={{ ...menuBtnBase, color: linkablePair ? "#111" : "#999" }}
-            disabled={!linkablePair}
+            style={{ ...menuBtnBase, color: linkPlan ? "#111" : "#999" }}
+            disabled={!linkPlan}
             onClick={() => { linkSelectedNodeModules(); closeMenus(); }}
             {...hoverHandlers}
           >
-            Link nodes: {linkNodesLabel}
+            Link modules: {linkModulesLabel}
           </button>
           {COLORWAY_ORDER.map((theme) => (
             <button key={theme} style={menuBtnBase} onClick={() => {
