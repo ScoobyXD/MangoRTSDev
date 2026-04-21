@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { CONTENT_MAP, WIDGET_LIBRARY } from "./widgets";
+import { MODULE_CONTENT_MAP as CONTENT_MAP, MODULE_LIBRARY as WIDGET_LIBRARY } from "./modules";
 import type { Widget, DragState, ResizeEdges } from "./types";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 

@@ -1,6 +1,6 @@
 # Nodes Module (Frontend) — Feature Documentation
 
-This document captures the full behavior and implementation details currently present in the **Nodes** family of modules:
+This document captures the full behavior and implementation details currently present in the **Nodes** family of modules loaded inside dashboard **frames** (UI containers):
 
 - **Node Canvas** (`nodes-canvas`, legacy `nodes`)
 - **Node Doc** (`node-doc`)
