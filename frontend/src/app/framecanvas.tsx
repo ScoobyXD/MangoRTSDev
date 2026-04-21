@@ -1,12 +1,9 @@
 import React from "react";
 
-export interface FrameCanvasProps {
-  children: React.ReactNode;
-  style?: React.CSSProperties;
-}
+export type FrameCanvasProps = React.HTMLAttributes<HTMLDivElement>;
 
-const FrameCanvas: React.FC<FrameCanvasProps> = ({ children, style }) => {
-  return <div style={style}>{children}</div>;
+const FrameCanvas: React.FC<FrameCanvasProps> = ({ children, ...props }) => {
+  return <div {...props}>{children}</div>;
 };
 
 export default FrameCanvas;
