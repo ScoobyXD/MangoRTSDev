@@ -1,5 +1,11 @@
 # Grid Dashboard UI — Context for LLMs
 
+# 🚨🚨🚨 MANDATORY DOCUMENTATION RULE (READ FIRST) 🚨🚨🚨
+# EVERY SINGLE CODE CHANGE MUST BE DOCUMENTED IN THE APPROPRIATE MARKDOWN FILE.
+# NO EXCEPTIONS. NO "WILL DOCUMENT LATER."
+# IF YOU CHANGE BEHAVIOR, UPDATE THE CORRESPONDING docs/* MODULE FILE IN THE SAME CHANGE.
+# CHANGES ARE NOT COMPLETE UNTIL DOCUMENTATION IS UPDATED.
+
 ## What This Project Is
 A new category of work software called an RTS, named after the video game genre. 
 It's a combination of communication, work objects, processes, and execution all in one.
@@ -182,6 +188,7 @@ A Case is the source of truth for one piece of work. Everything related to that 
 ## Terminology Update
 
 Prefer **module** over widget in product language and UI labels.
+Prefer **frame data model** over widget for the container model in code.
 
 ## Implementation Decision (April 8, 2026)
 
