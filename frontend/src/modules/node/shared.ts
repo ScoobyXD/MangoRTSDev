@@ -99,6 +99,7 @@ export function relationFromDirection(direction: NodeDirection): { a: "Parent" |
 
 export type NodeDocBox = { local_id: string; x: number; y: number; w: number; h: number; information_id?: string; information: string };
 export const NODE_DOC_LINKS_KEY = "node-doc-widget-links-v1";
+export const EDITOR_LINKS_KEY = NODE_DOC_LINKS_KEY;
 export const EXPLORER_CANVAS_LINKS_KEY = "company-explorer-widget-links-v1";
 export const NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX = "node-canvas-explorer-context-v1";
 export const NODE_DOC_MIN_W = 180;

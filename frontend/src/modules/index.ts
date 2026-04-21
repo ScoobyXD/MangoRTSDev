@@ -10,7 +10,7 @@ import {
   UsersContent,
 } from "../WidgetContent";
 import { NodesContent } from "./node/canvas";
-import { NodeDocContent } from "./node/doc";
+import { EditorContent } from "./editor";
 import { CompanyExplorerContent } from "./company-explorer";
 
 export interface ModuleTemplate {
@@ -31,7 +31,7 @@ export const MODULE_LIBRARY: ModuleTemplate[] = [
   { kind: "notifications", label: "Notifications", defaultW: 12, defaultH: 8, render: NotificationsContent },
   { kind: "map", label: "Map View", defaultW: 10, defaultH: 15, render: MapContent },
   { kind: "nodes-canvas", label: "Node Canvas", defaultW: 16, defaultH: 14, render: NodesContent },
-  { kind: "node-doc", label: "Node Doc", defaultW: 16, defaultH: 14, render: NodeDocContent },
+  { kind: "editor", label: "Editor", defaultW: 16, defaultH: 14, render: EditorContent },
   { kind: "company-explorer", label: "Company Explorer", defaultW: 18, defaultH: 14, render: CompanyExplorerContent },
 ];
 
@@ -39,3 +39,5 @@ export const MODULE_CONTENT_MAP: Record<string, React.FC<{ accent: string; widge
   MODULE_LIBRARY.map((module) => [module.kind, module.render])
 );
 MODULE_CONTENT_MAP.nodes = NodesContent;
+
+MODULE_CONTENT_MAP["node-doc"] = EditorContent;
