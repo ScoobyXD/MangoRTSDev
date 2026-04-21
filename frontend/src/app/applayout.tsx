@@ -698,7 +698,7 @@ const App: React.FC = () => {
   }, [frameRightClickMenu, frames]);
 
   useEffect(() => {
-    const frameIDs = new Set(frames.map((frame) => frame.id));
+    const frameIDs = new Set(tabs.flatMap((tab) => tab.frames.map((frame) => frame.id)));
     setNodeDocLinks((previous) => {
       const next = Object.fromEntries(Object.entries(previous).filter(([docID, canvasID]) => frameIDs.has(docID) && frameIDs.has(canvasID)));
       if (JSON.stringify(previous) !== JSON.stringify(next)) {
@@ -713,7 +713,7 @@ const App: React.FC = () => {
       }
       return next;
     });
-  }, [frames]);
+  }, [tabs]);
 
   const deleteSelectedFrame = useCallback(() => {
     const ids = selectedFrameIds.size > 0 ? selectedFrameIds : (selectedFrameId ? new Set([selectedFrameId]) : new Set<string>());
