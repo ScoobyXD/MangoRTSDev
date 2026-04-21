@@ -11,6 +11,7 @@ Date: 2026-04-21
   - `app/framecanvas.tsx` is now used for the main canvas interaction surface.
   - `app/framerightclickmenu.tsx` now owns right-click menu placement + outside-click behavior.
   - `app/menus/ModulePickerMenu.tsx` now owns module picker rendering (including Nodes submenu).
+- Pulled node module runtime out of `WidgetContent.tsx` into `frontend/src/module/node/*` so node entries can evolve without depending on a giant general-purpose content file.
 
 ## Behavior expectations
 

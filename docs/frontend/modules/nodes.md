@@ -5,6 +5,12 @@ This document captures the full behavior and implementation details currently pr
 - **Node Canvas** (`nodes-canvas`, legacy `nodes`)
 - **Node Doc** (`node-doc`)
 
+Implementation is now organized under:
+
+- `frontend/src/module/node/canvas/` (Node Canvas module entrypoint)
+- `frontend/src/module/node/doc/` (Node Doc module entrypoint)
+- `frontend/src/module/node/NodeModules.tsx` (shared node module implementation currently used by both entries)
+
 ---
 
 ## 1) Purpose
