@@ -387,7 +387,8 @@ interface FrameCardProps {
   frame: FrameDataModel;
   stepX: number;
   stepY: number;
-  parentFrame?: FrameDataModel;
+  isChild?: boolean;
+  nestedChildren?: React.ReactNode;
   isDragging: boolean;
   isSelected: boolean;
   editMode: boolean;
@@ -399,13 +400,13 @@ interface FrameCardProps {
   isLinked: boolean;
 }
 
-const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, parentFrame, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked }) => {
+const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nestedChildren, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked }) => {
   const Content = CONTENT_MAP[frame.kind];
   const theme = COLORWAYS[frame.theme ?? "teal"];
   const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-canvas" || frame.kind === "node-doc";
-  const left = (parentFrame ? parentFrame.x + frame.x : frame.x) * stepX;
-  const top = (parentFrame ? parentFrame.y + frame.y : frame.y) * stepY;
-  const nested = !!parentFrame;
+  const left = frame.x * stepX;
+  const top = frame.y * stepY;
+  const nested = !!isChild;
   return (
     <Frame
       style={{ position: "absolute", left, top, width: frame.w * stepX, height: frame.h * stepY, background: frame.color, border: isSelected ? "2px solid #111" : nested ? `1px dashed ${frame.accent}` : `1px solid ${frame.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: nested ? 200 : (isDragging ? 100 : 1), color: theme.text, boxShadow: nested ? "0 3px 16px rgba(0,0,0,0.18)" : undefined }}
@@ -438,6 +439,11 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, parentFrame,
       <div style={{ flex: 1, padding: isNodesFrame ? 0 : "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
         {Content ? <Content accent={frame.accent} widgetId={frame.id} hideTopControls={isNodesFrame} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: frame.accent }}>{frame.title}</span></div>}
       </div>
+      {nestedChildren && (
+        <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
+          <div style={{ position: "absolute", inset: 0, pointerEvents: "auto" }}>{nestedChildren}</div>
+        </div>
+      )}
       {editMode && HANDLES.map((h, i) => <div key={i} data-handle="true" onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, frame.id, h.edges); }} onTouchStart={(e) => { e.stopPropagation(); onResizeStart(e, frame.id, h.edges); }} style={{ position: "absolute", cursor: h.cursor, ...h.style }} />)}
     </Frame>
   );
@@ -888,6 +894,7 @@ const App: React.FC = () => {
 
           let next = prev.map((w) => {
             if (w.id !== d.id) return w;
+            if (d.mode === "drag" && !d.parentId) return w;
             const siblingOverlaps = prev.some((candidate) => {
               if (candidate.id === w.id) return false;
               const sameParent = (candidate.parentId ?? "") === (w.parentId ?? "");
@@ -1063,74 +1070,74 @@ const App: React.FC = () => {
                   return next;
                 });
               }}
+              nestedChildren={(childrenByParent.get(w.id) ?? []).map((child) => (
+                <FrameCard
+                  key={child.id}
+                  frame={child}
+                  isChild={true}
+                  stepX={stepX}
+                  stepY={stepY}
+                  isDragging={draggingId === child.id}
+                  isSelected={selectedFrameIds.has(child.id)}
+                  isLinked={true}
+                  editMode={editMode}
+                  onDragStart={(e, id) => {
+                    if (!editMode) return;
+                    e.preventDefault();
+                    const { px, py } = getPointer(e);
+                    const widget = frames.find((ww) => ww.id === id);
+                    if (!widget) return;
+                    dragRef.current = { id, parentId: widget.parentId, mode: "drag", edges: {}, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
+                    setDraggingId(id);
+                  }}
+                  onResizeStart={(e, id, edges) => {
+                    if (!editMode) return;
+                    e.preventDefault();
+                    const { px, py } = getPointer(e);
+                    const widget = frames.find((ww) => ww.id === id);
+                    if (!widget) return;
+                    dragRef.current = { id, parentId: widget.parentId, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
+                    setDraggingId(id);
+                  }}
+                  onContextMenu={(e, id) => {
+                    e.preventDefault();
+                    if (!selectedFrameIds.has(id)) {
+                      setSelectedFrameIds(new Set([id]));
+                      setSelectedFrameId(id);
+                    }
+                    setFrameRightClickMenu({ x: e.clientX, y: e.clientY, id });
+                    setModuleTypeMenu(null);
+                    setCanvasMenu(null);
+                    setShowNodesSubmenu(false);
+                  }}
+                  onModuleNameClick={(e, id) => {
+                    setFrameRightClickMenu(null);
+                    setHeaderMenu(null);
+                    setCanvasMenu(null);
+                    setShowNodesSubmenu(false);
+                    setSelectedFrameId(id);
+                    setSelectedFrameIds(new Set([id]));
+                    setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
+                  }}
+                  onSelect={(event, id) => {
+                    const additiveSelect = "ctrlKey" in event ? (!!event.ctrlKey || !!event.shiftKey) : false;
+                    if (!additiveSelect) {
+                      setSelectedFrameId(id);
+                      setSelectedFrameIds(new Set([id]));
+                      return;
+                    }
+                    setSelectedFrameId(id);
+                    setSelectedFrameIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(id)) next.delete(id);
+                      else next.add(id);
+                      if (next.size === 0) next.add(id);
+                      return next;
+                    });
+                  }}
+                />
+              ))}
             />
-            {(childrenByParent.get(w.id) ?? []).map((child) => (
-              <FrameCard
-                key={child.id}
-                frame={child}
-                parentFrame={w}
-                stepX={stepX}
-                stepY={stepY}
-                isDragging={draggingId === child.id}
-                isSelected={selectedFrameIds.has(child.id)}
-                isLinked={true}
-                editMode={editMode}
-                onDragStart={(e, id) => {
-                  if (!editMode) return;
-                  e.preventDefault();
-                  const { px, py } = getPointer(e);
-                  const widget = frames.find((ww) => ww.id === id);
-                  if (!widget) return;
-                  dragRef.current = { id, parentId: widget.parentId, mode: "drag", edges: {}, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
-                  setDraggingId(id);
-                }}
-                onResizeStart={(e, id, edges) => {
-                  if (!editMode) return;
-                  e.preventDefault();
-                  const { px, py } = getPointer(e);
-                  const widget = frames.find((ww) => ww.id === id);
-                  if (!widget) return;
-                  dragRef.current = { id, parentId: widget.parentId, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
-                  setDraggingId(id);
-                }}
-                onContextMenu={(e, id) => {
-                  e.preventDefault();
-                  if (!selectedFrameIds.has(id)) {
-                    setSelectedFrameIds(new Set([id]));
-                    setSelectedFrameId(id);
-                  }
-                  setFrameRightClickMenu({ x: e.clientX, y: e.clientY, id });
-                  setModuleTypeMenu(null);
-                  setCanvasMenu(null);
-                  setShowNodesSubmenu(false);
-                }}
-                onModuleNameClick={(e, id) => {
-                  setFrameRightClickMenu(null);
-                  setHeaderMenu(null);
-                  setCanvasMenu(null);
-                  setShowNodesSubmenu(false);
-                  setSelectedFrameId(id);
-                  setSelectedFrameIds(new Set([id]));
-                  setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
-                }}
-                onSelect={(event, id) => {
-                  const additiveSelect = "ctrlKey" in event ? (!!event.ctrlKey || !!event.shiftKey) : false;
-                  if (!additiveSelect) {
-                    setSelectedFrameId(id);
-                    setSelectedFrameIds(new Set([id]));
-                    return;
-                  }
-                  setSelectedFrameId(id);
-                  setSelectedFrameIds((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(id)) next.delete(id);
-                    else next.add(id);
-                    if (next.size === 0) next.add(id);
-                    return next;
-                  });
-                }}
-              />
-            ))}
           </React.Fragment>
         ))}
       </FrameCanvas>
