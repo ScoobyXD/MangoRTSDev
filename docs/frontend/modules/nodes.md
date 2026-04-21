@@ -7,9 +7,9 @@ This document captures the full behavior and implementation details currently pr
 
 Implementation is now organized under:
 
-- `frontend/src/module/node/canvas/NodesContent.tsx`
-- `frontend/src/module/node/doc/NodeDocContent.tsx`
-- `frontend/src/module/node/shared.ts` (shared types/constants/helpers)
+- `frontend/src/module/node/canvas/` (Node Canvas module entrypoint)
+- `frontend/src/module/node/doc/` (Node Doc module entrypoint)
+- `frontend/src/module/node/NodeModules.tsx` (shared node module implementation currently used by both entries)
 
 ---
 
@@ -304,7 +304,5 @@ This is the requested teal update used by teal-themed modules.
 
 Primary implementation is in:
 
-- `frontend/src/module/node/canvas/NodesContent.tsx` (Node Canvas behavior)
-- `frontend/src/module/node/doc/NodeDocContent.tsx` (Node Doc behavior)
-- `frontend/src/module/node/shared.ts` (shared node types/constants/helpers)
-- `frontend/src/app/applayout.tsx` (frame/menu integration and link action wiring)
+- `frontend/src/WidgetContent.tsx` (Nodes module behavior)
+- `frontend/src/App.tsx` (teal colorway config)

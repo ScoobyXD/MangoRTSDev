@@ -11,21 +11,13 @@ Date: 2026-04-21
   - `app/framecanvas.tsx` is now used for the main canvas interaction surface.
   - `app/framerightclickmenu.tsx` now owns right-click menu placement + outside-click behavior.
   - `app/menus/ModulePickerMenu.tsx` now owns module picker rendering (including Nodes submenu).
-- Pulled node module runtime out of `WidgetContent.tsx` into `frontend/src/module/node/*`.
-- Completed split of node runtime into dedicated files:
-  - `module/node/canvas/NodesContent.tsx`
-  - `module/node/doc/NodeDocContent.tsx`
-  - `module/node/shared.ts`
-- Removed migration compatibility files after successful wiring:
-  - deleted `frontend/src/App.tsx` compatibility export
-  - deleted `frontend/src/widgets/index.ts` compatibility shim
-  - deleted `frontend/src/module/node/NodeModules.tsx` transitional monolith
+- Pulled node module runtime out of `WidgetContent.tsx` into `frontend/src/module/node/*` so node entries can evolve without depending on a giant general-purpose content file.
 
 ## Behavior expectations
 
 - This change is structural: prop contracts and user interactions are preserved.
 - Existing persistence compatibility from PRA remains in `applayout`.
 
-## Remaining follow-up (non-blocking)
+## Remaining PRB follow-up
 
-- Optional quality refactor: split `applayout` into additional hooks/components for readability and testability.
+- Continue extracting additional cohesive logic blocks from `applayout` to keep the file slim (state orchestration/hooks, frame interaction logic, and menu command handlers).

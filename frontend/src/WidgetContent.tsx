@@ -1,4 +1,5 @@
 import React from "react";
+import { NodeDocContent, NodesContent } from "./module/node/NodeModules";
 
 
 const divider = { borderBottom: "1px solid currentColor", padding: "5px 0" };
@@ -83,3 +84,6 @@ export const MapContent: React.FC<{ accent: string }> = ({ accent }) => (
     <div style={{ fontSize: 12 }}>Latency avg: 43ms</div>
   </div>
 );
+
+
+export { NodeDocContent, NodesContent };

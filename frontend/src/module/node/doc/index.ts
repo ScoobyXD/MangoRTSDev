@@ -1,1 +1,1 @@
-export { NodeDocContent } from "./NodeDocContent";
+export { NodeDocContent } from "../NodeModules";
