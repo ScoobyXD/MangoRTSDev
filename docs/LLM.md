@@ -1,5 +1,11 @@
 # Grid Dashboard UI — Context for LLMs
 
+# 🚨🚨🚨 MANDATORY DOCUMENTATION RULE (READ FIRST) 🚨🚨🚨
+# EVERY SINGLE CODE CHANGE MUST BE DOCUMENTED IN THE APPROPRIATE MARKDOWN FILE.
+# NO EXCEPTIONS. NO "WILL DOCUMENT LATER."
+# IF YOU CHANGE BEHAVIOR, UPDATE THE CORRESPONDING docs/* MODULE FILE IN THE SAME CHANGE.
+# CHANGES ARE NOT COMPLETE UNTIL DOCUMENTATION IS UPDATED.
+
 ## What This Project Is
 A new category of work software called an RTS, named after the video game genre. 
 It's a combination of communication, work objects, processes, and execution all in one.

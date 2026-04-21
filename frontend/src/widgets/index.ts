@@ -9,6 +9,7 @@ import {
   TasksContent,
   UsersContent,
   NodesContent,
+  NodeDocContent,
 } from "../WidgetContent";
 
 export interface WidgetTemplate {
@@ -28,9 +29,11 @@ export const WIDGET_LIBRARY: WidgetTemplate[] = [
   { kind: "orders", label: "Recent Orders", defaultW: 10, defaultH: 9, render: OrdersContent },
   { kind: "notifications", label: "Notifications", defaultW: 12, defaultH: 8, render: NotificationsContent },
   { kind: "map", label: "Map View", defaultW: 10, defaultH: 15, render: MapContent },
-  { kind: "nodes", label: "Nodes", defaultW: 16, defaultH: 14, render: NodesContent },
+  { kind: "nodes-canvas", label: "Node Canvas", defaultW: 16, defaultH: 14, render: NodesContent },
+  { kind: "node-doc", label: "Node Doc", defaultW: 16, defaultH: 14, render: NodeDocContent },
 ];
 
 export const CONTENT_MAP: Record<string, React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }>> = Object.fromEntries(
   WIDGET_LIBRARY.map((widget) => [widget.kind, widget.render])
 );
+CONTENT_MAP.nodes = NodesContent;
