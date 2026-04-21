@@ -38,7 +38,7 @@ const ModulePickerMenu: React.FC<ModulePickerMenuProps> = ({
 }) => {
   return (
     <FrameRightClickMenu x={x} y={y} onClose={onClose}>
-      {moduleLibrary.filter((item) => item.kind !== "nodes-canvas" && item.kind !== "node-doc").map((item) => (
+      {moduleLibrary.filter((item) => item.kind !== "nodes-canvas").map((item) => (
         <button
           key={item.kind}
           style={menuBtnBase}
@@ -59,7 +59,7 @@ const ModulePickerMenu: React.FC<ModulePickerMenuProps> = ({
           onClick={() => setShowNodesSubmenu((value) => !value)}
           {...hoverHandlers}
         >
-          <span>Nodes</span>
+          <span>Node</span>
           <span style={{ fontSize: 10, opacity: 0.72 }}>▶</span>
         </button>
         {showNodesSubmenu && (

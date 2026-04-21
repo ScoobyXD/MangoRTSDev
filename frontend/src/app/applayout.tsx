@@ -6,7 +6,7 @@ import ModulePickerMenu from "./menus/ModulePickerMenu";
 import { MODULE_CONTENT_MAP as CONTENT_MAP, MODULE_LIBRARY as FRAME_MODULE_LIBRARY } from "../modules";
 import type { FrameDataModel, DragState, ResizeEdges } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { EXPLORER_CANVAS_LINKS_KEY, NODE_DOC_LINKS_KEY } from "../modules/node/shared";
+import { EDITOR_LINKS_KEY, EXPLORER_CANVAS_LINKS_KEY } from "../modules/node/shared";
 
 const CELL_SIZE = 28;
 const HEADER_H = 48;
@@ -36,19 +36,18 @@ const UI_THEME = {
 
 const NODE_SUBMODULES = [
   { kind: "nodes-canvas", label: "Node Canvas" },
-  { kind: "node-doc", label: "Node Doc" },
 ] as const;
 
 const createDefaultNodeViewFrames = (): FrameDataModel[] => ([
   { id: "default-node-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 11, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
   { id: "default-node-canvas", theme: "teal", kind: "nodes-canvas", x: 12, y: 1, w: 20, h: 30, title: "Node Canvas", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "default-node-doc", theme: "orange", kind: "node-doc", x: 32, y: 1, w: 11, h: 30, title: "Node Doc", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+  { id: "default-node-editor", theme: "orange", kind: "editor", x: 32, y: 1, w: 11, h: 30, title: "Editor", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
 ]);
 
 const createDefaultCompanyExplorerViewFrames = (): FrameDataModel[] => ([
   { id: "default-company-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 12, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
   { id: "default-company-details", theme: "teal", kind: "nodes-canvas", x: 13, y: 1, w: 18, h: 30, title: "Node Canvas", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "default-company-doc", theme: "orange", kind: "node-doc", x: 31, y: 1, w: 12, h: 30, title: "Node Doc", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+  { id: "default-company-editor", theme: "orange", kind: "editor", x: 31, y: 1, w: 12, h: 30, title: "Editor", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
 ]);
 
 const INITIAL_WIDGETS: FrameDataModel[] = [
@@ -109,9 +108,11 @@ function coerceFrame(value: unknown): FrameDataModel | null {
     typeof w !== "number" || typeof h !== "number" || typeof title !== "string" || typeof color !== "string" || typeof accent !== "string"
   ) return null;
 
+  const normalizedKind = kind === "node-doc" ? "editor" : kind;
+
   return {
     id,
-    kind,
+    kind: normalizedKind,
     parentId: typeof parentId === "string" && parentId.trim() ? parentId : undefined,
     theme: isColorway(theme) ? theme : "teal",
     x: Math.max(0, Math.round(x)),
@@ -202,7 +203,7 @@ function saveSettings(s: { bgColor: string; crossColor: string; headerBgColor: s
 
 function loadNodeDocLinks(): Record<string, string> {
   try {
-    const raw = localStorage.getItem(NODE_DOC_LINKS_KEY);
+    const raw = localStorage.getItem(EDITOR_LINKS_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
@@ -403,7 +404,7 @@ interface FrameCardProps {
 const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nestedChildren, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked }) => {
   const Content = CONTENT_MAP[frame.kind];
   const theme = COLORWAYS[frame.theme ?? "teal"];
-  const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-canvas" || frame.kind === "node-doc";
+  const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-canvas" || frame.kind === "editor" || frame.kind === "node-doc";
   const left = frame.x * stepX;
   const top = frame.y * stepY;
   const nested = !!isChild;
@@ -494,7 +495,7 @@ const App: React.FC = () => {
   const [headerTextColor, setHeaderTextColor] = useState(() => initialSettingsRef.current.headerTextColor || UI_THEME.text);
   const [tabBgColor, setTabBgColor] = useState(() => initialSettingsRef.current.tabBgColor || "#ffffff");
   const [tabTextColor, setTabTextColor] = useState(() => initialSettingsRef.current.tabTextColor || "#08343a");
-  const [nodeDocLinks, setNodeDocLinks] = useState<Record<string, string>>(() => loadNodeDocLinks());
+  const [editorLinks, setEditorLinks] = useState<Record<string, string>>(() => loadNodeDocLinks());
   const [explorerCanvasLinks, setExplorerCanvasLinks] = useState<Record<string, string>>(() => loadExplorerCanvasLinks());
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
@@ -625,10 +626,10 @@ const App: React.FC = () => {
 
   const closeMenus = useCallback(() => { setFrameRightClickMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); setShowNodesSubmenu(false); }, []);
 
-  const saveNodeDocLink = useCallback((docFrameID: string, canvasFrameID: string) => {
-    setNodeDocLinks((prev) => {
+  const saveEditorLink = useCallback((docFrameID: string, canvasFrameID: string) => {
+    setEditorLinks((prev) => {
       const next = { ...prev, [docFrameID]: canvasFrameID };
-      try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+      try { localStorage.setItem(EDITOR_LINKS_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
   }, []);
@@ -646,7 +647,7 @@ const App: React.FC = () => {
     if (pool.length < 2) return null;
     const canvases = pool.filter((frame) => frame.kind === "nodes" || frame.kind === "nodes-canvas");
     if (canvases.length !== 1) return null;
-    const docs = pool.filter((frame) => frame.kind === "node-doc");
+    const docs = pool.filter((frame) => frame.kind === "editor" || frame.kind === "node-doc");
     const explorers = pool.filter((frame) => frame.kind === "company-explorer");
     if (docs.length + explorers.length === 0) return null;
     return { canvas: canvases[0], docs, explorers, pool };
@@ -656,10 +657,10 @@ const App: React.FC = () => {
     if (!linkPlan) return;
     const canvasID = linkPlan.canvas.id;
     if (linkPlan.docs.length > 0) {
-      setNodeDocLinks((previous) => {
+      setEditorLinks((previous) => {
         const next = { ...previous };
         for (const doc of linkPlan.docs) next[doc.id] = canvasID;
-        try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+        try { localStorage.setItem(EDITOR_LINKS_KEY, JSON.stringify(next)); } catch {}
         return next;
       });
     }
@@ -673,13 +674,13 @@ const App: React.FC = () => {
     }
   }, [linkPlan]);
   const linkModulesLabel = useMemo(() => {
-    if (!linkPlan) return "Select one Node Canvas + one/more Node Doc or Company Explorer";
+    if (!linkPlan) return "Select one Node Canvas + one/more Editor or Company Explorer";
     return linkPlan.pool.map((frame) => frame.title).join(" + ");
   }, [linkPlan]);
   const linkedFrameIDs = useMemo(() => {
     const ids = new Set<string>();
     const frameIDs = new Set(frames.map((frame) => frame.id));
-    for (const [docFrameID, canvasFrameID] of Object.entries(nodeDocLinks)) {
+    for (const [docFrameID, canvasFrameID] of Object.entries(editorLinks)) {
       if (!frameIDs.has(docFrameID) || !frameIDs.has(canvasFrameID)) continue;
       ids.add(docFrameID);
       ids.add(canvasFrameID);
@@ -690,7 +691,7 @@ const App: React.FC = () => {
       ids.add(canvasFrameID);
     }
     return ids;
-  }, [nodeDocLinks, explorerCanvasLinks, frames]);
+  }, [editorLinks, explorerCanvasLinks, frames]);
   const frameInContextMenu = useMemo(() => {
     if (!frameRightClickMenu) return null;
     return frames.find((frame) => frame.id === frameRightClickMenu.id) ?? null;
@@ -698,10 +699,10 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const frameIDs = new Set(tabs.flatMap((tab) => tab.frames.map((frame) => frame.id)));
-    setNodeDocLinks((previous) => {
+    setEditorLinks((previous) => {
       const next = Object.fromEntries(Object.entries(previous).filter(([docID, canvasID]) => frameIDs.has(docID) && frameIDs.has(canvasID)));
       if (JSON.stringify(previous) !== JSON.stringify(next)) {
-        try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+        try { localStorage.setItem(EDITOR_LINKS_KEY, JSON.stringify(next)); } catch {}
       }
       return next;
     });
@@ -723,7 +724,7 @@ const App: React.FC = () => {
 
     if (groups.length === 0) return;
 
-    const nextDocLinks = { ...nodeDocLinks };
+    const nextDocLinks = { ...editorLinks };
     const nextExplorerLinks = { ...explorerCanvasLinks };
     let changedDoc = false;
     let changedExplorer = false;
@@ -732,7 +733,7 @@ const App: React.FC = () => {
       const canvases = group.filter((frame) => frame.kind === "nodes" || frame.kind === "nodes-canvas");
       if (canvases.length !== 1) continue;
       const canvasID = canvases[0].id;
-      for (const doc of group.filter((frame) => frame.kind === "node-doc")) {
+      for (const doc of group.filter((frame) => frame.kind === "editor" || frame.kind === "node-doc")) {
         if (nextDocLinks[doc.id] === canvasID) continue;
         nextDocLinks[doc.id] = canvasID;
         changedDoc = true;
@@ -745,14 +746,14 @@ const App: React.FC = () => {
     }
 
     if (changedDoc) {
-      setNodeDocLinks(nextDocLinks);
-      try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(nextDocLinks)); } catch {}
+      setEditorLinks(nextDocLinks);
+      try { localStorage.setItem(EDITOR_LINKS_KEY, JSON.stringify(nextDocLinks)); } catch {}
     }
     if (changedExplorer) {
       setExplorerCanvasLinks(nextExplorerLinks);
       try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(nextExplorerLinks)); } catch {}
     }
-  }, [frames, nodeDocLinks, explorerCanvasLinks]);
+  }, [frames, editorLinks, explorerCanvasLinks]);
 
   const deleteSelectedFrame = useCallback(() => {
     const ids = selectedFrameIds.size > 0 ? selectedFrameIds : (selectedFrameId ? new Set([selectedFrameId]) : new Set<string>());
@@ -855,9 +856,9 @@ const App: React.FC = () => {
   const openDefaultNodeView = useCallback((tabID: string) => {
     const framesForView = createDefaultNodeViewFrames();
     setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, frames: framesForView } : tab)));
-    setNodeDocLinks((previous) => {
-      const next = { ...previous, "default-node-doc": "default-node-canvas" };
-      try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+    setEditorLinks((previous) => {
+      const next = { ...previous, "default-node-editor": "default-node-canvas" };
+      try { localStorage.setItem(EDITOR_LINKS_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
     setExplorerCanvasLinks((previous) => {
@@ -872,9 +873,9 @@ const App: React.FC = () => {
   const openDefaultCompanyExplorerView = useCallback((tabID: string) => {
     const framesForView = createDefaultCompanyExplorerViewFrames();
     setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, frames: framesForView } : tab)));
-    setNodeDocLinks((previous) => {
-      const next = { ...previous, "default-company-doc": "default-company-details" };
-      try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+    setEditorLinks((previous) => {
+      const next = { ...previous, "default-company-editor": "default-company-details" };
+      try { localStorage.setItem(EDITOR_LINKS_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
     setExplorerCanvasLinks((previous) => {
