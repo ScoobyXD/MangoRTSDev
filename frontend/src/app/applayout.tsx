@@ -651,14 +651,6 @@ const App: React.FC = () => {
     if (docs.length + explorers.length === 0) return null;
     return { canvas: canvases[0], docs, explorers, pool };
   }, [selectedFrameId, selectedFrames, frames]);
-  const linkableExplorerPair = useMemo(() => {
-    const pool = selectedFrames.length > 0 ? selectedFrames : (selectedFrameId ? frames.filter((frame) => frame.id === selectedFrameId) : []);
-    if (pool.length !== 2) return null;
-    const canvas = pool.find((frame) => frame.kind === "nodes" || frame.kind === "nodes-canvas");
-    const explorer = pool.find((frame) => frame.kind === "company-explorer");
-    if (!canvas || !explorer) return null;
-    return { canvas, explorer };
-  }, [selectedFrameId, selectedFrames, frames]);
 
   const linkSelectedNodeModules = useCallback(() => {
     if (!linkPlan) return;
@@ -721,6 +713,46 @@ const App: React.FC = () => {
       return next;
     });
   }, [tabs]);
+  useEffect(() => {
+    const groups: FrameDataModel[][] = [];
+    for (const parent of frames.filter((frame) => !frame.parentId)) {
+      const children = frames.filter((frame) => frame.parentId === parent.id);
+      if (children.length === 0) continue;
+      groups.push([parent, ...children]);
+    }
+
+    if (groups.length === 0) return;
+
+    const nextDocLinks = { ...nodeDocLinks };
+    const nextExplorerLinks = { ...explorerCanvasLinks };
+    let changedDoc = false;
+    let changedExplorer = false;
+
+    for (const group of groups) {
+      const canvases = group.filter((frame) => frame.kind === "nodes" || frame.kind === "nodes-canvas");
+      if (canvases.length !== 1) continue;
+      const canvasID = canvases[0].id;
+      for (const doc of group.filter((frame) => frame.kind === "node-doc")) {
+        if (nextDocLinks[doc.id] === canvasID) continue;
+        nextDocLinks[doc.id] = canvasID;
+        changedDoc = true;
+      }
+      for (const explorer of group.filter((frame) => frame.kind === "company-explorer")) {
+        if (nextExplorerLinks[explorer.id] === canvasID) continue;
+        nextExplorerLinks[explorer.id] = canvasID;
+        changedExplorer = true;
+      }
+    }
+
+    if (changedDoc) {
+      setNodeDocLinks(nextDocLinks);
+      try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(nextDocLinks)); } catch {}
+    }
+    if (changedExplorer) {
+      setExplorerCanvasLinks(nextExplorerLinks);
+      try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(nextExplorerLinks)); } catch {}
+    }
+  }, [frames, nodeDocLinks, explorerCanvasLinks]);
 
   const deleteSelectedFrame = useCallback(() => {
     const ids = selectedFrameIds.size > 0 ? selectedFrameIds : (selectedFrameId ? new Set([selectedFrameId]) : new Set<string>());
