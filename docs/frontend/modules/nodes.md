@@ -168,9 +168,9 @@ Relationships are visualized with SVG polylines in world space.
 
 ## 8) Local persistence (layout + viewport)
 
-The module persists canvas state in `localStorage` keyed per company and widget scope:
+The module persists canvas state in `localStorage` keyed per company and frame scope:
 
-- Key format: `node-canvas-state-v3:<companyID>:<widgetId-or-global>`
+- Key format: `node-canvas-state-v3:<companyID>:<frameId-or-global>`
 - Stored fields:
   - `zoom`
   - `pan`
@@ -199,12 +199,12 @@ This keeps layout and viewport stable when switching views and reopening the mod
 
 ### 9.1 Linking model
 
-- Node Doc is linked to Node Canvas at widget level using:
+- Node Doc is linked to Node Canvas at frame level using:
   - localStorage key: `node-doc-widget-links-v1`
-  - value: map of `nodeDocWidgetId -> nodeCanvasWidgetId`
+  - value: map of `nodeDocFrameId -> nodeCanvasFrameId`
 - Linking is triggered from module context menu action:
   - `Link nodes: <dynamic titles joined by " + ">`
-- Linked modules show a **hexagon indicator** next to the module name chip in the widget header (both Node Canvas and Node Doc).
+- Linked modules show a **hexagon indicator** next to the module name chip in the frame header (both Node Canvas and Node Doc).
 - Link action is enabled when selection contains exactly:
   - one Node Canvas module (`nodes-canvas` or legacy `nodes`)
   - one Node Doc module (`node-doc`)

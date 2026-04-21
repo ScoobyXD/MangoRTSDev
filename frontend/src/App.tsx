@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { MODULE_CONTENT_MAP as CONTENT_MAP, MODULE_LIBRARY as WIDGET_LIBRARY } from "./modules";
+import { MODULE_CONTENT_MAP as CONTENT_MAP, MODULE_LIBRARY as FRAME_MODULE_LIBRARY } from "./modules";
 import type { FrameDataModel, DragState, ResizeEdges } from "./types";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
@@ -33,7 +33,7 @@ const NODE_SUBMODULES = [
   { kind: "nodes-canvas", label: "Node Canvas" },
   { kind: "node-doc", label: "Node Doc" },
 ] as const;
-const NODE_DOC_LINKS_KEY = "node-doc-widget-links-v1";
+const NODE_DOC_LINKS_KEY = "node-doc-widget-links-v1" // backward-compatible storage key;
 
 const INITIAL_WIDGETS: FrameDataModel[] = [
   { id: "w-revenue", theme: "teal", kind: "revenue", x: 2, y: 1, w: 12, h: 9, title: "Revenue", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
@@ -50,7 +50,7 @@ const INITIAL_WIDGETS: FrameDataModel[] = [
 interface ViewTab {
   id: string;
   name: string;
-  widgets: FrameDataModel[];
+  frames: FrameDataModel[];
 }
 
 interface DashboardSnapshot {
@@ -69,7 +69,7 @@ function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v));
 }
 
-function widgetsOverlap(a: FrameDataModel, b: FrameDataModel) {
+function framesOverlap(a: FrameDataModel, b: FrameDataModel) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
@@ -85,7 +85,7 @@ function isHexColor(value: unknown): value is string {
   return typeof value === "string" && /^#[0-9A-F]{6}$/i.test(value);
 }
 
-function coerceWidget(value: unknown): FrameDataModel | null {
+function coerceFrame(value: unknown): FrameDataModel | null {
   if (!isObject(value)) return null;
   const { id, kind, theme, x, y, w, h, title, color, accent } = value;
   if (
@@ -107,12 +107,12 @@ function coerceWidget(value: unknown): FrameDataModel | null {
   };
 }
 
-function sanitizeWidgets(value: unknown): FrameDataModel[] {
+function sanitizeFrames(value: unknown): FrameDataModel[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
   const cleaned: FrameDataModel[] = [];
   for (const item of value) {
-    const widget = coerceWidget(item);
+    const widget = coerceFrame(item);
     if (!widget || seen.has(widget.id)) continue;
     seen.add(widget.id);
     cleaned.push(widget);
@@ -130,7 +130,7 @@ const VIEWS_KEY = "grid-dashboard-views-v1";
 const SETTINGS_KEY = "grid-dashboard-settings";
 
 function loadViews(): { tabs: ViewTab[]; activeId: string } {
-  const fallback = { tabs: [{ id: "view-default", name: "Main View", widgets: INITIAL_WIDGETS }], activeId: "view-default" };
+  const fallback = { tabs: [{ id: "view-default", name: "Main View", frames: INITIAL_WIDGETS }], activeId: "view-default" };
   try {
     const raw = localStorage.getItem(VIEWS_KEY);
     if (!raw) return fallback;
@@ -140,8 +140,8 @@ function loadViews(): { tabs: ViewTab[]; activeId: string } {
     const tabs = parsed.tabs
       .map((tab) => {
         if (!isObject(tab) || typeof tab.id !== "string" || typeof tab.name !== "string") return null;
-        const widgets = sanitizeWidgets(tab.widgets);
-        return { id: tab.id, name: tab.name, widgets } satisfies ViewTab;
+        const frames = sanitizeFrames((tab as { frames?: unknown; widgets?: unknown }).frames ?? tab.widgets);
+        return { id: tab.id, name: tab.name, frames } satisfies ViewTab;
       })
       .filter((tab): tab is ViewTab => !!tab);
 
@@ -154,7 +154,10 @@ function loadViews(): { tabs: ViewTab[]; activeId: string } {
 }
 
 function saveViews(tabs: ViewTab[], activeId: string) {
-  try { localStorage.setItem(VIEWS_KEY, JSON.stringify({ tabs, activeId })); } catch {}
+  try {
+    const serializedTabs = tabs.map((tab) => ({ ...tab, widgets: tab.frames }));
+    localStorage.setItem(VIEWS_KEY, JSON.stringify({ tabs: serializedTabs, activeId }));
+  } catch {}
 }
 
 function loadSettings(): { bgColor?: string; crossColor?: string; headerBgColor?: string; headerTextColor?: string; tabBgColor?: string; tabTextColor?: string } {
@@ -217,24 +220,24 @@ const GridCrosses: React.FC<{ cols: number; rows: number; stepX: number; stepY: 
 );
 
 const PlacementSplash: React.FC<{
-  widget: FrameDataModel;
-  widgets: FrameDataModel[];
+  frame: FrameDataModel;
+  frames: FrameDataModel[];
   cols: number;
   rows: number;
   stepX: number;
   stepY: number;
-}> = React.memo(({ widget, widgets, cols, rows, stepX, stepY }) => {
+}> = React.memo(({ frame, frames, cols, rows, stepX, stepY }) => {
   const cells = useMemo(() => {
-    let seed = widget.x * 73856093 + widget.y * 19349663;
-    for (let i = 0; i < widget.id.length; i++) seed = (seed * 33 + widget.id.charCodeAt(i)) >>> 0;
+    let seed = frame.x * 73856093 + frame.y * 19349663;
+    for (let i = 0; i < frame.id.length; i++) seed = (seed * 33 + frame.id.charCodeAt(i)) >>> 0;
     const rand = () => {
       seed = (seed * 1664525 + 1013904223) >>> 0;
       return seed / 4294967296;
     };
 
     const occupied = new Set<string>();
-    for (const other of widgets) {
-      if (other.id === widget.id) continue;
+    for (const other of frames) {
+      if (other.id === frame.id) continue;
       for (let y = other.y; y < other.y + other.h; y++) {
         for (let x = other.x; x < other.x + other.w; x++) {
           occupied.add(`${x},${y}`);
@@ -242,7 +245,7 @@ const PlacementSplash: React.FC<{
       }
     }
 
-    const sizeFactor = Math.min(1.5, Math.log2(Math.max(widget.w, widget.h) + 1) / 4);
+    const sizeFactor = Math.min(1.5, Math.log2(Math.max(frame.w, frame.h) + 1) / 4);
     const edgeSpan = () => (rand() < 0.72 - sizeFactor * 0.08 ? 2 : 3);
     const armSpan = () => 1 + Math.floor(rand() * 3) + (rand() < 0.18 + sizeFactor * 0.08 ? 2 : 0);
     const radii = {
@@ -251,15 +254,15 @@ const PlacementSplash: React.FC<{
       top: edgeSpan(),
       bottom: edgeSpan(),
     };
-    const left = clamp(widget.x - radii.left, 0, Math.max(0, cols - 1));
-    const right = clamp(widget.x + widget.w - 1 + radii.right, 0, Math.max(0, cols - 1));
-    const top = clamp(widget.y - radii.top, 0, Math.max(0, rows - 1));
-    const bottom = clamp(widget.y + widget.h - 1 + radii.bottom, 0, Math.max(0, rows - 1));
+    const left = clamp(frame.x - radii.left, 0, Math.max(0, cols - 1));
+    const right = clamp(frame.x + frame.w - 1 + radii.right, 0, Math.max(0, cols - 1));
+    const top = clamp(frame.y - radii.top, 0, Math.max(0, rows - 1));
+    const bottom = clamp(frame.y + frame.h - 1 + radii.bottom, 0, Math.max(0, rows - 1));
 
     const result: { x: number; y: number; distance: number }[] = [];
     const seen = new Set<string>();
-    const centerX = widget.x + widget.w / 2;
-    const centerY = widget.y + widget.h / 2;
+    const centerX = frame.x + frame.w / 2;
+    const centerY = frame.y + frame.h / 2;
     const extraCells = new Set<string>();
     const addArm = (startX: number, startY: number, dx: number, dy: number, len: number) => {
       for (let i = 1; i <= len; i++) {
@@ -270,25 +273,25 @@ const PlacementSplash: React.FC<{
       }
     };
 
-    addArm(widget.x + Math.floor(rand() * widget.w), top, 0, -1, armSpan());
-    addArm(widget.x + Math.floor(rand() * widget.w), bottom, 0, 1, armSpan());
-    addArm(left, widget.y + Math.floor(rand() * widget.h), -1, 0, armSpan());
-    addArm(right, widget.y + Math.floor(rand() * widget.h), 1, 0, armSpan());
+    addArm(frame.x + Math.floor(rand() * frame.w), top, 0, -1, armSpan());
+    addArm(frame.x + Math.floor(rand() * frame.w), bottom, 0, 1, armSpan());
+    addArm(left, frame.y + Math.floor(rand() * frame.h), -1, 0, armSpan());
+    addArm(right, frame.y + Math.floor(rand() * frame.h), 1, 0, armSpan());
 
     for (let y = top; y <= bottom; y++) {
       for (let x = left; x <= right; x++) {
-        const insideWidget = x >= widget.x && x < widget.x + widget.w && y >= widget.y && y < widget.y + widget.h;
-        const gapLeft = widget.x - (x + 1);
-        const gapRight = x - (widget.x + widget.w) + 1;
-        const gapTop = widget.y - (y + 1);
-        const gapBottom = y - (widget.y + widget.h) + 1;
+        const insideFrame = x >= frame.x && x < frame.x + frame.w && y >= frame.y && y < frame.y + frame.h;
+        const gapLeft = frame.x - (x + 1);
+        const gapRight = x - (frame.x + frame.w) + 1;
+        const gapTop = frame.y - (y + 1);
+        const gapBottom = y - (frame.y + frame.h) + 1;
         const edgeDistance = Math.max(0, gapLeft, gapRight, gapTop, gapBottom);
         const coreThickness = Math.min(2.9, 1.75 + rand() * 0.7 + sizeFactor * 0.15);
         const withinCore = edgeDistance <= coreThickness;
         const splashNoise = rand() > 0.14;
         const inShape = withinCore && splashNoise;
         const isArm = extraCells.has(`${x},${y}`);
-        if (insideWidget || occupied.has(`${x},${y}`) || (!inShape && !isArm)) continue;
+        if (insideFrame || occupied.has(`${x},${y}`) || (!inShape && !isArm)) continue;
         const dist = Math.hypot(x + 0.5 - centerX, y + 0.5 - centerY);
         const key = `${x},${y}`;
         if (seen.has(key)) continue;
@@ -302,8 +305,8 @@ const PlacementSplash: React.FC<{
       const x = Number(xRaw);
       const y = Number(yRaw);
       if (occupied.has(cell)) continue;
-      const insideWidget = x >= widget.x && x < widget.x + widget.w && y >= widget.y && y < widget.y + widget.h;
-      if (insideWidget) continue;
+      const insideFrame = x >= frame.x && x < frame.x + frame.w && y >= frame.y && y < frame.y + frame.h;
+      if (insideFrame) continue;
       const dist = Math.hypot(x + 0.5 - centerX, y + 0.5 - centerY);
       if (seen.has(cell)) continue;
       seen.add(cell);
@@ -311,7 +314,7 @@ const PlacementSplash: React.FC<{
     }
 
     return result;
-  }, [widget, widgets, cols, rows]);
+  }, [frame, frames, cols, rows]);
 
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 50 }}>
@@ -349,8 +352,8 @@ const HANDLES: HandleDef[] = [
   { edges: { right: true }, cursor: "ew-resize", style: { right: -HANDLE / 2, top: CORNER_SIZE, bottom: CORNER_SIZE, width: HANDLE, zIndex: 1 } },
 ];
 
-interface WidgetCardProps {
-  widget: FrameDataModel;
+interface FrameCardProps {
+  frame: FrameDataModel;
   stepX: number;
   stepY: number;
   isDragging: boolean;
@@ -364,48 +367,48 @@ interface WidgetCardProps {
   isLinked: boolean;
 }
 
-const WidgetCard: React.FC<WidgetCardProps> = ({ widget, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked }) => {
-  const Content = CONTENT_MAP[widget.kind];
-  const theme = COLORWAYS[widget.theme ?? "teal"];
-  const isNodesWidget = widget.kind === "nodes" || widget.kind === "nodes-canvas" || widget.kind === "node-doc";
+const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked }) => {
+  const Content = CONTENT_MAP[frame.kind];
+  const theme = COLORWAYS[frame.theme ?? "teal"];
+  const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-canvas" || frame.kind === "node-doc";
   return (
     <div
-      style={{ position: "absolute", left: widget.x * stepX, top: widget.y * stepY, width: widget.w * stepX, height: widget.h * stepY, background: widget.color, border: isSelected ? "2px solid #111" : `1px solid ${widget.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
+      style={{ position: "absolute", left: frame.x * stepX, top: frame.y * stepY, width: frame.w * stepX, height: frame.h * stepY, background: frame.color, border: isSelected ? "2px solid #111" : `1px solid ${frame.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
       onClick={(e) => e.stopPropagation()}
       onMouseDownCapture={(e) => {
         if (e.button !== 0) return;
-        onSelect(e, widget.id);
+        onSelect(e, frame.id);
       }}
-      onTouchStartCapture={(e) => onSelect(e, widget.id)}
-      onMouseDown={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
-      onTouchStart={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, widget.id); }}
-      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, widget.id); }}
+      onTouchStartCapture={(e) => onSelect(e, frame.id)}
+      onMouseDown={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, frame.id); }}
+      onTouchStart={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, frame.id); }}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, frame.id); }}
     >
-      <div style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${widget.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}>
+      <div style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${frame.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onModuleNameClick(e, widget.id); }}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onModuleNameClick(e, frame.id); }}
             style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px", cursor: "pointer" }}
           >
-            {widget.title}
+            {frame.title}
           </span>
           {isLinked && (
             <svg aria-label="linked module" width="14" height="16" viewBox="0 0 14 16" style={{ display: "block" }}>
               <title>Linked</title>
-              <polygon points="7,1 13,4.5 13,11.5 7,15 1,11.5 1,4.5" fill="none" stroke={widget.accent} strokeWidth="1.2" />
+              <polygon points="7,1 13,4.5 13,11.5 7,15 1,11.5 1,4.5" fill="none" stroke={frame.accent} strokeWidth="1.2" />
             </svg>
           )}
         </div>
       </div>
-      <div style={{ flex: 1, padding: isNodesWidget ? 0 : "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
-        {Content ? <Content accent={widget.accent} widgetId={widget.id} hideTopControls={isNodesWidget} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: widget.accent }}>{widget.title}</span></div>}
+      <div style={{ flex: 1, padding: isNodesFrame ? 0 : "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
+        {Content ? <Content accent={frame.accent} widgetId={frame.id} hideTopControls={isNodesFrame} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: frame.accent }}>{frame.title}</span></div>}
       </div>
-      {editMode && HANDLES.map((h, i) => <div key={i} data-handle="true" onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, widget.id, h.edges); }} onTouchStart={(e) => { e.stopPropagation(); onResizeStart(e, widget.id, h.edges); }} style={{ position: "absolute", cursor: h.cursor, ...h.style }} />)}
+      {editMode && HANDLES.map((h, i) => <div key={i} data-handle="true" onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, frame.id, h.edges); }} onTouchStart={(e) => { e.stopPropagation(); onResizeStart(e, frame.id, h.edges); }} style={{ position: "absolute", cursor: h.cursor, ...h.style }} />)}
     </div>
   );
 };
 
-const FloatingMenu: React.FC<{ x: number; y: number; onClose: () => void; children: React.ReactNode }> = ({ x, y, onClose, children }) => {
+const FrameRightClickMenu: React.FC<{ x: number; y: number; onClose: () => void; children: React.ReactNode }> = ({ x, y, onClose, children }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
   useEffect(() => {
@@ -425,9 +428,9 @@ const FloatingMenu: React.FC<{ x: number; y: number; onClose: () => void; childr
 const menuBtnBase: React.CSSProperties = { display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 16px", fontSize: 12, fontWeight: 600, letterSpacing: "0.04em", fontFamily: "'IBM Plex Mono', monospace", background: "none", border: "none", color: "#333", cursor: "pointer", textAlign: "left" };
 const hoverHandlers = { onMouseEnter: (e: React.MouseEvent) => { (e.currentTarget as HTMLElement).style.background = "#f5f5f5"; }, onMouseLeave: (e: React.MouseEvent) => { (e.currentTarget as HTMLElement).style.background = "none"; } };
 
-let widgetCounter = 0;
+let frameCounter = 0;
 let tabCounter = 0;
-const createWidgetId = () => `widget-${Date.now()}-${++widgetCounter}`;
+const createFrameId = () => `frame-${Date.now()}-${++frameCounter}`;
 const createTabId = () => `view-${Date.now()}-${++tabCounter}`;
 
 const App: React.FC = () => {
@@ -438,8 +441,8 @@ const App: React.FC = () => {
   const [isDraggingTab, setIsDraggingTab] = useState(false);
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
-  const [selectedWidgetIds, setSelectedWidgetIds] = useState<Set<string>>(new Set());
+  const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
+  const [selectedFrameIds, setSelectedFrameIds] = useState<Set<string>>(new Set());
   const [editMode, setEditMode] = useState(false);
   const initialSettingsRef = useRef(loadSettings());
   const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || "#f7fffe");
@@ -451,7 +454,7 @@ const App: React.FC = () => {
   const [nodeDocLinks, setNodeDocLinks] = useState<Record<string, string>>(() => loadNodeDocLinks());
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
-  const [widgetMenu, setWidgetMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [frameRightClickMenu, setFrameRightClickMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [moduleTypeMenu, setModuleTypeMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [showNodesSubmenu, setShowNodesSubmenu] = useState(false);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number } | null>(null);
@@ -460,26 +463,26 @@ const App: React.FC = () => {
 
   const dragRef = useRef<DragState | null>(null);
   const tabDragRef = useRef<{ id: string; startX: number; startY: number } | null>(null);
-  const copiedWidgetRef = useRef<FrameDataModel | null>(null);
+  const copiedFrameRef = useRef<FrameDataModel | null>(null);
   const undoStackRef = useRef<DashboardSnapshot[]>([]);
   const redoStackRef = useRef<DashboardSnapshot[]>([]);
   const lastSnapshotRef = useRef<DashboardSnapshot | null>(null);
   const restoringRef = useRef(false);
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId) ?? tabs[0], [tabs, activeTabId]);
-  const widgets = activeTab?.widgets ?? [];
+  const frames = activeTab?.frames ?? [];
 
   useEffect(() => {
-    if (!selectedWidgetId) return;
-    if (!widgets.some((w) => w.id === selectedWidgetId)) setSelectedWidgetId(null);
-  }, [widgets, selectedWidgetId]);
+    if (!selectedFrameId) return;
+    if (!frames.some((w) => w.id === selectedFrameId)) setSelectedFrameId(null);
+  }, [frames, selectedFrameId]);
   useEffect(() => {
-    const ids = new Set(widgets.map((widget) => widget.id));
-    setSelectedWidgetIds((prev) => new Set(Array.from(prev).filter((id) => ids.has(id))));
-  }, [widgets]);
+    const ids = new Set(frames.map((widget) => widget.id));
+    setSelectedFrameIds((prev) => new Set(Array.from(prev).filter((id) => ids.has(id))));
+  }, [frames]);
 
-  const updateActiveWidgets = useCallback((updater: (prev: FrameDataModel[]) => FrameDataModel[]) => {
-    setTabs((prev) => prev.map((tab) => (tab.id === activeTabId ? { ...tab, widgets: updater(tab.widgets) } : tab)));
+  const updateActiveFrames = useCallback((updater: (prev: FrameDataModel[]) => FrameDataModel[]) => {
+    setTabs((prev) => prev.map((tab) => (tab.id === activeTabId ? { ...tab, frames: updater(tab.frames) } : tab)));
   }, [activeTabId]);
 
   const buildSnapshot = useCallback((): DashboardSnapshot => ({
@@ -539,96 +542,96 @@ const App: React.FC = () => {
   const stepX = viewSize.w / gridCols;
   const stepY = canvasH / gridRows;
 
-  const applyColorway = useCallback((widget: FrameDataModel, theme: ColorwayKey): FrameDataModel => {
+  const applyColorway = useCallback((frame: FrameDataModel, theme: ColorwayKey): FrameDataModel => {
     const swatch = COLORWAYS[theme];
-    return { ...widget, theme, color: swatch.color, accent: swatch.accent };
+    return { ...frame, theme, color: swatch.color, accent: swatch.accent };
   }, []);
 
-  const addWidget = useCallback((kind = "chart") => {
-    const template = WIDGET_LIBRARY.find((item) => item.kind === kind);
+  const addFrame = useCallback((kind = "chart") => {
+    const template = FRAME_MODULE_LIBRARY.find((item) => item.kind === kind);
     if (!template) return;
-    const id = createWidgetId();
-    const theme = COLORWAY_ORDER[(widgetCounter + 1) % COLORWAY_ORDER.length];
-    updateActiveWidgets((prev) => [...prev, { id, kind, theme, x: 1, y: 1, w: template.defaultW, h: template.defaultH, title: template.label, color: COLORWAYS[theme].color, accent: COLORWAYS[theme].accent }]);
-  }, [updateActiveWidgets]);
+    const id = createFrameId();
+    const theme = COLORWAY_ORDER[(frameCounter + 1) % COLORWAY_ORDER.length];
+    updateActiveFrames((prev) => [...prev, { id, kind, theme, x: 1, y: 1, w: template.defaultW, h: template.defaultH, title: template.label, color: COLORWAYS[theme].color, accent: COLORWAYS[theme].accent }]);
+  }, [updateActiveFrames]);
 
-  const duplicateWidget = useCallback((id: string) => {
-    updateActiveWidgets((prev) => {
+  const duplicateFrame = useCallback((id: string) => {
+    updateActiveFrames((prev) => {
       const src = prev.find((w) => w.id === id);
       if (!src) return prev;
-      return [...prev, { ...src, id: createWidgetId(), x: clamp(src.x + 2, 0, gridCols - src.w), y: clamp(src.y + 2, 0, gridRows - src.h) }];
+      return [...prev, { ...src, id: createFrameId(), x: clamp(src.x + 2, 0, gridCols - src.w), y: clamp(src.y + 2, 0, gridRows - src.h) }];
     });
-  }, [gridCols, gridRows, updateActiveWidgets]);
+  }, [gridCols, gridRows, updateActiveFrames]);
 
-  const closeMenus = useCallback(() => { setWidgetMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); setShowNodesSubmenu(false); }, []);
+  const closeMenus = useCallback(() => { setFrameRightClickMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); setShowNodesSubmenu(false); }, []);
 
-  const saveNodeDocLink = useCallback((docWidgetID: string, canvasWidgetID: string) => {
+  const saveNodeDocLink = useCallback((docFrameID: string, canvasFrameID: string) => {
     setNodeDocLinks((prev) => {
-      const next = { ...prev, [docWidgetID]: canvasWidgetID };
+      const next = { ...prev, [docFrameID]: canvasFrameID };
       try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
   }, []);
 
-  const selectedWidgets = useMemo(() => widgets.filter((widget) => selectedWidgetIds.has(widget.id)), [widgets, selectedWidgetIds]);
+  const selectedFrames = useMemo(() => frames.filter((frame) => selectedFrameIds.has(frame.id)), [frames, selectedFrameIds]);
   const linkablePair = useMemo(() => {
-    const pool = selectedWidgets.length > 0 ? selectedWidgets : (selectedWidgetId ? widgets.filter((widget) => widget.id === selectedWidgetId) : []);
+    const pool = selectedFrames.length > 0 ? selectedFrames : (selectedFrameId ? frames.filter((frame) => frame.id === selectedFrameId) : []);
     if (pool.length !== 2) return null;
-    const canvas = pool.find((widget) => widget.kind === "nodes" || widget.kind === "nodes-canvas");
-    const doc = pool.find((widget) => widget.kind === "node-doc");
+    const canvas = pool.find((frame) => frame.kind === "nodes" || frame.kind === "nodes-canvas");
+    const doc = pool.find((frame) => frame.kind === "node-doc");
     if (!canvas || !doc) return null;
     return { canvas, doc };
-  }, [selectedWidgetId, selectedWidgets, widgets]);
+  }, [selectedFrameId, selectedFrames, frames]);
 
   const linkSelectedNodeModules = useCallback(() => {
     if (!linkablePair) return;
     saveNodeDocLink(linkablePair.doc.id, linkablePair.canvas.id);
   }, [linkablePair, saveNodeDocLink]);
   const linkNodesLabel = useMemo(() => {
-    const pool = selectedWidgets.length > 1 ? selectedWidgets : (linkablePair ? [linkablePair.canvas, linkablePair.doc] : []);
+    const pool = selectedFrames.length > 1 ? selectedFrames : (linkablePair ? [linkablePair.canvas, linkablePair.doc] : []);
     if (pool.length === 0) return "Node Canvas + Node Doc";
-    return pool.map((widget) => widget.title).join(" + ");
-  }, [linkablePair, selectedWidgets]);
-  const linkedWidgetIDs = useMemo(() => {
+    return pool.map((frame) => frame.title).join(" + ");
+  }, [linkablePair, selectedFrames]);
+  const linkedFrameIDs = useMemo(() => {
     const ids = new Set<string>();
-    const widgetIDs = new Set(widgets.map((widget) => widget.id));
-    for (const [docWidgetID, canvasWidgetID] of Object.entries(nodeDocLinks)) {
-      if (!widgetIDs.has(docWidgetID) || !widgetIDs.has(canvasWidgetID)) continue;
-      ids.add(docWidgetID);
-      ids.add(canvasWidgetID);
+    const frameIDs = new Set(frames.map((frame) => frame.id));
+    for (const [docFrameID, canvasFrameID] of Object.entries(nodeDocLinks)) {
+      if (!frameIDs.has(docFrameID) || !frameIDs.has(canvasFrameID)) continue;
+      ids.add(docFrameID);
+      ids.add(canvasFrameID);
     }
     return ids;
-  }, [nodeDocLinks, widgets]);
+  }, [nodeDocLinks, frames]);
 
-  const deleteSelectedWidget = useCallback(() => {
-    const ids = selectedWidgetIds.size > 0 ? selectedWidgetIds : (selectedWidgetId ? new Set([selectedWidgetId]) : new Set<string>());
+  const deleteSelectedFrame = useCallback(() => {
+    const ids = selectedFrameIds.size > 0 ? selectedFrameIds : (selectedFrameId ? new Set([selectedFrameId]) : new Set<string>());
     if (ids.size === 0) return;
-    updateActiveWidgets((prev) => prev.filter((w) => !ids.has(w.id)));
-    setSelectedWidgetId(null);
-    setSelectedWidgetIds(new Set());
-  }, [selectedWidgetId, selectedWidgetIds, updateActiveWidgets]);
+    updateActiveFrames((prev) => prev.filter((w) => !ids.has(w.id)));
+    setSelectedFrameId(null);
+    setSelectedFrameIds(new Set());
+  }, [selectedFrameId, selectedFrameIds, updateActiveFrames]);
 
-  const copySelectedWidget = useCallback(() => {
-    if (!selectedWidgetId) return;
-    const target = widgets.find((w) => w.id === selectedWidgetId);
+  const copySelectedFrame = useCallback(() => {
+    if (!selectedFrameId) return;
+    const target = frames.find((w) => w.id === selectedFrameId);
     if (!target) return;
-    copiedWidgetRef.current = { ...target };
-  }, [selectedWidgetId, widgets]);
+    copiedFrameRef.current = { ...target };
+  }, [selectedFrameId, frames]);
 
-  const pasteWidget = useCallback(() => {
-    const copied = copiedWidgetRef.current;
+  const pasteFrame = useCallback(() => {
+    const copied = copiedFrameRef.current;
     if (!copied) return;
-    const id = createWidgetId();
+    const id = createFrameId();
     const pasted: FrameDataModel = {
       ...copied,
       id,
       x: clamp(copied.x + 2, 0, gridCols - copied.w),
       y: clamp(copied.y + 2, 0, gridRows - copied.h),
     };
-    updateActiveWidgets((prev) => [...prev, pasted]);
-    setSelectedWidgetId(id);
-    setSelectedWidgetIds(new Set([id]));
-  }, [gridCols, gridRows, updateActiveWidgets]);
+    updateActiveFrames((prev) => [...prev, pasted]);
+    setSelectedFrameId(id);
+    setSelectedFrameIds(new Set([id]));
+  }, [gridCols, gridRows, updateActiveFrames]);
 
   const undo = useCallback(() => {
     if (undoStackRef.current.length === 0) return;
@@ -649,16 +652,16 @@ const App: React.FC = () => {
   }, [applySnapshot, buildSnapshot]);
 
   useKeyboardShortcuts({
-    deleteSelection: deleteSelectedWidget,
-    copySelection: copySelectedWidget,
-    pasteSelection: pasteWidget,
+    deleteSelection: deleteSelectedFrame,
+    copySelection: copySelectedFrame,
+    pasteSelection: pasteFrame,
     undo,
     redo,
   });
 
   const addTab = useCallback(() => {
     const id = createTabId();
-    const newTab: ViewTab = { id, name: `View ${tabs.length + 1}`, widgets: [] };
+    const newTab: ViewTab = { id, name: `View ${tabs.length + 1}`, frames: [] };
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(id);
     setEditMode(true);
@@ -728,7 +731,7 @@ const App: React.FC = () => {
       const dCols = Math.round((px - d.startMouseX) / stepX);
       const dRows = Math.round((py - d.startMouseY) / stepY);
 
-      updateActiveWidgets((prev) => prev.map((w) => {
+      updateActiveFrames((prev) => prev.map((w) => {
         if (w.id !== d.id) return w;
         if (d.mode === "drag") return { ...w, x: clamp(d.origX + dCols, 0, gridCols - w.w), y: clamp(d.origY + dRows, 0, gridRows - w.h) };
         let x = d.origX, y = d.origY, nw = d.origW, nh = d.origH;
@@ -742,9 +745,9 @@ const App: React.FC = () => {
     const onEnd = () => {
       const d = dragRef.current;
       if (d) {
-        updateActiveWidgets((prev) => prev.map((w) => {
+        updateActiveFrames((prev) => prev.map((w) => {
           if (w.id !== d.id) return w;
-          const overlaps = prev.some((candidate) => candidate.id !== w.id && widgetsOverlap(w, candidate));
+          const overlaps = prev.some((candidate) => candidate.id !== w.id && framesOverlap(w, candidate));
           if (!overlaps) return w;
           return d.mode === "drag"
             ? { ...w, x: d.origX, y: d.origY }
@@ -764,13 +767,13 @@ const App: React.FC = () => {
       window.removeEventListener("touchmove", onMove);
       window.removeEventListener("touchend", onEnd);
     };
-  }, [gridCols, gridRows, stepX, stepY, updateActiveWidgets]);
+  }, [gridCols, gridRows, stepX, stepY, updateActiveFrames]);
 
   return (
     <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: bgColor || UI_THEME.surface }}>
       <header
         style={{ height: HEADER_H, padding: "0 20px", display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", background: headerBgColor, borderBottom: `1px solid ${UI_THEME.line}` }}
-        onContextMenu={(e) => { e.preventDefault(); setHeaderMenu({ x: e.clientX, y: e.clientY }); setCanvasMenu(null); setWidgetMenu(null); setModuleTypeMenu(null); }}
+        onContextMenu={(e) => { e.preventDefault(); setHeaderMenu({ x: e.clientX, y: e.clientY }); setCanvasMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <h1 style={{ fontWeight: 800, color: headerTextColor, letterSpacing: "0.04em", textTransform: "uppercase", margin: 0, lineHeight: 1 }}><span style={{ fontSize: 18 }}>Mango</span><span style={{ fontSize: 23, marginLeft: 2 }}>OS</span></h1>
@@ -827,32 +830,32 @@ const App: React.FC = () => {
           <button onClick={() => setEditMode((v) => !v)} style={{ height: 32, padding: "0 10px", background: editMode ? "#9df8ff" : tabBgColor, color: tabTextColor, border: `1px solid ${editMode ? "#0f7f8b" : UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
             {editMode ? "EDIT: ON" : "EDIT: OFF"}
           </button>
-          <button onClick={() => { addWidget(); setEditMode(true); }} style={{ width: 32, height: 32, background: tabBgColor, color: tabTextColor, border: `1px solid ${UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 20 }}>+</button>
+          <button onClick={() => { addFrame(); setEditMode(true); }} style={{ width: 32, height: 32, background: tabBgColor, color: tabTextColor, border: `1px solid ${UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 20 }}>+</button>
         </div>
       </header>
 
-      <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onClick={() => { setSelectedWidgetId(null); setSelectedWidgetIds(new Set()); }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setHeaderMenu(null); setWidgetMenu(null); setModuleTypeMenu(null); setShowNodesSubmenu(false); }}>
+      <div style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onClick={() => { setSelectedFrameId(null); setSelectedFrameIds(new Set()); }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setHeaderMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); setShowNodesSubmenu(false); }}>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
         {editMode && draggingId && (() => {
-          const activeWidget = widgets.find((w) => w.id === draggingId);
-          if (!activeWidget) return null;
-          return <PlacementSplash widget={activeWidget} widgets={widgets} cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} />;
+          const activeFrame = frames.find((w) => w.id === draggingId);
+          if (!activeFrame) return null;
+          return <PlacementSplash frame={activeFrame} frames={frames} cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} />;
         })()}
-        {widgets.map((w) => (
-          <WidgetCard
+        {frames.map((w) => (
+          <FrameCard
             key={w.id}
-            widget={w}
+            frame={w}
             stepX={stepX}
             stepY={stepY}
             isDragging={draggingId === w.id}
-            isSelected={selectedWidgetIds.has(w.id)}
-            isLinked={linkedWidgetIDs.has(w.id)}
+            isSelected={selectedFrameIds.has(w.id)}
+            isLinked={linkedFrameIDs.has(w.id)}
             editMode={editMode}
             onDragStart={(e, id) => {
               if (!editMode) return;
               e.preventDefault();
               const { px, py } = getPointer(e);
-              const widget = widgets.find((ww) => ww.id === id);
+              const widget = frames.find((ww) => ww.id === id);
               if (!widget) return;
               dragRef.current = { id, mode: "drag", edges: {}, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
               setDraggingId(id);
@@ -861,40 +864,40 @@ const App: React.FC = () => {
               if (!editMode) return;
               e.preventDefault();
               const { px, py } = getPointer(e);
-              const widget = widgets.find((ww) => ww.id === id);
+              const widget = frames.find((ww) => ww.id === id);
               if (!widget) return;
               dragRef.current = { id, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
               setDraggingId(id);
             }}
             onContextMenu={(e, id) => {
               e.preventDefault();
-              if (!selectedWidgetIds.has(id)) {
-                setSelectedWidgetIds(new Set([id]));
-                setSelectedWidgetId(id);
+              if (!selectedFrameIds.has(id)) {
+                setSelectedFrameIds(new Set([id]));
+                setSelectedFrameId(id);
               }
-              setWidgetMenu({ x: e.clientX, y: e.clientY, id });
+              setFrameRightClickMenu({ x: e.clientX, y: e.clientY, id });
               setModuleTypeMenu(null);
               setCanvasMenu(null);
               setShowNodesSubmenu(false);
             }}
             onModuleNameClick={(e, id) => {
-              setWidgetMenu(null);
+              setFrameRightClickMenu(null);
               setHeaderMenu(null);
               setCanvasMenu(null);
               setShowNodesSubmenu(false);
-              setSelectedWidgetId(id);
-              setSelectedWidgetIds(new Set([id]));
+              setSelectedFrameId(id);
+              setSelectedFrameIds(new Set([id]));
               setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
             }}
             onSelect={(event, id) => {
               const additiveSelect = "ctrlKey" in event ? (!!event.ctrlKey || !!event.shiftKey) : false;
               if (!additiveSelect) {
-                setSelectedWidgetId(id);
-                setSelectedWidgetIds(new Set([id]));
+                setSelectedFrameId(id);
+                setSelectedFrameIds(new Set([id]));
                 return;
               }
-              setSelectedWidgetId(id);
-              setSelectedWidgetIds((prev) => {
+              setSelectedFrameId(id);
+              setSelectedFrameIds((prev) => {
                 const next = new Set(prev);
                 if (next.has(id)) next.delete(id);
                 else next.add(id);
@@ -907,15 +910,15 @@ const App: React.FC = () => {
       </div>
 
       {tabMenu && (
-        <FloatingMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
+        <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
-        </FloatingMenu>
+        </FrameRightClickMenu>
       )}
 
-      {widgetMenu && (
-        <FloatingMenu x={widgetMenu.x} y={widgetMenu.y} onClose={closeMenus}>
-          <button style={menuBtnBase} onClick={() => { duplicateWidget(widgetMenu.id); closeMenus(); }} {...hoverHandlers}>Duplicate</button>
+      {frameRightClickMenu && (
+        <FrameRightClickMenu x={frameRightClickMenu.x} y={frameRightClickMenu.y} onClose={closeMenus}>
+          <button style={menuBtnBase} onClick={() => { duplicateFrame(frameRightClickMenu.id); closeMenus(); }} {...hoverHandlers}>Duplicate</button>
           <button
             style={{ ...menuBtnBase, color: linkablePair ? "#111" : "#999" }}
             disabled={!linkablePair}
@@ -926,24 +929,24 @@ const App: React.FC = () => {
           </button>
           {COLORWAY_ORDER.map((theme) => (
             <button key={theme} style={menuBtnBase} onClick={() => {
-              updateActiveWidgets((prev) => prev.map((w) => (w.id === widgetMenu.id ? applyColorway(w, theme) : w)));
+              updateActiveFrames((prev) => prev.map((w) => (w.id === frameRightClickMenu.id ? applyColorway(w, theme) : w)));
               closeMenus();
             }} {...hoverHandlers}>
               <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} /> {theme.toUpperCase()}
             </button>
           ))}
-          <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { updateActiveWidgets((prev) => prev.filter((w) => w.id !== widgetMenu.id)); closeMenus(); }} {...hoverHandlers}>Delete</button>
-        </FloatingMenu>
+          <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { updateActiveFrames((prev) => prev.filter((w) => w.id !== frameRightClickMenu.id)); closeMenus(); }} {...hoverHandlers}>Delete</button>
+        </FrameRightClickMenu>
       )}
 
       {moduleTypeMenu && (
-        <FloatingMenu x={moduleTypeMenu.x} y={moduleTypeMenu.y} onClose={closeMenus}>
-          {WIDGET_LIBRARY.filter((item) => item.kind !== "nodes-canvas" && item.kind !== "node-doc").map((item) => (
+        <FrameRightClickMenu x={moduleTypeMenu.x} y={moduleTypeMenu.y} onClose={closeMenus}>
+          {FRAME_MODULE_LIBRARY.filter((item) => item.kind !== "nodes-canvas" && item.kind !== "node-doc").map((item) => (
             <button
               key={item.kind}
               style={menuBtnBase}
               onClick={() => {
-                updateActiveWidgets((prev) => prev.map((w) => (w.id === moduleTypeMenu.id ? { ...w, kind: item.kind, title: item.label } : w)));
+                updateActiveFrames((prev) => prev.map((w) => (w.id === moduleTypeMenu.id ? { ...w, kind: item.kind, title: item.label } : w)));
                 closeMenus();
               }}
               {...hoverHandlers}
@@ -983,7 +986,7 @@ const App: React.FC = () => {
                     key={item.kind}
                     style={menuBtnBase}
                     onClick={() => {
-                      updateActiveWidgets((prev) => prev.map((w) => (w.id === moduleTypeMenu.id ? { ...w, kind: item.kind, title: item.label } : w)));
+                      updateActiveFrames((prev) => prev.map((w) => (w.id === moduleTypeMenu.id ? { ...w, kind: item.kind, title: item.label } : w)));
                       closeMenus();
                     }}
                     {...hoverHandlers}
@@ -994,11 +997,11 @@ const App: React.FC = () => {
               </div>
             )}
           </div>
-        </FloatingMenu>
+        </FrameRightClickMenu>
       )}
 
       {canvasMenu && (
-        <FloatingMenu x={canvasMenu.x} y={canvasMenu.y} onClose={closeMenus}>
+        <FrameRightClickMenu x={canvasMenu.x} y={canvasMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { setEditMode((v) => !v); closeMenus(); }} {...hoverHandlers}>
             Toggle Edit Mode (Now: {editMode ? "ON" : "OFF"})
           </button>
@@ -1010,11 +1013,11 @@ const App: React.FC = () => {
             Plus Color
             <input type="color" value={crossColor} onChange={(e) => setCrossColor(e.target.value)} />
           </label>
-        </FloatingMenu>
+        </FrameRightClickMenu>
       )}
 
       {headerMenu && (
-        <FloatingMenu x={headerMenu.x} y={headerMenu.y} onClose={closeMenus}>
+        <FrameRightClickMenu x={headerMenu.x} y={headerMenu.y} onClose={closeMenus}>
           <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>
             Header Bar
             <input type="color" value={headerBgColor} onChange={(e) => setHeaderBgColor(e.target.value)} />
@@ -1031,7 +1034,7 @@ const App: React.FC = () => {
             Tab Text
             <input type="color" value={tabTextColor} onChange={(e) => setTabTextColor(e.target.value)} />
           </label>
-        </FloatingMenu>
+        </FrameRightClickMenu>
       )}
     </div>
   );
