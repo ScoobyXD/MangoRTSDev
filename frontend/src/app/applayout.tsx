@@ -6,6 +6,7 @@ import ModulePickerMenu from "./menus/ModulePickerMenu";
 import { MODULE_CONTENT_MAP as CONTENT_MAP, MODULE_LIBRARY as FRAME_MODULE_LIBRARY } from "../modules";
 import type { FrameDataModel, DragState, ResizeEdges } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { NODE_DOC_LINKS_KEY } from "../modules/node/shared";
 
 const CELL_SIZE = 28;
 const HEADER_H = 48;
@@ -37,7 +38,6 @@ const NODE_SUBMODULES = [
   { kind: "nodes-canvas", label: "Node Canvas" },
   { kind: "node-doc", label: "Node Doc" },
 ] as const;
-const NODE_DOC_LINKS_KEY = "node-doc-widget-links-v1" // backward-compatible storage key;
 
 const INITIAL_WIDGETS: FrameDataModel[] = [
   { id: "w-revenue", theme: "teal", kind: "revenue", x: 2, y: 1, w: 12, h: 9, title: "Revenue", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },

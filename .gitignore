@@ -1,2 +1,6 @@
 docs/MangoOS.txt
 .env
+# Frontend build artifacts
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+frontend/node_modules/
