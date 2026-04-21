@@ -188,6 +188,7 @@ A Case is the source of truth for one piece of work. Everything related to that 
 ## Terminology Update
 
 Prefer **module** over widget in product language and UI labels.
+Prefer **frame data model** over widget for the container model in code.
 
 ## Implementation Decision (April 8, 2026)
 

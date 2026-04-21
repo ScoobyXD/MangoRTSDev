@@ -1,4 +1,4 @@
-export interface Widget {
+export interface FrameDataModel {
   id: string;
   kind: string;
   theme?: "teal" | "orange" | "white" | "black";
@@ -10,6 +10,9 @@ export interface Widget {
   color: string;
   accent: string;
 }
+
+// Backward compatibility during migration.
+export type Widget = FrameDataModel;
 
 export interface ResizeEdges {
   top?: boolean;

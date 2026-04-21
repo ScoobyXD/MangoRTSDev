@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { MODULE_CONTENT_MAP as CONTENT_MAP, MODULE_LIBRARY as WIDGET_LIBRARY } from "./modules";
-import type { Widget, DragState, ResizeEdges } from "./types";
+import type { FrameDataModel, DragState, ResizeEdges } from "./types";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
 const CELL_SIZE = 28;
@@ -35,7 +35,7 @@ const NODE_SUBMODULES = [
 ] as const;
 const NODE_DOC_LINKS_KEY = "node-doc-widget-links-v1";
 
-const INITIAL_WIDGETS: Widget[] = [
+const INITIAL_WIDGETS: FrameDataModel[] = [
   { id: "w-revenue", theme: "teal", kind: "revenue", x: 2, y: 1, w: 12, h: 9, title: "Revenue", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
   { id: "w-users", theme: "orange", kind: "users", x: 14, y: 1, w: 14, h: 9, title: "Active Users", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
   { id: "w-alerts", theme: "orange", kind: "alerts", x: 30, y: 1, w: 12, h: 14, title: "Alerts", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
@@ -50,7 +50,7 @@ const INITIAL_WIDGETS: Widget[] = [
 interface ViewTab {
   id: string;
   name: string;
-  widgets: Widget[];
+  widgets: FrameDataModel[];
 }
 
 interface DashboardSnapshot {
@@ -69,7 +69,7 @@ function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v));
 }
 
-function widgetsOverlap(a: Widget, b: Widget) {
+function widgetsOverlap(a: FrameDataModel, b: FrameDataModel) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
@@ -85,7 +85,7 @@ function isHexColor(value: unknown): value is string {
   return typeof value === "string" && /^#[0-9A-F]{6}$/i.test(value);
 }
 
-function coerceWidget(value: unknown): Widget | null {
+function coerceWidget(value: unknown): FrameDataModel | null {
   if (!isObject(value)) return null;
   const { id, kind, theme, x, y, w, h, title, color, accent } = value;
   if (
@@ -107,10 +107,10 @@ function coerceWidget(value: unknown): Widget | null {
   };
 }
 
-function sanitizeWidgets(value: unknown): Widget[] {
+function sanitizeWidgets(value: unknown): FrameDataModel[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
-  const cleaned: Widget[] = [];
+  const cleaned: FrameDataModel[] = [];
   for (const item of value) {
     const widget = coerceWidget(item);
     if (!widget || seen.has(widget.id)) continue;
@@ -217,8 +217,8 @@ const GridCrosses: React.FC<{ cols: number; rows: number; stepX: number; stepY: 
 );
 
 const PlacementSplash: React.FC<{
-  widget: Widget;
-  widgets: Widget[];
+  widget: FrameDataModel;
+  widgets: FrameDataModel[];
   cols: number;
   rows: number;
   stepX: number;
@@ -350,7 +350,7 @@ const HANDLES: HandleDef[] = [
 ];
 
 interface WidgetCardProps {
-  widget: Widget;
+  widget: FrameDataModel;
   stepX: number;
   stepY: number;
   isDragging: boolean;
@@ -460,7 +460,7 @@ const App: React.FC = () => {
 
   const dragRef = useRef<DragState | null>(null);
   const tabDragRef = useRef<{ id: string; startX: number; startY: number } | null>(null);
-  const copiedWidgetRef = useRef<Widget | null>(null);
+  const copiedWidgetRef = useRef<FrameDataModel | null>(null);
   const undoStackRef = useRef<DashboardSnapshot[]>([]);
   const redoStackRef = useRef<DashboardSnapshot[]>([]);
   const lastSnapshotRef = useRef<DashboardSnapshot | null>(null);
@@ -478,7 +478,7 @@ const App: React.FC = () => {
     setSelectedWidgetIds((prev) => new Set(Array.from(prev).filter((id) => ids.has(id))));
   }, [widgets]);
 
-  const updateActiveWidgets = useCallback((updater: (prev: Widget[]) => Widget[]) => {
+  const updateActiveWidgets = useCallback((updater: (prev: FrameDataModel[]) => FrameDataModel[]) => {
     setTabs((prev) => prev.map((tab) => (tab.id === activeTabId ? { ...tab, widgets: updater(tab.widgets) } : tab)));
   }, [activeTabId]);
 
@@ -539,7 +539,7 @@ const App: React.FC = () => {
   const stepX = viewSize.w / gridCols;
   const stepY = canvasH / gridRows;
 
-  const applyColorway = useCallback((widget: Widget, theme: ColorwayKey): Widget => {
+  const applyColorway = useCallback((widget: FrameDataModel, theme: ColorwayKey): FrameDataModel => {
     const swatch = COLORWAYS[theme];
     return { ...widget, theme, color: swatch.color, accent: swatch.accent };
   }, []);
@@ -619,7 +619,7 @@ const App: React.FC = () => {
     const copied = copiedWidgetRef.current;
     if (!copied) return;
     const id = createWidgetId();
-    const pasted: Widget = {
+    const pasted: FrameDataModel = {
       ...copied,
       id,
       x: clamp(copied.x + 2, 0, gridCols - copied.w),
