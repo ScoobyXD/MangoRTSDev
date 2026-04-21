@@ -9,8 +9,8 @@ import {
   TasksContent,
   UsersContent,
 } from "../WidgetContent";
-import { NodesContent } from "../module/node/canvas";
-import { NodeDocContent } from "../module/node/doc";
+import { NodesContent } from "./node/canvas";
+import { NodeDocContent } from "./node/doc";
 
 export interface ModuleTemplate {
   kind: string;
