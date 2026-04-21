@@ -1,1 +1,1 @@
-export { NodesContent } from "../NodeModules";
+export { NodesContent } from "./NodesContent";
