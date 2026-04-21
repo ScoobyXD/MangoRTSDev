@@ -5,11 +5,17 @@ This document captures the full behavior and implementation details currently pr
 - **Node Canvas** (`nodes-canvas`, legacy `nodes`)
 - **Node Doc** (`node-doc`)
 
+Implementation is now organized under:
+
+- `frontend/src/modules/node/canvas/NodesContent.tsx`
+- `frontend/src/modules/node/doc/NodeDocContent.tsx`
+- `frontend/src/modules/node/shared.ts` (shared types/constants/helpers)
+
 ---
 
 ## 1) Purpose
 
-The Nodes modules provide a visual “canvas-inside-canvas” experience plus linked node documentation inside dashboard widgets where users can:
+The Nodes modules provide a visual “canvas-inside-canvas” experience plus linked node documentation inside dashboard frames where users can:
 
 - create and delete nodes,
 - create directional relationships from side handles,
@@ -63,7 +69,7 @@ All HTTP calls go through a shared `requestJSON` helper:
 The module uses a virtual world and a viewport:
 
 - **World size**: `WORLD_W = 3200`, `WORLD_H = 2200`
-- **Viewport**: container inside widget (`minHeight: 560`)
+- **Viewport**: container inside frame (`minHeight: 560`)
 
 Nodes are positioned in **world coordinates**, while pan/zoom transform the world into viewport screen space.
 
@@ -168,9 +174,9 @@ Relationships are visualized with SVG polylines in world space.
 
 ## 8) Local persistence (layout + viewport)
 
-The module persists canvas state in `localStorage` keyed per company and widget scope:
+The module persists canvas state in `localStorage` keyed per company and frame scope:
 
-- Key format: `node-canvas-state-v3:<companyID>:<widgetId-or-global>`
+- Key format: `node-canvas-state-v3:<companyID>:<frameId-or-global>`
 - Stored fields:
   - `zoom`
   - `pan`
@@ -199,19 +205,19 @@ This keeps layout and viewport stable when switching views and reopening the mod
 
 ### 9.1 Linking model
 
-- Node Doc is linked to Node Canvas at widget level using:
-  - localStorage key: `node-doc-widget-links-v1`
-  - value: map of `nodeDocWidgetId -> nodeCanvasWidgetId`
+- Node Doc is linked to Node Canvas at frame level using:
+  - localStorage key: `node-doc-frame-links-v1`
+  - value: map of `nodeDocFrameId -> nodeCanvasFrameId`
 - Linking is triggered from module context menu action:
   - `Link nodes: <dynamic titles joined by " + ">`
-- Linked modules show a **hexagon indicator** next to the module name chip in the widget header (both Node Canvas and Node Doc).
+- Linked modules show a **hexagon indicator** next to the module name chip in the frame header (both Node Canvas and Node Doc).
 - Link action is enabled when selection contains exactly:
   - one Node Canvas module (`nodes-canvas` or legacy `nodes`)
   - one Node Doc module (`node-doc`)
 
 ### 9.2 Module multi-select behavior (for linking)
 
-- Widget/module selection is additive with `Shift + click` or `Ctrl + click`.
+- Frame/module selection is additive with `Shift + click` or `Ctrl + click`.
 - Right-click on an already-selected module preserves the multi-selection.
 - Selection capture runs in pointer capture phase to avoid nested module interactions dropping selection.
 
@@ -219,7 +225,7 @@ This keeps layout and viewport stable when switching views and reopening the mod
 
 Once linked, Node Doc polls the linked canvas state key:
 
-- `node-canvas-state-v3:<companyID>:<linkedCanvasWidgetId>`
+- `node-canvas-state-v3:<companyID>:<linkedCanvasFrameId>`
 
 and reads `selectedNodeID`. That selected node becomes the active storage target for Node Doc.
 
@@ -243,7 +249,7 @@ and reads `selectedNodeID`. That selected node becomes the active storage target
 
 ### Node Canvas main surface
 
-- Canvas consumes almost all remaining widget height (bottom utility rows removed).
+- Canvas consumes almost all remaining frame height (bottom utility rows removed).
 - World grid, relationship lines, node cards, side `+` actions, selection box, and group badge.
 - In-canvas instruction text.
 - Right-click context menu with `Create new node` at cursor location.
@@ -298,5 +304,7 @@ This is the requested teal update used by teal-themed modules.
 
 Primary implementation is in:
 
-- `frontend/src/WidgetContent.tsx` (Nodes module behavior)
-- `frontend/src/App.tsx` (teal colorway config)
+- `frontend/src/modules/node/canvas/NodesContent.tsx` (Node Canvas behavior)
+- `frontend/src/modules/node/doc/NodeDocContent.tsx` (Node Doc behavior)
+- `frontend/src/modules/node/shared.ts` (shared node types/constants/helpers)
+- `frontend/src/app/applayout.tsx` (frame/menu integration and link action wiring)

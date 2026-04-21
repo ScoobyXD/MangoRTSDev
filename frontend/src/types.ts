@@ -11,9 +11,6 @@ export interface FrameDataModel {
   accent: string;
 }
 
-// Backward compatibility during migration.
-export type Widget = FrameDataModel;
-
 export interface ResizeEdges {
   top?: boolean;
   bottom?: boolean;

@@ -8,16 +8,16 @@ import {
   RevenueContent,
   TasksContent,
   UsersContent,
-  NodesContent,
-  NodeDocContent,
-} from "../WidgetContent";
+} from "./content/basic";
+import { NodesContent } from "./node/canvas";
+import { NodeDocContent } from "./node/doc";
 
 export interface ModuleTemplate {
   kind: string;
   label: string;
   defaultW: number;
   defaultH: number;
-  render: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }>;
+  render: React.FC<{ accent: string; frameId?: string; hideTopControls?: boolean }>;
 }
 
 export const MODULE_LIBRARY: ModuleTemplate[] = [
@@ -33,7 +33,7 @@ export const MODULE_LIBRARY: ModuleTemplate[] = [
   { kind: "node-doc", label: "Node Doc", defaultW: 16, defaultH: 14, render: NodeDocContent },
 ];
 
-export const MODULE_CONTENT_MAP: Record<string, React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }>> = Object.fromEntries(
+export const MODULE_CONTENT_MAP: Record<string, React.FC<{ accent: string; frameId?: string; hideTopControls?: boolean }>> = Object.fromEntries(
   MODULE_LIBRARY.map((module) => [module.kind, module.render])
 );
 MODULE_CONTENT_MAP.nodes = NodesContent;

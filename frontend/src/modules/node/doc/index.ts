@@ -1,1 +1,1 @@
-export { NodeDocContent } from "../../../WidgetContent";
+export { NodeDocContent } from "./NodeDocContent";

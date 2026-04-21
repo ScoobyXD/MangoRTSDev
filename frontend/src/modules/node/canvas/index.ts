@@ -1,1 +1,1 @@
-export { NodesContent } from "../../../WidgetContent";
+export { NodesContent } from "./NodesContent";

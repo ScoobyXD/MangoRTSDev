@@ -32,7 +32,7 @@ Open that URL in your browser.
 - If needed, override with env vars before `npm run dev`:
 
 ```bash
-export VITE_API_BASE=http://localhost:8080
+export VITE_API_BASE_URL=http://localhost:8080
 export VITE_COMPANY_ID=11111111-1111-1111-1111-111111111111
 ```
 
