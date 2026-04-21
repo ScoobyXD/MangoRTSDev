@@ -1,7 +1,12 @@
 # FRAME/MODULE MIGRATION HANDOFF FOR NEW CODEX INSTANCE
 
 ## Purpose of this handoff
-This document is a full context transfer for the next Codex instance to finish the migration plan in two phases:
+This document is a context transfer for finishing and cleanup of the frame/module migration.
+
+> Status update (2026-04-21): PRA and PRB extraction are completed.
+> Runtime now lives in app-layer + module-layer files without legacy compatibility shims in `src/App.tsx`, `src/widgets/index.ts`, or `src/module/node/NodeModules.tsx`.
+
+The original migration plan was two phases:
 
 - **PRA** = naming migration (safe, no behavior changes)
 - **PRB** = structural extraction (move logic out of `App.tsx`)
@@ -33,24 +38,30 @@ Do **not** introduce vague names that require explanation.
 ## Current repository state (important)
 
 ### Migration progress completed
-1. `FrameDataModel` was added as the primary model type.
-2. `Widget` remains as a temporary alias for backward compatibility.
-3. `src/modules` registry exists (`MODULE_LIBRARY`, `MODULE_CONTENT_MAP`).
-4. `src/widgets/index.ts` is now a compatibility shim re-exporting modules.
-5. `main.tsx` points to `app/applayout`.
-6. `docs/LLM.md` includes mandatory documentation rule.
+1. `FrameDataModel` is the primary model type and `Widget` remains as a temporary alias.
+2. Runtime app entry is `src/main.tsx` -> `src/app/applayout.tsx`.
+3. App-layer files are live and used (`applayout`, `frame`, `framecanvas`, `framerightclickmenu`, `ModulePickerMenu`).
+4. `src/modules` registry exists (`MODULE_LIBRARY`, `MODULE_CONTENT_MAP`).
+5. Node runtime logic is split under `src/module/node/`:
+   - `src/module/node/canvas/NodesContent.tsx`
+   - `src/module/node/doc/NodeDocContent.tsx`
+   - `src/module/node/shared.ts`
+6. `docs/LLM.md` mandatory documentation policy is active.
 
 ### Files to inspect first
-- `frontend/src/App.tsx`
 - `frontend/src/types.ts`
 - `frontend/src/modules/index.ts`
-- `frontend/src/widgets/index.ts`
 - `frontend/src/app/applayout.tsx`
 - `frontend/src/app/frame.tsx`
 - `frontend/src/app/framecanvas.tsx`
 - `frontend/src/app/framerightclickmenu.tsx`
 - `frontend/src/app/menus/ModulePickerMenu.tsx`
 - `frontend/src/WidgetContent.tsx`
+- `frontend/src/module/node/shared.ts`
+- `frontend/src/module/node/canvas/NodesContent.tsx`
+- `frontend/src/module/node/doc/NodeDocContent.tsx`
+- `frontend/src/module/node/canvas/index.ts`
+- `frontend/src/module/node/doc/index.ts`
 - `docs/frontend/modules/nodes.md`
 - `docs/LLM.md`
 
@@ -131,6 +142,21 @@ Decompose large app logic from `App.tsx` into app-layer files while preserving b
 - Extracted components are actually used (not placeholders only).
 - Behavior parity with pre-extraction version.
 - `npm run build` passes.
+
+### PRB remaining work (current)
+- Decompose `app/applayout.tsx` further into smaller state/behavior hooks and view components (optional quality follow-up, not required for migration correctness).
+
+---
+
+## Safe cleanup candidates (as of 2026-04-21)
+
+### Safe to delete immediately (generated artifacts)
+- `frontend/node_modules/` (reinstall with `npm install`)
+- `frontend/dist/` build outputs
+- `frontend/tsconfig.tsbuildinfo` build cache
+
+### Delete only after confirming no external consumers
+- No frontend `src` compatibility shims remain after current cleanup.
 
 ---
 

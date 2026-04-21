@@ -8,9 +8,9 @@ import {
   RevenueContent,
   TasksContent,
   UsersContent,
-  NodesContent,
-  NodeDocContent,
 } from "../WidgetContent";
+import { NodesContent } from "../module/node/canvas";
+import { NodeDocContent } from "../module/node/doc";
 
 export interface ModuleTemplate {
   kind: string;

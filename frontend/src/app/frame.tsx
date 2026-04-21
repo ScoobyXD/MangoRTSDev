@@ -1,12 +1,9 @@
 import React from "react";
 
-export interface FrameProps {
-  children: React.ReactNode;
-  style?: React.CSSProperties;
-}
+export type FrameProps = React.HTMLAttributes<HTMLDivElement>;
 
-const Frame: React.FC<FrameProps> = ({ children, style }) => {
-  return <div style={style}>{children}</div>;
+const Frame: React.FC<FrameProps> = ({ children, ...props }) => {
+  return <div {...props}>{children}</div>;
 };
 
 export default Frame;
