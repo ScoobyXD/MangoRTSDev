@@ -15,6 +15,8 @@ const MIN_W = 3;
 const MIN_H = 3;
 const HANDLE = 6;
 const CORNER_SIZE = 14;
+const CHILD_GRID_DIVISOR = 2;
+const CHILD_EDGE_GAP = 0.5;
 
 const COLORWAYS = {
   teal: { color: "#00d5ff", accent: "#006f85", text: "#042028", tagBg: "#042028", tagText: "#ffffff" },
@@ -79,6 +81,13 @@ interface DashboardSnapshot {
 function clamp(v: number, lo: number, hi: number) {
   if (lo > hi) return lo;
   return Math.max(lo, Math.min(hi, v));
+}
+
+function clampToRangeWithInset(value: number, min: number, max: number, inset: number) {
+  const lo = min + inset;
+  const hi = max - inset;
+  if (lo > hi) return clamp(value, min, max);
+  return clamp(value, lo, hi);
 }
 
 function framesOverlap(a: FrameDataModel, b: FrameDataModel) {
@@ -396,19 +405,30 @@ interface FrameCardProps {
   onModuleNameClick: (e: React.MouseEvent, id: string) => void;
   onSelect: (event: React.MouseEvent | React.TouchEvent, id: string) => void;
   isLinked: boolean;
+  edgeHit?: { left: boolean; right: boolean; top: boolean; bottom: boolean };
 }
 
-const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nestedChildren, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked }) => {
+const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nestedChildren, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked, edgeHit }) => {
   const Content = CONTENT_MAP[frame.kind];
   const theme = COLORWAYS[frame.theme ?? "teal"];
   const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-canvas" || frame.kind === "editor" || frame.kind === "node-doc";
   const left = frame.x * stepX;
   const top = frame.y * stepY;
   const nested = !!isChild;
+  const shouldScaleContent = frame.w <= 7 || frame.h <= 7;
+  const contentScale = shouldScaleContent ? clamp(Math.min((frame.w * stepX) / 320, (frame.h * stepY) / 220), 0.65, 1) : 1;
+  const edgeGlow = !nested && edgeHit
+    ? [
+      edgeHit.left ? "inset 6px 0 0 rgba(255,255,255,0.5)" : null,
+      edgeHit.right ? "inset -6px 0 0 rgba(255,255,255,0.5)" : null,
+      edgeHit.top ? "inset 0 6px 0 rgba(255,255,255,0.5)" : null,
+      edgeHit.bottom ? "inset 0 -6px 0 rgba(255,255,255,0.5)" : null,
+    ].filter(Boolean).join(", ")
+    : "";
   return (
     <Frame
       data-child-frame={nested ? "true" : "false"}
-      style={{ position: "absolute", left, top, width: frame.w * stepX, height: frame.h * stepY, background: frame.color, border: isSelected ? "2px solid #111" : nested ? `1px dashed ${frame.accent}` : `1px solid ${frame.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: nested ? 200 : (isDragging ? 100 : 1), color: theme.text, boxShadow: nested ? "0 3px 16px rgba(0,0,0,0.18)" : undefined }}
+      style={{ position: "absolute", left, top, width: frame.w * stepX, height: frame.h * stepY, background: frame.color, border: isSelected ? "2px solid #111" : nested ? `1px dashed ${frame.accent}` : `1px solid ${frame.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: isDragging ? "grabbing" : "default", userSelect: "none", zIndex: nested ? 200 : (isDragging ? 100 : 1), color: theme.text, boxShadow: [nested ? "0 3px 16px rgba(0,0,0,0.18)" : null, edgeGlow || null].filter(Boolean).join(", ") || undefined, transition: "box-shadow 120ms ease" }}
       onClick={(e) => e.stopPropagation()}
       onMouseDownCapture={(e) => {
         const target = e.target as HTMLElement;
@@ -424,13 +444,15 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
       onMouseDown={(e) => {
         const target = e.target as HTMLElement;
         if (!nested && target.closest('[data-child-frame="true"]')) return;
-        if (!editMode || target.dataset.handle) return;
+        if (target.dataset.handle) return;
+        if (!editMode && !target.closest('[data-header-drag-handle="true"]')) return;
         onDragStart(e, frame.id);
       }}
       onTouchStart={(e) => {
         const target = e.target as HTMLElement;
         if (!nested && target.closest('[data-child-frame="true"]')) return;
-        if (!editMode || target.dataset.handle) return;
+        if (target.dataset.handle) return;
+        if (!editMode && !target.closest('[data-header-drag-handle="true"]')) return;
         onDragStart(e, frame.id);
       }}
       onContextMenu={(e) => {
@@ -441,7 +463,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         onContextMenu(e, frame.id);
       }}
     >
-      <div style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${frame.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}>
+      <div data-header-drag-handle="true" style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${frame.accent}`, cursor: isDragging ? "grabbing" : "grab", fontFamily: "'IBM Plex Mono', monospace" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onModuleNameClick(e, frame.id); }}
@@ -457,11 +479,13 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
           )}
         </div>
       </div>
-      <div style={{ flex: 1, padding: isNodesFrame ? 0 : "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
-        {Content ? <Content accent={frame.accent} widgetId={frame.id} hideTopControls={isNodesFrame} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: frame.accent }}>{frame.title}</span></div>}
+      <div style={{ flex: 1, minHeight: 0, padding: isNodesFrame ? 0 : "8px 10px", overflow: "auto", fontFamily: "'IBM Plex Mono', monospace" }}>
+        <div style={{ width: `${100 / contentScale}%`, height: `${100 / contentScale}%`, transform: `scale(${contentScale})`, transformOrigin: "top left" }}>
+          {Content ? <Content accent={frame.accent} widgetId={frame.id} hideTopControls={isNodesFrame} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: frame.accent }}>{frame.title}</span></div>}
+        </div>
       </div>
       {nestedChildren}
-      {editMode && HANDLES.map((h, i) => <div key={i} data-handle="true" onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, frame.id, h.edges); }} onTouchStart={(e) => { e.stopPropagation(); onResizeStart(e, frame.id, h.edges); }} style={{ position: "absolute", cursor: h.cursor, ...h.style }} />)}
+      {HANDLES.map((h, i) => <div key={i} data-handle="true" onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, frame.id, h.edges); }} onTouchStart={(e) => { e.stopPropagation(); onResizeStart(e, frame.id, h.edges); }} style={{ position: "absolute", cursor: h.cursor, opacity: editMode ? 0.45 : 0.2, ...h.style }} />)}
     </Frame>
   );
 };
@@ -923,20 +947,40 @@ const App: React.FC = () => {
       if (!d) return;
       e.preventDefault();
       const { px, py } = getPointer(e);
-      const dCols = Math.round((px - d.startMouseX) / stepX);
-      const dRows = Math.round((py - d.startMouseY) / stepY);
+      const stepFactor = d.parentId ? CHILD_GRID_DIVISOR : 1;
+      const dCols = Math.round((px - d.startMouseX) / (stepX / stepFactor)) / stepFactor;
+      const dRows = Math.round((py - d.startMouseY) / (stepY / stepFactor)) / stepFactor;
 
       updateActiveFrames((prev) => prev.map((w) => {
         if (w.id !== d.id) return w;
         const parent = d.parentId ? prev.find((candidate) => candidate.id === d.parentId) : null;
         const maxCols = parent ? parent.w : gridCols;
         const maxRows = parent ? parent.h : gridRows;
-        if (d.mode === "drag") return { ...w, x: clamp(d.origX + dCols, 0, maxCols - w.w), y: clamp(d.origY + dRows, 0, maxRows - w.h) };
+        const edgeInset = parent ? CHILD_EDGE_GAP : 0;
+        if (d.mode === "drag") {
+          const maxX = Math.max(0, maxCols - w.w);
+          const maxY = Math.max(0, maxRows - w.h);
+          return {
+            ...w,
+            x: clampToRangeWithInset(d.origX + dCols, 0, maxX, edgeInset),
+            y: clampToRangeWithInset(d.origY + dRows, 0, maxY, edgeInset),
+          };
+        }
         let x = d.origX, y = d.origY, nw = d.origW, nh = d.origH;
-        if (d.edges.right) nw = clamp(d.origW + dCols, MIN_W, maxCols - d.origX);
-        if (d.edges.bottom) nh = clamp(d.origH + dRows, MIN_H, maxRows - d.origY);
-        if (d.edges.left) { const shift = clamp(dCols, -d.origX, d.origW - MIN_W); x = d.origX + shift; nw = d.origW - shift; }
-        if (d.edges.top) { const shift = clamp(dRows, -d.origY, d.origH - MIN_H); y = d.origY + shift; nh = d.origH - shift; }
+        if (d.edges.right) nw = clamp(d.origW + dCols, MIN_W, maxCols - d.origX - edgeInset);
+        if (d.edges.bottom) nh = clamp(d.origH + dRows, MIN_H, maxRows - d.origY - edgeInset);
+        if (d.edges.left) {
+          const shift = clamp(dCols, -(d.origX - edgeInset), d.origW - MIN_W);
+          x = d.origX + shift;
+          nw = d.origW - shift;
+        }
+        if (d.edges.top) {
+          const shift = clamp(dRows, -(d.origY - edgeInset), d.origH - MIN_H);
+          y = d.origY + shift;
+          nh = d.origH - shift;
+        }
+        x = clampToRangeWithInset(x, 0, Math.max(0, maxCols - nw), edgeInset);
+        y = clampToRangeWithInset(y, 0, Math.max(0, maxRows - nh), edgeInset);
         return { ...w, x, y, w: nw, h: nh };
       }));
     };
@@ -968,8 +1012,8 @@ const App: React.FC = () => {
             .filter((frame) => !frame.parentId && frame.id !== moved.id)
             .find((frame) => framesOverlap(frame, moved));
           if (!host) return next;
-          const childX = clamp(moved.x - host.x, 0, Math.max(0, host.w - moved.w));
-          const childY = clamp(moved.y - host.y, 0, Math.max(0, host.h - moved.h));
+          const childX = clampToRangeWithInset(moved.x - host.x, 0, Math.max(0, host.w - moved.w), CHILD_EDGE_GAP);
+          const childY = clampToRangeWithInset(moved.y - host.y, 0, Math.max(0, host.h - moved.h), CHILD_EDGE_GAP);
           next = next.map((frame) => (frame.id === moved.id ? { ...frame, parentId: host.id, x: childX, y: childY } : frame));
           return next;
         });
@@ -1004,6 +1048,7 @@ const App: React.FC = () => {
             <button
               key={tab.id}
               onMouseDown={(e) => {
+                if (e.button !== 0) return;
                 if ((e.target as HTMLElement).tagName === "INPUT") return;
                 tabDragRef.current = { id: tab.id, startX: e.clientX, startY: e.clientY };
                 setMovingTabId(tab.id);
@@ -1024,7 +1069,7 @@ const App: React.FC = () => {
               }}
               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
               onDoubleClick={() => startRenamingTab(tab.id)}
-              onClick={() => { if (isDraggingTab) return; setActiveTabId(tab.id); setEditMode(false); }}
+              onClick={(e) => { if (e.button !== 0 || isDraggingTab) return; setActiveTabId(tab.id); setEditMode(false); }}
               style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? `1px solid ${tabTextColor}` : "1px solid rgba(8,52,58,0.35)", background: activeTabId === tab.id ? tabBgColor : `${tabBgColor}B3`, color: tabTextColor, borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
             >
               {renamingTabId === tab.id ? (
@@ -1070,9 +1115,9 @@ const App: React.FC = () => {
               isDragging={draggingId === w.id}
               isSelected={selectedFrameIds.has(w.id)}
               isLinked={linkedFrameIDs.has(w.id) || !!childrenByParent.get(w.id)?.length}
+              edgeHit={{ left: w.x <= 0, right: w.x + w.w >= gridCols, top: w.y <= 0, bottom: w.y + w.h >= gridRows }}
               editMode={editMode}
               onDragStart={(e, id) => {
-                if (!editMode) return;
                 e.preventDefault();
                 const { px, py } = getPointer(e);
                 const widget = frames.find((ww) => ww.id === id);
@@ -1081,7 +1126,6 @@ const App: React.FC = () => {
                 setDraggingId(id);
               }}
               onResizeStart={(e, id, edges) => {
-                if (!editMode) return;
                 e.preventDefault();
                 const { px, py } = getPointer(e);
                 const widget = frames.find((ww) => ww.id === id);
@@ -1135,7 +1179,6 @@ const App: React.FC = () => {
                   isLinked={true}
                   editMode={editMode}
                   onDragStart={(e, id) => {
-                    if (!editMode) return;
                     e.preventDefault();
                     const { px, py } = getPointer(e);
                     const widget = frames.find((ww) => ww.id === id);
@@ -1144,7 +1187,6 @@ const App: React.FC = () => {
                     setDraggingId(id);
                   }}
                   onResizeStart={(e, id, edges) => {
-                    if (!editMode) return;
                     e.preventDefault();
                     const { px, py } = getPointer(e);
                     const widget = frames.find((ww) => ww.id === id);

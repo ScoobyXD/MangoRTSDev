@@ -1,6 +1,6 @@
 # Nested Frame UX Specification
 
-Status: Draft v1 (2026-04-21)
+Status: Draft v2 (2026-04-21)
 
 ---
 
@@ -44,8 +44,13 @@ Once nested, child frames support local layout manipulation inside the parent co
 
 - move within available child-grid cells,
 - resize within parent constraints,
+- use a denser local interaction step than top-level canvas movement (sub-cell movement),
 - preserve module identity and state,
 - participate in parent-level linked context.
+
+Inset rule:
+
+- child frames must maintain a visual inset gap from every parent edge (cannot be flush to boundary).
 
 This is intended to feel similar to moving/resizing informational panels within module-local canvases.
 
@@ -108,3 +113,13 @@ For linked nested workspaces (e.g., Explorer + Canvas + Doc), interactions must 
 - cross-pane context remains synchronized.
 
 The goal is deterministic behavior across linked panes without changing core backend entity contracts.
+
+---
+
+## 8) Direct manipulation and sizing UX notes
+
+- Frame header bars are always draggable for repositioning (outside edit mode as well).
+- Frame resize handles are always available for pointer resizing (outside edit mode as well).
+- Right-click on view tabs opens context menu only and must not implicitly activate/switch tab.
+- When frames shrink, content should degrade gracefully via responsive scaling/scrolling instead of hard clipping.
+- Root frames touching canvas edges should show a brief/high-contrast edge-hit visual indication on contacted sides.
