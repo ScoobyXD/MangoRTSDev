@@ -6,7 +6,7 @@ import ModulePickerMenu from "./menus/ModulePickerMenu";
 import { MODULE_CONTENT_MAP as CONTENT_MAP, MODULE_LIBRARY as FRAME_MODULE_LIBRARY } from "../modules";
 import type { FrameDataModel, DragState, ResizeEdges } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { NODE_DOC_LINKS_KEY } from "../modules/node/shared";
+import { EXPLORER_CANVAS_LINKS_KEY, NODE_DOC_LINKS_KEY } from "../modules/node/shared";
 
 const CELL_SIZE = 28;
 const HEADER_H = 48;
@@ -38,6 +38,18 @@ const NODE_SUBMODULES = [
   { kind: "nodes-canvas", label: "Node Canvas" },
   { kind: "node-doc", label: "Node Doc" },
 ] as const;
+
+const createDefaultNodeViewFrames = (): FrameDataModel[] => ([
+  { id: "default-node-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 11, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  { id: "default-node-canvas", theme: "teal", kind: "nodes-canvas", x: 12, y: 1, w: 20, h: 30, title: "Node Canvas", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "default-node-doc", theme: "orange", kind: "node-doc", x: 32, y: 1, w: 11, h: 30, title: "Node Doc", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+]);
+
+const createDefaultCompanyExplorerViewFrames = (): FrameDataModel[] => ([
+  { id: "default-company-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 12, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  { id: "default-company-details", theme: "teal", kind: "nodes-canvas", x: 13, y: 1, w: 18, h: 30, title: "Node Canvas", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "default-company-doc", theme: "orange", kind: "node-doc", x: 31, y: 1, w: 12, h: 30, title: "Node Doc", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
+]);
 
 const INITIAL_WIDGETS: FrameDataModel[] = [
   { id: "w-revenue", theme: "teal", kind: "revenue", x: 2, y: 1, w: 12, h: 9, title: "Revenue", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
@@ -190,6 +202,20 @@ function saveSettings(s: { bgColor: string; crossColor: string; headerBgColor: s
 function loadNodeDocLinks(): Record<string, string> {
   try {
     const raw = localStorage.getItem(NODE_DOC_LINKS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string")
+    );
+  } catch {
+    return {};
+  }
+}
+
+function loadExplorerCanvasLinks(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(EXPLORER_CANVAS_LINKS_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
@@ -439,6 +465,7 @@ const App: React.FC = () => {
   const [tabBgColor, setTabBgColor] = useState(() => initialSettingsRef.current.tabBgColor || "#ffffff");
   const [tabTextColor, setTabTextColor] = useState(() => initialSettingsRef.current.tabTextColor || "#08343a");
   const [nodeDocLinks, setNodeDocLinks] = useState<Record<string, string>>(() => loadNodeDocLinks());
+  const [explorerCanvasLinks, setExplorerCanvasLinks] = useState<Record<string, string>>(() => loadExplorerCanvasLinks());
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [frameRightClickMenu, setFrameRightClickMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -559,6 +586,13 @@ const App: React.FC = () => {
       return next;
     });
   }, []);
+  const saveExplorerCanvasLink = useCallback((explorerFrameID: string, canvasFrameID: string) => {
+    setExplorerCanvasLinks((prev) => {
+      const next = { ...prev, [explorerFrameID]: canvasFrameID };
+      try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
 
   const selectedFrames = useMemo(() => frames.filter((frame) => selectedFrameIds.has(frame.id)), [frames, selectedFrameIds]);
   const linkablePair = useMemo(() => {
@@ -569,16 +603,34 @@ const App: React.FC = () => {
     if (!canvas || !doc) return null;
     return { canvas, doc };
   }, [selectedFrameId, selectedFrames, frames]);
+  const linkableExplorerPair = useMemo(() => {
+    const pool = selectedFrames.length > 0 ? selectedFrames : (selectedFrameId ? frames.filter((frame) => frame.id === selectedFrameId) : []);
+    if (pool.length !== 2) return null;
+    const canvas = pool.find((frame) => frame.kind === "nodes" || frame.kind === "nodes-canvas");
+    const explorer = pool.find((frame) => frame.kind === "company-explorer");
+    if (!canvas || !explorer) return null;
+    return { canvas, explorer };
+  }, [selectedFrameId, selectedFrames, frames]);
 
   const linkSelectedNodeModules = useCallback(() => {
-    if (!linkablePair) return;
-    saveNodeDocLink(linkablePair.doc.id, linkablePair.canvas.id);
-  }, [linkablePair, saveNodeDocLink]);
+    if (linkablePair) {
+      saveNodeDocLink(linkablePair.doc.id, linkablePair.canvas.id);
+      return;
+    }
+    if (linkableExplorerPair) {
+      saveExplorerCanvasLink(linkableExplorerPair.explorer.id, linkableExplorerPair.canvas.id);
+    }
+  }, [linkablePair, linkableExplorerPair, saveNodeDocLink, saveExplorerCanvasLink]);
   const linkNodesLabel = useMemo(() => {
     const pool = selectedFrames.length > 1 ? selectedFrames : (linkablePair ? [linkablePair.canvas, linkablePair.doc] : []);
     if (pool.length === 0) return "Node Canvas + Node Doc";
     return pool.map((frame) => frame.title).join(" + ");
   }, [linkablePair, selectedFrames]);
+  const linkModulesLabel = useMemo(() => {
+    if (linkablePair) return `${linkablePair.canvas.title} + ${linkablePair.doc.title}`;
+    if (linkableExplorerPair) return `${linkableExplorerPair.explorer.title} + ${linkableExplorerPair.canvas.title}`;
+    return linkNodesLabel;
+  }, [linkablePair, linkableExplorerPair, linkNodesLabel]);
   const linkedFrameIDs = useMemo(() => {
     const ids = new Set<string>();
     const frameIDs = new Set(frames.map((frame) => frame.id));
@@ -587,8 +639,31 @@ const App: React.FC = () => {
       ids.add(docFrameID);
       ids.add(canvasFrameID);
     }
+    for (const [explorerFrameID, canvasFrameID] of Object.entries(explorerCanvasLinks)) {
+      if (!frameIDs.has(explorerFrameID) || !frameIDs.has(canvasFrameID)) continue;
+      ids.add(explorerFrameID);
+      ids.add(canvasFrameID);
+    }
     return ids;
-  }, [nodeDocLinks, frames]);
+  }, [nodeDocLinks, explorerCanvasLinks, frames]);
+
+  useEffect(() => {
+    const frameIDs = new Set(frames.map((frame) => frame.id));
+    setNodeDocLinks((previous) => {
+      const next = Object.fromEntries(Object.entries(previous).filter(([docID, canvasID]) => frameIDs.has(docID) && frameIDs.has(canvasID)));
+      if (JSON.stringify(previous) !== JSON.stringify(next)) {
+        try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+      }
+      return next;
+    });
+    setExplorerCanvasLinks((previous) => {
+      const next = Object.fromEntries(Object.entries(previous).filter(([explorerID, canvasID]) => frameIDs.has(explorerID) && frameIDs.has(canvasID)));
+      if (JSON.stringify(previous) !== JSON.stringify(next)) {
+        try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+      }
+      return next;
+    });
+  }, [frames]);
 
   const deleteSelectedFrame = useCallback(() => {
     const ids = selectedFrameIds.size > 0 ? selectedFrameIds : (selectedFrameId ? new Set([selectedFrameId]) : new Set<string>());
@@ -687,6 +762,53 @@ const App: React.FC = () => {
       return filtered;
     });
   }, [tabs.length, activeTabId]);
+
+  const openDefaultNodeView = useCallback((tabID: string) => {
+    const framesForView = createDefaultNodeViewFrames();
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, frames: framesForView } : tab)));
+    setNodeDocLinks((previous) => {
+      const next = { ...previous, "default-node-doc": "default-node-canvas" };
+      try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+    setExplorerCanvasLinks((previous) => {
+      const next = { ...previous, "default-node-explorer": "default-node-canvas" };
+      try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+    setActiveTabId(tabID);
+    setEditMode(true);
+  }, []);
+
+  const openDefaultCompanyExplorerView = useCallback((tabID: string) => {
+    const framesForView = createDefaultCompanyExplorerViewFrames();
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, frames: framesForView } : tab)));
+    setNodeDocLinks((previous) => {
+      const next = { ...previous, "default-company-doc": "default-company-details" };
+      try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+    setExplorerCanvasLinks((previous) => {
+      const next = { ...previous, "default-company-explorer": "default-company-details" };
+      try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+    setActiveTabId(tabID);
+    setEditMode(true);
+  }, []);
+
+  const saveCurrentAsTemplate = useCallback((tabID: string) => {
+    const source = tabs.find((tab) => tab.id === tabID);
+    if (!source) return;
+    const id = createTabId();
+    const templateTab: ViewTab = {
+      id,
+      name: `${source.name} Template`,
+      frames: source.frames.map((frame) => ({ ...frame, id: createFrameId() })),
+    };
+    setTabs((previous) => [...previous, templateTab]);
+    setActiveTabId(id);
+  }, [tabs]);
 
 
 
@@ -900,6 +1022,9 @@ const App: React.FC = () => {
         <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
+          <button style={menuBtnBase} onClick={() => { openDefaultNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Default Node View</button>
+          <button style={menuBtnBase} onClick={() => { openDefaultCompanyExplorerView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Default Company Explorer View</button>
+          <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>
         </FrameRightClickMenu>
       )}
 
@@ -907,12 +1032,12 @@ const App: React.FC = () => {
         <FrameRightClickMenu x={frameRightClickMenu.x} y={frameRightClickMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { duplicateFrame(frameRightClickMenu.id); closeMenus(); }} {...hoverHandlers}>Duplicate</button>
           <button
-            style={{ ...menuBtnBase, color: linkablePair ? "#111" : "#999" }}
-            disabled={!linkablePair}
+            style={{ ...menuBtnBase, color: (linkablePair || linkableExplorerPair) ? "#111" : "#999" }}
+            disabled={!(linkablePair || linkableExplorerPair)}
             onClick={() => { linkSelectedNodeModules(); closeMenus(); }}
             {...hoverHandlers}
           >
-            Link nodes: {linkNodesLabel}
+            Link modules: {linkModulesLabel}
           </button>
           {COLORWAY_ORDER.map((theme) => (
             <button key={theme} style={menuBtnBase} onClick={() => {
