@@ -651,6 +651,14 @@ const App: React.FC = () => {
     if (docs.length + explorers.length === 0) return null;
     return { canvas: canvases[0], docs, explorers, pool };
   }, [selectedFrameId, selectedFrames, frames]);
+  const linkableExplorerPair = useMemo(() => {
+    const pool = selectedFrames.length > 0 ? selectedFrames : (selectedFrameId ? frames.filter((frame) => frame.id === selectedFrameId) : []);
+    if (pool.length !== 2) return null;
+    const canvas = pool.find((frame) => frame.kind === "nodes" || frame.kind === "nodes-canvas");
+    const explorer = pool.find((frame) => frame.kind === "company-explorer");
+    if (!canvas || !explorer) return null;
+    return { canvas, explorer };
+  }, [selectedFrameId, selectedFrames, frames]);
 
   const linkSelectedNodeModules = useCallback(() => {
     if (!linkPlan) return;
