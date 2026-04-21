@@ -103,7 +103,7 @@ function isHexColor(value: unknown): value is string {
 
 function coerceFrame(value: unknown): FrameDataModel | null {
   if (!isObject(value)) return null;
-  const { id, kind, theme, x, y, w, h, title, color, accent } = value;
+  const { id, kind, parentId, theme, x, y, w, h, title, color, accent } = value;
   if (
     typeof id !== "string" || typeof kind !== "string" || typeof x !== "number" || typeof y !== "number" ||
     typeof w !== "number" || typeof h !== "number" || typeof title !== "string" || typeof color !== "string" || typeof accent !== "string"
@@ -112,6 +112,7 @@ function coerceFrame(value: unknown): FrameDataModel | null {
   return {
     id,
     kind,
+    parentId: typeof parentId === "string" && parentId.trim() ? parentId : undefined,
     theme: isColorway(theme) ? theme : "teal",
     x: Math.max(0, Math.round(x)),
     y: Math.max(0, Math.round(y)),
@@ -386,6 +387,7 @@ interface FrameCardProps {
   frame: FrameDataModel;
   stepX: number;
   stepY: number;
+  parentFrame?: FrameDataModel;
   isDragging: boolean;
   isSelected: boolean;
   editMode: boolean;
@@ -397,13 +399,16 @@ interface FrameCardProps {
   isLinked: boolean;
 }
 
-const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked }) => {
+const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, parentFrame, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked }) => {
   const Content = CONTENT_MAP[frame.kind];
   const theme = COLORWAYS[frame.theme ?? "teal"];
   const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-canvas" || frame.kind === "node-doc";
+  const left = (parentFrame ? parentFrame.x + frame.x : frame.x) * stepX;
+  const top = (parentFrame ? parentFrame.y + frame.y : frame.y) * stepY;
+  const nested = !!parentFrame;
   return (
     <Frame
-      style={{ position: "absolute", left: frame.x * stepX, top: frame.y * stepY, width: frame.w * stepX, height: frame.h * stepY, background: frame.color, border: isSelected ? "2px solid #111" : `1px solid ${frame.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: isDragging ? 100 : 1, color: theme.text }}
+      style={{ position: "absolute", left, top, width: frame.w * stepX, height: frame.h * stepY, background: frame.color, border: isSelected ? "2px solid #111" : nested ? `1px dashed ${frame.accent}` : `1px solid ${frame.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: nested ? 200 : (isDragging ? 100 : 1), color: theme.text, boxShadow: nested ? "0 3px 16px rgba(0,0,0,0.18)" : undefined }}
       onClick={(e) => e.stopPropagation()}
       onMouseDownCapture={(e) => {
         if (e.button !== 0) return;
@@ -485,6 +490,17 @@ const App: React.FC = () => {
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId) ?? tabs[0], [tabs, activeTabId]);
   const frames = activeTab?.frames ?? [];
+  const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
+  const childrenByParent = useMemo(() => {
+    const grouped = new Map<string, FrameDataModel[]>();
+    for (const frame of frames) {
+      if (!frame.parentId) continue;
+      const current = grouped.get(frame.parentId) ?? [];
+      current.push(frame);
+      grouped.set(frame.parentId, current);
+    }
+    return grouped;
+  }, [frames]);
 
   useEffect(() => {
     if (!selectedFrameId) return;
@@ -498,6 +514,11 @@ const App: React.FC = () => {
   const updateActiveFrames = useCallback((updater: (prev: FrameDataModel[]) => FrameDataModel[]) => {
     setTabs((prev) => prev.map((tab) => (tab.id === activeTabId ? { ...tab, frames: updater(tab.frames) } : tab)));
   }, [activeTabId]);
+  useEffect(() => {
+    const frameIDs = new Set(frames.map((frame) => frame.id));
+    if (!frames.some((frame) => frame.parentId && !frameIDs.has(frame.parentId))) return;
+    updateActiveFrames((previous) => previous.map((frame) => (frame.parentId && !frameIDs.has(frame.parentId) ? { ...frame, parentId: undefined } : frame)));
+  }, [frames, updateActiveFrames]);
 
   const buildSnapshot = useCallback((): DashboardSnapshot => ({
     tabs,
@@ -646,6 +667,10 @@ const App: React.FC = () => {
     }
     return ids;
   }, [nodeDocLinks, explorerCanvasLinks, frames]);
+  const frameInContextMenu = useMemo(() => {
+    if (!frameRightClickMenu) return null;
+    return frames.find((frame) => frame.id === frameRightClickMenu.id) ?? null;
+  }, [frameRightClickMenu, frames]);
 
   useEffect(() => {
     const frameIDs = new Set(frames.map((frame) => frame.id));
@@ -842,10 +867,13 @@ const App: React.FC = () => {
 
       updateActiveFrames((prev) => prev.map((w) => {
         if (w.id !== d.id) return w;
-        if (d.mode === "drag") return { ...w, x: clamp(d.origX + dCols, 0, gridCols - w.w), y: clamp(d.origY + dRows, 0, gridRows - w.h) };
+        const parent = d.parentId ? prev.find((candidate) => candidate.id === d.parentId) : null;
+        const maxCols = parent ? parent.w : gridCols;
+        const maxRows = parent ? parent.h : gridRows;
+        if (d.mode === "drag") return { ...w, x: clamp(d.origX + dCols, 0, maxCols - w.w), y: clamp(d.origY + dRows, 0, maxRows - w.h) };
         let x = d.origX, y = d.origY, nw = d.origW, nh = d.origH;
-        if (d.edges.right) nw = clamp(d.origW + dCols, MIN_W, gridCols - d.origX);
-        if (d.edges.bottom) nh = clamp(d.origH + dRows, MIN_H, gridRows - d.origY);
+        if (d.edges.right) nw = clamp(d.origW + dCols, MIN_W, maxCols - d.origX);
+        if (d.edges.bottom) nh = clamp(d.origH + dRows, MIN_H, maxRows - d.origY);
         if (d.edges.left) { const shift = clamp(dCols, -d.origX, d.origW - MIN_W); x = d.origX + shift; nw = d.origW - shift; }
         if (d.edges.top) { const shift = clamp(dRows, -d.origY, d.origH - MIN_H); y = d.origY + shift; nh = d.origH - shift; }
         return { ...w, x, y, w: nw, h: nh };
@@ -854,14 +882,35 @@ const App: React.FC = () => {
     const onEnd = () => {
       const d = dragRef.current;
       if (d) {
-        updateActiveFrames((prev) => prev.map((w) => {
-          if (w.id !== d.id) return w;
-          const overlaps = prev.some((candidate) => candidate.id !== w.id && framesOverlap(w, candidate));
-          if (!overlaps) return w;
-          return d.mode === "drag"
-            ? { ...w, x: d.origX, y: d.origY }
-            : { ...w, x: d.origX, y: d.origY, w: d.origW, h: d.origH };
-        }));
+        updateActiveFrames((prev) => {
+          const target = prev.find((frame) => frame.id === d.id);
+          if (!target) return prev;
+
+          let next = prev.map((w) => {
+            if (w.id !== d.id) return w;
+            const siblingOverlaps = prev.some((candidate) => {
+              if (candidate.id === w.id) return false;
+              const sameParent = (candidate.parentId ?? "") === (w.parentId ?? "");
+              return sameParent && framesOverlap(w, candidate);
+            });
+            if (!siblingOverlaps) return w;
+            return d.mode === "drag"
+              ? { ...w, x: d.origX, y: d.origY }
+              : { ...w, x: d.origX, y: d.origY, w: d.origW, h: d.origH };
+          });
+
+          if (d.mode !== "drag" || d.parentId) return next;
+          const moved = next.find((frame) => frame.id === d.id);
+          if (!moved) return next;
+          const host = next
+            .filter((frame) => !frame.parentId && frame.id !== moved.id)
+            .find((frame) => framesOverlap(frame, moved));
+          if (!host) return next;
+          const childX = clamp(moved.x - host.x, 0, Math.max(0, host.w - moved.w));
+          const childY = clamp(moved.y - host.y, 0, Math.max(0, host.h - moved.h));
+          next = next.map((frame) => (frame.id === moved.id ? { ...frame, parentId: host.id, x: childX, y: childY } : frame));
+          return next;
+        });
       }
       dragRef.current = null;
       setDraggingId(null);
@@ -950,71 +999,139 @@ const App: React.FC = () => {
           if (!activeFrame) return null;
           return <PlacementSplash frame={activeFrame} frames={frames} cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} />;
         })()}
-        {frames.map((w) => (
-          <FrameCard
-            key={w.id}
-            frame={w}
-            stepX={stepX}
-            stepY={stepY}
-            isDragging={draggingId === w.id}
-            isSelected={selectedFrameIds.has(w.id)}
-            isLinked={linkedFrameIDs.has(w.id)}
-            editMode={editMode}
-            onDragStart={(e, id) => {
-              if (!editMode) return;
-              e.preventDefault();
-              const { px, py } = getPointer(e);
-              const widget = frames.find((ww) => ww.id === id);
-              if (!widget) return;
-              dragRef.current = { id, mode: "drag", edges: {}, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
-              setDraggingId(id);
-            }}
-            onResizeStart={(e, id, edges) => {
-              if (!editMode) return;
-              e.preventDefault();
-              const { px, py } = getPointer(e);
-              const widget = frames.find((ww) => ww.id === id);
-              if (!widget) return;
-              dragRef.current = { id, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
-              setDraggingId(id);
-            }}
-            onContextMenu={(e, id) => {
-              e.preventDefault();
-              if (!selectedFrameIds.has(id)) {
-                setSelectedFrameIds(new Set([id]));
-                setSelectedFrameId(id);
-              }
-              setFrameRightClickMenu({ x: e.clientX, y: e.clientY, id });
-              setModuleTypeMenu(null);
-              setCanvasMenu(null);
-              setShowNodesSubmenu(false);
-            }}
-            onModuleNameClick={(e, id) => {
-              setFrameRightClickMenu(null);
-              setHeaderMenu(null);
-              setCanvasMenu(null);
-              setShowNodesSubmenu(false);
-              setSelectedFrameId(id);
-              setSelectedFrameIds(new Set([id]));
-              setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
-            }}
-            onSelect={(event, id) => {
-              const additiveSelect = "ctrlKey" in event ? (!!event.ctrlKey || !!event.shiftKey) : false;
-              if (!additiveSelect) {
+        {rootFrames.map((w) => (
+          <React.Fragment key={w.id}>
+            <FrameCard
+              frame={w}
+              stepX={stepX}
+              stepY={stepY}
+              isDragging={draggingId === w.id}
+              isSelected={selectedFrameIds.has(w.id)}
+              isLinked={linkedFrameIDs.has(w.id) || !!childrenByParent.get(w.id)?.length}
+              editMode={editMode}
+              onDragStart={(e, id) => {
+                if (!editMode) return;
+                e.preventDefault();
+                const { px, py } = getPointer(e);
+                const widget = frames.find((ww) => ww.id === id);
+                if (!widget) return;
+                dragRef.current = { id, parentId: widget.parentId, mode: "drag", edges: {}, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
+                setDraggingId(id);
+              }}
+              onResizeStart={(e, id, edges) => {
+                if (!editMode) return;
+                e.preventDefault();
+                const { px, py } = getPointer(e);
+                const widget = frames.find((ww) => ww.id === id);
+                if (!widget) return;
+                dragRef.current = { id, parentId: widget.parentId, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
+                setDraggingId(id);
+              }}
+              onContextMenu={(e, id) => {
+                e.preventDefault();
+                if (!selectedFrameIds.has(id)) {
+                  setSelectedFrameIds(new Set([id]));
+                  setSelectedFrameId(id);
+                }
+                setFrameRightClickMenu({ x: e.clientX, y: e.clientY, id });
+                setModuleTypeMenu(null);
+                setCanvasMenu(null);
+                setShowNodesSubmenu(false);
+              }}
+              onModuleNameClick={(e, id) => {
+                setFrameRightClickMenu(null);
+                setHeaderMenu(null);
+                setCanvasMenu(null);
+                setShowNodesSubmenu(false);
                 setSelectedFrameId(id);
                 setSelectedFrameIds(new Set([id]));
-                return;
-              }
-              setSelectedFrameId(id);
-              setSelectedFrameIds((prev) => {
-                const next = new Set(prev);
-                if (next.has(id)) next.delete(id);
-                else next.add(id);
-                if (next.size === 0) next.add(id);
-                return next;
-              });
-            }}
-          />
+                setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
+              }}
+              onSelect={(event, id) => {
+                const additiveSelect = "ctrlKey" in event ? (!!event.ctrlKey || !!event.shiftKey) : false;
+                if (!additiveSelect) {
+                  setSelectedFrameId(id);
+                  setSelectedFrameIds(new Set([id]));
+                  return;
+                }
+                setSelectedFrameId(id);
+                setSelectedFrameIds((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(id)) next.delete(id);
+                  else next.add(id);
+                  if (next.size === 0) next.add(id);
+                  return next;
+                });
+              }}
+            />
+            {(childrenByParent.get(w.id) ?? []).map((child) => (
+              <FrameCard
+                key={child.id}
+                frame={child}
+                parentFrame={w}
+                stepX={stepX}
+                stepY={stepY}
+                isDragging={draggingId === child.id}
+                isSelected={selectedFrameIds.has(child.id)}
+                isLinked={true}
+                editMode={editMode}
+                onDragStart={(e, id) => {
+                  if (!editMode) return;
+                  e.preventDefault();
+                  const { px, py } = getPointer(e);
+                  const widget = frames.find((ww) => ww.id === id);
+                  if (!widget) return;
+                  dragRef.current = { id, parentId: widget.parentId, mode: "drag", edges: {}, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
+                  setDraggingId(id);
+                }}
+                onResizeStart={(e, id, edges) => {
+                  if (!editMode) return;
+                  e.preventDefault();
+                  const { px, py } = getPointer(e);
+                  const widget = frames.find((ww) => ww.id === id);
+                  if (!widget) return;
+                  dragRef.current = { id, parentId: widget.parentId, mode: "resize", edges, startMouseX: px, startMouseY: py, origX: widget.x, origY: widget.y, origW: widget.w, origH: widget.h };
+                  setDraggingId(id);
+                }}
+                onContextMenu={(e, id) => {
+                  e.preventDefault();
+                  if (!selectedFrameIds.has(id)) {
+                    setSelectedFrameIds(new Set([id]));
+                    setSelectedFrameId(id);
+                  }
+                  setFrameRightClickMenu({ x: e.clientX, y: e.clientY, id });
+                  setModuleTypeMenu(null);
+                  setCanvasMenu(null);
+                  setShowNodesSubmenu(false);
+                }}
+                onModuleNameClick={(e, id) => {
+                  setFrameRightClickMenu(null);
+                  setHeaderMenu(null);
+                  setCanvasMenu(null);
+                  setShowNodesSubmenu(false);
+                  setSelectedFrameId(id);
+                  setSelectedFrameIds(new Set([id]));
+                  setModuleTypeMenu({ x: e.clientX, y: e.clientY, id });
+                }}
+                onSelect={(event, id) => {
+                  const additiveSelect = "ctrlKey" in event ? (!!event.ctrlKey || !!event.shiftKey) : false;
+                  if (!additiveSelect) {
+                    setSelectedFrameId(id);
+                    setSelectedFrameIds(new Set([id]));
+                    return;
+                  }
+                  setSelectedFrameId(id);
+                  setSelectedFrameIds((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(id)) next.delete(id);
+                    else next.add(id);
+                    if (next.size === 0) next.add(id);
+                    return next;
+                  });
+                }}
+              />
+            ))}
+          </React.Fragment>
         ))}
       </FrameCanvas>
 
@@ -1031,6 +1148,22 @@ const App: React.FC = () => {
       {frameRightClickMenu && (
         <FrameRightClickMenu x={frameRightClickMenu.x} y={frameRightClickMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { duplicateFrame(frameRightClickMenu.id); closeMenus(); }} {...hoverHandlers}>Duplicate</button>
+          {frameInContextMenu?.parentId && (
+            <button
+              style={menuBtnBase}
+              onClick={() => {
+                const parent = frames.find((frame) => frame.id === frameInContextMenu.parentId);
+                updateActiveFrames((previous) => previous.map((frame) => {
+                  if (frame.id !== frameInContextMenu.id || !parent) return frame;
+                  return { ...frame, parentId: undefined, x: parent.x + frame.x, y: parent.y + frame.y };
+                }));
+                closeMenus();
+              }}
+              {...hoverHandlers}
+            >
+              Detach Child Frame
+            </button>
+          )}
           <button
             style={{ ...menuBtnBase, color: (linkablePair || linkableExplorerPair) ? "#111" : "#999" }}
             disabled={!(linkablePair || linkableExplorerPair)}
