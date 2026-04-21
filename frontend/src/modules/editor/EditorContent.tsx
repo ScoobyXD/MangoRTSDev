@@ -228,6 +228,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         <div key={box.local_id} style={{ position: "absolute", left: box.x, top: box.y, width: box.w, height: box.h, minWidth: NODE_DOC_MIN_W, minHeight: NODE_DOC_MIN_H }}>
           <textarea
             value={box.information}
+            onPointerDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
             onFocus={() => setActiveBoxID(box.local_id)}
             onChange={(event) => {
               const value = event.target.value;
