@@ -641,13 +641,15 @@ const App: React.FC = () => {
   }, []);
 
   const selectedFrames = useMemo(() => frames.filter((frame) => selectedFrameIds.has(frame.id)), [frames, selectedFrameIds]);
-  const linkablePair = useMemo(() => {
+  const linkPlan = useMemo(() => {
     const pool = selectedFrames.length > 0 ? selectedFrames : (selectedFrameId ? frames.filter((frame) => frame.id === selectedFrameId) : []);
-    if (pool.length !== 2) return null;
-    const canvas = pool.find((frame) => frame.kind === "nodes" || frame.kind === "nodes-canvas");
-    const doc = pool.find((frame) => frame.kind === "node-doc");
-    if (!canvas || !doc) return null;
-    return { canvas, doc };
+    if (pool.length < 2) return null;
+    const canvases = pool.filter((frame) => frame.kind === "nodes" || frame.kind === "nodes-canvas");
+    if (canvases.length !== 1) return null;
+    const docs = pool.filter((frame) => frame.kind === "node-doc");
+    const explorers = pool.filter((frame) => frame.kind === "company-explorer");
+    if (docs.length + explorers.length === 0) return null;
+    return { canvas: canvases[0], docs, explorers, pool };
   }, [selectedFrameId, selectedFrames, frames]);
   const linkableExplorerPair = useMemo(() => {
     const pool = selectedFrames.length > 0 ? selectedFrames : (selectedFrameId ? frames.filter((frame) => frame.id === selectedFrameId) : []);
@@ -659,24 +661,29 @@ const App: React.FC = () => {
   }, [selectedFrameId, selectedFrames, frames]);
 
   const linkSelectedNodeModules = useCallback(() => {
-    if (linkablePair) {
-      saveNodeDocLink(linkablePair.doc.id, linkablePair.canvas.id);
-      return;
+    if (!linkPlan) return;
+    const canvasID = linkPlan.canvas.id;
+    if (linkPlan.docs.length > 0) {
+      setNodeDocLinks((previous) => {
+        const next = { ...previous };
+        for (const doc of linkPlan.docs) next[doc.id] = canvasID;
+        try { localStorage.setItem(NODE_DOC_LINKS_KEY, JSON.stringify(next)); } catch {}
+        return next;
+      });
     }
-    if (linkableExplorerPair) {
-      saveExplorerCanvasLink(linkableExplorerPair.explorer.id, linkableExplorerPair.canvas.id);
+    if (linkPlan.explorers.length > 0) {
+      setExplorerCanvasLinks((previous) => {
+        const next = { ...previous };
+        for (const explorer of linkPlan.explorers) next[explorer.id] = canvasID;
+        try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+        return next;
+      });
     }
-  }, [linkablePair, linkableExplorerPair, saveNodeDocLink, saveExplorerCanvasLink]);
-  const linkNodesLabel = useMemo(() => {
-    const pool = selectedFrames.length > 1 ? selectedFrames : (linkablePair ? [linkablePair.canvas, linkablePair.doc] : []);
-    if (pool.length === 0) return "Node Canvas + Node Doc";
-    return pool.map((frame) => frame.title).join(" + ");
-  }, [linkablePair, selectedFrames]);
+  }, [linkPlan]);
   const linkModulesLabel = useMemo(() => {
-    if (linkablePair) return `${linkablePair.canvas.title} + ${linkablePair.doc.title}`;
-    if (linkableExplorerPair) return `${linkableExplorerPair.explorer.title} + ${linkableExplorerPair.canvas.title}`;
-    return linkNodesLabel;
-  }, [linkablePair, linkableExplorerPair, linkNodesLabel]);
+    if (!linkPlan) return "Select one Node Canvas + one/more Node Doc or Company Explorer";
+    return linkPlan.pool.map((frame) => frame.title).join(" + ");
+  }, [linkPlan]);
   const linkedFrameIDs = useMemo(() => {
     const ids = new Set<string>();
     const frameIDs = new Set(frames.map((frame) => frame.id));
@@ -1191,8 +1198,8 @@ const App: React.FC = () => {
             </button>
           )}
           <button
-            style={{ ...menuBtnBase, color: (linkablePair || linkableExplorerPair) ? "#111" : "#999" }}
-            disabled={!(linkablePair || linkableExplorerPair)}
+            style={{ ...menuBtnBase, color: linkPlan ? "#111" : "#999" }}
+            disabled={!linkPlan}
             onClick={() => { linkSelectedNodeModules(); closeMenus(); }}
             {...hoverHandlers}
           >
