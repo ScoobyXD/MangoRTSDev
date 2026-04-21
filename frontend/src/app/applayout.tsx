@@ -409,16 +409,39 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
   const nested = !!isChild;
   return (
     <Frame
+      data-child-frame={nested ? "true" : "false"}
       style={{ position: "absolute", left, top, width: frame.w * stepX, height: frame.h * stepY, background: frame.color, border: isSelected ? "2px solid #111" : nested ? `1px dashed ${frame.accent}` : `1px solid ${frame.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: editMode ? (isDragging ? "grabbing" : "grab") : "default", userSelect: "none", zIndex: nested ? 200 : (isDragging ? 100 : 1), color: theme.text, boxShadow: nested ? "0 3px 16px rgba(0,0,0,0.18)" : undefined }}
       onClick={(e) => e.stopPropagation()}
       onMouseDownCapture={(e) => {
+        const target = e.target as HTMLElement;
+        if (!nested && target.closest('[data-child-frame="true"]')) return;
         if (e.button !== 0) return;
         onSelect(e, frame.id);
       }}
-      onTouchStartCapture={(e) => onSelect(e, frame.id)}
-      onMouseDown={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, frame.id); }}
-      onTouchStart={(e) => { if (!editMode || (e.target as HTMLElement).dataset.handle) return; onDragStart(e, frame.id); }}
-      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(e, frame.id); }}
+      onTouchStartCapture={(e) => {
+        const target = e.target as HTMLElement;
+        if (!nested && target.closest('[data-child-frame="true"]')) return;
+        onSelect(e, frame.id);
+      }}
+      onMouseDown={(e) => {
+        const target = e.target as HTMLElement;
+        if (!nested && target.closest('[data-child-frame="true"]')) return;
+        if (!editMode || target.dataset.handle) return;
+        onDragStart(e, frame.id);
+      }}
+      onTouchStart={(e) => {
+        const target = e.target as HTMLElement;
+        if (!nested && target.closest('[data-child-frame="true"]')) return;
+        if (!editMode || target.dataset.handle) return;
+        onDragStart(e, frame.id);
+      }}
+      onContextMenu={(e) => {
+        const target = e.target as HTMLElement;
+        if (!nested && target.closest('[data-child-frame="true"]')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu(e, frame.id);
+      }}
     >
       <div style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${frame.accent}`, cursor: !editMode ? "pointer" : "inherit", fontFamily: "'IBM Plex Mono', monospace" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -439,11 +462,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
       <div style={{ flex: 1, padding: isNodesFrame ? 0 : "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
         {Content ? <Content accent={frame.accent} widgetId={frame.id} hideTopControls={isNodesFrame} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: frame.accent }}>{frame.title}</span></div>}
       </div>
-      {nestedChildren && (
-        <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
-          <div style={{ position: "absolute", inset: 0, pointerEvents: "auto" }}>{nestedChildren}</div>
-        </div>
-      )}
+      {nestedChildren}
       {editMode && HANDLES.map((h, i) => <div key={i} data-handle="true" onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, frame.id, h.edges); }} onTouchStart={(e) => { e.stopPropagation(); onResizeStart(e, frame.id, h.edges); }} style={{ position: "absolute", cursor: h.cursor, ...h.style }} />)}
     </Frame>
   );
