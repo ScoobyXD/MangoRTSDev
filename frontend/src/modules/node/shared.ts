@@ -39,7 +39,14 @@ export type NodeDirection = "left" | "right" | "top" | "bottom";
 export type PanelEdge = "top" | "right" | "bottom" | "left";
 export type NodePosition = { x: number; y: number };
 export type RelationshipAnchor = { from: NodeDirection; to: NodeDirection };
-export type NodeCanvasState = { zoom: number; pan: { x: number; y: number }; selectedNodeID: string; nodePositions: Record<string, NodePosition> };
+export type NodeCanvasState = {
+  zoom: number;
+  pan: { x: number; y: number };
+  selectedNodeID: string;
+  nodePositions: Record<string, NodePosition>;
+  relationshipColorsEnabled?: boolean;
+  relationshipRoleColors?: { parent: string; peer: string; child: string };
+};
 
 export const INFO_TYPES = [
   "Text box",

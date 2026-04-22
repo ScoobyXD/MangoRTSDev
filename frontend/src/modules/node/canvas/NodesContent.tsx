@@ -33,7 +33,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [detailsPanelNodeID, setDetailsPanelNodeID] = useState<string>("");
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number; submenuOpenLeft: boolean } | null>(null);
+  const [relationshipColorMenuOpen, setRelationshipColorMenuOpen] = useState(false);
   const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeID: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[] } | null>(null);
   const [canvasActive, setCanvasActive] = useState(false);
@@ -62,6 +63,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [selectionPointerID, setSelectionPointerID] = useState<number | null>(null);
   const restoredSelectionRef = useRef<string>("");
   const explorerContextRef = useRef<number>(0);
+  const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(false);
+  const [relationshipRoleColors, setRelationshipRoleColors] = useState({ parent: "#ff8a00", peer: "#0095ff", child: "#6f5cff" });
 
   useEffect(() => {
     const cached = SESSION_NODE_CANVAS_STATE.get(canvasStateKey);
@@ -73,6 +76,14 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       setSelectedNodeID(cached.selectedNodeID);
       setSelectedNodeIDs(cached.selectedNodeID ? new Set([cached.selectedNodeID]) : new Set());
       setNodePositions(cached.nodePositions);
+      setRelationshipColorsEnabled(!!cached.relationshipColorsEnabled);
+      if (cached.relationshipRoleColors) {
+        setRelationshipRoleColors({
+          parent: cached.relationshipRoleColors.parent ?? "#ff8a00",
+          peer: cached.relationshipRoleColors.peer ?? "#0095ff",
+          child: cached.relationshipRoleColors.child ?? "#6f5cff",
+        });
+      }
       setRestoredViewport(true);
       return;
     }
@@ -87,6 +98,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         pan?: { x?: number; y?: number };
         selectedNodeID?: string;
         nodePositions?: Record<string, { x?: number; y?: number }>;
+        relationshipColorsEnabled?: boolean;
+        relationshipRoleColors?: { parent?: string; peer?: string; child?: string };
       };
       if (typeof parsed.zoom === "number" && Number.isFinite(parsed.zoom)) {
         setZoom(clamp(parsed.zoom, 0.45, 2.7));
@@ -112,6 +125,16 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           };
         }
         setNodePositions(sanitized);
+      }
+      if (typeof parsed.relationshipColorsEnabled === "boolean") {
+        setRelationshipColorsEnabled(parsed.relationshipColorsEnabled);
+      }
+      if (parsed.relationshipRoleColors && typeof parsed.relationshipRoleColors === "object") {
+        setRelationshipRoleColors({
+          parent: typeof parsed.relationshipRoleColors.parent === "string" ? parsed.relationshipRoleColors.parent : "#ff8a00",
+          peer: typeof parsed.relationshipRoleColors.peer === "string" ? parsed.relationshipRoleColors.peer : "#0095ff",
+          child: typeof parsed.relationshipRoleColors.child === "string" ? parsed.relationshipRoleColors.child : "#6f5cff",
+        });
       }
     } catch {
       // ignore local cache parse errors
@@ -255,14 +278,21 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   useEffect(() => {
     if (!restoredViewport) return;
     try {
-      const nextState = { zoom, pan, selectedNodeID, nodePositions };
+      const nextState: NodeCanvasState = {
+        zoom,
+        pan,
+        selectedNodeID,
+        nodePositions,
+        relationshipColorsEnabled,
+        relationshipRoleColors,
+      };
       SESSION_NODE_CANVAS_STATE.set(canvasStateKey, nextState);
       localStorage.setItem(canvasStateKey, JSON.stringify(nextState));
       emitDashboardEvent(EVENT_NODE_CANVAS_STATE_UPDATED, { canvasWidgetID: canvasScope, selectedNodeID });
     } catch {
       // ignore local storage quota/security errors
     }
-  }, [canvasScope, canvasStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions]);
+  }, [canvasScope, canvasStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions, relationshipColorsEnabled, relationshipRoleColors]);
 
   useEffect(() => {
     setNodePositions((previous) => {
@@ -883,10 +913,21 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             : anchor.to === "top" ? { x: to.x, y: to.y - lane }
               : { x: to.x, y: to.y + lane };
         const points = routeOrthogonalPath(from, fromOut, toIn, to, rel.node_id_a, rel.node_id_b);
-        return { id: rel.node_relationship_id, points };
+        let role: "Parent" | "Peer" | "Child" | null = null;
+        if (selectedNodeID) {
+          if (rel.node_id_a === selectedNodeID) role = rel.a_position;
+          else if (rel.node_id_b === selectedNodeID) role = rel.b_position;
+        }
+        const stroke =
+          role === "Parent" ? relationshipRoleColors.parent
+            : role === "Peer" ? relationshipRoleColors.peer
+              : role === "Child" ? relationshipRoleColors.child
+                : accent;
+        const alpha = !relationshipColorsEnabled ? 0.72 : (role ? 0.92 : 0.35);
+        return { id: rel.node_relationship_id, points, stroke, alpha };
       })
-      .filter((path): path is { id: string; points: { x: number; y: number }[] } => !!path);
-  }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet, relationshipRoutingGrid]);
+      .filter((path): path is { id: string; points: { x: number; y: number }[]; stroke: string; alpha: number } => !!path);
+  }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet, relationshipRoutingGrid, selectedNodeID, relationshipRoleColors, accent, relationshipColorsEnabled]);
 
   const visibleNodes = useMemo(() => nodes.filter((node) => visibleNodeIDSet.has(node.node_id)), [nodes, visibleNodeIDSet]);
 
@@ -901,14 +942,14 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     if (!context) return;
 
     context.clearRect(0, 0, width, height);
-    context.strokeStyle = accent;
     context.lineWidth = 1.6;
-    context.globalAlpha = 0.72;
     context.lineCap = "round";
     context.lineJoin = "round";
 
     for (const path of connectionPaths) {
       if (path.points.length === 0) continue;
+      context.strokeStyle = relationshipColorsEnabled ? path.stroke : accent;
+      context.globalAlpha = path.alpha;
       context.beginPath();
       context.moveTo(path.points[0].x, path.points[0].y);
       for (const point of path.points.slice(1)) {
@@ -917,7 +958,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       context.stroke();
     }
     context.globalAlpha = 1;
-  }, [WORLD_H, WORLD_W, accent, connectionPaths]);
+  }, [WORLD_H, WORLD_W, accent, connectionPaths, relationshipColorsEnabled]);
 
   return (
     <div style={{ fontSize: 11, height: "100%" }}>
@@ -934,6 +975,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           event.preventDefault();
           event.stopPropagation();
           setCanvasActive(true);
+          setRelationshipColorMenuOpen(false);
           setNodeContextMenu(null);
           if (!viewportRef.current) return;
           const bounds = viewportRef.current.getBoundingClientRect();
@@ -941,7 +983,12 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
           const worldX = clamp((localX - pan.x) / zoom, 0, WORLD_W);
           const worldY = clamp((localY - pan.y) / zoom, 0, WORLD_H);
-          setContextMenu({ x: localX, y: localY, worldX, worldY });
+          const menuWidth = 190;
+          const menuHeight = 78;
+          const clampedX = clamp(localX, 8, Math.max(8, bounds.width - menuWidth - 8));
+          const clampedY = clamp(localY, 8, Math.max(8, bounds.height - menuHeight - 8));
+          const submenuOpenLeft = clampedX > bounds.width - menuWidth - 220;
+          setContextMenu({ x: clampedX, y: clampedY, worldX, worldY, submenuOpenLeft });
         }}
         onWheel={(event) => {
           event.preventDefault();
@@ -1155,7 +1202,6 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               position: "absolute",
               left: contextMenu.x,
               top: contextMenu.y,
-              transform: "translate(8px, 8px)",
               background: "rgba(255,255,255,0.95)",
               border: `1px solid ${accent}`,
               borderRadius: 8,
@@ -1164,6 +1210,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
             }}
             onPointerDown={(event) => event.stopPropagation()}
+            onMouseLeave={() => setRelationshipColorMenuOpen(false)}
           >
             <button
               style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px" }}
@@ -1176,6 +1223,62 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             >
               Create new node
             </button>
+            <button
+              style={{
+                width: "100%",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "6px 8px",
+                textAlign: "left",
+                opacity: relationshipColorsEnabled ? 1 : 0.62,
+                color: relationshipColorsEnabled ? "#0b4868" : "#4f5d66",
+              }}
+              onMouseEnter={() => setRelationshipColorMenuOpen(true)}
+              onClick={() => setRelationshipColorsEnabled((previous) => !previous)}
+            >
+              Enable relationship colors
+            </button>
+            {relationshipColorMenuOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 37,
+                  left: contextMenu.submenuOpenLeft ? undefined : "100%",
+                  right: contextMenu.submenuOpenLeft ? "100%" : undefined,
+                  marginLeft: contextMenu.submenuOpenLeft ? 0 : 8,
+                  marginRight: contextMenu.submenuOpenLeft ? 8 : 0,
+                  minWidth: 184,
+                  background: "rgba(255,255,255,0.97)",
+                  border: `1px solid ${accent}`,
+                  borderRadius: 8,
+                  padding: 8,
+                  boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
+                  display: "grid",
+                  gap: 6,
+                  opacity: relationshipColorsEnabled ? 1 : 0.68,
+                }}
+                onMouseEnter={() => setRelationshipColorMenuOpen(true)}
+                onMouseLeave={() => setRelationshipColorMenuOpen(false)}
+              >
+                {([
+                  ["Parent", "parent"],
+                  ["Peer", "peer"],
+                  ["Child", "child"],
+                ] as const).map(([label, key]) => (
+                  <label key={key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, fontWeight: 700 }}>
+                    <span>{label}</span>
+                    <input
+                      type="color"
+                      value={relationshipRoleColors[key]}
+                      onChange={(event) => setRelationshipRoleColors((previous) => ({ ...previous, [key]: event.target.value }))}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

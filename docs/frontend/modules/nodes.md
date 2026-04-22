@@ -163,6 +163,7 @@ Relationships are visualized with SVG polylines in world space.
 - Lines originate from side anchors that correspond to `+` side conventions.
 - Routing now uses obstacle-aware orthogonal pathing on the mini-grid so relationship lines remain continuous and do not visually cut through node cards when nodes are moved.
 - Connector paths are simplified after routing to keep turns clean while preserving continuous end-to-end segments.
+- Optional relationship role coloring can be toggled on; when active, lines connected to the currently selected node are color-coded by that node’s role in each relationship (`Parent`, `Peer`, `Child`) while non-selected links are dimmed.
 - Rendering is non-interactive (`pointerEvents: none`) and sits under node cards.
 
 ---
@@ -256,6 +257,9 @@ and reads `selectedNodeID`. That selected node becomes the active storage target
 - World grid, relationship lines, node cards, side `+` actions, selection box, and group badge.
 - In-canvas instruction text.
 - Right-click context menu with `Create new node` at cursor location.
+- Right-click context menu also includes `Enable relationship colors` with a hover submenu for per-role color pickers (`Parent`, `Peer`, `Child`) using RGB hex color inputs.
+- Relationship-color controls are visually lighter when enabled and slightly darkened when disabled to indicate current on/off state.
+- Canvas context menu placement is clamped within the viewport so all actions stay visible near canvas edges; the relationship-color flyout can open left when needed.
 - Right-click on a node opens node actions (`Edit node`, `Delete node`).
 - Delete key support for selected node(s), guarded by themed confirmation modal.
 
