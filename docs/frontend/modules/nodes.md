@@ -259,8 +259,9 @@ and reads `selectedNodeID`. That selected node becomes the active storage target
 - Right-click context menu with `Create new node` at cursor location.
 - Right-click context menu also includes `Enable relationship colors` with an explicit iOS-style on/off slider (knob left = off, knob right = on).
 - Right-click menu rows use left-aligned text and box-style row containers.
+- This menu uses the default **Boxy Hierarchical** list style.
 - Relationship role color options (`Parent`, `Peer`, `Child`) are shown directly under `Enable relationship colors` as nested controls with stronger right indentation.
-- Nested role rows use a Company Explorer-inspired boxy hierarchy style: child rows are indented and boxed under the parent relationship row.
+- Nested role rows use Boxy Hierarchical styling: child rows are indented and boxed under the parent relationship row.
 - No triangle expand/collapse indicators or decorative connector lines are used in this right-click hierarchy presentation.
 - Box rows are stacked flush with no vertical gaps between adjacent rows.
 - Role color pickers (`Parent`, `Peer`, `Child`) use RGB hex color inputs.

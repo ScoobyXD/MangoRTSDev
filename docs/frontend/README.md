@@ -41,3 +41,4 @@ This folder contains architecture, product behavior, and migration documentation
 - Structural extraction (PRB): complete for migration goals.
 - Company Explorer and Nested Frame product specs: drafted.
 - Remaining implementation work is in module runtime and app-layer interactions.
+- Hierarchical list default visual style: **Boxy Hierarchical** (boxed rows, indented nested rows, no triangle indicators, flush stacked row spacing).
