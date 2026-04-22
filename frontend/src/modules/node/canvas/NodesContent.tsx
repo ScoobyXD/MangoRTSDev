@@ -717,20 +717,22 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     if (!a || !b) return { from: "right", to: "left" };
     const centerA = { x: a.x + NODE_W / 2, y: a.y + NODE_H / 2 };
     const centerB = { x: b.x + NODE_W / 2, y: b.y + NODE_H / 2 };
-    const dx = centerB.x - centerA.x;
-    const dy = centerB.y - centerA.y;
 
-    if (relationship.a_position === "Parent" && relationship.b_position === "Child") {
-      return dy >= 0 ? { from: "bottom", to: "top" } : { from: "top", to: "bottom" };
-    }
-    if (relationship.a_position === "Child" && relationship.b_position === "Parent") {
-      return dy >= 0 ? { from: "top", to: "bottom" } : { from: "bottom", to: "top" };
+    const parentID =
+      relationship.a_position === "Parent" ? relationship.node_id_a
+        : relationship.b_position === "Parent" ? relationship.node_id_b
+          : "";
+    const childID =
+      relationship.a_position === "Child" ? relationship.node_id_a
+        : relationship.b_position === "Child" ? relationship.node_id_b
+          : "";
+
+    if (parentID && childID) {
+      if (relationship.node_id_a === parentID && relationship.node_id_b === childID) return { from: "bottom", to: "top" };
+      if (relationship.node_id_a === childID && relationship.node_id_b === parentID) return { from: "top", to: "bottom" };
     }
 
-    if (Math.abs(dy) > Math.abs(dx) * 1.15) {
-      return dy >= 0 ? { from: "bottom", to: "top" } : { from: "top", to: "bottom" };
-    }
-    return dx >= 0 ? { from: "right", to: "left" } : { from: "left", to: "right" };
+    return centerB.x >= centerA.x ? { from: "right", to: "left" } : { from: "left", to: "right" };
   };
 
   const visibleNodeIDSet = useMemo(() => {

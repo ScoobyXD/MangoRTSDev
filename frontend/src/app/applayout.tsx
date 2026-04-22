@@ -95,6 +95,16 @@ function snapToHalf(value: number): number {
   return Math.round(value * 2) / 2;
 }
 
+function withAlpha(hexColor: string, alpha: number): string {
+  const normalized = hexColor.trim();
+  const hex = normalized.startsWith("#") ? normalized.slice(1) : normalized;
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return `rgba(0,0,0,${alpha})`;
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 function framesOverlap(a: FrameDataModel, b: FrameDataModel) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
@@ -454,12 +464,14 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
   const availableContentW = Math.max(1, frame.w * stepX - 16);
   const availableContentH = Math.max(1, frame.h * stepY - 54);
   const contentScale = clamp(Math.min(availableContentW / 360, availableContentH / 250, 1), 0.35, 1);
+  const edgeHighlight = withAlpha(frame.accent || frame.color, 0.75);
+  const edgeAmbient = withAlpha(frame.accent || frame.color, 0.28);
   const edgeGlow = !nested && edgeHit
     ? [
-      edgeHit.left ? "inset 6px 0 0 rgba(255,255,255,0.5)" : null,
-      edgeHit.right ? "inset -6px 0 0 rgba(255,255,255,0.5)" : null,
-      edgeHit.top ? "inset 0 6px 0 rgba(255,255,255,0.5)" : null,
-      edgeHit.bottom ? "inset 0 -6px 0 rgba(255,255,255,0.5)" : null,
+      edgeHit.left ? `inset 8px 0 0 ${edgeHighlight}, inset 14px 0 18px ${edgeAmbient}` : null,
+      edgeHit.right ? `inset -8px 0 0 ${edgeHighlight}, inset -14px 0 18px ${edgeAmbient}` : null,
+      edgeHit.top ? `inset 0 8px 0 ${edgeHighlight}, inset 0 14px 18px ${edgeAmbient}` : null,
+      edgeHit.bottom ? `inset 0 -8px 0 ${edgeHighlight}, inset 0 -14px 18px ${edgeAmbient}` : null,
     ].filter(Boolean).join(", ")
     : "";
   return (
