@@ -744,6 +744,126 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     return visible;
   }, [nodes, nodePositions, pan.x, pan.y, zoom, canvasSize.width, canvasSize.height]);
 
+  const relationshipRoutingGrid = useMemo(() => {
+    const step = MINI_GRID;
+    const cols = Math.floor(WORLD_W / step) + 1;
+    const rows = Math.floor(WORLD_H / step) + 1;
+    const blocked = new Uint8Array(cols * rows);
+    const margin = step;
+
+    for (const node of nodes) {
+      const pos = nodePositions[node.node_id];
+      if (!pos) continue;
+      const minX = Math.max(0, Math.floor((pos.x - margin) / step));
+      const maxX = Math.min(cols - 1, Math.ceil((pos.x + NODE_W + margin) / step));
+      const minY = Math.max(0, Math.floor((pos.y - margin) / step));
+      const maxY = Math.min(rows - 1, Math.ceil((pos.y + NODE_H + margin) / step));
+      for (let gy = minY; gy <= maxY; gy += 1) {
+        for (let gx = minX; gx <= maxX; gx += 1) {
+          blocked[gy * cols + gx] = 1;
+        }
+      }
+    }
+
+    return { step, cols, rows, blocked };
+  }, [WORLD_H, WORLD_W, nodes, nodePositions]);
+
+  const routeOrthogonalPath = (
+    from: { x: number; y: number },
+    fromOut: { x: number; y: number },
+    toIn: { x: number; y: number },
+    to: { x: number; y: number },
+    sourceNodeID: string,
+    targetNodeID: string,
+  ) => {
+    const { step, cols, rows, blocked } = relationshipRoutingGrid;
+    const toCell = (point: { x: number; y: number }) => ({
+      gx: clamp(Math.round(point.x / step), 0, cols - 1),
+      gy: clamp(Math.round(point.y / step), 0, rows - 1),
+    });
+    const toPoint = (gx: number, gy: number) => ({ x: gx * step, y: gy * step });
+    const key = (gx: number, gy: number) => gy * cols + gx;
+    const sourcePos = nodePositions[sourceNodeID];
+    const targetPos = nodePositions[targetNodeID];
+
+    const isBlocked = (gx: number, gy: number) => {
+      const idx = key(gx, gy);
+      if (!blocked[idx]) return false;
+      const worldX = gx * step;
+      const worldY = gy * step;
+      const isInsideSource = sourcePos && worldX >= sourcePos.x - step && worldX <= sourcePos.x + NODE_W + step && worldY >= sourcePos.y - step && worldY <= sourcePos.y + NODE_H + step;
+      if (isInsideSource) return false;
+      const isInsideTarget = targetPos && worldX >= targetPos.x - step && worldX <= targetPos.x + NODE_W + step && worldY >= targetPos.y - step && worldY <= targetPos.y + NODE_H + step;
+      if (isInsideTarget) return false;
+      return true;
+    };
+
+    const start = toCell(fromOut);
+    const goal = toCell(toIn);
+    const startKey = key(start.gx, start.gy);
+    const goalKey = key(goal.gx, goal.gy);
+    const queue = [startKey];
+    const cameFrom = new Int32Array(cols * rows).fill(-1);
+    const visited = new Uint8Array(cols * rows);
+    visited[startKey] = 1;
+    let found = false;
+
+    for (let pointer = 0; pointer < queue.length; pointer += 1) {
+      const current = queue[pointer];
+      if (current === goalKey) {
+        found = true;
+        break;
+      }
+      const gx = current % cols;
+      const gy = Math.floor(current / cols);
+      const neighbors = [
+        { gx: gx + 1, gy },
+        { gx: gx - 1, gy },
+        { gx, gy: gy + 1 },
+        { gx, gy: gy - 1 },
+      ];
+      for (const next of neighbors) {
+        if (next.gx < 0 || next.gx >= cols || next.gy < 0 || next.gy >= rows) continue;
+        const nextKey = key(next.gx, next.gy);
+        if (visited[nextKey]) continue;
+        if (isBlocked(next.gx, next.gy) && nextKey !== goalKey) continue;
+        visited[nextKey] = 1;
+        cameFrom[nextKey] = current;
+        queue.push(nextKey);
+      }
+    }
+
+    const fallback = [from, fromOut, { x: toIn.x, y: fromOut.y }, toIn, to];
+    if (!found) return fallback.map((point) => ({ x: snapToGrid(point.x), y: snapToGrid(point.y) }));
+
+    const cells: number[] = [];
+    let current = goalKey;
+    while (current !== -1) {
+      cells.push(current);
+      if (current === startKey) break;
+      current = cameFrom[current];
+    }
+    cells.reverse();
+
+    const routed = cells.map((cell) => toPoint(cell % cols, Math.floor(cell / cols)));
+    const collapsed = [from, fromOut, ...routed, toIn, to].filter((point, index, list) => {
+      if (index === 0) return true;
+      const prev = list[index - 1];
+      return prev.x !== point.x || prev.y !== point.y;
+    });
+
+    const simplified = [collapsed[0]];
+    for (let i = 1; i < collapsed.length - 1; i += 1) {
+      const prev = simplified[simplified.length - 1];
+      const currentPoint = collapsed[i];
+      const next = collapsed[i + 1];
+      const sameLine = (prev.x === currentPoint.x && currentPoint.x === next.x) || (prev.y === currentPoint.y && currentPoint.y === next.y);
+      if (!sameLine) simplified.push(currentPoint);
+    }
+    simplified.push(collapsed[collapsed.length - 1]);
+    return simplified.map((point) => ({ x: snapToGrid(point.x), y: snapToGrid(point.y) }));
+  };
+
   const connectionPaths = useMemo(() => {
     return relationships
       .filter((rel) => nodeByID[rel.node_id_a] && nodeByID[rel.node_id_b] && nodePositions[rel.node_id_a] && nodePositions[rel.node_id_b])
@@ -762,13 +882,11 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           : anchor.to === "right" ? { x: to.x + lane, y: to.y }
             : anchor.to === "top" ? { x: to.x, y: to.y - lane }
               : { x: to.x, y: to.y + lane };
-        const horizontalFirst = anchor.from === "left" || anchor.from === "right";
-        const cornerA = horizontalFirst ? { x: toIn.x, y: fromOut.y } : { x: fromOut.x, y: toIn.y };
-        const points = [from, fromOut, cornerA, toIn, to].map((point) => ({ x: snapToGrid(point.x), y: snapToGrid(point.y) }));
+        const points = routeOrthogonalPath(from, fromOut, toIn, to, rel.node_id_a, rel.node_id_b);
         return { id: rel.node_relationship_id, points };
       })
       .filter((path): path is { id: string; points: { x: number; y: number }[] } => !!path);
-  }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet]);
+  }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet, relationshipRoutingGrid]);
 
   const visibleNodes = useMemo(() => nodes.filter((node) => visibleNodeIDSet.has(node.node_id)), [nodes, visibleNodeIDSet]);
 
