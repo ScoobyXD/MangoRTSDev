@@ -10,6 +10,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const canvasStateKey = `node-canvas-state-v3:${companyID}:${canvasScope}`;
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const relationshipCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1000, height: 560 });
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -762,6 +763,35 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   const visibleNodes = useMemo(() => nodes.filter((node) => visibleNodeIDSet.has(node.node_id)), [nodes, visibleNodeIDSet]);
 
+  useEffect(() => {
+    const canvas = relationshipCanvasRef.current;
+    if (!canvas) return;
+    const width = WORLD_W;
+    const height = WORLD_H;
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    context.clearRect(0, 0, width, height);
+    context.strokeStyle = accent;
+    context.lineWidth = 1.6;
+    context.globalAlpha = 0.72;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+
+    for (const path of connectionPaths) {
+      if (path.points.length === 0) continue;
+      context.beginPath();
+      context.moveTo(path.points[0].x, path.points[0].y);
+      for (const point of path.points.slice(1)) {
+        context.lineTo(point.x, point.y);
+      }
+      context.stroke();
+    }
+    context.globalAlpha = 1;
+  }, [WORLD_H, WORLD_W, accent, connectionPaths]);
+
   return (
     <div style={{ fontSize: 11, height: "100%" }}>
       <div
@@ -843,20 +873,10 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             backgroundPosition: "-1px -1px",
           }}
         >
-          <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 1 }}>
-            {connectionPaths.map((path) => (
-              <polyline
-                key={path.id}
-                points={path.points.map((point) => `${point.x},${point.y}`).join(" ")}
-                fill="none"
-                stroke={accent}
-                strokeWidth={1.6}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity={0.72}
-              />
-            ))}
-          </svg>
+          <canvas
+            ref={relationshipCanvasRef}
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 1 }}
+          />
 
           {visibleNodes.map((node) => {
             const position = nodePositions[node.node_id] ?? { x: 120, y: 120 };
