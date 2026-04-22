@@ -20,6 +20,10 @@ A half-decent analogy is an internal Bloombergy terminal on steroids with video 
 - **8-directional resize** — all 4 edges + all 4 corners. Left/top edges move origin inversely. Min 3×3. Edit mode only.
 - **Edit mode via canvas right-click** — right-click blank canvas → "Edit Mode: On/Off" toggle. No edit button in header. Edit mode shows blue badge in header + color pickers.
 - **Widget right-click menu** — Duplicate / Delete. Works in any mode (edit or not).
+- **Right-click menu alignment rule** — menu item text is left-aligned by default; nested child controls are intentionally indented to the right to show hierarchy.
+- **Nested relationship visuals** — for list-like nested UI (including right-click menus), use a Company Explorer-inspired hierarchy: boxy rows with child rows indented under the parent row.
+- **Hierarchy list styling convention** — right-click hierarchy lists should be fully boxy (top-level and nested rows), without triangle expand/collapse icons or decorative connector lines unless explicitly requested.
+- **Hierarchy spacing rule** — stacked hierarchy boxes should touch with no vertical gaps between adjacent rows (top-level and nested).
 - **Module-name click switcher** — single-click the module name tag (not the full header row) to open a module-type picker and swap kind/title in place. Works in edit and non-edit mode.
 - **Add widget (+)** — always-visible button in header. Works in any mode.
 - **Nothing auto-moves, instant snapping, no transitions**
