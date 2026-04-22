@@ -12,6 +12,14 @@ type CacheEntry = {
   subscribers: Set<Subscriber>;
   loading: boolean;
   source?: EventSource;
+  etag?: string;
+};
+
+type WorkspaceStreamEnvelope = {
+  company_id: string;
+  type: string;
+  ts: string;
+  data?: Record<string, unknown>;
 };
 
 type WorkspaceStreamEnvelope = {
@@ -133,9 +141,15 @@ export async function refreshWorkspaceSnapshot(apiBase: string, companyID: strin
   if (entry.loading) return;
   entry.loading = true;
   try {
-    const response = await fetch(`${apiBase}/v1/workspace/snapshot?company_id=${encodeURIComponent(companyID)}`);
+    const response = await fetch(`${apiBase}/v1/workspace/snapshot?company_id=${encodeURIComponent(companyID)}`, {
+      cache: "no-store",
+      headers: entry.etag ? { "If-None-Match": entry.etag } : undefined,
+    });
+    if (response.status === 304) return;
     if (!response.ok) return;
     const payload = (await response.json()) as WorkspaceSnapshot;
+    const nextEtag = response.headers.get("ETag");
+    if (nextEtag) entry.etag = nextEtag;
     entry.snapshot = {
       nodes: payload.nodes ?? [],
       relationships: payload.relationships ?? [],
