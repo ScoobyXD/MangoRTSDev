@@ -613,6 +613,31 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     }
   };
 
+  const commitRelationshipBetweenNodes = async (sourceNodeID: string, sourceSide: NodeDirection, targetNodeID: string, targetSide: NodeDirection) => {
+    if (!sourceNodeID || !targetNodeID || sourceNodeID === targetNodeID) return;
+    setError("");
+    try {
+      const relationship = await requestJSON<NodeRelationship>("/v1/node-relationships", {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyID,
+          node_id_a: sourceNodeID,
+          node_id_b: targetNodeID,
+          a_position: relationshipPositionFromSide(sourceSide),
+          b_position: relationshipPositionFromSide(targetSide),
+        }),
+      });
+      setRelationshipAnchors((previous) => ({
+        ...previous,
+        [relationship.node_relationship_id]: { from: sourceSide, to: targetSide },
+      }));
+      await loadDetails(selectedNodeID || sourceNodeID);
+      await loadGraphRelationships(nodes);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_create_node_relationship");
+    }
+  };
+
   const deleteRelationship = async (relationshipID: string) => {
     if (!relationshipID) return;
     setError("");
@@ -1370,7 +1395,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                             setRelationshipCursor(getAnchorPoint(node.node_id, direction));
                             return;
                           }
-                          await createRelationship(relationshipDraft.sourceNodeID, relationshipDraft.sourceSide, node.node_id, direction);
+                          await commitRelationshipBetweenNodes(relationshipDraft.sourceNodeID, relationshipDraft.sourceSide, node.node_id, direction);
                           setRelationshipDraft(null);
                           setRelationshipCursor(null);
                         }}

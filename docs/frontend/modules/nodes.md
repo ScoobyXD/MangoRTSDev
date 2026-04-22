@@ -188,6 +188,7 @@ Relationships are visualized with SVG polylines in world space.
 - `loadDetails(selectedNodeID)` loads details panel data for one selected node.
 - `loadGraphRelationships(nodes)` fetches details for each node and deduplicates relationships by `node_relationship_id` to render full graph links.
 - Workspace snapshot streaming/delta handling in `workspaceStore.ts` uses a single `WorkspaceStreamEnvelope` contract type for event application.
+- Relationship-create writes between existing nodes are executed through one internal helper path (`commitRelationshipBetweenNodes`) to avoid duplicate declaration/runtime drift in the canvas module.
 
 ---
 
