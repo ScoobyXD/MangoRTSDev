@@ -33,8 +33,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [detailsPanelNodeID, setDetailsPanelNodeID] = useState<string>("");
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number; submenuOpenLeft: boolean } | null>(null);
-  const [relationshipColorMenuOpen, setRelationshipColorMenuOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
   const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeID: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[] } | null>(null);
   const [canvasActive, setCanvasActive] = useState(false);
@@ -975,7 +974,6 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           event.preventDefault();
           event.stopPropagation();
           setCanvasActive(true);
-          setRelationshipColorMenuOpen(false);
           setNodeContextMenu(null);
           if (!viewportRef.current) return;
           const bounds = viewportRef.current.getBoundingClientRect();
@@ -983,12 +981,11 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
           const worldX = clamp((localX - pan.x) / zoom, 0, WORLD_W);
           const worldY = clamp((localY - pan.y) / zoom, 0, WORLD_H);
-          const menuWidth = 190;
-          const menuHeight = 78;
+          const menuWidth = 208;
+          const menuHeight = 162;
           const clampedX = clamp(localX, 8, Math.max(8, bounds.width - menuWidth - 8));
           const clampedY = clamp(localY, 8, Math.max(8, bounds.height - menuHeight - 8));
-          const submenuOpenLeft = clampedX > bounds.width - menuWidth - 220;
-          setContextMenu({ x: clampedX, y: clampedY, worldX, worldY, submenuOpenLeft });
+          setContextMenu({ x: clampedX, y: clampedY, worldX, worldY });
         }}
         onWheel={(event) => {
           event.preventDefault();
@@ -1206,14 +1203,17 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               border: `1px solid ${accent}`,
               borderRadius: 8,
               padding: 4,
+              width: 208,
+              boxSizing: "border-box",
+              display: "grid",
+              gap: 2,
               zIndex: 40,
               boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
             }}
             onPointerDown={(event) => event.stopPropagation()}
-            onMouseLeave={() => setRelationshipColorMenuOpen(false)}
           >
             <button
-              style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px" }}
+              style={{ width: "100%", border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", textAlign: "left" }}
               onClick={() => {
                 const title = trimOrEmpty(newNodeHeader) || "New node";
                 void createNode(title, { x: contextMenu.worldX, y: contextMenu.worldY });
@@ -1233,52 +1233,70 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 fontWeight: 700,
                 padding: "6px 8px",
                 textAlign: "left",
-                opacity: relationshipColorsEnabled ? 1 : 0.62,
-                color: relationshipColorsEnabled ? "#0b4868" : "#4f5d66",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 6,
+                color: "#111111",
               }}
-              onMouseEnter={() => setRelationshipColorMenuOpen(true)}
               onClick={() => setRelationshipColorsEnabled((previous) => !previous)}
             >
-              Enable relationship colors
-            </button>
-            {relationshipColorMenuOpen && (
-              <div
+              <span>Enable relationship colors</span>
+              <span
+                aria-hidden="true"
                 style={{
-                  position: "absolute",
-                  top: 37,
-                  left: contextMenu.submenuOpenLeft ? undefined : "100%",
-                  right: contextMenu.submenuOpenLeft ? "100%" : undefined,
-                  marginLeft: contextMenu.submenuOpenLeft ? 0 : 8,
-                  marginRight: contextMenu.submenuOpenLeft ? 8 : 0,
-                  minWidth: 184,
-                  background: "rgba(255,255,255,0.97)",
-                  border: `1px solid ${accent}`,
-                  borderRadius: 8,
-                  padding: 8,
-                  boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
-                  display: "grid",
-                  gap: 6,
-                  opacity: relationshipColorsEnabled ? 1 : 0.68,
+                  width: 28,
+                  height: 18,
+                  borderRadius: 999,
+                  background: relationshipColorsEnabled ? "#34c759" : "#b7c0c7",
+                  boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.12)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: relationshipColorsEnabled ? "flex-end" : "flex-start",
+                  padding: 2,
+                  boxSizing: "border-box",
+                  flexShrink: 0,
+                  transition: "background 120ms ease",
                 }}
-                onMouseEnter={() => setRelationshipColorMenuOpen(true)}
-                onMouseLeave={() => setRelationshipColorMenuOpen(false)}
               >
-                {([
-                  ["Parent", "parent"],
-                  ["Peer", "peer"],
-                  ["Child", "child"],
-                ] as const).map(([label, key]) => (
-                  <label key={key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, fontWeight: 700 }}>
-                    <span>{label}</span>
-                    <input
-                      type="color"
-                      value={relationshipRoleColors[key]}
-                      onChange={(event) => setRelationshipRoleColors((previous) => ({ ...previous, [key]: event.target.value }))}
-                    />
-                  </label>
-                ))}
-              </div>
-            )}
+                <span
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "#ffffff",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
+                  }}
+                />
+              </span>
+            </button>
+            <div
+              style={{
+                display: "grid",
+                gap: 6,
+                marginLeft: 20,
+                marginTop: 2,
+                padding: "4px 0 4px 10px",
+                borderLeft: "1px solid rgba(0,0,0,0.18)",
+                opacity: relationshipColorsEnabled ? 1 : 0.68,
+              }}
+            >
+              {([
+                ["Parent", "parent"],
+                ["Peer", "peer"],
+                ["Child", "child"],
+              ] as const).map(([label, key]) => (
+                <label key={key} style={{ display: "grid", gridTemplateColumns: "12px 1fr auto", alignItems: "center", columnGap: 6, fontSize: 11, fontWeight: 700 }}>
+                  <span style={{ width: 10, height: 1, background: "rgba(0,0,0,0.18)", justifySelf: "end" }} />
+                  <span>{label}</span>
+                  <input
+                    type="color"
+                    value={relationshipRoleColors[key]}
+                    onChange={(event) => setRelationshipRoleColors((previous) => ({ ...previous, [key]: event.target.value }))}
+                  />
+                </label>
+              ))}
+            </div>
           </div>
         )}
 
