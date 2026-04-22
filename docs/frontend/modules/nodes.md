@@ -151,6 +151,8 @@ Source node is always `node_id_a`, target node is always `node_id_b`.
 
 `a_position` is derived from the source side and `b_position` from the target side, so relationship semantics preserve exactly which sides were clicked.
 
+For `+` linked-node creation, the new node is attached on the **opposite side** of the source handle, and positions are derived from the same side-to-position mapping (no parent/child inversion patching).
+
 ### Relationship deletion
 
 - Relationship rows are removable from the details panel via **Snip**.

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, MINI_GRID, NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeCanvasState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_CANVAS_STATE, clamp, divider, oppositeSide, relationFromDirection, snapToGrid, trimOrEmpty } from "../shared";
+import { INFO_TYPES, MINI_GRID, NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeCanvasState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_CANVAS_STATE, clamp, divider, oppositeSide, snapToGrid, trimOrEmpty } from "../shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_CANVAS_STATE_UPDATED } from "../eventbus";
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../workspaceStore";
 
@@ -562,16 +562,14 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     if (!node) return;
 
     try {
-      const pair = relationFromDirection(direction);
-
       const relationship = await requestJSON<NodeRelationship>("/v1/node-relationships", {
         method: "POST",
         body: JSON.stringify({
           company_id: companyID,
           node_id_a: sourceNodeID,
           node_id_b: node.node_id,
-          a_position: pair.a,
-          b_position: pair.b,
+          a_position: relationPositionFromSide(direction),
+          b_position: relationPositionFromSide(oppositeSide(direction)),
         }),
       });
 
