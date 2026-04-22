@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, MINI_GRID, NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeCanvasState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_CANVAS_STATE, clamp, divider, oppositeSide, relationFromDirection, snapToGrid, trimOrEmpty } from "../shared";
+import { INFO_TYPES, MINI_GRID, NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeCanvasState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_CANVAS_STATE, clamp, divider, oppositeSide, snapToGrid, trimOrEmpty } from "../shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_CANVAS_STATE_UPDATED } from "../eventbus";
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../workspaceStore";
 
@@ -64,6 +64,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const explorerContextRef = useRef<number>(0);
   const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(false);
   const [relationshipRoleColors, setRelationshipRoleColors] = useState({ parent: "#ff8a00", peer: "#0095ff", child: "#6f5cff" });
+  const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
+  const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const cached = SESSION_NODE_CANVAS_STATE.get(canvasStateKey);
@@ -245,6 +247,21 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   useEffect(() => {
     void loadGraphRelationships(nodes);
   }, [nodes]);
+
+  useEffect(() => {
+    setSelectedRelationshipIDs((previous) => {
+      if (previous.size === 0) return previous;
+      const available = new Set(relationships.map((relationship) => relationship.node_relationship_id));
+      const next = new Set(Array.from(previous).filter((id) => available.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [relationships]);
+
+  useEffect(() => {
+    if (!relationshipDraft) return;
+    if (nodes.some((node) => node.node_id === relationshipDraft.sourceNodeID)) return;
+    setRelationshipDraft(null);
+  }, [nodes, relationshipDraft]);
 
   useEffect(() => {
     void loadDetails(selectedNodeID);
@@ -472,6 +489,31 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   }, []);
 
   useEffect(() => {
+    if (!relationshipDraft) return;
+    const onMove = (event: PointerEvent) => {
+      if (!viewportRef.current) return;
+      const bounds = viewportRef.current.getBoundingClientRect();
+      const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
+      const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
+      const worldX = clamp((localX - pan.x) / zoom, 0, WORLD_W);
+      const worldY = clamp((localY - pan.y) / zoom, 0, WORLD_H);
+      setRelationshipDraft((previous) => (previous ? { ...previous, cursor: { x: worldX, y: worldY } } : previous));
+    };
+    window.addEventListener("pointermove", onMove);
+    return () => window.removeEventListener("pointermove", onMove);
+  }, [relationshipDraft, pan.x, pan.y, zoom]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setRelationshipDraft(null);
+      setSelectedRelationshipIDs(new Set());
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
     if (!widgetId) return;
     const eventName = `nodes:create:${widgetId}`;
     const onCreate = (event: Event) => {
@@ -520,16 +562,14 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     if (!node) return;
 
     try {
-      const pair = relationFromDirection(direction);
-
       const relationship = await requestJSON<NodeRelationship>("/v1/node-relationships", {
         method: "POST",
         body: JSON.stringify({
           company_id: companyID,
           node_id_a: sourceNodeID,
           node_id_b: node.node_id,
-          a_position: pair.a,
-          b_position: pair.b,
+          a_position: relationPositionFromSide(direction),
+          b_position: relationPositionFromSide(oppositeSide(direction)),
         }),
       });
 
@@ -562,6 +602,33 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node_relationship");
     }
+  };
+
+  const relationPositionFromSide = (direction: NodeDirection): "Parent" | "Child" | "Peer" => {
+    if (direction === "left" || direction === "right") return "Peer";
+    if (direction === "top") return "Parent";
+    return "Child";
+  };
+
+  const commitRelationshipBetweenNodes = async (sourceNodeID: string, sourceSide: NodeDirection, targetNodeID: string, targetSide: NodeDirection) => {
+    if (!sourceNodeID || !targetNodeID || sourceNodeID === targetNodeID) return;
+    const relationship = await requestJSON<NodeRelationship>("/v1/node-relationships", {
+      method: "POST",
+      body: JSON.stringify({
+        company_id: companyID,
+        node_id_a: sourceNodeID,
+        node_id_b: targetNodeID,
+        a_position: relationPositionFromSide(sourceSide),
+        b_position: relationPositionFromSide(targetSide),
+      }),
+    });
+    setRelationshipAnchors((previous) => ({
+      ...previous,
+      [relationship.node_relationship_id]: { from: sourceSide, to: targetSide },
+    }));
+    await loadGraphRelationships(nodes);
+    await loadDetails(selectedNodeID);
+    if (detailsPanelNodeID) await loadDetails(detailsPanelNodeID);
   };
 
   const deleteNode = async (nodeID: string) => {
@@ -612,6 +679,28 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     }
   };
 
+  const deleteRelationships = async (relationshipIDs: string[]) => {
+    const unique = Array.from(new Set(relationshipIDs.filter(Boolean)));
+    if (unique.length === 0) return;
+    setError("");
+    try {
+      await Promise.all(unique.map((relationshipID) => requestJSON<{ status: string }>(`/v1/node-relationships/${relationshipID}?company_id=${encodeURIComponent(companyID)}`, {
+        method: "DELETE",
+      })));
+      setSelectedRelationshipIDs(new Set());
+      setRelationshipAnchors((previous) => {
+        const next = { ...previous };
+        for (const id of unique) delete next[id];
+        return next;
+      });
+      await loadGraphRelationships(nodes);
+      await loadDetails(selectedNodeID);
+      if (detailsPanelNodeID) await loadDetails(detailsPanelNodeID);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_delete_relationship");
+    }
+  };
+
   const addInformation = async (nodeID: string) => {
     if (!nodeID || !trimOrEmpty(infoDraft)) return;
     setError("");
@@ -640,6 +729,13 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
       }
       if (event.key !== "Delete" && event.key !== "Backspace") return;
+      const relationshipIDs = Array.from(selectedRelationshipIDs);
+      if (relationshipIDs.length > 0) {
+        event.preventDefault();
+        event.stopPropagation();
+        void deleteRelationships(relationshipIDs);
+        return;
+      }
       const nodeIDs = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : (selectedNodeID ? [selectedNodeID] : []);
       if (nodeIDs.length === 0) return;
       event.preventDefault();
@@ -648,7 +744,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [canvasActive, selectedNodeID, selectedNodeIDs]);
+  }, [canvasActive, selectedNodeID, selectedNodeIDs, selectedRelationshipIDs]);
 
   useEffect(() => {
     if (!panelDrag) return;
@@ -719,6 +815,10 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   const detailsPanelNode = useMemo(() => nodes.find((item) => item.node_id === detailsPanelNodeID) ?? null, [nodes, detailsPanelNodeID]);
   const nodeByID = useMemo(() => Object.fromEntries(nodes.map((node) => [node.node_id, node])), [nodes]);
+  const activeRoleNodeID = useMemo(() => {
+    if (selectedNodeIDs.size === 1) return Array.from(selectedNodeIDs)[0] ?? "";
+    return selectedNodeID;
+  }, [selectedNodeIDs, selectedNodeID]);
 
   useEffect(() => {
     if (!detailsPanelNode || !viewportRef.current) return;
@@ -913,9 +1013,9 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               : { x: to.x, y: to.y + lane };
         const points = routeOrthogonalPath(from, fromOut, toIn, to, rel.node_id_a, rel.node_id_b);
         let role: "Parent" | "Peer" | "Child" | null = null;
-        if (selectedNodeID) {
-          if (rel.node_id_a === selectedNodeID) role = rel.a_position;
-          else if (rel.node_id_b === selectedNodeID) role = rel.b_position;
+        if (activeRoleNodeID) {
+          if (rel.node_id_a === activeRoleNodeID) role = rel.a_position;
+          else if (rel.node_id_b === activeRoleNodeID) role = rel.b_position;
         }
         const stroke =
           role === "Parent" ? relationshipRoleColors.parent
@@ -923,10 +1023,17 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               : role === "Child" ? relationshipRoleColors.child
                 : accent;
         const alpha = !relationshipColorsEnabled ? 0.72 : (role ? 0.92 : 0.35);
-        return { id: rel.node_relationship_id, points, stroke, alpha };
+        return { id: rel.node_relationship_id, points, stroke, alpha, selected: selectedRelationshipIDs.has(rel.node_relationship_id) };
       })
-      .filter((path): path is { id: string; points: { x: number; y: number }[]; stroke: string; alpha: number } => !!path);
-  }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet, relationshipRoutingGrid, selectedNodeID, relationshipRoleColors, accent, relationshipColorsEnabled]);
+      .filter((path): path is { id: string; points: { x: number; y: number }[]; stroke: string; alpha: number; selected: boolean } => !!path);
+  }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet, relationshipRoutingGrid, activeRoleNodeID, relationshipRoleColors, accent, relationshipColorsEnabled, selectedRelationshipIDs]);
+
+  const draftPath = useMemo(() => {
+    if (!relationshipDraft) return null;
+    const from = getAnchorPoint(relationshipDraft.sourceNodeID, relationshipDraft.sourceSide);
+    if (!from) return null;
+    return [from, relationshipDraft.cursor];
+  }, [relationshipDraft, nodePositions]);
 
   const visibleNodes = useMemo(() => nodes.filter((node) => visibleNodeIDSet.has(node.node_id)), [nodes, visibleNodeIDSet]);
 
@@ -941,12 +1048,12 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     if (!context) return;
 
     context.clearRect(0, 0, width, height);
-    context.lineWidth = 1.6;
     context.lineCap = "round";
     context.lineJoin = "round";
 
     for (const path of connectionPaths) {
       if (path.points.length === 0) continue;
+      context.lineWidth = path.selected ? 3.4 : 1.6;
       context.strokeStyle = relationshipColorsEnabled ? path.stroke : accent;
       context.globalAlpha = path.alpha;
       context.beginPath();
@@ -956,8 +1063,19 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       }
       context.stroke();
     }
+    if (draftPath && draftPath.length > 1) {
+      context.lineWidth = 2.1;
+      context.strokeStyle = accent;
+      context.globalAlpha = 0.9;
+      context.setLineDash([7, 5]);
+      context.beginPath();
+      context.moveTo(draftPath[0].x, draftPath[0].y);
+      for (const point of draftPath.slice(1)) context.lineTo(point.x, point.y);
+      context.stroke();
+      context.setLineDash([]);
+    }
     context.globalAlpha = 1;
-  }, [WORLD_H, WORLD_W, accent, connectionPaths, relationshipColorsEnabled]);
+  }, [WORLD_H, WORLD_W, accent, connectionPaths, relationshipColorsEnabled, draftPath]);
 
   return (
     <div style={{ fontSize: 11, height: "100%" }}>
@@ -1005,6 +1123,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           setCanvasActive(true);
           setContextMenu(null);
           setNodeContextMenu(null);
+          setSelectedRelationshipIDs(new Set());
           const bounds = viewportRef.current.getBoundingClientRect();
           const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
           const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
@@ -1021,6 +1140,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             setSelectedNodeIDs(new Set());
             setSelectedNodeID("");
           }
+          if (relationshipDraft) setRelationshipDraft(null);
           setPanState({
             pointerID: event.pointerId,
             startMouseX: event.clientX,
@@ -1048,6 +1168,39 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             ref={relationshipCanvasRef}
             style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 1 }}
           />
+          <svg
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "auto", zIndex: 2 }}
+            viewBox={`0 0 ${WORLD_W} ${WORLD_H}`}
+          >
+            {connectionPaths.map((path) => (
+              <polyline
+                key={path.id}
+                points={path.points.map((point) => `${point.x},${point.y}`).join(" ")}
+                fill="none"
+                stroke="transparent"
+                strokeWidth={14}
+                style={{ cursor: "pointer" }}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  setCanvasActive(true);
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setRelationshipDraft(null);
+                  if (event.shiftKey || event.ctrlKey) {
+                    setSelectedRelationshipIDs((previous) => {
+                      const next = new Set(previous);
+                      if (next.has(path.id)) next.delete(path.id);
+                      else next.add(path.id);
+                      return next;
+                    });
+                    return;
+                  }
+                  setSelectedRelationshipIDs(new Set([path.id]));
+                }}
+              />
+            ))}
+          </svg>
 
           {visibleNodes.map((node) => {
             const position = nodePositions[node.node_id] ?? { x: 120, y: 120 };
@@ -1084,6 +1237,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                   event.preventDefault();
                   event.stopPropagation();
                   setCanvasActive(true);
+                  setSelectedRelationshipIDs(new Set());
                   const bounds = viewportRef.current?.getBoundingClientRect();
                   if (!bounds) return;
                   const nextIDs = selectedNodeIDs.has(node.node_id) ? Array.from(selectedNodeIDs) : [node.node_id];
@@ -1109,6 +1263,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                   }
                   setContextMenu(null);
                   setNodeContextMenu(null);
+                  setSelectedRelationshipIDs(new Set());
                   const bounds = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
 
                   const nextIDs = selectedNodeIDs.has(node.node_id) ? Array.from(selectedNodeIDs) : [node.node_id];
@@ -1139,39 +1294,82 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 <div style={{ padding: "4px 8px", fontSize: 9, opacity: 0.7 }}>drag to move · double-click for details</div>
 
                 {([
-                  ["left", { left: -10, top: "50%", transform: "translate(-50%, -50%)" }],
-                  ["right", { right: -10, top: "50%", transform: "translate(50%, -50%)" }],
-                  ["top", { top: -10, left: "50%", transform: "translate(-50%, -50%)" }],
-                  ["bottom", { bottom: -10, left: "50%", transform: "translate(-50%, 50%)" }],
-                ] as const).map(([direction, sideStyle]) => (
-                  <button
-                    key={direction}
-                    title={`Create ${direction} node`}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void createLinkedNode(node.node_id, direction);
-                    }}
-                    style={{
-                      position: "absolute",
-                      ...sideStyle,
-                      width: 20,
-                      height: 20,
-                      borderRadius: 999,
-                      border: `1px solid ${accent}`,
-                      background: "#ffffff",
-                      color: accent,
-                      display: isPrimary ? "grid" : "none",
-                      placeItems: "center",
-                      fontSize: 14,
-                      lineHeight: 1,
-                      cursor: "pointer",
-                      padding: 0,
-                    }}
-                  >
-                    +
-                  </button>
-                ))}
+                  ["left", { left: -12, top: "50%", transform: "translate(-50%, -50%)", flexDirection: "column" }],
+                  ["right", { right: -12, top: "50%", transform: "translate(50%, -50%)", flexDirection: "column" }],
+                  ["top", { top: -12, left: "50%", transform: "translate(-50%, -50%)", flexDirection: "row" }],
+                  ["bottom", { bottom: -12, left: "50%", transform: "translate(-50%, 50%)", flexDirection: "row" }],
+                ] as const).map(([direction, sideStyle]) => {
+                  const isDrafting = !!relationshipDraft;
+                  const isSource = relationshipDraft?.sourceNodeID === node.node_id && relationshipDraft.sourceSide === direction;
+                  return (
+                    <div
+                      key={direction}
+                      style={{
+                        position: "absolute",
+                        ...sideStyle,
+                        display: isPrimary || isDrafting ? "flex" : "none",
+                        gap: 4,
+                      }}
+                    >
+                      <button
+                        title={`Create ${direction} node`}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setRelationshipDraft(null);
+                          void createLinkedNode(node.node_id, direction);
+                        }}
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: 999,
+                          border: `1px solid ${accent}`,
+                          background: "#ffffff",
+                          color: accent,
+                          display: isDrafting ? "none" : "grid",
+                          placeItems: "center",
+                          fontSize: 14,
+                          lineHeight: 1,
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                      >
+                        +
+                      </button>
+                      <button
+                        title={isDrafting ? `Attach relationship on ${direction}` : `Create relationship from ${direction}`}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (relationshipDraft) {
+                            if (relationshipDraft.sourceNodeID === node.node_id) return;
+                            void commitRelationshipBetweenNodes(relationshipDraft.sourceNodeID, relationshipDraft.sourceSide, node.node_id, direction);
+                            setRelationshipDraft(null);
+                            return;
+                          }
+                          const start = getAnchorPoint(node.node_id, direction);
+                          if (!start) return;
+                          setSelectedRelationshipIDs(new Set());
+                          setRelationshipDraft({ sourceNodeID: node.node_id, sourceSide: direction, cursor: start });
+                        }}
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: 999,
+                          border: `1px solid ${accent}`,
+                          background: isSource ? accent : "#ffffff",
+                          color: isSource ? "#ffffff" : accent,
+                          display: "grid",
+                          placeItems: "center",
+                          cursor: relationshipDraft?.sourceNodeID === node.node_id ? "not-allowed" : "pointer",
+                          padding: 0,
+                        }}
+                      >
+                        {isDrafting ? "◎" : (direction === "top" ? "↑" : direction === "right" ? "→" : direction === "bottom" ? "↓" : "←")}
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
@@ -1415,8 +1613,16 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 {(details?.node.node_id === detailsPanelNode.node_id ? details.relationships : []).length === 0
                   ? <div style={{ ...divider, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, opacity: 0.55 }}>No relationships</div>
                   : (details?.relationships ?? []).map((rel) => (
-                    <div key={rel.node_relationship_id} style={{ ...divider, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {rel.node_id_a.slice(0, 6)}({rel.a_position}) → {rel.node_id_b.slice(0, 6)}({rel.b_position})
+                    <div key={rel.node_relationship_id} style={{ ...divider, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", columnGap: 8 }}>
+                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {rel.node_id_a.slice(0, 6)}({rel.a_position}) → {rel.node_id_b.slice(0, 6)}({rel.b_position})
+                      </div>
+                      <button
+                        onClick={() => { void deleteRelationships([rel.node_relationship_id]); }}
+                        style={{ border: "1px solid rgba(180,0,30,0.25)", background: "rgba(255,255,255,0.55)", color: "#b00020", borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: "pointer", padding: "2px 6px" }}
+                      >
+                        Snip
+                      </button>
                     </div>
                   ))}
               </div>
