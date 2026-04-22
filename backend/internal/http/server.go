@@ -33,6 +33,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/nodes", s.handleNodes)
 	mux.HandleFunc("/v1/nodes/", s.handleNodeSubresource)
 	mux.HandleFunc("/v1/node-relationships", s.handleNodeRelationships)
+	mux.HandleFunc("/v1/node-relationships/", s.handleNodeRelationshipByID)
 	mux.HandleFunc("/v1/workspace/snapshot", s.handleWorkspaceSnapshot)
 	mux.HandleFunc("/v1/workspace/stream", s.handleWorkspaceStream)
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
@@ -235,6 +236,36 @@ func (s *Server) handleNodeRelationships(w http.ResponseWriter, r *http.Request)
 	}
 	s.publishWorkspaceEvent(req.CompanyID, "relationship_created", map[string]any{"node_relationship_id": item.NodeRelationshipID, "node_id_a": item.NodeIDA, "node_id_b": item.NodeIDB, "relationship": item})
 	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) handleNodeRelationshipByID(w http.ResponseWriter, r *http.Request) {
+	relationshipID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/node-relationships/"))
+	if relationshipID == "" {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if strings.Contains(relationshipID, "/") {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if r.Method != http.MethodDelete {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	if err := s.repo.DeleteNodeRelationship(companyID, relationshipID); errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "relationship_not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_delete_node_relationship")
+		return
+	}
+	s.publishWorkspaceEvent(companyID, "relationship_deleted", map[string]any{"node_relationship_id": relationshipID})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request) {

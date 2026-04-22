@@ -15,6 +15,7 @@ type Repository interface {
 	CreateNode(companyID, header string) (domain.Node, error)
 	ListNodes(companyID string) ([]domain.Node, error)
 	ListNodeRelationships(companyID string) ([]domain.NodeRelationship, error)
+	DeleteNodeRelationship(companyID, relationshipID string) error
 	GetNode(companyID, nodeID string) (domain.Node, error)
 	DeleteNode(companyID, nodeID string) error
 	GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error)
@@ -179,6 +180,27 @@ func (r *MemoryRepo) CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPositi
 	}
 	r.nodeRels[companyID] = append(r.nodeRels[companyID], item)
 	return item, nil
+}
+
+func (r *MemoryRepo) DeleteNodeRelationship(companyID, relationshipID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items := r.nodeRels[companyID]
+	filtered := make([]domain.NodeRelationship, 0, len(items))
+	deleted := false
+	for _, item := range items {
+		if item.NodeRelationshipID == relationshipID {
+			deleted = true
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	if !deleted {
+		return ErrNotFound
+	}
+	r.nodeRels[companyID] = filtered
+	return nil
 }
 
 func (r *MemoryRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error) {
