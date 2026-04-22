@@ -132,51 +132,82 @@ For Node/Explorer/Editor/Logic Gate canvases:
 ## Implementation Checklist (LLM/Engineer Tracking)
 
 Mark each item when complete and keep this list current.
+Status legend:
+- ✅ complete in repo
+- 🟡 partial / implemented but not yet at target architecture intent
+- ⛔ not started / blocked
+
+Last reviewed: 2026-04-22
 
 ### Hot Path Contracts
-- [ ] Defined SLOs for every hot path endpoint (p50/p95/p99)
-- [ ] Latency budgets written per endpoint and per UI flow
-- [ ] Hot/warm/cold classification enforced in PR reviews
+- ⛔ Defined SLOs for every hot path endpoint (p50/p95/p99)
+- ⛔ Latency budgets written per endpoint and per UI flow
+- ⛔ Hot/warm/cold classification enforced in PR reviews
+
+Blockers:
+- No agreed latency SLO document per endpoint/UI flow yet.
+- No CI/PR gate wiring that enforces latency class policy.
 
 ### N+1 Elimination
-- [x] Node Canvas relationship loading moved away from per-node detail fan-out to bulk relationship loading
-- [ ] Remaining N+1 patterns removed from all hot modules
-- [ ] Backend queries verified by EXPLAIN plans for hot endpoints
+- ✅ Node Canvas relationship loading moved away from per-node detail fan-out to bulk relationship loading
+- ⛔ Remaining N+1 patterns removed from all hot modules
+- ⛔ Backend queries verified by EXPLAIN plans for hot endpoints
+
+Blockers:
+- No systematic endpoint-by-endpoint query review completed.
+- No committed EXPLAIN artifacts/checks for hot routes.
 
 ### Workspace Data Plane
-- [x] Single source-of-truth workspace snapshot endpoint added (`/v1/workspace/snapshot`)
-- [x] Initial bulk/snapshot API wired into hot modules (Node Canvas + Company Explorer)
-- [x] Shared normalized client workspace store introduced across modules
+- ✅ Single source-of-truth workspace snapshot endpoint added (`/v1/workspace/snapshot`)
+- ✅ Initial bulk/snapshot API wired into hot modules (Node Canvas + Company Explorer)
+- ✅ Shared normalized client workspace store introduced across modules
 
 ### Event-driven Sync
-- [x] Removed polling loop from Editor link synchronization
-- [x] Removed polling loop from Editor selected-node synchronization
-- [x] Removed polling loop from Explorer -> Canvas context synchronization
-- [x] WebSocket/SSE transport introduced for cross-client realtime sync (SSE implemented via `/v1/workspace/stream`)
+- ✅ Removed polling loop from Editor link synchronization
+- ✅ Removed polling loop from Editor selected-node synchronization
+- ✅ Removed polling loop from Explorer -> Canvas context synchronization
+- 🟡 WebSocket/SSE transport introduced for cross-client realtime sync (SSE via `/v1/workspace/stream`; only selected event types currently delta-applied client-side)
+
+Blockers:
+- Delta coverage is not yet complete for all mutation shapes.
+- No versioned event contract yet for long-term compatibility.
 
 ### Rendering Scalability
-- [x] Viewport culling/windowing implemented for Node Canvas
-- [x] Virtualization implemented for Explorer tree and heavy lists
-- [x] Canvas/WebGL decision implemented for high-density graph rendering (Canvas 2D edge path renderer adopted for current graph density)
-- [ ] Fine-grained subscriptions to avoid global rerenders
+- ✅ Viewport culling/windowing implemented for Node Canvas
+- ✅ Virtualization implemented for Explorer tree and heavy lists
+- 🟡 Canvas/WebGL decision implemented for high-density graph rendering (Canvas 2D edge path renderer added; full WebGL pipeline not implemented)
+- ⛔ Fine-grained subscriptions to avoid global rerenders
+
+Blockers:
+- Full WebGL migration requires renderer architecture choice (e.g. Pixi/custom regl) and interaction model redesign.
+- Current node cards are still React DOM; only relationship layer moved to canvas.
 
 ### Caching + Delivery
-- [ ] CDN strategy implemented and validated
-- [ ] Regional/edge read cache implemented for hot APIs
-- [ ] Redis/Valkey hot read model implemented
-- [x] ETag + 304 implemented on hot read endpoints
+- ⛔ CDN strategy implemented and validated
+- ⛔ Regional/edge read cache implemented for hot APIs
+- ⛔ Redis/Valkey hot read model implemented
+- ✅ ETag + 304 implemented on hot read endpoints
 
 ### Data Model / Database
-- [ ] `company_id`-first indexing audited and fixed
-- [ ] Sharding/partitioning strategy by `company_id` implemented
-- [x] Read model for graph snapshot/delta designed and implemented (initial snapshot endpoint + SSE delta events)
-- [ ] Any required joins/materialized views added for hot reads
+- ⛔ `company_id`-first indexing audited and fixed
+- ⛔ Sharding/partitioning strategy by `company_id` implemented
+- 🟡 Read model for graph snapshot/delta designed and implemented (initial snapshot endpoint + SSE events exist; dedicated DB read model/materialized structure not yet built)
+- ⛔ Any required joins/materialized views added for hot reads
+
+Blockers:
+- No production-scale workload profile (cardinality, fan-out, read/write ratio) captured yet.
+- Partitioning/sharding strategy depends on expected tenant growth and operational constraints.
+- No read-optimized snapshot table/materialized view migration plan drafted yet.
 
 ### Observability + Quality Gates
-- [ ] Endpoint-level latency dashboards (p50/p95/p99)
-- [ ] Error-rate and saturation dashboards for hot path services
-- [ ] Performance regression tests in CI for hot path workflows
-- [ ] Merge gate that fails on defined latency regressions
+- ⛔ Endpoint-level latency dashboards (p50/p95/p99)
+- ⛔ Error-rate and saturation dashboards for hot path services
+- ⛔ Performance regression tests in CI for hot path workflows
+- ⛔ Merge gate that fails on defined latency regressions
+
+Blockers:
+- Metrics instrumentation and dashboard ownership not finalized.
+- CI currently lacks perf-test stage and SLO threshold checks.
 
 ---
 
