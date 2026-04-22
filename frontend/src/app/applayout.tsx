@@ -431,18 +431,44 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
   const nested = !!isChild;
   const shouldScaleContent = frame.w <= 7 || frame.h <= 7;
   const contentScale = shouldScaleContent ? clamp(Math.min((frame.w * stepX) / 320, (frame.h * stepY) / 220), 0.65, 1) : 1;
-  const edgeGlow = !nested && edgeHit
-    ? [
-      edgeHit.left ? "inset 7px 0 0 rgba(255,255,255,0.72), inset 10px 0 0 rgba(0,0,0,0.6)" : null,
-      edgeHit.right ? "inset -7px 0 0 rgba(255,255,255,0.72), inset -10px 0 0 rgba(0,0,0,0.6)" : null,
-      edgeHit.top ? "inset 0 7px 0 rgba(255,255,255,0.72), inset 0 10px 0 rgba(0,0,0,0.6)" : null,
-      edgeHit.bottom ? "inset 0 -7px 0 rgba(255,255,255,0.72), inset 0 -10px 0 rgba(0,0,0,0.6)" : null,
-    ].filter(Boolean).join(", ")
-    : "";
+  const previousEdgeRef = useRef<{ left: boolean; right: boolean; top: boolean; bottom: boolean }>({ left: false, right: false, top: false, bottom: false });
+  const timersRef = useRef<Partial<Record<"left" | "right" | "top" | "bottom", number>>>({});
+  const [edgeBump, setEdgeBump] = useState<{ left: boolean; right: boolean; top: boolean; bottom: boolean }>({ left: false, right: false, top: false, bottom: false });
+
+  useEffect(() => {
+    if (nested || !edgeHit) return;
+    const previous = previousEdgeRef.current;
+    const sides: Array<"left" | "right" | "top" | "bottom"> = ["left", "right", "top", "bottom"];
+    for (const side of sides) {
+      if (!edgeHit[side] || previous[side]) continue;
+      setEdgeBump((prev) => ({ ...prev, [side]: true }));
+      if (timersRef.current[side]) window.clearTimeout(timersRef.current[side]);
+      timersRef.current[side] = window.setTimeout(() => {
+        setEdgeBump((prev) => ({ ...prev, [side]: false }));
+      }, 220);
+    }
+    previousEdgeRef.current = { ...edgeHit };
+  }, [nested, edgeHit]);
+
+  useEffect(() => {
+    return () => {
+      for (const timer of Object.values(timersRef.current)) {
+        if (timer) window.clearTimeout(timer);
+      }
+    };
+  }, []);
+
+  const edgeBumpBase = {
+    position: "absolute",
+    pointerEvents: "none",
+    background: frame.accent,
+    opacity: 0.7,
+  } satisfies React.CSSProperties;
+
   return (
     <Frame
       data-child-frame={nested ? "true" : "false"}
-      style={{ position: "absolute", left, top, width: frame.w * stepX, height: frame.h * stepY, background: frame.color, border: isSelected ? "2px solid #111" : nested ? `1px dashed ${frame.accent}` : `1px solid ${frame.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: isDragging ? "grabbing" : "default", userSelect: "none", zIndex: nested ? 200 : (isDragging ? 100 : 1), color: theme.text, boxShadow: [nested ? "0 3px 16px rgba(0,0,0,0.18)" : null, edgeGlow || null].filter(Boolean).join(", ") || undefined, transition: "box-shadow 120ms ease" }}
+      style={{ position: "absolute", left, top, width: frame.w * stepX, height: frame.h * stepY, background: frame.color, border: isSelected ? "2px solid #111" : nested ? `1px dashed ${frame.accent}` : `1px solid ${frame.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: isDragging ? "grabbing" : "default", userSelect: "none", zIndex: nested ? 200 : (isDragging ? 100 : 1), color: theme.text, boxShadow: nested ? "0 3px 16px rgba(0,0,0,0.18)" : undefined }}
       onClick={(e) => e.stopPropagation()}
       onMouseDownCapture={(e) => {
         const target = e.target as HTMLElement;
@@ -498,12 +524,12 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
           {Content ? <Content accent={frame.accent} widgetId={frame.id} hideTopControls={isNodesFrame} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: frame.accent }}>{frame.title}</span></div>}
         </div>
       </div>
-      {!nested && edgeHit && (
+      {!nested && (
         <>
-          {edgeHit.left && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 6, pointerEvents: "none", background: "repeating-linear-gradient(180deg, rgba(255,255,255,0.95) 0 3px, rgba(0,0,0,0.9) 3px 6px)" }} />}
-          {edgeHit.right && <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 6, pointerEvents: "none", background: "repeating-linear-gradient(180deg, rgba(255,255,255,0.95) 0 3px, rgba(0,0,0,0.9) 3px 6px)" }} />}
-          {edgeHit.top && <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: 6, pointerEvents: "none", background: "repeating-linear-gradient(90deg, rgba(255,255,255,0.95) 0 3px, rgba(0,0,0,0.9) 3px 6px)" }} />}
-          {edgeHit.bottom && <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 6, pointerEvents: "none", background: "repeating-linear-gradient(90deg, rgba(255,255,255,0.95) 0 3px, rgba(0,0,0,0.9) 3px 6px)" }} />}
+          {edgeBump.left && <div style={{ ...edgeBumpBase, left: 0, top: 0, bottom: 0, width: 10, animation: "frame-edge-bump-x 220ms ease-out forwards", transformOrigin: "left center" }} />}
+          {edgeBump.right && <div style={{ ...edgeBumpBase, right: 0, top: 0, bottom: 0, width: 10, animation: "frame-edge-bump-x 220ms ease-out forwards", transformOrigin: "right center" }} />}
+          {edgeBump.top && <div style={{ ...edgeBumpBase, top: 0, left: 0, right: 0, height: 10, animation: "frame-edge-bump-y 220ms ease-out forwards", transformOrigin: "center top" }} />}
+          {edgeBump.bottom && <div style={{ ...edgeBumpBase, bottom: 0, left: 0, right: 0, height: 10, animation: "frame-edge-bump-y 220ms ease-out forwards", transformOrigin: "center bottom" }} />}
         </>
       )}
       {nestedChildren}
@@ -1089,6 +1115,16 @@ const App: React.FC = () => {
 
   return (
     <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: bgColor || UI_THEME.surface }}>
+      <style>{`
+        @keyframes frame-edge-bump-x {
+          0% { opacity: 0.75; transform: scaleX(1); }
+          100% { opacity: 0; transform: scaleX(0.18); }
+        }
+        @keyframes frame-edge-bump-y {
+          0% { opacity: 0.75; transform: scaleY(1); }
+          100% { opacity: 0; transform: scaleY(0.18); }
+        }
+      `}</style>
       <header
         style={{ height: HEADER_H, padding: "0 20px", display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", background: headerBgColor, borderBottom: `1px solid ${UI_THEME.line}` }}
         onContextMenu={(e) => { e.preventDefault(); setHeaderMenu({ x: e.clientX, y: e.clientY }); setCanvasMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}

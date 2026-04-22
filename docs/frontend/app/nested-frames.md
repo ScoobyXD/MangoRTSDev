@@ -123,5 +123,5 @@ The goal is deterministic behavior across linked panes without changing core bac
 - Frame resize handles are always available for pointer resizing (outside edit mode as well).
 - Right-click on view tabs opens context menu only and must not implicitly activate/switch tab.
 - When frames shrink, content should degrade gracefully via responsive scaling/scrolling instead of hard clipping.
-- Root frames touching canvas edges should show a brief/high-contrast edge-hit visual indication on contacted sides.
-- Edge-hit indication must be visible on all frame colorways (teal/orange/white/black), including white modules, using high-contrast treatment.
+- Root frames touching canvas edges should trigger a brief in-frame "bump" animation on contacted sides.
+- The bump indication should use a solid frame-respective color, be visible on all frame colorways, and then fade out (non-persistent).
