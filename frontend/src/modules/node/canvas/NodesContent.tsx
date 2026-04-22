@@ -34,6 +34,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [loading, setLoading] = useState(false);
   const [detailsPanelNodeID, setDetailsPanelNodeID] = useState<string>("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
+  const [relationshipColorMenuOpen, setRelationshipColorMenuOpen] = useState(false);
   const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeID: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[] } | null>(null);
   const [canvasActive, setCanvasActive] = useState(false);
@@ -62,6 +63,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [selectionPointerID, setSelectionPointerID] = useState<number | null>(null);
   const restoredSelectionRef = useRef<string>("");
   const explorerContextRef = useRef<number>(0);
+  const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(false);
+  const [relationshipRoleColors, setRelationshipRoleColors] = useState({ parent: "#ff8a00", peer: "#0095ff", child: "#6f5cff" });
 
   useEffect(() => {
     const cached = SESSION_NODE_CANVAS_STATE.get(canvasStateKey);
@@ -73,6 +76,14 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       setSelectedNodeID(cached.selectedNodeID);
       setSelectedNodeIDs(cached.selectedNodeID ? new Set([cached.selectedNodeID]) : new Set());
       setNodePositions(cached.nodePositions);
+      setRelationshipColorsEnabled(!!cached.relationshipColorsEnabled);
+      if (cached.relationshipRoleColors) {
+        setRelationshipRoleColors({
+          parent: cached.relationshipRoleColors.parent ?? "#ff8a00",
+          peer: cached.relationshipRoleColors.peer ?? "#0095ff",
+          child: cached.relationshipRoleColors.child ?? "#6f5cff",
+        });
+      }
       setRestoredViewport(true);
       return;
     }
@@ -87,6 +98,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         pan?: { x?: number; y?: number };
         selectedNodeID?: string;
         nodePositions?: Record<string, { x?: number; y?: number }>;
+        relationshipColorsEnabled?: boolean;
+        relationshipRoleColors?: { parent?: string; peer?: string; child?: string };
       };
       if (typeof parsed.zoom === "number" && Number.isFinite(parsed.zoom)) {
         setZoom(clamp(parsed.zoom, 0.45, 2.7));
@@ -112,6 +125,16 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           };
         }
         setNodePositions(sanitized);
+      }
+      if (typeof parsed.relationshipColorsEnabled === "boolean") {
+        setRelationshipColorsEnabled(parsed.relationshipColorsEnabled);
+      }
+      if (parsed.relationshipRoleColors && typeof parsed.relationshipRoleColors === "object") {
+        setRelationshipRoleColors({
+          parent: typeof parsed.relationshipRoleColors.parent === "string" ? parsed.relationshipRoleColors.parent : "#ff8a00",
+          peer: typeof parsed.relationshipRoleColors.peer === "string" ? parsed.relationshipRoleColors.peer : "#0095ff",
+          child: typeof parsed.relationshipRoleColors.child === "string" ? parsed.relationshipRoleColors.child : "#6f5cff",
+        });
       }
     } catch {
       // ignore local cache parse errors
@@ -255,14 +278,21 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   useEffect(() => {
     if (!restoredViewport) return;
     try {
-      const nextState = { zoom, pan, selectedNodeID, nodePositions };
+      const nextState: NodeCanvasState = {
+        zoom,
+        pan,
+        selectedNodeID,
+        nodePositions,
+        relationshipColorsEnabled,
+        relationshipRoleColors,
+      };
       SESSION_NODE_CANVAS_STATE.set(canvasStateKey, nextState);
       localStorage.setItem(canvasStateKey, JSON.stringify(nextState));
       emitDashboardEvent(EVENT_NODE_CANVAS_STATE_UPDATED, { canvasWidgetID: canvasScope, selectedNodeID });
     } catch {
       // ignore local storage quota/security errors
     }
-  }, [canvasScope, canvasStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions]);
+  }, [canvasScope, canvasStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions, relationshipColorsEnabled, relationshipRoleColors]);
 
   useEffect(() => {
     setNodePositions((previous) => {
@@ -744,6 +774,126 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     return visible;
   }, [nodes, nodePositions, pan.x, pan.y, zoom, canvasSize.width, canvasSize.height]);
 
+  const relationshipRoutingGrid = useMemo(() => {
+    const step = MINI_GRID;
+    const cols = Math.floor(WORLD_W / step) + 1;
+    const rows = Math.floor(WORLD_H / step) + 1;
+    const blocked = new Uint8Array(cols * rows);
+    const margin = step;
+
+    for (const node of nodes) {
+      const pos = nodePositions[node.node_id];
+      if (!pos) continue;
+      const minX = Math.max(0, Math.floor((pos.x - margin) / step));
+      const maxX = Math.min(cols - 1, Math.ceil((pos.x + NODE_W + margin) / step));
+      const minY = Math.max(0, Math.floor((pos.y - margin) / step));
+      const maxY = Math.min(rows - 1, Math.ceil((pos.y + NODE_H + margin) / step));
+      for (let gy = minY; gy <= maxY; gy += 1) {
+        for (let gx = minX; gx <= maxX; gx += 1) {
+          blocked[gy * cols + gx] = 1;
+        }
+      }
+    }
+
+    return { step, cols, rows, blocked };
+  }, [WORLD_H, WORLD_W, nodes, nodePositions]);
+
+  const routeOrthogonalPath = (
+    from: { x: number; y: number },
+    fromOut: { x: number; y: number },
+    toIn: { x: number; y: number },
+    to: { x: number; y: number },
+    sourceNodeID: string,
+    targetNodeID: string,
+  ) => {
+    const { step, cols, rows, blocked } = relationshipRoutingGrid;
+    const toCell = (point: { x: number; y: number }) => ({
+      gx: clamp(Math.round(point.x / step), 0, cols - 1),
+      gy: clamp(Math.round(point.y / step), 0, rows - 1),
+    });
+    const toPoint = (gx: number, gy: number) => ({ x: gx * step, y: gy * step });
+    const key = (gx: number, gy: number) => gy * cols + gx;
+    const sourcePos = nodePositions[sourceNodeID];
+    const targetPos = nodePositions[targetNodeID];
+
+    const isBlocked = (gx: number, gy: number) => {
+      const idx = key(gx, gy);
+      if (!blocked[idx]) return false;
+      const worldX = gx * step;
+      const worldY = gy * step;
+      const isInsideSource = sourcePos && worldX >= sourcePos.x - step && worldX <= sourcePos.x + NODE_W + step && worldY >= sourcePos.y - step && worldY <= sourcePos.y + NODE_H + step;
+      if (isInsideSource) return false;
+      const isInsideTarget = targetPos && worldX >= targetPos.x - step && worldX <= targetPos.x + NODE_W + step && worldY >= targetPos.y - step && worldY <= targetPos.y + NODE_H + step;
+      if (isInsideTarget) return false;
+      return true;
+    };
+
+    const start = toCell(fromOut);
+    const goal = toCell(toIn);
+    const startKey = key(start.gx, start.gy);
+    const goalKey = key(goal.gx, goal.gy);
+    const queue = [startKey];
+    const cameFrom = new Int32Array(cols * rows).fill(-1);
+    const visited = new Uint8Array(cols * rows);
+    visited[startKey] = 1;
+    let found = false;
+
+    for (let pointer = 0; pointer < queue.length; pointer += 1) {
+      const current = queue[pointer];
+      if (current === goalKey) {
+        found = true;
+        break;
+      }
+      const gx = current % cols;
+      const gy = Math.floor(current / cols);
+      const neighbors = [
+        { gx: gx + 1, gy },
+        { gx: gx - 1, gy },
+        { gx, gy: gy + 1 },
+        { gx, gy: gy - 1 },
+      ];
+      for (const next of neighbors) {
+        if (next.gx < 0 || next.gx >= cols || next.gy < 0 || next.gy >= rows) continue;
+        const nextKey = key(next.gx, next.gy);
+        if (visited[nextKey]) continue;
+        if (isBlocked(next.gx, next.gy) && nextKey !== goalKey) continue;
+        visited[nextKey] = 1;
+        cameFrom[nextKey] = current;
+        queue.push(nextKey);
+      }
+    }
+
+    const fallback = [from, fromOut, { x: toIn.x, y: fromOut.y }, toIn, to];
+    if (!found) return fallback.map((point) => ({ x: snapToGrid(point.x), y: snapToGrid(point.y) }));
+
+    const cells: number[] = [];
+    let current = goalKey;
+    while (current !== -1) {
+      cells.push(current);
+      if (current === startKey) break;
+      current = cameFrom[current];
+    }
+    cells.reverse();
+
+    const routed = cells.map((cell) => toPoint(cell % cols, Math.floor(cell / cols)));
+    const collapsed = [from, fromOut, ...routed, toIn, to].filter((point, index, list) => {
+      if (index === 0) return true;
+      const prev = list[index - 1];
+      return prev.x !== point.x || prev.y !== point.y;
+    });
+
+    const simplified = [collapsed[0]];
+    for (let i = 1; i < collapsed.length - 1; i += 1) {
+      const prev = simplified[simplified.length - 1];
+      const currentPoint = collapsed[i];
+      const next = collapsed[i + 1];
+      const sameLine = (prev.x === currentPoint.x && currentPoint.x === next.x) || (prev.y === currentPoint.y && currentPoint.y === next.y);
+      if (!sameLine) simplified.push(currentPoint);
+    }
+    simplified.push(collapsed[collapsed.length - 1]);
+    return simplified.map((point) => ({ x: snapToGrid(point.x), y: snapToGrid(point.y) }));
+  };
+
   const connectionPaths = useMemo(() => {
     return relationships
       .filter((rel) => nodeByID[rel.node_id_a] && nodeByID[rel.node_id_b] && nodePositions[rel.node_id_a] && nodePositions[rel.node_id_b])
@@ -762,13 +912,22 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           : anchor.to === "right" ? { x: to.x + lane, y: to.y }
             : anchor.to === "top" ? { x: to.x, y: to.y - lane }
               : { x: to.x, y: to.y + lane };
-        const horizontalFirst = anchor.from === "left" || anchor.from === "right";
-        const cornerA = horizontalFirst ? { x: toIn.x, y: fromOut.y } : { x: fromOut.x, y: toIn.y };
-        const points = [from, fromOut, cornerA, toIn, to].map((point) => ({ x: snapToGrid(point.x), y: snapToGrid(point.y) }));
-        return { id: rel.node_relationship_id, points };
+        const points = routeOrthogonalPath(from, fromOut, toIn, to, rel.node_id_a, rel.node_id_b);
+        let role: "Parent" | "Peer" | "Child" | null = null;
+        if (selectedNodeID) {
+          if (rel.node_id_a === selectedNodeID) role = rel.a_position;
+          else if (rel.node_id_b === selectedNodeID) role = rel.b_position;
+        }
+        const stroke =
+          role === "Parent" ? relationshipRoleColors.parent
+            : role === "Peer" ? relationshipRoleColors.peer
+              : role === "Child" ? relationshipRoleColors.child
+                : accent;
+        const alpha = !relationshipColorsEnabled ? 0.72 : (role ? 0.92 : 0.35);
+        return { id: rel.node_relationship_id, points, stroke, alpha };
       })
-      .filter((path): path is { id: string; points: { x: number; y: number }[] } => !!path);
-  }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet]);
+      .filter((path): path is { id: string; points: { x: number; y: number }[]; stroke: string; alpha: number } => !!path);
+  }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet, relationshipRoutingGrid, selectedNodeID, relationshipRoleColors, accent, relationshipColorsEnabled]);
 
   const visibleNodes = useMemo(() => nodes.filter((node) => visibleNodeIDSet.has(node.node_id)), [nodes, visibleNodeIDSet]);
 
@@ -783,14 +942,14 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     if (!context) return;
 
     context.clearRect(0, 0, width, height);
-    context.strokeStyle = accent;
     context.lineWidth = 1.6;
-    context.globalAlpha = 0.72;
     context.lineCap = "round";
     context.lineJoin = "round";
 
     for (const path of connectionPaths) {
       if (path.points.length === 0) continue;
+      context.strokeStyle = relationshipColorsEnabled ? path.stroke : accent;
+      context.globalAlpha = path.alpha;
       context.beginPath();
       context.moveTo(path.points[0].x, path.points[0].y);
       for (const point of path.points.slice(1)) {
@@ -799,7 +958,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       context.stroke();
     }
     context.globalAlpha = 1;
-  }, [WORLD_H, WORLD_W, accent, connectionPaths]);
+  }, [WORLD_H, WORLD_W, accent, connectionPaths, relationshipColorsEnabled]);
 
   return (
     <div style={{ fontSize: 11, height: "100%" }}>
@@ -816,6 +975,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           event.preventDefault();
           event.stopPropagation();
           setCanvasActive(true);
+          setRelationshipColorMenuOpen(false);
           setNodeContextMenu(null);
           if (!viewportRef.current) return;
           const bounds = viewportRef.current.getBoundingClientRect();
@@ -1046,6 +1206,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
             }}
             onPointerDown={(event) => event.stopPropagation()}
+            onMouseLeave={() => setRelationshipColorMenuOpen(false)}
           >
             <button
               style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px" }}
@@ -1058,6 +1219,60 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             >
               Create new node
             </button>
+            <button
+              style={{
+                width: "100%",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "6px 8px",
+                textAlign: "left",
+                opacity: relationshipColorsEnabled ? 1 : 0.62,
+                color: relationshipColorsEnabled ? "#0b4868" : "#4f5d66",
+              }}
+              onMouseEnter={() => setRelationshipColorMenuOpen(true)}
+              onClick={() => setRelationshipColorsEnabled((previous) => !previous)}
+            >
+              Enable relationship colors
+            </button>
+            {relationshipColorMenuOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 37,
+                  left: "100%",
+                  marginLeft: 8,
+                  minWidth: 184,
+                  background: "rgba(255,255,255,0.97)",
+                  border: `1px solid ${accent}`,
+                  borderRadius: 8,
+                  padding: 8,
+                  boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
+                  display: "grid",
+                  gap: 6,
+                  opacity: relationshipColorsEnabled ? 1 : 0.68,
+                }}
+                onMouseEnter={() => setRelationshipColorMenuOpen(true)}
+                onMouseLeave={() => setRelationshipColorMenuOpen(false)}
+              >
+                {([
+                  ["Parent", "parent"],
+                  ["Peer", "peer"],
+                  ["Child", "child"],
+                ] as const).map(([label, key]) => (
+                  <label key={key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, fontWeight: 700 }}>
+                    <span>{label}</span>
+                    <input
+                      type="color"
+                      value={relationshipRoleColors[key]}
+                      onChange={(event) => setRelationshipRoleColors((previous) => ({ ...previous, [key]: event.target.value }))}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
