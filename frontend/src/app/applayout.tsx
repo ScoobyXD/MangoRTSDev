@@ -91,8 +91,35 @@ function clampToRangeWithInset(value: number, min: number, max: number, inset: n
   return clamp(value, lo, hi);
 }
 
+function snapToHalf(value: number): number {
+  return Math.round(value * 2) / 2;
+}
+
 function framesOverlap(a: FrameDataModel, b: FrameDataModel) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function edgeHits(frame: FrameDataModel, cols: number, rows: number) {
+  return {
+    left: frame.x <= 0,
+    right: frame.x + frame.w >= cols,
+    top: frame.y <= 0,
+    bottom: frame.y + frame.h >= rows,
+  };
+}
+
+function resizeChildrenToParent(parentBefore: FrameDataModel, parentAfter: FrameDataModel, children: FrameDataModel[]) {
+  const widthScale = parentBefore.w > 0 ? parentAfter.w / parentBefore.w : 1;
+  const heightScale = parentBefore.h > 0 ? parentAfter.h / parentBefore.h : 1;
+  return children.map((child) => {
+    const nextW = clamp(Math.round(child.w * widthScale), MIN_W, Math.max(MIN_W, parentAfter.w - CHILD_EDGE_GAP * 2));
+    const nextH = clamp(Math.round(child.h * heightScale), MIN_H, Math.max(MIN_H, parentAfter.h - CHILD_EDGE_GAP * 2));
+    const maxX = Math.max(0, parentAfter.w - nextW);
+    const maxY = Math.max(0, parentAfter.h - nextH);
+    const nextX = clampToRangeWithInset(snapToHalf(child.x * widthScale), 0, maxX, CHILD_EDGE_GAP);
+    const nextY = clampToRangeWithInset(snapToHalf(child.y * heightScale), 0, maxY, CHILD_EDGE_GAP);
+    return { ...child, x: nextX, y: nextY, w: nextW, h: nextH };
+  });
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -122,8 +149,8 @@ function coerceFrame(value: unknown): FrameDataModel | null {
     kind: normalizedKind,
     parentId: typeof parentId === "string" && parentId.trim() ? parentId : undefined,
     theme: isColorway(theme) ? theme : "teal",
-    x: Math.max(0, Math.round(x)),
-    y: Math.max(0, Math.round(y)),
+    x: Math.max(0, snapToHalf(x)),
+    y: Math.max(0, snapToHalf(y)),
     w: Math.max(MIN_W, Math.round(w)),
     h: Math.max(MIN_H, Math.round(h)),
     title,
@@ -424,8 +451,9 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
   const left = frame.x * stepX;
   const top = frame.y * stepY;
   const nested = !!isChild;
-  const shouldScaleContent = frame.w <= 7 || frame.h <= 7;
-  const contentScale = shouldScaleContent ? clamp(Math.min((frame.w * stepX) / 320, (frame.h * stepY) / 220), 0.65, 1) : 1;
+  const availableContentW = Math.max(1, frame.w * stepX - 16);
+  const availableContentH = Math.max(1, frame.h * stepY - 54);
+  const contentScale = clamp(Math.min(availableContentW / 360, availableContentH / 250, 1), 0.35, 1);
   const edgeGlow = !nested && edgeHit
     ? [
       edgeHit.left ? "inset 6px 0 0 rgba(255,255,255,0.5)" : null,
@@ -488,7 +516,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
           )}
         </div>
       </div>
-      <div style={{ flex: 1, minHeight: 0, padding: isNodesFrame ? 0 : "8px 10px", overflow: "auto", fontFamily: "'IBM Plex Mono', monospace" }}>
+      <div style={{ flex: 1, minHeight: 0, padding: isNodesFrame ? 0 : "8px 10px", overflow: "hidden", fontFamily: "'IBM Plex Mono', monospace" }}>
         <div style={{ width: `${100 / contentScale}%`, height: `${100 / contentScale}%`, transform: `scale(${contentScale})`, transformOrigin: "top left" }}>
           {Content ? <Content accent={frame.accent} widgetId={frame.id} hideTopControls={isNodesFrame} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: frame.accent }}>{frame.title}</span></div>}
         </div>
@@ -517,6 +545,7 @@ const App: React.FC = () => {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [selectedFrameIds, setSelectedFrameIds] = useState<Set<string>>(new Set());
+  const [edgeFlashByFrameId, setEdgeFlashByFrameId] = useState<Record<string, { left: boolean; right: boolean; top: boolean; bottom: boolean }>>({});
   const [editMode, setEditMode] = useState(false);
   const initialSettingsRef = useRef(loadSettings());
   const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || "#f7fffe");
@@ -536,6 +565,7 @@ const App: React.FC = () => {
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
 
   const dragRef = useRef<DragState | null>(null);
+  const edgeFlashTimeoutsRef = useRef<Record<string, number>>({});
   const tabDragRef = useRef<{ id: string; startX: number; startY: number } | null>(null);
   const copiedFrameRef = useRef<FrameDataModel | null>(null);
   const undoStackRef = useRef<DashboardSnapshot[]>([]);
@@ -960,38 +990,54 @@ const App: React.FC = () => {
       const dCols = Math.round((px - d.startMouseX) / (stepX / stepFactor)) / stepFactor;
       const dRows = Math.round((py - d.startMouseY) / (stepY / stepFactor)) / stepFactor;
 
-      updateActiveFrames((prev) => prev.map((w) => {
-        if (w.id !== d.id) return w;
-        const parent = d.parentId ? prev.find((candidate) => candidate.id === d.parentId) : null;
-        const maxCols = parent ? parent.w : gridCols;
-        const maxRows = parent ? parent.h : gridRows;
-        const edgeInset = parent ? CHILD_EDGE_GAP : 0;
-        if (d.mode === "drag") {
-          const maxX = Math.max(0, maxCols - w.w);
-          const maxY = Math.max(0, maxRows - w.h);
-          return {
-            ...w,
-            x: clampToRangeWithInset(d.origX + dCols, 0, maxX, edgeInset),
-            y: clampToRangeWithInset(d.origY + dRows, 0, maxY, edgeInset),
-          };
+      updateActiveFrames((prev) => {
+        let next = prev.map((w) => {
+          if (w.id !== d.id) return w;
+          const parent = d.parentId ? prev.find((candidate) => candidate.id === d.parentId) : null;
+          const maxCols = parent ? parent.w : gridCols;
+          const maxRows = parent ? parent.h : gridRows;
+          const edgeInset = parent ? CHILD_EDGE_GAP : 0;
+          if (d.mode === "drag") {
+            const maxX = Math.max(0, maxCols - w.w);
+            const maxY = Math.max(0, maxRows - w.h);
+            return {
+              ...w,
+              x: snapToHalf(clampToRangeWithInset(d.origX + dCols, 0, maxX, edgeInset)),
+              y: snapToHalf(clampToRangeWithInset(d.origY + dRows, 0, maxY, edgeInset)),
+            };
+          }
+          let x = d.origX, y = d.origY, nw = d.origW, nh = d.origH;
+          if (d.edges.right) nw = clamp(d.origW + dCols, MIN_W, maxCols - d.origX - edgeInset);
+          if (d.edges.bottom) nh = clamp(d.origH + dRows, MIN_H, maxRows - d.origY - edgeInset);
+          if (d.edges.left) {
+            const shift = clamp(dCols, -(d.origX - edgeInset), d.origW - MIN_W);
+            x = d.origX + shift;
+            nw = d.origW - shift;
+          }
+          if (d.edges.top) {
+            const shift = clamp(dRows, -(d.origY - edgeInset), d.origH - MIN_H);
+            y = d.origY + shift;
+            nh = d.origH - shift;
+          }
+          x = clampToRangeWithInset(x, 0, Math.max(0, maxCols - nw), edgeInset);
+          y = clampToRangeWithInset(y, 0, Math.max(0, maxRows - nh), edgeInset);
+          return { ...w, x: snapToHalf(x), y: snapToHalf(y), w: Math.round(nw), h: Math.round(nh) };
+        });
+
+        if (d.mode === "resize") {
+          const parentBefore = prev.find((frame) => frame.id === d.id);
+          const parentAfter = next.find((frame) => frame.id === d.id);
+          if (parentBefore && parentAfter) {
+            const children = next.filter((frame) => frame.parentId === d.id);
+            if (children.length > 0) {
+              const resizedChildren = resizeChildrenToParent(parentBefore, parentAfter, children);
+              const byID = new Map(resizedChildren.map((child) => [child.id, child]));
+              next = next.map((frame) => byID.get(frame.id) ?? frame);
+            }
+          }
         }
-        let x = d.origX, y = d.origY, nw = d.origW, nh = d.origH;
-        if (d.edges.right) nw = clamp(d.origW + dCols, MIN_W, maxCols - d.origX - edgeInset);
-        if (d.edges.bottom) nh = clamp(d.origH + dRows, MIN_H, maxRows - d.origY - edgeInset);
-        if (d.edges.left) {
-          const shift = clamp(dCols, -(d.origX - edgeInset), d.origW - MIN_W);
-          x = d.origX + shift;
-          nw = d.origW - shift;
-        }
-        if (d.edges.top) {
-          const shift = clamp(dRows, -(d.origY - edgeInset), d.origH - MIN_H);
-          y = d.origY + shift;
-          nh = d.origH - shift;
-        }
-        x = clampToRangeWithInset(x, 0, Math.max(0, maxCols - nw), edgeInset);
-        y = clampToRangeWithInset(y, 0, Math.max(0, maxRows - nh), edgeInset);
-        return { ...w, x, y, w: nw, h: nh };
-      }));
+        return next;
+      });
     };
     const onEnd = () => {
       const d = dragRef.current;
@@ -1021,8 +1067,8 @@ const App: React.FC = () => {
             .filter((frame) => !frame.parentId && frame.id !== moved.id)
             .find((frame) => framesOverlap(frame, moved));
           if (!host) return next;
-          const childX = clampToRangeWithInset(moved.x - host.x, 0, Math.max(0, host.w - moved.w), CHILD_EDGE_GAP);
-          const childY = clampToRangeWithInset(moved.y - host.y, 0, Math.max(0, host.h - moved.h), CHILD_EDGE_GAP);
+          const childX = snapToHalf(clampToRangeWithInset(moved.x - host.x, 0, Math.max(0, host.w - moved.w), CHILD_EDGE_GAP));
+          const childY = snapToHalf(clampToRangeWithInset(moved.y - host.y, 0, Math.max(0, host.h - moved.h), CHILD_EDGE_GAP));
           next = next.map((frame) => (frame.id === moved.id ? { ...frame, parentId: host.id, x: childX, y: childY } : frame));
           return next;
         });
@@ -1041,6 +1087,31 @@ const App: React.FC = () => {
       window.removeEventListener("touchend", onEnd);
     };
   }, [gridCols, gridRows, stepX, stepY, updateActiveFrames]);
+
+  useEffect(() => {
+    if (!draggingId) return;
+    const active = frames.find((frame) => frame.id === draggingId);
+    if (!active || active.parentId) return;
+    const hit = edgeHits(active, gridCols, gridRows);
+    if (!hit.left && !hit.right && !hit.top && !hit.bottom) return;
+    setEdgeFlashByFrameId((previous) => ({ ...previous, [active.id]: hit }));
+    const existing = edgeFlashTimeoutsRef.current[active.id];
+    if (existing) window.clearTimeout(existing);
+    edgeFlashTimeoutsRef.current[active.id] = window.setTimeout(() => {
+      setEdgeFlashByFrameId((previous) => {
+        const next = { ...previous };
+        delete next[active.id];
+        return next;
+      });
+      delete edgeFlashTimeoutsRef.current[active.id];
+    }, 220);
+  }, [draggingId, frames, gridCols, gridRows]);
+
+  useEffect(() => () => {
+    for (const timeout of Object.values(edgeFlashTimeoutsRef.current)) {
+      window.clearTimeout(timeout);
+    }
+  }, []);
 
   return (
     <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: bgColor || UI_THEME.surface }}>
@@ -1124,7 +1195,7 @@ const App: React.FC = () => {
               isDragging={draggingId === w.id}
               isSelected={selectedFrameIds.has(w.id)}
               isLinked={linkedFrameIDs.has(w.id) || !!childrenByParent.get(w.id)?.length}
-              edgeHit={{ left: w.x <= 0, right: w.x + w.w >= gridCols, top: w.y <= 0, bottom: w.y + w.h >= gridRows }}
+              edgeHit={edgeFlashByFrameId[w.id]}
               editMode={editMode}
               onDragStart={(e, id) => {
                 e.preventDefault();
