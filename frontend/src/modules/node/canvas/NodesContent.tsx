@@ -712,12 +712,27 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   const inferAnchor = (relationship: NodeRelationship): RelationshipAnchor => {
     if (relationshipAnchors[relationship.node_relationship_id]) return relationshipAnchors[relationship.node_relationship_id];
-    if (relationship.a_position === "Child" && relationship.b_position === "Parent") return { from: "top", to: "bottom" };
-    if (relationship.a_position === "Parent" && relationship.b_position === "Child") return { from: "bottom", to: "top" };
     const a = nodePositions[relationship.node_id_a];
     const b = nodePositions[relationship.node_id_b];
     if (!a || !b) return { from: "right", to: "left" };
-    return b.x >= a.x ? { from: "right", to: "left" } : { from: "left", to: "right" };
+    const centerA = { x: a.x + NODE_W / 2, y: a.y + NODE_H / 2 };
+    const centerB = { x: b.x + NODE_W / 2, y: b.y + NODE_H / 2 };
+
+    const parentID =
+      relationship.a_position === "Parent" ? relationship.node_id_a
+        : relationship.b_position === "Parent" ? relationship.node_id_b
+          : "";
+    const childID =
+      relationship.a_position === "Child" ? relationship.node_id_a
+        : relationship.b_position === "Child" ? relationship.node_id_b
+          : "";
+
+    if (parentID && childID) {
+      if (relationship.node_id_a === parentID && relationship.node_id_b === childID) return { from: "bottom", to: "top" };
+      if (relationship.node_id_a === childID && relationship.node_id_b === parentID) return { from: "top", to: "bottom" };
+    }
+
+    return centerB.x >= centerA.x ? { from: "right", to: "left" } : { from: "left", to: "right" };
   };
 
   const visibleNodeIDSet = useMemo(() => {
