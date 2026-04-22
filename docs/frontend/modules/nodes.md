@@ -161,6 +161,8 @@ Relationships are visualized with SVG polylines in world space.
 
 - Polyline routes are orthogonal and grid-snapped.
 - Lines originate from side anchors that correspond to `+` side conventions.
+- Routing now uses obstacle-aware orthogonal pathing on the mini-grid so relationship lines remain continuous and do not visually cut through node cards when nodes are moved.
+- Connector paths are simplified after routing to keep turns clean while preserving continuous end-to-end segments.
 - Rendering is non-interactive (`pointerEvents: none`) and sits under node cards.
 
 ---
