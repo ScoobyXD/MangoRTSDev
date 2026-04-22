@@ -1009,9 +1009,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               : { x: to.x, y: to.y + lane };
         const points = routeOrthogonalPath(from, fromOut, toIn, to, rel.node_id_a, rel.node_id_b);
         let role: "Parent" | "Peer" | "Child" | null = null;
-        if (selectedNodeID) {
-          if (rel.node_id_a === selectedNodeID) role = rel.a_position;
-          else if (rel.node_id_b === selectedNodeID) role = rel.b_position;
+        if (selectedNodeID && (rel.node_id_a === selectedNodeID || rel.node_id_b === selectedNodeID)) {
+          role = rel.a_position;
         }
         const stroke =
           role === "Parent" ? relationshipRoleColors.parent
