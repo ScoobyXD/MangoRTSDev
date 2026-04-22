@@ -33,7 +33,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [detailsPanelNodeID, setDetailsPanelNodeID] = useState<string>("");
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number; submenuOpenLeft: boolean } | null>(null);
   const [relationshipColorMenuOpen, setRelationshipColorMenuOpen] = useState(false);
   const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeID: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[] } | null>(null);
@@ -983,7 +983,12 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
           const worldX = clamp((localX - pan.x) / zoom, 0, WORLD_W);
           const worldY = clamp((localY - pan.y) / zoom, 0, WORLD_H);
-          setContextMenu({ x: localX, y: localY, worldX, worldY });
+          const menuWidth = 190;
+          const menuHeight = 78;
+          const clampedX = clamp(localX, 8, Math.max(8, bounds.width - menuWidth - 8));
+          const clampedY = clamp(localY, 8, Math.max(8, bounds.height - menuHeight - 8));
+          const submenuOpenLeft = clampedX > bounds.width - menuWidth - 220;
+          setContextMenu({ x: clampedX, y: clampedY, worldX, worldY, submenuOpenLeft });
         }}
         onWheel={(event) => {
           event.preventDefault();
@@ -1197,7 +1202,6 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               position: "absolute",
               left: contextMenu.x,
               top: contextMenu.y,
-              transform: "translate(8px, 8px)",
               background: "rgba(255,255,255,0.95)",
               border: `1px solid ${accent}`,
               borderRadius: 8,
@@ -1242,8 +1246,10 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 style={{
                   position: "absolute",
                   top: 37,
-                  left: "100%",
-                  marginLeft: 8,
+                  left: contextMenu.submenuOpenLeft ? undefined : "100%",
+                  right: contextMenu.submenuOpenLeft ? "100%" : undefined,
+                  marginLeft: contextMenu.submenuOpenLeft ? 0 : 8,
+                  marginRight: contextMenu.submenuOpenLeft ? 8 : 0,
                   minWidth: 184,
                   background: "rgba(255,255,255,0.97)",
                   border: `1px solid ${accent}`,
