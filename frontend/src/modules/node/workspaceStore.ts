@@ -14,6 +14,13 @@ type CacheEntry = {
   source?: EventSource;
 };
 
+type WorkspaceStreamEnvelope = {
+  company_id: string;
+  type: string;
+  ts: string;
+  data?: Record<string, unknown>;
+};
+
 const EMPTY_SNAPSHOT: WorkspaceSnapshot = { nodes: [], relationships: [] };
 const workspaceCache = new Map<string, CacheEntry>();
 
@@ -27,6 +34,97 @@ function getEntry(key: string): CacheEntry {
 
 function notify(entry: CacheEntry): void {
   for (const subscriber of entry.subscribers) subscriber();
+}
+
+function asNodeRecord(candidate: unknown): NodeRecord | null {
+  if (!candidate || typeof candidate !== "object") return null;
+  const value = candidate as Partial<NodeRecord>;
+  if (typeof value.company_id !== "string" || typeof value.node_id !== "string" || typeof value.header !== "string") return null;
+  return {
+    company_id: value.company_id,
+    node_id: value.node_id,
+    header: value.header,
+    created_timestamp: typeof value.created_timestamp === "string" ? value.created_timestamp : new Date().toISOString(),
+  };
+}
+
+function asRelationship(candidate: unknown): NodeRelationship | null {
+  if (!candidate || typeof candidate !== "object") return null;
+  const value = candidate as Partial<NodeRelationship>;
+  if (
+    typeof value.company_id !== "string" ||
+    typeof value.node_relationship_id !== "string" ||
+    typeof value.node_id_a !== "string" ||
+    typeof value.node_id_b !== "string" ||
+    typeof value.a_position !== "string" ||
+    typeof value.b_position !== "string"
+  ) return null;
+  return {
+    company_id: value.company_id,
+    node_relationship_id: value.node_relationship_id,
+    node_id_a: value.node_id_a,
+    node_id_b: value.node_id_b,
+    a_position: value.a_position as NodeRelationship["a_position"],
+    b_position: value.b_position as NodeRelationship["b_position"],
+    created_timestamp: typeof value.created_timestamp === "string" ? value.created_timestamp : new Date().toISOString(),
+  };
+}
+
+function applyWorkspaceDelta(entry: CacheEntry, envelope: WorkspaceStreamEnvelope): boolean {
+  const previous = entry.snapshot;
+  const currentNodes = previous.nodes ?? [];
+  const currentRelationships = previous.relationships ?? [];
+  const data = envelope.data ?? {};
+
+  if (envelope.type === "node_created") {
+    const node = asNodeRecord(data.node);
+    if (!node) return false;
+    const exists = currentNodes.some((item) => item.node_id === node.node_id);
+    entry.snapshot = {
+      nodes: exists ? currentNodes.map((item) => (item.node_id === node.node_id ? node : item)) : [...currentNodes, node],
+      relationships: currentRelationships,
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+
+  if (envelope.type === "node_deleted") {
+    const nodeID = typeof data.node_id === "string" ? data.node_id : "";
+    if (!nodeID) return false;
+    entry.snapshot = {
+      nodes: currentNodes.filter((item) => item.node_id !== nodeID),
+      relationships: currentRelationships.filter((item) => item.node_id_a !== nodeID && item.node_id_b !== nodeID),
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+
+  if (envelope.type === "relationship_created") {
+    const relationship = asRelationship(data.relationship);
+    if (!relationship) return false;
+    const exists = currentRelationships.some((item) => item.node_relationship_id === relationship.node_relationship_id);
+    entry.snapshot = {
+      nodes: currentNodes,
+      relationships: exists
+        ? currentRelationships.map((item) => (item.node_relationship_id === relationship.node_relationship_id ? relationship : item))
+        : [...currentRelationships, relationship],
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+
+  if (envelope.type === "relationship_deleted") {
+    const relationshipID = typeof data.node_relationship_id === "string" ? data.node_relationship_id : "";
+    if (!relationshipID) return false;
+    entry.snapshot = {
+      nodes: currentNodes,
+      relationships: currentRelationships.filter((item) => item.node_relationship_id !== relationshipID),
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+
+  return false;
 }
 
 export async function refreshWorkspaceSnapshot(apiBase: string, companyID: string): Promise<void> {
@@ -54,8 +152,21 @@ function ensureStream(apiBase: string, companyID: string): void {
   const entry = getEntry(key);
   if (entry.source) return;
   const source = new EventSource(`${apiBase}/v1/workspace/stream?company_id=${encodeURIComponent(companyID)}`);
-  source.addEventListener("workspace", () => {
-    void refreshWorkspaceSnapshot(apiBase, companyID);
+  source.addEventListener("workspace", (event) => {
+    const payload = (event as MessageEvent).data;
+    if (typeof payload !== "string" || payload.length === 0) {
+      void refreshWorkspaceSnapshot(apiBase, companyID);
+      return;
+    }
+    try {
+      const envelope = JSON.parse(payload) as WorkspaceStreamEnvelope;
+      if (envelope.company_id !== companyID) return;
+      const applied = applyWorkspaceDelta(entry, envelope);
+      if (applied) notify(entry);
+      else void refreshWorkspaceSnapshot(apiBase, companyID);
+    } catch {
+      void refreshWorkspaceSnapshot(apiBase, companyID);
+    }
   });
   source.onerror = () => {
     // Browser will auto-retry EventSource; keep current source reference.

@@ -156,15 +156,15 @@ Mark each item when complete and keep this list current.
 
 ### Rendering Scalability
 - [x] Viewport culling/windowing implemented for Node Canvas
-- [ ] Virtualization implemented for Explorer tree and heavy lists
-- [ ] Canvas/WebGL decision implemented for high-density graph rendering
+- [x] Virtualization implemented for Explorer tree and heavy lists
+- [x] Canvas/WebGL decision implemented for high-density graph rendering (Canvas 2D edge path renderer adopted for current graph density)
 - [ ] Fine-grained subscriptions to avoid global rerenders
 
 ### Caching + Delivery
 - [ ] CDN strategy implemented and validated
 - [ ] Regional/edge read cache implemented for hot APIs
 - [ ] Redis/Valkey hot read model implemented
-- [ ] ETag + 304 implemented on hot read endpoints
+- [x] ETag + 304 implemented on hot read endpoints
 
 ### Data Model / Database
 - [ ] `company_id`-first indexing audited and fixed

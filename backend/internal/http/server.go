@@ -1,6 +1,9 @@
 package httpapi
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,7 +57,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"nodes": items})
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"nodes": items})
 		return
 	}
 
@@ -77,7 +80,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_create_node")
 			return
 		}
-		s.publishWorkspaceEvent(req.CompanyID, "node_created", map[string]any{"node_id": item.NodeID})
+		s.publishWorkspaceEvent(req.CompanyID, "node_created", map[string]any{"node_id": item.NodeID, "node": item})
 		writeJSON(w, http.StatusCreated, item)
 		return
 	}
@@ -140,7 +143,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		details.Node = item
-		writeJSON(w, http.StatusOK, details)
+		writeJSONMaybeNotModified(w, r, http.StatusOK, details)
 		return
 	}
 
@@ -192,7 +195,7 @@ func (s *Server) handleNodeRelationships(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, "failed_to_list_node_relationships")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"relationships": items})
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"relationships": items})
 		return
 	}
 
@@ -230,7 +233,7 @@ func (s *Server) handleNodeRelationships(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_create_node_relationship")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "relationship_created", map[string]any{"node_relationship_id": item.NodeRelationshipID, "node_id_a": item.NodeIDA, "node_id_b": item.NodeIDB})
+	s.publishWorkspaceEvent(req.CompanyID, "relationship_created", map[string]any{"node_relationship_id": item.NodeRelationshipID, "node_id_a": item.NodeIDA, "node_id_b": item.NodeIDB, "relationship": item})
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -254,7 +257,7 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_node_relationships")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes, "relationships": relationships, "generated_at": time.Now().UTC()})
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"nodes": nodes, "relationships": relationships, "generated_at": time.Now().UTC()})
 }
 
 func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
@@ -467,13 +470,32 @@ func (s *Server) handleOperationByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed_to_load_operation")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeJSONMaybeNotModified(w, r, http.StatusOK, item)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeJSONMaybeNotModified(w http.ResponseWriter, r *http.Request, status int, v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_encode_json")
+		return
+	}
+	sum := sha256.Sum256(body)
+	etag := `"` + hex.EncodeToString(sum[:]) + `"`
+	if strings.TrimSpace(r.Header.Get("If-None-Match")) == etag {
+		w.Header().Set("ETag", etag)
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", etag)
+	w.WriteHeader(status)
+	_, _ = w.Write(append(bytes.Clone(body), '\n'))
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {
