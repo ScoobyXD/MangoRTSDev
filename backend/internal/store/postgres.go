@@ -95,6 +95,26 @@ func (r *PostgresRepo) ListNodeRelationships(companyID string) ([]domain.NodeRel
 	return items, nil
 }
 
+func (r *PostgresRepo) DeleteNodeRelationship(companyID, relationshipID string) error {
+	ctx := context.Background()
+	deleted, err := r.db.ExecContext(ctx,
+		`delete from node_relationships
+		 where company_id=$1 and node_relationship_id=$2`,
+		companyID, relationshipID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := deleted.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *PostgresRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	ctx := context.Background()
 	var item domain.Node

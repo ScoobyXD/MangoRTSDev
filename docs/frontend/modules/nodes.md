@@ -49,6 +49,8 @@ Base values are read from:
   - deletes selected node.
 - `POST /v1/node-relationships`
   - creates relationship with `{ company_id, node_id_a, node_id_b, a_position, b_position }`.
+- `DELETE /v1/node-relationships/:node_relationship_id?company_id=...`
+  - deletes a relationship by id.
 - `POST /v1/nodes/:node_id/information`
   - adds info item with `{ company_id, type, information }`.
 
@@ -122,28 +124,33 @@ Nodes are positioned in **world coordinates**, while pan/zoom transform the worl
 
 ## 5) Relationship creation rules
 
-Each selected node card shows `+` handles on all sides:
+Each selected node card shows **arrow-line handles** on all sides:
 
-- Left `+` -> peer relationship
-- Right `+` -> peer relationship
-- Top `+` -> new node is parent of source node
-- Bottom `+` -> new node is child of source node
+- Top icon arrow points up.
+- Right icon arrow points right.
+- Bottom icon arrow points down.
+- Left icon arrow points left.
+
+Relationship creation uses a two-click attach flow between existing nodes:
+
+1. Click a side handle on the source node.
+2. Click a side handle on the target node.
+3. The module writes one relationship row.
 
 ### Position mapping currently used when creating relationship records
 
-Source node is always `node_id_a`, new node is `node_id_b`.
+Source node is always `node_id_a`, target node is always `node_id_b`.
 
-- Left/Right:
-  - `a_position = Peer`
-  - `b_position = Peer`
-- Top:
-  - `a_position = Child`
-  - `b_position = Parent`
-- Bottom:
-  - `a_position = Parent`
-  - `b_position = Child`
+- Side `left` / `right` maps to position `Peer`.
+- Side `top` maps to position `Child`.
+- Side `bottom` maps to position `Parent`.
 
-This mapping is aligned to the intended parent/child semantics for top/bottom creation.
+`a_position` is derived from the source side and `b_position` from the target side, so relationship semantics preserve exactly which sides were clicked.
+
+### Relationship deletion
+
+- Relationship rows are removable from the details panel via **Snip**.
+- Deletes call `DELETE /v1/node-relationships/:node_relationship_id`.
 
 ---
 
@@ -254,7 +261,7 @@ and reads `selectedNodeID`. That selected node becomes the active storage target
 ### Node Canvas main surface
 
 - Canvas consumes almost all remaining widget height (bottom utility rows removed).
-- World grid, relationship lines, node cards, side `+` actions, selection box, and group badge.
+- World grid, relationship lines, node cards, side arrow actions, selection box, and group badge.
 - In-canvas instruction text.
 - Right-click context menu with `Create new node` at cursor location.
 - Right-click context menu also includes `Enable relationship colors` with an explicit iOS-style on/off slider (knob left = off, knob right = on).
