@@ -18,6 +18,7 @@ const HANDLE = 6;
 const CORNER_SIZE = 14;
 const CHILD_GRID_DIVISOR = 2;
 const CHILD_EDGE_GAP = 0.5;
+const HALF_STEP = 0.5;
 
 const COLORWAYS = {
   teal: { color: "#00d5ff", accent: "#006f85", text: "#042028", tagBg: "#042028", tagText: "#ffffff" },
@@ -84,6 +85,10 @@ function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+function snapToHalfStep(value: number) {
+  return Math.round(value / HALF_STEP) * HALF_STEP;
+}
+
 function clampToRangeWithInset(value: number, min: number, max: number, inset: number) {
   const lo = min + inset;
   const hi = max - inset;
@@ -122,8 +127,8 @@ function coerceFrame(value: unknown): FrameDataModel | null {
     kind: normalizedKind,
     parentId: typeof parentId === "string" && parentId.trim() ? parentId : undefined,
     theme: isColorway(theme) ? theme : "teal",
-    x: Math.max(0, Math.round(x)),
-    y: Math.max(0, Math.round(y)),
+    x: Math.max(0, snapToHalfStep(x)),
+    y: Math.max(0, snapToHalfStep(y)),
     w: Math.max(MIN_W, Math.round(w)),
     h: Math.max(MIN_H, Math.round(h)),
     title,
@@ -428,10 +433,10 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
   const contentScale = shouldScaleContent ? clamp(Math.min((frame.w * stepX) / 320, (frame.h * stepY) / 220), 0.65, 1) : 1;
   const edgeGlow = !nested && edgeHit
     ? [
-      edgeHit.left ? "inset 6px 0 0 rgba(255,255,255,0.5)" : null,
-      edgeHit.right ? "inset -6px 0 0 rgba(255,255,255,0.5)" : null,
-      edgeHit.top ? "inset 0 6px 0 rgba(255,255,255,0.5)" : null,
-      edgeHit.bottom ? "inset 0 -6px 0 rgba(255,255,255,0.5)" : null,
+      edgeHit.left ? "inset 7px 0 0 rgba(255,255,255,0.72), inset 10px 0 0 rgba(0,0,0,0.6)" : null,
+      edgeHit.right ? "inset -7px 0 0 rgba(255,255,255,0.72), inset -10px 0 0 rgba(0,0,0,0.6)" : null,
+      edgeHit.top ? "inset 0 7px 0 rgba(255,255,255,0.72), inset 0 10px 0 rgba(0,0,0,0.6)" : null,
+      edgeHit.bottom ? "inset 0 -7px 0 rgba(255,255,255,0.72), inset 0 -10px 0 rgba(0,0,0,0.6)" : null,
     ].filter(Boolean).join(", ")
     : "";
   return (
@@ -493,6 +498,14 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
           {Content ? <Content accent={frame.accent} widgetId={frame.id} hideTopControls={isNodesFrame} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: frame.accent }}>{frame.title}</span></div>}
         </div>
       </div>
+      {!nested && edgeHit && (
+        <>
+          {edgeHit.left && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 6, pointerEvents: "none", background: "repeating-linear-gradient(180deg, rgba(255,255,255,0.95) 0 3px, rgba(0,0,0,0.9) 3px 6px)" }} />}
+          {edgeHit.right && <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 6, pointerEvents: "none", background: "repeating-linear-gradient(180deg, rgba(255,255,255,0.95) 0 3px, rgba(0,0,0,0.9) 3px 6px)" }} />}
+          {edgeHit.top && <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: 6, pointerEvents: "none", background: "repeating-linear-gradient(90deg, rgba(255,255,255,0.95) 0 3px, rgba(0,0,0,0.9) 3px 6px)" }} />}
+          {edgeHit.bottom && <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 6, pointerEvents: "none", background: "repeating-linear-gradient(90deg, rgba(255,255,255,0.95) 0 3px, rgba(0,0,0,0.9) 3px 6px)" }} />}
+        </>
+      )}
       {nestedChildren}
       {HANDLES.map((h, i) => <div key={i} data-handle="true" onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, frame.id, h.edges); }} onTouchStart={(e) => { e.stopPropagation(); onResizeStart(e, frame.id, h.edges); }} style={{ position: "absolute", cursor: h.cursor, opacity: editMode ? 0.45 : 0.2, ...h.style }} />)}
     </Frame>
@@ -631,6 +644,38 @@ const App: React.FC = () => {
   const gridRows = Math.max(1, Math.round(canvasH / CELL_SIZE));
   const stepX = viewSize.w / gridCols;
   const stepY = canvasH / gridRows;
+
+  useEffect(() => {
+    updateActiveFrames((previous) => {
+      let changed = false;
+      const byId = new Map(previous.map((frame) => [frame.id, frame]));
+      const normalized = previous.map((frame) => {
+        if (!frame.parentId) {
+          const maxRootX = Math.max(0, gridCols - frame.w);
+          const maxRootY = Math.max(0, gridRows - frame.h);
+          const nextX = clamp(frame.x, 0, maxRootX);
+          const nextY = clamp(frame.y, 0, maxRootY);
+          if (nextX !== frame.x || nextY !== frame.y) {
+            changed = true;
+            return { ...frame, x: nextX, y: nextY };
+          }
+          return frame;
+        }
+        const parent = byId.get(frame.parentId);
+        if (!parent) return frame;
+        const maxChildX = Math.max(0, parent.w - frame.w);
+        const maxChildY = Math.max(0, parent.h - frame.h);
+        const nextX = clampToRangeWithInset(frame.x, 0, maxChildX, CHILD_EDGE_GAP);
+        const nextY = clampToRangeWithInset(frame.y, 0, maxChildY, CHILD_EDGE_GAP);
+        if (nextX !== frame.x || nextY !== frame.y) {
+          changed = true;
+          return { ...frame, x: nextX, y: nextY };
+        }
+        return frame;
+      });
+      return changed ? normalized : previous;
+    });
+  }, [gridCols, gridRows, updateActiveFrames]);
 
   const applyColorway = useCallback((frame: FrameDataModel, theme: ColorwayKey): FrameDataModel => {
     const swatch = COLORWAYS[theme];

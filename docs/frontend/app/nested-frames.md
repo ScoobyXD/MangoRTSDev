@@ -51,6 +51,7 @@ Once nested, child frames support local layout manipulation inside the parent co
 Inset rule:
 
 - child frames must maintain a visual inset gap from every parent edge (cannot be flush to boundary).
+- inset gap must be re-enforced during persisted-layout restore so browser refresh does not collapse child frames flush to parent boundaries.
 
 This is intended to feel similar to moving/resizing informational panels within module-local canvases.
 
@@ -123,3 +124,4 @@ The goal is deterministic behavior across linked panes without changing core bac
 - Right-click on view tabs opens context menu only and must not implicitly activate/switch tab.
 - When frames shrink, content should degrade gracefully via responsive scaling/scrolling instead of hard clipping.
 - Root frames touching canvas edges should show a brief/high-contrast edge-hit visual indication on contacted sides.
+- Edge-hit indication must be visible on all frame colorways (teal/orange/white/black), including white modules, using high-contrast treatment.

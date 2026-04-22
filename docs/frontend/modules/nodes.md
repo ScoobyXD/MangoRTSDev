@@ -154,7 +154,8 @@ Relationships are visualized with SVG polylines in world space.
 ### Anchor behavior
 
 - A relationship remembers creation-side anchors when created in-session.
-- If no remembered anchor exists, anchor side is inferred from relationship positions and geometry.
+- If no remembered anchor exists, anchor side is inferred from relationship positions and current geometry.
+- On restored sessions, parent/child anchors are geometry-validated so lines do not route from the wrong side after refresh.
 
 ### Routing behavior
 
