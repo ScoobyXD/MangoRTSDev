@@ -1274,9 +1274,10 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               style={{
                 display: "grid",
                 gap: 6,
-                marginLeft: 14,
+                marginLeft: 20,
                 marginTop: 2,
-                padding: "2px 0 4px",
+                padding: "4px 0 4px 10px",
+                borderLeft: "1px solid rgba(0,0,0,0.18)",
                 opacity: relationshipColorsEnabled ? 1 : 0.68,
               }}
             >
@@ -1285,7 +1286,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 ["Peer", "peer"],
                 ["Child", "child"],
               ] as const).map(([label, key]) => (
-                <label key={key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, fontWeight: 700 }}>
+                <label key={key} style={{ display: "grid", gridTemplateColumns: "12px 1fr auto", alignItems: "center", columnGap: 6, fontSize: 11, fontWeight: 700 }}>
+                  <span style={{ width: 10, height: 1, background: "rgba(0,0,0,0.18)", justifySelf: "end" }} />
                   <span>{label}</span>
                   <input
                     type="color"
