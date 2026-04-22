@@ -9,8 +9,8 @@ import {
   TasksContent,
   UsersContent,
 } from "../WidgetContent";
-import { NodesContent } from "./node/canvas";
-import { EditorContent } from "./editor";
+import { NodesContent } from "./node/canvas/NodesContent";
+import { EditorContent } from "./editor/EditorContent";
 import { CompanyExplorerContent } from "./company-explorer";
 
 export interface ModuleTemplate {
