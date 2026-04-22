@@ -606,8 +606,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   const relationPositionFromSide = (direction: NodeDirection): "Parent" | "Child" | "Peer" => {
     if (direction === "left" || direction === "right") return "Peer";
-    if (direction === "top") return "Child";
-    return "Parent";
+    if (direction === "top") return "Parent";
+    return "Child";
   };
 
   const commitRelationshipBetweenNodes = async (sourceNodeID: string, sourceSide: NodeDirection, targetNodeID: string, targetSide: NodeDirection) => {

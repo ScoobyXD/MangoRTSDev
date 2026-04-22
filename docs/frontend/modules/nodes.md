@@ -146,8 +146,8 @@ Relationship creation uses a two-click attach flow between existing nodes:
 Source node is always `node_id_a`, target node is always `node_id_b`.
 
 - Side `left` / `right` maps to position `Peer`.
-- Side `top` maps to position `Child`.
-- Side `bottom` maps to position `Parent`.
+- Side `top` maps to position `Parent`.
+- Side `bottom` maps to position `Child`.
 
 `a_position` is derived from the source side and `b_position` from the target side, so relationship semantics preserve exactly which sides were clicked.
 
