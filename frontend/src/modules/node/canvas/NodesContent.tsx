@@ -1206,7 +1206,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               width: 232,
               boxSizing: "border-box",
               display: "grid",
-              gap: 6,
+              gap: 0,
               zIndex: 40,
               boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
             }}
@@ -1222,7 +1222,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 fontWeight: 700,
                 padding: "7px 8px",
                 textAlign: "left",
-                borderRadius: 4,
+                borderRadius: 0,
               }}
               onClick={() => {
                 const title = trimOrEmpty(newNodeHeader) || "New node";
@@ -1248,7 +1248,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 justifyContent: "space-between",
                 gap: 6,
                 color: "#111111",
-                borderRadius: 4,
+                borderRadius: 0,
               }}
               onClick={() => setRelationshipColorsEnabled((previous) => !previous)}
             >
@@ -1285,7 +1285,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               style={{
                 display: "grid",
                 marginLeft: 16,
-                gap: 4,
+                gap: 0,
                 opacity: relationshipColorsEnabled ? 1 : 0.68,
               }}
             >
@@ -1293,7 +1293,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 ["Parent", "parent"],
                 ["Peer", "peer"],
                 ["Child", "child"],
-              ] as const).map(([label, key]) => (
+              ] as const).map(([label, key], index) => (
                 <label
                   key={key}
                   style={{
@@ -1305,7 +1305,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                     fontWeight: 700,
                     padding: "6px 8px",
                     border: "1px solid rgba(0,0,0,0.16)",
-                    borderRadius: 4,
+                    borderTop: index === 0 ? "1px solid rgba(0,0,0,0.16)" : "0",
+                    borderRadius: 0,
                     background: "rgba(255,255,255,0.72)",
                   }}
                 >
