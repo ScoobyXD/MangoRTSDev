@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { EXPLORER_CANVAS_LINKS_KEY, NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX, NodeDetails, NodeRecord } from "../node/shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED } from "../node/eventbus";
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../node/workspaceStore";
@@ -24,6 +24,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["folder-root", "folder-nodes", "folder-notes", "folder-logic"]));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const treeViewportRef = useRef<HTMLDivElement | null>(null);
+  const [treeScrollTop, setTreeScrollTop] = useState(0);
+  const [treeViewportHeight, setTreeViewportHeight] = useState(480);
+
+  const TREE_ROW_HEIGHT = 30;
+  const TREE_OVERSCAN = 8;
 
   const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const response = await fetch(`${apiBase}${path}`, {
@@ -105,7 +111,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     rows.push({ id: "folder-nodes", label: "Nodes", depth: 1, kind: "folder", scopeLevel: 1 });
     if (expanded.has("folder-nodes")) {
       rows.push({ id: "folder-all", label: `All Nodes (${nodes.length})`, depth: 2, kind: "folder", scopeLevel: 1 });
-      for (const node of nodes.slice(0, 250)) {
+      for (const node of nodes) {
         rows.push({ id: `node-${node.node_id}`, label: node.header || node.node_id, depth: 3, kind: "node", nodeID: node.node_id, scopeLevel: 3 });
       }
     }
@@ -124,6 +130,31 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, [expanded, nodes, unattachedNodeIDs]);
 
   const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID) ?? treeRows[0], [selectedTreeID, treeRows]);
+
+  useEffect(() => {
+    if (!treeViewportRef.current) return;
+    const measure = () => {
+      const height = treeViewportRef.current?.clientHeight ?? 0;
+      if (height > 0) setTreeViewportHeight(height);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  const virtualizedTree = useMemo(() => {
+    const total = treeRows.length;
+    if (total === 0) return { rows: [] as ExplorerTreeNode[], topSpacer: 0, bottomSpacer: 0 };
+    const visibleCount = Math.max(1, Math.ceil(treeViewportHeight / TREE_ROW_HEIGHT));
+    const start = Math.max(0, Math.floor(treeScrollTop / TREE_ROW_HEIGHT) - TREE_OVERSCAN);
+    const end = Math.min(total, start + visibleCount + TREE_OVERSCAN * 2);
+    const rows = treeRows.slice(start, end);
+    return {
+      rows,
+      topSpacer: start * TREE_ROW_HEIGHT,
+      bottomSpacer: Math.max(0, (total - end) * TREE_ROW_HEIGHT),
+    };
+  }, [treeRows, treeViewportHeight, treeScrollTop]);
 
   useEffect(() => {
     try {
@@ -167,9 +198,14 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   return (
     <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(220px, 0.95fr) minmax(280px, 1.1fr) minmax(220px, 0.95fr)", background: "#ffffff", color: "#0f1f23" }}>
-      <div style={{ borderRight: "1px solid rgba(3,25,30,0.14)", overflow: "auto" }}>
+      <div
+        ref={treeViewportRef}
+        onScroll={(event) => setTreeScrollTop((event.currentTarget as HTMLDivElement).scrollTop)}
+        style={{ borderRight: "1px solid rgba(3,25,30,0.14)", overflow: "auto" }}
+      >
         <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(3,25,30,0.14)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Company Explorer</div>
-        {treeRows.map((row) => {
+        <div style={{ height: virtualizedTree.topSpacer }} />
+        {virtualizedTree.rows.map((row) => {
           const isFolder = row.kind === "folder";
           const isOpen = expanded.has(row.id);
           const isSelected = selectedTreeID === row.id;
@@ -186,6 +222,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 display: "flex",
                 alignItems: "center",
                 gap: 6,
+                minHeight: TREE_ROW_HEIGHT,
                 padding: "4px 8px",
                 paddingLeft: 10 + row.depth * 16,
                 fontSize: 12,
@@ -225,6 +262,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
             </div>
           );
         })}
+        <div style={{ height: virtualizedTree.bottomSpacer }} />
       </div>
 
       <div style={{ borderRight: "1px solid rgba(3,25,30,0.14)", display: "grid", gridTemplateRows: "auto 1fr", overflow: "hidden" }}>
