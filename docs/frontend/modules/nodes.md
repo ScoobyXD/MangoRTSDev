@@ -124,7 +124,10 @@ Nodes are positioned in **world coordinates**, while pan/zoom transform the worl
 
 ## 5) Relationship creation rules
 
-Each selected node card shows **arrow-line handles** on all sides:
+Each selected node card shows **two controls per side**:
+
+- `+` icon keeps the existing behavior: create a new linked node off that side.
+- Arrow-line icon handles direct relationship creation between existing nodes.
 
 - Top icon arrow points up.
 - Right icon arrow points right.
@@ -134,8 +137,10 @@ Each selected node card shows **arrow-line handles** on all sides:
 Relationship creation uses a two-click attach flow between existing nodes:
 
 1. Click a side handle on the source node.
-2. Click a side handle on the target node.
-3. The module writes one relationship row.
+2. A trace line is shown from source side to cursor.
+3. All relationship-side icons switch into a **receive icon** state while drafting.
+4. Click a side receive icon on the target node.
+5. The module writes one relationship row.
 
 ### Position mapping currently used when creating relationship records
 
@@ -150,6 +155,8 @@ Source node is always `node_id_a`, target node is always `node_id_b`.
 ### Relationship deletion
 
 - Relationship rows are removable from the details panel via **Snip**.
+- Relationship lines can also be selected directly on canvas by clicking the line path (multi-select with `Shift`/`Ctrl` + click).
+- Keyboard `Delete` / `Backspace` deletes selected relationships.
 - Deletes call `DELETE /v1/node-relationships/:node_relationship_id`.
 
 ---
