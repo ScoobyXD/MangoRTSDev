@@ -1272,22 +1272,47 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             </button>
             <div
               style={{
+                position: "relative",
                 display: "grid",
-                gap: 6,
-                marginLeft: 20,
-                marginTop: 2,
-                padding: "4px 0 4px 10px",
-                borderLeft: "1px solid rgba(0,0,0,0.18)",
+                marginLeft: 18,
+                marginTop: 4,
+                border: "1px solid rgba(0,0,0,0.16)",
+                borderRadius: 6,
+                background: "rgba(255,255,255,0.55)",
+                overflow: "hidden",
                 opacity: relationshipColorsEnabled ? 1 : 0.68,
               }}
             >
+              <span
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  left: 8,
+                  top: 8,
+                  bottom: 8,
+                  width: 1,
+                  background: "rgba(0,0,0,0.2)",
+                }}
+              />
               {([
                 ["Parent", "parent"],
                 ["Peer", "peer"],
                 ["Child", "child"],
-              ] as const).map(([label, key]) => (
-                <label key={key} style={{ display: "grid", gridTemplateColumns: "12px 1fr auto", alignItems: "center", columnGap: 6, fontSize: 11, fontWeight: 700 }}>
-                  <span style={{ width: 10, height: 1, background: "rgba(0,0,0,0.18)", justifySelf: "end" }} />
+              ] as const).map(([label, key], index) => (
+                <label
+                  key={key}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "16px 1fr auto",
+                    alignItems: "center",
+                    columnGap: 6,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: "6px 8px 6px 0",
+                    borderTop: index === 0 ? "none" : "1px solid rgba(0,0,0,0.08)",
+                  }}
+                >
+                  <span style={{ width: 8, height: 1, background: "rgba(0,0,0,0.2)", justifySelf: "end" }} />
                   <span>{label}</span>
                   <input
                     type="color"
