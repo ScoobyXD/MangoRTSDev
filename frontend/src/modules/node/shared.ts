@@ -93,8 +93,8 @@ export function oppositeSide(direction: NodeDirection): NodeDirection {
 
 export function relationFromDirection(direction: NodeDirection): { a: "Parent" | "Child" | "Peer"; b: "Parent" | "Child" | "Peer" } {
   if (direction === "left" || direction === "right") return { a: "Peer", b: "Peer" };
-  if (direction === "top") return { a: "Child", b: "Parent" };
-  return { a: "Parent", b: "Child" };
+  if (direction === "top") return { a: "Parent", b: "Child" };
+  return { a: "Child", b: "Parent" };
 }
 
 export type NodeDocBox = { local_id: string; x: number; y: number; w: number; h: number; information_id?: string; information: string };
