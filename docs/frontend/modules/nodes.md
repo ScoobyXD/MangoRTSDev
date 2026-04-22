@@ -7,9 +7,8 @@ This document captures the full behavior and implementation details currently pr
 
 Implementation is now organized under:
 
-- `frontend/src/module/node/canvas/NodesContent.tsx`
-- `frontend/src/module/node/doc/NodeDocContent.tsx`
-- `frontend/src/module/node/shared.ts` (shared types/constants/helpers)
+- `frontend/src/modules/node/canvas/NodesContent.tsx`
+- `frontend/src/modules/node/shared.ts` (shared types/constants/helpers)
 
 ---
 
@@ -124,7 +123,7 @@ Nodes are positioned in **world coordinates**, while pan/zoom transform the worl
 
 ## 5) Relationship creation rules
 
-Each selected node card shows **two controls per side**:
+The primary selected node card shows **two controls per side**:
 
 - `+` icon keeps the existing behavior: create a new linked node off that side.
 - Arrow-line icon handles direct relationship creation between existing nodes.
@@ -138,7 +137,7 @@ Relationship creation uses a two-click attach flow between existing nodes:
 
 1. Click a side handle on the source node.
 2. A trace line is shown from source side to cursor.
-3. All relationship-side icons switch into a **receive icon** state while drafting.
+3. All node relationship-side icons switch into a **receive icon** state while drafting.
 4. Click a side receive icon on the target node.
 5. The module writes one relationship row.
 
@@ -152,6 +151,8 @@ Source node is always `node_id_a`, target node is always `node_id_b`.
 
 `a_position` is derived from the source side and `b_position` from the target side, so relationship semantics preserve exactly which sides were clicked.
 
+For `+` linked-node creation, the new node is attached on the **opposite side** of the source handle, and positions are derived from the same side-to-position mapping (no parent/child inversion patching).
+
 ### Relationship deletion
 
 - Relationship rows are removable from the details panel via **Snip**.
@@ -163,7 +164,7 @@ Source node is always `node_id_a`, target node is always `node_id_b`.
 
 ## 6) Relationship line rendering
 
-Relationships are visualized with SVG polylines in world space.
+Relationships are rendered on a world-space `<canvas>` for performance, with a lightweight SVG hit layer for direct relationship line selection.
 
 ### Anchor behavior
 
@@ -177,8 +178,8 @@ Relationships are visualized with SVG polylines in world space.
 - Lines originate from side anchors that correspond to `+` side conventions.
 - Routing now uses obstacle-aware orthogonal pathing on the mini-grid so relationship lines remain continuous and do not visually cut through node cards when nodes are moved.
 - Connector paths are simplified after routing to keep turns clean while preserving continuous end-to-end segments.
-- Optional relationship role coloring can be toggled on; when active, lines connected to the currently selected node are color-coded by that node’s role in each relationship (`Parent`, `Peer`, `Child`) while non-selected links are dimmed.
-- Rendering is non-interactive (`pointerEvents: none`) and sits under node cards.
+- Optional relationship role coloring can be toggled on; when active, lines connected to the active selected node (single-selection focus) are color-coded by that node’s role in the relationship (`Parent`, `Peer`, `Child`) while non-selected links are dimmed.
+- Visual rendering sits under node cards, and a transparent hit layer enables selection without degrading line draw performance.
 
 ---
 
@@ -186,7 +187,7 @@ Relationships are visualized with SVG polylines in world space.
 
 - `loadNodes()` loads all nodes.
 - `loadDetails(selectedNodeID)` loads details panel data for one selected node.
-- `loadGraphRelationships(nodes)` fetches details for each node and deduplicates relationships by `node_relationship_id` to render full graph links.
+- `loadGraphRelationships(nodes)` reuses workspace snapshot relationship payloads filtered to currently loaded nodes.
 - Workspace snapshot streaming/delta handling in `workspaceStore.ts` uses a single `WorkspaceStreamEnvelope` contract type for event application.
 - Relationship-create writes between existing nodes are executed through one internal helper path (`commitRelationshipBetweenNodes`) to avoid duplicate declaration/runtime drift in the canvas module.
 
