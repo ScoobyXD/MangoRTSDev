@@ -59,6 +59,42 @@ func (r *PostgresRepo) ListNodes(companyID string) ([]domain.Node, error) {
 	return items, nil
 }
 
+func (r *PostgresRepo) ListNodeRelationships(companyID string) ([]domain.NodeRelationship, error) {
+	ctx := context.Background()
+	rows, err := r.db.QueryContext(ctx,
+		`select company_id, node_relationship_id, node_id_a, node_id_b, a_position::text, b_position::text, created_timestamp
+		 from node_relationships
+		 where company_id=$1
+		 order by created_timestamp asc`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.NodeRelationship, 0)
+	for rows.Next() {
+		var item domain.NodeRelationship
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.NodeRelationshipID,
+			&item.NodeIDA,
+			&item.NodeIDB,
+			&item.APosition,
+			&item.BPosition,
+			&item.CreatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (r *PostgresRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	ctx := context.Background()
 	var item domain.Node

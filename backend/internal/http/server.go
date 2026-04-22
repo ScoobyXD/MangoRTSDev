@@ -170,6 +170,21 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNodeRelationships(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		items, err := s.repo.ListNodeRelationships(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_node_relationships")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"relationships": items})
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return

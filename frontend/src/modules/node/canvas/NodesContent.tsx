@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeCanvasState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_CANVAS_STATE, clamp, divider, oppositeSide, relationFromDirection, snapToGrid, trimOrEmpty } from "../shared";
+import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_CANVAS_STATE_UPDATED } from "../eventbus";
 
 export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -177,14 +178,9 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       return;
     }
     try {
-      const detailPayloads = await Promise.all(
-        graphNodes.map((node) => requestJSON<NodeDetails>(`/v1/nodes/${node.node_id}?company_id=${encodeURIComponent(companyID)}`))
-      );
-      const dedup = new Map<string, NodeRelationship>();
-      for (const detail of detailPayloads) {
-        for (const rel of detail.relationships ?? []) dedup.set(rel.node_relationship_id, rel);
-      }
-      setRelationships(Array.from(dedup.values()));
+      const payload = await requestJSON<{ relationships: NodeRelationship[] }>(`/v1/node-relationships?company_id=${encodeURIComponent(companyID)}`);
+      const allowed = new Set(graphNodes.map((node) => node.node_id));
+      setRelationships((payload.relationships ?? []).filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_load_relationships");
     }
@@ -250,10 +246,11 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       const nextState = { zoom, pan, selectedNodeID, nodePositions };
       SESSION_NODE_CANVAS_STATE.set(canvasStateKey, nextState);
       localStorage.setItem(canvasStateKey, JSON.stringify(nextState));
+      emitDashboardEvent(EVENT_NODE_CANVAS_STATE_UPDATED, { canvasWidgetID: canvasScope, selectedNodeID });
     } catch {
       // ignore local storage quota/security errors
     }
-  }, [canvasStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions]);
+  }, [canvasScope, canvasStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions]);
 
   useEffect(() => {
     setNodePositions((previous) => {
@@ -331,9 +328,22 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         // ignore malformed explorer context payload
       }
     };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key && event.key !== explorerKey) return;
+      applyExplorerContext();
+    };
+    const onExplorerContextUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ key?: string }>).detail;
+      if (!detail || detail.key !== explorerKey) return;
+      applyExplorerContext();
+    };
     applyExplorerContext();
-    const timer = window.setInterval(applyExplorerContext, 350);
-    return () => window.clearInterval(timer);
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
+    };
   }, [companyID, canvasScope, nodes]);
 
   useEffect(() => {
