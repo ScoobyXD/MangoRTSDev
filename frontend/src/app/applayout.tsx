@@ -7,6 +7,7 @@ import { MODULE_CONTENT_MAP as CONTENT_MAP, MODULE_LIBRARY as FRAME_MODULE_LIBRA
 import type { FrameDataModel, DragState, ResizeEdges } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { EDITOR_LINKS_KEY, EXPLORER_CANVAS_LINKS_KEY } from "../modules/node/shared";
+import { emitDashboardEvent, EVENT_EDITOR_LINKS_UPDATED } from "../modules/node/eventbus";
 
 const CELL_SIZE = 28;
 const HEADER_H = 48;
@@ -219,6 +220,14 @@ function loadNodeDocLinks(): Record<string, string> {
   } catch {
     return {};
   }
+}
+
+
+function persistEditorLinks(next: Record<string, string>) {
+  try {
+    localStorage.setItem(EDITOR_LINKS_KEY, JSON.stringify(next));
+    emitDashboardEvent(EVENT_EDITOR_LINKS_UPDATED, { links: next });
+  } catch {}
 }
 
 function loadExplorerCanvasLinks(): Record<string, string> {
@@ -649,7 +658,7 @@ const App: React.FC = () => {
   const saveEditorLink = useCallback((docFrameID: string, canvasFrameID: string) => {
     setEditorLinks((prev) => {
       const next = { ...prev, [docFrameID]: canvasFrameID };
-      try { localStorage.setItem(EDITOR_LINKS_KEY, JSON.stringify(next)); } catch {}
+      persistEditorLinks(next)
       return next;
     });
   }, []);
@@ -680,7 +689,7 @@ const App: React.FC = () => {
       setEditorLinks((previous) => {
         const next = { ...previous };
         for (const doc of linkPlan.docs) next[doc.id] = canvasID;
-        try { localStorage.setItem(EDITOR_LINKS_KEY, JSON.stringify(next)); } catch {}
+        persistEditorLinks(next)
         return next;
       });
     }
@@ -722,7 +731,7 @@ const App: React.FC = () => {
     setEditorLinks((previous) => {
       const next = Object.fromEntries(Object.entries(previous).filter(([docID, canvasID]) => frameIDs.has(docID) && frameIDs.has(canvasID)));
       if (JSON.stringify(previous) !== JSON.stringify(next)) {
-        try { localStorage.setItem(EDITOR_LINKS_KEY, JSON.stringify(next)); } catch {}
+        persistEditorLinks(next)
       }
       return next;
     });
@@ -767,7 +776,7 @@ const App: React.FC = () => {
 
     if (changedDoc) {
       setEditorLinks(nextDocLinks);
-      try { localStorage.setItem(EDITOR_LINKS_KEY, JSON.stringify(nextDocLinks)); } catch {}
+      persistEditorLinks(nextDocLinks)
     }
     if (changedExplorer) {
       setExplorerCanvasLinks(nextExplorerLinks);
@@ -878,7 +887,7 @@ const App: React.FC = () => {
     setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, frames: framesForView } : tab)));
     setEditorLinks((previous) => {
       const next = { ...previous, "default-node-editor": "default-node-canvas" };
-      try { localStorage.setItem(EDITOR_LINKS_KEY, JSON.stringify(next)); } catch {}
+      persistEditorLinks(next)
       return next;
     });
     setExplorerCanvasLinks((previous) => {
@@ -895,7 +904,7 @@ const App: React.FC = () => {
     setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, frames: framesForView } : tab)));
     setEditorLinks((previous) => {
       const next = { ...previous, "default-company-editor": "default-company-details" };
-      try { localStorage.setItem(EDITOR_LINKS_KEY, JSON.stringify(next)); } catch {}
+      persistEditorLinks(next)
       return next;
     });
     setExplorerCanvasLinks((previous) => {

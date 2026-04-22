@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { EXPLORER_CANVAS_LINKS_KEY, NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX, NodeDetails, NodeRecord } from "../node/shared";
+import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED } from "../node/eventbus";
 
 type ExplorerTreeNode = {
   id: string;
@@ -136,6 +137,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         ts: Date.now(),
       };
       localStorage.setItem(key, JSON.stringify(payload));
+      emitDashboardEvent(EVENT_EXPLORER_CONTEXT_UPDATED, { key });
     } catch {
       // ignore local storage failures
     }

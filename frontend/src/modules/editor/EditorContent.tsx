@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { NodeDetails, NodeDocBox, NodeInformation, EDITOR_LINKS_KEY, NODE_DOC_MIN_H, NODE_DOC_MIN_W, clamp, parseDocBox } from "../node/shared";
+import { EVENT_EDITOR_LINKS_UPDATED, EVENT_NODE_CANVAS_STATE_UPDATED } from "../node/eventbus";
 
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -70,20 +71,42 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [companyID, requestJSON]);
 
   useEffect(() => {
-    setLinkedCanvasWidgetID(readLinkedCanvasWidgetID());
-    const timer = window.setInterval(() => {
-      setLinkedCanvasWidgetID(readLinkedCanvasWidgetID());
-    }, 500);
-    return () => window.clearInterval(timer);
+    const refresh = () => setLinkedCanvasWidgetID(readLinkedCanvasWidgetID());
+    refresh();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key && event.key !== EDITOR_LINKS_KEY) return;
+      refresh();
+    };
+    const onLinksUpdated = () => refresh();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(EVENT_EDITOR_LINKS_UPDATED, onLinksUpdated);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(EVENT_EDITOR_LINKS_UPDATED, onLinksUpdated);
+    };
   }, [readLinkedCanvasWidgetID]);
 
   useEffect(() => {
-    setLinkedNodeID(readSelectedNodeFromCanvas(linkedCanvasWidgetID));
-    const timer = window.setInterval(() => {
-      setLinkedNodeID(readSelectedNodeFromCanvas(linkedCanvasWidgetID));
-    }, 500);
-    return () => window.clearInterval(timer);
-  }, [linkedCanvasWidgetID, readSelectedNodeFromCanvas]);
+    const refresh = () => setLinkedNodeID(readSelectedNodeFromCanvas(linkedCanvasWidgetID));
+    refresh();
+    const onStorage = (event: StorageEvent) => {
+      if (!linkedCanvasWidgetID) return;
+      const canvasStateKey = `node-canvas-state-v3:${companyID}:${linkedCanvasWidgetID}`;
+      if (event.key && event.key !== canvasStateKey) return;
+      refresh();
+    };
+    const onCanvasStateUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ canvasWidgetID?: string }>).detail;
+      if (!detail || detail.canvasWidgetID !== linkedCanvasWidgetID) return;
+      refresh();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(EVENT_NODE_CANVAS_STATE_UPDATED, onCanvasStateUpdated);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(EVENT_NODE_CANVAS_STATE_UPDATED, onCanvasStateUpdated);
+    };
+  }, [companyID, linkedCanvasWidgetID, readSelectedNodeFromCanvas]);
 
   useEffect(() => {
     let cancelled = false;
