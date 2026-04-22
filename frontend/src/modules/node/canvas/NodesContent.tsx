@@ -712,12 +712,21 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   const inferAnchor = (relationship: NodeRelationship): RelationshipAnchor => {
     if (relationshipAnchors[relationship.node_relationship_id]) return relationshipAnchors[relationship.node_relationship_id];
-    if (relationship.a_position === "Child" && relationship.b_position === "Parent") return { from: "top", to: "bottom" };
-    if (relationship.a_position === "Parent" && relationship.b_position === "Child") return { from: "bottom", to: "top" };
     const a = nodePositions[relationship.node_id_a];
     const b = nodePositions[relationship.node_id_b];
+    if (relationship.a_position === "Child" && relationship.b_position === "Parent") {
+      if (a && b) return b.y <= a.y ? { from: "top", to: "bottom" } : { from: "bottom", to: "top" };
+      return { from: "top", to: "bottom" };
+    }
+    if (relationship.a_position === "Parent" && relationship.b_position === "Child") {
+      if (a && b) return b.y >= a.y ? { from: "bottom", to: "top" } : { from: "top", to: "bottom" };
+      return { from: "bottom", to: "top" };
+    }
     if (!a || !b) return { from: "right", to: "left" };
-    return b.x >= a.x ? { from: "right", to: "left" } : { from: "left", to: "right" };
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    if (Math.abs(dy) > Math.abs(dx) * 1.15) return dy >= 0 ? { from: "bottom", to: "top" } : { from: "top", to: "bottom" };
+    return dx >= 0 ? { from: "right", to: "left" } : { from: "left", to: "right" };
   };
 
   const visibleNodeIDSet = useMemo(() => {
