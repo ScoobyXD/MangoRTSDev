@@ -187,6 +187,7 @@ Relationships are visualized with SVG polylines in world space.
 - `loadNodes()` loads all nodes.
 - `loadDetails(selectedNodeID)` loads details panel data for one selected node.
 - `loadGraphRelationships(nodes)` fetches details for each node and deduplicates relationships by `node_relationship_id` to render full graph links.
+- Workspace snapshot streaming/delta handling in `workspaceStore.ts` uses a single `WorkspaceStreamEnvelope` contract type for event application.
 
 ---
 
