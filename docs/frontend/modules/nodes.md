@@ -258,10 +258,10 @@ and reads `selectedNodeID`. That selected node becomes the active storage target
 - In-canvas instruction text.
 - Right-click context menu with `Create new node` at cursor location.
 - Right-click context menu also includes `Enable relationship colors` with an explicit iOS-style on/off slider (knob left = off, knob right = on).
-- Right-click menu rows use left-aligned text.
+- Right-click menu rows use left-aligned text and box-style row containers.
 - Relationship role color options (`Parent`, `Peer`, `Child`) are shown directly under `Enable relationship colors` as nested controls with stronger right indentation.
-- Nested role rows use a Company Explorer-inspired boxy hierarchy style: grouped rectangular rows with separators plus tree guide lines (vertical + short elbow connectors).
-- No triangle expand/collapse indicators are used in this right-click hierarchy presentation.
+- Nested role rows use a Company Explorer-inspired boxy hierarchy style: child rows are indented and boxed under the parent relationship row.
+- No triangle expand/collapse indicators or decorative connector lines are used in this right-click hierarchy presentation.
 - Role color pickers (`Parent`, `Peer`, `Child`) use RGB hex color inputs.
 - Canvas context menu placement is clamped within the viewport so all actions stay visible near canvas edges.
 - Right-click on a node opens node actions (`Edit node`, `Delete node`).

@@ -981,8 +981,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
           const worldX = clamp((localX - pan.x) / zoom, 0, WORLD_W);
           const worldY = clamp((localY - pan.y) / zoom, 0, WORLD_H);
-          const menuWidth = 208;
-          const menuHeight = 162;
+          const menuWidth = 232;
+          const menuHeight = 188;
           const clampedX = clamp(localX, 8, Math.max(8, bounds.width - menuWidth - 8));
           const clampedY = clamp(localY, 8, Math.max(8, bounds.height - menuHeight - 8));
           setContextMenu({ x: clampedX, y: clampedY, worldX, worldY });
@@ -1202,18 +1202,28 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               background: "rgba(255,255,255,0.95)",
               border: `1px solid ${accent}`,
               borderRadius: 8,
-              padding: 4,
-              width: 208,
+              padding: 8,
+              width: 232,
               boxSizing: "border-box",
               display: "grid",
-              gap: 2,
+              gap: 6,
               zIndex: 40,
               boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
             }}
             onPointerDown={(event) => event.stopPropagation()}
           >
             <button
-              style={{ width: "100%", border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", textAlign: "left" }}
+              style={{
+                width: "100%",
+                border: "1px solid rgba(0,0,0,0.16)",
+                background: "rgba(255,255,255,0.8)",
+                cursor: "pointer",
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "7px 8px",
+                textAlign: "left",
+                borderRadius: 4,
+              }}
               onClick={() => {
                 const title = trimOrEmpty(newNodeHeader) || "New node";
                 void createNode(title, { x: contextMenu.worldX, y: contextMenu.worldY });
@@ -1226,18 +1236,19 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             <button
               style={{
                 width: "100%",
-                border: "none",
-                background: "transparent",
+                border: "1px solid rgba(0,0,0,0.16)",
+                background: "rgba(255,255,255,0.8)",
                 cursor: "pointer",
                 fontSize: 11,
                 fontWeight: 700,
-                padding: "6px 8px",
+                padding: "7px 8px",
                 textAlign: "left",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: 6,
                 color: "#111111",
+                borderRadius: 4,
               }}
               onClick={() => setRelationshipColorsEnabled((previous) => !previous)}
             >
@@ -1272,47 +1283,32 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             </button>
             <div
               style={{
-                position: "relative",
                 display: "grid",
-                marginLeft: 18,
-                marginTop: 4,
-                border: "1px solid rgba(0,0,0,0.16)",
-                borderRadius: 6,
-                background: "rgba(255,255,255,0.55)",
-                overflow: "hidden",
+                marginLeft: 16,
+                gap: 4,
                 opacity: relationshipColorsEnabled ? 1 : 0.68,
               }}
             >
-              <span
-                aria-hidden="true"
-                style={{
-                  position: "absolute",
-                  left: 8,
-                  top: 8,
-                  bottom: 8,
-                  width: 1,
-                  background: "rgba(0,0,0,0.2)",
-                }}
-              />
               {([
                 ["Parent", "parent"],
                 ["Peer", "peer"],
                 ["Child", "child"],
-              ] as const).map(([label, key], index) => (
+              ] as const).map(([label, key]) => (
                 <label
                   key={key}
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "16px 1fr auto",
+                    gridTemplateColumns: "1fr auto",
                     alignItems: "center",
-                    columnGap: 6,
+                    columnGap: 8,
                     fontSize: 11,
                     fontWeight: 700,
-                    padding: "6px 8px 6px 0",
-                    borderTop: index === 0 ? "none" : "1px solid rgba(0,0,0,0.08)",
+                    padding: "6px 8px",
+                    border: "1px solid rgba(0,0,0,0.16)",
+                    borderRadius: 4,
+                    background: "rgba(255,255,255,0.72)",
                   }}
                 >
-                  <span style={{ width: 8, height: 1, background: "rgba(0,0,0,0.2)", justifySelf: "end" }} />
                   <span>{label}</span>
                   <input
                     type="color"
