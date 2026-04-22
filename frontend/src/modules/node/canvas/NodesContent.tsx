@@ -1206,6 +1206,10 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               border: `1px solid ${accent}`,
               borderRadius: 8,
               padding: 4,
+              width: 228,
+              boxSizing: "border-box",
+              display: "grid",
+              gap: 2,
               zIndex: 40,
               boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
             }}
@@ -1233,23 +1237,53 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 fontWeight: 700,
                 padding: "6px 8px",
                 textAlign: "left",
-                opacity: relationshipColorsEnabled ? 1 : 0.62,
-                color: relationshipColorsEnabled ? "#0b4868" : "#4f5d66",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+                color: "#0b4868",
               }}
               onMouseEnter={() => setRelationshipColorMenuOpen(true)}
               onClick={() => setRelationshipColorsEnabled((previous) => !previous)}
             >
-              Enable relationship colors
+              <span>Enable relationship colors</span>
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 32,
+                  height: 18,
+                  borderRadius: 999,
+                  background: relationshipColorsEnabled ? "#34c759" : "#b7c0c7",
+                  boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.12)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: relationshipColorsEnabled ? "flex-end" : "flex-start",
+                  padding: 2,
+                  boxSizing: "border-box",
+                  flexShrink: 0,
+                  transition: "background 120ms ease",
+                }}
+              >
+                <span
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "#ffffff",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
+                  }}
+                />
+              </span>
             </button>
             {relationshipColorMenuOpen && (
               <div
                 style={{
                   position: "absolute",
-                  top: 37,
+                  top: 34,
                   left: contextMenu.submenuOpenLeft ? undefined : "100%",
                   right: contextMenu.submenuOpenLeft ? "100%" : undefined,
-                  marginLeft: contextMenu.submenuOpenLeft ? 0 : 8,
-                  marginRight: contextMenu.submenuOpenLeft ? 8 : 0,
+                  marginLeft: contextMenu.submenuOpenLeft ? 0 : 2,
+                  marginRight: contextMenu.submenuOpenLeft ? 2 : 0,
                   minWidth: 184,
                   background: "rgba(255,255,255,0.97)",
                   border: `1px solid ${accent}`,

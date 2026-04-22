@@ -257,8 +257,9 @@ and reads `selectedNodeID`. That selected node becomes the active storage target
 - World grid, relationship lines, node cards, side `+` actions, selection box, and group badge.
 - In-canvas instruction text.
 - Right-click context menu with `Create new node` at cursor location.
-- Right-click context menu also includes `Enable relationship colors` with a hover submenu for per-role color pickers (`Parent`, `Peer`, `Child`) using RGB hex color inputs.
-- Relationship-color controls are visually lighter when enabled and slightly darkened when disabled to indicate current on/off state.
+- Right-click context menu also includes `Enable relationship colors` with an explicit iOS-style on/off slider (knob left = off, knob right = on).
+- The role color flyout is opened from the relationship-colors row and is visually docked tightly to the main context menu with aligned top edges for cleaner grouping.
+- Role color pickers (`Parent`, `Peer`, `Child`) use RGB hex color inputs.
 - Canvas context menu placement is clamped within the viewport so all actions stay visible near canvas edges; the relationship-color flyout can open left when needed.
 - Right-click on a node opens node actions (`Edit node`, `Delete node`).
 - Delete key support for selected node(s), guarded by themed confirmation modal.
