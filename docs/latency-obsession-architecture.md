@@ -143,14 +143,19 @@ Mark each item when complete and keep this list current.
 - [ ] Remaining N+1 patterns removed from all hot modules
 - [ ] Backend queries verified by EXPLAIN plans for hot endpoints
 
+### Workspace Data Plane
+- [x] Single source-of-truth workspace snapshot endpoint added (`/v1/workspace/snapshot`)
+- [x] Initial bulk/snapshot API wired into hot modules (Node Canvas + Company Explorer)
+- [x] Shared normalized client workspace store introduced across modules
+
 ### Event-driven Sync
 - [x] Removed polling loop from Editor link synchronization
 - [x] Removed polling loop from Editor selected-node synchronization
 - [x] Removed polling loop from Explorer -> Canvas context synchronization
-- [ ] WebSocket/SSE transport introduced for cross-client realtime sync
+- [x] WebSocket/SSE transport introduced for cross-client realtime sync (SSE implemented via `/v1/workspace/stream`)
 
 ### Rendering Scalability
-- [ ] Viewport culling/windowing implemented for Node Canvas
+- [x] Viewport culling/windowing implemented for Node Canvas
 - [ ] Virtualization implemented for Explorer tree and heavy lists
 - [ ] Canvas/WebGL decision implemented for high-density graph rendering
 - [ ] Fine-grained subscriptions to avoid global rerenders
@@ -164,7 +169,7 @@ Mark each item when complete and keep this list current.
 ### Data Model / Database
 - [ ] `company_id`-first indexing audited and fixed
 - [ ] Sharding/partitioning strategy by `company_id` implemented
-- [ ] Read model for graph snapshot/delta designed and implemented
+- [x] Read model for graph snapshot/delta designed and implemented (initial snapshot endpoint + SSE delta events)
 - [ ] Any required joins/materialized views added for hot reads
 
 ### Observability + Quality Gates

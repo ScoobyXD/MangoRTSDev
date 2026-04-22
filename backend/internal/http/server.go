@@ -3,8 +3,10 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"miraeopus/backend/internal/store"
@@ -12,10 +14,14 @@ import (
 
 type Server struct {
 	repo store.Repository
+	hub  *workspaceEventHub
 }
 
 func NewServer(repo store.Repository) *Server {
-	return &Server{repo: repo}
+	return &Server{
+		repo: repo,
+		hub:  newWorkspaceEventHub(),
+	}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -24,6 +30,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/nodes", s.handleNodes)
 	mux.HandleFunc("/v1/nodes/", s.handleNodeSubresource)
 	mux.HandleFunc("/v1/node-relationships", s.handleNodeRelationships)
+	mux.HandleFunc("/v1/workspace/snapshot", s.handleWorkspaceSnapshot)
+	mux.HandleFunc("/v1/workspace/stream", s.handleWorkspaceStream)
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
 	mux.HandleFunc("/v1/operations", s.handleOperations)
 	mux.HandleFunc("/v1/operations/", s.handleOperationByID)
@@ -69,6 +77,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_create_node")
 			return
 		}
+		s.publishWorkspaceEvent(req.CompanyID, "node_created", map[string]any{"node_id": item.NodeID})
 		writeJSON(w, http.StatusCreated, item)
 		return
 	}
@@ -99,6 +108,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed_to_delete_node")
 				return
 			}
+			s.publishWorkspaceEvent(companyID, "node_deleted", map[string]any{"node_id": nodeID})
 			writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 			return
 		}
@@ -162,6 +172,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_add_node_information")
 			return
 		}
+		s.publishWorkspaceEvent(req.CompanyID, "node_information_created", map[string]any{"node_id": nodeID, "information_id": item.InformationID})
 		writeJSON(w, http.StatusCreated, item)
 		return
 	}
@@ -219,7 +230,136 @@ func (s *Server) handleNodeRelationships(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_create_node_relationship")
 		return
 	}
+	s.publishWorkspaceEvent(req.CompanyID, "relationship_created", map[string]any{"node_relationship_id": item.NodeRelationshipID, "node_id_a": item.NodeIDA, "node_id_b": item.NodeIDB})
 	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	nodes, err := s.repo.ListNodes(companyID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
+		return
+	}
+	relationships, err := s.repo.ListNodeRelationships(companyID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_node_relationships")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes, "relationships": relationships, "generated_at": time.Now().UTC()})
+}
+
+func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "stream_unsupported")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	ch := s.hub.subscribe()
+	defer s.hub.unsubscribe(ch)
+
+	fmt.Fprintf(w, "event: ready\ndata: {\"company_id\":%q}\n\n", companyID)
+	flusher.Flush()
+
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-heartbeat.C:
+			fmt.Fprint(w, "event: ping\ndata: {}\n\n")
+			flusher.Flush()
+		case payload := <-ch:
+			var envelope workspaceEventEnvelope
+			if err := json.Unmarshal(payload, &envelope); err != nil {
+				continue
+			}
+			if envelope.CompanyID != companyID {
+				continue
+			}
+			fmt.Fprintf(w, "event: workspace\ndata: %s\n\n", payload)
+			flusher.Flush()
+		}
+	}
+}
+
+type workspaceEventEnvelope struct {
+	CompanyID string         `json:"company_id"`
+	Type      string         `json:"type"`
+	TS        time.Time      `json:"ts"`
+	Data      map[string]any `json:"data,omitempty"`
+}
+
+type workspaceEventHub struct {
+	mu          sync.RWMutex
+	subscribers map[chan []byte]struct{}
+}
+
+func newWorkspaceEventHub() *workspaceEventHub {
+	return &workspaceEventHub{subscribers: map[chan []byte]struct{}{}}
+}
+
+func (h *workspaceEventHub) subscribe() chan []byte {
+	ch := make(chan []byte, 24)
+	h.mu.Lock()
+	h.subscribers[ch] = struct{}{}
+	h.mu.Unlock()
+	return ch
+}
+
+func (h *workspaceEventHub) unsubscribe(ch chan []byte) {
+	h.mu.Lock()
+	delete(h.subscribers, ch)
+	h.mu.Unlock()
+	close(ch)
+}
+
+func (h *workspaceEventHub) publish(payload []byte) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for ch := range h.subscribers {
+		select {
+		case ch <- payload:
+		default:
+		}
+	}
+}
+
+func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[string]any) {
+	payload, err := json.Marshal(workspaceEventEnvelope{
+		CompanyID: companyID,
+		Type:      eventType,
+		TS:        time.Now().UTC(),
+		Data:      data,
+	})
+	if err != nil {
+		return
+	}
+	s.hub.publish(payload)
 }
 
 func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {

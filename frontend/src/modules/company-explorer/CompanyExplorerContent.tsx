@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { EXPLORER_CANVAS_LINKS_KEY, NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX, NodeDetails, NodeRecord } from "../node/shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED } from "../node/eventbus";
+import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../node/workspaceStore";
 
 type ExplorerTreeNode = {
   id: string;
@@ -49,22 +50,25 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setLoading(true);
       try {
-        setLoading(true);
-        setError("");
-        const payload = await requestJSON<{ nodes: NodeRecord[] }>(`/v1/nodes?company_id=${encodeURIComponent(companyID)}`);
+        await refreshWorkspaceSnapshot(apiBase, companyID);
         if (cancelled) return;
-        setNodes(payload.nodes ?? []);
+        setNodes(getWorkspaceSnapshot(apiBase, companyID).nodes ?? []);
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "failed_to_load_nodes");
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, [companyID]);
+    return () => { cancelled = true; };
+  }, [apiBase, companyID]);
+
+  useEffect(() => {
+    return subscribeWorkspace(apiBase, companyID, () => {
+      setNodes(getWorkspaceSnapshot(apiBase, companyID).nodes ?? []);
+    });
+  }, [apiBase, companyID]);
 
   useEffect(() => {
     if (!selectedNodeID) {
