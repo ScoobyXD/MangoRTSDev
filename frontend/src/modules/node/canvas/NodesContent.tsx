@@ -815,6 +815,10 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   const detailsPanelNode = useMemo(() => nodes.find((item) => item.node_id === detailsPanelNodeID) ?? null, [nodes, detailsPanelNodeID]);
   const nodeByID = useMemo(() => Object.fromEntries(nodes.map((node) => [node.node_id, node])), [nodes]);
+  const activeRoleNodeID = useMemo(() => {
+    if (selectedNodeIDs.size === 1) return Array.from(selectedNodeIDs)[0] ?? "";
+    return selectedNodeID;
+  }, [selectedNodeIDs, selectedNodeID]);
 
   useEffect(() => {
     if (!detailsPanelNode || !viewportRef.current) return;
@@ -1009,8 +1013,9 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               : { x: to.x, y: to.y + lane };
         const points = routeOrthogonalPath(from, fromOut, toIn, to, rel.node_id_a, rel.node_id_b);
         let role: "Parent" | "Peer" | "Child" | null = null;
-        if (selectedNodeID && (rel.node_id_a === selectedNodeID || rel.node_id_b === selectedNodeID)) {
-          role = rel.a_position;
+        if (activeRoleNodeID) {
+          if (rel.node_id_a === activeRoleNodeID) role = rel.a_position;
+          else if (rel.node_id_b === activeRoleNodeID) role = rel.b_position;
         }
         const stroke =
           role === "Parent" ? relationshipRoleColors.parent
@@ -1021,7 +1026,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         return { id: rel.node_relationship_id, points, stroke, alpha, selected: selectedRelationshipIDs.has(rel.node_relationship_id) };
       })
       .filter((path): path is { id: string; points: { x: number; y: number }[]; stroke: string; alpha: number; selected: boolean } => !!path);
-  }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet, relationshipRoutingGrid, selectedNodeID, relationshipRoleColors, accent, relationshipColorsEnabled, selectedRelationshipIDs]);
+  }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet, relationshipRoutingGrid, activeRoleNodeID, relationshipRoleColors, accent, relationshipColorsEnabled, selectedRelationshipIDs]);
 
   const draftPath = useMemo(() => {
     if (!relationshipDraft) return null;
