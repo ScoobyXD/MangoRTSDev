@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeCanvasState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_CANVAS_STATE, clamp, divider, oppositeSide, relationFromDirection, snapToGrid, trimOrEmpty } from "../shared";
+import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_CANVAS_STATE_UPDATED } from "../eventbus";
+import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../workspaceStore";
 
 export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -147,8 +149,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     setLoading(true);
     setError("");
     try {
-      const payload = await requestJSON<{ nodes: NodeRecord[] }>(`/v1/nodes?company_id=${encodeURIComponent(companyID)}`);
-      const nextNodes = payload.nodes ?? [];
+      await refreshWorkspaceSnapshot(apiBase, companyID);
+      const nextNodes = getWorkspaceSnapshot(apiBase, companyID).nodes ?? [];
       setNodes(nextNodes);
 
       const hasSelection = selectedNodeID && nextNodes.some((item) => item.node_id === selectedNodeID);
@@ -177,14 +179,10 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       return;
     }
     try {
-      const detailPayloads = await Promise.all(
-        graphNodes.map((node) => requestJSON<NodeDetails>(`/v1/nodes/${node.node_id}?company_id=${encodeURIComponent(companyID)}`))
-      );
-      const dedup = new Map<string, NodeRelationship>();
-      for (const detail of detailPayloads) {
-        for (const rel of detail.relationships ?? []) dedup.set(rel.node_relationship_id, rel);
-      }
-      setRelationships(Array.from(dedup.values()));
+      await refreshWorkspaceSnapshot(apiBase, companyID);
+      const payload = getWorkspaceSnapshot(apiBase, companyID);
+      const allowed = new Set(graphNodes.map((node) => node.node_id));
+      setRelationships((payload.relationships ?? []).filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_load_relationships");
     }
@@ -211,6 +209,15 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   useEffect(() => {
     void loadNodes();
   }, []);
+
+  useEffect(() => {
+    return subscribeWorkspace(apiBase, companyID, () => {
+      const snapshot = getWorkspaceSnapshot(apiBase, companyID);
+      setNodes(snapshot.nodes ?? []);
+      const allowed = new Set((snapshot.nodes ?? []).map((node) => node.node_id));
+      setRelationships((snapshot.relationships ?? []).filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b)));
+    });
+  }, [apiBase, companyID]);
 
   useEffect(() => {
     void loadGraphRelationships(nodes);
@@ -250,10 +257,11 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       const nextState = { zoom, pan, selectedNodeID, nodePositions };
       SESSION_NODE_CANVAS_STATE.set(canvasStateKey, nextState);
       localStorage.setItem(canvasStateKey, JSON.stringify(nextState));
+      emitDashboardEvent(EVENT_NODE_CANVAS_STATE_UPDATED, { canvasWidgetID: canvasScope, selectedNodeID });
     } catch {
       // ignore local storage quota/security errors
     }
-  }, [canvasStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions]);
+  }, [canvasScope, canvasStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions]);
 
   useEffect(() => {
     setNodePositions((previous) => {
@@ -331,9 +339,22 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         // ignore malformed explorer context payload
       }
     };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key && event.key !== explorerKey) return;
+      applyExplorerContext();
+    };
+    const onExplorerContextUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ key?: string }>).detail;
+      if (!detail || detail.key !== explorerKey) return;
+      applyExplorerContext();
+    };
     applyExplorerContext();
-    const timer = window.setInterval(applyExplorerContext, 350);
-    return () => window.clearInterval(timer);
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
+    };
   }, [companyID, canvasScope, nodes]);
 
   useEffect(() => {
@@ -698,9 +719,25 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     return b.x >= a.x ? { from: "right", to: "left" } : { from: "left", to: "right" };
   };
 
+  const visibleNodeIDSet = useMemo(() => {
+    const minX = (-pan.x) / zoom;
+    const minY = (-pan.y) / zoom;
+    const maxX = minX + canvasSize.width / zoom;
+    const maxY = minY + canvasSize.height / zoom;
+    const pad = 180;
+    const visible = new Set<string>();
+    for (const node of nodes) {
+      const position = nodePositions[node.node_id] ?? { x: 120, y: 120 };
+      const inView = position.x + NODE_W >= minX - pad && position.x <= maxX + pad && position.y + NODE_H >= minY - pad && position.y <= maxY + pad;
+      if (inView) visible.add(node.node_id);
+    }
+    return visible;
+  }, [nodes, nodePositions, pan.x, pan.y, zoom, canvasSize.width, canvasSize.height]);
+
   const connectionPaths = useMemo(() => {
     return relationships
       .filter((rel) => nodeByID[rel.node_id_a] && nodeByID[rel.node_id_b] && nodePositions[rel.node_id_a] && nodePositions[rel.node_id_b])
+      .filter((rel) => visibleNodeIDSet.has(rel.node_id_a) || visibleNodeIDSet.has(rel.node_id_b))
       .map((rel) => {
         const anchor = inferAnchor(rel);
         const from = getAnchorPoint(rel.node_id_a, anchor.from);
@@ -721,7 +758,9 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         return { id: rel.node_relationship_id, points };
       })
       .filter((path): path is { id: string; points: { x: number; y: number }[] } => !!path);
-  }, [relationships, nodeByID, nodePositions, relationshipAnchors]);
+  }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet]);
+
+  const visibleNodes = useMemo(() => nodes.filter((node) => visibleNodeIDSet.has(node.node_id)), [nodes, visibleNodeIDSet]);
 
   return (
     <div style={{ fontSize: 11, height: "100%" }}>
@@ -819,7 +858,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             ))}
           </svg>
 
-          {nodes.map((node) => {
+          {visibleNodes.map((node) => {
             const position = nodePositions[node.node_id] ?? { x: 120, y: 120 };
             const isSelected = selectedNodeIDs.has(node.node_id);
             const isPrimary = node.node_id === selectedNodeID;

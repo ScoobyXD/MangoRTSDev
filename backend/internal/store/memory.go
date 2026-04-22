@@ -14,6 +14,7 @@ var ErrNotFound = errors.New("not found")
 type Repository interface {
 	CreateNode(companyID, header string) (domain.Node, error)
 	ListNodes(companyID string) ([]domain.Node, error)
+	ListNodeRelationships(companyID string) ([]domain.NodeRelationship, error)
 	GetNode(companyID, nodeID string) (domain.Node, error)
 	DeleteNode(companyID, nodeID string) error
 	GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error)
@@ -95,6 +96,17 @@ func (r *MemoryRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 		return domain.Node{}, ErrNotFound
 	}
 	return n, nil
+}
+
+func (r *MemoryRepo) ListNodeRelationships(companyID string) ([]domain.NodeRelationship, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := append([]domain.NodeRelationship{}, r.nodeRels[companyID]...)
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
+	return items, nil
 }
 
 func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
