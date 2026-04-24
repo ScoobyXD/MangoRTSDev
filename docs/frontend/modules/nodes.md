@@ -112,7 +112,9 @@ Nodes are positioned in **world coordinates**, while pan/zoom transform the worl
 
 - `Shift + drag` **or** `Ctrl + drag` on canvas creates marquee selection box.
 - Nodes intersecting the box become selected.
+- Relationship lines intersecting the box also become selected.
 - `Shift + click` **or** `Ctrl + click` on node cards toggles nodes in/out of the current selection set.
+- `Shift + click` **or** `Ctrl + click` on relationship lines toggles relationships in/out of the current selection set.
 - Visual indicators:
   - selected border/outline/glow,
   - selected dot marker on card,
