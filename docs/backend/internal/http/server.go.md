@@ -1,3 +1,17 @@
+# This is the main doc related to server.go
+## Golden Rules:
+Design the MangoOS hot-path architecture for:
+- 100000s of UI elements and simultaneous background operations per active workspace
+- 100000s of companies
+- 1000000s of users and ai agency
+- strict latency culture with sub-100ms targets for interactive reads
+- ***THIS IS SUPER IMPORTandANT:*** In the future we will have ai agents operate this app without a UI,
+    so we need to make sure everything can be done by ai agents headless with just APIs. 
+    And of course, it needs to work well with 10000s of ai agents all using the apis all at once.
+
+These rules are from the latency-obsession-architecture.md file 
+
+
 # Workspace Snapshot GET Spam: Root Cause + Fix
 
 Last updated: 2026-04-24
