@@ -17,7 +17,13 @@
   "include": [
     "src/modules/node-map/shared.ts",
     "src/modules/node-map/relationshipProjection.ts",
-    "src/modules/node-map/relationshipProjection.test.ts"
+    "src/modules/node-map/relationshipProjection.test.ts",
+    "src/modules/node-map/keyboardDeletion.ts",
+    "src/modules/node-map/keyboardDeletion.test.ts",
+    "src/modules/node-map/relationshipDeletionScope.ts",
+    "src/modules/node-map/relationshipDeletionScope.test.ts",
+    "src/modules/node-map/selectionGeometry.ts",
+    "src/modules/node-map/selectionGeometry.test.ts"
   ],
   "exclude": []
 }

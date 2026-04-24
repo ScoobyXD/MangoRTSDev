@@ -27,11 +27,18 @@ If you changed behavior and did not add/update tests + update this doc, the chan
 
 Purpose:
 - Validate node-relationship role mapping and anchor semantics.
+- Validate relationship selection hit-testing geometry for line selection boxes.
 - Prevent regressions on `a_position` / `b_position` interpretation and selected-role coloring.
 
 Primary source files:
 - `frontend/src/modules/node-map/relationshipProjection.ts`
 - `frontend/src/modules/node-map/relationshipProjection.test.ts`
+- `frontend/src/modules/node-map/keyboardDeletion.ts`
+- `frontend/src/modules/node-map/keyboardDeletion.test.ts`
+- `frontend/src/modules/node-map/relationshipDeletionScope.ts`
+- `frontend/src/modules/node-map/relationshipDeletionScope.test.ts`
+- `frontend/src/modules/node-map/selectionGeometry.ts`
+- `frontend/src/modules/node-map/selectionGeometry.test.ts`
 
 Run command:
 - From `frontend/`: `npm run test:node-relationships`
@@ -99,6 +106,18 @@ Use this checklist format and keep it complete.
   - selected-node opposite-side role resolution
   - parent/child anchor inference
   - projected visual metadata output
+- [x] `frontend/src/modules/node-map/selectionGeometry.test.ts`
+  - polyline/selection-rectangle intersection detection
+  - path-inside-rectangle hit detection
+  - non-intersecting path rejection
+- [x] `frontend/src/modules/node-map/keyboardDeletion.test.ts`
+  - delete/backspace key filtering
+  - relationship-vs-node delete priority resolution
+  - fallback node delete intent resolution
+- [x] `frontend/src/modules/node-map/relationshipDeletionScope.test.ts`
+  - empty/invalid relationship selection detection
+  - active-company scope mismatch rejection
+  - valid scoped delete payload resolution
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
 
