@@ -20,6 +20,7 @@ export interface ModulePickerMenuProps {
   onChangeModuleKind: (moduleTypeMenuId: string, kind: string, label: string) => void;
 }
 
+// Module switcher menu: lets users swap a frame's feature module in-place.
 const ModulePickerMenu: React.FC<ModulePickerMenuProps> = ({
   x,
   y,
@@ -37,6 +38,7 @@ const ModulePickerMenu: React.FC<ModulePickerMenuProps> = ({
           key={item.kind}
           style={menuBtnBase}
           onClick={() => {
+            // Bridge to AppLayout module registry update path.
             onChangeModuleKind(moduleTypeMenuId, item.kind, item.label);
             onClose();
           }}

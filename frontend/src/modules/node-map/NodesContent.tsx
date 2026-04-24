@@ -5,6 +5,7 @@ import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } fr
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { pathIntersectsRect } from "./relationshipSelection";
 
+// Node Map module: graph canvas, relationship editing, and detail panel workflows.
 export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
@@ -148,6 +149,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     }
   }, [mapStateKey]);
 
+  // Shared API request helper for node CRUD, details, and relationship operations.
   const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const response = await fetch(`${apiBase}${path}`, {
       ...init,
@@ -174,6 +176,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     return response.json() as Promise<T>;
   };
 
+  // Snapshot-driven node loader that also restores/maintains active selection.
   const loadNodes = async () => {
     setLoading(true);
     setError("");
@@ -202,6 +205,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     }
   };
 
+  // Load relationship set scoped to nodes currently available in workspace snapshot.
   const loadGraphRelationships = async (graphNodes: NodeRecord[]) => {
     if (graphNodes.length === 0) {
       setRelationships([]);
@@ -217,6 +221,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     }
   };
 
+  // Node details loader used by right-side details panel and info editing actions.
   const loadDetails = async (nodeID: string) => {
     if (!nodeID) {
       setDetails(null);
@@ -644,6 +649,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     if (detailsPanelNodeID) await loadDetails(detailsPanelNodeID);
   };
 
+  // Delete-node action with selection/context cleanup and snapshot refresh.
   const deleteNode = async (nodeID: string) => {
     if (!nodeID) return;
     setError("");

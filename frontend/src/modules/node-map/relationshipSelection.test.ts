@@ -1,3 +1,4 @@
+// Relationship selection hit-test geometry tests for marquee and line segments.
 // @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";

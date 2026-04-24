@@ -1,3 +1,4 @@
+// Relationship projection semantics tests (parent/child/peer + anchors + color role mapping).
 // @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";

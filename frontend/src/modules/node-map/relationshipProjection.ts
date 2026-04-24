@@ -2,18 +2,21 @@ import { NodeDirection, NodePosition, NodeRelationship, RelationshipAnchor } fro
 
 export type RelationshipRole = "Parent" | "Child" | "Peer";
 
+// Backend write payload contract for relationship creation from node-map UI gestures.
 export type RelationshipWritePayload = {
   a_position: RelationshipRole;
   b_position: RelationshipRole;
   anchor: RelationshipAnchor;
 };
 
+// Side-to-role mapping: horizontal sides are peers, vertical sides imply hierarchy.
 export function relationshipRoleFromSide(side: NodeDirection): RelationshipRole {
   if (side === "left" || side === "right") return "Peer";
   if (side === "top") return "Parent";
   return "Child";
 }
 
+// New-linked-node path: decides default relationship semantics from the source + handle used.
 export function buildLinkedNodePayloadFromSourceSide(side: NodeDirection): RelationshipWritePayload {
   if (side === "top") {
     return {
@@ -43,6 +46,7 @@ export function buildLinkedNodePayloadFromSourceSide(side: NodeDirection): Relat
   };
 }
 
+// Existing-node attach path: converts selected source/target sides into API row fields.
 export function buildExistingNodeRelationshipPayload(sourceSide: NodeDirection, targetSide: NodeDirection): RelationshipWritePayload {
   const sourceRole = sourceSide === "top" ? "Child" : sourceSide === "bottom" ? "Parent" : "Peer";
   const targetRole = sourceRole === "Child" ? "Parent" : sourceRole === "Parent" ? "Child" : "Peer";
@@ -53,6 +57,7 @@ export function buildExistingNodeRelationshipPayload(sourceSide: NodeDirection, 
   };
 }
 
+// Relationship legality gate: enforce parent/child vertical and peer horizontal pairings.
 export function isLegalRelationshipSidePair(sourceSide: NodeDirection, targetSide: NodeDirection): boolean {
   const sourceIsPeer = sourceSide === "left" || sourceSide === "right";
   const targetIsPeer = targetSide === "left" || targetSide === "right";
@@ -61,6 +66,7 @@ export function isLegalRelationshipSidePair(sourceSide: NodeDirection, targetSid
   return targetSide === "top";
 }
 
+// Active-node role resolver used by relationship color coding and contextual highlighting.
 export function selectedRoleForRelationship(relationship: NodeRelationship, activeNodeID: string): RelationshipRole | null {
   if (!activeNodeID) return null;
   if (relationship.node_id_a === activeNodeID) return relationship.b_position;
@@ -78,6 +84,7 @@ export type RelationshipProjection = {
   alpha: number;
 };
 
+// Anchor inference fallback used when no persisted anchor exists for this relationship row.
 export function inferRelationshipAnchor(
   relationship: NodeRelationship,
   nodePositions: Record<string, NodePosition>,
@@ -104,6 +111,7 @@ export function inferRelationshipAnchor(
   return dx >= 0 ? { from: "right", to: "left" } : { from: "left", to: "right" };
 }
 
+// Rendering projection: converts relationship rows to visual metadata used by path drawing.
 export function projectRelationshipVisual(
   relationship: NodeRelationship,
   options: {

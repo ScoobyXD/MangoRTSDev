@@ -21,6 +21,7 @@ export interface ModuleTemplate {
   render: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }>;
 }
 
+// Master module library used by add-module flow and module-picker context menu.
 export const MODULE_LIBRARY: ModuleTemplate[] = [
   { kind: "revenue", label: "Revenue", defaultW: 12, defaultH: 9, render: RevenueContent },
   { kind: "users", label: "Active Users", defaultW: 10, defaultH: 12, render: UsersContent },
@@ -35,9 +36,11 @@ export const MODULE_LIBRARY: ModuleTemplate[] = [
   { kind: "company-explorer", label: "Company Explorer", defaultW: 18, defaultH: 14, render: CompanyExplorerContent },
 ];
 
+// Fast lookup map consumed by frame rendering paths in AppLayout.
 export const MODULE_CONTENT_MAP: Record<string, React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }>> = Object.fromEntries(
   MODULE_LIBRARY.map((module) => [module.kind, module.render])
 );
-MODULE_CONTENT_MAP.nodes = NodesContent;
 
+// Legacy aliases maintained so older persisted layouts still open correctly.
+MODULE_CONTENT_MAP.nodes = NodesContent;
 MODULE_CONTENT_MAP["node-doc"] = EditorContent;

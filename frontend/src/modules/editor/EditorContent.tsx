@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { NodeDetails, NodeDocBox, NodeInformation, EDITOR_LINKS_KEY, NODE_DOC_MIN_H, NODE_DOC_MIN_W, clamp, parseDocBox } from "../node-map/shared";
 import { EVENT_EDITOR_LINKS_UPDATED, EVENT_NODE_MAP_STATE_UPDATED } from "../node-map/eventbus";
 
+// Editor module: node-linked document canvas for text boxes and notes.
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
@@ -28,6 +29,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   } | null>(null);
   const [error, setError] = useState("");
 
+  // API helper for editor load/save flows tied to selected node context.
   const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const response = await fetch(`${apiBase}${path}`, {
       ...init,
@@ -38,6 +40,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     return response.json() as Promise<T>;
   }, [apiBase]);
 
+  // Reads editor->node-map link so this panel can follow the selected map scope.
   const readLinkedMapWidgetID = useCallback((): string => {
     try {
       const raw = localStorage.getItem(EDITOR_LINKS_KEY);
@@ -49,6 +52,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [scope]);
 
+  // Reads currently selected node from linked node-map persisted state.
   const readSelectedNodeFromMap = useCallback((mapWidgetID: string): string => {
     if (!mapWidgetID) return "";
     try {
@@ -61,6 +65,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [companyID]);
 
+  // Persist a single document box into node information rows (Text box type).
   const saveBox = useCallback(async (nodeID: string, box: NodeDocBox) => {
     const payload = JSON.stringify({ local_id: box.local_id, x: box.x, y: box.y, w: box.w, h: box.h, text: box.information });
     const created = await requestJSON<NodeInformation>(`/v1/nodes/${nodeID}/information`, {

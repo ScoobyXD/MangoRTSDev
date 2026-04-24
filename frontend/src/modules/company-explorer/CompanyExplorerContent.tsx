@@ -12,6 +12,7 @@ type ExplorerTreeNode = {
   scopeLevel: number;
 };
 
+// Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
 export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
@@ -31,6 +32,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const TREE_ROW_HEIGHT = 30;
   const TREE_OVERSCAN = 8;
 
+  // Shared request helper for explorer detail/snapshot API calls.
   const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const response = await fetch(`${apiBase}${path}`, {
       ...init,
@@ -104,6 +106,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return new Set(nodes.filter((node) => !attached.has(node.node_id)).map((node) => node.node_id));
   }, [nodes, selectedDetails]);
 
+  // Build ctrl+f-friendly hierarchy rows (Company/Nodes/Logic Gates/Knowledge Notes).
   const treeRows = useMemo<ExplorerTreeNode[]>(() => {
     const rows: ExplorerTreeNode[] = [];
     rows.push({ id: "folder-root", label: "Company", depth: 0, kind: "folder", scopeLevel: 0 });
@@ -142,6 +145,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return () => window.removeEventListener("resize", measure);
   }, []);
 
+  // Virtualization window: keeps tree rendering fast when node counts grow.
   const virtualizedTree = useMemo(() => {
     const total = treeRows.length;
     if (total === 0) return { rows: [] as ExplorerTreeNode[], topSpacer: 0, bottomSpacer: 0 };
@@ -178,6 +182,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [companyID, scope, selectedNodeID, selectedTreeID, selectedTree]);
 
+  // Right-panel history summary derived from selected node details payload.
   const historyRows = useMemo(() => {
     if (!selectedDetails) return [];
     const nodeCreated = selectedDetails.node?.created_timestamp ? `Node created at ${selectedDetails.node.created_timestamp}` : "Node created";
@@ -185,6 +190,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return [nodeCreated, ...infoEvents].slice(0, 5);
   }, [selectedDetails]);
 
+  // KPI strip used for fast operational scanning in explorer details pane.
   const kpiRows = useMemo(() => {
     const details = selectedDetails;
     if (!details) return [];

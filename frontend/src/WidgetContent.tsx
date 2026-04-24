@@ -1,8 +1,11 @@
+// Lightweight sample module bodies for dashboard demo metrics/feeds/maps.
 import React from "react";
 
 
+// Shared row separator style for mock content lists.
 const divider = { borderBottom: "1px solid currentColor", padding: "5px 0" };
 
+// Revenue KPI module sample.
 export const RevenueContent: React.FC<{ accent: string }> = ({ accent }) => (
   <div style={{ display: "grid", gap: 6 }}>
     <div style={{ fontSize: 12, textTransform: "uppercase" }}>[ Monthly Revenue ]</div>
@@ -12,6 +15,7 @@ export const RevenueContent: React.FC<{ accent: string }> = ({ accent }) => (
   </div>
 );
 
+// Active users KPI module sample.
 export const UsersContent: React.FC<{ accent: string }> = ({ accent }) => (
   <div style={{ display: "grid", gap: 6 }}>
     <div style={{ fontSize: 12, textTransform: "uppercase" }}>[ Active Users ]</div>
@@ -21,6 +25,7 @@ export const UsersContent: React.FC<{ accent: string }> = ({ accent }) => (
   </div>
 );
 
+// Alerts feed module sample with list rows.
 export const AlertsContent: React.FC<{ accent: string }> = ({ accent }) => {
   const items = ["CPU > 90% on app-2", "Disk full on db-3", "SSL cert expiring in 4d", "Memory spike resolved"];
   return (
@@ -33,6 +38,7 @@ export const AlertsContent: React.FC<{ accent: string }> = ({ accent }) => {
   );
 };
 
+// Sprint progress KPI module sample.
 export const TasksContent: React.FC<{ accent: string }> = ({ accent }) => (
   <div style={{ display: "grid", gap: 6 }}>
     <div style={{ fontSize: 12, textTransform: "uppercase" }}>[ Sprint Tasks ]</div>
@@ -42,6 +48,7 @@ export const TasksContent: React.FC<{ accent: string }> = ({ accent }) => (
   </div>
 );
 
+// Analytics summary module sample.
 export const ChartContent: React.FC<{ accent: string }> = ({ accent }) => (
   <div style={{ display: "grid", gap: 6 }}>
     <div style={{ fontSize: 12, textTransform: "uppercase" }}>[ Analytics ]</div>
@@ -51,6 +58,7 @@ export const ChartContent: React.FC<{ accent: string }> = ({ accent }) => (
   </div>
 );
 
+// Recent orders feed module sample.
 export const OrdersContent: React.FC<{ accent: string }> = ({ accent }) => {
   const orders = ["#4012 // SHIPPED", "#4011 // PROCESSING", "#4010 // DELIVERED", "#4009 // REFUNDED"];
   return (
@@ -63,6 +71,7 @@ export const OrdersContent: React.FC<{ accent: string }> = ({ accent }) => {
   );
 };
 
+// Notifications feed module sample.
 export const NotificationsContent: React.FC<{ accent: string }> = ({ accent }) => {
   const notifs = ["New signup: jane@acme.co", "Payment received: $120.00", "Server restart complete", "Comment on PR #482"];
   return (
@@ -75,6 +84,7 @@ export const NotificationsContent: React.FC<{ accent: string }> = ({ accent }) =
   );
 };
 
+// Geo node overview module sample.
 export const MapContent: React.FC<{ accent: string }> = ({ accent }) => (
   <div style={{ height: "100%", display: "grid", alignContent: "start", gap: 6 }}>
     <div style={{ fontSize: 12, textTransform: "uppercase", color: "inherit" }}>[ Geo Node ]</div>
