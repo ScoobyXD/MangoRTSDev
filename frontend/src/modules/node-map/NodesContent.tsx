@@ -3,6 +3,7 @@ import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NO
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_STATE_UPDATED } from "./eventbus";
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "./workspaceStore";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
+import { doesPolylineIntersectRect } from "./selectionGeometry";
 
 export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -423,53 +424,6 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       window.removeEventListener("pointerup", onUp);
     };
   }, [panState]);
-
-  useEffect(() => {
-    if (selectionPointerID === null || !selectionBox.active) return;
-
-    const onMove = (event: PointerEvent) => {
-      if (event.pointerId !== selectionPointerID) return;
-      if (!viewportRef.current) return;
-      const bounds = viewportRef.current.getBoundingClientRect();
-      setSelectionBox((previous) => ({
-        ...previous,
-        currentX: clamp(event.clientX - bounds.left, 0, bounds.width),
-        currentY: clamp(event.clientY - bounds.top, 0, bounds.height),
-      }));
-    };
-
-    const onUp = (event: PointerEvent) => {
-      if (event.pointerId !== selectionPointerID || !viewportRef.current) return;
-      const minX = Math.min(selectionBox.startX, selectionBox.currentX);
-      const maxX = Math.max(selectionBox.startX, selectionBox.currentX);
-      const minY = Math.min(selectionBox.startY, selectionBox.currentY);
-      const maxY = Math.max(selectionBox.startY, selectionBox.currentY);
-
-      const selected = nodes.filter((node) => {
-        const pos = nodePositions[node.node_id];
-        if (!pos) return false;
-        const left = pos.x * zoom + pan.x;
-        const top = pos.y * zoom + pan.y;
-        const right = left + NODE_W * zoom;
-        const bottom = top + NODE_H * zoom;
-        return right >= minX && left <= maxX && bottom >= minY && top <= maxY;
-      });
-
-      const nextSet = new Set(selected.map((item) => item.node_id));
-      setSelectedNodeIDs(nextSet);
-      if (selected.length > 0) setSelectedNodeID(selected[0].node_id);
-      setSelectionPointerID(null);
-      setSelectionBox((previous) => ({ ...previous, active: false }));
-    };
-
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [selectionPointerID, selectionBox, nodes, nodePositions, zoom, pan.x, pan.y]);
 
   useEffect(() => {
     const onWindowPointerDown = () => {
@@ -1011,6 +965,64 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       })
       .filter((path): path is { id: string; points: { x: number; y: number }[]; stroke: string; alpha: number; selected: boolean } => !!path);
   }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet, relationshipRoutingGrid, activeRoleNodeID, relationshipRoleColors, accent, relationshipColorsEnabled, selectedRelationshipIDs]);
+
+  useEffect(() => {
+    if (selectionPointerID === null || !selectionBox.active) return;
+
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== selectionPointerID) return;
+      if (!viewportRef.current) return;
+      const bounds = viewportRef.current.getBoundingClientRect();
+      setSelectionBox((previous) => ({
+        ...previous,
+        currentX: clamp(event.clientX - bounds.left, 0, bounds.width),
+        currentY: clamp(event.clientY - bounds.top, 0, bounds.height),
+      }));
+    };
+
+    const onUp = (event: PointerEvent) => {
+      if (event.pointerId !== selectionPointerID || !viewportRef.current) return;
+      const minX = Math.min(selectionBox.startX, selectionBox.currentX);
+      const maxX = Math.max(selectionBox.startX, selectionBox.currentX);
+      const minY = Math.min(selectionBox.startY, selectionBox.currentY);
+      const maxY = Math.max(selectionBox.startY, selectionBox.currentY);
+
+      const selectedNodes = nodes.filter((node) => {
+        const pos = nodePositions[node.node_id];
+        if (!pos) return false;
+        const left = pos.x * zoom + pan.x;
+        const top = pos.y * zoom + pan.y;
+        const right = left + NODE_W * zoom;
+        const bottom = top + NODE_H * zoom;
+        return right >= minX && left <= maxX && bottom >= minY && top <= maxY;
+      });
+
+      const selectedRelationships = connectionPaths
+        .filter((path) => doesPolylineIntersectRect(path.points.map((point) => ({ x: point.x * zoom + pan.x, y: point.y * zoom + pan.y })), {
+          minX,
+          minY,
+          maxX,
+          maxY,
+        }))
+        .map((path) => path.id);
+
+      setSelectedNodeIDs(new Set(selectedNodes.map((item) => item.node_id)));
+      if (selectedNodes.length > 0) setSelectedNodeID(selectedNodes[0].node_id);
+      else setSelectedNodeID("");
+      setSelectedRelationshipIDs(new Set(selectedRelationships));
+      setSelectionPointerID(null);
+      setSelectionBox((previous) => ({ ...previous, active: false }));
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [selectionPointerID, selectionBox, nodes, nodePositions, connectionPaths, zoom, pan.x, pan.y]);
+
 
   const draftPath = useMemo(() => {
     if (!relationshipDraft) return null;
