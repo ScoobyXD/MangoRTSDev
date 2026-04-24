@@ -145,13 +145,27 @@ Relationship creation uses a two-click attach flow between existing nodes:
 
 Source node is always `node_id_a`, target node is always `node_id_b`.
 
-- Side `left` / `right` maps to position `Peer`.
-- Side `top` maps to position `Parent`.
-- Side `bottom` maps to position `Child`.
+#### Existing-node attach flow (arrow icon)
 
-`a_position` is derived from the source side and `b_position` from the target side, so relationship semantics preserve exactly which sides were clicked.
+- Side `left` / `right` maps to `Peer`.
+- Side `top` maps to `Parent`.
+- Side `bottom` maps to `Child`.
 
-For `+` linked-node creation, the new node is attached on the **opposite side** of the source handle, and positions are derived from the same side-to-position mapping (no parent/child inversion patching).
+This flow keeps literal side semantics from the two clicked handles:
+
+- `a_position = role(source side)`
+- `b_position = role(target side)`
+
+#### `+` linked-node creation flow (create a new node from one side)
+
+For `+` creation, the target node is spawned on the opposite side, but vertical role writes are intentionally normalized so selected-node relationship coloring is correct for both nodes:
+
+- Source side `top` -> write `(a_position=Child, b_position=Parent)` and anchor `(from=top, to=bottom)`.
+- Source side `bottom` -> write `(a_position=Parent, b_position=Child)` and anchor `(from=bottom, to=top)`.
+- Source side `left` -> write `(Peer, Peer)` with `(from=left, to=right)`.
+- Source side `right` -> write `(Peer, Peer)` with `(from=right, to=left)`.
+
+This replaces the old incorrect vertical swap behavior.
 
 ### Relationship deletion
 
@@ -169,8 +183,11 @@ Relationships are rendered on a world-space `<canvas>` for performance, with a l
 ### Anchor behavior
 
 - A relationship remembers creation-side anchors when created in-session.
-- If no remembered anchor exists, anchor side is inferred from relationship positions and current geometry.
-- On restored sessions, parent/child anchors are geometry-validated so lines do not route from the wrong side after refresh.
+- If no remembered anchor exists, anchor side is inferred via a shared projection helper:
+  - `(a=Child, b=Parent)` -> `top -> bottom`
+  - `(a=Parent, b=Child)` -> `bottom -> top`
+  - peer links fall back to geometry-based horizontal/vertical inference.
+- Anchor and role inference now live in `frontend/src/modules/node/canvas/relationshipProjection.ts` to avoid duplicated/contradictory logic in render and write paths.
 
 ### Routing behavior
 
@@ -183,6 +200,21 @@ Relationships are rendered on a world-space `<canvas>` for performance, with a l
 
 ---
 
+## 6.1 Relationship projection helper (phase 1/2 hardening)
+
+`relationshipProjection.ts` is now the single semantic source for:
+
+- side -> role mapping,
+- linked-node payload generation for `+`,
+- existing-node attach payload generation,
+- selected-node role resolution,
+- anchor inference,
+- projected visual edge metadata (`sourceNodeID`, `targetNodeID`, `sourceAnchor`, `targetAnchor`, `selectedRole`, `strokeColor`, `alpha`).
+
+The projection object is **derived in memory** during render. It is not persisted to PostgreSQL and is not added to the workspace snapshot API payload.
+
+---
+
 ## 7) Data loading strategy
 
 - `loadNodes()` loads all nodes.
@@ -190,6 +222,41 @@ Relationships are rendered on a world-space `<canvas>` for performance, with a l
 - `loadGraphRelationships(nodes)` reuses workspace snapshot relationship payloads filtered to currently loaded nodes.
 - Workspace snapshot streaming/delta handling in `workspaceStore.ts` uses a single `WorkspaceStreamEnvelope` contract type for event application.
 - Relationship-create writes between existing nodes are executed through one internal helper path (`commitRelationshipBetweenNodes`) to avoid duplicate declaration/runtime drift in the canvas module.
+
+---
+
+## 7.1 Tests for relationship semantics
+
+### Files under test
+
+- `frontend/src/modules/node/canvas/relationshipProjection.ts`
+
+### Test file
+
+- `frontend/src/modules/node/canvas/relationshipProjection.test.ts`
+
+### Available tests in that file
+
+1. maps side to relationship role for direct links
+2. maps plus-link top/bottom to correct parent-child semantics
+3. keeps peer semantics for plus-link left/right
+4. uses clicked sides for existing-node relationship writes
+5. resolves selected role from the opposite-side position field
+6. infers deterministic anchor for parent-child and child-parent rows
+7. projects visual edge metadata without persistent storage
+
+### How to run
+
+From `frontend/`:
+
+```bash
+npm run test:node-relationships
+```
+
+What the command does:
+
+1. Compiles only the node-relationship projection test targets with `tsc -p tsconfig.node-tests.json`.
+2. Runs Node’s built-in test runner against the emitted JS test file in `.test-dist/`.
 
 ---
 
