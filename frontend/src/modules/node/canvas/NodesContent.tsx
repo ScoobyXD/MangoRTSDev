@@ -606,8 +606,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   const relationPositionFromSide = (direction: NodeDirection): "Parent" | "Child" | "Peer" => {
     if (direction === "left" || direction === "right") return "Peer";
-    if (direction === "top") return "Child";
-    return "Parent";
+    if (direction === "top") return "Parent";
+    return "Child";
   };
 
   const commitRelationshipBetweenNodes = async (sourceNodeID: string, sourceSide: NodeDirection, targetNodeID: string, targetSide: NodeDirection) => {
@@ -1014,8 +1014,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         const points = routeOrthogonalPath(from, fromOut, toIn, to, rel.node_id_a, rel.node_id_b);
         let role: "Parent" | "Peer" | "Child" | null = null;
         if (activeRoleNodeID) {
-          if (rel.node_id_a === activeRoleNodeID) role = rel.a_position;
-          else if (rel.node_id_b === activeRoleNodeID) role = rel.b_position;
+          if (rel.node_id_a === activeRoleNodeID) role = rel.b_position;
+          else if (rel.node_id_b === activeRoleNodeID) role = rel.a_position;
         }
         const stroke =
           role === "Parent" ? relationshipRoleColors.parent

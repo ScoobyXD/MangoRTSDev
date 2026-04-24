@@ -178,7 +178,7 @@ Relationships are rendered on a world-space `<canvas>` for performance, with a l
 - Lines originate from side anchors that correspond to `+` side conventions.
 - Routing now uses obstacle-aware orthogonal pathing on the mini-grid so relationship lines remain continuous and do not visually cut through node cards when nodes are moved.
 - Connector paths are simplified after routing to keep turns clean while preserving continuous end-to-end segments.
-- Optional relationship role coloring can be toggled on; when active, lines connected to the active selected node (single-selection focus) are color-coded by that node’s role in the relationship (`Parent`, `Peer`, `Child`) while non-selected links are dimmed.
+- Optional relationship role coloring can be toggled on; when active, lines connected to the active selected node (single-selection focus) are color-coded by the opposite-side role field in the row (`node_id_a` uses `b_position`, `node_id_b` uses `a_position`) so visual direction reflects the connected side relative to the selected node.
 - Visual rendering sits under node cards, and a transparent hit layer enables selection without degrading line draw performance.
 
 ---
