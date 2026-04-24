@@ -23,7 +23,7 @@ The UI intent is explicitly "tree explorer first" (similar mental model to DBeav
 
 ### 2.1 Independence requirement
 
-`Company Explorer` must function on its own, independent of Node Canvas and Node Doc.
+`Company Explorer` must function on its own, independent of Node Map and Node Doc.
 
 In standalone mode:
 
@@ -114,7 +114,7 @@ Notes:
 
 In the default Node-oriented workspace (Explorer + Canvas + Doc):
 
-- Explorer selection drives scope for Node Canvas.
+- Explorer selection drives scope for Node Map.
 - Selecting deeper tree levels narrows visible/queried graph scope.
 - Selecting higher levels broadens visible/queried graph scope.
 - Node Doc follows active selection context.
@@ -140,4 +140,4 @@ This keeps source-of-truth entity IDs and persistence semantics intact.
 
 - No template locking policy in v1.
 - No deeper-than-2-level frame nesting semantics in v1 (defined by Nested Frame spec).
-- No requirement to replace Node Canvas or Node Doc behavior; Explorer complements them.
+- No requirement to replace Node Map or Node Doc behavior; Explorer complements them.

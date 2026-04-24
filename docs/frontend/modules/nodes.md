@@ -2,13 +2,13 @@
 
 This document captures the full behavior and implementation details currently present in the **Nodes** family of modules loaded inside dashboard **frames** (UI containers):
 
-- **Node Canvas** (`nodes-canvas`, legacy `nodes`)
+- **Node Map** (`nodes-map`, legacy `nodes`)
 - **Node Doc** (`node-doc`)
 
 Implementation is now organized under:
 
-- `frontend/src/modules/node/canvas/NodesContent.tsx`
-- `frontend/src/modules/node/shared.ts` (shared types/constants/helpers)
+- `frontend/src/modules/node-map/NodesContent.tsx`
+- `frontend/src/modules/node-map/shared.ts` (shared types/constants/helpers)
 
 ---
 
@@ -24,8 +24,8 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 - view relationship lines between nodes,
 - add node information records,
 - and keep node layout/view state persisted locally.
-- link a Node Canvas module to a Node Doc module,
-- and edit text-box notes in Node Doc that attach to whichever node is currently selected in the linked Node Canvas.
+- link a Node Map module to a Node Doc module,
+- and edit text-box notes in Node Doc that attach to whichever node is currently selected in the linked Node Map.
 
 ---
 
@@ -186,7 +186,7 @@ Relationships are rendered on a world-space `<canvas>` for performance, with a l
   - `(a=Child, b=Parent)` -> `top -> bottom`
   - `(a=Parent, b=Child)` -> `bottom -> top`
   - peer links fall back to geometry-based horizontal/vertical inference.
-- Anchor and role inference now live in `frontend/src/modules/node/canvas/relationshipProjection.ts` to avoid duplicated/contradictory logic in render and write paths.
+- Anchor and role inference now live in `frontend/src/modules/node-map/relationshipProjection.ts` to avoid duplicated/contradictory logic in render and write paths.
 
 ### Routing behavior
 
@@ -228,11 +228,11 @@ The projection object is **derived in memory** during render. It is not persiste
 
 ### Files under test
 
-- `frontend/src/modules/node/canvas/relationshipProjection.ts`
+- `frontend/src/modules/node-map/relationshipProjection.ts`
 
 ### Test file
 
-- `frontend/src/modules/node/canvas/relationshipProjection.test.ts`
+- `frontend/src/modules/node-map/relationshipProjection.test.ts`
 
 ### Available tests in that file
 
@@ -263,7 +263,7 @@ What the command does:
 
 The module persists canvas state in `localStorage` keyed per company and frame scope:
 
-- Key format: `node-canvas-state-v3:<companyID>:<frameId-or-global>`
+- Key format: `node-map-state-v1:<companyID>:<frameId-or-global>`
 - Stored fields:
   - `zoom`
   - `pan`
@@ -292,14 +292,14 @@ This keeps layout and viewport stable when switching views and reopening the mod
 
 ### 9.1 Linking model
 
-- Node Doc is linked to Node Canvas at frame level using:
+- Node Doc is linked to Node Map at frame level using:
   - localStorage key: `node-doc-widget-links-v1`
   - value: map of `nodeDocFrameId -> nodeCanvasFrameId`
 - Linking is triggered from module context menu action:
   - `Link nodes: <dynamic titles joined by " + ">`
-- Linked modules show a **hexagon indicator** next to the module name chip in the frame header (both Node Canvas and Node Doc).
+- Linked modules show a **hexagon indicator** next to the module name chip in the frame header (both Node Map and Node Doc).
 - Link action is enabled when selection contains exactly:
-  - one Node Canvas module (`nodes-canvas` or legacy `nodes`)
+  - one Node Map module (`nodes-map` or legacy `nodes`)
   - one Node Doc module (`node-doc`)
 
 ### 9.2 Module multi-select behavior (for linking)
@@ -312,7 +312,7 @@ This keeps layout and viewport stable when switching views and reopening the mod
 
 Once linked, Node Doc polls the linked canvas state key:
 
-- `node-canvas-state-v3:<companyID>:<linkedCanvasWidgetId>`
+- `node-map-state-v1:<companyID>:<linkedCanvasWidgetId>`
 
 and reads `selectedNodeID`. That selected node becomes the active storage target for Node Doc.
 
@@ -327,14 +327,14 @@ and reads `selectedNodeID`. That selected node becomes the active storage target
   - payload stores JSON `{ local_id, x, y, text }` as `information`
 - UI states:
   - if not linked: prompt user to link modules
-  - if linked but no selected node: prompt user to select a node in linked Node Canvas
+  - if linked but no selected node: prompt user to select a node in linked Node Map
   - if linked and node selected: show linked node header + information summary at top of Node Doc
 
 ---
 
 ## 10) Controls and panels in module UI
 
-### Node Canvas main surface
+### Node Map main surface
 
 - Canvas consumes almost all remaining widget height (bottom utility rows removed).
 - World grid, relationship lines, node cards, side arrow actions, selection box, and group badge.
@@ -352,7 +352,7 @@ and reads `selectedNodeID`. That selected node becomes the active storage target
 - Right-click on a node opens node actions (`Edit node`, `Delete node`).
 - Delete key support for selected node(s), guarded by themed confirmation modal.
 
-### Node Canvas right overlay details panel
+### Node Map right overlay details panel
 
 - Double-clicking a node opens a translucent “glass” panel anchored to the right side.
 - Panel can be dragged and resized.
@@ -400,7 +400,7 @@ This is the requested teal update used by teal-themed modules.
 
 Primary implementation is in:
 
-- `frontend/src/module/node/canvas/NodesContent.tsx` (Node Canvas behavior)
-- `frontend/src/module/node/doc/NodeDocContent.tsx` (Node Doc behavior)
-- `frontend/src/module/node/shared.ts` (shared node types/constants/helpers)
+- `frontend/src/modules/node-map/NodesContent.tsx` (Node Map behavior)
+- `frontend/src/modules/editor/EditorContent.tsx` (Node Doc behavior)
+- `frontend/src/modules/node-map/shared.ts` (shared node types/constants/helpers)
 - `frontend/src/app/applayout.tsx` (frame/menu integration and link action wiring)

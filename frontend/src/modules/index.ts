@@ -9,7 +9,7 @@ import {
   TasksContent,
   UsersContent,
 } from "../WidgetContent";
-import { NodesContent } from "./node/canvas/NodesContent";
+import { NodesContent } from "./node-map/NodesContent";
 import { EditorContent } from "./editor/EditorContent";
 import { CompanyExplorerContent } from "./company-explorer";
 
@@ -30,7 +30,7 @@ export const MODULE_LIBRARY: ModuleTemplate[] = [
   { kind: "orders", label: "Recent Orders", defaultW: 10, defaultH: 9, render: OrdersContent },
   { kind: "notifications", label: "Notifications", defaultW: 12, defaultH: 8, render: NotificationsContent },
   { kind: "map", label: "Map View", defaultW: 10, defaultH: 15, render: MapContent },
-  { kind: "nodes-canvas", label: "Node Canvas", defaultW: 16, defaultH: 14, render: NodesContent },
+  { kind: "nodes-map", label: "Node Map", defaultW: 16, defaultH: 14, render: NodesContent },
   { kind: "editor", label: "Editor", defaultW: 16, defaultH: 14, render: EditorContent },
   { kind: "company-explorer", label: "Company Explorer", defaultW: 18, defaultH: 14, render: CompanyExplorerContent },
 ];

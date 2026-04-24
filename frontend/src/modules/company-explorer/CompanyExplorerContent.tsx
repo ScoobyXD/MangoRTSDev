@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { EXPLORER_CANVAS_LINKS_KEY, NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX, NodeDetails, NodeRecord } from "../node/shared";
-import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED } from "../node/eventbus";
-import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../node/workspaceStore";
+import { EXPLORER_MAP_LINKS_KEY, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeDetails, NodeRecord } from "../node-map/shared";
+import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED } from "../node-map/eventbus";
+import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../node-map/workspaceStore";
 
 type ExplorerTreeNode = {
   id: string;
@@ -158,11 +158,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(EXPLORER_CANVAS_LINKS_KEY);
+      const raw = localStorage.getItem(EXPLORER_MAP_LINKS_KEY);
       const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
       const linkedCanvasID = typeof parsed[scope] === "string" ? parsed[scope] : "";
       if (!linkedCanvasID) return;
-      const key = `${NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${linkedCanvasID}`;
+      const key = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${linkedCanvasID}`;
       const payload = {
         sourceExplorerID: scope,
         selectedNodeID,

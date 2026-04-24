@@ -30,8 +30,8 @@ Purpose:
 - Prevent regressions on `a_position` / `b_position` interpretation and selected-role coloring.
 
 Primary source files:
-- `frontend/src/modules/node/canvas/relationshipProjection.ts`
-- `frontend/src/modules/node/canvas/relationshipProjection.test.ts`
+- `frontend/src/modules/node-map/relationshipProjection.ts`
+- `frontend/src/modules/node-map/relationshipProjection.test.ts`
 
 Run command:
 - From `frontend/`: `npm run test:node-relationships`
@@ -90,7 +90,7 @@ This currently runs, in order:
 Use this checklist format and keep it complete.
 
 ### Unit tests
-- [x] `frontend/src/modules/node/canvas/relationshipProjection.test.ts`
+- [x] `frontend/src/modules/node-map/relationshipProjection.test.ts`
   - side -> role mapping
   - `+` linked top/bottom semantics
   - peer semantics for left/right

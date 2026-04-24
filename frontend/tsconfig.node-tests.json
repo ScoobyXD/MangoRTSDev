@@ -15,9 +15,9 @@
     "declarationMap": false
   },
   "include": [
-    "src/modules/node/shared.ts",
-    "src/modules/node/canvas/relationshipProjection.ts",
-    "src/modules/node/canvas/relationshipProjection.test.ts"
+    "src/modules/node-map/shared.ts",
+    "src/modules/node-map/relationshipProjection.ts",
+    "src/modules/node-map/relationshipProjection.test.ts"
   ],
   "exclude": []
 }

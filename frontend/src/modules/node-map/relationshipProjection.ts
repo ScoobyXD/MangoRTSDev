@@ -1,4 +1,4 @@
-import { NodeDirection, NodePosition, NodeRelationship, RelationshipAnchor } from "../shared.js";
+import { NodeDirection, NodePosition, NodeRelationship, RelationshipAnchor } from "./shared.js";
 
 export type RelationshipRole = "Parent" | "Child" | "Peer";
 

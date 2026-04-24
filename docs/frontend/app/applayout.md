@@ -36,7 +36,7 @@ The app layout keeps compatibility for persisted payloads:
 - `grid-dashboard-settings`
   - stores global UI color and header/tab settings
 - `node-doc-widget-links-v1`
-  - retained key name for Node Canvas/Doc linking compatibility
+  - retained key name for Node Map/Doc linking compatibility
 
 ## Migration outcome
 

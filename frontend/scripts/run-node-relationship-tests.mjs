@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const frontendRoot = resolve(scriptDir, "..");
-const testFile = resolve(frontendRoot, ".test-dist/modules/node/canvas/relationshipProjection.test.js");
+const testFile = resolve(frontendRoot, ".test-dist/modules/node-map/relationshipProjection.test.js");
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
 
 function run(command) {
@@ -25,4 +25,4 @@ writeFileSync(testFile, contents, "utf8");
 mkdirSync(resolve(frontendRoot, ".test-dist"), { recursive: true });
 writeFileSync(packageFile, '{"type":"module"}\n', "utf8");
 
-run(`"${process.execPath}" --test .test-dist/modules/node/canvas/relationshipProjection.test.js`);
+run(`"${process.execPath}" --test .test-dist/modules/node-map/relationshipProjection.test.js`);

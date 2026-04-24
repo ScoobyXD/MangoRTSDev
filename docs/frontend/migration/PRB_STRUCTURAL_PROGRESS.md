@@ -11,15 +11,15 @@ Date: 2026-04-21
   - `app/framecanvas.tsx` is now used for the main canvas interaction surface.
   - `app/framerightclickmenu.tsx` now owns right-click menu placement + outside-click behavior.
   - `app/menus/ModulePickerMenu.tsx` now owns module picker rendering (including Nodes submenu).
-- Pulled node module runtime out of `WidgetContent.tsx` into `frontend/src/module/node/*`.
+- Pulled node module runtime out of `WidgetContent.tsx` into `frontend/src/modules/node-map/*`.
 - Completed split of node runtime into dedicated files:
-  - `module/node/canvas/NodesContent.tsx`
-  - `module/node/doc/NodeDocContent.tsx`
-  - `module/node/shared.ts`
+  - `modules/node-map/NodesContent.tsx`
+  - `modules/editor/EditorContent.tsx`
+  - `modules/node-map/shared.ts`
 - Removed migration compatibility files after successful wiring:
   - deleted `frontend/src/App.tsx` compatibility export
   - deleted `frontend/src/widgets/index.ts` compatibility shim
-  - deleted `frontend/src/module/node/NodeModules.tsx` transitional monolith
+  - deleted `frontend/src/modules/node-map/NodeModules.tsx` transitional monolith
 
 ## Behavior expectations
 
