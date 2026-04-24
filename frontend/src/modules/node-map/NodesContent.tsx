@@ -3,6 +3,8 @@ import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NO
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_STATE_UPDATED } from "./eventbus";
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "./workspaceStore";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
+import { doesPolylineIntersectRect } from "./selectionGeometry";
+import { resolveNodeMapDeleteIntent } from "./keyboardDeletion";
 
 export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -36,6 +38,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [detailsPanelNodeID, setDetailsPanelNodeID] = useState<string>("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
   const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeID: string } | null>(null);
+  const [relationshipContextMenu, setRelationshipContextMenu] = useState<{ x: number; y: number; relationshipID: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[] } | null>(null);
   const [canvasActive, setCanvasActive] = useState(false);
   const [panelRect, setPanelRect] = useState({ x: 0, y: 10, width: 340, height: 360 });
@@ -425,56 +428,10 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   }, [panState]);
 
   useEffect(() => {
-    if (selectionPointerID === null || !selectionBox.active) return;
-
-    const onMove = (event: PointerEvent) => {
-      if (event.pointerId !== selectionPointerID) return;
-      if (!viewportRef.current) return;
-      const bounds = viewportRef.current.getBoundingClientRect();
-      setSelectionBox((previous) => ({
-        ...previous,
-        currentX: clamp(event.clientX - bounds.left, 0, bounds.width),
-        currentY: clamp(event.clientY - bounds.top, 0, bounds.height),
-      }));
-    };
-
-    const onUp = (event: PointerEvent) => {
-      if (event.pointerId !== selectionPointerID || !viewportRef.current) return;
-      const minX = Math.min(selectionBox.startX, selectionBox.currentX);
-      const maxX = Math.max(selectionBox.startX, selectionBox.currentX);
-      const minY = Math.min(selectionBox.startY, selectionBox.currentY);
-      const maxY = Math.max(selectionBox.startY, selectionBox.currentY);
-
-      const selected = nodes.filter((node) => {
-        const pos = nodePositions[node.node_id];
-        if (!pos) return false;
-        const left = pos.x * zoom + pan.x;
-        const top = pos.y * zoom + pan.y;
-        const right = left + NODE_W * zoom;
-        const bottom = top + NODE_H * zoom;
-        return right >= minX && left <= maxX && bottom >= minY && top <= maxY;
-      });
-
-      const nextSet = new Set(selected.map((item) => item.node_id));
-      setSelectedNodeIDs(nextSet);
-      if (selected.length > 0) setSelectedNodeID(selected[0].node_id);
-      setSelectionPointerID(null);
-      setSelectionBox((previous) => ({ ...previous, active: false }));
-    };
-
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [selectionPointerID, selectionBox, nodes, nodePositions, zoom, pan.x, pan.y]);
-
-  useEffect(() => {
     const onWindowPointerDown = () => {
       setContextMenu(null);
       setNodeContextMenu(null);
+      setRelationshipContextMenu(null);
     };
     window.addEventListener("pointerdown", onWindowPointerDown);
     return () => window.removeEventListener("pointerdown", onWindowPointerDown);
@@ -681,14 +638,26 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   };
 
   const deleteRelationships = async (relationshipIDs: string[]) => {
-    const unique = Array.from(new Set(relationshipIDs.filter(Boolean)));
-    if (unique.length === 0) return;
+    const unique = Array.from(new Set(relationshipIDs.map((id) => id.trim()).filter((id) => id.length > 0)));
+    if (unique.length === 0) {
+      setError("relationship_selection_invalid");
+      return;
+    }
     setError("");
     try {
-      await Promise.all(unique.map((relationshipID) => requestJSON<{ status: string }>(`/v1/node-relationships/${relationshipID}?company_id=${encodeURIComponent(companyID)}`, {
-        method: "DELETE",
-      })));
-      setSelectedRelationshipIDs(new Set());
+      const companyByRelationshipID = new Map(relationships.map((relationship) => [relationship.node_relationship_id, relationship.company_id]));
+      await Promise.all(unique.map((relationshipID) => {
+        const relationshipCompanyID = companyByRelationshipID.get(relationshipID) ?? companyID;
+        return requestJSON<{ status: string }>(`/v1/node-relationships/${relationshipID}?company_id=${encodeURIComponent(relationshipCompanyID)}`, {
+          method: "DELETE",
+        });
+      }));
+      setSelectedRelationshipIDs((previous) => {
+        const next = new Set(previous);
+        for (const id of unique) next.delete(id);
+        return next;
+      });
+      setRelationships((previous) => previous.filter((relationship) => !unique.includes(relationship.node_relationship_id)));
       setRelationshipAnchors((previous) => {
         const next = { ...previous };
         for (const id of unique) delete next[id];
@@ -723,29 +692,29 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!canvasActive) return;
       const target = event.target as HTMLElement | null;
       if (target) {
         const tag = target.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
       }
-      if (event.key !== "Delete" && event.key !== "Backspace") return;
-      const relationshipIDs = Array.from(selectedRelationshipIDs);
-      if (relationshipIDs.length > 0) {
-        event.preventDefault();
-        event.stopPropagation();
-        void deleteRelationships(relationshipIDs);
-        return;
-      }
-      const nodeIDs = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : (selectedNodeID ? [selectedNodeID] : []);
-      if (nodeIDs.length === 0) return;
+      const intent = resolveNodeMapDeleteIntent({
+        key: event.key,
+        selectedRelationshipIDs,
+        selectedNodeIDs,
+        selectedNodeID,
+      });
+      if (intent.type === "none") return;
       event.preventDefault();
       event.stopPropagation();
-      setConfirmDelete({ nodeIDs });
+      if (intent.type === "relationships") {
+        void deleteRelationships(intent.ids);
+        return;
+      }
+      setConfirmDelete({ nodeIDs: intent.ids });
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [canvasActive, selectedNodeID, selectedNodeIDs, selectedRelationshipIDs]);
+  }, [selectedNodeID, selectedNodeIDs, selectedRelationshipIDs]);
 
   useEffect(() => {
     if (!panelDrag) return;
@@ -1012,6 +981,64 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       .filter((path): path is { id: string; points: { x: number; y: number }[]; stroke: string; alpha: number; selected: boolean } => !!path);
   }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet, relationshipRoutingGrid, activeRoleNodeID, relationshipRoleColors, accent, relationshipColorsEnabled, selectedRelationshipIDs]);
 
+  useEffect(() => {
+    if (selectionPointerID === null || !selectionBox.active) return;
+
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== selectionPointerID) return;
+      if (!viewportRef.current) return;
+      const bounds = viewportRef.current.getBoundingClientRect();
+      setSelectionBox((previous) => ({
+        ...previous,
+        currentX: clamp(event.clientX - bounds.left, 0, bounds.width),
+        currentY: clamp(event.clientY - bounds.top, 0, bounds.height),
+      }));
+    };
+
+    const onUp = (event: PointerEvent) => {
+      if (event.pointerId !== selectionPointerID || !viewportRef.current) return;
+      const minX = Math.min(selectionBox.startX, selectionBox.currentX);
+      const maxX = Math.max(selectionBox.startX, selectionBox.currentX);
+      const minY = Math.min(selectionBox.startY, selectionBox.currentY);
+      const maxY = Math.max(selectionBox.startY, selectionBox.currentY);
+
+      const selectedNodes = nodes.filter((node) => {
+        const pos = nodePositions[node.node_id];
+        if (!pos) return false;
+        const left = pos.x * zoom + pan.x;
+        const top = pos.y * zoom + pan.y;
+        const right = left + NODE_W * zoom;
+        const bottom = top + NODE_H * zoom;
+        return right >= minX && left <= maxX && bottom >= minY && top <= maxY;
+      });
+
+      const selectedRelationships = connectionPaths
+        .filter((path) => doesPolylineIntersectRect(path.points.map((point) => ({ x: point.x * zoom + pan.x, y: point.y * zoom + pan.y })), {
+          minX,
+          minY,
+          maxX,
+          maxY,
+        }))
+        .map((path) => path.id);
+
+      setSelectedNodeIDs(new Set(selectedNodes.map((item) => item.node_id)));
+      if (selectedNodes.length > 0) setSelectedNodeID(selectedNodes[0].node_id);
+      else setSelectedNodeID("");
+      setSelectedRelationshipIDs(new Set(selectedRelationships));
+      setSelectionPointerID(null);
+      setSelectionBox((previous) => ({ ...previous, active: false }));
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [selectionPointerID, selectionBox, nodes, nodePositions, connectionPaths, zoom, pan.x, pan.y]);
+
+
   const draftPath = useMemo(() => {
     if (!relationshipDraft) return null;
     const from = getAnchorPoint(relationshipDraft.sourceNodeID, relationshipDraft.sourceSide);
@@ -1077,6 +1104,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           event.stopPropagation();
           setCanvasActive(true);
           setNodeContextMenu(null);
+          setRelationshipContextMenu(null);
           if (!viewportRef.current) return;
           const bounds = viewportRef.current.getBoundingClientRect();
           const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
@@ -1107,6 +1135,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           setCanvasActive(true);
           setContextMenu(null);
           setNodeContextMenu(null);
+          setRelationshipContextMenu(null);
           setSelectedRelationshipIDs(new Set());
           const bounds = viewportRef.current.getBoundingClientRect();
           const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
@@ -1187,6 +1216,25 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                   event.stopPropagation();
                   setRelationshipDraft(null);
                   void deleteRelationships([path.id]);
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setCanvasActive(true);
+                  setRelationshipDraft(null);
+                  setError("");
+                  setContextMenu(null);
+                  setNodeContextMenu(null);
+                  const bounds = viewportRef.current?.getBoundingClientRect();
+                  if (!bounds) return;
+                  const alreadySelected = selectedRelationshipIDs.has(path.id);
+                  const nextSelection = alreadySelected && selectedRelationshipIDs.size > 0 ? new Set(selectedRelationshipIDs) : new Set([path.id]);
+                  setSelectedRelationshipIDs(nextSelection);
+                  setRelationshipContextMenu({
+                    x: clamp(event.clientX - bounds.left, 0, bounds.width),
+                    y: clamp(event.clientY - bounds.top, 0, bounds.height),
+                    relationshipID: path.id,
+                  });
                 }}
               />
             ))}
@@ -1388,6 +1436,28 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           />
         )}
 
+        {error && (
+          <div
+            style={{
+              position: "absolute",
+              left: 12,
+              bottom: 12,
+              zIndex: 48,
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#b00020",
+              background: "rgba(255,255,255,0.94)",
+              border: "1px solid rgba(176,0,32,0.35)",
+              borderRadius: 8,
+              padding: "6px 8px",
+              maxWidth: 320,
+              boxShadow: "0 6px 16px rgba(0,0,0,0.12)",
+            }}
+          >
+            {error}
+          </div>
+        )}
+
         {contextMenu && (
           <div
             style={{
@@ -1540,6 +1610,39 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             </button>
             <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", color: "#a20026", textAlign: "left" }} onClick={() => { const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID]; setConfirmDelete({ nodeIDs: ids }); setNodeContextMenu(null); }}>
               Delete node
+            </button>
+          </div>
+        )}
+
+        {relationshipContextMenu && (
+          <div
+            style={{
+              position: "absolute",
+              left: relationshipContextMenu.x,
+              top: relationshipContextMenu.y,
+              transform: "translate(8px, 8px)",
+              background: "rgba(255,255,255,0.95)",
+              border: `1px solid ${accent}`,
+              borderRadius: 8,
+              padding: 4,
+              zIndex: 41,
+              boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
+              display: "grid",
+              gap: 2,
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <button
+              style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", color: "#a20026", textAlign: "left" }}
+              onClick={() => {
+                const ids = selectedRelationshipIDs.has(relationshipContextMenu.relationshipID) && selectedRelationshipIDs.size > 0
+                  ? Array.from(selectedRelationshipIDs)
+                  : [relationshipContextMenu.relationshipID];
+                void deleteRelationships(ids);
+                setRelationshipContextMenu(null);
+              }}
+            >
+              Delete relationship{selectedRelationshipIDs.size > 1 ? `s (${selectedRelationshipIDs.size})` : ""}
             </button>
           </div>
         )}
