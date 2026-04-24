@@ -98,10 +98,15 @@ Use this checklist format and keep it complete.
   - illegal relationship side-pair enforcement (peer-only, top->bottom, bottom->top)
   - selected-node opposite-side role resolution
   - parent/child anchor inference
-  - projected visual metadata output
+  - projected visual relationship line metadata output
 - [x] `frontend/src/modules/node-map/relationshipSelection.test.ts`
   - line-segment vs marquee rectangle intersection detection
   - polyline relationship-path vs marquee rectangle intersection detection
+  - rectangle-boundary overlap detection for relationship-line hit-testing
+  - non-overlap guard for fully out-of-bounds relationship-line paths
+- [x] `frontend/src/modules/node-map/relationshipDeleteSummary.test.ts`
+  - success/failure summarization for batched relationship-line delete requests
+  - preserves per-relationship failure reason reporting for visibility
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
 

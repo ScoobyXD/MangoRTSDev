@@ -19,7 +19,9 @@
     "src/modules/node-map/relationshipProjection.ts",
     "src/modules/node-map/relationshipProjection.test.ts",
     "src/modules/node-map/relationshipSelection.ts",
-    "src/modules/node-map/relationshipSelection.test.ts"
+    "src/modules/node-map/relationshipSelection.test.ts",
+    "src/modules/node-map/relationshipDeleteSummary.ts",
+    "src/modules/node-map/relationshipDeleteSummary.test.ts"
   ],
   "exclude": []
 }

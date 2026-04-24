@@ -90,7 +90,7 @@ test("infers deterministic anchor for parent-child and child-parent rows", () =>
   assert.deepEqual(inferRelationshipAnchor(relationship({ a_position: "Parent", b_position: "Child" }), {}), { from: "bottom", to: "top" });
 });
 
-test("projects visual edge metadata without persistent storage", () => {
+test("projects visual relationship line metadata without persistent storage", () => {
   const rel = relationship({ a_position: "Child", b_position: "Parent" });
   const projected = projectRelationshipVisual(rel, {
     activeNodeID: "node-a",
