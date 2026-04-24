@@ -71,6 +71,16 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
   const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
   const connectionPathsRef = useRef<Array<{ id: string; points: { x: number; y: number }[] }>>([]);
+  const suppressNextRelationshipLineClickRef = useRef(false);
+
+  const startRelationshipLineMarqueeSelection = (pointerID: number, clientX: number, clientY: number) => {
+    if (!viewportRef.current) return;
+    const bounds = viewportRef.current.getBoundingClientRect();
+    const localX = clamp(clientX - bounds.left, 0, bounds.width);
+    const localY = clamp(clientY - bounds.top, 0, bounds.height);
+    setSelectionPointerID(pointerID);
+    setSelectionBox({ startX: localX, startY: localY, currentX: localX, currentY: localY, active: true });
+  };
 
   useEffect(() => {
     const cached = SESSION_NODE_MAP_STATE.get(mapStateKey);
@@ -472,7 +482,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         })), rect))
         .map((path) => path.id);
       setSelectedNodeIDs(nextSet);
-      if (selected.length > 0) setSelectedNodeID(selected[0].node_id);
+      setSelectedNodeID(selected.length > 0 ? selected[0].node_id : "");
       setSelectedRelationshipIDs(new Set(selectedRelationshipIDsInBox));
       setSelectionPointerID(null);
       setSelectionBox((previous) => ({ ...previous, active: false }));
@@ -1139,8 +1149,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           if (event.ctrlKey || event.shiftKey) {
             event.preventDefault();
             event.stopPropagation();
-            setSelectionPointerID(event.pointerId);
-            setSelectionBox({ startX: localX, startY: localY, currentX: localX, currentY: localY, active: true });
+            startRelationshipLineMarqueeSelection(event.pointerId, event.clientX, event.clientY);
             return;
           }
 
@@ -1192,8 +1201,17 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                   event.stopPropagation();
                   setCanvasActive(true);
                   setRelationshipContextMenu(null);
+                  if (event.ctrlKey || event.shiftKey) {
+                    event.preventDefault();
+                    suppressNextRelationshipLineClickRef.current = true;
+                    startRelationshipLineMarqueeSelection(event.pointerId, event.clientX, event.clientY);
+                  }
                 }}
                 onClick={(event) => {
+                  if (suppressNextRelationshipLineClickRef.current) {
+                    suppressNextRelationshipLineClickRef.current = false;
+                    return;
+                  }
                   event.stopPropagation();
                   setRelationshipDraft(null);
                   setRelationshipContextMenu(null);
@@ -1207,6 +1225,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                     });
                     return;
                   }
+                  setSelectedNodeIDs(new Set());
+                  setSelectedNodeID("");
                   setSelectedRelationshipIDs(new Set([path.id]));
                 }}
                 onDoubleClick={(event) => {
@@ -1230,6 +1250,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                   setRelationshipDraft(null);
                   setContextMenu(null);
                   setNodeContextMenu(null);
+                  setSelectedNodeIDs(new Set());
+                  setSelectedNodeID("");
                   setSelectedRelationshipIDs((previous) => {
                     if (previous.has(path.id)) return previous;
                     return new Set([path.id]);
