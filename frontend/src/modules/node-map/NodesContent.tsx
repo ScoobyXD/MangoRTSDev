@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_STATE_UPDATED } from "./eventbus";
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "./workspaceStore";
-import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, projectRelationshipVisual } from "./relationshipProjection";
+import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 
 export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -608,6 +608,10 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   const commitRelationshipBetweenNodes = async (sourceNodeID: string, sourceSide: NodeDirection, targetNodeID: string, targetSide: NodeDirection) => {
     if (!sourceNodeID || !targetNodeID || sourceNodeID === targetNodeID) return;
+    if (!isLegalRelationshipSidePair(sourceSide, targetSide)) {
+      setError("illegal_relationship_pair");
+      return;
+    }
     const payload = buildExistingNodeRelationshipPayload(sourceSide, targetSide);
     const relationship = await requestJSON<NodeRelationship>("/v1/node-relationships", {
       method: "POST",
@@ -1167,6 +1171,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 onClick={(event) => {
                   event.stopPropagation();
                   setRelationshipDraft(null);
+                  setError("");
                   if (event.shiftKey || event.ctrlKey) {
                     setSelectedRelationshipIDs((previous) => {
                       const next = new Set(previous);
@@ -1177,6 +1182,11 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                     return;
                   }
                   setSelectedRelationshipIDs(new Set([path.id]));
+                }}
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                  setRelationshipDraft(null);
+                  void deleteRelationships([path.id]);
                 }}
               />
             ))}
@@ -1296,6 +1306,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                           event.stopPropagation();
+                          setError("");
                           setRelationshipDraft(null);
                           void createLinkedNode(node.node_id, direction);
                         }}
@@ -1321,8 +1332,13 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                           event.stopPropagation();
+                          setError("");
                           if (relationshipDraft) {
                             if (relationshipDraft.sourceNodeID === node.node_id) return;
+                            if (!isLegalRelationshipSidePair(relationshipDraft.sourceSide, direction)) {
+                              setError("illegal_relationship_pair");
+                              return;
+                            }
                             void commitRelationshipBetweenNodes(relationshipDraft.sourceNodeID, relationshipDraft.sourceSide, node.node_id, direction);
                             setRelationshipDraft(null);
                             return;
@@ -1341,7 +1357,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                           color: isSource ? "#ffffff" : accent,
                           display: "grid",
                           placeItems: "center",
-                          cursor: relationshipDraft?.sourceNodeID === node.node_id ? "not-allowed" : "pointer",
+                          cursor: relationshipDraft?.sourceNodeID === node.node_id || (relationshipDraft && !isLegalRelationshipSidePair(relationshipDraft.sourceSide, direction)) ? "not-allowed" : "pointer",
+                          opacity: relationshipDraft && !isLegalRelationshipSidePair(relationshipDraft.sourceSide, direction) ? 0.35 : 1,
                           padding: 0,
                         }}
                       >

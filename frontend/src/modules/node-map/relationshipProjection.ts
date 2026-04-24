@@ -53,6 +53,14 @@ export function buildExistingNodeRelationshipPayload(sourceSide: NodeDirection, 
   };
 }
 
+export function isLegalRelationshipSidePair(sourceSide: NodeDirection, targetSide: NodeDirection): boolean {
+  const sourceIsPeer = sourceSide === "left" || sourceSide === "right";
+  const targetIsPeer = targetSide === "left" || targetSide === "right";
+  if (sourceIsPeer) return targetIsPeer;
+  if (sourceSide === "top") return targetSide === "bottom";
+  return targetSide === "top";
+}
+
 export function selectedRoleForRelationship(relationship: NodeRelationship, activeNodeID: string): RelationshipRole | null {
   if (!activeNodeID) return null;
   if (relationship.node_id_a === activeNodeID) return relationship.b_position;
