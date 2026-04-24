@@ -6,8 +6,8 @@ import ModulePickerMenu from "./menus/ModulePickerMenu";
 import { MODULE_CONTENT_MAP as CONTENT_MAP, MODULE_LIBRARY as FRAME_MODULE_LIBRARY } from "../modules";
 import type { FrameDataModel, DragState, ResizeEdges } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { EDITOR_LINKS_KEY, EXPLORER_CANVAS_LINKS_KEY } from "../modules/node/shared";
-import { emitDashboardEvent, EVENT_EDITOR_LINKS_UPDATED } from "../modules/node/eventbus";
+import { EDITOR_LINKS_KEY, EXPLORER_MAP_LINKS_KEY } from "../modules/node-map/shared";
+import { emitDashboardEvent, EVENT_EDITOR_LINKS_UPDATED } from "../modules/node-map/eventbus";
 
 const CELL_SIZE = 28;
 const HEADER_H = 48;
@@ -41,13 +41,13 @@ const UI_THEME = {
 
 const createDefaultNodeViewFrames = (): FrameDataModel[] => ([
   { id: "default-node-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 11, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
-  { id: "default-node-canvas", theme: "teal", kind: "nodes-canvas", x: 12, y: 1, w: 20, h: 30, title: "Node Canvas", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "default-node-map", theme: "teal", kind: "nodes-map", x: 12, y: 1, w: 20, h: 30, title: "Node Map", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
   { id: "default-node-editor", theme: "orange", kind: "editor", x: 32, y: 1, w: 11, h: 30, title: "Editor", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
 ]);
 
 const createDefaultCompanyExplorerViewFrames = (): FrameDataModel[] => ([
   { id: "default-company-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 12, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
-  { id: "default-company-details", theme: "teal", kind: "nodes-canvas", x: 13, y: 1, w: 18, h: 30, title: "Node Canvas", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
+  { id: "default-company-details", theme: "teal", kind: "nodes-map", x: 13, y: 1, w: 18, h: 30, title: "Node Map", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
   { id: "default-company-editor", theme: "orange", kind: "editor", x: 31, y: 1, w: 12, h: 30, title: "Editor", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
 ]);
 
@@ -60,7 +60,7 @@ const INITIAL_WIDGETS: FrameDataModel[] = [
   { id: "w-orders", theme: "orange", kind: "orders", x: 2, y: 20, w: 10, h: 10, title: "Recent Orders", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
   { id: "w-notifications", theme: "orange", kind: "notifications", x: 12, y: 22, w: 12, h: 10, title: "Notifications", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
   { id: "w-map", theme: "teal", kind: "map", x: 28, y: 15, w: 14, h: 17, title: "Map View", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-nodes", theme: "white", kind: "nodes-canvas", x: 24, y: 22, w: 18, h: 10, title: "Node Canvas", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  { id: "w-nodes", theme: "white", kind: "nodes-map", x: 24, y: 22, w: 18, h: 10, title: "Node Map", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
 ];
 
 interface ViewTab {
@@ -235,9 +235,9 @@ function persistEditorLinks(next: Record<string, string>) {
   } catch {}
 }
 
-function loadExplorerCanvasLinks(): Record<string, string> {
+function loadExplorerMapLinks(): Record<string, string> {
   try {
-    const raw = localStorage.getItem(EXPLORER_CANVAS_LINKS_KEY);
+    const raw = localStorage.getItem(EXPLORER_MAP_LINKS_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
@@ -425,7 +425,7 @@ interface FrameCardProps {
 const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nestedChildren, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked, edgeHit }) => {
   const Content = CONTENT_MAP[frame.kind];
   const theme = COLORWAYS[frame.theme ?? "teal"];
-  const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-canvas" || frame.kind === "editor" || frame.kind === "node-doc";
+  const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-map" || frame.kind === "editor" || frame.kind === "node-doc";
   const left = frame.x * stepX;
   const top = frame.y * stepY;
   const nested = !!isChild;
@@ -565,7 +565,7 @@ const App: React.FC = () => {
   const [tabBgColor, setTabBgColor] = useState(() => initialSettingsRef.current.tabBgColor || "#ffffff");
   const [tabTextColor, setTabTextColor] = useState(() => initialSettingsRef.current.tabTextColor || "#08343a");
   const [editorLinks, setEditorLinks] = useState<Record<string, string>>(() => loadNodeDocLinks());
-  const [explorerCanvasLinks, setExplorerCanvasLinks] = useState<Record<string, string>>(() => loadExplorerCanvasLinks());
+  const [explorerMapLinks, setExplorerCanvasLinks] = useState<Record<string, string>>(() => loadExplorerMapLinks());
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [frameRightClickMenu, setFrameRightClickMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -726,17 +726,17 @@ const App: React.FC = () => {
 
   const closeMenus = useCallback(() => { setFrameRightClickMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); }, []);
 
-  const saveEditorLink = useCallback((docFrameID: string, canvasFrameID: string) => {
+  const saveEditorLink = useCallback((docFrameID: string, mapFrameID: string) => {
     setEditorLinks((prev) => {
-      const next = { ...prev, [docFrameID]: canvasFrameID };
+      const next = { ...prev, [docFrameID]: mapFrameID };
       persistEditorLinks(next)
       return next;
     });
   }, []);
-  const saveExplorerCanvasLink = useCallback((explorerFrameID: string, canvasFrameID: string) => {
+  const saveExplorerMapLink = useCallback((explorerFrameID: string, mapFrameID: string) => {
     setExplorerCanvasLinks((prev) => {
-      const next = { ...prev, [explorerFrameID]: canvasFrameID };
-      try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+      const next = { ...prev, [explorerFrameID]: mapFrameID };
+      try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
   }, []);
@@ -745,7 +745,7 @@ const App: React.FC = () => {
   const linkPlan = useMemo(() => {
     const pool = selectedFrames.length > 0 ? selectedFrames : (selectedFrameId ? frames.filter((frame) => frame.id === selectedFrameId) : []);
     if (pool.length < 2) return null;
-    const canvases = pool.filter((frame) => frame.kind === "nodes" || frame.kind === "nodes-canvas");
+    const canvases = pool.filter((frame) => frame.kind === "nodes" || frame.kind === "nodes-map");
     if (canvases.length !== 1) return null;
     const docs = pool.filter((frame) => frame.kind === "editor" || frame.kind === "node-doc");
     const explorers = pool.filter((frame) => frame.kind === "company-explorer");
@@ -768,30 +768,30 @@ const App: React.FC = () => {
       setExplorerCanvasLinks((previous) => {
         const next = { ...previous };
         for (const explorer of linkPlan.explorers) next[explorer.id] = canvasID;
-        try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+        try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(next)); } catch {}
         return next;
       });
     }
   }, [linkPlan]);
   const linkModulesLabel = useMemo(() => {
-    if (!linkPlan) return "Select one Node Canvas + one/more Editor or Company Explorer";
+    if (!linkPlan) return "Select one Node Map + one/more Editor or Company Explorer";
     return linkPlan.pool.map((frame) => frame.title).join(" + ");
   }, [linkPlan]);
   const linkedFrameIDs = useMemo(() => {
     const ids = new Set<string>();
     const frameIDs = new Set(frames.map((frame) => frame.id));
-    for (const [docFrameID, canvasFrameID] of Object.entries(editorLinks)) {
-      if (!frameIDs.has(docFrameID) || !frameIDs.has(canvasFrameID)) continue;
+    for (const [docFrameID, mapFrameID] of Object.entries(editorLinks)) {
+      if (!frameIDs.has(docFrameID) || !frameIDs.has(mapFrameID)) continue;
       ids.add(docFrameID);
-      ids.add(canvasFrameID);
+      ids.add(mapFrameID);
     }
-    for (const [explorerFrameID, canvasFrameID] of Object.entries(explorerCanvasLinks)) {
-      if (!frameIDs.has(explorerFrameID) || !frameIDs.has(canvasFrameID)) continue;
+    for (const [explorerFrameID, mapFrameID] of Object.entries(explorerMapLinks)) {
+      if (!frameIDs.has(explorerFrameID) || !frameIDs.has(mapFrameID)) continue;
       ids.add(explorerFrameID);
-      ids.add(canvasFrameID);
+      ids.add(mapFrameID);
     }
     return ids;
-  }, [editorLinks, explorerCanvasLinks, frames]);
+  }, [editorLinks, explorerMapLinks, frames]);
   const frameInContextMenu = useMemo(() => {
     if (!frameRightClickMenu) return null;
     return frames.find((frame) => frame.id === frameRightClickMenu.id) ?? null;
@@ -809,7 +809,7 @@ const App: React.FC = () => {
     setExplorerCanvasLinks((previous) => {
       const next = Object.fromEntries(Object.entries(previous).filter(([explorerID, canvasID]) => frameIDs.has(explorerID) && frameIDs.has(canvasID)));
       if (JSON.stringify(previous) !== JSON.stringify(next)) {
-        try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+        try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(next)); } catch {}
       }
       return next;
     });
@@ -825,12 +825,12 @@ const App: React.FC = () => {
     if (groups.length === 0) return;
 
     const nextDocLinks = { ...editorLinks };
-    const nextExplorerLinks = { ...explorerCanvasLinks };
+    const nextExplorerLinks = { ...explorerMapLinks };
     let changedDoc = false;
     let changedExplorer = false;
 
     for (const group of groups) {
-      const canvases = group.filter((frame) => frame.kind === "nodes" || frame.kind === "nodes-canvas");
+      const canvases = group.filter((frame) => frame.kind === "nodes" || frame.kind === "nodes-map");
       if (canvases.length !== 1) continue;
       const canvasID = canvases[0].id;
       for (const doc of group.filter((frame) => frame.kind === "editor" || frame.kind === "node-doc")) {
@@ -851,9 +851,9 @@ const App: React.FC = () => {
     }
     if (changedExplorer) {
       setExplorerCanvasLinks(nextExplorerLinks);
-      try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(nextExplorerLinks)); } catch {}
+      try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(nextExplorerLinks)); } catch {}
     }
-  }, [frames, editorLinks, explorerCanvasLinks]);
+  }, [frames, editorLinks, explorerMapLinks]);
 
   const deleteSelectedFrame = useCallback(() => {
     const ids = selectedFrameIds.size > 0 ? selectedFrameIds : (selectedFrameId ? new Set([selectedFrameId]) : new Set<string>());
@@ -957,13 +957,13 @@ const App: React.FC = () => {
     const framesForView = createDefaultNodeViewFrames();
     setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, frames: framesForView } : tab)));
     setEditorLinks((previous) => {
-      const next = { ...previous, "default-node-editor": "default-node-canvas" };
+      const next = { ...previous, "default-node-editor": "default-node-map" };
       persistEditorLinks(next)
       return next;
     });
     setExplorerCanvasLinks((previous) => {
-      const next = { ...previous, "default-node-explorer": "default-node-canvas" };
-      try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+      const next = { ...previous, "default-node-explorer": "default-node-map" };
+      try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
     setActiveTabId(tabID);
@@ -980,7 +980,7 @@ const App: React.FC = () => {
     });
     setExplorerCanvasLinks((previous) => {
       const next = { ...previous, "default-company-explorer": "default-company-details" };
-      try { localStorage.setItem(EXPLORER_CANVAS_LINKS_KEY, JSON.stringify(next)); } catch {}
+      try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
     setActiveTabId(tabID);

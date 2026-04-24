@@ -6,7 +6,7 @@ See also: `docs/frontend/README.md` for the current frontend documentation map.
 This document is a context transfer for finishing and cleanup of the frame/module migration.
 
 > Status update (2026-04-21): PRA and PRB extraction are completed.
-> Runtime now lives in app-layer + module-layer files without legacy compatibility shims in `src/App.tsx`, `src/widgets/index.ts`, or `src/module/node/NodeModules.tsx`.
+> Runtime now lives in app-layer + module-layer files without legacy compatibility shims in `src/App.tsx`, `src/widgets/index.ts`, or `src/modules/node-map/NodeModules.tsx`.
 
 The original migration plan was two phases:
 
@@ -22,7 +22,7 @@ This handoff is intentionally exhaustive so the new instance can continue withou
 ### Core model
 - A **frame data model** is the UI container users can place/size/reorder.
 - A **module** is functionality loaded inside a frame.
-- Frames can host node submodules (`Node Canvas`, `Node Doc`) and be linked.
+- Frames can host node submodules (`Node Map`, `Node Doc`) and be linked.
 
 ### Naming preferences from product owner
 Use names that are self-explanatory without parenthetical explanation:
@@ -44,10 +44,10 @@ Do **not** introduce vague names that require explanation.
 2. Runtime app entry is `src/main.tsx` -> `src/app/applayout.tsx`.
 3. App-layer files are live and used (`applayout`, `frame`, `framecanvas`, `framerightclickmenu`, `ModulePickerMenu`).
 4. `src/modules` registry exists (`MODULE_LIBRARY`, `MODULE_CONTENT_MAP`).
-5. Node runtime logic is split under `src/module/node/`:
-   - `src/module/node/canvas/NodesContent.tsx`
-   - `src/module/node/doc/NodeDocContent.tsx`
-   - `src/module/node/shared.ts`
+5. Node runtime logic is split under `src/modules/node-map/`:
+   - `src/modules/node-map/NodesContent.tsx`
+   - `src/modules/editor/EditorContent.tsx`
+   - `src/modules/node-map/shared.ts`
 6. `docs/LLM.md` mandatory documentation policy is active.
 
 ### Files to inspect first
@@ -59,11 +59,11 @@ Do **not** introduce vague names that require explanation.
 - `frontend/src/app/framerightclickmenu.tsx`
 - `frontend/src/app/menus/ModulePickerMenu.tsx`
 - `frontend/src/WidgetContent.tsx`
-- `frontend/src/module/node/shared.ts`
-- `frontend/src/module/node/canvas/NodesContent.tsx`
-- `frontend/src/module/node/doc/NodeDocContent.tsx`
-- `frontend/src/module/node/canvas/index.ts`
-- `frontend/src/module/node/doc/index.ts`
+- `frontend/src/modules/node-map/shared.ts`
+- `frontend/src/modules/node-map/NodesContent.tsx`
+- `frontend/src/modules/editor/EditorContent.tsx`
+- `frontend/src/modules/node-map/index.ts`
+- `frontend/src/modules/node-map/doc/index.ts`
 - `docs/frontend/modules/nodes.md`
 - `docs/LLM.md`
 
@@ -71,19 +71,19 @@ Do **not** introduce vague names that require explanation.
 
 ## Functional features already present (must not regress)
 
-### Node Canvas / Node Doc
-- Node Canvas + Node Doc module kinds exist.
-- Linking between Node Canvas and Node Doc exists via localStorage map.
-- Node Doc follows linked Node Canvas selected node.
+### Node Map / Node Doc
+- Node Map + Node Doc module kinds exist.
+- Linking between Node Map and Node Doc exists via localStorage map.
+- Node Doc follows linked Node Map selected node.
 - Text boxes can be created/moved/resized and persisted as node information.
 
 ### Selection and linking UX
 - Multi-select for module containers exists.
-- Link action appears in context menu and can link Node Canvas + Node Doc.
+- Link action appears in context menu and can link Node Map + Node Doc.
 
 ### Persistence keys currently in use
 - Node doc links: `node-doc-widget-links-v1`
-- Canvas state: `node-canvas-state-v3:<companyID>:<widgetId-or-global>`
+- Canvas state: `node-map-state-v1:<companyID>:<widgetId-or-global>`
 
 Do not change these keys unless adding an explicit migration.
 
@@ -169,7 +169,7 @@ Decompose large app logic from `App.tsx` into app-layer files while preserving b
 
 ### Required docs updates
 - `docs/frontend/modules/nodes.md`
-  - keep in sync with Node Canvas/Doc behaviors
+  - keep in sync with Node Map/Doc behaviors
   - update naming references to frame/module terms
 - Add/maintain migration notes file(s) under `docs/frontend/migration/` for PRA/PRB progress.
 

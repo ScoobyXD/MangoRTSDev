@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { NodeDetails, NodeDocBox, NodeInformation, EDITOR_LINKS_KEY, NODE_DOC_MIN_H, NODE_DOC_MIN_W, clamp, parseDocBox } from "../node/shared";
-import { EVENT_EDITOR_LINKS_UPDATED, EVENT_NODE_CANVAS_STATE_UPDATED } from "../node/eventbus";
+import { NodeDetails, NodeDocBox, NodeInformation, EDITOR_LINKS_KEY, NODE_DOC_MIN_H, NODE_DOC_MIN_W, clamp, parseDocBox } from "../node-map/shared";
+import { EVENT_EDITOR_LINKS_UPDATED, EVENT_NODE_MAP_STATE_UPDATED } from "../node-map/eventbus";
 
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const scope = widgetId?.trim() ? widgetId : "global";
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const [linkedCanvasWidgetID, setLinkedCanvasWidgetID] = useState("");
+  const [linkedMapWidgetID, setLinkedMapWidgetID] = useState("");
   const [linkedNodeID, setLinkedNodeID] = useState("");
   const [linkedNodeHeader, setLinkedNodeHeader] = useState("");
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
@@ -38,7 +38,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     return response.json() as Promise<T>;
   }, [apiBase]);
 
-  const readLinkedCanvasWidgetID = useCallback((): string => {
+  const readLinkedMapWidgetID = useCallback((): string => {
     try {
       const raw = localStorage.getItem(EDITOR_LINKS_KEY);
       if (!raw) return "";
@@ -49,10 +49,10 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [scope]);
 
-  const readSelectedNodeFromCanvas = useCallback((canvasWidgetID: string): string => {
-    if (!canvasWidgetID) return "";
+  const readSelectedNodeFromMap = useCallback((mapWidgetID: string): string => {
+    if (!mapWidgetID) return "";
     try {
-      const raw = localStorage.getItem(`node-canvas-state-v3:${companyID}:${canvasWidgetID}`);
+      const raw = localStorage.getItem(`node-map-state-v1:${companyID}:${mapWidgetID}`);
       if (!raw) return "";
       const parsed = JSON.parse(raw) as { selectedNodeID?: string };
       return typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "";
@@ -71,7 +71,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [companyID, requestJSON]);
 
   useEffect(() => {
-    const refresh = () => setLinkedCanvasWidgetID(readLinkedCanvasWidgetID());
+    const refresh = () => setLinkedMapWidgetID(readLinkedMapWidgetID());
     refresh();
     const onStorage = (event: StorageEvent) => {
       if (event.key && event.key !== EDITOR_LINKS_KEY) return;
@@ -84,29 +84,29 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(EVENT_EDITOR_LINKS_UPDATED, onLinksUpdated);
     };
-  }, [readLinkedCanvasWidgetID]);
+  }, [readLinkedMapWidgetID]);
 
   useEffect(() => {
-    const refresh = () => setLinkedNodeID(readSelectedNodeFromCanvas(linkedCanvasWidgetID));
+    const refresh = () => setLinkedNodeID(readSelectedNodeFromMap(linkedMapWidgetID));
     refresh();
     const onStorage = (event: StorageEvent) => {
-      if (!linkedCanvasWidgetID) return;
-      const canvasStateKey = `node-canvas-state-v3:${companyID}:${linkedCanvasWidgetID}`;
-      if (event.key && event.key !== canvasStateKey) return;
+      if (!linkedMapWidgetID) return;
+      const mapStateKey = `node-map-state-v1:${companyID}:${linkedMapWidgetID}`;
+      if (event.key && event.key !== mapStateKey) return;
       refresh();
     };
-    const onCanvasStateUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ canvasWidgetID?: string }>).detail;
-      if (!detail || detail.canvasWidgetID !== linkedCanvasWidgetID) return;
+    const onMapStateUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ mapWidgetID?: string }>).detail;
+      if (!detail || detail.mapWidgetID !== linkedMapWidgetID) return;
       refresh();
     };
     window.addEventListener("storage", onStorage);
-    window.addEventListener(EVENT_NODE_CANVAS_STATE_UPDATED, onCanvasStateUpdated);
+    window.addEventListener(EVENT_NODE_MAP_STATE_UPDATED, onMapStateUpdated);
     return () => {
       window.removeEventListener("storage", onStorage);
-      window.removeEventListener(EVENT_NODE_CANVAS_STATE_UPDATED, onCanvasStateUpdated);
+      window.removeEventListener(EVENT_NODE_MAP_STATE_UPDATED, onMapStateUpdated);
     };
-  }, [companyID, linkedCanvasWidgetID, readSelectedNodeFromCanvas]);
+  }, [companyID, linkedMapWidgetID, readSelectedNodeFromMap]);
 
   useEffect(() => {
     let cancelled = false;
@@ -336,8 +336,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         />
       ))}
       {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020" }}>{error}</div>}
-      {!linkedCanvasWidgetID && <div style={{ position: "absolute", top: 12, left: 10, fontSize: 11, opacity: 0.72 }}>Right-click selected modules and use “Link modules”.</div>}
-      {linkedCanvasWidgetID && !linkedNodeID && <div style={{ position: "absolute", top: 12, left: 10, fontSize: 11, opacity: 0.72 }}>Select a node in Node Canvas (Shift/Ctrl-click modules to multi-select and link).</div>}
+      {!linkedMapWidgetID && <div style={{ position: "absolute", top: 12, left: 10, fontSize: 11, opacity: 0.72 }}>Right-click selected modules and use “Link modules”.</div>}
+      {linkedMapWidgetID && !linkedNodeID && <div style={{ position: "absolute", top: 12, left: 10, fontSize: 11, opacity: 0.72 }}>Select a node in Node Map (Shift/Ctrl-click modules to multi-select and link).</div>}
     </div>
   );
 };

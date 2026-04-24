@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, MINI_GRID, NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeCanvasState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_CANVAS_STATE, clamp, divider, snapToGrid, trimOrEmpty } from "../shared";
-import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_CANVAS_STATE_UPDATED } from "../eventbus";
-import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../workspaceStore";
+import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, snapToGrid, trimOrEmpty } from "./shared";
+import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_STATE_UPDATED } from "./eventbus";
+import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "./workspaceStore";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, projectRelationshipVisual } from "./relationshipProjection";
 
 export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
-  const canvasScope = widgetId?.trim() ? widgetId : "global";
-  const canvasStateKey = `node-canvas-state-v3:${companyID}:${canvasScope}`;
+  const mapScope = widgetId?.trim() ? widgetId : "global";
+  const mapStateKey = `node-map-state-v1:${companyID}:${mapScope}`;
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const relationshipCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -69,7 +69,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const cached = SESSION_NODE_CANVAS_STATE.get(canvasStateKey);
+    const cached = SESSION_NODE_MAP_STATE.get(mapStateKey);
     if (cached) {
       setZoom(clamp(cached.zoom, 0.45, 2.7));
       setPan(cached.pan);
@@ -90,7 +90,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       return;
     }
     try {
-      const raw = localStorage.getItem(canvasStateKey);
+      const raw = localStorage.getItem(mapStateKey);
       if (!raw) {
         setRestoredViewport(true);
         return;
@@ -143,7 +143,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     } finally {
       setRestoredViewport(true);
     }
-  }, [canvasStateKey]);
+  }, [mapStateKey]);
 
   const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const response = await fetch(`${apiBase}${path}`, {
@@ -295,7 +295,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   useEffect(() => {
     if (!restoredViewport) return;
     try {
-      const nextState: NodeCanvasState = {
+      const nextState: NodeMapState = {
         zoom,
         pan,
         selectedNodeID,
@@ -303,13 +303,13 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         relationshipColorsEnabled,
         relationshipRoleColors,
       };
-      SESSION_NODE_CANVAS_STATE.set(canvasStateKey, nextState);
-      localStorage.setItem(canvasStateKey, JSON.stringify(nextState));
-      emitDashboardEvent(EVENT_NODE_CANVAS_STATE_UPDATED, { canvasWidgetID: canvasScope, selectedNodeID });
+      SESSION_NODE_MAP_STATE.set(mapStateKey, nextState);
+      localStorage.setItem(mapStateKey, JSON.stringify(nextState));
+      emitDashboardEvent(EVENT_NODE_MAP_STATE_UPDATED, { mapWidgetID: mapScope, selectedNodeID });
     } catch {
       // ignore local storage quota/security errors
     }
-  }, [canvasScope, canvasStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions, relationshipColorsEnabled, relationshipRoleColors]);
+  }, [mapScope, mapStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions, relationshipColorsEnabled, relationshipRoleColors]);
 
   useEffect(() => {
     setNodePositions((previous) => {
@@ -370,7 +370,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   }, [dragState, pan.x, pan.y, zoom]);
 
   useEffect(() => {
-    const explorerKey = `${NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${canvasScope}`;
+    const explorerKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${mapScope}`;
     const applyExplorerContext = () => {
       try {
         const raw = localStorage.getItem(explorerKey);
@@ -403,7 +403,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
     };
-  }, [companyID, canvasScope, nodes]);
+  }, [companyID, mapScope, nodes]);
 
   useEffect(() => {
     if (!panState) return;

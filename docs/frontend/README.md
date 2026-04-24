@@ -17,7 +17,7 @@ This folder contains architecture, product behavior, and migration documentation
 
 ### Modules
 - `docs/frontend/modules/nodes.md`
-  - Node Canvas + Node Doc behavior
+  - Node Map + Node Doc behavior
   - API contracts
   - persistence model
   - file ownership for node runtime

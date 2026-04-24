@@ -39,7 +39,7 @@ export type NodeDirection = "left" | "right" | "top" | "bottom";
 export type PanelEdge = "top" | "right" | "bottom" | "left";
 export type NodePosition = { x: number; y: number };
 export type RelationshipAnchor = { from: NodeDirection; to: NodeDirection };
-export type NodeCanvasState = {
+export type NodeMapState = {
   zoom: number;
   pan: { x: number; y: number };
   selectedNodeID: string;
@@ -63,7 +63,7 @@ export const INFO_TYPES = [
 export const NODE_W = 148;
 export const NODE_H = 96;
 export const MINI_GRID = 12;
-export const SESSION_NODE_CANVAS_STATE = new Map<string, NodeCanvasState>();
+export const SESSION_NODE_MAP_STATE = new Map<string, NodeMapState>();
 export const PANEL_MIN_WIDTH = 300;
 export const PANEL_MIN_HEIGHT = 220;
 
@@ -101,8 +101,8 @@ export function oppositeSide(direction: NodeDirection): NodeDirection {
 export type NodeDocBox = { local_id: string; x: number; y: number; w: number; h: number; information_id?: string; information: string };
 export const NODE_DOC_LINKS_KEY = "node-doc-widget-links-v1";
 export const EDITOR_LINKS_KEY = NODE_DOC_LINKS_KEY;
-export const EXPLORER_CANVAS_LINKS_KEY = "company-explorer-widget-links-v1";
-export const NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX = "node-canvas-explorer-context-v1";
+export const EXPLORER_MAP_LINKS_KEY = "company-explorer-widget-links-v1";
+export const NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX = "node-map-explorer-context-v1";
 export const NODE_DOC_MIN_W = 180;
 export const NODE_DOC_MIN_H = 36;
 

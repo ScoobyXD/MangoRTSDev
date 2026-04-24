@@ -16,7 +16,7 @@ This document is the source of truth for architecture decisions and execution tr
 ### Hot Path (must be aggressively optimized)
 These paths are always latency-sensitive and product-critical:
 - **Everything in File Explorer module**
-- **Everything in Node Canvas module**
+- **Everything in Node Map module**
 - **Everything in Details module / node details retrieval**
 - **Everything in Editor module that reads or writes active node information**
 - **Everything in upcoming Logic Gate Canvas module**
@@ -149,7 +149,7 @@ Blockers:
 - No CI/PR gate wiring that enforces latency class policy.
 
 ### N+1 Elimination
-- ✅ Node Canvas relationship loading moved away from per-node detail fan-out to bulk relationship loading
+- ✅ Node Map relationship loading moved away from per-node detail fan-out to bulk relationship loading
 - ⛔ Remaining N+1 patterns removed from all hot modules
 - ⛔ Backend queries verified by EXPLAIN plans for hot endpoints
 
@@ -159,7 +159,7 @@ Blockers:
 
 ### Workspace Data Plane
 - ✅ Single source-of-truth workspace snapshot endpoint added (`/v1/workspace/snapshot`)
-- ✅ Initial bulk/snapshot API wired into hot modules (Node Canvas + Company Explorer)
+- ✅ Initial bulk/snapshot API wired into hot modules (Node Map + Company Explorer)
 - ✅ Shared normalized client workspace store introduced across modules
 
 ### Event-driven Sync
@@ -173,7 +173,7 @@ Blockers:
 - No versioned event contract yet for long-term compatibility.
 
 ### Rendering Scalability
-- ✅ Viewport culling/windowing implemented for Node Canvas
+- ✅ Viewport culling/windowing implemented for Node Map
 - ✅ Virtualization implemented for Explorer tree and heavy lists
 - 🟡 Canvas/WebGL decision implemented for high-density graph rendering (Canvas 2D edge path renderer added; full WebGL pipeline not implemented)
 - ⛔ Fine-grained subscriptions to avoid global rerenders

@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, inferRelationshipAnchor, projectRelationshipVisual, relationshipRoleFromSide, selectedRoleForRelationship } from "./relationshipProjection.js";
-import { NodeRelationship } from "../shared.js";
+import { NodeRelationship } from "./shared.js";
 
 function relationship(overrides: Partial<NodeRelationship>): NodeRelationship {
   return {
