@@ -27,6 +27,12 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 - link a Node Map module to a Node Doc module,
 - and edit text-box notes in Node Doc that attach to whichever node is currently selected in the linked Node Map.
 
+### Terminology (authoritative)
+
+- **Node**: the node box/card UI element.
+- **Relationship line**: the literal line UI element connecting two nodes on the canvas.
+- **Relationship**: the parent/child/peer data relationship represented by a `node_relationships` row.
+
 ---
 
 ## 2) API contracts used by the module
@@ -182,6 +188,7 @@ This replaces the old incorrect vertical swap behavior.
 - Keyboard `Delete` / `Backspace` deletes selected relationships.
 - Right-clicking a relationship line opens a relationship context menu with **Delete relationship** (or plural delete when a selected line group is active).
 - Deletes call `DELETE /v1/node-relationships/:node_relationship_id`.
+- Relationship-line delete operations remove only relationship rows; connected nodes remain intact.
 
 ---
 
@@ -218,7 +225,7 @@ Relationships are rendered on a world-space `<canvas>` for performance, with a l
 - existing-node attach payload generation,
 - selected-node role resolution,
 - anchor inference,
-- projected visual edge metadata (`sourceNodeID`, `targetNodeID`, `sourceAnchor`, `targetAnchor`, `selectedRole`, `strokeColor`, `alpha`).
+- projected visual relationship line metadata (`sourceNodeID`, `targetNodeID`, `sourceAnchor`, `targetAnchor`, `selectedRole`, `strokeColor`, `alpha`).
 
 The projection object is **derived in memory** during render. It is not persisted to PostgreSQL and is not added to the workspace snapshot API payload.
 
@@ -253,7 +260,7 @@ The projection object is **derived in memory** during render. It is not persiste
 5. enforces illegal side-pair rules for existing-node relationship drafts
 6. resolves selected role from the opposite-side position field
 7. infers deterministic anchor for parent-child and child-parent rows
-8. projects visual edge metadata without persistent storage
+8. projects visual relationship line metadata without persistent storage
 
 ### How to run
 
@@ -352,6 +359,7 @@ and reads `selectedNodeID`. That selected node becomes the active storage target
 - In-canvas instruction text.
 - Right-click context menu with `Create new node` at cursor location.
 - Right-click context menu also includes `Enable relationship colors` with an explicit iOS-style on/off slider (knob left = off, knob right = on).
+- A top-right status badge surfaces relationship-line delete progress and failure reasons so delete operations are observable even when the details panel is closed.
 - Right-click menu rows use left-aligned text and box-style row containers.
 - This menu uses the default **Boxy Hierarchical** list style.
 - Relationship role color options (`Parent`, `Peer`, `Child`) are shown directly under `Enable relationship colors` as nested controls with stronger right indentation.

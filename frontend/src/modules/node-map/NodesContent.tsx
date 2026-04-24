@@ -4,6 +4,7 @@ import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_STAT
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "./workspaceStore";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { pathIntersectsRect } from "./relationshipSelection";
+import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
 export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
@@ -34,6 +35,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [infoType, setInfoType] = useState<(typeof INFO_TYPES)[number]>("Text box");
   const [infoDraft, setInfoDraft] = useState("");
   const [error, setError] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [detailsPanelNodeID, setDetailsPanelNodeID] = useState<string>("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
@@ -71,6 +73,16 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
   const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
   const connectionPathsRef = useRef<Array<{ id: string; points: { x: number; y: number }[] }>>([]);
+  const suppressNextRelationshipLineClickRef = useRef(false);
+
+  const startRelationshipLineMarqueeSelection = (pointerID: number, clientX: number, clientY: number) => {
+    if (!viewportRef.current) return;
+    const bounds = viewportRef.current.getBoundingClientRect();
+    const localX = clamp(clientX - bounds.left, 0, bounds.width);
+    const localY = clamp(clientY - bounds.top, 0, bounds.height);
+    setSelectionPointerID(pointerID);
+    setSelectionBox({ startX: localX, startY: localY, currentX: localX, currentY: localY, active: true });
+  };
 
   useEffect(() => {
     const cached = SESSION_NODE_MAP_STATE.get(mapStateKey);
@@ -472,7 +484,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         })), rect))
         .map((path) => path.id);
       setSelectedNodeIDs(nextSet);
-      if (selected.length > 0) setSelectedNodeID(selected[0].node_id);
+      setSelectedNodeID(selected.length > 0 ? selected[0].node_id : "");
       setSelectedRelationshipIDs(new Set(selectedRelationshipIDsInBox));
       setSelectionPointerID(null);
       setSelectionBox((previous) => ({ ...previous, active: false }));
@@ -702,21 +714,47 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     const unique = Array.from(new Set(relationshipIDs.filter(Boolean)));
     if (unique.length === 0) return;
     setError("");
+    setStatusMessage(`Deleting ${unique.length} relationship line${unique.length === 1 ? "" : "s"}...`);
     try {
-      await Promise.all(unique.map((relationshipID) => requestJSON<{ status: string }>(`/v1/node-relationships/${relationshipID}?company_id=${encodeURIComponent(companyID)}`, {
+      const settled = await Promise.allSettled(unique.map((relationshipID) => requestJSON<{ status: string }>(`/v1/node-relationships/${relationshipID}?company_id=${encodeURIComponent(companyID)}`, {
         method: "DELETE",
       })));
-      setSelectedRelationshipIDs(new Set());
-      setRelationshipAnchors((previous) => {
-        const next = { ...previous };
-        for (const id of unique) delete next[id];
+      const summary = summarizeRelationshipDeleteResults(unique, settled);
+
+      if (summary.succeededIDs.length > 0) {
+        const deletedSet = new Set(summary.succeededIDs);
+        setRelationships((previous) => previous.filter((relationship) => !deletedSet.has(relationship.node_relationship_id)));
+      }
+      setSelectedRelationshipIDs((previous) => {
+        if (summary.succeededIDs.length === 0) return previous;
+        const next = new Set(previous);
+        for (const id of summary.succeededIDs) next.delete(id);
         return next;
       });
+      setRelationshipAnchors((previous) => {
+        if (summary.succeededIDs.length === 0) return previous;
+        const next = { ...previous };
+        for (const id of summary.succeededIDs) delete next[id];
+        return next;
+      });
+
       await loadGraphRelationships(nodes);
       await loadDetails(selectedNodeID);
       if (detailsPanelNodeID) await loadDetails(detailsPanelNodeID);
+
+      if (summary.failed.length > 0) {
+        const failure = summary.failed[0];
+        setError(failure?.reason ?? "failed_to_delete_relationship");
+        setStatusMessage(
+          `Deleted ${summary.succeededIDs.length}/${unique.length} relationship lines. First failure (${failure?.relationshipID ?? "unknown"}): ${failure?.reason ?? "failed_to_delete_relationship"}`,
+        );
+        return;
+      }
+
+      setStatusMessage(`Deleted ${summary.succeededIDs.length} relationship line${summary.succeededIDs.length === 1 ? "" : "s"}.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_delete_relationship");
+      setStatusMessage("Delete relationship line request failed.");
     }
   };
 
@@ -741,7 +779,6 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!canvasActive) return;
       const target = event.target as HTMLElement | null;
       if (target) {
         const tag = target.tagName;
@@ -749,13 +786,15 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       }
       if (event.key !== "Delete" && event.key !== "Backspace") return;
       const relationshipIDs = Array.from(selectedRelationshipIDs);
+      const nodeIDs = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : (selectedNodeID ? [selectedNodeID] : []);
+      const hasSelection = relationshipIDs.length > 0 || nodeIDs.length > 0;
+      if (!hasSelection || (!canvasActive && relationshipIDs.length === 0)) return;
       if (relationshipIDs.length > 0) {
         event.preventDefault();
         event.stopPropagation();
         void deleteRelationships(relationshipIDs);
         return;
       }
-      const nodeIDs = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : (selectedNodeID ? [selectedNodeID] : []);
       if (nodeIDs.length === 0) return;
       event.preventDefault();
       event.stopPropagation();
@@ -1139,8 +1178,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           if (event.ctrlKey || event.shiftKey) {
             event.preventDefault();
             event.stopPropagation();
-            setSelectionPointerID(event.pointerId);
-            setSelectionBox({ startX: localX, startY: localY, currentX: localX, currentY: localY, active: true });
+            startRelationshipLineMarqueeSelection(event.pointerId, event.clientX, event.clientY);
             return;
           }
 
@@ -1192,8 +1230,17 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                   event.stopPropagation();
                   setCanvasActive(true);
                   setRelationshipContextMenu(null);
+                  if (event.ctrlKey || event.shiftKey) {
+                    event.preventDefault();
+                    suppressNextRelationshipLineClickRef.current = true;
+                    startRelationshipLineMarqueeSelection(event.pointerId, event.clientX, event.clientY);
+                  }
                 }}
                 onClick={(event) => {
+                  if (suppressNextRelationshipLineClickRef.current) {
+                    suppressNextRelationshipLineClickRef.current = false;
+                    return;
+                  }
                   event.stopPropagation();
                   setRelationshipDraft(null);
                   setRelationshipContextMenu(null);
@@ -1207,6 +1254,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                     });
                     return;
                   }
+                  setSelectedNodeIDs(new Set());
+                  setSelectedNodeID("");
                   setSelectedRelationshipIDs(new Set([path.id]));
                 }}
                 onDoubleClick={(event) => {
@@ -1230,6 +1279,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                   setRelationshipDraft(null);
                   setContextMenu(null);
                   setNodeContextMenu(null);
+                  setSelectedNodeIDs(new Set());
+                  setSelectedNodeID("");
                   setSelectedRelationshipIDs((previous) => {
                     if (previous.has(path.id)) return previous;
                     return new Set([path.id]);
@@ -1756,6 +1807,27 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             }}
           >
             Group selected: {selectedNodeIDs.size}
+          </div>
+        )}
+
+        {(statusMessage || error) && (
+          <div
+            style={{
+              position: "absolute",
+              top: 10,
+              right: 10,
+              zIndex: 31,
+              maxWidth: 420,
+              borderRadius: 8,
+              padding: "6px 8px",
+              fontSize: 11,
+              fontFamily: "'JetBrains Mono', monospace",
+              background: error ? "rgba(178, 0, 32, 0.9)" : "rgba(0, 0, 0, 0.78)",
+              color: "#ffffff",
+              boxShadow: "0 6px 18px rgba(0,0,0,0.22)",
+            }}
+          >
+            {error ? `Error: ${error}` : statusMessage}
           </div>
         )}
 
