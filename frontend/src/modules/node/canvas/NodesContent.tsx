@@ -1013,6 +1013,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               : { x: to.x, y: to.y + lane };
         const points = routeOrthogonalPath(from, fromOut, toIn, to, rel.node_id_a, rel.node_id_b);
         let role: "Parent" | "Peer" | "Child" | null = null;
+        
+        //This is where we decide how to display parent/child relationships based on the node currently selected
         if (activeRoleNodeID) {
           if (rel.node_id_a === activeRoleNodeID) role = rel.b_position;
           else if (rel.node_id_b === activeRoleNodeID) role = rel.a_position;
