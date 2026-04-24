@@ -1,3 +1,4 @@
+// Workspace data-plane cache for Node Map + Company Explorer real-time synchronization.
 import { NodeRecord, NodeRelationship } from "./shared";
 
 export type WorkspaceSnapshot = {
@@ -22,9 +23,11 @@ type WorkspaceStreamEnvelope = {
   data?: Record<string, unknown>;
 };
 
+// Initial cache snapshot so subscribers always receive a consistent shape.
 const EMPTY_SNAPSHOT: WorkspaceSnapshot = { nodes: [], relationships: [] };
 const workspaceCache = new Map<string, CacheEntry>();
 
+// Cache entry resolver: creates per-company workspace cache bucket on demand.
 function getEntry(key: string): CacheEntry {
   const existing = workspaceCache.get(key);
   if (existing) return existing;
@@ -33,10 +36,12 @@ function getEntry(key: string): CacheEntry {
   return created;
 }
 
+// Fan-out notifier for Company Explorer / Node Map subscribers.
 function notify(entry: CacheEntry): void {
   for (const subscriber of entry.subscribers) subscriber();
 }
 
+// Runtime payload guard for SSE delta events -> NodeRecord contract.
 function asNodeRecord(candidate: unknown): NodeRecord | null {
   if (!candidate || typeof candidate !== "object") return null;
   const value = candidate as Partial<NodeRecord>;
@@ -49,6 +54,7 @@ function asNodeRecord(candidate: unknown): NodeRecord | null {
   };
 }
 
+// Runtime payload guard for SSE delta events -> NodeRelationship contract.
 function asRelationship(candidate: unknown): NodeRelationship | null {
   if (!candidate || typeof candidate !== "object") return null;
   const value = candidate as Partial<NodeRelationship>;
@@ -71,6 +77,7 @@ function asRelationship(candidate: unknown): NodeRelationship | null {
   };
 }
 
+// Delta reducer: applies streaming workspace events without full snapshot reload.
 function applyWorkspaceDelta(entry: CacheEntry, envelope: WorkspaceStreamEnvelope): boolean {
   const previous = entry.snapshot;
   const currentNodes = previous.nodes ?? [];
@@ -128,6 +135,7 @@ function applyWorkspaceDelta(entry: CacheEntry, envelope: WorkspaceStreamEnvelop
   return false;
 }
 
+// Snapshot fetcher with ETag support; keeps hot-path reads light and cache-friendly.
 export async function refreshWorkspaceSnapshot(apiBase: string, companyID: string): Promise<void> {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
@@ -154,6 +162,7 @@ export async function refreshWorkspaceSnapshot(apiBase: string, companyID: strin
   }
 }
 
+// SSE stream bootstrap: keeps modules synchronized in near real-time without polling loops.
 function ensureStream(apiBase: string, companyID: string): void {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
@@ -181,6 +190,7 @@ function ensureStream(apiBase: string, companyID: string): void {
   entry.source = source;
 }
 
+// Public subscription API used by UI modules for workspace snapshot updates.
 export function subscribeWorkspace(apiBase: string, companyID: string, subscriber: Subscriber): () => void {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
@@ -196,6 +206,7 @@ export function subscribeWorkspace(apiBase: string, companyID: string, subscribe
   };
 }
 
+// Synchronous snapshot getter for render paths that need latest cached workspace data.
 export function getWorkspaceSnapshot(apiBase: string, companyID: string): WorkspaceSnapshot {
   const key = `${apiBase}:${companyID}`;
   return getEntry(key).snapshot;

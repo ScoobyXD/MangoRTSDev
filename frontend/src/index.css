@@ -1,17 +1,20 @@
 @import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=IBM+Plex+Mono:wght@500;700&display=swap");
 
+/* Global reset and predictable box model for full-canvas dashboard layout. */
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
+/* Lock app viewport to full-screen and prevent browser scrollbars. */
 html, body, #root {
   width: 100%;
   height: 100%;
   overflow: hidden;
 }
 
+/* Base typography and neutral background for module theming contrast. */
 body {
   font-family: "Manrope", "Helvetica Neue", sans-serif;
   color: #101010;
@@ -23,6 +26,7 @@ button, input {
   font-family: inherit;
 }
 
+/* Node-details panel custom scrollbar styling for dense information panes. */
 .node-details-panel {
   scrollbar-width: thin;
   scrollbar-color: rgba(7, 86, 94, 0.5) rgba(255, 255, 255, 0.28);

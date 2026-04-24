@@ -1,6 +1,7 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
+// Dev proxy keeps frontend API calls aligned with backend routes during local development.
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -9,4 +10,4 @@ export default defineConfig({
       "/healthz": "http://localhost:8080",
     },
   },
-})
+});

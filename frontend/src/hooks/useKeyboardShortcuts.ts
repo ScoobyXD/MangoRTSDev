@@ -8,12 +8,14 @@ interface KeyboardActions {
   redo: () => void;
 }
 
+// Global keyboard command router for frame editing workflows (delete/copy/paste/undo/redo).
 export function useKeyboardShortcuts(actions: KeyboardActions) {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target) {
         const tag = target.tagName;
+        // Ignore shortcuts while typing so form and editor inputs remain predictable.
         if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
       }
 

@@ -7,10 +7,12 @@ export interface FrameRightClickMenuProps {
   onClose: () => void;
 }
 
+// Floating context-menu shell used by header/canvas/frame menus throughout the dashboard.
 const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, y, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
 
+  // Keep menu inside viewport bounds so right-click actions are always reachable.
   useEffect(() => {
     if (!menuRef.current) return;
     const rect = menuRef.current.getBoundingClientRect();
@@ -20,6 +22,7 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
     });
   }, [x, y]);
 
+  // Global outside-click handler: close this menu when users interact elsewhere.
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();

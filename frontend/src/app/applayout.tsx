@@ -39,12 +39,14 @@ const UI_THEME = {
 };
 
 
+// Default Node Ops view layout (Explorer + Node Map + Editor triad).
 const createDefaultNodeViewFrames = (): FrameDataModel[] => ([
   { id: "default-node-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 11, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
   { id: "default-node-map", theme: "teal", kind: "nodes-map", x: 12, y: 1, w: 20, h: 30, title: "Node Map", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
   { id: "default-node-editor", theme: "orange", kind: "editor", x: 32, y: 1, w: 11, h: 30, title: "Editor", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
 ]);
 
+// Default Company Explorer-centric view layout preset.
 const createDefaultCompanyExplorerViewFrames = (): FrameDataModel[] => ([
   { id: "default-company-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 12, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
   { id: "default-company-details", theme: "teal", kind: "nodes-map", x: 13, y: 1, w: 18, h: 30, title: "Node Map", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
@@ -80,6 +82,7 @@ interface DashboardSnapshot {
   tabTextColor: string;
 }
 
+// Numeric clamp helper used by drag/resize/pan boundary guards.
 function clamp(v: number, lo: number, hi: number) {
   if (lo > hi) return lo;
   return Math.max(lo, Math.min(hi, v));
@@ -112,6 +115,7 @@ function isHexColor(value: unknown): value is string {
   return typeof value === "string" && /^#[0-9A-F]{6}$/i.test(value);
 }
 
+// Storage migration guard: sanitize persisted frame payloads from localStorage.
 function coerceFrame(value: unknown): FrameDataModel | null {
   if (!isObject(value)) return null;
   const { id, kind, parentId, theme, x, y, w, h, title, color, accent } = value;
@@ -159,6 +163,7 @@ function getPointer(e: React.MouseEvent | React.TouchEvent | MouseEvent | TouchE
 const VIEWS_KEY = "grid-dashboard-views-v1";
 const SETTINGS_KEY = "grid-dashboard-settings";
 
+// Load saved dashboard views/tabs with legacy widget compatibility fallback.
 function loadViews(): { tabs: ViewTab[]; activeId: string } {
   const fallback = { tabs: [{ id: "view-default", name: "Main View", frames: INITIAL_WIDGETS }], activeId: "view-default" };
   try {
@@ -190,6 +195,7 @@ function saveViews(tabs: ViewTab[], activeId: string) {
   } catch {}
 }
 
+// Load persisted theme settings for canvas/header/tab color customization.
 function loadSettings(): { bgColor?: string; crossColor?: string; headerBgColor?: string; headerTextColor?: string; tabBgColor?: string; tabTextColor?: string } {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
@@ -249,6 +255,7 @@ function loadExplorerMapLinks(): Record<string, string> {
   }
 }
 
+// SVG grid marker renderer (plus intersections) for visual snapping guidance.
 const GridCrosses: React.FC<{ cols: number; rows: number; stepX: number; stepY: number; width: number; height: number; color: string }> = React.memo(
   ({ cols, rows, stepX, stepY, width, height, color }) => {
     const path = useMemo(() => {

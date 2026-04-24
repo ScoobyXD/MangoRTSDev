@@ -9,6 +9,7 @@ export type ScreenRect = {
 
 const EPSILON = 0.000001;
 
+// Hit-test primitive used by relationship marquee selection and line-click selection.
 const pointInRect = (point: ScreenPoint, rect: ScreenRect) => (
   point.x >= rect.minX && point.x <= rect.maxX && point.y >= rect.minY && point.y <= rect.maxY
 );
@@ -26,6 +27,7 @@ const onSegment = (a: ScreenPoint, b: ScreenPoint, c: ScreenPoint) => (
   b.y + EPSILON >= Math.min(a.y, c.y)
 );
 
+// Segment intersection helper for orthogonal relationship path and marquee rectangle logic.
 const segmentsIntersect = (a1: ScreenPoint, a2: ScreenPoint, b1: ScreenPoint, b2: ScreenPoint) => {
   const o1 = orientation(a1, a2, b1);
   const o2 = orientation(a1, a2, b2);
@@ -40,6 +42,7 @@ const segmentsIntersect = (a1: ScreenPoint, a2: ScreenPoint, b1: ScreenPoint, b2
   return false;
 };
 
+// Single polyline segment against selection rectangle.
 export const segmentIntersectsRect = (from: ScreenPoint, to: ScreenPoint, rect: ScreenRect) => {
   if (pointInRect(from, rect) || pointInRect(to, rect)) return true;
 
@@ -59,6 +62,7 @@ export const segmentIntersectsRect = (from: ScreenPoint, to: ScreenPoint, rect: 
   );
 };
 
+// Full relationship polyline against selection rectangle (supports multi-turn paths).
 export const pathIntersectsRect = (points: ScreenPoint[], rect: ScreenRect) => {
   if (points.length < 2) return false;
   for (let i = 1; i < points.length; i += 1) {
