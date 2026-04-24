@@ -181,6 +181,7 @@ This replaces the old incorrect vertical swap behavior.
 - Right-clicking a relationship line opens a context menu with **Delete relationship** (or **Delete relationships (N)** for multi-select).
 - Relationship lines can be snipped directly on-canvas via line **double-click**.
 - Keyboard `Delete` / `Backspace` prioritizes selected relationships first, then selected nodes (inside Node Map scope).
+- Relationship delete failures now surface in a viewport-level error banner (not only in the details panel).
 - Deletes call `DELETE /v1/node-relationships/:node_relationship_id`.
 
 ---

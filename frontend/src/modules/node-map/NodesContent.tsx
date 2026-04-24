@@ -638,14 +638,22 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   };
 
   const deleteRelationships = async (relationshipIDs: string[]) => {
-    const unique = Array.from(new Set(relationshipIDs.filter(Boolean)));
-    if (unique.length === 0) return;
+    const unique = Array.from(new Set(relationshipIDs.map((id) => id.trim()).filter((id) => id.length > 0)));
+    if (unique.length === 0) {
+      setError("relationship_selection_invalid");
+      return;
+    }
     setError("");
     try {
       await Promise.all(unique.map((relationshipID) => requestJSON<{ status: string }>(`/v1/node-relationships/${relationshipID}?company_id=${encodeURIComponent(companyID)}`, {
         method: "DELETE",
       })));
-      setSelectedRelationshipIDs(new Set());
+      setSelectedRelationshipIDs((previous) => {
+        const next = new Set(previous);
+        for (const id of unique) next.delete(id);
+        return next;
+      });
+      setRelationships((previous) => previous.filter((relationship) => !unique.includes(relationship.node_relationship_id)));
       setRelationshipAnchors((previous) => {
         const next = { ...previous };
         for (const id of unique) delete next[id];
@@ -1092,6 +1100,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           event.stopPropagation();
           setCanvasActive(true);
           setNodeContextMenu(null);
+          setRelationshipContextMenu(null);
           if (!viewportRef.current) return;
           const bounds = viewportRef.current.getBoundingClientRect();
           const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
@@ -1209,6 +1218,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                   event.stopPropagation();
                   setCanvasActive(true);
                   setRelationshipDraft(null);
+                  setError("");
                   setContextMenu(null);
                   setNodeContextMenu(null);
                   const bounds = viewportRef.current?.getBoundingClientRect();
@@ -1420,6 +1430,28 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
               zIndex: 20,
             }}
           />
+        )}
+
+        {error && (
+          <div
+            style={{
+              position: "absolute",
+              left: 12,
+              bottom: 12,
+              zIndex: 48,
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#b00020",
+              background: "rgba(255,255,255,0.94)",
+              border: "1px solid rgba(176,0,32,0.35)",
+              borderRadius: 8,
+              padding: "6px 8px",
+              maxWidth: 320,
+              boxShadow: "0 6px 16px rgba(0,0,0,0.12)",
+            }}
+          >
+            {error}
+          </div>
         )}
 
         {contextMenu && (
