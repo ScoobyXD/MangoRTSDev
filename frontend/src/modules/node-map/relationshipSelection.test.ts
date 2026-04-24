@@ -34,3 +34,24 @@ test("detects path intersection when any polyline segment intersects rectangle",
   );
   assert.equal(intersects, true);
 });
+
+test("detects intersection when a segment lies on a rectangle boundary", () => {
+  const intersects = segmentIntersectsRect(
+    { x: 4, y: 0 },
+    { x: 4, y: 10 },
+    { minX: 4, maxX: 6, minY: 4, maxY: 6 },
+  );
+  assert.equal(intersects, true);
+});
+
+test("returns false for a path fully outside the selection rectangle", () => {
+  const intersects = pathIntersectsRect(
+    [
+      { x: 0, y: 0 },
+      { x: 3, y: 0 },
+      { x: 3, y: 3 },
+    ],
+    { minX: 4, maxX: 8, minY: 4, maxY: 8 },
+  );
+  assert.equal(intersects, false);
+});
