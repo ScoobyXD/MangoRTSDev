@@ -74,6 +74,12 @@ create table if not exists node_relationships (
   a_position node_relationship_position not null,
   b_position node_relationship_position not null,
   created_timestamp timestamptz not null,
+  constraint node_relationships_position_pair_chk check (
+    (a_position = 'Parent' and b_position = 'Child')
+    or (a_position = 'Child' and b_position = 'Parent')
+    or (a_position = 'Peer' and b_position = 'Peer')
+  ),
+  constraint node_relationships_not_self_chk check (node_id_a <> node_id_b),
   primary key (company_id, node_relationship_id),
   foreign key (company_id, node_id_a) references nodes (company_id, node_id),
   foreign key (company_id, node_id_b) references nodes (company_id, node_id)
@@ -164,6 +170,8 @@ create table if not exists operations (
 - A Position (Enum: Parent, Child, Peer) -> `node_relationships.a_position`
 - B Position (Enum: Parent, Child, Peer) -> `node_relationships.b_position`
 - Created Timestamp (TIMESTAMPTZ) -> `node_relationships.created_timestamp`
+- Constraint: `node_relationships_position_pair_chk` allows only Parent->Child, Child->Parent, or Peer<->Peer.
+- Constraint: `node_relationships_not_self_chk` requires `node_id_a <> node_id_b`.
 
 ### Node Information Schema
 

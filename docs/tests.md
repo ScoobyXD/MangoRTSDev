@@ -99,6 +99,8 @@ Use this checklist format and keep it complete.
   - selected-node opposite-side role resolution
   - parent/child anchor inference
   - projected visual metadata output
+- [x] `backend/internal/http/server_test.go`
+  - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
 
 ### Integration tests
 - [ ] None committed yet (to be added)

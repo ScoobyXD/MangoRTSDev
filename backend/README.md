@@ -105,6 +105,7 @@ go test ./...
 
 ```powershell
 ./scripts/apply_canonical_schema.ps1
+./scripts/apply_node_relationship_guards.ps1
 ./scripts/check_db_ready.ps1
 ```
 
@@ -112,6 +113,7 @@ go test ./...
 
 ```bash
 ./scripts/apply_canonical_schema.sh
+./scripts/apply_node_relationship_guards.sh
 ./scripts/check_db_ready.sh
 ```
 
@@ -121,6 +123,16 @@ Or directly:
 psql "host=$DB_HOST port=${DB_PORT:-5432} user=$DB_USER dbname=$DB_NAME sslmode=${DB_SSLMODE:-require}" \
   -f db/schema.sql
 ```
+
+For existing databases that were created before relationship guard constraints were added, run:
+
+```bash
+./scripts/apply_node_relationship_guards.sh
+```
+
+These guards enforce:
+- only Parent<->Child or Peer<->Peer relationship position pairs
+- no self-relationships (`node_id_a <> node_id_b`)
 
 ## API endpoints (MVP canonical set)
 
