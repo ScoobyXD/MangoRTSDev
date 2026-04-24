@@ -3,6 +3,7 @@ import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NO
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_STATE_UPDATED } from "./eventbus";
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "./workspaceStore";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
+import { pathIntersectsRect } from "./relationshipSelection";
 
 export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -36,6 +37,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [detailsPanelNodeID, setDetailsPanelNodeID] = useState<string>("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
   const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeID: string } | null>(null);
+  const [relationshipContextMenu, setRelationshipContextMenu] = useState<{ x: number; y: number; relationshipID: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[] } | null>(null);
   const [canvasActive, setCanvasActive] = useState(false);
   const [panelRect, setPanelRect] = useState({ x: 0, y: 10, width: 340, height: 360 });
@@ -67,6 +69,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [relationshipRoleColors, setRelationshipRoleColors] = useState({ parent: "#ff8a00", peer: "#0095ff", child: "#6f5cff" });
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
   const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
+  const connectionPathsRef = useRef<Array<{ id: string; points: { x: number; y: number }[] }>>([]);
 
   useEffect(() => {
     const cached = SESSION_NODE_MAP_STATE.get(mapStateKey);
@@ -456,8 +459,16 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       });
 
       const nextSet = new Set(selected.map((item) => item.node_id));
+      const rect = { minX, maxX, minY, maxY };
+      const selectedRelationshipIDsInBox = connectionPathsRef.current
+        .filter((path) => pathIntersectsRect(path.points.map((point) => ({
+          x: point.x * zoom + pan.x,
+          y: point.y * zoom + pan.y,
+        })), rect))
+        .map((path) => path.id);
       setSelectedNodeIDs(nextSet);
       if (selected.length > 0) setSelectedNodeID(selected[0].node_id);
+      setSelectedRelationshipIDs(new Set(selectedRelationshipIDsInBox));
       setSelectionPointerID(null);
       setSelectionBox((previous) => ({ ...previous, active: false }));
     };
@@ -475,6 +486,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     const onWindowPointerDown = () => {
       setContextMenu(null);
       setNodeContextMenu(null);
+      setRelationshipContextMenu(null);
     };
     window.addEventListener("pointerdown", onWindowPointerDown);
     return () => window.removeEventListener("pointerdown", onWindowPointerDown);
@@ -1012,6 +1024,10 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       .filter((path): path is { id: string; points: { x: number; y: number }[]; stroke: string; alpha: number; selected: boolean } => !!path);
   }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet, relationshipRoutingGrid, activeRoleNodeID, relationshipRoleColors, accent, relationshipColorsEnabled, selectedRelationshipIDs]);
 
+  useEffect(() => {
+    connectionPathsRef.current = connectionPaths.map((path) => ({ id: path.id, points: path.points }));
+  }, [connectionPaths]);
+
   const draftPath = useMemo(() => {
     if (!relationshipDraft) return null;
     const from = getAnchorPoint(relationshipDraft.sourceNodeID, relationshipDraft.sourceSide);
@@ -1077,6 +1093,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           event.stopPropagation();
           setCanvasActive(true);
           setNodeContextMenu(null);
+          setRelationshipContextMenu(null);
           if (!viewportRef.current) return;
           const bounds = viewportRef.current.getBoundingClientRect();
           const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
@@ -1107,6 +1124,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           setCanvasActive(true);
           setContextMenu(null);
           setNodeContextMenu(null);
+          setRelationshipContextMenu(null);
           setSelectedRelationshipIDs(new Set());
           const bounds = viewportRef.current.getBoundingClientRect();
           const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
@@ -1167,10 +1185,12 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 onPointerDown={(event) => {
                   event.stopPropagation();
                   setCanvasActive(true);
+                  setRelationshipContextMenu(null);
                 }}
                 onClick={(event) => {
                   event.stopPropagation();
                   setRelationshipDraft(null);
+                  setRelationshipContextMenu(null);
                   setError("");
                   if (event.shiftKey || event.ctrlKey) {
                     setSelectedRelationshipIDs((previous) => {
@@ -1186,7 +1206,29 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 onDoubleClick={(event) => {
                   event.stopPropagation();
                   setRelationshipDraft(null);
+                  setRelationshipContextMenu(null);
                   void deleteRelationships([path.id]);
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (!viewportRef.current) return;
+                  const bounds = viewportRef.current.getBoundingClientRect();
+                  const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
+                  const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
+                  const menuWidth = 188;
+                  const menuHeight = 56;
+                  const clampedX = clamp(localX, 8, Math.max(8, bounds.width - menuWidth - 8));
+                  const clampedY = clamp(localY, 8, Math.max(8, bounds.height - menuHeight - 8));
+                  setCanvasActive(true);
+                  setRelationshipDraft(null);
+                  setContextMenu(null);
+                  setNodeContextMenu(null);
+                  setSelectedRelationshipIDs((previous) => {
+                    if (previous.has(path.id)) return previous;
+                    return new Set([path.id]);
+                  });
+                  setRelationshipContextMenu({ x: clampedX, y: clampedY, relationshipID: path.id });
                 }}
               />
             ))}
@@ -1228,6 +1270,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                   event.stopPropagation();
                   setCanvasActive(true);
                   setSelectedRelationshipIDs(new Set());
+                  setRelationshipContextMenu(null);
                   const bounds = viewportRef.current?.getBoundingClientRect();
                   if (!bounds) return;
                   const nextIDs = selectedNodeIDs.has(node.node_id) ? Array.from(selectedNodeIDs) : [node.node_id];
@@ -1253,6 +1296,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                   }
                   setContextMenu(null);
                   setNodeContextMenu(null);
+                  setRelationshipContextMenu(null);
                   setSelectedRelationshipIDs(new Set());
                   const bounds = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
 
@@ -1540,6 +1584,39 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             </button>
             <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", color: "#a20026", textAlign: "left" }} onClick={() => { const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID]; setConfirmDelete({ nodeIDs: ids }); setNodeContextMenu(null); }}>
               Delete node
+            </button>
+          </div>
+        )}
+
+        {relationshipContextMenu && (
+          <div
+            style={{
+              position: "absolute",
+              left: relationshipContextMenu.x,
+              top: relationshipContextMenu.y,
+              transform: "translate(8px, 8px)",
+              background: "rgba(255,255,255,0.95)",
+              border: `1px solid ${accent}`,
+              borderRadius: 8,
+              padding: 4,
+              zIndex: 41,
+              boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
+              display: "grid",
+              gap: 2,
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <button
+              style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", color: "#a20026", textAlign: "left" }}
+              onClick={() => {
+                const relationshipIDs = selectedRelationshipIDs.has(relationshipContextMenu.relationshipID)
+                  ? Array.from(selectedRelationshipIDs)
+                  : [relationshipContextMenu.relationshipID];
+                void deleteRelationships(relationshipIDs);
+                setRelationshipContextMenu(null);
+              }}
+            >
+              Delete relationship{selectedRelationshipIDs.size > 1 ? "s" : ""}
             </button>
           </div>
         )}

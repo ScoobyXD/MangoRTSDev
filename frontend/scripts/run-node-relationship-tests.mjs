@@ -5,7 +5,10 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const frontendRoot = resolve(scriptDir, "..");
-const testFile = resolve(frontendRoot, ".test-dist/modules/node-map/relationshipProjection.test.js");
+const testFiles = [
+  resolve(frontendRoot, ".test-dist/modules/node-map/relationshipProjection.test.js"),
+  resolve(frontendRoot, ".test-dist/modules/node-map/relationshipSelection.test.js"),
+];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
 
 function run(command) {
@@ -18,11 +21,14 @@ function run(command) {
 
 run("npx tsc -p tsconfig.node-tests.json");
 
-let contents = readFileSync(testFile, "utf8");
-contents = contents.replace('"./relationshipProjection"', '"./relationshipProjection.js"');
-writeFileSync(testFile, contents, "utf8");
+for (const testFile of testFiles) {
+  let contents = readFileSync(testFile, "utf8");
+  contents = contents.replaceAll('"./relationshipProjection"', '"./relationshipProjection.js"');
+  contents = contents.replaceAll('"./relationshipSelection"', '"./relationshipSelection.js"');
+  writeFileSync(testFile, contents, "utf8");
+}
 
 mkdirSync(resolve(frontendRoot, ".test-dist"), { recursive: true });
 writeFileSync(packageFile, '{"type":"module"}\n', "utf8");
 
-run(`"${process.execPath}" --test .test-dist/modules/node-map/relationshipProjection.test.js`);
+run(`"${process.execPath}" --test .test-dist/modules/node-map/relationshipProjection.test.js .test-dist/modules/node-map/relationshipSelection.test.js`);

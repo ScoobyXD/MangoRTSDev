@@ -99,6 +99,9 @@ Use this checklist format and keep it complete.
   - selected-node opposite-side role resolution
   - parent/child anchor inference
   - projected visual metadata output
+- [x] `frontend/src/modules/node-map/relationshipSelection.test.ts`
+  - line-segment vs marquee rectangle intersection detection
+  - polyline relationship-path vs marquee rectangle intersection detection
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
 

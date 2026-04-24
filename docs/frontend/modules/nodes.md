@@ -177,8 +177,10 @@ This replaces the old incorrect vertical swap behavior.
 
 - Relationship rows are removable from the details panel via **Snip**.
 - Relationship lines can also be selected directly on canvas by clicking the line path (multi-select with `Shift`/`Ctrl` + click).
+- Relationship lines are included in marquee selection (`Shift`/`Ctrl` + drag) so line-only and mixed node+line group selection works with the same drag gesture family used for nodes.
 - Relationship lines can be snipped directly on-canvas via line **double-click**.
 - Keyboard `Delete` / `Backspace` deletes selected relationships.
+- Right-clicking a relationship line opens a relationship context menu with **Delete relationship** (or plural delete when a selected line group is active).
 - Deletes call `DELETE /v1/node-relationships/:node_relationship_id`.
 
 ---
