@@ -178,8 +178,9 @@ This replaces the old incorrect vertical swap behavior.
 - Relationship rows are removable from the details panel via **Snip**.
 - Relationship lines can also be selected directly on canvas by clicking the line path (multi-select with `Shift`/`Ctrl` + click).
 - Relationship lines participate in marquee selection (`Shift`/`Ctrl` + drag) using polyline/selection-rectangle intersection.
+- Right-clicking a relationship line opens a context menu with **Delete relationship** (or **Delete relationships (N)** for multi-select).
 - Relationship lines can be snipped directly on-canvas via line **double-click**.
-- Keyboard `Delete` / `Backspace` deletes selected relationships.
+- Keyboard `Delete` / `Backspace` prioritizes selected relationships first, then selected nodes (inside Node Map scope).
 - Deletes call `DELETE /v1/node-relationships/:node_relationship_id`.
 
 ---
@@ -238,11 +239,13 @@ The projection object is **derived in memory** during render. It is not persiste
 ### Files under test
 
 - `frontend/src/modules/node-map/relationshipProjection.ts`
+- `frontend/src/modules/node-map/keyboardDeletion.ts`
 - `frontend/src/modules/node-map/selectionGeometry.ts`
 
 ### Test file
 
 - `frontend/src/modules/node-map/relationshipProjection.test.ts`
+- `frontend/src/modules/node-map/keyboardDeletion.test.ts`
 - `frontend/src/modules/node-map/selectionGeometry.test.ts`
 
 ### Available tests in that file
@@ -256,6 +259,7 @@ The projection object is **derived in memory** during render. It is not persiste
 7. infers deterministic anchor for parent-child and child-parent rows
 8. projects visual edge metadata without persistent storage
 9. detects relationship polyline intersection for marquee selection hit-testing
+10. enforces keyboard delete intent priority (relationships before nodes)
 
 ### How to run
 

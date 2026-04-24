@@ -33,6 +33,8 @@ Purpose:
 Primary source files:
 - `frontend/src/modules/node-map/relationshipProjection.ts`
 - `frontend/src/modules/node-map/relationshipProjection.test.ts`
+- `frontend/src/modules/node-map/keyboardDeletion.ts`
+- `frontend/src/modules/node-map/keyboardDeletion.test.ts`
 - `frontend/src/modules/node-map/selectionGeometry.ts`
 - `frontend/src/modules/node-map/selectionGeometry.test.ts`
 
@@ -106,6 +108,10 @@ Use this checklist format and keep it complete.
   - polyline/selection-rectangle intersection detection
   - path-inside-rectangle hit detection
   - non-intersecting path rejection
+- [x] `frontend/src/modules/node-map/keyboardDeletion.test.ts`
+  - delete/backspace key filtering
+  - relationship-vs-node delete priority resolution
+  - fallback node delete intent resolution
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
 
