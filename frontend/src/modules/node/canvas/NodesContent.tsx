@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, MINI_GRID, NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeCanvasState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_CANVAS_STATE, clamp, divider, oppositeSide, snapToGrid, trimOrEmpty } from "../shared";
+import { INFO_TYPES, MINI_GRID, NODE_CANVAS_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeCanvasState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_CANVAS_STATE, clamp, divider, snapToGrid, trimOrEmpty } from "../shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_CANVAS_STATE_UPDATED } from "../eventbus";
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../workspaceStore";
+import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, projectRelationshipVisual } from "./relationshipProjection";
 
 export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -562,14 +563,15 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     if (!node) return;
 
     try {
+      const payload = buildLinkedNodePayloadFromSourceSide(direction);
       const relationship = await requestJSON<NodeRelationship>("/v1/node-relationships", {
         method: "POST",
         body: JSON.stringify({
           company_id: companyID,
           node_id_a: sourceNodeID,
           node_id_b: node.node_id,
-          a_position: relationPositionFromSide(direction),
-          b_position: relationPositionFromSide(oppositeSide(direction)),
+          a_position: payload.a_position,
+          b_position: payload.b_position,
         }),
       });
 
@@ -591,7 +593,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
       setRelationshipAnchors((previous) => ({
         ...previous,
-        [relationship.node_relationship_id]: { from: direction, to: oppositeSide(direction) },
+        [relationship.node_relationship_id]: payload.anchor,
       }));
 
       await loadDetails(sourceNodeID);
@@ -604,27 +606,22 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     }
   };
 
-  const relationPositionFromSide = (direction: NodeDirection): "Parent" | "Child" | "Peer" => {
-    if (direction === "left" || direction === "right") return "Peer";
-    if (direction === "top") return "Parent";
-    return "Child";
-  };
-
   const commitRelationshipBetweenNodes = async (sourceNodeID: string, sourceSide: NodeDirection, targetNodeID: string, targetSide: NodeDirection) => {
     if (!sourceNodeID || !targetNodeID || sourceNodeID === targetNodeID) return;
+    const payload = buildExistingNodeRelationshipPayload(sourceSide, targetSide);
     const relationship = await requestJSON<NodeRelationship>("/v1/node-relationships", {
       method: "POST",
       body: JSON.stringify({
         company_id: companyID,
         node_id_a: sourceNodeID,
         node_id_b: targetNodeID,
-        a_position: relationPositionFromSide(sourceSide),
-        b_position: relationPositionFromSide(targetSide),
+        a_position: payload.a_position,
+        b_position: payload.b_position,
       }),
     });
     setRelationshipAnchors((previous) => ({
       ...previous,
-      [relationship.node_relationship_id]: { from: sourceSide, to: targetSide },
+      [relationship.node_relationship_id]: payload.anchor,
     }));
     await loadGraphRelationships(nodes);
     await loadDetails(selectedNodeID);
@@ -839,25 +836,6 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     return { x: pos.x + NODE_W / 2, y: pos.y + NODE_H };
   };
 
-  const inferAnchor = (relationship: NodeRelationship): RelationshipAnchor => {
-    if (relationshipAnchors[relationship.node_relationship_id]) return relationshipAnchors[relationship.node_relationship_id];
-    const a = nodePositions[relationship.node_id_a];
-    const b = nodePositions[relationship.node_id_b];
-    if (relationship.a_position === "Child" && relationship.b_position === "Parent") {
-      if (a && b) return b.y <= a.y ? { from: "top", to: "bottom" } : { from: "bottom", to: "top" };
-      return { from: "top", to: "bottom" };
-    }
-    if (relationship.a_position === "Parent" && relationship.b_position === "Child") {
-      if (a && b) return b.y >= a.y ? { from: "bottom", to: "top" } : { from: "top", to: "bottom" };
-      return { from: "bottom", to: "top" };
-    }
-    if (!a || !b) return { from: "right", to: "left" };
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    if (Math.abs(dy) > Math.abs(dx) * 1.15) return dy >= 0 ? { from: "bottom", to: "top" } : { from: "top", to: "bottom" };
-    return dx >= 0 ? { from: "right", to: "left" } : { from: "left", to: "right" };
-  };
-
   const visibleNodeIDSet = useMemo(() => {
     const minX = (-pan.x) / zoom;
     const minY = (-pan.y) / zoom;
@@ -998,34 +976,34 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       .filter((rel) => nodeByID[rel.node_id_a] && nodeByID[rel.node_id_b] && nodePositions[rel.node_id_a] && nodePositions[rel.node_id_b])
       .filter((rel) => visibleNodeIDSet.has(rel.node_id_a) || visibleNodeIDSet.has(rel.node_id_b))
       .map((rel) => {
-        const anchor = inferAnchor(rel);
-        const from = getAnchorPoint(rel.node_id_a, anchor.from);
-        const to = getAnchorPoint(rel.node_id_b, anchor.to);
+        const projection = projectRelationshipVisual(rel, {
+          activeNodeID: activeRoleNodeID,
+          relationshipColorsEnabled,
+          relationshipRoleColors,
+          accent,
+          rememberedAnchor: relationshipAnchors[rel.node_relationship_id],
+          nodePositions,
+        });
+        const from = getAnchorPoint(projection.sourceNodeID, projection.sourceAnchor);
+        const to = getAnchorPoint(projection.targetNodeID, projection.targetAnchor);
         if (!from || !to) return null;
         const lane = MINI_GRID * 2;
-        const fromOut = anchor.from === "left" ? { x: from.x - lane, y: from.y }
-          : anchor.from === "right" ? { x: from.x + lane, y: from.y }
-            : anchor.from === "top" ? { x: from.x, y: from.y - lane }
+        const fromOut = projection.sourceAnchor === "left" ? { x: from.x - lane, y: from.y }
+          : projection.sourceAnchor === "right" ? { x: from.x + lane, y: from.y }
+            : projection.sourceAnchor === "top" ? { x: from.x, y: from.y - lane }
               : { x: from.x, y: from.y + lane };
-        const toIn = anchor.to === "left" ? { x: to.x - lane, y: to.y }
-          : anchor.to === "right" ? { x: to.x + lane, y: to.y }
-            : anchor.to === "top" ? { x: to.x, y: to.y - lane }
+        const toIn = projection.targetAnchor === "left" ? { x: to.x - lane, y: to.y }
+          : projection.targetAnchor === "right" ? { x: to.x + lane, y: to.y }
+            : projection.targetAnchor === "top" ? { x: to.x, y: to.y - lane }
               : { x: to.x, y: to.y + lane };
         const points = routeOrthogonalPath(from, fromOut, toIn, to, rel.node_id_a, rel.node_id_b);
-        let role: "Parent" | "Peer" | "Child" | null = null;
-        
-        //This is where we decide how to display parent/child relationships based on the node currently selected
-        if (activeRoleNodeID) {
-          if (rel.node_id_a === activeRoleNodeID) role = rel.b_position;
-          else if (rel.node_id_b === activeRoleNodeID) role = rel.a_position;
-        }
-        const stroke =
-          role === "Parent" ? relationshipRoleColors.parent
-            : role === "Peer" ? relationshipRoleColors.peer
-              : role === "Child" ? relationshipRoleColors.child
-                : accent;
-        const alpha = !relationshipColorsEnabled ? 0.72 : (role ? 0.92 : 0.35);
-        return { id: rel.node_relationship_id, points, stroke, alpha, selected: selectedRelationshipIDs.has(rel.node_relationship_id) };
+        return {
+          id: rel.node_relationship_id,
+          points,
+          stroke: projection.strokeColor,
+          alpha: projection.alpha,
+          selected: selectedRelationshipIDs.has(rel.node_relationship_id),
+        };
       })
       .filter((path): path is { id: string; points: { x: number; y: number }[]; stroke: string; alpha: number; selected: boolean } => !!path);
   }, [relationships, nodeByID, nodePositions, relationshipAnchors, visibleNodeIDSet, relationshipRoutingGrid, activeRoleNodeID, relationshipRoleColors, accent, relationshipColorsEnabled, selectedRelationshipIDs]);

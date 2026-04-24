@@ -22,13 +22,6 @@ type WorkspaceStreamEnvelope = {
   data?: Record<string, unknown>;
 };
 
-type WorkspaceStreamEnvelope = {
-  company_id: string;
-  type: string;
-  ts: string;
-  data?: Record<string, unknown>;
-};
-
 const EMPTY_SNAPSHOT: WorkspaceSnapshot = { nodes: [], relationships: [] };
 const workspaceCache = new Map<string, CacheEntry>();
 
