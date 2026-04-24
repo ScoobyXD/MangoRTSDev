@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test:node-relationships": "tsc -p tsconfig.node-tests.json && sed -i 's|\"./relationshipProjection\"|\"./relationshipProjection.js\"|' .test-dist/modules/node/canvas/relationshipProjection.test.js && echo '{\"type\":\"module\"}' > .test-dist/package.json && node --test .test-dist/modules/node/canvas/relationshipProjection.test.js"
+    "test:node-relationships": "node ./scripts/run-node-relationship-tests.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

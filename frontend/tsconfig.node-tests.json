@@ -18,5 +18,6 @@
     "src/modules/node/shared.ts",
     "src/modules/node/canvas/relationshipProjection.ts",
     "src/modules/node/canvas/relationshipProjection.test.ts"
-  ]
+  ],
+  "exclude": []
 }
