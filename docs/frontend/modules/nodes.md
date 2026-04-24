@@ -147,14 +147,13 @@ Source node is always `node_id_a`, target node is always `node_id_b`.
 
 #### Existing-node attach flow (arrow icon)
 
-- Side `left` / `right` maps to `Peer`.
-- Side `top` maps to `Parent`.
-- Side `bottom` maps to `Child`.
+Role write semantics are source-side driven (same vertical contract as `+` creation):
 
-This flow keeps literal side semantics from the two clicked handles:
+- Source side `top` -> write `(a_position=Child, b_position=Parent)`.
+- Source side `bottom` -> write `(a_position=Parent, b_position=Child)`.
+- Source side `left` / `right` -> write `(a_position=Peer, b_position=Peer)`.
 
-- `a_position = role(source side)`
-- `b_position = role(target side)`
+The target click side is still captured for anchor routing (`anchor.to`) but does not flip role semantics.
 
 #### `+` linked-node creation flow (create a new node from one side)
 
@@ -240,7 +239,7 @@ The projection object is **derived in memory** during render. It is not persiste
 1. maps side to relationship role for direct links
 2. maps plus-link top/bottom to correct parent-child semantics
 3. keeps peer semantics for plus-link left/right
-4. uses clicked sides for existing-node relationship writes
+4. uses source-side semantics for existing-node relationship writes
 5. resolves selected role from the opposite-side position field
 6. infers deterministic anchor for parent-child and child-parent rows
 7. projects visual edge metadata without persistent storage

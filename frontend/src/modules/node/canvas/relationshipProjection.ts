@@ -44,9 +44,11 @@ export function buildLinkedNodePayloadFromSourceSide(side: NodeDirection): Relat
 }
 
 export function buildExistingNodeRelationshipPayload(sourceSide: NodeDirection, targetSide: NodeDirection): RelationshipWritePayload {
+  const sourceRole = sourceSide === "top" ? "Child" : sourceSide === "bottom" ? "Parent" : "Peer";
+  const targetRole = sourceRole === "Child" ? "Parent" : sourceRole === "Parent" ? "Child" : "Peer";
   return {
-    a_position: relationshipRoleFromSide(sourceSide),
-    b_position: relationshipRoleFromSide(targetSide),
+    a_position: sourceRole,
+    b_position: targetRole,
     anchor: { from: sourceSide, to: targetSide },
   };
 }

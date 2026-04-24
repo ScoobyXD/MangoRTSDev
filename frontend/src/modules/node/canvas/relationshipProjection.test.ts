@@ -53,11 +53,16 @@ test("keeps peer semantics for plus-link left/right", () => {
   });
 });
 
-test("uses clicked sides for existing-node relationship writes", () => {
+test("uses source-side semantics for existing-node relationship writes", () => {
   assert.deepEqual(buildExistingNodeRelationshipPayload("top", "bottom"), {
+    a_position: "Child",
+    b_position: "Parent",
+    anchor: { from: "top", to: "bottom" },
+  });
+  assert.deepEqual(buildExistingNodeRelationshipPayload("bottom", "top"), {
     a_position: "Parent",
     b_position: "Child",
-    anchor: { from: "top", to: "bottom" },
+    anchor: { from: "bottom", to: "top" },
   });
 });
 
