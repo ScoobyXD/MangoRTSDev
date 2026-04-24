@@ -1,6 +1,12 @@
 package httpapi
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"miraeopus/backend/internal/store"
+)
 
 func TestIsLegalNodeRelationshipPositionPair(t *testing.T) {
 	t.Parallel()
@@ -29,5 +35,40 @@ func TestIsLegalNodeRelationshipPositionPair(t *testing.T) {
 				t.Fatalf("isLegalNodeRelationshipPositionPair(%q, %q) = %t, want %t", tc.a, tc.b, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestWorkspaceSnapshotReturnsNotModifiedWhenDataUnchanged(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-etag-test"
+
+	_, err := repo.CreateNode(companyID, "alpha")
+	if err != nil {
+		t.Fatalf("CreateNode() error = %v", err)
+	}
+
+	firstReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID, nil)
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("first snapshot status = %d, want %d", firstRec.Code, http.StatusOK)
+	}
+
+	etag := firstRec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("first snapshot ETag is empty")
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID, nil)
+	secondReq.Header.Set("If-None-Match", etag)
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, secondReq)
+
+	if secondRec.Code != http.StatusNotModified {
+		t.Fatalf("second snapshot status = %d, want %d", secondRec.Code, http.StatusNotModified)
 	}
 }
