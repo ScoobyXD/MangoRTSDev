@@ -53,12 +53,13 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   const [dragState, setDragState] = useState<{ nodeIDs: string[]; pointerID: number; offsets: Record<string, { x: number; y: number }> } | null>(null);
   const [panState, setPanState] = useState<{ pointerID: number; startMouseX: number; startMouseY: number; startPanX: number; startPanY: number } | null>(null);
-  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; currentX: number; currentY: number; active: boolean }>({
+  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; currentX: number; currentY: number; active: boolean; additive: boolean }>({
     startX: 0,
     startY: 0,
     currentX: 0,
     currentY: 0,
     active: false,
+    additive: false,
   });
   const [selectionPointerID, setSelectionPointerID] = useState<number | null>(null);
   const restoredSelectionRef = useRef<string>("");
@@ -423,53 +424,6 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       window.removeEventListener("pointerup", onUp);
     };
   }, [panState]);
-
-  useEffect(() => {
-    if (selectionPointerID === null || !selectionBox.active) return;
-
-    const onMove = (event: PointerEvent) => {
-      if (event.pointerId !== selectionPointerID) return;
-      if (!viewportRef.current) return;
-      const bounds = viewportRef.current.getBoundingClientRect();
-      setSelectionBox((previous) => ({
-        ...previous,
-        currentX: clamp(event.clientX - bounds.left, 0, bounds.width),
-        currentY: clamp(event.clientY - bounds.top, 0, bounds.height),
-      }));
-    };
-
-    const onUp = (event: PointerEvent) => {
-      if (event.pointerId !== selectionPointerID || !viewportRef.current) return;
-      const minX = Math.min(selectionBox.startX, selectionBox.currentX);
-      const maxX = Math.max(selectionBox.startX, selectionBox.currentX);
-      const minY = Math.min(selectionBox.startY, selectionBox.currentY);
-      const maxY = Math.max(selectionBox.startY, selectionBox.currentY);
-
-      const selected = nodes.filter((node) => {
-        const pos = nodePositions[node.node_id];
-        if (!pos) return false;
-        const left = pos.x * zoom + pan.x;
-        const top = pos.y * zoom + pan.y;
-        const right = left + NODE_W * zoom;
-        const bottom = top + NODE_H * zoom;
-        return right >= minX && left <= maxX && bottom >= minY && top <= maxY;
-      });
-
-      const nextSet = new Set(selected.map((item) => item.node_id));
-      setSelectedNodeIDs(nextSet);
-      if (selected.length > 0) setSelectedNodeID(selected[0].node_id);
-      setSelectionPointerID(null);
-      setSelectionBox((previous) => ({ ...previous, active: false }));
-    };
-
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [selectionPointerID, selectionBox, nodes, nodePositions, zoom, pan.x, pan.y]);
 
   useEffect(() => {
     const onWindowPointerDown = () => {
@@ -1019,7 +973,118 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     return [from, relationshipDraft.cursor];
   }, [relationshipDraft, nodePositions]);
 
+  useEffect(() => {
+    if (selectionPointerID === null || !selectionBox.active) return;
+
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== selectionPointerID) return;
+      if (!viewportRef.current) return;
+      const bounds = viewportRef.current.getBoundingClientRect();
+      setSelectionBox((previous) => ({
+        ...previous,
+        currentX: clamp(event.clientX - bounds.left, 0, bounds.width),
+        currentY: clamp(event.clientY - bounds.top, 0, bounds.height),
+      }));
+    };
+
+    const onUp = (event: PointerEvent) => {
+      if (event.pointerId !== selectionPointerID || !viewportRef.current) return;
+      const minX = Math.min(selectionBox.startX, selectionBox.currentX);
+      const maxX = Math.max(selectionBox.startX, selectionBox.currentX);
+      const minY = Math.min(selectionBox.startY, selectionBox.currentY);
+      const maxY = Math.max(selectionBox.startY, selectionBox.currentY);
+
+      const selected = nodes.filter((node) => {
+        const pos = nodePositions[node.node_id];
+        if (!pos) return false;
+        const left = pos.x * zoom + pan.x;
+        const top = pos.y * zoom + pan.y;
+        const right = left + NODE_W * zoom;
+        const bottom = top + NODE_H * zoom;
+        return right >= minX && left <= maxX && bottom >= minY && top <= maxY;
+      });
+
+      const selectedRelationshipIDsInBox = connectionPaths
+        .filter((path) => {
+          const screenPoints = path.points.map((point) => ({ x: point.x * zoom + pan.x, y: point.y * zoom + pan.y }));
+          return pathIntersectsRect(screenPoints, minX, minY, maxX, maxY);
+        })
+        .map((path) => path.id);
+
+      if (selectionBox.additive) {
+        setSelectedNodeIDs((previous) => {
+          const next = new Set(previous);
+          for (const item of selected) next.add(item.node_id);
+          return next;
+        });
+        if (selected.length > 0) setSelectedNodeID(selected[selected.length - 1].node_id);
+        setSelectedRelationshipIDs((previous) => {
+          const next = new Set(previous);
+          for (const id of selectedRelationshipIDsInBox) next.add(id);
+          return next;
+        });
+      } else {
+        const nextSet = new Set(selected.map((item) => item.node_id));
+        setSelectedNodeIDs(nextSet);
+        if (selected.length > 0) setSelectedNodeID(selected[0].node_id);
+        else setSelectedNodeID("");
+        setSelectedRelationshipIDs(new Set(selectedRelationshipIDsInBox));
+      }
+      setSelectionPointerID(null);
+      setSelectionBox((previous) => ({ ...previous, active: false, additive: false }));
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [selectionPointerID, selectionBox, nodes, nodePositions, zoom, pan.x, pan.y, connectionPaths]);
+
   const visibleNodes = useMemo(() => nodes.filter((node) => visibleNodeIDSet.has(node.node_id)), [nodes, visibleNodeIDSet]);
+
+  const rectContainsPoint = (x: number, y: number, minX: number, minY: number, maxX: number, maxY: number) => x >= minX && x <= maxX && y >= minY && y <= maxY;
+  const orientation = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number) => {
+    const value = (by - ay) * (cx - bx) - (bx - ax) * (cy - by);
+    if (Math.abs(value) < 0.000001) return 0;
+    return value > 0 ? 1 : 2;
+  };
+  const onSegment = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number) =>
+    bx <= Math.max(ax, cx) && bx >= Math.min(ax, cx) && by <= Math.max(ay, cy) && by >= Math.min(ay, cy);
+  const segmentsIntersect = (a1x: number, a1y: number, a2x: number, a2y: number, b1x: number, b1y: number, b2x: number, b2y: number) => {
+    const o1 = orientation(a1x, a1y, a2x, a2y, b1x, b1y);
+    const o2 = orientation(a1x, a1y, a2x, a2y, b2x, b2y);
+    const o3 = orientation(b1x, b1y, b2x, b2y, a1x, a1y);
+    const o4 = orientation(b1x, b1y, b2x, b2y, a2x, a2y);
+    if (o1 !== o2 && o3 !== o4) return true;
+    if (o1 === 0 && onSegment(a1x, a1y, b1x, b1y, a2x, a2y)) return true;
+    if (o2 === 0 && onSegment(a1x, a1y, b2x, b2y, a2x, a2y)) return true;
+    if (o3 === 0 && onSegment(b1x, b1y, a1x, a1y, b2x, b2y)) return true;
+    if (o4 === 0 && onSegment(b1x, b1y, a2x, a2y, b2x, b2y)) return true;
+    return false;
+  };
+  const pathIntersectsRect = (points: { x: number; y: number }[], minX: number, minY: number, maxX: number, maxY: number) => {
+    if (points.length === 0) return false;
+    for (const point of points) {
+      if (rectContainsPoint(point.x, point.y, minX, minY, maxX, maxY)) return true;
+    }
+    const rectEdges = [
+      { x1: minX, y1: minY, x2: maxX, y2: minY },
+      { x1: maxX, y1: minY, x2: maxX, y2: maxY },
+      { x1: maxX, y1: maxY, x2: minX, y2: maxY },
+      { x1: minX, y1: maxY, x2: minX, y2: minY },
+    ];
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const a = points[i];
+      const b = points[i + 1];
+      for (const edge of rectEdges) {
+        if (segmentsIntersect(a.x, a.y, b.x, b.y, edge.x1, edge.y1, edge.x2, edge.y2)) return true;
+      }
+    }
+    return false;
+  };
 
   useEffect(() => {
     const canvas = relationshipCanvasRef.current;
@@ -1116,7 +1181,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             event.preventDefault();
             event.stopPropagation();
             setSelectionPointerID(event.pointerId);
-            setSelectionBox({ startX: localX, startY: localY, currentX: localX, currentY: localY, active: true });
+            setSelectionBox({ startX: localX, startY: localY, currentX: localX, currentY: localY, active: true, additive: true });
             return;
           }
 
@@ -1673,6 +1738,24 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             }}
           >
             Group selected: {selectedNodeIDs.size}
+          </div>
+        )}
+
+        {selectedRelationshipIDs.size > 0 && !selectionBox.active && (
+          <div
+            style={{
+              position: "absolute",
+              top: selectedNodeIDs.size > 1 ? 34 : 10,
+              left: 10,
+              zIndex: 30,
+              background: "rgba(0,0,0,0.75)",
+              color: "#fff",
+              padding: "4px 8px",
+              borderRadius: 6,
+              fontSize: 10,
+            }}
+          >
+            Relationships selected: {selectedRelationshipIDs.size}
           </div>
         )}
 
