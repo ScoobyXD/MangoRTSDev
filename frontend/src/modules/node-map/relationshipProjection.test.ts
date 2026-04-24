@@ -1,7 +1,7 @@
 // @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, inferRelationshipAnchor, projectRelationshipVisual, relationshipRoleFromSide, selectedRoleForRelationship } from "./relationshipProjection.js";
+import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, inferRelationshipAnchor, isLegalRelationshipSidePair, projectRelationshipVisual, relationshipRoleFromSide, selectedRoleForRelationship } from "./relationshipProjection.js";
 import { NodeRelationship } from "./shared.js";
 
 function relationship(overrides: Partial<NodeRelationship>): NodeRelationship {
@@ -64,6 +64,17 @@ test("uses source-side semantics for existing-node relationship writes", () => {
     b_position: "Child",
     anchor: { from: "bottom", to: "top" },
   });
+});
+
+test("enforces illegal side-pair rules for existing-node relationship drafts", () => {
+  assert.equal(isLegalRelationshipSidePair("left", "right"), true);
+  assert.equal(isLegalRelationshipSidePair("right", "left"), true);
+  assert.equal(isLegalRelationshipSidePair("left", "top"), false);
+  assert.equal(isLegalRelationshipSidePair("right", "bottom"), false);
+  assert.equal(isLegalRelationshipSidePair("top", "bottom"), true);
+  assert.equal(isLegalRelationshipSidePair("bottom", "top"), true);
+  assert.equal(isLegalRelationshipSidePair("top", "top"), false);
+  assert.equal(isLegalRelationshipSidePair("bottom", "bottom"), false);
 });
 
 test("resolves selected role from the opposite-side position field", () => {

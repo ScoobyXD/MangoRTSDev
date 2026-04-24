@@ -18,6 +18,11 @@ select to_regclass('public.nodes') as nodes,
        to_regclass('public.logic_gates') as logic_gates,
        to_regclass('public.operations') as operations;
 
+select conname
+from pg_constraint
+where conname in ('node_relationships_position_pair_chk', 'node_relationships_not_self_chk')
+order by conname;
+
 do $$
 begin
   if to_regclass('public.nodes') is null
@@ -25,6 +30,12 @@ begin
      or to_regclass('public.logic_gates') is null
      or to_regclass('public.operations') is null then
     raise exception 'canonical schema tables are missing; run apply_canonical_schema first';
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'node_relationships_position_pair_chk') then
+    raise exception 'missing constraint node_relationships_position_pair_chk; run apply_node_relationship_guards';
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'node_relationships_not_self_chk') then
+    raise exception 'missing constraint node_relationships_not_self_chk; run apply_node_relationship_guards';
   end if;
 end $$;
 '@
@@ -34,4 +45,4 @@ if ($LASTEXITCODE -ne 0) {
   throw "psql failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "✅ DB connectivity and canonical tables verified"
+Write-Host "✅ DB connectivity, canonical tables, and node relationship guards verified"

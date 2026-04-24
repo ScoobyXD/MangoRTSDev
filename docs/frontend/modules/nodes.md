@@ -141,6 +141,13 @@ Relationship creation uses a two-click attach flow between existing nodes:
 4. Click a side receive icon on the target node.
 5. The module writes one relationship row.
 
+Illegal relationship-side pairs are rejected before write:
+
+- Source `left`/`right` (peer) can only attach to target `left`/`right` (peer).
+- Source `top` can only attach to target `bottom`.
+- Source `bottom` can only attach to target `top`.
+- Illegal target sides are visually de-emphasized while drafting and do not write DB rows.
+
 ### Position mapping currently used when creating relationship records
 
 Source node is always `node_id_a`, target node is always `node_id_b`.
@@ -170,6 +177,7 @@ This replaces the old incorrect vertical swap behavior.
 
 - Relationship rows are removable from the details panel via **Snip**.
 - Relationship lines can also be selected directly on canvas by clicking the line path (multi-select with `Shift`/`Ctrl` + click).
+- Relationship lines can be snipped directly on-canvas via line **double-click**.
 - Keyboard `Delete` / `Backspace` deletes selected relationships.
 - Deletes call `DELETE /v1/node-relationships/:node_relationship_id`.
 
@@ -240,9 +248,10 @@ The projection object is **derived in memory** during render. It is not persiste
 2. maps plus-link top/bottom to correct parent-child semantics
 3. keeps peer semantics for plus-link left/right
 4. uses source-side semantics for existing-node relationship writes
-5. resolves selected role from the opposite-side position field
-6. infers deterministic anchor for parent-child and child-parent rows
-7. projects visual edge metadata without persistent storage
+5. enforces illegal side-pair rules for existing-node relationship drafts
+6. resolves selected role from the opposite-side position field
+7. infers deterministic anchor for parent-child and child-parent rows
+8. projects visual edge metadata without persistent storage
 
 ### How to run
 

@@ -95,9 +95,12 @@ Use this checklist format and keep it complete.
   - `+` linked top/bottom semantics
   - peer semantics for left/right
   - existing-node payload mapping
+  - illegal relationship side-pair enforcement (peer-only, top->bottom, bottom->top)
   - selected-node opposite-side role resolution
   - parent/child anchor inference
   - projected visual metadata output
+- [x] `backend/internal/http/server_test.go`
+  - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
 
 ### Integration tests
 - [ ] None committed yet (to be added)

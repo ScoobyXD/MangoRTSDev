@@ -224,6 +224,14 @@ func (s *Server) handleNodeRelationships(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "invalid_relationship_position")
 		return
 	}
+	if strings.TrimSpace(req.NodeIDA) == strings.TrimSpace(req.NodeIDB) {
+		writeError(w, http.StatusBadRequest, "self_relationship_not_allowed")
+		return
+	}
+	if !isLegalNodeRelationshipPositionPair(req.APosition, req.BPosition) {
+		writeError(w, http.StatusBadRequest, "illegal_relationship_pair")
+		return
+	}
 
 	item, err := s.repo.CreateNodeRelationship(req.CompanyID, req.NodeIDA, req.NodeIDB, req.APosition, req.BPosition)
 	if errors.Is(err, store.ErrNotFound) {
@@ -236,6 +244,12 @@ func (s *Server) handleNodeRelationships(w http.ResponseWriter, r *http.Request)
 	}
 	s.publishWorkspaceEvent(req.CompanyID, "relationship_created", map[string]any{"node_relationship_id": item.NodeRelationshipID, "node_id_a": item.NodeIDA, "node_id_b": item.NodeIDB, "relationship": item})
 	writeJSON(w, http.StatusCreated, item)
+}
+
+func isLegalNodeRelationshipPositionPair(aPosition, bPosition string) bool {
+	return (aPosition == "Parent" && bPosition == "Child") ||
+		(aPosition == "Child" && bPosition == "Parent") ||
+		(aPosition == "Peer" && bPosition == "Peer")
 }
 
 func (s *Server) handleNodeRelationshipByID(w http.ResponseWriter, r *http.Request) {
