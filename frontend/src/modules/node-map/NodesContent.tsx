@@ -177,7 +177,12 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         const payload = await response.json();
         if (payload?.error) reason = payload.error;
       } catch {
-        // no-op
+        try {
+          const fallbackText = (await response.text()).trim();
+          if (fallbackText) reason = `${reason}:${fallbackText.slice(0, 120)}`;
+        } catch {
+          // no-op
+        }
       }
       throw new Error(reason);
     }
@@ -744,6 +749,12 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
       if (summary.failed.length > 0) {
         const failure = summary.failed[0];
+        if (failure?.reason === "relationship_not_found" || failure?.reason.startsWith("request_failed_404")) {
+          await refreshWorkspaceSnapshot(apiBase, companyID);
+          const snapshot = getWorkspaceSnapshot(apiBase, companyID);
+          const allowed = new Set(nodes.map((node) => node.node_id));
+          setRelationships((snapshot.relationships ?? []).filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b)));
+        }
         setError(failure?.reason ?? "failed_to_delete_relationship");
         setStatusMessage(
           `Deleted ${summary.succeededIDs.length}/${unique.length} relationship lines. First failure (${failure?.relationshipID ?? "unknown"}): ${failure?.reason ?? "failed_to_delete_relationship"}`,
