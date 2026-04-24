@@ -645,9 +645,13 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     }
     setError("");
     try {
-      await Promise.all(unique.map((relationshipID) => requestJSON<{ status: string }>(`/v1/node-relationships/${relationshipID}?company_id=${encodeURIComponent(companyID)}`, {
-        method: "DELETE",
-      })));
+      const companyByRelationshipID = new Map(relationships.map((relationship) => [relationship.node_relationship_id, relationship.company_id]));
+      await Promise.all(unique.map((relationshipID) => {
+        const relationshipCompanyID = companyByRelationshipID.get(relationshipID) ?? companyID;
+        return requestJSON<{ status: string }>(`/v1/node-relationships/${relationshipID}?company_id=${encodeURIComponent(relationshipCompanyID)}`, {
+          method: "DELETE",
+        });
+      }));
       setSelectedRelationshipIDs((previous) => {
         const next = new Set(previous);
         for (const id of unique) next.delete(id);
