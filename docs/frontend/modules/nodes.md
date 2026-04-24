@@ -20,7 +20,7 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 - create directional relationships from side handles,
 - drag nodes on a fine grid,
 - zoom and pan across a larger virtual node world,
-- box-select multiple nodes,
+- box-select multiple nodes and relationship lines,
 - view relationship lines between nodes,
 - add node information records,
 - and keep node layout/view state persisted locally.
@@ -111,13 +111,13 @@ Nodes are positioned in **world coordinates**, while pan/zoom transform the worl
 ### 4.4 Multi-select
 
 - `Shift + drag` **or** `Ctrl + drag` on canvas creates marquee selection box.
-- Nodes intersecting the box become selected.
+- Nodes and relationship line paths intersecting the box become selected.
 - `Shift + click` **or** `Ctrl + click` on node cards toggles nodes in/out of the current selection set.
 - Visual indicators:
   - selected border/outline/glow,
   - selected dot marker on card,
   - “Group selected: N” badge for multi-select.
-- Clicking blank canvas clears group selection.
+- Clicking blank canvas clears node and relationship selection sets.
 
 ---
 
@@ -177,6 +177,7 @@ This replaces the old incorrect vertical swap behavior.
 
 - Relationship rows are removable from the details panel via **Snip**.
 - Relationship lines can also be selected directly on canvas by clicking the line path (multi-select with `Shift`/`Ctrl` + click).
+- Relationship lines participate in marquee selection (`Shift`/`Ctrl` + drag) using polyline/selection-rectangle intersection.
 - Relationship lines can be snipped directly on-canvas via line **double-click**.
 - Keyboard `Delete` / `Backspace` deletes selected relationships.
 - Deletes call `DELETE /v1/node-relationships/:node_relationship_id`.
@@ -237,10 +238,12 @@ The projection object is **derived in memory** during render. It is not persiste
 ### Files under test
 
 - `frontend/src/modules/node-map/relationshipProjection.ts`
+- `frontend/src/modules/node-map/selectionGeometry.ts`
 
 ### Test file
 
 - `frontend/src/modules/node-map/relationshipProjection.test.ts`
+- `frontend/src/modules/node-map/selectionGeometry.test.ts`
 
 ### Available tests in that file
 
@@ -252,6 +255,7 @@ The projection object is **derived in memory** during render. It is not persiste
 6. resolves selected role from the opposite-side position field
 7. infers deterministic anchor for parent-child and child-parent rows
 8. projects visual edge metadata without persistent storage
+9. detects relationship polyline intersection for marquee selection hit-testing
 
 ### How to run
 
@@ -264,7 +268,7 @@ npm run test:node-relationships
 What the command does:
 
 1. Compiles only the node-relationship projection test targets with `tsc -p tsconfig.node-tests.json`.
-2. Runs Node’s built-in test runner against the emitted JS test file in `.test-dist/`.
+2. Runs Node’s built-in test runner against the emitted JS test files in `.test-dist/`.
 
 ---
 
