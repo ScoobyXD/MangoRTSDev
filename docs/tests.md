@@ -104,6 +104,9 @@ Use this checklist format and keep it complete.
   - polyline relationship-path vs marquee rectangle intersection detection
   - rectangle-boundary overlap detection for relationship-line hit-testing
   - non-overlap guard for fully out-of-bounds relationship-line paths
+- [x] `frontend/src/modules/node-map/relationshipDeleteSummary.test.ts`
+  - success/failure summarization for batched relationship-line delete requests
+  - preserves per-relationship failure reason reporting for visibility
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
 

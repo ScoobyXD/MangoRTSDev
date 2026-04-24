@@ -359,6 +359,7 @@ and reads `selectedNodeID`. That selected node becomes the active storage target
 - In-canvas instruction text.
 - Right-click context menu with `Create new node` at cursor location.
 - Right-click context menu also includes `Enable relationship colors` with an explicit iOS-style on/off slider (knob left = off, knob right = on).
+- A top-right status badge surfaces relationship-line delete progress and failure reasons so delete operations are observable even when the details panel is closed.
 - Right-click menu rows use left-aligned text and box-style row containers.
 - This menu uses the default **Boxy Hierarchical** list style.
 - Relationship role color options (`Parent`, `Peer`, `Child`) are shown directly under `Enable relationship colors` as nested controls with stronger right indentation.

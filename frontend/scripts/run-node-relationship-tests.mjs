@@ -8,6 +8,7 @@ const frontendRoot = resolve(scriptDir, "..");
 const testFiles = [
   resolve(frontendRoot, ".test-dist/modules/node-map/relationshipProjection.test.js"),
   resolve(frontendRoot, ".test-dist/modules/node-map/relationshipSelection.test.js"),
+  resolve(frontendRoot, ".test-dist/modules/node-map/relationshipDeleteSummary.test.js"),
 ];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
 
@@ -25,10 +26,11 @@ for (const testFile of testFiles) {
   let contents = readFileSync(testFile, "utf8");
   contents = contents.replaceAll('"./relationshipProjection"', '"./relationshipProjection.js"');
   contents = contents.replaceAll('"./relationshipSelection"', '"./relationshipSelection.js"');
+  contents = contents.replaceAll('"./relationshipDeleteSummary"', '"./relationshipDeleteSummary.js"');
   writeFileSync(testFile, contents, "utf8");
 }
 
 mkdirSync(resolve(frontendRoot, ".test-dist"), { recursive: true });
 writeFileSync(packageFile, '{"type":"module"}\n', "utf8");
 
-run(`"${process.execPath}" --test .test-dist/modules/node-map/relationshipProjection.test.js .test-dist/modules/node-map/relationshipSelection.test.js`);
+run(`"${process.execPath}" --test .test-dist/modules/node-map/relationshipProjection.test.js .test-dist/modules/node-map/relationshipSelection.test.js .test-dist/modules/node-map/relationshipDeleteSummary.test.js`);
