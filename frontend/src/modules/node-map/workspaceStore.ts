@@ -41,6 +41,21 @@ function notify(entry: CacheEntry): void {
   for (const subscriber of entry.subscribers) subscriber();
 }
 
+// Local mutation helper: lets hot-path UI actions apply immediate cache updates without
+// forcing a full snapshot refetch. SSE + periodic snapshot refresh remain the source of truth.
+export function upsertWorkspaceNode(apiBase: string, companyID: string, node: NodeRecord): void {
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  const currentNodes = entry.snapshot.nodes ?? [];
+  const exists = currentNodes.some((item) => item.node_id === node.node_id);
+  entry.snapshot = {
+    nodes: exists ? currentNodes.map((item) => (item.node_id === node.node_id ? node : item)) : [...currentNodes, node],
+    relationships: entry.snapshot.relationships ?? [],
+    generated_at: new Date().toISOString(),
+  };
+  notify(entry);
+}
+
 // Runtime payload guard for SSE delta events -> NodeRecord contract.
 function asNodeRecord(candidate: unknown): NodeRecord | null {
   if (!candidate || typeof candidate !== "object") return null;
@@ -150,6 +165,9 @@ export async function refreshWorkspaceSnapshot(apiBase: string, companyID: strin
     if (!response.ok) return;
     const payload = (await response.json()) as WorkspaceSnapshot;
     const nextEtag = response.headers.get("ETag");
+    // If the backend says the payload hash is identical to what we already hold, skip
+    // subscriber fan-out entirely. This protects hot paths from unnecessary rerender churn.
+    if (nextEtag && entry.etag === nextEtag) return;
     if (nextEtag) entry.etag = nextEtag;
     entry.snapshot = {
       nodes: payload.nodes ?? [],
