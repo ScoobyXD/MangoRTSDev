@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_STATE_UPDATED } from "./eventbus";
-import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace, upsertWorkspaceNode } from "./workspaceStore";
+import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, removeWorkspaceNode, subscribeWorkspace, upsertWorkspaceNode } from "./workspaceStore";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { pathIntersectsRect } from "./relationshipSelection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
@@ -170,12 +170,12 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   // Shared API request helper for node CRUD, details, and relationship operations.
   const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+    const headers = new Headers(init?.headers);
+    // Avoid setting Content-Type on GET/HEAD requests; this reduces cross-origin preflights.
+    if (init?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
     const response = await fetch(`${apiBase}${path}`, {
       ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers || {}),
-      },
+      headers,
     });
 
     if (!response.ok) {
@@ -294,8 +294,9 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   useEffect(() => {
     if (!detailsPanelNodeID) return;
+    if (detailsPanelNodeID === selectedNodeID) return;
     void loadDetails(detailsPanelNodeID);
-  }, [detailsPanelNodeID]);
+  }, [detailsPanelNodeID, selectedNodeID]);
 
   useEffect(() => {
     const resize = () => {
@@ -665,7 +666,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     }));
     loadGraphRelationshipsFromSnapshot(nodes);
     await loadDetails(selectedNodeID);
-    if (detailsPanelNodeID) await loadDetails(detailsPanelNodeID);
+    if (detailsPanelNodeID && detailsPanelNodeID !== selectedNodeID) await loadDetails(detailsPanelNodeID);
   };
 
   // Delete-node action with selection/context cleanup and snapshot refresh.
@@ -676,13 +677,19 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       await requestJSON<{ status: string }>(`/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}`, {
         method: "DELETE",
       });
+      removeWorkspaceNode(apiBase, companyID, nodeID);
       setDetails((current) => (current?.node.node_id === nodeID ? null : current));
       if (detailsPanelNodeID === nodeID) setDetailsPanelNodeID("");
-      await loadNodes();
       setSelectedNodeIDs((previous) => {
         const next = new Set(previous);
         next.delete(nodeID);
         return next;
+      });
+      setSelectedNodeID((previous) => {
+        if (previous !== nodeID) return previous;
+        const snapshot = getWorkspaceSnapshot(apiBase, companyID);
+        const fallback = (snapshot.nodes ?? [])[0]?.node_id ?? "";
+        return fallback;
       });
       setNodePositions((previous) => {
         const next = { ...previous };
@@ -702,10 +709,12 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       await Promise.all(unique.map((nodeID) => requestJSON<{ status: string }>(`/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}`, {
         method: "DELETE",
       })));
+      for (const id of unique) removeWorkspaceNode(apiBase, companyID, id);
       setDetails((current) => (current && unique.includes(current.node.node_id) ? null : current));
       if (detailsPanelNodeID && unique.includes(detailsPanelNodeID)) setDetailsPanelNodeID("");
-      await loadNodes();
-      setSelectedNodeID("");
+      const snapshot = getWorkspaceSnapshot(apiBase, companyID);
+      const fallback = (snapshot.nodes ?? [])[0]?.node_id ?? "";
+      setSelectedNodeID(fallback);
       setSelectedNodeIDs(new Set());
       setNodePositions((previous) => {
         const next = { ...previous };
@@ -747,7 +756,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
       loadGraphRelationshipsFromSnapshot(nodes);
       await loadDetails(selectedNodeID);
-      if (detailsPanelNodeID) await loadDetails(detailsPanelNodeID);
+      if (detailsPanelNodeID && detailsPanelNodeID !== selectedNodeID) await loadDetails(detailsPanelNodeID);
 
       if (summary.failed.length > 0) {
         const failure = summary.failed[0];

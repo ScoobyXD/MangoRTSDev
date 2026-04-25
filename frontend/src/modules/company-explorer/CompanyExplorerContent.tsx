@@ -34,12 +34,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   // Shared request helper for explorer detail/snapshot API calls.
   const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+    const headers = new Headers(init?.headers);
+    // Avoid Content-Type on body-less requests to reduce CORS preflight chatter on GETs.
+    if (init?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
     const response = await fetch(`${apiBase}${path}`, {
       ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers || {}),
-      },
+      headers,
     });
     if (!response.ok) {
       let reason = `request_failed_${response.status}`;

@@ -41,6 +41,12 @@ function notify(entry: CacheEntry): void {
   for (const subscriber of entry.subscribers) subscriber();
 }
 
+// Some workspace events are intentionally non-graph mutations (e.g. node information writes).
+// For those, refreshing the graph snapshot is unnecessary and adds avoidable hot-path GET load.
+function isNonGraphWorkspaceEvent(eventType: string): boolean {
+  return eventType === "node_information_created";
+}
+
 // Local mutation helper: lets hot-path UI actions apply immediate cache updates without
 // forcing a full snapshot refetch. SSE + periodic snapshot refresh remain the source of truth.
 export function upsertWorkspaceNode(apiBase: string, companyID: string, node: NodeRecord): void {
@@ -51,6 +57,24 @@ export function upsertWorkspaceNode(apiBase: string, companyID: string, node: No
   entry.snapshot = {
     nodes: exists ? currentNodes.map((item) => (item.node_id === node.node_id ? node : item)) : [...currentNodes, node],
     relationships: entry.snapshot.relationships ?? [],
+    generated_at: new Date().toISOString(),
+  };
+  notify(entry);
+}
+
+// Local mutation helper for delete flows so successful node deletes converge immediately without
+// forcing a full snapshot reload on hot paths.
+export function removeWorkspaceNode(apiBase: string, companyID: string, nodeID: string): void {
+  if (!nodeID) return;
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  const currentNodes = entry.snapshot.nodes ?? [];
+  const nextNodes = currentNodes.filter((item) => item.node_id !== nodeID);
+  const nextRelationships = (entry.snapshot.relationships ?? []).filter((item) => item.node_id_a !== nodeID && item.node_id_b !== nodeID);
+  if (nextNodes.length === currentNodes.length && nextRelationships.length === (entry.snapshot.relationships ?? []).length) return;
+  entry.snapshot = {
+    nodes: nextNodes,
+    relationships: nextRelationships,
     generated_at: new Date().toISOString(),
   };
   notify(entry);
@@ -195,6 +219,7 @@ function ensureStream(apiBase: string, companyID: string): void {
     try {
       const envelope = JSON.parse(payload) as WorkspaceStreamEnvelope;
       if (envelope.company_id !== companyID) return;
+      if (isNonGraphWorkspaceEvent(envelope.type)) return;
       const applied = applyWorkspaceDelta(entry, envelope);
       if (applied) notify(entry);
       else void refreshWorkspaceSnapshot(apiBase, companyID);

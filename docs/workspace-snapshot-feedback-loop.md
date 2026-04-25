@@ -56,6 +56,10 @@ The loop above violated these rules by repeatedly issuing snapshot reads and re-
 - Relationship projection now reads from local snapshot cache in-memory.
 - Added a guard in snapshot refresh to skip subscriber fan-out when ETag is unchanged.
 - Removed the post-create `loadNodes()` snapshot refetch and replaced it with workspace-store optimistic node upsert plus SSE/store convergence so all subscribers update consistently.
+- Added workspace-store local node removal helper so delete flows no longer force `loadNodes()` snapshot refresh on success.
+- Added non-graph workspace event short-circuiting (`node_information_created`) so these events no longer trigger graph snapshot refresh fallback.
+- Reduced preflight overhead by only setting `Content-Type: application/json` on requests that actually include a body.
+- Reduced duplicate details GETs by skipping redundant details-panel reload when it targets the same node as the selected-node details load.
 
 ### Backend (snapshot endpoint)
 
