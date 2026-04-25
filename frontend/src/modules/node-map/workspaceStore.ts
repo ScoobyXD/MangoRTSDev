@@ -150,6 +150,9 @@ export async function refreshWorkspaceSnapshot(apiBase: string, companyID: strin
     if (!response.ok) return;
     const payload = (await response.json()) as WorkspaceSnapshot;
     const nextEtag = response.headers.get("ETag");
+    // If the backend says the payload hash is identical to what we already hold, skip
+    // subscriber fan-out entirely. This protects hot paths from unnecessary rerender churn.
+    if (nextEtag && entry.etag === nextEtag) return;
     if (nextEtag) entry.etag = nextEtag;
     entry.snapshot = {
       nodes: payload.nodes ?? [],

@@ -75,6 +75,13 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const connectionPathsRef = useRef<Array<{ id: string; points: { x: number; y: number }[] }>>([]);
   const suppressNextRelationshipLineClickRef = useRef(false);
 
+  // Keep relationship projection derivation centralized so callers can reuse the exact same
+  // filtering logic without triggering additional network calls.
+  const projectVisibleRelationships = (snapshotNodes: NodeRecord[], snapshotRelationships: NodeRelationship[]) => {
+    const allowed = new Set(snapshotNodes.map((node) => node.node_id));
+    return snapshotRelationships.filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b));
+  };
+
   const startRelationshipLineMarqueeSelection = (pointerID: number, clientX: number, clientY: number) => {
     if (!viewportRef.current) return;
     const bounds = viewportRef.current.getBoundingClientRect();
@@ -222,20 +229,16 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     }
   };
 
-  // Load relationship set scoped to nodes currently available in workspace snapshot.
-  const loadGraphRelationships = async (graphNodes: NodeRecord[]) => {
+  // Load relationship set scoped to nodes currently available in the local workspace snapshot cache.
+  // IMPORTANT: this intentionally does not fetch. Fetching here created a hot-path feedback loop:
+  // nodes changed -> refresh snapshot -> subscription setNodes -> nodes changed again.
+  const loadGraphRelationshipsFromSnapshot = (graphNodes: NodeRecord[]) => {
     if (graphNodes.length === 0) {
       setRelationships([]);
       return;
     }
-    try {
-      await refreshWorkspaceSnapshot(apiBase, companyID);
-      const payload = getWorkspaceSnapshot(apiBase, companyID);
-      const allowed = new Set(graphNodes.map((node) => node.node_id));
-      setRelationships((payload.relationships ?? []).filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b)));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_load_relationships");
-    }
+    const payload = getWorkspaceSnapshot(apiBase, companyID);
+    setRelationships(projectVisibleRelationships(graphNodes, payload.relationships ?? []));
   };
 
   // Node details loader used by right-side details panel and info editing actions.
@@ -264,15 +267,11 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   useEffect(() => {
     return subscribeWorkspace(apiBase, companyID, () => {
       const snapshot = getWorkspaceSnapshot(apiBase, companyID);
-      setNodes(snapshot.nodes ?? []);
-      const allowed = new Set((snapshot.nodes ?? []).map((node) => node.node_id));
-      setRelationships((snapshot.relationships ?? []).filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b)));
+      const snapshotNodes = snapshot.nodes ?? [];
+      setNodes(snapshotNodes);
+      setRelationships(projectVisibleRelationships(snapshotNodes, snapshot.relationships ?? []));
     });
   }, [apiBase, companyID]);
-
-  useEffect(() => {
-    void loadGraphRelationships(nodes);
-  }, [nodes]);
 
   useEffect(() => {
     setSelectedRelationshipIDs((previous) => {
@@ -570,7 +569,13 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         method: "POST",
         body: JSON.stringify({ company_id: companyID, header: value }),
       });
-      await loadNodes();
+      // Hot-path rule: avoid full snapshot refetch on create.
+      // We rely on SSE/workspace-store propagation for canonical sync and do a local optimistic insert
+      // so the creating client updates immediately without reopening a snapshot request loop.
+      setNodes((previous) => {
+        if (previous.some((item) => item.node_id === node.node_id)) return previous;
+        return [...previous, node];
+      });
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       if (worldPos) {
@@ -631,7 +636,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       }));
 
       await loadDetails(sourceNodeID);
-      await loadGraphRelationships([...nodes, node]);
+      loadGraphRelationshipsFromSnapshot([...nodes, node]);
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       setDetailsPanelNodeID(node.node_id);
@@ -661,7 +666,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       ...previous,
       [relationship.node_relationship_id]: payload.anchor,
     }));
-    await loadGraphRelationships(nodes);
+    loadGraphRelationshipsFromSnapshot(nodes);
     await loadDetails(selectedNodeID);
     if (detailsPanelNodeID) await loadDetails(detailsPanelNodeID);
   };
@@ -743,7 +748,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         return next;
       });
 
-      await loadGraphRelationships(nodes);
+      loadGraphRelationshipsFromSnapshot(nodes);
       await loadDetails(selectedNodeID);
       if (detailsPanelNodeID) await loadDetails(detailsPanelNodeID);
 
@@ -752,8 +757,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         if (failure?.reason === "relationship_not_found" || failure?.reason.startsWith("request_failed_404")) {
           await refreshWorkspaceSnapshot(apiBase, companyID);
           const snapshot = getWorkspaceSnapshot(apiBase, companyID);
-          const allowed = new Set(nodes.map((node) => node.node_id));
-          setRelationships((snapshot.relationships ?? []).filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b)));
+          setRelationships(projectVisibleRelationships(nodes, snapshot.relationships ?? []));
         }
         setError(failure?.reason ?? "failed_to_delete_relationship");
         setStatusMessage(

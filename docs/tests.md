@@ -109,9 +109,11 @@ Use this checklist format and keep it complete.
   - preserves per-relationship failure reason reporting for visibility
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
+  - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)
 
 ### Integration tests
 - [ ] None committed yet (to be added)
+- [ ] Workspace store create-node anti-refetch loop integration test (temporarily blocked: no existing browser/session harness to simulate EventSource + component lifecycle churn deterministically)
 
 ### End-to-end tests
 - [ ] None committed yet (to be added)
