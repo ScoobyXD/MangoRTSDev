@@ -175,6 +175,60 @@ Blockers:
 - Delta coverage is not yet complete for all mutation shapes.
 - No versioned event contract yet for long-term compatibility.
 
+### Workspace Snapshot Consistency Model (Current)
+
+These are the currently implemented mechanisms that keep the client workspace cache aligned with database truth:
+
+1. **DB-backed snapshot endpoint remains authoritative.**
+   - `/v1/workspace/snapshot` is built from repository reads (`ListNodes`, `ListNodeRelationships`) on each request.
+   - This endpoint remains the read authority for full graph state.
+
+2. **Initial hydration + subscription model.**
+   - Node Map mounts, hydrates from snapshot/store, then stays synced via workspace subscriptions/stream.
+
+3. **SSE delta application for core graph events.**
+   - Client deltas are currently applied for:
+     - `node_created`
+     - `node_deleted`
+     - `relationship_created`
+     - `relationship_deleted`
+   - Subscribers are notified immediately after successful delta apply.
+
+4. **Fallback full refresh on stream uncertainty.**
+   - If stream payload is empty, malformed, or cannot be delta-applied, client falls back to `refreshWorkspaceSnapshot(...)`.
+
+5. **Conditional GET / ETag guard.**
+   - Snapshot refresh sends `If-None-Match`.
+   - Unchanged payloads can return `304 Not Modified`.
+   - Client also skips subscriber fan-out when returned ETag matches cached ETag.
+
+6. **Targeted reconciliation on known mismatch cases.**
+   - Example: relationship-delete flow performs explicit snapshot refresh on 404-style mismatch to resynchronize state.
+
+7. **Optimistic local updates are a fast path, not final authority.**
+   - `upsertWorkspaceNode` / `removeWorkspaceNode` are local convergence helpers for latency.
+   - SSE + snapshot refresh remain the source-of-truth convergence path.
+
+### Remaining Risk (Important)
+
+- SSE delta coverage is still partial (“only selected event types currently delta-applied client-side”).
+- Therefore bounded drift risk remains until event coverage and contract versioning are completed.
+- Reducing chatty fallback GETs increases dependence on stream contract quality and reconciliation reliability.
+
+### De-risking Recommendations (Next)
+
+1. **Versioned stream envelope + monotonic sequence per company**
+   - detect dropped/out-of-order events and trigger safe reconciliation.
+
+2. **Periodic lightweight reconciliation checkpoints**
+   - e.g., scheduled snapshot check every N minutes and/or on tab visibility regain.
+
+3. **Snapshot-hash compare telemetry**
+   - detect divergence early and quantify drift frequency.
+
+4. **Explicit SLOs for stream-lag and reconciliation-lag**
+   - make lag visible and enforceable with dashboards + alerts.
+
 ### Rendering Scalability
 - ✅ Viewport culling/windowing implemented for Node Map
 - ✅ Virtualization implemented for Explorer tree and heavy lists
