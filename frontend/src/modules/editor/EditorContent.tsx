@@ -31,9 +31,12 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   // API helper for editor load/save flows tied to selected node context.
   const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
+    const headers = new Headers(init?.headers);
+    // Avoid setting Content-Type for body-less requests to prevent unnecessary preflights on GETs.
+    if (init?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
     const response = await fetch(`${apiBase}${path}`, {
       ...init,
-      headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+      headers,
     });
     if (!response.ok) throw new Error(await response.text() || `Request failed (${response.status})`);
     if (response.status === 204) return undefined as T;

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_STATE_UPDATED } from "./eventbus";
-import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "./workspaceStore";
+import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, removeWorkspaceNode, subscribeWorkspace, upsertWorkspaceNode } from "./workspaceStore";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { pathIntersectsRect } from "./relationshipSelection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
@@ -74,6 +74,13 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
   const connectionPathsRef = useRef<Array<{ id: string; points: { x: number; y: number }[] }>>([]);
   const suppressNextRelationshipLineClickRef = useRef(false);
+
+  // Keep relationship projection derivation centralized so callers can reuse the exact same
+  // filtering logic without triggering additional network calls.
+  const projectVisibleRelationships = (snapshotNodes: NodeRecord[], snapshotRelationships: NodeRelationship[]) => {
+    const allowed = new Set(snapshotNodes.map((node) => node.node_id));
+    return snapshotRelationships.filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b));
+  };
 
   const startRelationshipLineMarqueeSelection = (pointerID: number, clientX: number, clientY: number) => {
     if (!viewportRef.current) return;
@@ -163,12 +170,12 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   // Shared API request helper for node CRUD, details, and relationship operations.
   const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+    const headers = new Headers(init?.headers);
+    // Avoid setting Content-Type on GET/HEAD requests; this reduces cross-origin preflights.
+    if (init?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
     const response = await fetch(`${apiBase}${path}`, {
       ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers || {}),
-      },
+      headers,
     });
 
     if (!response.ok) {
@@ -222,20 +229,16 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     }
   };
 
-  // Load relationship set scoped to nodes currently available in workspace snapshot.
-  const loadGraphRelationships = async (graphNodes: NodeRecord[]) => {
+  // Load relationship set scoped to nodes currently available in the local workspace snapshot cache.
+  // IMPORTANT: this intentionally does not fetch. Fetching here created a hot-path feedback loop:
+  // nodes changed -> refresh snapshot -> subscription setNodes -> nodes changed again.
+  const loadGraphRelationshipsFromSnapshot = (graphNodes: NodeRecord[]) => {
     if (graphNodes.length === 0) {
       setRelationships([]);
       return;
     }
-    try {
-      await refreshWorkspaceSnapshot(apiBase, companyID);
-      const payload = getWorkspaceSnapshot(apiBase, companyID);
-      const allowed = new Set(graphNodes.map((node) => node.node_id));
-      setRelationships((payload.relationships ?? []).filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b)));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_load_relationships");
-    }
+    const payload = getWorkspaceSnapshot(apiBase, companyID);
+    setRelationships(projectVisibleRelationships(graphNodes, payload.relationships ?? []));
   };
 
   // Node details loader used by right-side details panel and info editing actions.
@@ -264,15 +267,11 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   useEffect(() => {
     return subscribeWorkspace(apiBase, companyID, () => {
       const snapshot = getWorkspaceSnapshot(apiBase, companyID);
-      setNodes(snapshot.nodes ?? []);
-      const allowed = new Set((snapshot.nodes ?? []).map((node) => node.node_id));
-      setRelationships((snapshot.relationships ?? []).filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b)));
+      const snapshotNodes = snapshot.nodes ?? [];
+      setNodes(snapshotNodes);
+      setRelationships(projectVisibleRelationships(snapshotNodes, snapshot.relationships ?? []));
     });
   }, [apiBase, companyID]);
-
-  useEffect(() => {
-    void loadGraphRelationships(nodes);
-  }, [nodes]);
 
   useEffect(() => {
     setSelectedRelationshipIDs((previous) => {
@@ -295,8 +294,9 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   useEffect(() => {
     if (!detailsPanelNodeID) return;
+    if (detailsPanelNodeID === selectedNodeID) return;
     void loadDetails(detailsPanelNodeID);
-  }, [detailsPanelNodeID]);
+  }, [detailsPanelNodeID, selectedNodeID]);
 
   useEffect(() => {
     const resize = () => {
@@ -570,7 +570,10 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         method: "POST",
         body: JSON.stringify({ company_id: companyID, header: value }),
       });
-      await loadNodes();
+      // Hot-path rule: avoid full snapshot refetch on create.
+      // Apply optimistic node insertion via workspaceStore so all subscribers (Node Map + Explorer)
+      // get immediate convergence without issuing a snapshot GET.
+      upsertWorkspaceNode(apiBase, companyID, node);
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       if (worldPos) {
@@ -631,7 +634,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       }));
 
       await loadDetails(sourceNodeID);
-      await loadGraphRelationships([...nodes, node]);
+      loadGraphRelationshipsFromSnapshot([...nodes, node]);
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       setDetailsPanelNodeID(node.node_id);
@@ -661,9 +664,9 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       ...previous,
       [relationship.node_relationship_id]: payload.anchor,
     }));
-    await loadGraphRelationships(nodes);
+    loadGraphRelationshipsFromSnapshot(nodes);
     await loadDetails(selectedNodeID);
-    if (detailsPanelNodeID) await loadDetails(detailsPanelNodeID);
+    if (detailsPanelNodeID && detailsPanelNodeID !== selectedNodeID) await loadDetails(detailsPanelNodeID);
   };
 
   // Delete-node action with selection/context cleanup and snapshot refresh.
@@ -674,13 +677,19 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       await requestJSON<{ status: string }>(`/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}`, {
         method: "DELETE",
       });
+      removeWorkspaceNode(apiBase, companyID, nodeID);
       setDetails((current) => (current?.node.node_id === nodeID ? null : current));
       if (detailsPanelNodeID === nodeID) setDetailsPanelNodeID("");
-      await loadNodes();
       setSelectedNodeIDs((previous) => {
         const next = new Set(previous);
         next.delete(nodeID);
         return next;
+      });
+      setSelectedNodeID((previous) => {
+        if (previous !== nodeID) return previous;
+        const snapshot = getWorkspaceSnapshot(apiBase, companyID);
+        const fallback = (snapshot.nodes ?? [])[0]?.node_id ?? "";
+        return fallback;
       });
       setNodePositions((previous) => {
         const next = { ...previous };
@@ -700,10 +709,12 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       await Promise.all(unique.map((nodeID) => requestJSON<{ status: string }>(`/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}`, {
         method: "DELETE",
       })));
+      for (const id of unique) removeWorkspaceNode(apiBase, companyID, id);
       setDetails((current) => (current && unique.includes(current.node.node_id) ? null : current));
       if (detailsPanelNodeID && unique.includes(detailsPanelNodeID)) setDetailsPanelNodeID("");
-      await loadNodes();
-      setSelectedNodeID("");
+      const snapshot = getWorkspaceSnapshot(apiBase, companyID);
+      const fallback = (snapshot.nodes ?? [])[0]?.node_id ?? "";
+      setSelectedNodeID(fallback);
       setSelectedNodeIDs(new Set());
       setNodePositions((previous) => {
         const next = { ...previous };
@@ -743,17 +754,16 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         return next;
       });
 
-      await loadGraphRelationships(nodes);
+      loadGraphRelationshipsFromSnapshot(nodes);
       await loadDetails(selectedNodeID);
-      if (detailsPanelNodeID) await loadDetails(detailsPanelNodeID);
+      if (detailsPanelNodeID && detailsPanelNodeID !== selectedNodeID) await loadDetails(detailsPanelNodeID);
 
       if (summary.failed.length > 0) {
         const failure = summary.failed[0];
         if (failure?.reason === "relationship_not_found" || failure?.reason.startsWith("request_failed_404")) {
           await refreshWorkspaceSnapshot(apiBase, companyID);
           const snapshot = getWorkspaceSnapshot(apiBase, companyID);
-          const allowed = new Set(nodes.map((node) => node.node_id));
-          setRelationships((snapshot.relationships ?? []).filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b)));
+          setRelationships(projectVisibleRelationships(nodes, snapshot.relationships ?? []));
         }
         setError(failure?.reason ?? "failed_to_delete_relationship");
         setStatusMessage(
