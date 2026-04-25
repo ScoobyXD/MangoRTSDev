@@ -302,7 +302,10 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_node_relationships")
 		return
 	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"nodes": nodes, "relationships": relationships, "generated_at": time.Now().UTC()})
+	// Keep snapshot payload deterministic for unchanged data so ETag-based 304 responses
+	// actually work. Using a "now" timestamp here makes every response look different and
+	// defeats conditional GETs on this hot path.
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"nodes": nodes, "relationships": relationships})
 }
 
 func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
