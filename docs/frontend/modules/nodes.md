@@ -143,6 +143,7 @@ Relationship creation uses a two-click attach flow between existing nodes:
 
 1. Click a side handle on the source node.
 2. A trace line is shown from source side to cursor.
+   - The draft trace uses the same obstacle-aware orthogonal router as persisted relationship lines, so it follows mini-grid lanes and wraps around node cards while the cursor moves.
 3. All node relationship-side icons switch into a **receive icon** state while drafting.
 4. Click a side receive icon on the target node.
 5. The module writes one relationship row.
@@ -210,6 +211,7 @@ Relationships are rendered on a world-space `<canvas>` for performance, with a l
 - Polyline routes are orthogonal and grid-snapped.
 - Lines originate from side anchors that correspond to `+` side conventions.
 - Routing now uses obstacle-aware orthogonal pathing on the mini-grid so relationship lines remain continuous and do not visually cut through node cards when nodes are moved.
+- Draft relationship traces now use that same routing engine during pointer-move previews, preventing temporary straight-line previews that diverge from final saved path behavior.
 - Connector paths are simplified after routing to keep turns clean while preserving continuous end-to-end segments.
 - Optional relationship role coloring can be toggled on; when active, lines connected to the active selected node (single-selection focus) are color-coded by the opposite-side role field in the row (`node_id_a` uses `b_position`, `node_id_b` uses `a_position`) so visual direction reflects the connected side relative to the selected node.
 - Visual rendering sits under node cards, and a transparent hit layer enables selection without degrading line draw performance.
