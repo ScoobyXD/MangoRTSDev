@@ -21,6 +21,7 @@ File: `frontend/src/app/applayout.tsx`
 - `framecanvas.tsx` — board/canvas container primitive
 - `framerightclickmenu.tsx` — floating right-click menu container
 - `menus/ModulePickerMenu.tsx` — module-type chooser (including node submodule menu)
+- `frameLinking.ts` — pure helper layer for link/delink planning and context-menu label semantics
 
 ## Data model ownership
 
@@ -51,3 +52,11 @@ The app layout keeps compatibility for persisted payloads:
 - undo/redo snapshot logic into a dedicated hook
 - drag/resize interaction handlers into dedicated hooks
 - menu command action groups into smaller modules
+
+## Frame header + linking behavior notes (2026-04-25)
+
+- Frame headers are now compact top-left overlay tags (module name chip + linked hex indicator) instead of full-width header bars, removing dead header space and keeping content area dominant.
+- Selection no longer causes subtle content shifts because frame borders keep constant width in selected/non-selected states.
+- Frame right-click menu `Link modules` label now shows `No other module selected` when only one module is active in selection/context.
+- Link planning now supports Editor + Company Explorer linking when both already share exactly one existing Node Map link target (fallback map inference).
+- Right-click menu now includes `Delink modules`, which removes link mappings touching selected/context modules (including reverse links when a Node Map is selected).

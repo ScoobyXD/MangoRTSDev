@@ -15,6 +15,10 @@
     "declarationMap": false
   },
   "include": [
+    "src/types.ts",
+    "src/test-node-shims.d.ts",
+    "src/app/frameLinking.ts",
+    "src/app/frameLinking.test.ts",
     "src/modules/node-map/shared.ts",
     "src/modules/node-map/relationshipProjection.ts",
     "src/modules/node-map/relationshipProjection.test.ts",
