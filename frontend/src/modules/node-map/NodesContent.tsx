@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_STATE_UPDATED } from "./eventbus";
-import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "./workspaceStore";
+import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace, upsertWorkspaceNode } from "./workspaceStore";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { pathIntersectsRect } from "./relationshipSelection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
@@ -570,12 +570,9 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         body: JSON.stringify({ company_id: companyID, header: value }),
       });
       // Hot-path rule: avoid full snapshot refetch on create.
-      // We rely on SSE/workspace-store propagation for canonical sync and do a local optimistic insert
-      // so the creating client updates immediately without reopening a snapshot request loop.
-      setNodes((previous) => {
-        if (previous.some((item) => item.node_id === node.node_id)) return previous;
-        return [...previous, node];
-      });
+      // Apply optimistic node insertion via workspaceStore so all subscribers (Node Map + Explorer)
+      // get immediate convergence without issuing a snapshot GET.
+      upsertWorkspaceNode(apiBase, companyID, node);
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       if (worldPos) {

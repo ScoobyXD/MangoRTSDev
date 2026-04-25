@@ -55,7 +55,7 @@ The loop above violated these rules by repeatedly issuing snapshot reads and re-
 - Removed network refresh from relationship derivation paths that run on node state changes.
 - Relationship projection now reads from local snapshot cache in-memory.
 - Added a guard in snapshot refresh to skip subscriber fan-out when ETag is unchanged.
-- Removed the post-create `loadNodes()` snapshot refetch and replaced it with local optimistic node insertion plus SSE/store convergence.
+- Removed the post-create `loadNodes()` snapshot refetch and replaced it with workspace-store optimistic node upsert plus SSE/store convergence so all subscribers update consistently.
 
 ### Backend (snapshot endpoint)
 
