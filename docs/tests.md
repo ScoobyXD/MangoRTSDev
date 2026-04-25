@@ -113,6 +113,7 @@ Use this checklist format and keep it complete.
 
 ### Integration tests
 - [ ] None committed yet (to be added)
+- [ ] Workspace store create-node anti-refetch loop integration test (temporarily blocked: no existing browser/session harness to simulate EventSource + component lifecycle churn deterministically)
 
 ### End-to-end tests
 - [ ] None committed yet (to be added)

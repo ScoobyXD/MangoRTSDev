@@ -569,7 +569,13 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         method: "POST",
         body: JSON.stringify({ company_id: companyID, header: value }),
       });
-      await loadNodes();
+      // Hot-path rule: avoid full snapshot refetch on create.
+      // We rely on SSE/workspace-store propagation for canonical sync and do a local optimistic insert
+      // so the creating client updates immediately without reopening a snapshot request loop.
+      setNodes((previous) => {
+        if (previous.some((item) => item.node_id === node.node_id)) return previous;
+        return [...previous, node];
+      });
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       if (worldPos) {
