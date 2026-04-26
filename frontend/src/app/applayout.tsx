@@ -8,6 +8,7 @@ import type { FrameDataModel, DragState, ResizeEdges } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { EDITOR_LINKS_KEY, EXPLORER_MAP_LINKS_KEY } from "../modules/node-map/shared";
 import { emitDashboardEvent, EVENT_EDITOR_LINKS_UPDATED } from "../modules/node-map/eventbus";
+import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool } from "./frameLinking";
 
 const CELL_SIZE = 28;
 const HEADER_H = 48;
@@ -475,7 +476,25 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
   return (
     <Frame
       data-child-frame={nested ? "true" : "false"}
-      style={{ position: "absolute", left, top, width: frame.w * stepX, height: frame.h * stepY, background: frame.color, border: isSelected ? "2px solid #111" : nested ? `1px dashed ${frame.accent}` : `1px solid ${frame.accent}`, display: "flex", flexDirection: "column", overflow: "hidden", cursor: isDragging ? "grabbing" : "default", userSelect: "none", zIndex: nested ? 200 : (isDragging ? 100 : 1), color: theme.text, boxShadow: nested ? "0 3px 16px rgba(0,0,0,0.18)" : undefined }}
+      style={{
+        position: "absolute",
+        left,
+        top,
+        width: frame.w * stepX,
+        height: frame.h * stepY,
+        background: frame.color,
+        // Keep border width constant between selected/non-selected to prevent tiny content jump.
+        border: isSelected ? "2px solid #111" : nested ? `2px dashed ${frame.accent}` : `2px solid ${frame.accent}`,
+        boxSizing: "border-box",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        cursor: isDragging ? "grabbing" : "default",
+        userSelect: "none",
+        zIndex: nested ? 200 : (isDragging ? 100 : 1),
+        color: theme.text,
+        boxShadow: nested ? "0 3px 16px rgba(0,0,0,0.18)" : undefined,
+      }}
       onClick={(e) => e.stopPropagation()}
       onMouseDownCapture={(e) => {
         const target = e.target as HTMLElement;
@@ -510,21 +529,38 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         onContextMenu(e, frame.id);
       }}
     >
-      <div data-header-drag-handle="true" style={{ padding: "6px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${frame.accent}`, cursor: isDragging ? "grabbing" : "grab", fontFamily: "'IBM Plex Mono', monospace" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div
+        data-header-drag-handle="true"
+        style={{
+          position: "absolute",
+          // Pin the compact header plate to frame edges so the tag looks flush (no dead corner gaps).
+          top: 0,
+          left: 0,
+          zIndex: 5,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "4px 6px",
+          // Keep right/bottom edges explicit so the plate reads as a clean rectangle extending from frame edges.
+          borderRight: `2px solid ${frame.accent}`,
+          borderBottom: `2px solid ${frame.accent}`,
+          background: frame.color,
+          cursor: isDragging ? "grabbing" : "grab",
+          fontFamily: "'IBM Plex Mono', monospace",
+        }}
+      >
           <span
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onModuleNameClick(e, frame.id); }}
-            style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px", cursor: "pointer" }}
+            style={{ fontSize: 12, fontWeight: 800, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.09em", background: theme.tagBg, padding: "3px 8px", cursor: "pointer", lineHeight: 1.1 }}
           >
             {frame.title}
           </span>
           {isLinked && (
-            <svg aria-label="linked module" width="14" height="16" viewBox="0 0 14 16" style={{ display: "block" }}>
+            <svg aria-label="linked module" width="17" height="19" viewBox="0 0 17 19" style={{ display: "block" }}>
               <title>Linked</title>
-              <polygon points="7,1 13,4.5 13,11.5 7,15 1,11.5 1,4.5" fill="none" stroke={frame.accent} strokeWidth="1.2" />
+              <polygon points="8.5,1.5 15.5,5.5 15.5,13.5 8.5,17.5 1.5,13.5 1.5,5.5" fill="none" stroke={frame.accent} strokeWidth="1.8" />
             </svg>
           )}
-        </div>
       </div>
       <div style={{ flex: 1, minHeight: 0, padding: isNodesFrame ? 0 : "8px 10px", overflow: "auto", fontFamily: "'IBM Plex Mono', monospace" }}>
         <div style={{ width: `${100 / contentScale}%`, height: `${100 / contentScale}%`, transform: `scale(${contentScale})`, transformOrigin: "top left" }}>
@@ -748,42 +784,47 @@ const App: React.FC = () => {
     });
   }, []);
 
-  const selectedFrames = useMemo(() => frames.filter((frame) => selectedFrameIds.has(frame.id)), [frames, selectedFrameIds]);
+  const linkPool = useMemo(() => buildLinkPool({
+    frames,
+    selectedFrameIds,
+    selectedFrameId,
+    contextFrameId: frameRightClickMenu?.id ?? null,
+  }), [frames, selectedFrameIds, selectedFrameId, frameRightClickMenu]);
   const linkPlan = useMemo(() => {
-    const pool = selectedFrames.length > 0 ? selectedFrames : (selectedFrameId ? frames.filter((frame) => frame.id === selectedFrameId) : []);
-    if (pool.length < 2) return null;
-    const canvases = pool.filter((frame) => frame.kind === "nodes" || frame.kind === "nodes-map");
-    if (canvases.length !== 1) return null;
-    const docs = pool.filter((frame) => frame.kind === "editor" || frame.kind === "node-doc");
-    const explorers = pool.filter((frame) => frame.kind === "company-explorer");
-    if (docs.length + explorers.length === 0) return null;
-    return { canvas: canvases[0], docs, explorers, pool };
-  }, [selectedFrameId, selectedFrames, frames]);
+    return computeLinkPlan(linkPool, editorLinks, explorerMapLinks);
+  }, [linkPool, editorLinks, explorerMapLinks]);
 
   const linkSelectedNodeModules = useCallback(() => {
     if (!linkPlan) return;
-    const canvasID = linkPlan.canvas.id;
-    if (linkPlan.docs.length > 0) {
+    if (linkPlan.editorFrameIDs.length > 0) {
       setEditorLinks((previous) => {
         const next = { ...previous };
-        for (const doc of linkPlan.docs) next[doc.id] = canvasID;
+        for (const editorID of linkPlan.editorFrameIDs) next[editorID] = linkPlan.mapFrameID;
         persistEditorLinks(next)
         return next;
       });
     }
-    if (linkPlan.explorers.length > 0) {
+    if (linkPlan.explorerFrameIDs.length > 0) {
       setExplorerCanvasLinks((previous) => {
         const next = { ...previous };
-        for (const explorer of linkPlan.explorers) next[explorer.id] = canvasID;
+        for (const explorerID of linkPlan.explorerFrameIDs) next[explorerID] = linkPlan.mapFrameID;
         try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(next)); } catch {}
         return next;
       });
     }
   }, [linkPlan]);
+  const delinkSelectedNodeModules = useCallback(() => {
+    const result = delinkForPool(linkPool, editorLinks, explorerMapLinks);
+    if (!result.changed) return;
+    setEditorLinks(result.nextEditorLinks);
+    persistEditorLinks(result.nextEditorLinks);
+    setExplorerCanvasLinks(result.nextExplorerLinks);
+    try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(result.nextExplorerLinks)); } catch {}
+  }, [linkPool, editorLinks, explorerMapLinks]);
   const linkModulesLabel = useMemo(() => {
-    if (!linkPlan) return "Select one Node Map + one/more Editor or Company Explorer";
-    return linkPlan.pool.map((frame) => frame.title).join(" + ");
-  }, [linkPlan]);
+    return buildLinkModulesLabel(linkPool, linkPlan);
+  }, [linkPool, linkPlan]);
+  const canDelinkModules = useMemo(() => delinkForPool(linkPool, editorLinks, explorerMapLinks).changed, [linkPool, editorLinks, explorerMapLinks]);
   const linkedFrameIDs = useMemo(() => {
     const ids = new Set<string>();
     const frameIDs = new Set(frames.map((frame) => frame.id));
@@ -1368,6 +1409,14 @@ const App: React.FC = () => {
             {...hoverHandlers}
           >
             Link modules: {linkModulesLabel}
+          </button>
+          <button
+            style={{ ...menuBtnBase, color: canDelinkModules ? "#111" : "#999" }}
+            disabled={!canDelinkModules}
+            onClick={() => { delinkSelectedNodeModules(); closeMenus(); }}
+            {...hoverHandlers}
+          >
+            Delink modules
           </button>
           {COLORWAY_ORDER.map((theme) => (
             <button key={theme} style={menuBtnBase} onClick={() => {

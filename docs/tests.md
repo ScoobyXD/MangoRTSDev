@@ -107,6 +107,11 @@ Use this checklist format and keep it complete.
 - [x] `frontend/src/modules/node-map/relationshipDeleteSummary.test.ts`
   - success/failure summarization for batched relationship-line delete requests
   - preserves per-relationship failure reason reporting for visibility
+- [x] `frontend/src/app/frameLinking.test.ts`
+  - context-menu link label fallback (`No other module selected`) when only one module is in active pool
+  - editor+explorer link-plan fallback through existing shared Node Map link
+  - context-frame pool fallback when no explicit selection set exists
+  - delink behavior removes both direct and reverse-side link mappings
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
   - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)
@@ -116,6 +121,7 @@ Use this checklist format and keep it complete.
 - [ ] Workspace store create-node anti-refetch loop integration test (temporarily blocked: no existing browser/session harness to simulate EventSource + component lifecycle churn deterministically)
 - [ ] Node Map + Editor duplicate-details-request suppression integration test (temporarily blocked: no browser harness asserting per-action network request counts)
 - [ ] Cross-origin preflight minimization test for GET helpers (temporarily blocked: no automated CORS/request-capture harness in repo)
+- [ ] Frame header-plate visual regression test (temporarily blocked: no committed browser visual-diff harness for asserting edge-flush tag geometry and icon scale)
 
 ### End-to-end tests
 - [ ] None committed yet (to be added)
