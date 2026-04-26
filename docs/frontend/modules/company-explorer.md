@@ -121,6 +121,11 @@ In the default Node-oriented workspace (Explorer + Canvas + Doc):
 
 This linking is conceptualized as context sync, not as a new data model.
 
+Implementation update (2026-04-26):
+- Frame-level linking now supports direct Explorer <-> Editor context links (not only Explorer <-> Node Map).
+- Current runtime still resolves Node Map as the active graph context provider via compatibility mapping, while the link graph is designed to extend to future module kinds (e.g. logic-map) without redesigning link storage.
+- Explorer selection context is now broadcast to all directly linked frame targets (including Editor) through explorer-context localStorage/event keys so linked editors can follow selected node content without requiring an explicit map link.
+
 ---
 
 ## 6) Data/backend stance

@@ -3,6 +3,8 @@ import { EXPLORER_MAP_LINKS_KEY, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeDetai
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED } from "../node-map/eventbus";
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../node-map/workspaceStore";
 
+const FRAME_LINKS_KEY = "frame-module-links-v1";
+
 type ExplorerTreeNode = {
   id: string;
   label: string;
@@ -162,11 +164,22 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(EXPLORER_MAP_LINKS_KEY);
-      const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-      const linkedCanvasID = typeof parsed[scope] === "string" ? parsed[scope] : "";
-      if (!linkedCanvasID) return;
-      const key = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${linkedCanvasID}`;
+      const targetIDs = new Set<string>();
+
+      const rawLegacy = localStorage.getItem(EXPLORER_MAP_LINKS_KEY);
+      const parsedLegacy = rawLegacy ? (JSON.parse(rawLegacy) as Record<string, string>) : {};
+      const linkedCanvasID = typeof parsedLegacy[scope] === "string" ? parsedLegacy[scope] : "";
+      if (linkedCanvasID) targetIDs.add(linkedCanvasID);
+
+      const rawGraph = localStorage.getItem(FRAME_LINKS_KEY);
+      const graph = rawGraph ? (JSON.parse(rawGraph) as Array<{ a?: string; b?: string }>) : [];
+      for (const edge of graph) {
+        if (!edge || typeof edge !== "object") continue;
+        if (edge.a === scope && typeof edge.b === "string") targetIDs.add(edge.b);
+        if (edge.b === scope && typeof edge.a === "string") targetIDs.add(edge.a);
+      }
+      if (targetIDs.size === 0) return;
+
       const payload = {
         sourceExplorerID: scope,
         selectedNodeID,
@@ -175,8 +188,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         selectedLabel: selectedTree?.label ?? "",
         ts: Date.now(),
       };
-      localStorage.setItem(key, JSON.stringify(payload));
-      emitDashboardEvent(EVENT_EXPLORER_CONTEXT_UPDATED, { key });
+      for (const targetID of targetIDs) {
+        if (!targetID) continue;
+        const key = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${targetID}`;
+        localStorage.setItem(key, JSON.stringify(payload));
+        emitDashboardEvent(EVENT_EXPLORER_CONTEXT_UPDATED, { key, sourceExplorerID: scope, targetID });
+      }
     } catch {
       // ignore local storage failures
     }

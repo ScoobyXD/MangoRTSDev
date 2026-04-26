@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool } from "./frameLinking.js";
+import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, deriveLegacyMapLinks, mergeLinkPlan } from "./frameLinking.js";
 import type { FrameDataModel } from "../types.js";
 
 const map: FrameDataModel = { id: "map-1", kind: "nodes-map", title: "Node Map", x: 0, y: 0, w: 8, h: 8, color: "#fff", accent: "#111" };
@@ -12,12 +12,14 @@ test("link menu label falls back to no-other-selected when only one frame is in 
   assert.equal(label, "No other module selected");
 });
 
-test("computeLinkPlan links editor + explorer through existing linked map fallback", () => {
-  const plan = computeLinkPlan([editor, explorer], { "editor-1": "map-1" }, {});
+test("computeLinkPlan builds pairwise context links for selected pool", () => {
+  const plan = computeLinkPlan([map, editor, explorer]);
   assert.deepEqual(plan, {
-    mapFrameID: "map-1",
-    editorFrameIDs: ["editor-1"],
-    explorerFrameIDs: ["explorer-1"],
+    edges: [
+      { a: "map-1", b: "editor-1", mode: "context" },
+      { a: "map-1", b: "explorer-1", mode: "context" },
+      { a: "editor-1", b: "explorer-1", mode: "context" },
+    ],
   });
 });
 
@@ -34,11 +36,23 @@ test("buildLinkPool falls back to context frame when no multi-select exists", ()
 test("delinkForPool removes both direct and reverse-side module links", () => {
   const result = delinkForPool(
     [map],
-    { "editor-1": "map-1", "editor-2": "map-2" },
-    { "explorer-1": "map-1", "explorer-2": "map-2" },
+    [
+      { a: "editor-1", b: "map-1", mode: "context" },
+      { a: "editor-2", b: "map-2", mode: "context" },
+      { a: "explorer-1", b: "map-1", mode: "context" },
+    ],
   );
   assert.equal(result.changed, true);
-  assert.deepEqual(result.nextEditorLinks, { "editor-2": "map-2" });
-  assert.deepEqual(result.nextExplorerLinks, { "explorer-2": "map-2" });
+  assert.deepEqual(result.nextEdges, [{ a: "editor-2", b: "map-2", mode: "context" }]);
 });
 
+test("deriveLegacyMapLinks resolves indirect editor/explorer links through the graph", () => {
+  const frames = [map, editor, explorer];
+  const edges = mergeLinkPlan([], computeLinkPlan([editor, explorer])!);
+  const linked = deriveLegacyMapLinks(
+    frames,
+    mergeLinkPlan(edges, { edges: [{ a: "map-1", b: "editor-1", mode: "context" }] }),
+  );
+  assert.deepEqual(linked.editorLinks, { "editor-1": "map-1" });
+  assert.deepEqual(linked.explorerLinks, { "explorer-1": "map-1" });
+});
