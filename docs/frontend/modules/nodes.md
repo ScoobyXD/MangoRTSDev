@@ -119,6 +119,7 @@ Nodes are positioned in **world coordinates**, while pan/zoom transform the worl
 - `Shift + drag` **or** `Ctrl + drag` on canvas creates marquee selection box.
 - Nodes intersecting the box become selected.
 - `Shift + click` **or** `Ctrl + click` on node cards toggles nodes in/out of the current selection set.
+- `Shift + drag` over an existing multi-selection now adds newly boxed nodes/relationship lines into the current selection set (additive marquee) instead of replacing the existing batch.
 - Visual indicators:
   - selected border/outline/glow,
   - selected dot marker on card,
@@ -187,6 +188,7 @@ This replaces the old incorrect vertical swap behavior.
 - Relationship lines are included in marquee selection (`Shift`/`Ctrl` + drag) so line-only and mixed node+line group selection works with the same drag gesture family used for nodes.
 - Relationship lines can be snipped directly on-canvas via line **double-click**.
 - Keyboard `Delete` / `Backspace` deletes selected relationships.
+- When a mixed selection includes both nodes and relationship lines, one delete confirmation now covers both so nodes are not left behind after line deletion.
 - Right-clicking a relationship line opens a relationship context menu with **Delete relationship** (or plural delete when a selected line group is active).
 - Deletes call `DELETE /v1/node-relationships/:node_relationship_id`.
 - Relationship-line delete operations remove only relationship rows; connected nodes remain intact.

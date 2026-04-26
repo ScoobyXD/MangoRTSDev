@@ -41,7 +41,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
   const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeID: string } | null>(null);
   const [relationshipContextMenu, setRelationshipContextMenu] = useState<{ x: number; y: number; relationshipID: string } | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[] } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[]; relationshipIDs: string[] } | null>(null);
   const [canvasActive, setCanvasActive] = useState(false);
   const [panelRect, setPanelRect] = useState({ x: 0, y: 10, width: 340, height: 360 });
   const [panelDrag, setPanelDrag] = useState<{ pointerID: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
@@ -58,12 +58,13 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   const [dragState, setDragState] = useState<{ nodeIDs: string[]; pointerID: number; offsets: Record<string, { x: number; y: number }> } | null>(null);
   const [panState, setPanState] = useState<{ pointerID: number; startMouseX: number; startMouseY: number; startPanX: number; startPanY: number } | null>(null);
-  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; currentX: number; currentY: number; active: boolean }>({
+  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; currentX: number; currentY: number; active: boolean; additive: boolean }>({
     startX: 0,
     startY: 0,
     currentX: 0,
     currentY: 0,
     active: false,
+    additive: false,
   });
   const [selectionPointerID, setSelectionPointerID] = useState<number | null>(null);
   const restoredSelectionRef = useRef<string>("");
@@ -82,13 +83,13 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     return snapshotRelationships.filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b));
   };
 
-  const startRelationshipLineMarqueeSelection = (pointerID: number, clientX: number, clientY: number) => {
+  const startRelationshipLineMarqueeSelection = (pointerID: number, clientX: number, clientY: number, additive: boolean) => {
     if (!viewportRef.current) return;
     const bounds = viewportRef.current.getBoundingClientRect();
     const localX = clamp(clientX - bounds.left, 0, bounds.width);
     const localY = clamp(clientY - bounds.top, 0, bounds.height);
     setSelectionPointerID(pointerID);
-    setSelectionBox({ startX: localX, startY: localY, currentX: localX, currentY: localY, active: true });
+    setSelectionBox({ startX: localX, startY: localY, currentX: localX, currentY: localY, active: true, additive });
   };
 
   useEffect(() => {
@@ -488,11 +489,24 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           y: point.y * zoom + pan.y,
         })), rect))
         .map((path) => path.id);
-      setSelectedNodeIDs(nextSet);
-      setSelectedNodeID(selected.length > 0 ? selected[0].node_id : "");
-      setSelectedRelationshipIDs(new Set(selectedRelationshipIDsInBox));
+      if (selectionBox.additive) {
+        setSelectedNodeIDs((previous) => {
+          const merged = new Set(previous);
+          for (const id of nextSet) merged.add(id);
+          return merged;
+        });
+        setSelectedRelationshipIDs((previous) => {
+          const merged = new Set(previous);
+          for (const id of selectedRelationshipIDsInBox) merged.add(id);
+          return merged;
+        });
+      } else {
+        setSelectedNodeIDs(nextSet);
+        setSelectedRelationshipIDs(new Set(selectedRelationshipIDsInBox));
+      }
+      setSelectedNodeID(selected.length > 0 ? selected[0].node_id : (selectionBox.additive ? selectedNodeID : ""));
       setSelectionPointerID(null);
-      setSelectionBox((previous) => ({ ...previous, active: false }));
+      setSelectionBox((previous) => ({ ...previous, active: false, additive: false }));
     };
 
     window.addEventListener("pointermove", onMove);
@@ -502,7 +516,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [selectionPointerID, selectionBox, nodes, nodePositions, zoom, pan.x, pan.y]);
+  }, [selectionPointerID, selectionBox, nodes, nodePositions, zoom, pan.x, pan.y, selectedNodeID]);
 
   useEffect(() => {
     const onWindowPointerDown = () => {
@@ -810,16 +824,9 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       const nodeIDs = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : (selectedNodeID ? [selectedNodeID] : []);
       const hasSelection = relationshipIDs.length > 0 || nodeIDs.length > 0;
       if (!hasSelection || (!canvasActive && relationshipIDs.length === 0)) return;
-      if (relationshipIDs.length > 0) {
-        event.preventDefault();
-        event.stopPropagation();
-        void deleteRelationships(relationshipIDs);
-        return;
-      }
-      if (nodeIDs.length === 0) return;
       event.preventDefault();
       event.stopPropagation();
-      setConfirmDelete({ nodeIDs });
+      setConfirmDelete({ nodeIDs, relationshipIDs });
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
@@ -1297,7 +1304,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           if (event.ctrlKey || event.shiftKey) {
             event.preventDefault();
             event.stopPropagation();
-            startRelationshipLineMarqueeSelection(event.pointerId, event.clientX, event.clientY);
+            startRelationshipLineMarqueeSelection(event.pointerId, event.clientX, event.clientY, true);
             return;
           }
 
@@ -1352,7 +1359,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                   if (event.ctrlKey || event.shiftKey) {
                     event.preventDefault();
                     suppressNextRelationshipLineClickRef.current = true;
-                    startRelationshipLineMarqueeSelection(event.pointerId, event.clientX, event.clientY);
+                    startRelationshipLineMarqueeSelection(event.pointerId, event.clientX, event.clientY, true);
                   }
                 }}
                 onClick={(event) => {
@@ -1758,7 +1765,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
             <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", textAlign: "left" }} onClick={() => { setDetailsPanelNodeID(nodeContextMenu.nodeID); setNodeContextMenu(null); }}>
               Edit node
             </button>
-            <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", color: "#a20026", textAlign: "left" }} onClick={() => { const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID]; setConfirmDelete({ nodeIDs: ids }); setNodeContextMenu(null); }}>
+            <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", color: "#a20026", textAlign: "left" }} onClick={() => { const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID]; setConfirmDelete({ nodeIDs: ids, relationshipIDs: [] }); setNodeContextMenu(null); }}>
               Delete node
             </button>
           </div>
@@ -1953,9 +1960,16 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
         {confirmDelete && (
           <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 60, display: "grid", placeItems: "center" }}>
             <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: `1px solid ${accent}`, background: "rgba(255,255,255,0.92)", padding: 12, display: "grid", gap: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700 }}>Are you sure you want to delete {confirmDelete.nodeIDs.length} node{confirmDelete.nodeIDs.length === 1 ? "" : "s"}?</div>
+              <div style={{ fontSize: 12, fontWeight: 700 }}>
+                Are you sure you want to delete {confirmDelete.nodeIDs.length} node{confirmDelete.nodeIDs.length === 1 ? "" : "s"}
+                {confirmDelete.relationshipIDs.length > 0 ? ` and ${confirmDelete.relationshipIDs.length} relationship line${confirmDelete.relationshipIDs.length === 1 ? "" : "s"}` : ""}?
+              </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <button onClick={() => { void deleteNodes(confirmDelete.nodeIDs); setConfirmDelete(null); }} style={{ border: `1px solid ${accent}`, background: "#d8fff6", cursor: "pointer", fontWeight: 700 }}>Yes</button>
+                <button onClick={() => {
+                  if (confirmDelete.relationshipIDs.length > 0) void deleteRelationships(confirmDelete.relationshipIDs);
+                  if (confirmDelete.nodeIDs.length > 0) void deleteNodes(confirmDelete.nodeIDs);
+                  setConfirmDelete(null);
+                }} style={{ border: `1px solid ${accent}`, background: "#d8fff6", cursor: "pointer", fontWeight: 700 }}>Yes</button>
                 <button onClick={() => setConfirmDelete(null)} style={{ border: `1px solid ${accent}`, background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
               </div>
             </div>
