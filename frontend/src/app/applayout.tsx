@@ -22,7 +22,7 @@ const CHILD_EDGE_GAP = 0.5;
 const HALF_STEP = 0.5;
 
 const COLORWAYS = {
-  teal: { color: "#00d5ff", accent: "#006f85", text: "#042028", tagBg: "#042028", tagText: "#ffffff" },
+  teal: { color: "#00e9ff", accent: "#006f85", text: "#042028", tagBg: "#042028", tagText: "#ffffff" },
   orange: { color: "#ff6a00", accent: "#5a2200", text: "#120900", tagBg: "#120900", tagText: "#ffffff" },
   white: { color: "#ffffff", accent: "#111111", text: "#111111", tagBg: "#111111", tagText: "#ffffff" },
   black: { color: "#0c0c0c", accent: "#ffffff", text: "#ffffff", tagBg: "#ffffff", tagText: "#050505" },
@@ -33,7 +33,7 @@ const COLORWAY_ORDER: ColorwayKey[] = ["teal", "orange", "white", "black"];
 
 const UI_THEME = {
   surface: "#f7fffe",
-  panel: "#ff6a00",
+  panel: "#00e9ff",
   line: "rgba(12, 67, 74, 0.45)",
   text: "#041d22",
   subtext: "#0b5058",
@@ -401,8 +401,8 @@ const PlacementSplash: React.FC<{
               top: cell.y * stepY + 1.5,
               width: Math.max(2, stepX - 3),
               height: Math.max(2, stepY - 3),
-              border: "1px solid rgba(7, 86, 94, 0.55)",
-              background: `rgba(111, 231, 238, ${opacity})`,
+              border: "1px solid rgba(0, 233, 255, 0.72)",
+              background: `rgba(0, 233, 255, ${opacity})`,
               boxShadow: "0 0 0 1px rgba(255,255,255,0.18) inset",
             }}
           />
@@ -496,7 +496,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         height: frame.h * stepY,
         background: frame.color,
         // Keep border width constant between selected/non-selected to prevent tiny content jump.
-        border: nested ? `2px dashed ${frame.accent}` : `2px solid ${isSelected ? "#2563eb" : frame.accent}`,
+        border: nested ? `2px dashed ${frame.accent}` : `2px solid ${isSelected ? "#00e9ff" : frame.accent}`,
         boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
@@ -506,7 +506,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         zIndex: nested ? 200 : (isDragging ? 100 : 1),
         color: theme.text,
         boxShadow: isSelected
-          ? "0 0 0 3px rgba(37,99,235,0.35), 0 8px 20px rgba(2,22,46,0.24)"
+          ? "0 0 0 3px rgba(0,233,255,0.42), 0 8px 20px rgba(2,22,46,0.24)"
           : nested
             ? "0 3px 16px rgba(0,0,0,0.18)"
             : undefined,

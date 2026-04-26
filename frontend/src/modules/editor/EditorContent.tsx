@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { NodeDetails, NodeDocBox, NodeInformation, EDITOR_LINKS_KEY, NODE_DOC_MIN_H, NODE_DOC_MIN_W, clamp, parseDocBox } from "../node-map/shared";
-import { EVENT_EDITOR_LINKS_UPDATED, EVENT_NODE_MAP_STATE_UPDATED } from "../node-map/eventbus";
+import { NodeDetails, NodeDocBox, NodeInformation, EDITOR_LINKS_KEY, NODE_DOC_MIN_H, NODE_DOC_MIN_W, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, clamp, parseDocBox } from "../node-map/shared";
+import { EVENT_EDITOR_LINKS_UPDATED, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_STATE_UPDATED } from "../node-map/eventbus";
 
 // Editor module: node-linked document canvas for text boxes and notes.
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
@@ -68,6 +68,17 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [companyID]);
 
+  const readSelectedNodeFromExplorerContext = useCallback((): string => {
+    try {
+      const raw = localStorage.getItem(`${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
+      if (!raw) return "";
+      const parsed = JSON.parse(raw) as { selectedNodeID?: string };
+      return typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "";
+    } catch {
+      return "";
+    }
+  }, [companyID, scope]);
+
   // Persist a single document box into node information rows (Text box type).
   const saveBox = useCallback(async (nodeID: string, box: NodeDocBox) => {
     const payload = JSON.stringify({ local_id: box.local_id, x: box.x, y: box.y, w: box.w, h: box.h, text: box.information });
@@ -95,12 +106,19 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [readLinkedMapWidgetID]);
 
   useEffect(() => {
-    const refresh = () => setLinkedNodeID(readSelectedNodeFromMap(linkedMapWidgetID));
+    const refresh = () => {
+      const selectedFromMap = readSelectedNodeFromMap(linkedMapWidgetID);
+      if (selectedFromMap) {
+        setLinkedNodeID(selectedFromMap);
+        return;
+      }
+      setLinkedNodeID(readSelectedNodeFromExplorerContext());
+    };
     refresh();
     const onStorage = (event: StorageEvent) => {
-      if (!linkedMapWidgetID) return;
-      const mapStateKey = `node-map-state-v1:${companyID}:${linkedMapWidgetID}`;
-      if (event.key && event.key !== mapStateKey) return;
+      const mapStateKey = linkedMapWidgetID ? `node-map-state-v1:${companyID}:${linkedMapWidgetID}` : "";
+      const explorerContextKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
+      if (event.key && event.key !== mapStateKey && event.key !== explorerContextKey) return;
       refresh();
     };
     const onMapStateUpdated = (event: Event) => {
@@ -108,13 +126,22 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (!detail || detail.mapWidgetID !== linkedMapWidgetID) return;
       refresh();
     };
+    const onExplorerContextUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ key?: string; targetID?: string }>).detail;
+      if (!detail) return;
+      const expectedKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
+      if (detail.key !== expectedKey && detail.targetID !== scope) return;
+      refresh();
+    };
     window.addEventListener("storage", onStorage);
     window.addEventListener(EVENT_NODE_MAP_STATE_UPDATED, onMapStateUpdated);
+    window.addEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
     return () => {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(EVENT_NODE_MAP_STATE_UPDATED, onMapStateUpdated);
+      window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
     };
-  }, [companyID, linkedMapWidgetID, readSelectedNodeFromMap]);
+  }, [companyID, linkedMapWidgetID, readSelectedNodeFromMap, readSelectedNodeFromExplorerContext, scope]);
 
   useEffect(() => {
     let cancelled = false;

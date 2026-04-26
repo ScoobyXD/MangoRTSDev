@@ -69,3 +69,4 @@ The app layout keeps compatibility for persisted payloads:
 - Existing module contracts are preserved by deriving legacy editor/explorer -> map link keys from the link graph (compatibility bridge for current module internals).
 - Right-clicking empty canvas now includes `Create new frame`, which spawns a frame at the clicked grid location.
 - Selected frames now use a common web-app convention: blue focus outline + focus ring shadow for stronger visibility.
+- Selection ring, teal frame option, and drag placement splash now use the unified RGB `0,233,255` accent to match the canvas/header accent direction.

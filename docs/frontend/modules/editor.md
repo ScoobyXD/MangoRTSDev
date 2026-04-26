@@ -14,9 +14,10 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 ## Important Data/Integration Paths
 - **Input from Node Map:** selected node state (`node-map-state-v1:<company_id>:<map_widget_id>`).
 - **Linking source:** generic frame-link graph (`frame-module-links-v1`) with compatibility bridge to editor/map linkage key (`EDITOR_LINKS_KEY`).
+- **Explorer fallback context source:** editor can read explorer-driven node selection from `node-map-explorer-context-v1:<company_id>:<editor_widget_id>` when no direct map-state context is available.
 - **Backend read path:** `GET /v1/nodes/:node_id?company_id=...`.
 - **Backend write path:** `POST /v1/nodes/:node_id/information` for text-box payloads.
-- **Event sync hooks:** `EVENT_EDITOR_LINKS_UPDATED`, `EVENT_NODE_MAP_STATE_UPDATED`, and `storage` events.
+- **Event sync hooks:** `EVENT_EDITOR_LINKS_UPDATED`, `EVENT_NODE_MAP_STATE_UPDATED`, `EVENT_EXPLORER_CONTEXT_UPDATED`, and `storage` events.
 
 ## UX Notes
 - Text boxes support drag and edge/corner resize interactions.
