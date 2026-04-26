@@ -113,6 +113,10 @@ Use this checklist format and keep it complete.
   - legacy editor/explorer -> Node Map compatibility derivation through indirect link graph paths
   - context-frame pool fallback when no explicit selection set exists
   - delink behavior removes all graph edges touching selected/context modules
+- [x] `frontend/src/modules/linkingGraph.test.ts`
+  - frame-link edge sanitization canonicalizes and deduplicates undirected graph edges
+  - linked target resolution by kind supports traversal through intermediary graph hops
+  - direct-neighbor resolution returns adjacency-only targets for explorer fanout
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
   - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)

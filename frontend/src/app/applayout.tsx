@@ -6,9 +6,9 @@ import ModulePickerMenu from "./menus/ModulePickerMenu";
 import { MODULE_CONTENT_MAP as CONTENT_MAP, MODULE_LIBRARY as FRAME_MODULE_LIBRARY } from "../modules";
 import type { FrameDataModel, DragState, ResizeEdges } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { EDITOR_LINKS_KEY, EXPLORER_MAP_LINKS_KEY } from "../modules/node-map/shared";
-import { emitDashboardEvent, EVENT_EDITOR_LINKS_UPDATED } from "../modules/node-map/eventbus";
-import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, deriveLegacyMapLinks, FRAME_LINKS_KEY, mergeLinkPlan, sanitizeFrameLinks, type FrameLinkEdge } from "./frameLinking";
+import { emitDashboardEvent, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
+import { FRAME_REGISTRY_KEY } from "../modules/linkingGraph";
+import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, FRAME_LINKS_KEY, mergeLinkPlan, sanitizeFrameLinks, type FrameLinkEdge } from "./frameLinking";
 
 const CELL_SIZE = 28;
 const HEADER_H = 48;
@@ -232,40 +232,8 @@ function saveSettings(s: { bgColor: string; crossColor: string; headerBgColor: s
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
 }
 
-function loadNodeDocLinks(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(EDITOR_LINKS_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
-    return Object.fromEntries(
-      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string")
-    );
-  } catch {
-    return {};
-  }
-}
-
-
-function persistEditorLinks(next: Record<string, string>) {
-  try {
-    localStorage.setItem(EDITOR_LINKS_KEY, JSON.stringify(next));
-    emitDashboardEvent(EVENT_EDITOR_LINKS_UPDATED, { links: next });
-  } catch {}
-}
-
-function loadExplorerMapLinks(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(EXPLORER_MAP_LINKS_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
-    return Object.fromEntries(
-      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string")
-    );
-  } catch {
-    return {};
-  }
+function persistFrameRegistry(next: Record<string, { kind: string }>) {
+  try { localStorage.setItem(FRAME_REGISTRY_KEY, JSON.stringify(next)); } catch {}
 }
 
 // SVG grid marker renderer (plus intersections) for visual snapping guidance.
@@ -623,8 +591,6 @@ const App: React.FC = () => {
   const [headerTextColor, setHeaderTextColor] = useState(() => initialSettingsRef.current.headerTextColor || UI_THEME.text);
   const [tabBgColor, setTabBgColor] = useState(() => initialSettingsRef.current.tabBgColor || "#ffffff");
   const [tabTextColor, setTabTextColor] = useState(() => initialSettingsRef.current.tabTextColor || "#08343a");
-  const [editorLinks, setEditorLinks] = useState<Record<string, string>>(() => loadNodeDocLinks());
-  const [explorerMapLinks, setExplorerCanvasLinks] = useState<Record<string, string>>(() => loadExplorerMapLinks());
   const [frameLinks, setFrameLinks] = useState<FrameLinkEdge[]>(() => loadFrameLinks());
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
@@ -641,6 +607,8 @@ const App: React.FC = () => {
   const redoStackRef = useRef<DashboardSnapshot[]>([]);
   const lastSnapshotRef = useRef<DashboardSnapshot | null>(null);
   const restoringRef = useRef(false);
+  const lastFrameRegistrySignatureRef = useRef("");
+  const frameLinkRevisionRef = useRef(0);
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId) ?? tabs[0], [tabs, activeTabId]);
   const frames = activeTab?.frames ?? [];
@@ -853,13 +821,24 @@ const App: React.FC = () => {
   }, [frames, frameLinks]);
 
   useEffect(() => {
-    const legacy = deriveLegacyMapLinks(frames, frameLinks);
-    setEditorLinks(legacy.editorLinks);
-    persistEditorLinks(legacy.editorLinks);
-    setExplorerCanvasLinks(legacy.explorerLinks);
-    try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(legacy.explorerLinks)); } catch {}
     persistFrameLinks(frameLinks);
-  }, [frames, frameLinks]);
+    frameLinkRevisionRef.current += 1;
+    emitDashboardEvent(EVENT_FRAME_LINK_GRAPH_UPDATED, {
+      revision: frameLinkRevisionRef.current,
+      changedAt: Date.now(),
+    });
+  }, [frameLinks]);
+
+  useEffect(() => {
+    const registry = Object.fromEntries(frames.map((frame) => [frame.id, { kind: frame.kind }]));
+    const signature = Object.entries(registry)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([id, item]) => `${id}:${item.kind}`)
+      .join("|");
+    if (signature === lastFrameRegistrySignatureRef.current) return;
+    lastFrameRegistrySignatureRef.current = signature;
+    persistFrameRegistry(registry);
+  }, [frames]);
 
   const deleteSelectedFrame = useCallback(() => {
     const ids = selectedFrameIds.size > 0 ? selectedFrameIds : (selectedFrameId ? new Set([selectedFrameId]) : new Set<string>());
