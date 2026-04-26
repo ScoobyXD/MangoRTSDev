@@ -533,14 +533,17 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         data-header-drag-handle="true"
         style={{
           position: "absolute",
-          top: 6,
-          left: 6,
+          // Pin the compact header plate to frame edges so the tag looks flush (no dead corner gaps).
+          top: 0,
+          left: 0,
           zIndex: 5,
           display: "flex",
           alignItems: "center",
-          gap: 6,
-          padding: "2px 4px",
-          border: `1px solid ${frame.accent}`,
+          gap: 8,
+          padding: "4px 6px",
+          // Keep right/bottom edges explicit so the plate reads as a clean rectangle extending from frame edges.
+          borderRight: `2px solid ${frame.accent}`,
+          borderBottom: `2px solid ${frame.accent}`,
           background: frame.color,
           cursor: isDragging ? "grabbing" : "grab",
           fontFamily: "'IBM Plex Mono', monospace",
@@ -548,14 +551,14 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
       >
           <span
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onModuleNameClick(e, frame.id); }}
-            style={{ fontSize: 10, fontWeight: 700, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.1em", background: theme.tagBg, padding: "2px 6px", cursor: "pointer" }}
+            style={{ fontSize: 12, fontWeight: 800, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.09em", background: theme.tagBg, padding: "3px 8px", cursor: "pointer", lineHeight: 1.1 }}
           >
             {frame.title}
           </span>
           {isLinked && (
-            <svg aria-label="linked module" width="14" height="16" viewBox="0 0 14 16" style={{ display: "block" }}>
+            <svg aria-label="linked module" width="17" height="19" viewBox="0 0 17 19" style={{ display: "block" }}>
               <title>Linked</title>
-              <polygon points="7,1 13,4.5 13,11.5 7,15 1,11.5 1,4.5" fill="none" stroke={frame.accent} strokeWidth="1.2" />
+              <polygon points="8.5,1.5 15.5,5.5 15.5,13.5 8.5,17.5 1.5,13.5 1.5,5.5" fill="none" stroke={frame.accent} strokeWidth="1.8" />
             </svg>
           )}
       </div>

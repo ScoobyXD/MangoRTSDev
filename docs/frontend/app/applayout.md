@@ -56,6 +56,7 @@ The app layout keeps compatibility for persisted payloads:
 ## Frame header + linking behavior notes (2026-04-25)
 
 - Frame headers are now compact top-left overlay tags (module name chip + linked hex indicator) instead of full-width header bars, removing dead header space and keeping content area dominant.
+- Compact header plate is now edge-flush (`top:0`, `left:0`) with explicit right/bottom borders so the plate reads as a clean rectangle integrated into the frame corner without corner gaps.
 - Selection no longer causes subtle content shifts because frame borders keep constant width in selected/non-selected states.
 - Frame right-click menu `Link modules` label now shows `No other module selected` when only one module is active in selection/context.
 - Link planning now supports Editor + Company Explorer linking when both already share exactly one existing Node Map link target (fallback map inference).

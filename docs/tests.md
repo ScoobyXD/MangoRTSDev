@@ -121,6 +121,7 @@ Use this checklist format and keep it complete.
 - [ ] Workspace store create-node anti-refetch loop integration test (temporarily blocked: no existing browser/session harness to simulate EventSource + component lifecycle churn deterministically)
 - [ ] Node Map + Editor duplicate-details-request suppression integration test (temporarily blocked: no browser harness asserting per-action network request counts)
 - [ ] Cross-origin preflight minimization test for GET helpers (temporarily blocked: no automated CORS/request-capture harness in repo)
+- [ ] Frame header-plate visual regression test (temporarily blocked: no committed browser visual-diff harness for asserting edge-flush tag geometry and icon scale)
 
 ### End-to-end tests
 - [ ] None committed yet (to be added)
