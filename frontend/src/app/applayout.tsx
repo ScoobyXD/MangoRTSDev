@@ -8,7 +8,7 @@ import type { FrameDataModel, DragState, ResizeEdges } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { EDITOR_LINKS_KEY, EXPLORER_MAP_LINKS_KEY } from "../modules/node-map/shared";
 import { emitDashboardEvent, EVENT_EDITOR_LINKS_UPDATED } from "../modules/node-map/eventbus";
-import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool } from "./frameLinking";
+import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, deriveLegacyMapLinks, FRAME_LINKS_KEY, mergeLinkPlan, sanitizeFrameLinks, type FrameLinkEdge } from "./frameLinking";
 
 const CELL_SIZE = 28;
 const HEADER_H = 48;
@@ -163,6 +163,18 @@ function getPointer(e: React.MouseEvent | React.TouchEvent | MouseEvent | TouchE
 
 const VIEWS_KEY = "grid-dashboard-views-v1";
 const SETTINGS_KEY = "grid-dashboard-settings";
+function loadFrameLinks(): FrameLinkEdge[] {
+  try {
+    const raw = localStorage.getItem(FRAME_LINKS_KEY);
+    if (!raw) return [];
+    return sanitizeFrameLinks(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+function persistFrameLinks(next: FrameLinkEdge[]) {
+  try { localStorage.setItem(FRAME_LINKS_KEY, JSON.stringify(next)); } catch {}
+}
 
 // Load saved dashboard views/tabs with legacy widget compatibility fallback.
 function loadViews(): { tabs: ViewTab[]; activeId: string } {
@@ -484,7 +496,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         height: frame.h * stepY,
         background: frame.color,
         // Keep border width constant between selected/non-selected to prevent tiny content jump.
-        border: isSelected ? "2px solid #111" : nested ? `2px dashed ${frame.accent}` : `2px solid ${frame.accent}`,
+        border: nested ? `2px dashed ${frame.accent}` : `2px solid ${isSelected ? "#2563eb" : frame.accent}`,
         boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
@@ -493,7 +505,11 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         userSelect: "none",
         zIndex: nested ? 200 : (isDragging ? 100 : 1),
         color: theme.text,
-        boxShadow: nested ? "0 3px 16px rgba(0,0,0,0.18)" : undefined,
+        boxShadow: isSelected
+          ? "0 0 0 3px rgba(37,99,235,0.35), 0 8px 20px rgba(2,22,46,0.24)"
+          : nested
+            ? "0 3px 16px rgba(0,0,0,0.18)"
+            : undefined,
       }}
       onClick={(e) => e.stopPropagation()}
       onMouseDownCapture={(e) => {
@@ -609,11 +625,12 @@ const App: React.FC = () => {
   const [tabTextColor, setTabTextColor] = useState(() => initialSettingsRef.current.tabTextColor || "#08343a");
   const [editorLinks, setEditorLinks] = useState<Record<string, string>>(() => loadNodeDocLinks());
   const [explorerMapLinks, setExplorerCanvasLinks] = useState<Record<string, string>>(() => loadExplorerMapLinks());
+  const [frameLinks, setFrameLinks] = useState<FrameLinkEdge[]>(() => loadFrameLinks());
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [frameRightClickMenu, setFrameRightClickMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [moduleTypeMenu, setModuleTypeMenu] = useState<{ x: number; y: number; id: string } | null>(null);
-  const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number } | null>(null);
+  const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number; gridX: number; gridY: number } | null>(null);
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number } | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
 
@@ -751,13 +768,15 @@ const App: React.FC = () => {
     return { ...frame, theme, color: swatch.color, accent: swatch.accent };
   }, []);
 
-  const addFrame = useCallback((kind = "chart") => {
+  const addFrame = useCallback((kind = "chart", preferred?: { x: number; y: number }) => {
     const template = FRAME_MODULE_LIBRARY.find((item) => item.kind === kind);
     if (!template) return;
     const id = createFrameId();
     const theme = COLORWAY_ORDER[(frameCounter + 1) % COLORWAY_ORDER.length];
-    updateActiveFrames((prev) => [...prev, { id, kind, theme, x: 1, y: 1, w: template.defaultW, h: template.defaultH, title: template.label, color: COLORWAYS[theme].color, accent: COLORWAYS[theme].accent }]);
-  }, [updateActiveFrames]);
+    const nextX = preferred ? clamp(preferred.x, 0, Math.max(0, gridCols - template.defaultW)) : 1;
+    const nextY = preferred ? clamp(preferred.y, 0, Math.max(0, gridRows - template.defaultH)) : 1;
+    updateActiveFrames((prev) => [...prev, { id, kind, theme, x: nextX, y: nextY, w: template.defaultW, h: template.defaultH, title: template.label, color: COLORWAYS[theme].color, accent: COLORWAYS[theme].accent }]);
+  }, [gridCols, gridRows, updateActiveFrames]);
 
   const duplicateFrame = useCallback((id: string) => {
     updateActiveFrames((prev) => {
@@ -769,21 +788,6 @@ const App: React.FC = () => {
 
   const closeMenus = useCallback(() => { setFrameRightClickMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); }, []);
 
-  const saveEditorLink = useCallback((docFrameID: string, mapFrameID: string) => {
-    setEditorLinks((prev) => {
-      const next = { ...prev, [docFrameID]: mapFrameID };
-      persistEditorLinks(next)
-      return next;
-    });
-  }, []);
-  const saveExplorerMapLink = useCallback((explorerFrameID: string, mapFrameID: string) => {
-    setExplorerCanvasLinks((prev) => {
-      const next = { ...prev, [explorerFrameID]: mapFrameID };
-      try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(next)); } catch {}
-      return next;
-    });
-  }, []);
-
   const linkPool = useMemo(() => buildLinkPool({
     frames,
     selectedFrameIds,
@@ -791,55 +795,32 @@ const App: React.FC = () => {
     contextFrameId: frameRightClickMenu?.id ?? null,
   }), [frames, selectedFrameIds, selectedFrameId, frameRightClickMenu]);
   const linkPlan = useMemo(() => {
-    return computeLinkPlan(linkPool, editorLinks, explorerMapLinks);
-  }, [linkPool, editorLinks, explorerMapLinks]);
+    return computeLinkPlan(linkPool);
+  }, [linkPool]);
 
   const linkSelectedNodeModules = useCallback(() => {
     if (!linkPlan) return;
-    if (linkPlan.editorFrameIDs.length > 0) {
-      setEditorLinks((previous) => {
-        const next = { ...previous };
-        for (const editorID of linkPlan.editorFrameIDs) next[editorID] = linkPlan.mapFrameID;
-        persistEditorLinks(next)
-        return next;
-      });
-    }
-    if (linkPlan.explorerFrameIDs.length > 0) {
-      setExplorerCanvasLinks((previous) => {
-        const next = { ...previous };
-        for (const explorerID of linkPlan.explorerFrameIDs) next[explorerID] = linkPlan.mapFrameID;
-        try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(next)); } catch {}
-        return next;
-      });
-    }
+    setFrameLinks((previous) => mergeLinkPlan(previous, linkPlan));
   }, [linkPlan]);
   const delinkSelectedNodeModules = useCallback(() => {
-    const result = delinkForPool(linkPool, editorLinks, explorerMapLinks);
+    const result = delinkForPool(linkPool, frameLinks);
     if (!result.changed) return;
-    setEditorLinks(result.nextEditorLinks);
-    persistEditorLinks(result.nextEditorLinks);
-    setExplorerCanvasLinks(result.nextExplorerLinks);
-    try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(result.nextExplorerLinks)); } catch {}
-  }, [linkPool, editorLinks, explorerMapLinks]);
+    setFrameLinks(result.nextEdges);
+  }, [linkPool, frameLinks]);
   const linkModulesLabel = useMemo(() => {
     return buildLinkModulesLabel(linkPool, linkPlan);
   }, [linkPool, linkPlan]);
-  const canDelinkModules = useMemo(() => delinkForPool(linkPool, editorLinks, explorerMapLinks).changed, [linkPool, editorLinks, explorerMapLinks]);
+  const canDelinkModules = useMemo(() => delinkForPool(linkPool, frameLinks).changed, [linkPool, frameLinks]);
   const linkedFrameIDs = useMemo(() => {
     const ids = new Set<string>();
     const frameIDs = new Set(frames.map((frame) => frame.id));
-    for (const [docFrameID, mapFrameID] of Object.entries(editorLinks)) {
-      if (!frameIDs.has(docFrameID) || !frameIDs.has(mapFrameID)) continue;
-      ids.add(docFrameID);
-      ids.add(mapFrameID);
-    }
-    for (const [explorerFrameID, mapFrameID] of Object.entries(explorerMapLinks)) {
-      if (!frameIDs.has(explorerFrameID) || !frameIDs.has(mapFrameID)) continue;
-      ids.add(explorerFrameID);
-      ids.add(mapFrameID);
+    for (const edge of frameLinks) {
+      if (!frameIDs.has(edge.a) || !frameIDs.has(edge.b)) continue;
+      ids.add(edge.a);
+      ids.add(edge.b);
     }
     return ids;
-  }, [editorLinks, explorerMapLinks, frames]);
+  }, [frameLinks, frames]);
   const frameInContextMenu = useMemo(() => {
     if (!frameRightClickMenu) return null;
     return frames.find((frame) => frame.id === frameRightClickMenu.id) ?? null;
@@ -847,20 +828,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const frameIDs = new Set(tabs.flatMap((tab) => tab.frames.map((frame) => frame.id)));
-    setEditorLinks((previous) => {
-      const next = Object.fromEntries(Object.entries(previous).filter(([docID, canvasID]) => frameIDs.has(docID) && frameIDs.has(canvasID)));
-      if (JSON.stringify(previous) !== JSON.stringify(next)) {
-        persistEditorLinks(next)
-      }
-      return next;
-    });
-    setExplorerCanvasLinks((previous) => {
-      const next = Object.fromEntries(Object.entries(previous).filter(([explorerID, canvasID]) => frameIDs.has(explorerID) && frameIDs.has(canvasID)));
-      if (JSON.stringify(previous) !== JSON.stringify(next)) {
-        try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(next)); } catch {}
-      }
-      return next;
-    });
+    setFrameLinks((previous) => previous.filter((edge) => frameIDs.has(edge.a) && frameIDs.has(edge.b)));
   }, [tabs]);
   useEffect(() => {
     const groups: FrameDataModel[][] = [];
@@ -872,36 +840,26 @@ const App: React.FC = () => {
 
     if (groups.length === 0) return;
 
-    const nextDocLinks = { ...editorLinks };
-    const nextExplorerLinks = { ...explorerMapLinks };
-    let changedDoc = false;
-    let changedExplorer = false;
+    let nextLinks = frameLinks;
+    let changed = false;
 
     for (const group of groups) {
-      const canvases = group.filter((frame) => frame.kind === "nodes" || frame.kind === "nodes-map");
-      if (canvases.length !== 1) continue;
-      const canvasID = canvases[0].id;
-      for (const doc of group.filter((frame) => frame.kind === "editor" || frame.kind === "node-doc")) {
-        if (nextDocLinks[doc.id] === canvasID) continue;
-        nextDocLinks[doc.id] = canvasID;
-        changedDoc = true;
-      }
-      for (const explorer of group.filter((frame) => frame.kind === "company-explorer")) {
-        if (nextExplorerLinks[explorer.id] === canvasID) continue;
-        nextExplorerLinks[explorer.id] = canvasID;
-        changedExplorer = true;
-      }
+      const merged = mergeLinkPlan(nextLinks, computeLinkPlan(group));
+      if (merged.length !== nextLinks.length) changed = true;
+      nextLinks = merged;
     }
 
-    if (changedDoc) {
-      setEditorLinks(nextDocLinks);
-      persistEditorLinks(nextDocLinks)
-    }
-    if (changedExplorer) {
-      setExplorerCanvasLinks(nextExplorerLinks);
-      try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(nextExplorerLinks)); } catch {}
-    }
-  }, [frames, editorLinks, explorerMapLinks]);
+    if (changed) setFrameLinks(nextLinks);
+  }, [frames, frameLinks]);
+
+  useEffect(() => {
+    const legacy = deriveLegacyMapLinks(frames, frameLinks);
+    setEditorLinks(legacy.editorLinks);
+    persistEditorLinks(legacy.editorLinks);
+    setExplorerCanvasLinks(legacy.explorerLinks);
+    try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(legacy.explorerLinks)); } catch {}
+    persistFrameLinks(frameLinks);
+  }, [frames, frameLinks]);
 
   const deleteSelectedFrame = useCallback(() => {
     const ids = selectedFrameIds.size > 0 ? selectedFrameIds : (selectedFrameId ? new Set([selectedFrameId]) : new Set<string>());
@@ -1004,16 +962,7 @@ const App: React.FC = () => {
   const openDefaultNodeView = useCallback((tabID: string) => {
     const framesForView = createDefaultNodeViewFrames();
     setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, frames: framesForView } : tab)));
-    setEditorLinks((previous) => {
-      const next = { ...previous, "default-node-editor": "default-node-map" };
-      persistEditorLinks(next)
-      return next;
-    });
-    setExplorerCanvasLinks((previous) => {
-      const next = { ...previous, "default-node-explorer": "default-node-map" };
-      try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(next)); } catch {}
-      return next;
-    });
+    setFrameLinks((previous) => mergeLinkPlan(previous, computeLinkPlan(framesForView)));
     setActiveTabId(tabID);
     setEditMode(true);
   }, []);
@@ -1021,16 +970,7 @@ const App: React.FC = () => {
   const openDefaultCompanyExplorerView = useCallback((tabID: string) => {
     const framesForView = createDefaultCompanyExplorerViewFrames();
     setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, frames: framesForView } : tab)));
-    setEditorLinks((previous) => {
-      const next = { ...previous, "default-company-editor": "default-company-details" };
-      persistEditorLinks(next)
-      return next;
-    });
-    setExplorerCanvasLinks((previous) => {
-      const next = { ...previous, "default-company-explorer": "default-company-details" };
-      try { localStorage.setItem(EXPLORER_MAP_LINKS_KEY, JSON.stringify(next)); } catch {}
-      return next;
-    });
+    setFrameLinks((previous) => mergeLinkPlan(previous, computeLinkPlan(framesForView)));
     setActiveTabId(tabID);
     setEditMode(true);
   }, []);
@@ -1237,7 +1177,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <FrameCanvas style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onClick={() => { setSelectedFrameId(null); setSelectedFrameIds(new Set()); }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY }); setHeaderMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}>
+      <FrameCanvas style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onClick={() => { setSelectedFrameId(null); setSelectedFrameIds(new Set()); }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY, gridX: Math.floor(e.clientX / stepX), gridY: Math.floor((e.clientY - HEADER_H) / stepY) }); setHeaderMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
         {editMode && draggingId && (() => {
           const activeFrame = frames.find((w) => w.id === draggingId);
@@ -1447,6 +1387,9 @@ const App: React.FC = () => {
 
       {canvasMenu && (
         <FrameRightClickMenu x={canvasMenu.x} y={canvasMenu.y} onClose={closeMenus}>
+          <button style={menuBtnBase} onClick={() => { addFrame("chart", { x: canvasMenu.gridX, y: canvasMenu.gridY }); setEditMode(true); closeMenus(); }} {...hoverHandlers}>
+            Create new frame
+          </button>
           <button style={menuBtnBase} onClick={() => { setEditMode((v) => !v); closeMenus(); }} {...hoverHandlers}>
             Toggle Edit Mode (Now: {editMode ? "ON" : "OFF"})
           </button>
