@@ -280,3 +280,35 @@ Any such change must include:
 - explicit SLO impact goal
 - rollback plan
 - migration safety notes
+
+---
+
+## History
+
+> ⚠️ **DO NOT EDIT THIS HISTORY SECTION UNLESS A USER EXPLICITLY ASKS YOU TO.**
+> This section is append-only and should only be updated when a user directly requests a history entry.
+
+### 2026-04-26 — Frontend module-link latency hardening + full graph migration
+
+**Problem before this change (explicit):**
+- Module-link synchronization mixed semantic context updates with high-frequency UI geometry churn.
+- Node Map emitted cross-module map-state events during pan/zoom/drag state persistence, causing unnecessary linked-module refresh work.
+- App layout rewrote compatibility link mappings on broad frame changes, so non-link edits (like drag/resize) could trigger avoidable link propagation.
+- Explorer and Editor consumed a compatibility bridge path that increased localStorage/event fan-out and widened effect dependencies.
+
+**Implemented solution (explicit):**
+- Promoted `frame-module-links-v1` to the sole module-link source-of-truth for runtime linking.
+- Added `frame-module-registry-v1` (frame id -> kind) to support graph traversal by consumers without legacy map-link key writes.
+- Introduced dedicated semantic event channels:
+  - `EVENT_FRAME_LINK_GRAPH_UPDATED` for graph changes only.
+  - `EVENT_NODE_MAP_SELECTION_UPDATED` for selection context changes only.
+- Removed app-layer runtime writes of legacy editor/explorer bridge mappings.
+- Refactored Editor to resolve linked Node Map via graph traversal (`frame-module-links-v1` + `frame-module-registry-v1`) and react to semantic events.
+- Refactored Explorer target fan-out to direct graph neighbors and graph-change events.
+- Separated hot interaction persistence from semantic sync:
+  - Node Map keeps local map-state persistence debounced.
+  - Cross-module notifications now fire only on selected-node semantic changes.
+
+**Latency-architecture alignment outcome:**
+- Better compliance with “event-driven sync” while reducing broad fan-out.
+- Better compliance with “batch updates / avoid global rerenders” by isolating high-frequency interaction state from cross-module context propagation.

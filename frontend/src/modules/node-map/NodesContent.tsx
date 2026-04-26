@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, snapToGrid, trimOrEmpty } from "./shared";
-import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_STATE_UPDATED } from "./eventbus";
+import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, removeWorkspaceNode, subscribeWorkspace, upsertWorkspaceNode } from "./workspaceStore";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { pathIntersectsRect } from "./relationshipSelection";
@@ -75,6 +75,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
   const connectionPathsRef = useRef<Array<{ id: string; points: { x: number; y: number }[] }>>([]);
   const suppressNextRelationshipLineClickRef = useRef(false);
+  const selectionRevisionRef = useRef(0);
 
   // Keep relationship projection derivation centralized so callers can reuse the exact same
   // filtering logic without triggering additional network calls.
@@ -320,22 +321,35 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   useEffect(() => {
     if (!restoredViewport) return;
-    try {
-      const nextState: NodeMapState = {
-        zoom,
-        pan,
-        selectedNodeID,
-        nodePositions,
-        relationshipColorsEnabled,
-        relationshipRoleColors,
-      };
-      SESSION_NODE_MAP_STATE.set(mapStateKey, nextState);
-      localStorage.setItem(mapStateKey, JSON.stringify(nextState));
-      emitDashboardEvent(EVENT_NODE_MAP_STATE_UPDATED, { mapWidgetID: mapScope, selectedNodeID });
-    } catch {
-      // ignore local storage quota/security errors
-    }
-  }, [mapScope, mapStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions, relationshipColorsEnabled, relationshipRoleColors]);
+    const timeout = window.setTimeout(() => {
+      try {
+        const nextState: NodeMapState = {
+          zoom,
+          pan,
+          selectedNodeID,
+          nodePositions,
+          relationshipColorsEnabled,
+          relationshipRoleColors,
+        };
+        SESSION_NODE_MAP_STATE.set(mapStateKey, nextState);
+        localStorage.setItem(mapStateKey, JSON.stringify(nextState));
+      } catch {
+        // ignore local storage quota/security errors
+      }
+    }, 120);
+    return () => window.clearTimeout(timeout);
+  }, [mapStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions, relationshipColorsEnabled, relationshipRoleColors]);
+
+  useEffect(() => {
+    if (!restoredViewport) return;
+    selectionRevisionRef.current += 1;
+    emitDashboardEvent(EVENT_NODE_MAP_SELECTION_UPDATED, {
+      mapWidgetID: mapScope,
+      selectedNodeID,
+      revision: selectionRevisionRef.current,
+      changedAt: Date.now(),
+    });
+  }, [mapScope, restoredViewport, selectedNodeID]);
 
   useEffect(() => {
     setNodePositions((previous) => {

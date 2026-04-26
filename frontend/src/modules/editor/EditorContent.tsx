@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { NodeDetails, NodeDocBox, NodeInformation, EDITOR_LINKS_KEY, NODE_DOC_MIN_H, NODE_DOC_MIN_W, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, clamp, parseDocBox } from "../node-map/shared";
-import { EVENT_EDITOR_LINKS_UPDATED, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_STATE_UPDATED } from "../node-map/eventbus";
+import { NodeDetails, NodeDocBox, NodeInformation, NODE_DOC_MIN_H, NODE_DOC_MIN_W, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, clamp, parseDocBox } from "../node-map/shared";
+import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
+import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 
 // Editor module: node-linked document canvas for text boxes and notes.
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
@@ -28,6 +29,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     edges: { top?: true; right?: true; bottom?: true; left?: true };
   } | null>(null);
   const [error, setError] = useState("");
+  const lastSelectionRevisionRef = useRef(0);
 
   // API helper for editor load/save flows tied to selected node context.
   const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
@@ -43,16 +45,16 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     return response.json() as Promise<T>;
   }, [apiBase]);
 
-  // Reads editor->node-map link so this panel can follow the selected map scope.
+  // Resolves linked map frame via graph links + frame registry metadata.
   const readLinkedMapWidgetID = useCallback((): string => {
-    try {
-      const raw = localStorage.getItem(EDITOR_LINKS_KEY);
-      if (!raw) return "";
-      const parsed = JSON.parse(raw) as Record<string, string>;
-      return typeof parsed[scope] === "string" ? parsed[scope] : "";
-    } catch {
-      return "";
-    }
+    const edges = readFrameLinksFromStorage();
+    const registry = readFrameRegistryFromStorage();
+    return resolveLinkedFrameByKindFromGraph({
+      startFrameID: scope,
+      targetKind: "map",
+      edges,
+      registry,
+    });
   }, [scope]);
 
   // Reads currently selected node from linked node-map persisted state.
@@ -93,15 +95,15 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const refresh = () => setLinkedMapWidgetID(readLinkedMapWidgetID());
     refresh();
     const onStorage = (event: StorageEvent) => {
-      if (event.key && event.key !== EDITOR_LINKS_KEY) return;
+      if (event.key && event.key !== FRAME_LINKS_KEY && event.key !== FRAME_REGISTRY_KEY) return;
       refresh();
     };
-    const onLinksUpdated = () => refresh();
+    const onGraphUpdated = () => refresh();
     window.addEventListener("storage", onStorage);
-    window.addEventListener(EVENT_EDITOR_LINKS_UPDATED, onLinksUpdated);
+    window.addEventListener(EVENT_FRAME_LINK_GRAPH_UPDATED, onGraphUpdated);
     return () => {
       window.removeEventListener("storage", onStorage);
-      window.removeEventListener(EVENT_EDITOR_LINKS_UPDATED, onLinksUpdated);
+      window.removeEventListener(EVENT_FRAME_LINK_GRAPH_UPDATED, onGraphUpdated);
     };
   }, [readLinkedMapWidgetID]);
 
@@ -122,8 +124,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       refresh();
     };
     const onMapStateUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string }>).detail;
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; revision?: number }>).detail;
       if (!detail || detail.mapWidgetID !== linkedMapWidgetID) return;
+      const revision = typeof detail.revision === "number" ? detail.revision : 0;
+      if (revision > 0 && revision <= lastSelectionRevisionRef.current) return;
+      if (revision > 0) lastSelectionRevisionRef.current = revision;
       refresh();
     };
     const onExplorerContextUpdated = (event: Event) => {
@@ -134,11 +139,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       refresh();
     };
     window.addEventListener("storage", onStorage);
-    window.addEventListener(EVENT_NODE_MAP_STATE_UPDATED, onMapStateUpdated);
+    window.addEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapStateUpdated);
     window.addEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
     return () => {
       window.removeEventListener("storage", onStorage);
-      window.removeEventListener(EVENT_NODE_MAP_STATE_UPDATED, onMapStateUpdated);
+      window.removeEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapStateUpdated);
       window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
     };
   }, [companyID, linkedMapWidgetID, readSelectedNodeFromMap, readSelectedNodeFromExplorerContext, scope]);

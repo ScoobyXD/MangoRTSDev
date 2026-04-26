@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { EXPLORER_MAP_LINKS_KEY, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeDetails, NodeRecord } from "../node-map/shared";
-import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED } from "../node-map/eventbus";
+import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeDetails, NodeRecord } from "../node-map/shared";
+import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../node-map/eventbus";
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../node-map/workspaceStore";
-
-const FRAME_LINKS_KEY = "frame-module-links-v1";
+import { FRAME_LINKS_KEY, readFrameLinksFromStorage, resolveDirectLinkedTargets } from "../linkingGraph";
 
 type ExplorerTreeNode = {
   id: string;
@@ -30,6 +29,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const treeViewportRef = useRef<HTMLDivElement | null>(null);
   const [treeScrollTop, setTreeScrollTop] = useState(0);
   const [treeViewportHeight, setTreeViewportHeight] = useState(480);
+  const [linkRevision, setLinkRevision] = useState(0);
 
   const TREE_ROW_HEIGHT = 30;
   const TREE_OVERSCAN = 8;
@@ -163,21 +163,23 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, [treeRows, treeViewportHeight, treeScrollTop]);
 
   useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key && event.key !== FRAME_LINKS_KEY) return;
+      setLinkRevision((value) => value + 1);
+    };
+    const onGraphUpdated = () => setLinkRevision((value) => value + 1);
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(EVENT_FRAME_LINK_GRAPH_UPDATED, onGraphUpdated);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(EVENT_FRAME_LINK_GRAPH_UPDATED, onGraphUpdated);
+    };
+  }, []);
+
+  useEffect(() => {
     try {
-      const targetIDs = new Set<string>();
-
-      const rawLegacy = localStorage.getItem(EXPLORER_MAP_LINKS_KEY);
-      const parsedLegacy = rawLegacy ? (JSON.parse(rawLegacy) as Record<string, string>) : {};
-      const linkedCanvasID = typeof parsedLegacy[scope] === "string" ? parsedLegacy[scope] : "";
-      if (linkedCanvasID) targetIDs.add(linkedCanvasID);
-
-      const rawGraph = localStorage.getItem(FRAME_LINKS_KEY);
-      const graph = rawGraph ? (JSON.parse(rawGraph) as Array<{ a?: string; b?: string }>) : [];
-      for (const edge of graph) {
-        if (!edge || typeof edge !== "object") continue;
-        if (edge.a === scope && typeof edge.b === "string") targetIDs.add(edge.b);
-        if (edge.b === scope && typeof edge.a === "string") targetIDs.add(edge.a);
-      }
+      const graph = readFrameLinksFromStorage();
+      const targetIDs = new Set(resolveDirectLinkedTargets({ sourceFrameID: scope, edges: graph }));
       if (targetIDs.size === 0) return;
 
       const payload = {
@@ -197,7 +199,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     } catch {
       // ignore local storage failures
     }
-  }, [companyID, scope, selectedNodeID, selectedTreeID, selectedTree]);
+  }, [companyID, scope, selectedNodeID, selectedTreeID, selectedTree, linkRevision]);
 
   // Right-panel history summary derived from selected node details payload.
   const historyRows = useMemo(() => {
