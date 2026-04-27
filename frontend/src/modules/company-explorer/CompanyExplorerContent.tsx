@@ -32,6 +32,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [linkRevision, setLinkRevision] = useState(0);
   const [linkedMapFrameID, setLinkedMapFrameID] = useState("");
   const lastMapSelectionRevisionRef = useRef(0);
+  const suppressNextExplorerBroadcastRef = useRef(false);
 
   const TREE_ROW_HEIGHT = 30;
   const TREE_OVERSCAN = 8;
@@ -207,6 +208,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   useEffect(() => {
     const applyMapSelection = (selectedFromMap: string) => {
       if (!selectedFromMap) return;
+      suppressNextExplorerBroadcastRef.current = true;
       setSelectedNodeID(selectedFromMap);
       setSelectedTreeID(`node-${selectedFromMap}`);
       setExpanded((previous) => {
@@ -230,11 +232,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       }
     };
     readFromMapState();
-    const onStorage = (event: StorageEvent) => {
-      const mapStateKey = linkedMapFrameID ? `node-map-state-v1:${companyID}:${linkedMapFrameID}` : "";
-      if (event.key && event.key !== mapStateKey) return;
-      readFromMapState();
-    };
     const onMapSelectionUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number }>).detail;
       if (!detail || detail.mapWidgetID !== linkedMapFrameID) return;
@@ -244,15 +241,17 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       if (typeof detail.selectedNodeID !== "string") return;
       applyMapSelection(detail.selectedNodeID);
     };
-    window.addEventListener("storage", onStorage);
     window.addEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapSelectionUpdated);
     return () => {
-      window.removeEventListener("storage", onStorage);
       window.removeEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapSelectionUpdated);
     };
   }, [companyID, linkedMapFrameID]);
 
   useEffect(() => {
+    if (suppressNextExplorerBroadcastRef.current) {
+      suppressNextExplorerBroadcastRef.current = false;
+      return;
+    }
     try {
       const graph = readFrameLinksFromStorage();
       const targetIDs = new Set(resolveDirectLinkedTargets({ sourceFrameID: scope, edges: graph }));
