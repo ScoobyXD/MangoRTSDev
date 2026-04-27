@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 
 	"miraeopus/backend/internal/domain"
@@ -253,7 +254,23 @@ func (r *PostgresRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDeta
 	}, nil
 }
 
-func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, information string) (domain.NodeInformation, error) {
+func semanticTextFromInformation(infoType, information string) string {
+	if infoType != "Text box" {
+		return information
+	}
+	var payload struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal([]byte(information), &payload); err != nil {
+		return information
+	}
+	if payload.Text == "" {
+		return information
+	}
+	return payload.Text
+}
+
+func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, information, semanticKey string) (domain.NodeInformation, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -296,11 +313,77 @@ func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, informati
 	); err != nil {
 		return domain.NodeInformation{}, err
 	}
+	if infoType == "Text box" {
+		keyValue := semanticKey
+		if keyValue == "" {
+			keyValue = item.InformationID
+		}
+		if _, err := tx.ExecContext(ctx,
+			`insert into node_text_projection
+			 (company_id, node_id, semantic_key, text_value, source_information_id, created_timestamp, updated_timestamp)
+			 values ($1, $2, $3, $4, $5, now(), now())
+			 on conflict (company_id, node_id, semantic_key)
+			 do update set
+			   text_value=excluded.text_value,
+			   source_information_id=excluded.source_information_id,
+			   updated_timestamp=now()`,
+			item.CompanyID, item.NodeID, keyValue, semanticTextFromInformation(infoType, information), item.InformationID,
+		); err != nil {
+			return domain.NodeInformation{}, err
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return domain.NodeInformation{}, err
 	}
 	return item, nil
+}
+
+func (r *PostgresRepo) ListNodeTextProjections(companyID, nodeID string) ([]domain.NodeTextProjection, error) {
+	ctx := context.Background()
+	var exists bool
+	if err := r.db.QueryRowContext(ctx,
+		`select exists(select 1 from nodes where company_id=$1 and node_id=$2)`,
+		companyID, nodeID,
+	).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`select company_id, node_id, semantic_key, text_value, source_information_id, created_timestamp, updated_timestamp
+		 from node_text_projection
+		 where company_id=$1 and node_id=$2
+		 order by updated_timestamp asc`,
+		companyID, nodeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.NodeTextProjection, 0)
+	for rows.Next() {
+		var item domain.NodeTextProjection
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.NodeID,
+			&item.SemanticKey,
+			&item.TextValue,
+			&item.SourceInformationID,
+			&item.CreatedTimestamp,
+			&item.UpdatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func (r *PostgresRepo) CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error) {

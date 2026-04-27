@@ -48,6 +48,8 @@ Base values are read from:
   - loads the nodes list.
 - `GET /v1/nodes/:node_id?company_id=...`
   - loads node details (relationships + information) for one node.
+- `GET /v1/nodes/:node_id/text-projection?company_id=...`
+  - loads typed semantic editor text rows for hot-path editor rendering.
 - `POST /v1/nodes`
   - creates a node with `{ company_id, header }`.
 - `DELETE /v1/nodes/:node_id?company_id=...`

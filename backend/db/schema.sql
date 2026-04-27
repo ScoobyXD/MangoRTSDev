@@ -77,6 +77,19 @@ create table if not exists node_information (
   foreign key (company_id, node_id) references nodes (company_id, node_id)
 );
 
+create table if not exists node_text_projection (
+  company_id uuid not null,
+  node_id uuid not null,
+  semantic_key text not null,
+  text_value text not null,
+  source_information_id uuid not null,
+  created_timestamp timestamptz not null,
+  updated_timestamp timestamptz not null,
+  primary key (company_id, node_id, semantic_key),
+  foreign key (company_id, node_id) references nodes (company_id, node_id),
+  foreign key (company_id, source_information_id) references node_information (company_id, information_id)
+);
+
 create table if not exists logic_gates (
   company_id uuid not null,
   logic_gate_id uuid not null,
@@ -124,5 +137,6 @@ create table if not exists operations (
 );
 
 create index if not exists idx_node_information_node on node_information(company_id, node_id);
+create index if not exists idx_node_text_projection_node_updated on node_text_projection(company_id, node_id, updated_timestamp desc);
 create index if not exists idx_operations_node on operations(company_id, node_id);
 create index if not exists idx_operations_logic_gate on operations(company_id, logic_gate_id);

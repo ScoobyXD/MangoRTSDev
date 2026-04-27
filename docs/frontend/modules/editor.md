@@ -17,7 +17,13 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 - **Explorer fallback context source:** editor can read explorer-driven node selection from `node-map-explorer-context-v1:<company_id>:<editor_widget_id>` when no direct map-state context is available.
 - **Backend read path:** `GET /v1/nodes/:node_id?company_id=...`.
 - **Backend write path:** `POST /v1/nodes/:node_id/information` for text-box payloads.
+- **Backend semantic read path:** `GET /v1/nodes/:node_id/text-projection?company_id=...` (typed text projection rows for hot editor loads).
 - **Event sync hooks:** `EVENT_FRAME_LINK_GRAPH_UPDATED`, `EVENT_NODE_MAP_SELECTION_UPDATED`, `EVENT_EXPLORER_CONTEXT_UPDATED`, and `storage` events.
+
+## Semantic vs layout persistence policy (2026-04-27)
+- Editor semantic text values are persisted server-side and served through typed text projection rows for hot-path loads.
+- Editor box geometry (`x/y/w/h`) is local/per-user layout state and is intentionally not part of hot server payloads.
+- This removes hot-path JSON geometry reconstruction work while preserving fast local layout interaction.
 
 ## Latency hardening update (2026-04-26)
 - Editor no longer depends on legacy editor->map localStorage mapping updates.
@@ -32,7 +38,7 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 ## UX Notes
 - Text boxes support drag and edge/corner resize interactions.
 - Double-clicking the canvas creates a new text box at pointer position.
-- Box geometry and text are stored in each information payload to preserve layout.
+- Text value is persisted server-side; box geometry is preserved in local/per-user layout storage.
 
 ## Commenting Convention Reminder
 When editing this module, prefer comments that summarize intent and feature responsibilities (what this block controls), not line-by-line implementation mechanics.

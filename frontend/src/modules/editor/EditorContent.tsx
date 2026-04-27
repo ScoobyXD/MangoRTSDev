@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { NodeDetails, NodeDocBox, NodeInformation, NODE_DOC_MIN_H, NODE_DOC_MIN_W, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, clamp, parseDocBox } from "../node-map/shared";
+import { NodeDocBox, NodeInformation, NODE_DOC_MIN_H, NODE_DOC_MIN_W, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, clamp } from "../node-map/shared";
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
+import { getNodeDetailsSingleFlight, getNodeTextProjectionSingleFlight, invalidateNodeCaches } from "../node-map/nodeDetailsStore";
+
+type LocalBoxLayout = Record<string, { x: number; y: number; w: number; h: number }>;
 
 // Editor module: node-linked document canvas for text boxes and notes.
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
@@ -30,6 +33,30 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   } | null>(null);
   const [error, setError] = useState("");
   const lastSelectionRevisionRef = useRef(0);
+
+  const readLocalLayout = useCallback((nodeID: string): LocalBoxLayout => {
+    if (!nodeID) return {};
+    const key = `editor-local-layout-v1:${companyID}:${scope}:${nodeID}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw) as LocalBoxLayout;
+      if (!parsed || typeof parsed !== "object") return {};
+      return parsed;
+    } catch {
+      return {};
+    }
+  }, [companyID, scope]);
+
+  const writeLocalLayout = useCallback((nodeID: string, next: LocalBoxLayout) => {
+    if (!nodeID) return;
+    const key = `editor-local-layout-v1:${companyID}:${scope}:${nodeID}`;
+    try {
+      localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      // ignore storage failures in local-only layout path
+    }
+  }, [companyID, scope]);
 
   // API helper for editor load/save flows tied to selected node context.
   const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
@@ -83,13 +110,13 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   // Persist a single document box into node information rows (Text box type).
   const saveBox = useCallback(async (nodeID: string, box: NodeDocBox) => {
-    const payload = JSON.stringify({ local_id: box.local_id, x: box.x, y: box.y, w: box.w, h: box.h, text: box.information });
     const created = await requestJSON<NodeInformation>(`/v1/nodes/${nodeID}/information`, {
       method: "POST",
-      body: JSON.stringify({ company_id: companyID, type: "Text box", information: payload }),
+      body: JSON.stringify({ company_id: companyID, type: "Text box", information: box.information, semantic_key: box.local_id }),
     });
+    invalidateNodeCaches(apiBase, companyID, nodeID);
     setBoxes((prev) => prev.map((item) => (item.local_id === box.local_id ? { ...item, information_id: created.information_id } : item)));
-  }, [companyID, requestJSON]);
+  }, [apiBase, companyID, requestJSON]);
 
   useEffect(() => {
     const refresh = () => setLinkedMapWidgetID(readLinkedMapWidgetID());
@@ -169,22 +196,30 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     (async () => {
       try {
         setError("");
-        const details = await requestJSON<NodeDetails>(`/v1/nodes/${linkedNodeID}?company_id=${encodeURIComponent(companyID)}`);
+        const [details, projections] = await Promise.all([
+          getNodeDetailsSingleFlight(apiBase, companyID, linkedNodeID),
+          getNodeTextProjectionSingleFlight(apiBase, companyID, linkedNodeID),
+        ]);
         if (cancelled) return;
         setLinkedNodeHeader(details.node.header);
         const nonText = details.information.filter((item) => item.type !== "Text box");
         setLinkedNodeInfoPreview([
-          `Text boxes: ${details.information.length - nonText.length}`,
+          `Text boxes: ${projections.length}`,
           ...nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`),
         ]);
-        const latestByBox = new Map<string, NodeDocBox>();
-        const orderedInfo = [...details.information].sort((a, b) => new Date(a.updated_timestamp).getTime() - new Date(b.updated_timestamp).getTime());
-        for (const info of orderedInfo) {
-          const parsed = parseDocBox(info);
-          if (!parsed) continue;
-          latestByBox.set(parsed.local_id, parsed);
-        }
-        const nextBoxes = Array.from(latestByBox.values());
+        const layout = readLocalLayout(linkedNodeID);
+        const nextBoxes = projections.map((item, index) => {
+          const position = layout[item.semantic_key];
+          return {
+            local_id: item.semantic_key,
+            information_id: item.source_information_id,
+            x: position?.x ?? (24 + (index % 6) * 18),
+            y: position?.y ?? (56 + (index % 6) * 14),
+            w: position?.w ?? 320,
+            h: position?.h ?? 52,
+            information: item.text_value,
+          } as NodeDocBox;
+        });
         setBoxes(nextBoxes);
         if (nextBoxes.length > 0) setActiveBoxID(nextBoxes[nextBoxes.length - 1].local_id);
       } catch (cause) {
@@ -192,7 +227,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       }
     })();
     return () => { cancelled = true; };
-  }, [companyID, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, linkedNodeID, readLocalLayout]);
 
   useEffect(() => {
     if (!placing || !canvasRef.current) return;
@@ -205,13 +240,18 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     };
     const onUp = () => {
       const moved = boxes.find((item) => item.local_id === placing.id);
-      if (linkedNodeID && moved) void saveBox(linkedNodeID, moved);
+      if (linkedNodeID && moved) {
+        writeLocalLayout(linkedNodeID, {
+          ...readLocalLayout(linkedNodeID),
+          [moved.local_id]: { x: moved.x, y: moved.y, w: moved.w, h: moved.h },
+        });
+      }
       setPlacing(null);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     return () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
-  }, [boxes, linkedNodeID, placing, saveBox]);
+  }, [boxes, linkedNodeID, placing, readLocalLayout, writeLocalLayout]);
 
   useEffect(() => {
     if (!resizing || !canvasRef.current) return;
@@ -246,7 +286,12 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const onUp = (event: PointerEvent) => {
       if (event.pointerId !== resizing.pointerID) return;
       const next = boxes.find((item) => item.local_id === resizing.id);
-      if (linkedNodeID && next) void saveBox(linkedNodeID, next);
+      if (linkedNodeID && next) {
+        writeLocalLayout(linkedNodeID, {
+          ...readLocalLayout(linkedNodeID),
+          [next.local_id]: { x: next.x, y: next.y, w: next.w, h: next.h },
+        });
+      }
       setResizing(null);
     };
     window.addEventListener("pointermove", onMove);
@@ -255,7 +300,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [boxes, linkedNodeID, resizing, saveBox]);
+  }, [boxes, linkedNodeID, resizing, readLocalLayout, writeLocalLayout]);
 
 
   useEffect(() => {
@@ -276,8 +321,14 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     setBoxes((prev) => [...prev, next]);
     setActiveBoxID(localID);
     setFocusBoxID(localID);
+    if (linkedNodeID) {
+      writeLocalLayout(linkedNodeID, {
+        ...readLocalLayout(linkedNodeID),
+        [localID]: { x: next.x, y: next.y, w: next.w, h: next.h },
+      });
+    }
     if (linkedNodeID && initialText.trim().length > 0) void saveBox(linkedNodeID, next);
-  }, [boxes.length, linkedNodeID, saveBox]);
+  }, [boxes.length, linkedNodeID, readLocalLayout, saveBox, writeLocalLayout]);
 
   return (
     <div

@@ -125,15 +125,6 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		item, err := s.repo.GetNode(companyID, nodeID)
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "node_not_found")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_load_node")
-			return
-		}
 		details, err := s.repo.GetNodeDetails(companyID, nodeID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "node_not_found")
@@ -143,8 +134,34 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_load_node")
 			return
 		}
-		details.Node = item
 		writeJSONMaybeNotModified(w, r, http.StatusOK, details)
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "text-projection" {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		items, err := s.repo.ListNodeTextProjections(companyID, nodeID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "node_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_node_text_projection")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+			"company_id": companyID,
+			"node_id":    nodeID,
+			"items":      items,
+		})
 		return
 	}
 
@@ -157,6 +174,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			CompanyID   string `json:"company_id"`
 			Type        string `json:"type"`
 			Information string `json:"information"`
+			SemanticKey string `json:"semantic_key"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
@@ -167,7 +185,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		item, err := s.repo.AddNodeInformation(req.CompanyID, nodeID, req.Type, req.Information)
+		item, err := s.repo.AddNodeInformation(req.CompanyID, nodeID, req.Type, req.Information, req.SemanticKey)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "node_not_found")
 			return

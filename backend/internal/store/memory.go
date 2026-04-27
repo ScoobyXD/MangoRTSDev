@@ -19,7 +19,8 @@ type Repository interface {
 	GetNode(companyID, nodeID string) (domain.Node, error)
 	DeleteNode(companyID, nodeID string) error
 	GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error)
-	AddNodeInformation(companyID, nodeID, infoType, information string) (domain.NodeInformation, error)
+	AddNodeInformation(companyID, nodeID, infoType, information, semanticKey string) (domain.NodeInformation, error)
+	ListNodeTextProjections(companyID, nodeID string) ([]domain.NodeTextProjection, error)
 	CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error)
 	CreateLogicGate(companyID, header string) (domain.LogicGate, error)
 	CreateOperation(in CreateOperationInput) (domain.Operation, error)
@@ -39,6 +40,7 @@ type MemoryRepo struct {
 	mu         sync.RWMutex
 	nodes      map[string]domain.Node
 	nodeInfo   map[string][]domain.NodeInformation
+	nodeText   map[string]map[string]domain.NodeTextProjection
 	nodeRels   map[string][]domain.NodeRelationship
 	logicGates map[string]domain.LogicGate
 	operations map[string]domain.Operation
@@ -48,6 +50,7 @@ func NewMemoryRepo() *MemoryRepo {
 	return &MemoryRepo{
 		nodes:      map[string]domain.Node{},
 		nodeInfo:   map[string][]domain.NodeInformation{},
+		nodeText:   map[string]map[string]domain.NodeTextProjection{},
 		nodeRels:   map[string][]domain.NodeRelationship{},
 		logicGates: map[string]domain.LogicGate{},
 		operations: map[string]domain.Operation{},
@@ -121,6 +124,7 @@ func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
 
 	delete(r.nodes, k)
 	delete(r.nodeInfo, k)
+	delete(r.nodeText, k)
 
 	filtered := make([]domain.NodeRelationship, 0, len(r.nodeRels[companyID]))
 	for _, rel := range r.nodeRels[companyID] {
@@ -133,7 +137,7 @@ func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
 	return nil
 }
 
-func (r *MemoryRepo) AddNodeInformation(companyID, nodeID, infoType, information string) (domain.NodeInformation, error) {
+func (r *MemoryRepo) AddNodeInformation(companyID, nodeID, infoType, information, semanticKey string) (domain.NodeInformation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -155,7 +159,46 @@ func (r *MemoryRepo) AddNodeInformation(companyID, nodeID, infoType, information
 	sort.Slice(r.nodeInfo[k], func(i, j int) bool {
 		return r.nodeInfo[k][i].CreatedTimestamp.Before(r.nodeInfo[k][j].CreatedTimestamp)
 	})
+	if infoType == "Text box" {
+		keyValue := semanticKey
+		if keyValue == "" {
+			keyValue = item.InformationID
+		}
+		if r.nodeText[k] == nil {
+			r.nodeText[k] = map[string]domain.NodeTextProjection{}
+		}
+		existing, ok := r.nodeText[k][keyValue]
+		created := item.CreatedTimestamp
+		if ok {
+			created = existing.CreatedTimestamp
+		}
+		r.nodeText[k][keyValue] = domain.NodeTextProjection{
+			CompanyID:           companyID,
+			NodeID:              nodeID,
+			SemanticKey:         keyValue,
+			TextValue:           information,
+			SourceInformationID: item.InformationID,
+			CreatedTimestamp:    created,
+			UpdatedTimestamp:    item.UpdatedTimestamp,
+		}
+	}
 	return item, nil
+}
+
+func (r *MemoryRepo) ListNodeTextProjections(companyID, nodeID string) ([]domain.NodeTextProjection, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
+		return nil, ErrNotFound
+	}
+	items := make([]domain.NodeTextProjection, 0)
+	for _, item := range r.nodeText[key(companyID, nodeID)] {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].UpdatedTimestamp.Before(items[j].UpdatedTimestamp)
+	})
+	return items, nil
 }
 
 func (r *MemoryRepo) CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error) {

@@ -3,6 +3,7 @@ import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeDetails, NodeRecord } from ".
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../node-map/workspaceStore";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
+import { getNodeDetailsSingleFlight } from "../node-map/nodeDetailsStore";
 
 type ExplorerTreeNode = {
   id: string;
@@ -37,29 +38,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const TREE_ROW_HEIGHT = 30;
   const TREE_OVERSCAN = 8;
 
-  // Shared request helper for explorer detail/snapshot API calls.
-  const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
-    const headers = new Headers(init?.headers);
-    // Avoid Content-Type on body-less requests to reduce CORS preflight chatter on GETs.
-    if (init?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    const response = await fetch(`${apiBase}${path}`, {
-      ...init,
-      headers,
-    });
-    if (!response.ok) {
-      let reason = `request_failed_${response.status}`;
-      try {
-        const payload = await response.json();
-        if (payload?.error) reason = payload.error;
-      } catch {
-        // no-op
-      }
-      throw new Error(reason);
-    }
-    if (response.status === 204) return {} as T;
-    return response.json() as Promise<T>;
-  };
-
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -91,7 +69,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     let cancelled = false;
     (async () => {
       try {
-        const payload = await requestJSON<NodeDetails>(`/v1/nodes/${selectedNodeID}?company_id=${encodeURIComponent(companyID)}`);
+        const payload = await getNodeDetailsSingleFlight(apiBase, companyID, selectedNodeID);
         if (!cancelled) setSelectedDetails(payload);
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "failed_to_load_details");
@@ -100,7 +78,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return () => {
       cancelled = true;
     };
-  }, [selectedNodeID, companyID]);
+  }, [apiBase, selectedNodeID, companyID]);
 
   const unattachedNodeIDs = useMemo(() => {
     const attached = new Set<string>();
