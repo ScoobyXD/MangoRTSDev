@@ -245,6 +245,14 @@ Blockers:
 - ⛔ Redis/Valkey hot read model implemented
 - ✅ ETag + 304 implemented on hot read endpoints
 
+### Node Information Hot-Path Note (Editor)
+- Current behavior stores editor text-box payloads as JSON text in `node_information.information`.
+- This is acceptable for MVP compatibility but should be treated as an optimization target for hot-path scale.
+- Preferred sequence (do not skip ordering):
+  1. profile editor read/write and payload growth,
+  2. reduce append-only churn (update/upsert semantics by stable box identity),
+  3. introduce read-optimized latest projection for editor first-paint paths.
+
 ### Data Model / Database
 - ⛔ `company_id`-first indexing audited and fixed
 - ⛔ Sharding/partitioning strategy by `company_id` implemented
