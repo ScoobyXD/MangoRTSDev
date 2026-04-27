@@ -338,6 +338,7 @@ Once linked, Node Doc/Editor reads selected-node context from linked map state k
 and reads `selectedNodeID`. That selected node becomes the active storage target for Node Doc.
 
 Selection notifications are event-driven (`EVENT_NODE_MAP_SELECTION_UPDATED`) and only emit on semantic selected-node changes (not on pan/zoom/drag geometry churn).
+Linked Company Explorer frames consume those semantic selection events and map-state updates so Explorer row highlight follows Node Map selection in the same linked workspace.
 
 ### 9.4 Node Doc persistence behavior
 

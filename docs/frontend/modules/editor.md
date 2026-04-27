@@ -24,6 +24,10 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 - Link-resolution refresh is now triggered by dedicated graph-change events (or frame-link storage key changes), not by unrelated app layout churn.
 - Node map selection sync now consumes semantic selection events (with revision metadata) rather than high-frequency full map-state event fanout.
 
+## Editor persistence + reload correctness update (2026-04-26)
+- Text box blur-save now commits the current textarea value directly, preventing stale state snapshots that could previously persist blank/old text and then rehydrate incorrectly after node switches.
+- Empty double-click box creation no longer writes an immediate blank persistence row; persistence starts once there is user-entered content or subsequent geometry/text save action.
+
 ## UX Notes
 - Text boxes support drag and edge/corner resize interactions.
 - Double-clicking the canvas creates a new text box at pointer position.

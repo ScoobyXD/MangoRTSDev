@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeDetails, NodeRecord } from "../node-map/shared";
-import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../node-map/eventbus";
+import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../node-map/workspaceStore";
-import { FRAME_LINKS_KEY, readFrameLinksFromStorage, resolveDirectLinkedTargets } from "../linkingGraph";
+import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 
 type ExplorerTreeNode = {
   id: string;
@@ -30,6 +30,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [treeScrollTop, setTreeScrollTop] = useState(0);
   const [treeViewportHeight, setTreeViewportHeight] = useState(480);
   const [linkRevision, setLinkRevision] = useState(0);
+  const [linkedMapFrameID, setLinkedMapFrameID] = useState("");
+  const lastMapSelectionRevisionRef = useRef(0);
 
   const TREE_ROW_HEIGHT = 30;
   const TREE_OVERSCAN = 8;
@@ -163,6 +165,32 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, [treeRows, treeViewportHeight, treeScrollTop]);
 
   useEffect(() => {
+    const refreshLinkedMap = () => {
+      const edges = readFrameLinksFromStorage();
+      const registry = readFrameRegistryFromStorage();
+      const resolved = resolveLinkedFrameByKindFromGraph({
+        startFrameID: scope,
+        targetKind: "map",
+        edges,
+        registry,
+      });
+      setLinkedMapFrameID(resolved);
+    };
+    refreshLinkedMap();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key && event.key !== FRAME_LINKS_KEY && event.key !== FRAME_REGISTRY_KEY) return;
+      refreshLinkedMap();
+    };
+    const onGraphUpdated = () => refreshLinkedMap();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(EVENT_FRAME_LINK_GRAPH_UPDATED, onGraphUpdated);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(EVENT_FRAME_LINK_GRAPH_UPDATED, onGraphUpdated);
+    };
+  }, [scope]);
+
+  useEffect(() => {
     const onStorage = (event: StorageEvent) => {
       if (event.key && event.key !== FRAME_LINKS_KEY) return;
       setLinkRevision((value) => value + 1);
@@ -175,6 +203,54 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       window.removeEventListener(EVENT_FRAME_LINK_GRAPH_UPDATED, onGraphUpdated);
     };
   }, []);
+
+  useEffect(() => {
+    const applyMapSelection = (selectedFromMap: string) => {
+      if (!selectedFromMap) return;
+      setSelectedNodeID(selectedFromMap);
+      setSelectedTreeID(`node-${selectedFromMap}`);
+      setExpanded((previous) => {
+        if (previous.has("folder-root") && previous.has("folder-nodes")) return previous;
+        const next = new Set(previous);
+        next.add("folder-root");
+        next.add("folder-nodes");
+        return next;
+      });
+    };
+    const readFromMapState = () => {
+      if (!linkedMapFrameID) return;
+      const mapStateKey = `node-map-state-v1:${companyID}:${linkedMapFrameID}`;
+      try {
+        const raw = localStorage.getItem(mapStateKey);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as { selectedNodeID?: string };
+        if (typeof parsed.selectedNodeID === "string") applyMapSelection(parsed.selectedNodeID);
+      } catch {
+        // ignore malformed map state payload
+      }
+    };
+    readFromMapState();
+    const onStorage = (event: StorageEvent) => {
+      const mapStateKey = linkedMapFrameID ? `node-map-state-v1:${companyID}:${linkedMapFrameID}` : "";
+      if (event.key && event.key !== mapStateKey) return;
+      readFromMapState();
+    };
+    const onMapSelectionUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number }>).detail;
+      if (!detail || detail.mapWidgetID !== linkedMapFrameID) return;
+      const revision = typeof detail.revision === "number" ? detail.revision : 0;
+      if (revision > 0 && revision <= lastMapSelectionRevisionRef.current) return;
+      if (revision > 0) lastMapSelectionRevisionRef.current = revision;
+      if (typeof detail.selectedNodeID !== "string") return;
+      applyMapSelection(detail.selectedNodeID);
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapSelectionUpdated);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapSelectionUpdated);
+    };
+  }, [companyID, linkedMapFrameID]);
 
   useEffect(() => {
     try {

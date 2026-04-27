@@ -267,7 +267,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     setBoxes((prev) => [...prev, next]);
     setActiveBoxID(localID);
     setFocusBoxID(localID);
-    if (linkedNodeID) void saveBox(linkedNodeID, next);
+    if (linkedNodeID && initialText.trim().length > 0) void saveBox(linkedNodeID, next);
   }, [boxes.length, linkedNodeID, saveBox]);
 
   return (
@@ -312,10 +312,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
               const value = event.target.value;
               setBoxes((prev) => prev.map((item) => (item.local_id === box.local_id ? { ...item, information: value } : item)));
             }}
-            onBlur={() => {
+            onBlur={(event) => {
               if (!linkedNodeID) return;
               const latest = boxes.find((item) => item.local_id === box.local_id);
-              if (latest) void saveBox(linkedNodeID, latest);
+              const nextValue = event.currentTarget.value;
+              if (latest) void saveBox(linkedNodeID, { ...latest, information: nextValue });
             }}
             style={{
               width: "100%",

@@ -129,6 +129,7 @@ Implementation update (2026-04-26):
 Latency hardening update (2026-04-26):
 - Explorer target resolution now reads direct neighbors from `frame-module-links-v1` only (legacy explorer->map bridge key no longer required in runtime writes).
 - Explorer re-evaluates link targets on dedicated graph-change signals (`EVENT_FRAME_LINK_GRAPH_UPDATED`) and frame-link storage updates.
+- Explorer now also listens to semantic Node Map selection events and linked map-state updates, so selecting a node in Node Map updates Explorer row selection (`node-<id>`) and keeps linked Editor context in sync bidirectionally.
 
 ---
 
