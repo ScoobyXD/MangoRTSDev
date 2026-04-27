@@ -4,7 +4,7 @@
 The Editor module is the node-linked text workspace for MangoOS. It lets users view and edit structured text boxes that are persisted as `Text box` node information records.
 
 ## Key Responsibilities
-- Resolve which Node Map widget this editor is linked to via `EDITOR_LINKS_KEY`.
+- Resolve which Node Map frame this editor is linked to through the frame-link graph + frame registry.
 - Read the currently selected node from linked Node Map local state.
 - Load selected node details and extract text-box records from node information.
 - Render draggable/resizable text boxes inside the editor canvas.
@@ -13,11 +13,21 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 
 ## Important Data/Integration Paths
 - **Input from Node Map:** selected node state (`node-map-state-v1:<company_id>:<map_widget_id>`).
-- **Linking source:** generic frame-link graph (`frame-module-links-v1`) with compatibility bridge to editor/map linkage key (`EDITOR_LINKS_KEY`).
+- **Linking source:** generic frame-link graph (`frame-module-links-v1`) + frame registry (`frame-module-registry-v1`) with graph traversal to nearest linked map frame.
 - **Explorer fallback context source:** editor can read explorer-driven node selection from `node-map-explorer-context-v1:<company_id>:<editor_widget_id>` when no direct map-state context is available.
 - **Backend read path:** `GET /v1/nodes/:node_id?company_id=...`.
 - **Backend write path:** `POST /v1/nodes/:node_id/information` for text-box payloads.
-- **Event sync hooks:** `EVENT_EDITOR_LINKS_UPDATED`, `EVENT_NODE_MAP_STATE_UPDATED`, `EVENT_EXPLORER_CONTEXT_UPDATED`, and `storage` events.
+- **Event sync hooks:** `EVENT_FRAME_LINK_GRAPH_UPDATED`, `EVENT_NODE_MAP_SELECTION_UPDATED`, `EVENT_EXPLORER_CONTEXT_UPDATED`, and `storage` events.
+
+## Latency hardening update (2026-04-26)
+- Editor no longer depends on legacy editor->map localStorage mapping updates.
+- Link-resolution refresh is now triggered by dedicated graph-change events (or frame-link storage key changes), not by unrelated app layout churn.
+- Node map selection sync now consumes semantic selection events (with revision metadata) rather than high-frequency full map-state event fanout.
+
+## Editor persistence + reload correctness update (2026-04-26)
+- Text box blur-save now commits the current textarea value directly, preventing stale state snapshots that could previously persist blank/old text and then rehydrate incorrectly after node switches.
+- Empty double-click box creation no longer writes an immediate blank persistence row; persistence starts once there is user-entered content or subsequent geometry/text save action.
+- Semantic event precedence update: when map/explorer selection events arrive, Editor applies selected-node IDs directly from event context instead of waiting for debounced map-state storage reads, preventing stale-node display during explorer-driven selection changes.
 
 ## UX Notes
 - Text boxes support drag and edge/corner resize interactions.

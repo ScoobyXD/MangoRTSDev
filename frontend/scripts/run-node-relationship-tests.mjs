@@ -7,6 +7,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const frontendRoot = resolve(scriptDir, "..");
 const testFiles = [
   resolve(frontendRoot, ".test-dist/app/frameLinking.test.js"),
+  resolve(frontendRoot, ".test-dist/modules/linkingGraph.test.js"),
   resolve(frontendRoot, ".test-dist/modules/node-map/relationshipProjection.test.js"),
   resolve(frontendRoot, ".test-dist/modules/node-map/relationshipSelection.test.js"),
   resolve(frontendRoot, ".test-dist/modules/node-map/relationshipDeleteSummary.test.js"),

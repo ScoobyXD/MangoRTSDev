@@ -36,8 +36,10 @@ The app layout keeps compatibility for persisted payloads:
   - reads both legacy `tab.widgets` and current `tab.frames`
 - `grid-dashboard-settings`
   - stores global UI color and header/tab settings
-- `node-doc-widget-links-v1`
-  - retained key name for Node Map/Doc linking compatibility
+- `frame-module-links-v1`
+  - graph edge list for frame-to-frame context links
+- `frame-module-registry-v1`
+  - frame kind registry (`frameID -> kind`) for graph consumers
 
 ## Migration outcome
 
@@ -70,3 +72,10 @@ The app layout keeps compatibility for persisted payloads:
 - Right-clicking empty canvas now includes `Create new frame`, which spawns a frame at the clicked grid location.
 - Selected frames now use a common web-app convention: blue focus outline + focus ring shadow for stronger visibility.
 - Selection ring, teal frame option, and drag placement splash now use the unified RGB `0,233,255` accent to match the canvas/header accent direction.
+
+## Frame-link graph hardening + full migration (2026-04-26)
+
+- `applayout` now treats `frame-module-links-v1` as the sole linking source-of-truth and emits a dedicated graph-update event only when link edges actually change.
+- Legacy compatibility key persistence (`node-doc-widget-links-v1`, `company-explorer-widget-links-v1`) was removed from app-layer write paths to eliminate drag/resize-induced link churn.
+- Frame metadata for graph consumers is now persisted separately as `frame-module-registry-v1` (`{ frameID -> { kind } }`) and only rewritten when membership/kind signature changes.
+- This isolates high-frequency geometry updates from cross-module linking state propagation.
