@@ -112,9 +112,6 @@ export function oppositeSide(direction: NodeDirection): NodeDirection {
 
 // Editor text-box model stored in node information rows.
 export type NodeDocBox = { local_id: string; x: number; y: number; w: number; h: number; information_id?: string; information: string };
-export const NODE_DOC_LINKS_KEY = "node-doc-widget-links-v1";
-export const EDITOR_LINKS_KEY = NODE_DOC_LINKS_KEY;
-export const EXPLORER_MAP_LINKS_KEY = "company-explorer-widget-links-v1";
 export const NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX = "node-map-explorer-context-v1";
 export const NODE_DOC_MIN_W = 180;
 export const NODE_DOC_MIN_H = 36;
