@@ -314,15 +314,14 @@ This keeps layout and viewport stable when switching views and reopening the mod
 
 ### 9.1 Linking model
 
-- Node Doc is linked to Node Map at frame level using:
-  - localStorage key: `node-doc-widget-links-v1`
-  - value: map of `nodeDocFrameId -> nodeCanvasFrameId`
+- Node Doc/Editor linkage is resolved from the frame-link graph:
+  - graph key: `frame-module-links-v1`
+  - frame registry key: `frame-module-registry-v1`
+  - resolution rule: traverse linked frames and select nearest frame whose kind resolves to Node Map (`nodes-map`/`nodes`).
 - Linking is triggered from module context menu action:
-  - `Link nodes: <dynamic titles joined by " + ">`
+  - `Link modules: <dynamic titles joined by " + ">`
 - Linked modules show a **hexagon indicator** next to the module name chip in the frame header (both Node Map and Node Doc).
-- Link action is enabled when selection contains exactly:
-  - one Node Map module (`nodes-map` or legacy `nodes`)
-  - one Node Doc module (`node-doc`)
+- Link action supports pairwise graph edges across linkable module kinds (map/editor/explorer/logic-map).
 
 ### 9.2 Module multi-select behavior (for linking)
 
@@ -332,11 +331,14 @@ This keeps layout and viewport stable when switching views and reopening the mod
 
 ### 9.3 Selected-node sync
 
-Once linked, Node Doc polls the linked canvas state key:
+Once linked, Node Doc/Editor reads selected-node context from linked map state key:
 
 - `node-map-state-v1:<companyID>:<linkedCanvasWidgetId>`
 
 and reads `selectedNodeID`. That selected node becomes the active storage target for Node Doc.
+
+Selection notifications are event-driven (`EVENT_NODE_MAP_SELECTION_UPDATED`) and only emit on semantic selected-node changes (not on pan/zoom/drag geometry churn).
+Linked Company Explorer frames consume those semantic selection events and map-state updates so Explorer row highlight follows Node Map selection in the same linked workspace.
 
 ### 9.4 Node Doc persistence behavior
 
