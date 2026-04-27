@@ -124,11 +124,15 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       refresh();
     };
     const onMapStateUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; revision?: number }>).detail;
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number }>).detail;
       if (!detail || detail.mapWidgetID !== linkedMapWidgetID) return;
       const revision = typeof detail.revision === "number" ? detail.revision : 0;
       if (revision > 0 && revision <= lastSelectionRevisionRef.current) return;
       if (revision > 0) lastSelectionRevisionRef.current = revision;
+      if (typeof detail.selectedNodeID === "string") {
+        setLinkedNodeID(detail.selectedNodeID);
+        return;
+      }
       refresh();
     };
     const onExplorerContextUpdated = (event: Event) => {
@@ -136,6 +140,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (!detail) return;
       const expectedKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
       if (detail.key !== expectedKey && detail.targetID !== scope) return;
+      const explorerSelected = readSelectedNodeFromExplorerContext();
+      if (explorerSelected) {
+        setLinkedNodeID(explorerSelected);
+        return;
+      }
       refresh();
     };
     window.addEventListener("storage", onStorage);
