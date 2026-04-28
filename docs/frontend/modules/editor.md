@@ -40,5 +40,15 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 - Double-clicking the canvas creates a new text box at pointer position.
 - Text value is persisted server-side; box geometry is preserved in local/per-user layout storage.
 
+
+## Node information payload model (important)
+- Editor persists text boxes through the generic `node_information` contract.
+- For `type = "Text box"`, the `information` field carries a JSON-serialized envelope (`local_id`, geometry, text) as a **string** payload.
+- This is why DB viewers show escaped JSON in `node_information.information` instead of scalar columns.
+- Parsing/dedupe currently happens in frontend read logic (`parseDocBox` + latest-per-`local_id` merge).
+
+### Latency note
+This model is flexible for MVP but can become hot-path expensive at scale. Follow the latency architecture sequence (measure -> constrain write churn -> projection/read model) before introducing heavier schema complexity.
+
 ## Commenting Convention Reminder
 When editing this module, prefer comments that summarize intent and feature responsibilities (what this block controls), not line-by-line implementation mechanics.
