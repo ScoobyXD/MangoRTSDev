@@ -282,7 +282,7 @@ func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, informati
 	if err := tx.QueryRowContext(ctx,
 		`insert into node_information
 		 (company_id, information_id, node_id, type, information, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4::info_type, $5, now(), now())
+		 values ($1, $2, $3, $4::information_type, $5, now(), now())
 		 returning company_id, information_id, node_id, type::text, information, created_timestamp, updated_timestamp`,
 		item.CompanyID, item.InformationID, item.NodeID, item.Type, item.Information,
 	).Scan(
@@ -303,7 +303,7 @@ func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, informati
 	if _, err := tx.ExecContext(ctx,
 		`insert into node_projection_table
 		 (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4::info_type, $5, now(), now())
+		 values ($1, $2, $3, $4::information_type, $5, now(), now())
 		 on conflict (company_id, node_id, information_id)
 		 do update set
 		   type=excluded.type,
