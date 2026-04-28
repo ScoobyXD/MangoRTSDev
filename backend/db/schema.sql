@@ -16,8 +16,8 @@ end $$;
 
 do $$
 begin
-  if not exists (select 1 from pg_type where typname = 'info_type') then
-    create type info_type as enum (
+  if not exists (select 1 from pg_type where typname = 'information_type') then
+    create type information_type as enum (
       'Text box',
       'Checklist',
       'Status',
@@ -69,11 +69,23 @@ create table if not exists node_information (
   company_id uuid not null,
   information_id uuid not null,
   node_id uuid not null,
-  type info_type not null,
+  type information_type not null,
   information text not null,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   primary key (company_id, information_id),
+  foreign key (company_id, node_id) references nodes (company_id, node_id)
+);
+
+create table if not exists node_projection_table (
+  company_id uuid not null,
+  node_id uuid not null,
+  information_id uuid not null,
+  type information_type not null,
+  information text not null,
+  created_timestamp timestamptz not null,
+  updated_timestamp timestamptz not null,
+  primary key (company_id, node_id, information_id),
   foreign key (company_id, node_id) references nodes (company_id, node_id)
 );
 
@@ -102,7 +114,7 @@ create table if not exists logic_gate_information (
   company_id uuid not null,
   information_id uuid not null,
   logic_gate_id uuid not null,
-  type info_type not null,
+  type information_type not null,
   information text not null,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
@@ -124,5 +136,6 @@ create table if not exists operations (
 );
 
 create index if not exists idx_node_information_node on node_information(company_id, node_id);
+create index if not exists idx_node_projection_table_node_updated on node_projection_table(company_id, node_id, updated_timestamp desc);
 create index if not exists idx_operations_node on operations(company_id, node_id);
 create index if not exists idx_operations_logic_gate on operations(company_id, logic_gate_id);

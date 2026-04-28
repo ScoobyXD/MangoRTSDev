@@ -48,6 +48,8 @@ Base values are read from:
   - loads the nodes list.
 - `GET /v1/nodes/:node_id?company_id=...`
   - loads node details (relationships + information) for one node.
+- `GET /v1/nodes/:node_id/projection?company_id=...`
+  - loads typed node information projection rows for hot-path editor rendering.
 - `POST /v1/nodes`
   - creates a node with `{ company_id, header }`.
 - `DELETE /v1/nodes/:node_id?company_id=...`
@@ -337,18 +339,18 @@ Once linked, Node Doc/Editor reads selected-node context from linked map state k
 
 and reads `selectedNodeID`. That selected node becomes the active storage target for Node Doc.
 
-Selection notifications are event-driven (`EVENT_NODE_MAP_SELECTION_UPDATED`) and only emit on semantic selected-node changes (not on pan/zoom/drag geometry churn).
-Linked Company Explorer frames consume those semantic selection events and map-state updates so Explorer row highlight follows Node Map selection in the same linked workspace.
+Selection notifications are event-driven (`EVENT_NODE_MAP_SELECTION_UPDATED`) and only emit on selected-node changes (not on pan/zoom/drag geometry churn).
+Linked Company Explorer frames consume those selection events and map-state updates so Explorer row highlight follows Node Map selection in the same linked workspace.
 
 ### 9.4 Node Doc persistence behavior
 
 - Load:
-  - `GET /v1/nodes/:node_id?company_id=...`
-  - parse `information` rows where `type === "Text box"`
-  - keep latest record per `local_id` by timestamp order
+  - `GET /v1/nodes/:node_id/projection?company_id=...`
+  - consume typed node projection rows for information values
+  - merge with local/per-user layout coordinates for render placement
 - Save:
   - `POST /v1/nodes/:node_id/information`
-  - payload stores JSON `{ local_id, x, y, text }` as `information`
+  - payload stores information text/value (no geometry in hot server path)
 - UI states:
   - if not linked: prompt user to link modules
   - if linked but no selected node: prompt user to select a node in linked Node Map

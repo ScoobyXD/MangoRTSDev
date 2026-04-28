@@ -5,6 +5,7 @@ import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, removeWorkspaceNode, su
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { pathIntersectsRect } from "./relationshipSelection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
+import { getNodeDetailsSingleFlight, invalidateNodeCaches } from "./nodeDetailsStore";
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
 export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
@@ -252,7 +253,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     setLoading(true);
     setError("");
     try {
-      const payload = await requestJSON<NodeDetails>(`/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}`);
+      const payload = await getNodeDetailsSingleFlight(apiBase, companyID, nodeID);
       setDetails(payload);
     } catch (err) {
       setDetails(null);
@@ -819,6 +820,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           information: trimOrEmpty(infoDraft),
         }),
       });
+      invalidateNodeCaches(apiBase, companyID, nodeID);
       setInfoDraft("");
       await loadDetails(nodeID);
     } catch (err) {

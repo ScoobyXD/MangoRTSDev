@@ -130,6 +130,48 @@ For Node/Explorer/Editor/Logic Gate canvases:
 - compact shape for first paint
 - incremental delta channel for updates
 
+### Hot-path cache hierarchy contract (locked)
+
+To keep hot-path interactions deterministic under high concurrency, MangoOS uses this layered contract:
+
+1. **L1 module state cache (per-frame render state).**
+   - Immediate paint data for active component tree.
+   - Must avoid full-tree invalidation on targeted updates.
+
+2. **L2 shared workspace cache (normalized client graph/details cache).**
+   - Shared by Node Map, Company Explorer, and Editor.
+   - One node/details key must resolve to one in-memory canonical value for the page session.
+
+3. **L3 single-flight read-through fetch layer.**
+   - Cache miss for a key starts at most one network request.
+   - Concurrent readers await the same promise (no duplicate in-flight requests per key).
+
+4. **L4 server projection/read model.**
+   - Hot reads are served from typed read models shaped for immediate UI usage.
+   - Runtime read handlers must avoid per-request blob reconstruction loops.
+
+5. **L5 canonical write/history store.**
+   - Append/update paths keep authoritative history and feed projection updates.
+   - Projection freshness is maintained on write and stream reconciliation.
+
+### Semantic vs UI layout policy (Editor + Node Map)
+
+- **Node information values** (text/value content attached to nodes) are server-side and projection-backed for hot reads.
+- **UI layout geometry** (editor box coordinates, pan/zoom, per-user layout preferences) is local/per-user by default and must not sit on the hot server path.
+- Optional shared layout templates are allowed as an explicit non-hot-path feature.
+
+### Current -> target behavior clarification (Editor latency fix)
+
+Current issue:
+- Node selection can trigger duplicate `/v1/nodes/:id` details fetches across linked modules.
+- Editor previously reconstructed text boxes from `node_information` JSON blobs on each selection.
+
+Target behavior:
+- One cache-miss fetch at most per node key (single-flight).
+- Editor information reads come from typed projection rows.
+- Editor geometry remains local/per-user and is not sent on hot information save/read paths.
+- Cross-module details reads are served from shared cache entries whenever possible.
+
 ---
 
 ## Implementation Checklist (LLM/Engineer Tracking)
