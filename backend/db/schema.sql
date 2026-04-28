@@ -41,7 +41,7 @@ end $$;
 create table if not exists nodes (
   company_id uuid not null,
   node_id uuid not null,
-  header text not null,
+  title text not null,
   created_timestamp timestamptz not null,
   primary key (company_id, node_id)
 );

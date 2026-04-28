@@ -30,6 +30,7 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 ### Terminology (authoritative)
 
 - **Node**: the node box/card UI element.
+- **Node title**: canonical text label shown on node cards and explorer rows (legacy name: `header`).
 - **Relationship line**: the literal line UI element connecting two nodes on the canvas.
 - **Relationship**: the parent/child/peer data relationship represented by a `node_relationships` row.
 
@@ -51,7 +52,7 @@ Base values are read from:
 - `GET /v1/nodes/:node_id/projection?company_id=...`
   - loads typed node information projection rows for hot-path editor rendering.
 - `POST /v1/nodes`
-  - creates a node with `{ company_id, header }`.
+  - creates a node with `{ company_id, title }` (legacy `{ company_id, header }` is still accepted for backward compatibility).
 - `DELETE /v1/nodes/:node_id?company_id=...`
   - deletes selected node.
 - `POST /v1/node-relationships`

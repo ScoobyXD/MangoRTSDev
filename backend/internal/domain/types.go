@@ -3,9 +3,12 @@ package domain
 import "time"
 
 type Node struct {
-	CompanyID        string    `json:"company_id"`
-	NodeID           string    `json:"node_id"`
-	Header           string    `json:"header"`
+	CompanyID string `json:"company_id"`
+	NodeID    string `json:"node_id"`
+	// Title is the canonical public API field name for node text labels.
+	Title string `json:"title"`
+	// Header remains as a backward-compatible alias for existing clients.
+	Header           string    `json:"header,omitempty"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 

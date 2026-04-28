@@ -7,9 +7,16 @@ export const divider = { borderBottom: "1px solid currentColor", padding: "5px 0
 export type NodeRecord = {
   company_id: string;
   node_id: string;
-  header: string;
+  // Title is canonical. Header remains for backward-compatible payloads.
+  title: string;
+  header?: string;
   created_timestamp: string;
 };
+
+// Runtime-safe node label resolver so hot-path modules can consume title/header without extra API calls.
+export function getNodeTitle(node: Pick<NodeRecord, "title" | "header">): string {
+  return trimOrEmpty(node.title || node.header || "");
+}
 
 // Relationship row payload (a/b sides preserve directional parent/child semantics).
 export type NodeRelationship = {

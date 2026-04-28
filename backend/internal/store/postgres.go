@@ -16,25 +16,25 @@ func NewPostgresRepo(db *sql.DB) *PostgresRepo {
 	return &PostgresRepo{db: db}
 }
 
-func (r *PostgresRepo) CreateNode(companyID, header string) (domain.Node, error) {
+func (r *PostgresRepo) CreateNode(companyID, title string) (domain.Node, error) {
 	ctx := context.Background()
-	item := domain.Node{CompanyID: companyID, NodeID: newUUIDv7String(), Header: header}
+	item := domain.Node{CompanyID: companyID, NodeID: newUUIDv7String(), Title: title, Header: title}
 	err := r.db.QueryRowContext(ctx,
-		`insert into nodes (company_id, node_id, header, created_timestamp)
+		`insert into nodes (company_id, node_id, title, created_timestamp)
 		 values ($1, $2, $3, now())
-		 returning company_id, node_id, header, created_timestamp`,
-		item.CompanyID, item.NodeID, item.Header,
-	).Scan(&item.CompanyID, &item.NodeID, &item.Header, &item.CreatedTimestamp)
+		 returning company_id, node_id, title, created_timestamp`,
+		item.CompanyID, item.NodeID, item.Title,
+	).Scan(&item.CompanyID, &item.NodeID, &item.Title, &item.CreatedTimestamp)
 	if err != nil {
 		return domain.Node{}, err
 	}
-	return item, nil
+	return hydrateNodeTitle(item), nil
 }
 
 func (r *PostgresRepo) ListNodes(companyID string) ([]domain.Node, error) {
 	ctx := context.Background()
 	rows, err := r.db.QueryContext(ctx,
-		`select company_id, node_id, header, created_timestamp
+		`select company_id, node_id, title, created_timestamp
 		 from nodes
 		 where company_id=$1
 		 order by created_timestamp asc`,
@@ -48,10 +48,10 @@ func (r *PostgresRepo) ListNodes(companyID string) ([]domain.Node, error) {
 	items := make([]domain.Node, 0)
 	for rows.Next() {
 		var item domain.Node
-		if err := rows.Scan(&item.CompanyID, &item.NodeID, &item.Header, &item.CreatedTimestamp); err != nil {
+		if err := rows.Scan(&item.CompanyID, &item.NodeID, &item.Title, &item.CreatedTimestamp); err != nil {
 			return nil, err
 		}
-		items = append(items, item)
+		items = append(items, hydrateNodeTitle(item))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -119,17 +119,17 @@ func (r *PostgresRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	ctx := context.Background()
 	var item domain.Node
 	err := r.db.QueryRowContext(ctx,
-		`select company_id, node_id, header, created_timestamp
+		`select company_id, node_id, title, created_timestamp
 		 from nodes where company_id=$1 and node_id=$2`,
 		companyID, nodeID,
-	).Scan(&item.CompanyID, &item.NodeID, &item.Header, &item.CreatedTimestamp)
+	).Scan(&item.CompanyID, &item.NodeID, &item.Title, &item.CreatedTimestamp)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Node{}, ErrNotFound
 	}
 	if err != nil {
 		return domain.Node{}, err
 	}
-	return item, nil
+	return hydrateNodeTitle(item), nil
 }
 
 func (r *PostgresRepo) DeleteNode(companyID, nodeID string) error {

@@ -61,18 +61,30 @@ func key(companyID, id string) string {
 	return companyID + ":" + id
 }
 
-func (r *MemoryRepo) CreateNode(companyID, header string) (domain.Node, error) {
+// hydrateNodeTitle keeps node naming backward compatible while making title the canonical field.
+func hydrateNodeTitle(node domain.Node) domain.Node {
+	if node.Title == "" {
+		node.Title = node.Header
+	}
+	if node.Header == "" {
+		node.Header = node.Title
+	}
+	return node
+}
+
+func (r *MemoryRepo) CreateNode(companyID, title string) (domain.Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	n := domain.Node{
 		CompanyID:        companyID,
 		NodeID:           newUUIDv7String(),
-		Header:           header,
+		Title:            title,
+		Header:           title,
 		CreatedTimestamp: time.Now().UTC(),
 	}
 	r.nodes[key(companyID, n.NodeID)] = n
-	return n, nil
+	return hydrateNodeTitle(n), nil
 }
 
 func (r *MemoryRepo) ListNodes(companyID string) ([]domain.Node, error) {
@@ -82,7 +94,7 @@ func (r *MemoryRepo) ListNodes(companyID string) ([]domain.Node, error) {
 	items := make([]domain.Node, 0)
 	for _, node := range r.nodes {
 		if node.CompanyID == companyID {
-			items = append(items, node)
+			items = append(items, hydrateNodeTitle(node))
 		}
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -99,7 +111,7 @@ func (r *MemoryRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	if !ok {
 		return domain.Node{}, ErrNotFound
 	}
-	return n, nil
+	return hydrateNodeTitle(n), nil
 }
 
 func (r *MemoryRepo) ListNodeRelationships(companyID string) ([]domain.NodeRelationship, error) {

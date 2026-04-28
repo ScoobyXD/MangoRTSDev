@@ -83,12 +83,15 @@ export function removeWorkspaceNode(apiBase: string, companyID: string, nodeID: 
 // Runtime payload guard for SSE delta events -> NodeRecord contract.
 function asNodeRecord(candidate: unknown): NodeRecord | null {
   if (!candidate || typeof candidate !== "object") return null;
-  const value = candidate as Partial<NodeRecord>;
-  if (typeof value.company_id !== "string" || typeof value.node_id !== "string" || typeof value.header !== "string") return null;
+  const value = candidate as Partial<NodeRecord> & { header?: unknown };
+  if (typeof value.company_id !== "string" || typeof value.node_id !== "string") return null;
+  const title = typeof value.title === "string" ? value.title : (typeof value.header === "string" ? value.header : "");
+  if (!title) return null;
   return {
     company_id: value.company_id,
     node_id: value.node_id,
-    header: value.header,
+    title,
+    header: typeof value.header === "string" ? value.header : title,
     created_timestamp: typeof value.created_timestamp === "string" ? value.created_timestamp : new Date().toISOString(),
   };
 }
