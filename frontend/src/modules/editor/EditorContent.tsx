@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { NodeDocBox, NodeInformation, NODE_DOC_MIN_H, NODE_DOC_MIN_W, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, clamp } from "../node-map/shared";
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
-import { getNodeDetailsSingleFlight, getNodeEditorProjectionSingleFlight, invalidateNodeCaches } from "../node-map/nodeDetailsStore";
+import { getNodeDetailsSingleFlight, getNodeProjectionSingleFlight, invalidateNodeCaches } from "../node-map/nodeDetailsStore";
 
 type LocalBoxLayout = Record<string, { x: number; y: number; w: number; h: number }>;
 
@@ -112,7 +112,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const saveBox = useCallback(async (nodeID: string, box: NodeDocBox) => {
     const created = await requestJSON<NodeInformation>(`/v1/nodes/${nodeID}/information`, {
       method: "POST",
-      body: JSON.stringify({ company_id: companyID, type: "Text box", information: box.information, info_key: box.local_id }),
+      body: JSON.stringify({ company_id: companyID, type: "Text box", information: box.information, information_id: box.information_id }),
     });
     invalidateNodeCaches(apiBase, companyID, nodeID);
     setBoxes((prev) => prev.map((item) => (item.local_id === box.local_id ? { ...item, information_id: created.information_id } : item)));
@@ -198,7 +198,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         setError("");
         const [details, projections] = await Promise.all([
           getNodeDetailsSingleFlight(apiBase, companyID, linkedNodeID),
-          getNodeEditorProjectionSingleFlight(apiBase, companyID, linkedNodeID),
+          getNodeProjectionSingleFlight(apiBase, companyID, linkedNodeID),
         ]);
         if (cancelled) return;
         setLinkedNodeHeader(details.node.header);
@@ -209,10 +209,10 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         ]);
         const layout = readLocalLayout(linkedNodeID);
         const nextBoxes = projections.map((item, index) => {
-          const position = layout[item.info_key];
+          const position = layout[item.information_id];
           return {
-            local_id: item.info_key,
-            information_id: item.source_information_id,
+            local_id: item.information_id,
+            information_id: item.information_id,
             x: position?.x ?? (24 + (index % 6) * 18),
             y: position?.y ?? (56 + (index % 6) * 14),
             w: position?.w ?? 320,

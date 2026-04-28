@@ -253,7 +253,7 @@ func (r *PostgresRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDeta
 	}, nil
 }
 
-func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, information, infoKey string) (domain.NodeInformation, error) {
+func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, information, informationID string) (domain.NodeInformation, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -296,21 +296,20 @@ func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, informati
 	); err != nil {
 		return domain.NodeInformation{}, err
 	}
-	keyValue := infoKey
+	keyValue := informationID
 	if keyValue == "" {
 		keyValue = item.InformationID
 	}
 	if _, err := tx.ExecContext(ctx,
-		`insert into node_editor_projection
-		 (company_id, node_id, info_key, type, information, source_information_id, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4::info_type, $5, $6, now(), now())
-		 on conflict (company_id, node_id, info_key)
+		`insert into node_projection_table
+		 (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
+		 values ($1, $2, $3, $4::info_type, $5, now(), now())
+		 on conflict (company_id, node_id, information_id)
 		 do update set
 		   type=excluded.type,
 		   information=excluded.information,
-		   source_information_id=excluded.source_information_id,
 		   updated_timestamp=now()`,
-		item.CompanyID, item.NodeID, keyValue, item.Type, information, item.InformationID,
+		item.CompanyID, item.NodeID, keyValue, item.Type, information,
 	); err != nil {
 		return domain.NodeInformation{}, err
 	}
@@ -321,7 +320,7 @@ func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, informati
 	return item, nil
 }
 
-func (r *PostgresRepo) ListNodeEditorProjections(companyID, nodeID string) ([]domain.NodeEditorProjection, error) {
+func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error) {
 	ctx := context.Background()
 	var exists bool
 	if err := r.db.QueryRowContext(ctx,
@@ -335,8 +334,8 @@ func (r *PostgresRepo) ListNodeEditorProjections(companyID, nodeID string) ([]do
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		`select company_id, node_id, info_key, type::text, information, source_information_id, created_timestamp, updated_timestamp
-		 from node_editor_projection
+		`select company_id, node_id, information_id, type::text, information, created_timestamp, updated_timestamp
+		 from node_projection_table
 		 where company_id=$1 and node_id=$2
 		 order by updated_timestamp asc`,
 		companyID, nodeID,
@@ -346,16 +345,15 @@ func (r *PostgresRepo) ListNodeEditorProjections(companyID, nodeID string) ([]do
 	}
 	defer rows.Close()
 
-	items := make([]domain.NodeEditorProjection, 0)
+	items := make([]domain.NodeProjection, 0)
 	for rows.Next() {
-		var item domain.NodeEditorProjection
+		var item domain.NodeProjection
 		if err := rows.Scan(
 			&item.CompanyID,
 			&item.NodeID,
-			&item.InfoKey,
+			&item.InformationID,
 			&item.Type,
 			&item.Information,
-			&item.SourceInformationID,
 			&item.CreatedTimestamp,
 			&item.UpdatedTimestamp,
 		); err != nil {

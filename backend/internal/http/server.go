@@ -138,7 +138,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(parts) == 2 && parts[1] == "editor-projection" {
+	if len(parts) == 2 && parts[1] == "projection" {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
@@ -148,13 +148,13 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		items, err := s.repo.ListNodeEditorProjections(companyID, nodeID)
+		items, err := s.repo.ListNodeProjections(companyID, nodeID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "node_not_found")
 			return
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_load_node_editor_projection")
+			writeError(w, http.StatusInternalServerError, "failed_to_load_node_projection")
 			return
 		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
@@ -171,10 +171,10 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var req struct {
-			CompanyID   string `json:"company_id"`
-			Type        string `json:"type"`
-			Information string `json:"information"`
-			InfoKey     string `json:"info_key"`
+			CompanyID     string `json:"company_id"`
+			Type          string `json:"type"`
+			Information   string `json:"information"`
+			InformationID string `json:"information_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
@@ -185,7 +185,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		item, err := s.repo.AddNodeInformation(req.CompanyID, nodeID, req.Type, req.Information, req.InfoKey)
+		item, err := s.repo.AddNodeInformation(req.CompanyID, nodeID, req.Type, req.Information, req.InformationID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "node_not_found")
 			return

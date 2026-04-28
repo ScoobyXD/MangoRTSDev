@@ -156,7 +156,7 @@ To keep hot-path interactions deterministic under high concurrency, MangoOS uses
 
 ### Semantic vs UI layout policy (Editor + Node Map)
 
-- **Semantic information** (text/value content used by runtime operations) is server-side and projection-backed for hot reads.
+- **Node information values** (text/value content attached to nodes) are server-side and projection-backed for hot reads.
 - **UI layout geometry** (editor box coordinates, pan/zoom, per-user layout preferences) is local/per-user by default and must not sit on the hot server path.
 - Optional shared layout templates are allowed as an explicit non-hot-path feature.
 
@@ -168,8 +168,8 @@ Current issue:
 
 Target behavior:
 - One cache-miss fetch at most per node key (single-flight).
-- Editor semantic information reads come from typed projection rows.
-- Editor geometry remains local/per-user and is not sent on hot semantic save/read paths.
+- Editor information reads come from typed projection rows.
+- Editor geometry remains local/per-user and is not sent on hot information save/read paths.
 - Cross-module details reads are served from shared cache entries whenever possible.
 
 ---
