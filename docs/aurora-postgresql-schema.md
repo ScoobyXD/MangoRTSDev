@@ -61,7 +61,7 @@ end $$;
 create table if not exists nodes (
   company_id uuid not null,
   node_id uuid not null,
-  header text not null,
+  title text not null,
   created_timestamp timestamptz not null,
   primary key (company_id, node_id)
 );
@@ -170,7 +170,7 @@ create table if not exists operations (
 
 - Company ID (UUIDv7) (FK) -> `nodes.company_id`
 - Node ID (UUIDv7) -> `nodes.node_id`
-- Header (Text) -> `nodes.header`
+- Title (Text) -> `nodes.title`
 - Created Timestamp (TIMESTAMPTZ) -> `nodes.created_timestamp`
 
 ### Node Relationships Schema

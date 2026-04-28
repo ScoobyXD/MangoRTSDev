@@ -120,6 +120,7 @@ Use this checklist format and keep it complete.
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
   - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)
+  - node-title resolver normalization (`title` preferred, `header` fallback for backward compatibility)
 
 ### Integration tests
 - [ ] None committed yet (to be added)
