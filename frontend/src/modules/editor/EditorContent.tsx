@@ -111,13 +111,19 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [companyID, scope]);
 
   // Persist a single document box into node information rows (Text box type).
+  // Important identity rule:
+  // - `node_information` rows are append-history records (new server ID each write).
+  // - `node_projection_table` rows are keyed by the textbox identity (`information_id`) we send.
+  // For Editor correctness we must keep a stable textbox `information_id` client-side and never
+  // overwrite it with the append-history ID returned by the API on later saves.
   const saveBox = useCallback(async (nodeID: string, box: NodeDocBox) => {
     const created = await requestJSON<NodeInformation>(`/v1/nodes/${nodeID}/information`, {
       method: "POST",
       body: JSON.stringify({ company_id: companyID, type: "Text box", information: box.information, information_id: box.information_id }),
     });
     invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
-    setBoxes((prev) => prev.map((item) => (item.local_id === box.local_id ? { ...item, information_id: created.information_id } : item)));
+    const stableInformationID = box.information_id || created.information_id;
+    setBoxes((prev) => prev.map((item) => (item.local_id === box.local_id ? { ...item, information_id: stableInformationID } : item)));
   }, [apiBase, companyID, requestJSON]);
 
   useEffect(() => {
@@ -332,7 +338,12 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const baseX = typeof x === "number" ? x : 24 + (boxes.length % 6) * 18;
     const baseY = typeof y === "number" ? y : 56 + (boxes.length % 6) * 14;
     const localID = `docbox-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`;
-    const next: NodeDocBox = { local_id: localID, x: baseX, y: baseY, w: 320, h: 52, information: initialText };
+    // Generate a stable UUID immediately so rapid blur/save sequences cannot fork projection IDs.
+    // This keeps one textbox mapped to one projection row even under fast user interactions.
+    const informationID = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0").slice(0, 12)}`;
+    const next: NodeDocBox = { local_id: localID, information_id: informationID, x: baseX, y: baseY, w: 320, h: 52, information: initialText };
     setBoxes((prev) => [...prev, next]);
     setActiveBoxID(localID);
     setFocusBoxID(localID);

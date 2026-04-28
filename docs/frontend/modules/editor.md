@@ -35,6 +35,12 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 - Empty double-click box creation no longer writes an immediate blank persistence row; persistence starts once there is user-entered content or subsequent geometry/text save action.
 - Semantic event precedence update: when map/explorer selection events arrive, Editor applies selected-node IDs directly from event context instead of waiting for debounced map-state storage reads, preventing stale-node display during explorer-driven selection changes.
 
+## Projection identity hardening update (2026-04-28)
+- Every newly created editor textbox now gets a stable client-generated UUID `information_id` immediately (before first network save).
+- Blur saves and follow-up saves continue using that same textbox identity key.
+- The API still appends history rows to `node_information`, but projection identity now remains stable in `node_projection_table`.
+- This prevents textbox duplication after refresh caused by projection-key drift during rapid save/blur sequences.
+
 ## UX Notes
 - Text boxes support drag and edge/corner resize interactions.
 - Double-clicking the canvas creates a new text box at pointer position.
