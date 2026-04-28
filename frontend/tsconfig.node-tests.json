@@ -22,6 +22,7 @@
     "src/modules/linkingGraph.ts",
     "src/modules/linkingGraph.test.ts",
     "src/modules/node-map/shared.ts",
+    "src/modules/node-map/shared.test.ts",
     "src/modules/node-map/relationshipProjection.ts",
     "src/modules/node-map/relationshipProjection.test.ts",
     "src/modules/node-map/relationshipSelection.ts",

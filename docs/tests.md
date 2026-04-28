@@ -107,6 +107,9 @@ Use this checklist format and keep it complete.
 - [x] `frontend/src/modules/node-map/relationshipDeleteSummary.test.ts`
   - success/failure summarization for batched relationship-line delete requests
   - preserves per-relationship failure reason reporting for visibility
+- [x] `frontend/src/modules/node-map/shared.test.ts`
+  - node-title display helper keeps frontend "Title" copy aligned while preserving backend `header` contract usage
+  - trims whitespace and falls back to `node_id` when no human title is present
 - [x] `frontend/src/app/frameLinking.test.ts`
   - context-menu link label fallback (`No other module selected`) when only one module is in active pool
   - graph-based pairwise link-plan generation for multi-module selection pools
