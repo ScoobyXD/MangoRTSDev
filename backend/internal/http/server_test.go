@@ -72,3 +72,29 @@ func TestWorkspaceSnapshotReturnsNotModifiedWhenDataUnchanged(t *testing.T) {
 		t.Fatalf("second snapshot status = %d, want %d", secondRec.Code, http.StatusNotModified)
 	}
 }
+
+func TestResolveNodeTitle(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		title  string
+		header string
+		want   string
+	}{
+		{name: "prefers_title", title: "New Title", header: "Legacy Header", want: "New Title"},
+		{name: "falls_back_to_header", title: "", header: "Legacy Header", want: "Legacy Header"},
+		{name: "trims_whitespace", title: "  New Title  ", header: "", want: "New Title"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := resolveNodeTitle(tc.title, tc.header)
+			if got != tc.want {
+				t.Fatalf("resolveNodeTitle(%q, %q) = %q, want %q", tc.title, tc.header, got, tc.want)
+			}
+		})
+	}
+}
