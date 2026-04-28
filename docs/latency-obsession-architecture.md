@@ -159,6 +159,8 @@ To keep hot-path interactions deterministic under high concurrency, MangoOS uses
 - **Node information values** (text/value content attached to nodes) are server-side and projection-backed for hot reads.
 - **UI layout geometry** (editor box coordinates, pan/zoom, per-user layout preferences) is local/per-user by default and must not sit on the hot server path.
 - Optional shared layout templates are allowed as an explicit non-hot-path feature.
+- **Editor textbox projection identity** must be stable (`information_id`) across all saves for the same textbox so projection reads do not fork into duplicate boxes.
+- **Node delete path** must clear both canonical history rows and projection rows before deleting the node record to keep FK checks deterministic and low-latency.
 
 ### Current -> target behavior clarification (Editor latency fix)
 

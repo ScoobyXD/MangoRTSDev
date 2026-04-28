@@ -156,6 +156,16 @@ func (r *PostgresRepo) DeleteNode(companyID, nodeID string) error {
 		return err
 	}
 
+	// Projection rows also reference nodes directly. Remove them before deleting the node row
+	// so FK checks pass for nodes that have editor/node information history.
+	if _, err := tx.ExecContext(ctx,
+		`delete from node_projection_table
+		 where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
+	); err != nil {
+		return err
+	}
+
 	deletedNode, err := tx.ExecContext(ctx,
 		`delete from nodes
 		 where company_id=$1 and node_id=$2`,
