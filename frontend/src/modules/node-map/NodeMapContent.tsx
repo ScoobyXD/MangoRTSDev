@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, getNodeTitle, snapToGrid, trimOrEmpty } from "./shared";
+import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, getNodeTitle, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
-import { pathIntersectsRect } from "./relationshipSelection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
 import { getNodeRecordSingleFlight, invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
+import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
 export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
@@ -45,21 +45,12 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[]; relationshipIDs: string[] } | null>(null);
   const [canvasActive, setCanvasActive] = useState(false);
   const [panelRect, setPanelRect] = useState({ x: 0, y: 10, width: 340, height: 360 });
-  const [panelDrag, setPanelDrag] = useState<{ pointerID: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const [panelResize, setPanelResize] = useState<{
-    pointerID: number;
-    startX: number;
-    startY: number;
-    originX: number;
-    originY: number;
-    originW: number;
-    originH: number;
-    edges: Partial<Record<PanelEdge, true>>;
-  } | null>(null);
+  const [panelDrag, setPanelDrag] = useState<NodeMapPanelDragState | null>(null);
+  const [panelResize, setPanelResize] = useState<NodeMapPanelResizeState | null>(null);
 
-  const [dragState, setDragState] = useState<{ nodeIDs: string[]; pointerID: number; offsets: Record<string, { x: number; y: number }> } | null>(null);
-  const [panState, setPanState] = useState<{ pointerID: number; startMouseX: number; startMouseY: number; startPanX: number; startPanY: number } | null>(null);
-  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; currentX: number; currentY: number; active: boolean; additive: boolean }>({
+  const [dragState, setDragState] = useState<NodeMapDragState | null>(null);
+  const [panState, setPanState] = useState<NodeMapPanState | null>(null);
+  const [selectionBox, setSelectionBox] = useState<NodeMapMultiSelectBox>({
     startX: 0,
     startY: 0,
     currentX: 0,
@@ -68,6 +59,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     additive: false,
   });
   const [selectionPointerID, setSelectionPointerID] = useState<number | null>(null);
+  const selectionBoxRef = useRef(selectionBox);
   const restoredSelectionRef = useRef<string>("");
   const explorerContextRef = useRef<number>(0);
   const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(false);
@@ -85,13 +77,13 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     return snapshotRelationships.filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b));
   };
 
-  const startRelationshipLineMarqueeSelection = (pointerID: number, clientX: number, clientY: number, additive: boolean) => {
-    if (!viewportRef.current) return;
-    const bounds = viewportRef.current.getBoundingClientRect();
-    const localX = clamp(clientX - bounds.left, 0, bounds.width);
-    const localY = clamp(clientY - bounds.top, 0, bounds.height);
-    setSelectionPointerID(pointerID);
-    setSelectionBox({ startX: localX, startY: localY, currentX: localX, currentY: localY, active: true, additive });
+  const startNodeMapMultiSelect = (pointerID: number, clientX: number, clientY: number, additive: boolean) => {
+    const started = beginNodeMapMultiSelectSession(viewportRef.current, pointerID, clientX, clientY, additive);
+    if (!started) return;
+    const nextSelectionBox = started.multiSelectBox;
+    selectionBoxRef.current = nextSelectionBox;
+    setSelectionPointerID(started.pointerID);
+    setSelectionBox(nextSelectionBox);
   };
 
   useEffect(() => {
@@ -374,41 +366,18 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     });
   }, [nodes, canvasSize.width]);
 
-  useEffect(() => {
-    if (!dragState) return;
-
-    const onMove = (event: PointerEvent) => {
-      if (event.pointerId !== dragState.pointerID || !viewportRef.current) return;
-      const bounds = viewportRef.current.getBoundingClientRect();
-      const mouseX = event.clientX - bounds.left;
-      const mouseY = event.clientY - bounds.top;
-      setNodePositions((previous) => {
-        const next = { ...previous };
-        for (const nodeID of dragState.nodeIDs) {
-          const offset = dragState.offsets[nodeID];
-          if (!offset) continue;
-          const worldX = (mouseX - pan.x) / zoom - offset.x;
-          const worldY = (mouseY - pan.y) / zoom - offset.y;
-          next[nodeID] = {
-            x: clamp(snapToGrid(worldX), 0, WORLD_W - NODE_W),
-            y: clamp(snapToGrid(worldY), 0, WORLD_H - NODE_H),
-          };
-        }
-        return next;
-      });
-    };
-
-    const onUp = (event: PointerEvent) => {
-      if (event.pointerId === dragState.pointerID) setDragState(null);
-    };
-
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [dragState, pan.x, pan.y, zoom]);
+  useNodeMapDragControls({
+    dragState,
+    viewportRef,
+    pan,
+    zoom,
+    worldWidth: WORLD_W,
+    worldHeight: WORLD_H,
+    nodeWidth: NODE_W,
+    nodeHeight: NODE_H,
+    setNodePositions,
+    setDragState,
+  });
 
   useEffect(() => {
     const explorerKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${mapScope}`;
@@ -446,92 +415,29 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     };
   }, [companyID, mapScope, nodes]);
 
-  useEffect(() => {
-    if (!panState) return;
-    const onMove = (event: PointerEvent) => {
-      if (event.pointerId !== panState.pointerID) return;
-      const dx = event.clientX - panState.startMouseX;
-      const dy = event.clientY - panState.startMouseY;
-      setPan({ x: panState.startPanX + dx, y: panState.startPanY + dy });
-    };
-    const onUp = (event: PointerEvent) => {
-      if (event.pointerId === panState.pointerID) setPanState(null);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [panState]);
+  useNodeMapPanControls({ panState, setPan, setPanState });
 
-  useEffect(() => {
-    if (selectionPointerID === null || !selectionBox.active) return;
-
-    const onMove = (event: PointerEvent) => {
-      if (event.pointerId !== selectionPointerID) return;
-      if (!viewportRef.current) return;
-      const bounds = viewportRef.current.getBoundingClientRect();
-      setSelectionBox((previous) => ({
-        ...previous,
-        currentX: clamp(event.clientX - bounds.left, 0, bounds.width),
-        currentY: clamp(event.clientY - bounds.top, 0, bounds.height),
-      }));
-    };
-
-    const onUp = (event: PointerEvent) => {
-      if (event.pointerId !== selectionPointerID || !viewportRef.current) return;
-      const minX = Math.min(selectionBox.startX, selectionBox.currentX);
-      const maxX = Math.max(selectionBox.startX, selectionBox.currentX);
-      const minY = Math.min(selectionBox.startY, selectionBox.currentY);
-      const maxY = Math.max(selectionBox.startY, selectionBox.currentY);
-
-      const selected = nodes.filter((node) => {
-        const pos = nodePositions[node.node_id];
-        if (!pos) return false;
-        const left = pos.x * zoom + pan.x;
-        const top = pos.y * zoom + pan.y;
-        const right = left + NODE_W * zoom;
-        const bottom = top + NODE_H * zoom;
-        return right >= minX && left <= maxX && bottom >= minY && top <= maxY;
-      });
-
-      const nextSet = new Set(selected.map((item) => item.node_id));
-      const rect = { minX, maxX, minY, maxY };
-      const selectedRelationshipIDsInBox = connectionPathsRef.current
-        .filter((path) => pathIntersectsRect(path.points.map((point) => ({
-          x: point.x * zoom + pan.x,
-          y: point.y * zoom + pan.y,
-        })), rect))
-        .map((path) => path.id);
-      if (selectionBox.additive) {
-        setSelectedNodeIDs((previous) => {
-          const merged = new Set(previous);
-          for (const id of nextSet) merged.add(id);
-          return merged;
-        });
-        setSelectedRelationshipIDs((previous) => {
-          const merged = new Set(previous);
-          for (const id of selectedRelationshipIDsInBox) merged.add(id);
-          return merged;
-        });
-      } else {
-        setSelectedNodeIDs(nextSet);
-        setSelectedRelationshipIDs(new Set(selectedRelationshipIDsInBox));
-      }
-      setSelectedNodeID(selected.length > 0 ? selected[0].node_id : (selectionBox.additive ? selectedNodeID : ""));
-      setSelectionPointerID(null);
-      setSelectionBox((previous) => ({ ...previous, active: false, additive: false }));
-    };
-
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [selectionPointerID, selectionBox, nodes, nodePositions, zoom, pan.x, pan.y, selectedNodeID]);
+  useNodeMapMultiSelectControls({
+    selectionPointerID,
+    multiSelectBox: selectionBox,
+    multiSelectBoxRef: selectionBoxRef,
+    viewportRef,
+    nodes,
+    nodePositions,
+    relationshipPathsRef: connectionPathsRef,
+    zoom,
+    pan,
+    nodeWidth: NODE_W,
+    nodeHeight: NODE_H,
+    selectedNodeIDs,
+    selectedRelationshipIDs,
+    selectedNodeID,
+    setSelectedNodeIDs,
+    setSelectedRelationshipIDs,
+    setSelectedNodeID,
+    setSelectionPointerID,
+    setMultiSelectBox: setSelectionBox,
+  });
 
   useEffect(() => {
     const onWindowPointerDown = () => {
@@ -552,30 +458,16 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     return () => window.removeEventListener("pointerdown", onWindowPointerDown, true);
   }, []);
 
-  useEffect(() => {
-    if (!relationshipDraft) return;
-    const onMove = (event: PointerEvent) => {
-      if (!viewportRef.current) return;
-      const bounds = viewportRef.current.getBoundingClientRect();
-      const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
-      const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
-      const worldX = clamp((localX - pan.x) / zoom, 0, WORLD_W);
-      const worldY = clamp((localY - pan.y) / zoom, 0, WORLD_H);
-      setRelationshipDraft((previous) => (previous ? { ...previous, cursor: { x: worldX, y: worldY } } : previous));
-    };
-    window.addEventListener("pointermove", onMove);
-    return () => window.removeEventListener("pointermove", onMove);
-  }, [relationshipDraft, pan.x, pan.y, zoom]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setRelationshipDraft(null);
-      setSelectedRelationshipIDs(new Set());
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  useNodeMapRelationshipDraftControls({
+    relationshipDraft,
+    viewportRef,
+    pan,
+    zoom,
+    worldWidth: WORLD_W,
+    worldHeight: WORLD_H,
+    setRelationshipDraft,
+    setSelectedRelationshipIDs,
+  });
 
   useEffect(() => {
     if (!widgetId) return;
@@ -828,92 +720,25 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     }
   };
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target) {
-        const tag = target.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
-      }
-      if (event.key !== "Delete" && event.key !== "Backspace") return;
-      const relationshipIDs = Array.from(selectedRelationshipIDs);
-      const nodeIDs = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : (selectedNodeID ? [selectedNodeID] : []);
-      const hasSelection = relationshipIDs.length > 0 || nodeIDs.length > 0;
-      if (!hasSelection || (!canvasActive && relationshipIDs.length === 0)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      setConfirmDelete({ nodeIDs, relationshipIDs });
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [canvasActive, selectedNodeID, selectedNodeIDs, selectedRelationshipIDs]);
+  useNodeMapDeleteKeyboardControl({
+    canvasActive,
+    selectedNodeID,
+    selectedNodeIDs,
+    selectedRelationshipIDs,
+    setConfirmDelete,
+  });
 
-  useEffect(() => {
-    if (!panelDrag) return;
-    const onMove = (event: PointerEvent) => {
-      if (event.pointerId !== panelDrag.pointerID || !viewportRef.current) return;
-      const dx = event.clientX - panelDrag.startX;
-      const dy = event.clientY - panelDrag.startY;
-      const bounds = viewportRef.current.getBoundingClientRect();
-      const maxX = Math.max(0, bounds.width - panelRect.width - 8);
-      const maxY = Math.max(0, bounds.height - 56);
-      setPanelRect((previous) => ({ ...previous, x: clamp(panelDrag.originX + dx, 0, maxX), y: clamp(panelDrag.originY + dy, 8, maxY) }));
-    };
-    const onUp = (event: PointerEvent) => { if (event.pointerId === panelDrag.pointerID) setPanelDrag(null); };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [panelDrag, panelRect.width]);
-
-  useEffect(() => {
-    if (!panelResize) return;
-    const onMove = (event: PointerEvent) => {
-      if (event.pointerId !== panelResize.pointerID || !viewportRef.current) return;
-      const bounds = viewportRef.current.getBoundingClientRect();
-      const dx = event.clientX - panelResize.startX;
-      const dy = event.clientY - panelResize.startY;
-      const maxX = Math.max(0, bounds.width - 8);
-      const maxY = Math.max(8, bounds.height - 8);
-
-      let nextX = panelResize.originX;
-      let nextY = panelResize.originY;
-      let nextW = panelResize.originW;
-      let nextH = panelResize.originH;
-
-      if (panelResize.edges.right) nextW = panelResize.originW + dx;
-      if (panelResize.edges.bottom) nextH = panelResize.originH + dy;
-      if (panelResize.edges.left) {
-        nextX = panelResize.originX + dx;
-        nextW = panelResize.originW - dx;
-      }
-      if (panelResize.edges.top) {
-        nextY = panelResize.originY + dy;
-        nextH = panelResize.originH - dy;
-      }
-
-      nextW = clamp(nextW, PANEL_MIN_WIDTH, maxX);
-      nextH = clamp(nextH, PANEL_MIN_HEIGHT, maxY - 8);
-      nextX = clamp(nextX, 0, maxX - nextW);
-      nextY = clamp(nextY, 8, maxY - nextH);
-
-      if (panelResize.edges.left) nextX = panelResize.originX + (panelResize.originW - nextW);
-      if (panelResize.edges.top) nextY = panelResize.originY + (panelResize.originH - nextH);
-      nextX = clamp(nextX, 0, maxX - nextW);
-      nextY = clamp(nextY, 8, maxY - nextH);
-
-      setPanelRect({ x: nextX, y: nextY, width: nextW, height: nextH });
-    };
-    const onUp = (event: PointerEvent) => { if (event.pointerId === panelResize.pointerID) setPanelResize(null); };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [panelResize]);
+  useNodeMapPanelControls({
+    panelDrag,
+    panelResize,
+    panelRect,
+    panelMinWidth: PANEL_MIN_WIDTH,
+    panelMinHeight: PANEL_MIN_HEIGHT,
+    viewportRef,
+    setPanelDrag,
+    setPanelResize,
+    setPanelRect,
+  });
 
   const detailsPanelNode = useMemo(() => nodes.find((item) => item.node_id === detailsPanelNodeID) ?? null, [nodes, detailsPanelNodeID]);
   const nodeByID = useMemo(() => Object.fromEntries(nodes.map((node) => [node.node_id, node])), [nodes]);
@@ -1320,7 +1145,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           if (event.ctrlKey || event.shiftKey) {
             event.preventDefault();
             event.stopPropagation();
-            startRelationshipLineMarqueeSelection(event.pointerId, event.clientX, event.clientY, true);
+            startNodeMapMultiSelect(event.pointerId, event.clientX, event.clientY, true);
             return;
           }
 
@@ -1375,7 +1200,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   if (event.ctrlKey || event.shiftKey) {
                     event.preventDefault();
                     suppressNextRelationshipLineClickRef.current = true;
-                    startRelationshipLineMarqueeSelection(event.pointerId, event.clientX, event.clientY, true);
+                    startNodeMapMultiSelect(event.pointerId, event.clientX, event.clientY, true);
                   }
                 }}
                 onClick={(event) => {

@@ -8,6 +8,7 @@ This document captures the full behavior and implementation details currently pr
 Implementation is now organized under:
 
 - `frontend/src/modules/node-map/NodeMapContent.tsx`
+- `frontend/src/modules/node-map/NodeMapControls.ts` (Node Map keyboard/mouse/pointer control hooks + multi-select/line-hit helpers)
 - `frontend/src/modules/node-map/shared.ts` (shared types/constants/helpers)
 
 ---
@@ -119,10 +120,12 @@ Nodes are positioned in **world coordinates**, while pan/zoom transform the worl
 
 ### 4.4 Multi-select
 
-- `Shift + drag` **or** `Ctrl + drag` on canvas creates marquee selection box.
+- `Shift + drag` **or** `Ctrl + drag` on canvas creates a multi-select box.
 - Nodes intersecting the box become selected.
 - `Shift + click` **or** `Ctrl + click` on node cards toggles nodes in/out of the current selection set.
-- `Shift + drag` over an existing multi-selection now adds newly boxed nodes/relationship lines into the current selection set (additive marquee) instead of replacing the existing batch.
+- `Shift + drag` over an existing multi-selection now adds newly boxed nodes/relationship lines into the current selection set (additive multi-select) instead of replacing the existing batch.
+- Multi-select behavior is now **pointer-session locked**: once a multi-select drag starts in additive mode (`Shift`/`Ctrl` held at drag start), the session remains additive until pointer-up even if modifier keys are released mid-drag.
+- Relationship-line multi-select inclusion uses the same pointer-session rectangle as node-card inclusion so mixed node+line selection is deterministic during long drag gestures.
 - Visual indicators:
   - selected border/outline/glow,
   - selected dot marker on card,
@@ -188,7 +191,7 @@ This replaces the old incorrect vertical swap behavior.
 
 - Relationship rows are removable from the details panel via **Snip**.
 - Relationship lines can also be selected directly on canvas by clicking the line path (multi-select with `Shift`/`Ctrl` + click).
-- Relationship lines are included in marquee selection (`Shift`/`Ctrl` + drag) so line-only and mixed node+line group selection works with the same drag gesture family used for nodes.
+- Relationship lines are included in multi-select (`Shift`/`Ctrl` + drag) so line-only and mixed node+line group selection works with the same drag gesture family used for nodes.
 - Relationship lines can be snipped directly on-canvas via line **double-click**.
 - Keyboard `Delete` / `Backspace` deletes selected relationships.
 - When a mixed selection includes both nodes and relationship lines, one delete confirmation now covers both so nodes are not left behind after line deletion.

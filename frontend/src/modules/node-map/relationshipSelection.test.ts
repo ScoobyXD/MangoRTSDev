@@ -1,8 +1,8 @@
-// Relationship selection hit-test geometry tests for marquee and line segments.
+// Relationship selection hit-test geometry tests for multi-select box and line segments.
 // @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
-import { pathIntersectsRect, segmentIntersectsRect } from "./relationshipSelection.js";
+import { pathIntersectsRect, segmentIntersectsRect } from "./NodeMapControls.js";
 
 test("detects segment intersection when segment crosses rectangle", () => {
   const intersects = segmentIntersectsRect(
