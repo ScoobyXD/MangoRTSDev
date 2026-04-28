@@ -11,6 +11,13 @@ export type NodeRecord = {
   created_timestamp: string;
 };
 
+// UI naming adapter: backend keeps `header`, but frontend product copy now prefers "Title".
+// Keeping this helper centralized avoids repeated trim/fallback work across hot-path modules.
+export function getNodeTitleFromRecord(node: Pick<NodeRecord, "header" | "node_id">): string {
+  const normalizedHeader = trimOrEmpty(node.header);
+  return normalizedHeader || node.node_id;
+}
+
 // Relationship row payload (a/b sides preserve directional parent/child semantics).
 export type NodeRelationship = {
   company_id: string;

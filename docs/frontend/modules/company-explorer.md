@@ -74,6 +74,10 @@ Responsibilities:
 - editable metadata and structured fields,
 - relationship summary.
 
+Naming copy update (2026-04-28):
+- Explorer node-facing UI copy now uses **Title** wording instead of **Header**.
+- This is a presentation-layer naming change only; backend payloads still use the `header` field contract.
+
 ### 3.3 Right pane: Context
 
 Responsibilities:

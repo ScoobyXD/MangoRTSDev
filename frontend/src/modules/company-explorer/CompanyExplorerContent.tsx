@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeDetails, NodeRecord } from "../node-map/shared";
+import { getNodeTitleFromRecord, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeDetails, NodeRecord } from "../node-map/shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../node-map/workspaceStore";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
@@ -98,7 +98,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     if (expanded.has("folder-nodes")) {
       rows.push({ id: "folder-all", label: `All Nodes (${nodes.length})`, depth: 2, kind: "folder", scopeLevel: 1 });
       for (const node of nodes) {
-        rows.push({ id: `node-${node.node_id}`, label: node.header || node.node_id, depth: 3, kind: "node", nodeID: node.node_id, scopeLevel: 3 });
+        rows.push({ id: `node-${node.node_id}`, label: getNodeTitleFromRecord(node), depth: 3, kind: "node", nodeID: node.node_id, scopeLevel: 3 });
       }
     }
 
@@ -350,6 +350,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           {loading && <div style={{ fontSize: 12, opacity: 0.72 }}>Loading...</div>}
           {!loading && selectedDetails && (
             <>
+              <div style={{ fontSize: 12, opacity: 0.82 }}>Title: {getNodeTitleFromRecord(selectedDetails.node)}</div>
               <div style={{ fontSize: 12, opacity: 0.82 }}>Node ID: {selectedDetails.node.node_id}</div>
               <div style={{ fontSize: 12, opacity: 0.82 }}>Created: {selectedDetails.node.created_timestamp}</div>
               <div style={{ fontSize: 12, opacity: 0.82 }}>Relationships: {selectedDetails.relationships.length}</div>

@@ -11,6 +11,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/modules/node-map/relationshipProjection.test.js"),
   resolve(frontendRoot, ".test-dist/modules/node-map/relationshipSelection.test.js"),
   resolve(frontendRoot, ".test-dist/modules/node-map/relationshipDeleteSummary.test.js"),
+  resolve(frontendRoot, ".test-dist/modules/node-map/shared.test.js"),
 ];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
 
