@@ -48,8 +48,8 @@ Base values are read from:
   - loads the nodes list.
 - `GET /v1/nodes/:node_id?company_id=...`
   - loads node details (relationships + information) for one node.
-- `GET /v1/nodes/:node_id/text-projection?company_id=...`
-  - loads typed semantic editor text rows for hot-path editor rendering.
+- `GET /v1/nodes/:node_id/editor-projection?company_id=...`
+  - loads typed semantic editor rows for hot-path editor rendering.
 - `POST /v1/nodes`
   - creates a node with `{ company_id, header }`.
 - `DELETE /v1/nodes/:node_id?company_id=...`
@@ -345,12 +345,12 @@ Linked Company Explorer frames consume those semantic selection events and map-s
 ### 9.4 Node Doc persistence behavior
 
 - Load:
-  - `GET /v1/nodes/:node_id?company_id=...`
-  - parse `information` rows where `type === "Text box"`
-  - keep latest record per `local_id` by timestamp order
+  - `GET /v1/nodes/:node_id/editor-projection?company_id=...`
+  - consume typed editor projection rows for semantic values
+  - merge with local/per-user layout coordinates for render placement
 - Save:
   - `POST /v1/nodes/:node_id/information`
-  - payload stores JSON `{ local_id, x, y, text }` as `information`
+  - payload stores semantic information text/value (no geometry in hot server path)
 - UI states:
   - if not linked: prompt user to link modules
   - if linked but no selected node: prompt user to select a node in linked Node Map

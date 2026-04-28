@@ -97,15 +97,16 @@ create table if not exists node_information (
   foreign key (company_id, node_id) references nodes (company_id, node_id)
 );
 
-create table if not exists node_text_projection (
+create table if not exists node_editor_projection (
   company_id uuid not null,
   node_id uuid not null,
-  semantic_key text not null,
-  text_value text not null,
+  info_key text not null,
+  type info_type not null,
+  information text not null,
   source_information_id uuid not null,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
-  primary key (company_id, node_id, semantic_key),
+  primary key (company_id, node_id, info_key),
   foreign key (company_id, node_id) references nodes (company_id, node_id),
   foreign key (company_id, source_information_id) references node_information (company_id, information_id)
 );

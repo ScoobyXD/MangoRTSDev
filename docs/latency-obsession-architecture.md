@@ -168,7 +168,7 @@ Current issue:
 
 Target behavior:
 - One cache-miss fetch at most per node key (single-flight).
-- Editor semantic text reads come from typed projection rows.
+- Editor semantic information reads come from typed projection rows.
 - Editor geometry remains local/per-user and is not sent on hot semantic save/read paths.
 - Cross-module details reads are served from shared cache entries whenever possible.
 

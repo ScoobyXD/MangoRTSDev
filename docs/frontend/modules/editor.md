@@ -17,11 +17,11 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 - **Explorer fallback context source:** editor can read explorer-driven node selection from `node-map-explorer-context-v1:<company_id>:<editor_widget_id>` when no direct map-state context is available.
 - **Backend read path:** `GET /v1/nodes/:node_id?company_id=...`.
 - **Backend write path:** `POST /v1/nodes/:node_id/information` for text-box payloads.
-- **Backend semantic read path:** `GET /v1/nodes/:node_id/text-projection?company_id=...` (typed text projection rows for hot editor loads).
+- **Backend semantic read path:** `GET /v1/nodes/:node_id/editor-projection?company_id=...` (typed editor projection rows for hot editor loads).
 - **Event sync hooks:** `EVENT_FRAME_LINK_GRAPH_UPDATED`, `EVENT_NODE_MAP_SELECTION_UPDATED`, `EVENT_EXPLORER_CONTEXT_UPDATED`, and `storage` events.
 
 ## Semantic vs layout persistence policy (2026-04-27)
-- Editor semantic text values are persisted server-side and served through typed text projection rows for hot-path loads.
+- Editor semantic values are persisted server-side and served through typed editor projection rows for hot-path loads.
 - Editor box geometry (`x/y/w/h`) is local/per-user layout state and is intentionally not part of hot server payloads.
 - This removes hot-path JSON geometry reconstruction work while preserving fast local layout interaction.
 

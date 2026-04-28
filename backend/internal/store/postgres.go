@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 
 	"miraeopus/backend/internal/domain"
@@ -254,23 +253,7 @@ func (r *PostgresRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDeta
 	}, nil
 }
 
-func semanticTextFromInformation(infoType, information string) string {
-	if infoType != "Text box" {
-		return information
-	}
-	var payload struct {
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal([]byte(information), &payload); err != nil {
-		return information
-	}
-	if payload.Text == "" {
-		return information
-	}
-	return payload.Text
-}
-
-func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, information, semanticKey string) (domain.NodeInformation, error) {
+func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, information, infoKey string) (domain.NodeInformation, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -313,24 +296,23 @@ func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, informati
 	); err != nil {
 		return domain.NodeInformation{}, err
 	}
-	if infoType == "Text box" {
-		keyValue := semanticKey
-		if keyValue == "" {
-			keyValue = item.InformationID
-		}
-		if _, err := tx.ExecContext(ctx,
-			`insert into node_text_projection
-			 (company_id, node_id, semantic_key, text_value, source_information_id, created_timestamp, updated_timestamp)
-			 values ($1, $2, $3, $4, $5, now(), now())
-			 on conflict (company_id, node_id, semantic_key)
-			 do update set
-			   text_value=excluded.text_value,
-			   source_information_id=excluded.source_information_id,
-			   updated_timestamp=now()`,
-			item.CompanyID, item.NodeID, keyValue, semanticTextFromInformation(infoType, information), item.InformationID,
-		); err != nil {
-			return domain.NodeInformation{}, err
-		}
+	keyValue := infoKey
+	if keyValue == "" {
+		keyValue = item.InformationID
+	}
+	if _, err := tx.ExecContext(ctx,
+		`insert into node_editor_projection
+		 (company_id, node_id, info_key, type, information, source_information_id, created_timestamp, updated_timestamp)
+		 values ($1, $2, $3, $4::info_type, $5, $6, now(), now())
+		 on conflict (company_id, node_id, info_key)
+		 do update set
+		   type=excluded.type,
+		   information=excluded.information,
+		   source_information_id=excluded.source_information_id,
+		   updated_timestamp=now()`,
+		item.CompanyID, item.NodeID, keyValue, item.Type, information, item.InformationID,
+	); err != nil {
+		return domain.NodeInformation{}, err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -339,7 +321,7 @@ func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, informati
 	return item, nil
 }
 
-func (r *PostgresRepo) ListNodeTextProjections(companyID, nodeID string) ([]domain.NodeTextProjection, error) {
+func (r *PostgresRepo) ListNodeEditorProjections(companyID, nodeID string) ([]domain.NodeEditorProjection, error) {
 	ctx := context.Background()
 	var exists bool
 	if err := r.db.QueryRowContext(ctx,
@@ -353,8 +335,8 @@ func (r *PostgresRepo) ListNodeTextProjections(companyID, nodeID string) ([]doma
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		`select company_id, node_id, semantic_key, text_value, source_information_id, created_timestamp, updated_timestamp
-		 from node_text_projection
+		`select company_id, node_id, info_key, type::text, information, source_information_id, created_timestamp, updated_timestamp
+		 from node_editor_projection
 		 where company_id=$1 and node_id=$2
 		 order by updated_timestamp asc`,
 		companyID, nodeID,
@@ -364,14 +346,15 @@ func (r *PostgresRepo) ListNodeTextProjections(companyID, nodeID string) ([]doma
 	}
 	defer rows.Close()
 
-	items := make([]domain.NodeTextProjection, 0)
+	items := make([]domain.NodeEditorProjection, 0)
 	for rows.Next() {
-		var item domain.NodeTextProjection
+		var item domain.NodeEditorProjection
 		if err := rows.Scan(
 			&item.CompanyID,
 			&item.NodeID,
-			&item.SemanticKey,
-			&item.TextValue,
+			&item.InfoKey,
+			&item.Type,
+			&item.Information,
 			&item.SourceInformationID,
 			&item.CreatedTimestamp,
 			&item.UpdatedTimestamp,

@@ -110,28 +110,8 @@ export function oppositeSide(direction: NodeDirection): NodeDirection {
   return "top";
 }
 
-// Editor text-box model stored in node information rows.
+// Editor box model used in module-local render state.
 export type NodeDocBox = { local_id: string; x: number; y: number; w: number; h: number; information_id?: string; information: string };
 export const NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX = "node-map-explorer-context-v1";
 export const NODE_DOC_MIN_W = 180;
 export const NODE_DOC_MIN_H = 36;
-
-// Parser that converts persisted backend text payload into editor box geometry/content.
-export function parseDocBox(info: NodeInformation): NodeDocBox | null {
-  if (info.type !== "Text box") return null;
-  try {
-    const parsed = JSON.parse(info.information) as { local_id?: string; x?: number; y?: number; w?: number; h?: number; text?: string };
-    if (typeof parsed?.x !== "number" || typeof parsed?.y !== "number" || typeof parsed?.text !== "string") return null;
-    return {
-      local_id: typeof parsed.local_id === "string" && parsed.local_id.trim() ? parsed.local_id : info.information_id,
-      x: parsed.x,
-      y: parsed.y,
-      w: typeof parsed.w === "number" ? parsed.w : 320,
-      h: typeof parsed.h === "number" ? parsed.h : 52,
-      information_id: info.information_id,
-      information: parsed.text,
-    };
-  } catch {
-    return { local_id: info.information_id, x: 24, y: 56, w: 320, h: 52, information_id: info.information_id, information: info.information };
-  }
-}

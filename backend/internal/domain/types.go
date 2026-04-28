@@ -29,11 +29,12 @@ type NodeInformation struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
-type NodeTextProjection struct {
+type NodeEditorProjection struct {
 	CompanyID           string    `json:"company_id"`
 	NodeID              string    `json:"node_id"`
-	SemanticKey         string    `json:"semantic_key"`
-	TextValue           string    `json:"text_value"`
+	InfoKey             string    `json:"info_key"`
+	Type                string    `json:"type"`
+	Information         string    `json:"information"`
 	SourceInformationID string    `json:"source_information_id"`
 	CreatedTimestamp    time.Time `json:"created_timestamp"`
 	UpdatedTimestamp    time.Time `json:"updated_timestamp"`

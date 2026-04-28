@@ -1,26 +1,27 @@
 import { NodeDetails } from "./shared";
 
-export type NodeTextProjectionItem = {
+export type NodeEditorProjectionItem = {
   company_id: string;
   node_id: string;
-  semantic_key: string;
-  text_value: string;
+  info_key: string;
+  type: string;
+  information: string;
   source_information_id: string;
   created_timestamp: string;
   updated_timestamp: string;
 };
 
-type NodeTextProjectionResponse = {
+type NodeEditorProjectionResponse = {
   company_id: string;
   node_id: string;
-  items: NodeTextProjectionItem[];
+  items: NodeEditorProjectionItem[];
 };
 
 const detailsCache = new Map<string, NodeDetails>();
 const detailsInflight = new Map<string, Promise<NodeDetails>>();
 
-const textProjectionCache = new Map<string, NodeTextProjectionItem[]>();
-const textProjectionInflight = new Map<string, Promise<NodeTextProjectionItem[]>>();
+const editorProjectionCache = new Map<string, NodeEditorProjectionItem[]>();
+const editorProjectionInflight = new Map<string, Promise<NodeEditorProjectionItem[]>>();
 
 function key(apiBase: string, companyID: string, nodeID: string): string {
   return `${apiBase}:${companyID}:${nodeID}`;
@@ -38,7 +39,7 @@ async function requestJSON<T>(apiBase: string, path: string, init?: RequestInit)
 export function invalidateNodeCaches(apiBase: string, companyID: string, nodeID: string): void {
   const cacheKey = key(apiBase, companyID, nodeID);
   detailsCache.delete(cacheKey);
-  textProjectionCache.delete(cacheKey);
+  editorProjectionCache.delete(cacheKey);
 }
 
 export async function getNodeDetailsSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<NodeDetails> {
@@ -61,23 +62,23 @@ export async function getNodeDetailsSingleFlight(apiBase: string, companyID: str
   return promise;
 }
 
-export async function getNodeTextProjectionSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<NodeTextProjectionItem[]> {
+export async function getNodeEditorProjectionSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<NodeEditorProjectionItem[]> {
   const cacheKey = key(apiBase, companyID, nodeID);
-  const cached = textProjectionCache.get(cacheKey);
+  const cached = editorProjectionCache.get(cacheKey);
   if (cached) return cached;
-  const inflight = textProjectionInflight.get(cacheKey);
+  const inflight = editorProjectionInflight.get(cacheKey);
   if (inflight) return inflight;
-  const promise = requestJSON<NodeTextProjectionResponse>(apiBase, `/v1/nodes/${nodeID}/text-projection?company_id=${encodeURIComponent(companyID)}`)
+  const promise = requestJSON<NodeEditorProjectionResponse>(apiBase, `/v1/nodes/${nodeID}/editor-projection?company_id=${encodeURIComponent(companyID)}`)
     .then((payload) => {
       const items = payload.items ?? [];
-      textProjectionCache.set(cacheKey, items);
-      textProjectionInflight.delete(cacheKey);
+      editorProjectionCache.set(cacheKey, items);
+      editorProjectionInflight.delete(cacheKey);
       return items;
     })
     .catch((error) => {
-      textProjectionInflight.delete(cacheKey);
+      editorProjectionInflight.delete(cacheKey);
       throw error;
     });
-  textProjectionInflight.set(cacheKey, promise);
+  editorProjectionInflight.set(cacheKey, promise);
   return promise;
 }
