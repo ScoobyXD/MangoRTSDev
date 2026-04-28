@@ -39,6 +39,7 @@ Run command:
 Notes:
 - Uses Node's built-in test runner after TypeScript compile for a focused test target.
 - Command is implemented through a Node script for cross-platform behavior.
+- Output is grouped by **frontend feature sections** so relationship/linking/multi-select failures are easier to scan.
 
 ### 2) Frontend build/type safety gate
 
@@ -100,10 +101,15 @@ Use this checklist format and keep it complete.
   - parent/child anchor inference
   - projected visual relationship line metadata output
 - [x] `frontend/src/modules/node-map/relationshipSelection.test.ts`
-  - line-segment vs marquee rectangle intersection detection
-  - polyline relationship-path vs marquee rectangle intersection detection
+  - line-segment vs multi-select box rectangle intersection detection
+  - polyline relationship-path vs multi-select box rectangle intersection detection
   - rectangle-boundary overlap detection for relationship-line hit-testing
   - non-overlap guard for fully out-of-bounds relationship-line paths
+  - geometry helpers now source from `frontend/src/modules/node-map/NodeMapControls.ts`
+- [x] `frontend/src/modules/node-map/NodeMapControls.test.ts`
+  - selects node cards + relationship lines that intersect the multi-select box rectangle
+  - additive merge keeps previous selection batch for shift/ctrl multi-select
+  - additive behavior is pointer-session driven (does not depend on modifier state at pointer-up)
 - [x] `frontend/src/modules/node-map/relationshipDeleteSummary.test.ts`
   - success/failure summarization for batched relationship-line delete requests
   - preserves per-relationship failure reason reporting for visibility
