@@ -45,7 +45,7 @@ Do **not** introduce vague names that require explanation.
 3. App-layer files are live and used (`applayout`, `frame`, `framecanvas`, `framerightclickmenu`, `ModulePickerMenu`).
 4. `src/modules` registry exists (`MODULE_LIBRARY`, `MODULE_CONTENT_MAP`).
 5. Node runtime logic is split under `src/modules/node-map/`:
-   - `src/modules/node-map/NodesContent.tsx`
+   - `src/modules/node-map/NodeMapContent.tsx`
    - `src/modules/editor/EditorContent.tsx`
    - `src/modules/node-map/shared.ts`
 6. `docs/LLM.md` mandatory documentation policy is active.
@@ -60,7 +60,7 @@ Do **not** introduce vague names that require explanation.
 - `frontend/src/app/menus/ModulePickerMenu.tsx`
 - `frontend/src/WidgetContent.tsx`
 - `frontend/src/modules/node-map/shared.ts`
-- `frontend/src/modules/node-map/NodesContent.tsx`
+- `frontend/src/modules/node-map/NodeMapContent.tsx`
 - `frontend/src/modules/editor/EditorContent.tsx`
 - `frontend/src/modules/node-map/index.ts`
 - `frontend/src/modules/node-map/doc/index.ts`

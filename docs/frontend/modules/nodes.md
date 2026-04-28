@@ -7,7 +7,7 @@ This document captures the full behavior and implementation details currently pr
 
 Implementation is now organized under:
 
-- `frontend/src/modules/node-map/NodesContent.tsx`
+- `frontend/src/modules/node-map/NodeMapContent.tsx`
 - `frontend/src/modules/node-map/shared.ts` (shared types/constants/helpers)
 
 ---
@@ -30,6 +30,7 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 ### Terminology (authoritative)
 
 - **Node**: the node box/card UI element.
+- **Node title**: canonical text label shown on node cards and explorer rows.
 - **Relationship line**: the literal line UI element connecting two nodes on the canvas.
 - **Relationship**: the parent/child/peer data relationship represented by a `node_relationships` row.
 
@@ -51,7 +52,7 @@ Base values are read from:
 - `GET /v1/nodes/:node_id/projection?company_id=...`
   - loads typed node information projection rows for hot-path editor rendering.
 - `POST /v1/nodes`
-  - creates a node with `{ company_id, header }`.
+  - creates a node with `{ company_id, title }`.
 - `DELETE /v1/nodes/:node_id?company_id=...`
   - deletes selected node.
 - `POST /v1/node-relationships`
@@ -242,7 +243,7 @@ The projection object is **derived in memory** during render. It is not persiste
 - `loadNodes()` loads all nodes.
 - `loadDetails(selectedNodeID)` loads details panel data for one selected node.
 - `loadGraphRelationships(nodes)` reuses workspace snapshot relationship payloads filtered to currently loaded nodes.
-- Workspace snapshot streaming/delta handling in `workspaceStore.ts` uses a single `WorkspaceStreamEnvelope` contract type for event application.
+- Node relationship graph streaming/delta handling in `NodeRelationshipGraph.ts` uses a single `NodeRelationshipGraphStreamEnvelope` contract type for event application.
 - Relationship-create writes between existing nodes are executed through one internal helper path (`commitRelationshipBetweenNodes`) to avoid duplicate declaration/runtime drift in the canvas module.
 
 ---
@@ -354,7 +355,7 @@ Linked Company Explorer frames consume those selection events and map-state upda
 - UI states:
   - if not linked: prompt user to link modules
   - if linked but no selected node: prompt user to select a node in linked Node Map
-  - if linked and node selected: show linked node header + information summary at top of Node Doc
+  - if linked and node selected: show linked node title + information summary at top of Node Doc
 
 ---
 
@@ -427,7 +428,15 @@ This is the requested teal update used by teal-themed modules.
 
 Primary implementation is in:
 
-- `frontend/src/modules/node-map/NodesContent.tsx` (Node Map behavior)
+- `frontend/src/modules/node-map/NodeMapContent.tsx` (Node Map behavior)
 - `frontend/src/modules/editor/EditorContent.tsx` (Node Doc behavior)
 - `frontend/src/modules/node-map/shared.ts` (shared node types/constants/helpers)
 - `frontend/src/app/applayout.tsx` (frame/menu integration and link action wiring)
+
+
+## 16) Explorer + Editor + Stats responsibility split (2026-04-28)
+
+- **Company Explorer** is now navigation/context handoff focused (tree selection + linked-context broadcast), not a node-details surface.
+- **Editor** is now the canonical module for node metadata + history context alongside text-box information editing.
+- **Stats** is now a dedicated module (`stats`) for KPI/stat cards derived from the nearest linked context source (node support is implemented now; additional source adapters can be added).
+- The old Company Explorer **Related Artifacts** placeholder section has been removed.

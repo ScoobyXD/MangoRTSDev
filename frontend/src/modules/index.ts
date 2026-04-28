@@ -9,9 +9,10 @@ import {
   TasksContent,
   UsersContent,
 } from "../WidgetContent";
-import { NodesContent } from "./node-map/NodesContent";
+import { NodeMapContent } from "./node-map/NodeMapContent";
 import { EditorContent } from "./editor/EditorContent";
 import { CompanyExplorerContent } from "./company-explorer";
+import { StatsContent } from "./stats/StatsContent";
 
 export interface ModuleTemplate {
   kind: string;
@@ -31,9 +32,10 @@ export const MODULE_LIBRARY: ModuleTemplate[] = [
   { kind: "orders", label: "Recent Orders", defaultW: 10, defaultH: 9, render: OrdersContent },
   { kind: "notifications", label: "Notifications", defaultW: 12, defaultH: 8, render: NotificationsContent },
   { kind: "map", label: "Map View", defaultW: 10, defaultH: 15, render: MapContent },
-  { kind: "nodes-map", label: "Node Map", defaultW: 16, defaultH: 14, render: NodesContent },
+  { kind: "nodes-map", label: "Node Map", defaultW: 16, defaultH: 14, render: NodeMapContent },
   { kind: "editor", label: "Editor", defaultW: 16, defaultH: 14, render: EditorContent },
   { kind: "company-explorer", label: "Company Explorer", defaultW: 18, defaultH: 14, render: CompanyExplorerContent },
+  { kind: "stats", label: "Stats", defaultW: 12, defaultH: 10, render: StatsContent },
 ];
 
 // Fast lookup map consumed by frame rendering paths in AppLayout.
@@ -42,5 +44,5 @@ export const MODULE_CONTENT_MAP: Record<string, React.FC<{ accent: string; widge
 );
 
 // Legacy aliases maintained so older persisted layouts still open correctly.
-MODULE_CONTENT_MAP.nodes = NodesContent;
+MODULE_CONTENT_MAP.nodes = NodeMapContent;
 MODULE_CONTENT_MAP["node-doc"] = EditorContent;

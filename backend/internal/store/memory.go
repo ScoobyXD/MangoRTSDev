@@ -12,7 +12,7 @@ import (
 var ErrNotFound = errors.New("not found")
 
 type Repository interface {
-	CreateNode(companyID, header string) (domain.Node, error)
+	CreateNode(companyID, title string) (domain.Node, error)
 	ListNodes(companyID string) ([]domain.Node, error)
 	ListNodeRelationships(companyID string) ([]domain.NodeRelationship, error)
 	DeleteNodeRelationship(companyID, relationshipID string) error
@@ -61,14 +61,14 @@ func key(companyID, id string) string {
 	return companyID + ":" + id
 }
 
-func (r *MemoryRepo) CreateNode(companyID, header string) (domain.Node, error) {
+func (r *MemoryRepo) CreateNode(companyID, title string) (domain.Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	n := domain.Node{
 		CompanyID:        companyID,
 		NodeID:           newUUIDv7String(),
-		Header:           header,
+		Title:            title,
 		CreatedTimestamp: time.Now().UTC(),
 	}
 	r.nodes[key(companyID, n.NodeID)] = n

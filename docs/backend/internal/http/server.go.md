@@ -47,7 +47,7 @@ This issue was caused by two hot-path behaviors reinforcing each other:
 
 3. **Create-node flow still forced snapshot refetch on the hot path**
    - `createNode(...)` posted successfully and then immediately called `loadNodes()`.
-   - `loadNodes()` always called `refreshWorkspaceSnapshot(...)`.
+   - `loadNodes()` always called `refreshNodeRelationshipGraphSnapshot(...)`.
    - In environments with extra subscribers/remount churn, this reintroduced repeated snapshot reads after node creation.
 
    Net result: click spam was fixed, but "create node" could still restart snapshot GET bursts.
@@ -64,7 +64,7 @@ The loop above violated these rules by repeatedly issuing snapshot reads and re-
 
 ## Implemented fix
 
-### Frontend (Node Map + workspace store)
+### Frontend (Node Map + NodeRelationshipGraph store)
 
 - Removed network refresh from relationship derivation paths that run on node state changes.
 - Relationship projection now reads from local snapshot cache in-memory.
@@ -97,4 +97,4 @@ The loop above violated these rules by repeatedly issuing snapshot reads and re-
 
 - Add dashboard panels for `/v1/workspace/snapshot` request rate and 2xx/304 breakdown.
 - Alert when per-session snapshot GET rate exceeds expected thresholds on Node Map hot path.
-- Add a dedicated frontend test harness for workspace store subscription/refresh loops.
+- Add a dedicated frontend test harness for NodeRelationshipGraph store subscription/refresh loops.

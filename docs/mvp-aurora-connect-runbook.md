@@ -85,7 +85,7 @@ Open a second PowerShell window at repo root and run:
 ```powershell
 $companyId = "11111111-1111-1111-1111-111111111111"
 
-$nodePayload = @{ company_id = $companyId; header = "MVP launch critical path" } | ConvertTo-Json
+$nodePayload = @{ company_id = $companyId; title = "MVP launch critical path" } | ConvertTo-Json
 $nodeResp = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/v1/nodes" -ContentType "application/json" -Body $nodePayload
 $nodeResp | ConvertTo-Json -Depth 6
 

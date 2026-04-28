@@ -1,7 +1,7 @@
-// Workspace data-plane cache for Node Map + Company Explorer real-time synchronization.
+// Node relationship graph cache/sync plane for Node Map + Company Explorer.
 import { NodeRecord, NodeRelationship } from "./shared";
 
-export type WorkspaceSnapshot = {
+export type NodeRelationshipGraphSnapshot = {
   nodes: NodeRecord[];
   relationships: NodeRelationship[];
   generated_at?: string;
@@ -9,14 +9,14 @@ export type WorkspaceSnapshot = {
 
 type Subscriber = () => void;
 type CacheEntry = {
-  snapshot: WorkspaceSnapshot;
+  snapshot: NodeRelationshipGraphSnapshot;
   subscribers: Set<Subscriber>;
   loading: boolean;
   source?: EventSource;
   etag?: string;
 };
 
-type WorkspaceStreamEnvelope = {
+type NodeRelationshipGraphStreamEnvelope = {
   company_id: string;
   type: string;
   ts: string;
@@ -24,15 +24,15 @@ type WorkspaceStreamEnvelope = {
 };
 
 // Initial cache snapshot so subscribers always receive a consistent shape.
-const EMPTY_SNAPSHOT: WorkspaceSnapshot = { nodes: [], relationships: [] };
-const workspaceCache = new Map<string, CacheEntry>();
+const EMPTY_SNAPSHOT: NodeRelationshipGraphSnapshot = { nodes: [], relationships: [] };
+const nodeRelationshipGraphCache = new Map<string, CacheEntry>();
 
 // Cache entry resolver: creates per-company workspace cache bucket on demand.
 function getEntry(key: string): CacheEntry {
-  const existing = workspaceCache.get(key);
+  const existing = nodeRelationshipGraphCache.get(key);
   if (existing) return existing;
   const created: CacheEntry = { snapshot: EMPTY_SNAPSHOT, subscribers: new Set(), loading: false };
-  workspaceCache.set(key, created);
+  nodeRelationshipGraphCache.set(key, created);
   return created;
 }
 
@@ -41,7 +41,7 @@ function notify(entry: CacheEntry): void {
   for (const subscriber of entry.subscribers) subscriber();
 }
 
-// Some workspace events are intentionally non-graph mutations (e.g. node information writes).
+// Some graph events are intentionally non-relationship mutations (e.g. node information writes).
 // For those, refreshing the graph snapshot is unnecessary and adds avoidable hot-path GET load.
 function isNonGraphWorkspaceEvent(eventType: string): boolean {
   return eventType === "node_information_created";
@@ -49,7 +49,7 @@ function isNonGraphWorkspaceEvent(eventType: string): boolean {
 
 // Local mutation helper: lets hot-path UI actions apply immediate cache updates without
 // forcing a full snapshot refetch. SSE + periodic snapshot refresh remain the source of truth.
-export function upsertWorkspaceNode(apiBase: string, companyID: string, node: NodeRecord): void {
+export function upsertNodeRelationshipGraphNode(apiBase: string, companyID: string, node: NodeRecord): void {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
   const currentNodes = entry.snapshot.nodes ?? [];
@@ -64,7 +64,7 @@ export function upsertWorkspaceNode(apiBase: string, companyID: string, node: No
 
 // Local mutation helper for delete flows so successful node deletes converge immediately without
 // forcing a full snapshot reload on hot paths.
-export function removeWorkspaceNode(apiBase: string, companyID: string, nodeID: string): void {
+export function removeNodeRelationshipGraphNode(apiBase: string, companyID: string, nodeID: string): void {
   if (!nodeID) return;
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
@@ -84,11 +84,11 @@ export function removeWorkspaceNode(apiBase: string, companyID: string, nodeID: 
 function asNodeRecord(candidate: unknown): NodeRecord | null {
   if (!candidate || typeof candidate !== "object") return null;
   const value = candidate as Partial<NodeRecord>;
-  if (typeof value.company_id !== "string" || typeof value.node_id !== "string" || typeof value.header !== "string") return null;
+  if (typeof value.company_id !== "string" || typeof value.node_id !== "string" || typeof value.title !== "string") return null;
   return {
     company_id: value.company_id,
     node_id: value.node_id,
-    header: value.header,
+    title: value.title,
     created_timestamp: typeof value.created_timestamp === "string" ? value.created_timestamp : new Date().toISOString(),
   };
 }
@@ -116,8 +116,8 @@ function asRelationship(candidate: unknown): NodeRelationship | null {
   };
 }
 
-// Delta reducer: applies streaming workspace events without full snapshot reload.
-function applyWorkspaceDelta(entry: CacheEntry, envelope: WorkspaceStreamEnvelope): boolean {
+// Delta reducer: applies streaming graph events without full snapshot reload.
+function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelationshipGraphStreamEnvelope): boolean {
   const previous = entry.snapshot;
   const currentNodes = previous.nodes ?? [];
   const currentRelationships = previous.relationships ?? [];
@@ -175,7 +175,7 @@ function applyWorkspaceDelta(entry: CacheEntry, envelope: WorkspaceStreamEnvelop
 }
 
 // Snapshot fetcher with ETag support; keeps hot-path reads light and cache-friendly.
-export async function refreshWorkspaceSnapshot(apiBase: string, companyID: string): Promise<void> {
+export async function refreshNodeRelationshipGraphSnapshot(apiBase: string, companyID: string): Promise<void> {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
   if (entry.loading) return;
@@ -187,7 +187,7 @@ export async function refreshWorkspaceSnapshot(apiBase: string, companyID: strin
     });
     if (response.status === 304) return;
     if (!response.ok) return;
-    const payload = (await response.json()) as WorkspaceSnapshot;
+    const payload = (await response.json()) as NodeRelationshipGraphSnapshot;
     const nextEtag = response.headers.get("ETag");
     // If the backend says the payload hash is identical to what we already hold, skip
     // subscriber fan-out entirely. This protects hot paths from unnecessary rerender churn.
@@ -213,18 +213,18 @@ function ensureStream(apiBase: string, companyID: string): void {
   source.addEventListener("workspace", (event) => {
     const payload = (event as MessageEvent).data;
     if (typeof payload !== "string" || payload.length === 0) {
-      void refreshWorkspaceSnapshot(apiBase, companyID);
+      void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
       return;
     }
     try {
-      const envelope = JSON.parse(payload) as WorkspaceStreamEnvelope;
+      const envelope = JSON.parse(payload) as NodeRelationshipGraphStreamEnvelope;
       if (envelope.company_id !== companyID) return;
       if (isNonGraphWorkspaceEvent(envelope.type)) return;
-      const applied = applyWorkspaceDelta(entry, envelope);
+      const applied = applyNodeRelationshipGraphDelta(entry, envelope);
       if (applied) notify(entry);
-      else void refreshWorkspaceSnapshot(apiBase, companyID);
+      else void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
     } catch {
-      void refreshWorkspaceSnapshot(apiBase, companyID);
+      void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
     }
   });
   source.onerror = () => {
@@ -234,23 +234,23 @@ function ensureStream(apiBase: string, companyID: string): void {
 }
 
 // Public subscription API used by UI modules for workspace snapshot updates.
-export function subscribeWorkspace(apiBase: string, companyID: string, subscriber: Subscriber): () => void {
+export function subscribeNodeRelationshipGraph(apiBase: string, companyID: string, subscriber: Subscriber): () => void {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
   entry.subscribers.add(subscriber);
   if (entry.snapshot.nodes.length === 0 && entry.snapshot.relationships.length === 0) {
-    void refreshWorkspaceSnapshot(apiBase, companyID);
+    void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
   }
   ensureStream(apiBase, companyID);
   return () => {
-    const current = workspaceCache.get(key);
+    const current = nodeRelationshipGraphCache.get(key);
     if (!current) return;
     current.subscribers.delete(subscriber);
   };
 }
 
 // Synchronous snapshot getter for render paths that need latest cached workspace data.
-export function getWorkspaceSnapshot(apiBase: string, companyID: string): WorkspaceSnapshot {
+export function getNodeRelationshipGraphSnapshot(apiBase: string, companyID: string): NodeRelationshipGraphSnapshot {
   const key = `${apiBase}:${companyID}`;
   return getEntry(key).snapshot;
 }

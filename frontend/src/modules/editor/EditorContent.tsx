@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { NodeDocBox, NodeInformation, NODE_DOC_MIN_H, NODE_DOC_MIN_W, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, clamp } from "../node-map/shared";
+import { getNodeTitle, NodeDocBox, NodeInformation, NODE_DOC_MIN_H, NODE_DOC_MIN_W, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, clamp } from "../node-map/shared";
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
-import { getNodeDetailsSingleFlight, getNodeProjectionSingleFlight, invalidateNodeCaches } from "../node-map/nodeDetailsStore";
+import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 
 type LocalBoxLayout = Record<string, { x: number; y: number; w: number; h: number }>;
 
@@ -14,8 +14,10 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [linkedMapWidgetID, setLinkedMapWidgetID] = useState("");
   const [linkedNodeID, setLinkedNodeID] = useState("");
-  const [linkedNodeHeader, setLinkedNodeHeader] = useState("");
+  const [linkedNodeTitle, setLinkedNodeTitle] = useState("");
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
+  const [linkedNodeMetadataRows, setLinkedNodeMetadataRows] = useState<Array<{ label: string; value: string }>>([]);
+  const [linkedNodeHistoryRows, setLinkedNodeHistoryRows] = useState<string[]>([]);
   const [boxes, setBoxes] = useState<NodeDocBox[]>([]);
   const [activeBoxID, setActiveBoxID] = useState<string>("");
   const [focusBoxID, setFocusBoxID] = useState<string>("");
@@ -114,7 +116,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       method: "POST",
       body: JSON.stringify({ company_id: companyID, type: "Text box", information: box.information, information_id: box.information_id }),
     });
-    invalidateNodeCaches(apiBase, companyID, nodeID);
+    invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
     setBoxes((prev) => prev.map((item) => (item.local_id === box.local_id ? { ...item, information_id: created.information_id } : item)));
   }, [apiBase, companyID, requestJSON]);
 
@@ -189,24 +191,37 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     if (!linkedNodeID) {
       setBoxes([]);
       setActiveBoxID("");
-      setLinkedNodeHeader("");
+      setLinkedNodeTitle("");
       setLinkedNodeInfoPreview([]);
+      setLinkedNodeMetadataRows([]);
+      setLinkedNodeHistoryRows([]);
       return;
     }
     (async () => {
       try {
         setError("");
         const [details, projections] = await Promise.all([
-          getNodeDetailsSingleFlight(apiBase, companyID, linkedNodeID),
-          getNodeProjectionSingleFlight(apiBase, companyID, linkedNodeID),
+          getNodeRecordSingleFlight(apiBase, companyID, linkedNodeID),
+          getNodeInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
         ]);
         if (cancelled) return;
-        setLinkedNodeHeader(details.node.header);
+        setLinkedNodeTitle(getNodeTitle(details.node));
         const nonText = details.information.filter((item) => item.type !== "Text box");
         setLinkedNodeInfoPreview([
           `Text boxes: ${projections.length}`,
           ...nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`),
         ]);
+        setLinkedNodeMetadataRows([
+          { label: "Node ID", value: details.node.node_id },
+          { label: "Created", value: details.node.created_timestamp },
+          { label: "Relationships", value: String(details.relationships.length) },
+          { label: "Information records", value: String(details.information.length) },
+        ]);
+        const historyRows = [
+          details.node.created_timestamp ? `Node created at ${details.node.created_timestamp}` : "Node created",
+          ...details.information.slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`),
+        ];
+        setLinkedNodeHistoryRows(historyRows);
         const layout = readLocalLayout(linkedNodeID);
         const nextBoxes = projections.map((item, index) => {
           const position = layout[item.information_id];
@@ -350,14 +365,37 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         createBox("", x, y);
       }}
     >
-      {linkedNodeHeader && (
-        <div style={{ position: "absolute", top: 8, left: 10, right: 12, display: "grid", gap: 2, pointerEvents: "none" }}>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: accent }}>
-            Node: {linkedNodeHeader}
+      {linkedNodeTitle && (
+        <div style={{ position: "absolute", top: 8, left: 10, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
+          <div style={{ display: "grid", gap: 2 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: accent }}>
+              Node: {linkedNodeTitle}
+            </div>
+            <div style={{ fontSize: 10, opacity: 0.7 }}>
+              {linkedNodeInfoPreview.length > 0 ? linkedNodeInfoPreview.join(" • ") : "No non-text node information yet"}
+            </div>
           </div>
-          <div style={{ fontSize: 10, opacity: 0.7 }}>
-            {linkedNodeInfoPreview.length > 0 ? linkedNodeInfoPreview.join(" • ") : "No non-text node information yet"}
-          </div>
+          {linkedNodeMetadataRows.length > 0 && (
+            <section style={{ pointerEvents: "auto", display: "grid", gap: 6, maxWidth: 520 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>Metadata</div>
+              <div style={{ display: "grid", gap: 4 }}>
+                {linkedNodeMetadataRows.map((row) => (
+                  <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(3,25,30,0.14)", borderRadius: 6, padding: "4px 6px" }}>
+                    <span style={{ opacity: 0.75 }}>{row.label}</span>
+                    <strong>{row.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+          {linkedNodeHistoryRows.length > 0 && (
+            <section style={{ pointerEvents: "auto", display: "grid", gap: 6, maxWidth: 640 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>History</div>
+              <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(3,25,30,0.14)", borderRadius: 6, padding: "6px 8px 6px 22px" }}>
+                {linkedNodeHistoryRows.map((row, index) => <li key={`${row}-${index}`}>{row}</li>)}
+              </ul>
+            </section>
+          )}
         </div>
       )}
       {boxes.map((box) => (

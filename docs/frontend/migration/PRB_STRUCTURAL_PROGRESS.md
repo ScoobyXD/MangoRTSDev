@@ -13,7 +13,7 @@ Date: 2026-04-21
   - `app/menus/ModulePickerMenu.tsx` now owns module picker rendering (including Nodes submenu).
 - Pulled node module runtime out of `WidgetContent.tsx` into `frontend/src/modules/node-map/*`.
 - Completed split of node runtime into dedicated files:
-  - `modules/node-map/NodesContent.tsx`
+  - `modules/node-map/NodeMapContent.tsx`
   - `modules/editor/EditorContent.tsx`
   - `modules/node-map/shared.ts`
 - Removed migration compatibility files after successful wiring:

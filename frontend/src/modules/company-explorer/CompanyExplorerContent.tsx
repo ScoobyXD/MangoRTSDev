@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeDetails, NodeRecord } from "../node-map/shared";
+import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeRecord, NodeRelationship } from "../node-map/shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
-import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, subscribeWorkspace } from "../node-map/workspaceStore";
+import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
-import { getNodeDetailsSingleFlight } from "../node-map/nodeDetailsStore";
 
 type ExplorerTreeNode = {
   id: string;
@@ -23,7 +22,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [selectedTreeID, setSelectedTreeID] = useState("folder-all");
   const [selectedNodeID, setSelectedNodeID] = useState("");
-  const [selectedDetails, setSelectedDetails] = useState<NodeDetails | null>(null);
+  const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["folder-root", "folder-nodes", "folder-notes", "folder-logic"]));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -43,9 +42,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     (async () => {
       setLoading(true);
       try {
-        await refreshWorkspaceSnapshot(apiBase, companyID);
+        await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
         if (cancelled) return;
-        setNodes(getWorkspaceSnapshot(apiBase, companyID).nodes ?? []);
+        const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+        setNodes(snapshot.nodes ?? []);
+        setRelationships(snapshot.relationships ?? []);
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "failed_to_load_nodes");
       } finally {
@@ -56,38 +57,21 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, [apiBase, companyID]);
 
   useEffect(() => {
-    return subscribeWorkspace(apiBase, companyID, () => {
-      setNodes(getWorkspaceSnapshot(apiBase, companyID).nodes ?? []);
+    return subscribeNodeRelationshipGraph(apiBase, companyID, () => {
+      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+      setNodes(snapshot.nodes ?? []);
+      setRelationships(snapshot.relationships ?? []);
     });
   }, [apiBase, companyID]);
 
-  useEffect(() => {
-    if (!selectedNodeID) {
-      setSelectedDetails(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const payload = await getNodeDetailsSingleFlight(apiBase, companyID, selectedNodeID);
-        if (!cancelled) setSelectedDetails(payload);
-      } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : "failed_to_load_details");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [apiBase, selectedNodeID, companyID]);
-
   const unattachedNodeIDs = useMemo(() => {
     const attached = new Set<string>();
-    for (const detail of selectedDetails?.relationships ?? []) {
-      attached.add(detail.node_id_a);
-      attached.add(detail.node_id_b);
+    for (const relationship of relationships) {
+      attached.add(relationship.node_id_a);
+      attached.add(relationship.node_id_b);
     }
     return new Set(nodes.filter((node) => !attached.has(node.node_id)).map((node) => node.node_id));
-  }, [nodes, selectedDetails]);
+  }, [nodes, relationships]);
 
   // Build ctrl+f-friendly hierarchy rows (Company/Nodes/Logic Gates/Knowledge Notes).
   const treeRows = useMemo<ExplorerTreeNode[]>(() => {
@@ -98,7 +82,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     if (expanded.has("folder-nodes")) {
       rows.push({ id: "folder-all", label: `All Nodes (${nodes.length})`, depth: 2, kind: "folder", scopeLevel: 1 });
       for (const node of nodes) {
-        rows.push({ id: `node-${node.node_id}`, label: node.header || node.node_id, depth: 3, kind: "node", nodeID: node.node_id, scopeLevel: 3 });
+        rows.push({ id: `node-${node.node_id}`, label: getNodeTitle(node) || node.node_id, depth: 3, kind: "node", nodeID: node.node_id, scopeLevel: 3 });
       }
     }
 
@@ -254,28 +238,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [companyID, scope, selectedNodeID, selectedTreeID, selectedTree, linkRevision]);
 
-  // Right-panel history summary derived from selected node details payload.
-  const historyRows = useMemo(() => {
-    if (!selectedDetails) return [];
-    const nodeCreated = selectedDetails.node?.created_timestamp ? `Node created at ${selectedDetails.node.created_timestamp}` : "Node created";
-    const infoEvents = (selectedDetails.information ?? []).slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`);
-    return [nodeCreated, ...infoEvents].slice(0, 5);
-  }, [selectedDetails]);
-
-  // KPI strip used for fast operational scanning in explorer details pane.
-  const kpiRows = useMemo(() => {
-    const details = selectedDetails;
-    if (!details) return [];
-    return [
-      { label: "Relationships", value: String(details.relationships?.length ?? 0) },
-      { label: "Information Records", value: String(details.information?.length ?? 0) },
-      { label: "Entity Type", value: "node" },
-      { label: "Scope", value: selectedTree?.label ?? "Company" },
-    ];
-  }, [selectedDetails, selectedTree]);
-
   return (
-    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(220px, 0.95fr) minmax(280px, 1.1fr) minmax(220px, 0.95fr)", background: "#ffffff", color: "#0f1f23" }}>
+    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(240px, 1.2fr) minmax(280px, 1fr)", background: "#ffffff", color: "#0f1f23" }}>
       <div
         ref={treeViewportRef}
         onScroll={(event) => setTreeScrollTop((event.currentTarget as HTMLDivElement).scrollTop)}
@@ -343,54 +307,21 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         <div style={{ height: virtualizedTree.bottomSpacer }} />
       </div>
 
-      <div style={{ borderRight: "1px solid rgba(3,25,30,0.14)", display: "grid", gridTemplateRows: "auto 1fr", overflow: "hidden" }}>
-        <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(3,25,30,0.14)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Details</div>
+      <div style={{ display: "grid", gridTemplateRows: "auto 1fr", overflow: "hidden" }}>
+        <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(3,25,30,0.14)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Selection</div>
         <div style={{ overflow: "auto", padding: 12, display: "grid", gap: 10, alignContent: "start" }}>
           <div style={{ fontSize: 13, fontWeight: 700 }}>{selectedTree?.label ?? "Company"}</div>
           {loading && <div style={{ fontSize: 12, opacity: 0.72 }}>Loading...</div>}
-          {!loading && selectedDetails && (
+          {!loading && selectedNodeID && (
             <>
-              <div style={{ fontSize: 12, opacity: 0.82 }}>Node ID: {selectedDetails.node.node_id}</div>
-              <div style={{ fontSize: 12, opacity: 0.82 }}>Created: {selectedDetails.node.created_timestamp}</div>
-              <div style={{ fontSize: 12, opacity: 0.82 }}>Relationships: {selectedDetails.relationships.length}</div>
-              <div style={{ fontSize: 12, opacity: 0.82 }}>Information records: {selectedDetails.information.length}</div>
+              <div style={{ fontSize: 12, opacity: 0.82 }}>Node ID: {selectedNodeID}</div>
+              <div style={{ fontSize: 12, opacity: 0.82 }}>Linked modules can consume this selection via explorer context events.</div>
             </>
           )}
-          {!selectedDetails && !loading && (
-            <div style={{ fontSize: 12, opacity: 0.82 }}>Select a node-level file in the tree to view full details here.</div>
+          {!selectedNodeID && !loading && (
+            <div style={{ fontSize: 12, opacity: 0.82 }}>Select a node-level file in the tree to propagate selection to linked modules.</div>
           )}
           {error && <div style={{ fontSize: 11, color: "#b00020" }}>{error}</div>}
-        </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateRows: "auto 1fr", overflow: "hidden" }}>
-        <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(3,25,30,0.14)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Context</div>
-        <div style={{ overflow: "auto", padding: 12, display: "grid", gap: 12, alignContent: "start" }}>
-          <section>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>History</div>
-            {historyRows.length === 0 ? <div style={{ fontSize: 12, opacity: 0.7 }}>No history available for current scope.</div> : (
-              <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 4 }}>
-                {historyRows.map((item) => <li key={item} style={{ fontSize: 12 }}>{item}</li>)}
-              </ul>
-            )}
-          </section>
-          <section>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Metrics / KPI</div>
-            {kpiRows.length === 0 ? <div style={{ fontSize: 12, opacity: 0.7 }}>Select a node-level file to see KPI values.</div> : (
-              <div style={{ display: "grid", gap: 6 }}>
-                {kpiRows.map((row) => (
-                  <div key={row.label} style={{ border: "1px solid rgba(4,31,38,0.16)", borderRadius: 8, padding: "6px 8px", display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                    <span style={{ opacity: 0.8 }}>{row.label}</span>
-                    <strong>{row.value}</strong>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-          <section>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Related Artifacts</div>
-            <div style={{ fontSize: 12, opacity: 0.75 }}>Artifacts support can be expanded here (documents, links, media).</div>
-          </section>
         </div>
       </div>
     </div>

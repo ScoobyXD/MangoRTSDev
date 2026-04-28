@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, snapToGrid, trimOrEmpty } from "./shared";
+import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, PanelEdge, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, getNodeTitle, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
-import { getWorkspaceSnapshot, refreshWorkspaceSnapshot, removeWorkspaceNode, subscribeWorkspace, upsertWorkspaceNode } from "./workspaceStore";
+import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { pathIntersectsRect } from "./relationshipSelection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
-import { getNodeDetailsSingleFlight, invalidateNodeCaches } from "./nodeDetailsStore";
+import { getNodeRecordSingleFlight, invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
-export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
+export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const mapScope = widgetId?.trim() ? widgetId : "global";
@@ -32,7 +32,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const [selectedNodeID, setSelectedNodeID] = useState<string>("");
   const [selectedNodeIDs, setSelectedNodeIDs] = useState<Set<string>>(new Set());
   const [details, setDetails] = useState<NodeDetails | null>(null);
-  const [newNodeHeader, setNewNodeHeader] = useState("");
+  const [newNodeTitle, setNewNodeTitle] = useState("");
   const [infoType, setInfoType] = useState<(typeof INFO_TYPES)[number]>("Text box");
   const [infoDraft, setInfoDraft] = useState("");
   const [error, setError] = useState("");
@@ -208,8 +208,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     setLoading(true);
     setError("");
     try {
-      await refreshWorkspaceSnapshot(apiBase, companyID);
-      const nextNodes = getWorkspaceSnapshot(apiBase, companyID).nodes ?? [];
+      await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+      const nextNodes = getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes ?? [];
       setNodes(nextNodes);
 
       const hasSelection = selectedNodeID && nextNodes.some((item) => item.node_id === selectedNodeID);
@@ -240,7 +240,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       setRelationships([]);
       return;
     }
-    const payload = getWorkspaceSnapshot(apiBase, companyID);
+    const payload = getNodeRelationshipGraphSnapshot(apiBase, companyID);
     setRelationships(projectVisibleRelationships(graphNodes, payload.relationships ?? []));
   };
 
@@ -253,7 +253,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     setLoading(true);
     setError("");
     try {
-      const payload = await getNodeDetailsSingleFlight(apiBase, companyID, nodeID);
+      const payload = await getNodeRecordSingleFlight(apiBase, companyID, nodeID);
       setDetails(payload);
     } catch (err) {
       setDetails(null);
@@ -268,8 +268,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
   }, []);
 
   useEffect(() => {
-    return subscribeWorkspace(apiBase, companyID, () => {
-      const snapshot = getWorkspaceSnapshot(apiBase, companyID);
+    return subscribeNodeRelationshipGraph(apiBase, companyID, () => {
+      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
       const snapshotNodes = snapshot.nodes ?? [];
       setNodes(snapshotNodes);
       setRelationships(projectVisibleRelationships(snapshotNodes, snapshot.relationships ?? []));
@@ -581,28 +581,28 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     if (!widgetId) return;
     const eventName = `nodes:create:${widgetId}`;
     const onCreate = (event: Event) => {
-      const custom = event as CustomEvent<{ header?: string }>;
-      const header = trimOrEmpty(custom.detail?.header ?? "");
-      if (!header) return;
-      void createNode(header);
+      const custom = event as CustomEvent<{ title?: string }>;
+      const title = trimOrEmpty(custom.detail?.title ?? "");
+      if (!title) return;
+      void createNode(title);
     };
     window.addEventListener(eventName, onCreate as EventListener);
     return () => window.removeEventListener(eventName, onCreate as EventListener);
   }, [widgetId]);
 
-  const createNode = async (header: string, worldPos?: { x: number; y: number }): Promise<NodeRecord | null> => {
-    const value = trimOrEmpty(header);
+  const createNode = async (title: string, worldPos?: { x: number; y: number }): Promise<NodeRecord | null> => {
+    const value = trimOrEmpty(title);
     if (!value) return null;
     setError("");
     try {
       const node = await requestJSON<NodeRecord>("/v1/nodes", {
         method: "POST",
-        body: JSON.stringify({ company_id: companyID, header: value }),
+        body: JSON.stringify({ company_id: companyID, title: value }),
       });
       // Hot-path rule: avoid full snapshot refetch on create.
-      // Apply optimistic node insertion via workspaceStore so all subscribers (Node Map + Explorer)
+      // Apply optimistic node insertion via NodeRelationshipGraph so all subscribers (Node Map + Explorer)
       // get immediate convergence without issuing a snapshot GET.
-      upsertWorkspaceNode(apiBase, companyID, node);
+      upsertNodeRelationshipGraphNode(apiBase, companyID, node);
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       if (worldPos) {
@@ -625,7 +625,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
     const sourceNode = nodes.find((node) => node.node_id === sourceNodeID);
     if (!sourceNode) return;
 
-    const node = await createNode(`${sourceNode.header} ${direction}`);
+    const node = await createNode(`${getNodeTitle(sourceNode)} ${direction}`);
     if (!node) return;
 
     try {
@@ -706,7 +706,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       await requestJSON<{ status: string }>(`/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}`, {
         method: "DELETE",
       });
-      removeWorkspaceNode(apiBase, companyID, nodeID);
+      removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
       setDetails((current) => (current?.node.node_id === nodeID ? null : current));
       if (detailsPanelNodeID === nodeID) setDetailsPanelNodeID("");
       setSelectedNodeIDs((previous) => {
@@ -716,7 +716,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       });
       setSelectedNodeID((previous) => {
         if (previous !== nodeID) return previous;
-        const snapshot = getWorkspaceSnapshot(apiBase, companyID);
+        const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
         const fallback = (snapshot.nodes ?? [])[0]?.node_id ?? "";
         return fallback;
       });
@@ -738,10 +738,10 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       await Promise.all(unique.map((nodeID) => requestJSON<{ status: string }>(`/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}`, {
         method: "DELETE",
       })));
-      for (const id of unique) removeWorkspaceNode(apiBase, companyID, id);
+      for (const id of unique) removeNodeRelationshipGraphNode(apiBase, companyID, id);
       setDetails((current) => (current && unique.includes(current.node.node_id) ? null : current));
       if (detailsPanelNodeID && unique.includes(detailsPanelNodeID)) setDetailsPanelNodeID("");
-      const snapshot = getWorkspaceSnapshot(apiBase, companyID);
+      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
       const fallback = (snapshot.nodes ?? [])[0]?.node_id ?? "";
       setSelectedNodeID(fallback);
       setSelectedNodeIDs(new Set());
@@ -790,8 +790,8 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
       if (summary.failed.length > 0) {
         const failure = summary.failed[0];
         if (failure?.reason === "relationship_not_found" || failure?.reason.startsWith("request_failed_404")) {
-          await refreshWorkspaceSnapshot(apiBase, companyID);
-          const snapshot = getWorkspaceSnapshot(apiBase, companyID);
+          await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+          const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
           setRelationships(projectVisibleRelationships(nodes, snapshot.relationships ?? []));
         }
         setError(failure?.reason ?? "failed_to_delete_relationship");
@@ -820,7 +820,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
           information: trimOrEmpty(infoDraft),
         }),
       });
-      invalidateNodeCaches(apiBase, companyID, nodeID);
+      invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
       setInfoDraft("");
       await loadDetails(nodeID);
     } catch (err) {
@@ -1514,7 +1514,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 }}
               >
                 <div style={{ borderBottom: "1px solid currentColor", padding: "8px 8px 7px", fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>
-                  <div style={{ whiteSpace: "normal", overflowWrap: "anywhere", maxHeight: 28, overflow: "hidden" }}>{node.header}</div>
+                  <div style={{ whiteSpace: "normal", overflowWrap: "anywhere", maxHeight: 28, overflow: "hidden" }}>{getNodeTitle(node)}</div>
                 </div>
                 {isSelected && (
                   <div style={{ position: "absolute", top: 6, right: 6, width: 12, height: 12, borderRadius: 999, background: accent, opacity: 0.85 }} />
@@ -1663,9 +1663,9 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 borderRadius: 0,
               }}
               onClick={() => {
-                const title = trimOrEmpty(newNodeHeader) || "New node";
+                const title = trimOrEmpty(newNodeTitle) || "New node";
                 void createNode(title, { x: contextMenu.worldX, y: contextMenu.worldY });
-                if (!trimOrEmpty(newNodeHeader)) setNewNodeHeader("");
+                if (!trimOrEmpty(newNodeTitle)) setNewNodeTitle("");
                 setContextMenu(null);
               }}
             >
@@ -1866,7 +1866,7 @@ export const NodesContent: React.FC<{ accent: string; widgetId?: string; hideTop
                 setPanelDrag({ pointerID: event.pointerId, startX: event.clientX, startY: event.clientY, originX: panelRect.x, originY: panelRect.y });
               }}
             >
-              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.14em" }}>{detailsPanelNode.header}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.14em" }}>{getNodeTitle(detailsPanelNode)}</div>
               <button onClick={() => setDetailsPanelNodeID("")} style={{ border: "1px solid rgba(0,0,0,0.15)", background: "rgba(255,255,255,0.4)", borderRadius: 6, cursor: "pointer", width: 22, height: 22, fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, lineHeight: 1, padding: 0 }}>✕</button>
             </div>
             <div style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 10, fontWeight: 500, opacity: 0.6, letterSpacing: "0.02em" }}>ID: {detailsPanelNode.node_id}</div>
