@@ -35,13 +35,13 @@ async function requestJSON<T>(apiBase: string, path: string, init?: RequestInit)
   return response.json() as Promise<T>;
 }
 
-export function invalidateNodeCaches(apiBase: string, companyID: string, nodeID: string): void {
+export function invalidateNodeRecordStoreCaches(apiBase: string, companyID: string, nodeID: string): void {
   const cacheKey = key(apiBase, companyID, nodeID);
   detailsCache.delete(cacheKey);
   projectionCache.delete(cacheKey);
 }
 
-export async function getNodeDetailsSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<NodeDetails> {
+export async function getNodeRecordSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<NodeDetails> {
   const cacheKey = key(apiBase, companyID, nodeID);
   const cached = detailsCache.get(cacheKey);
   if (cached) return cached;
@@ -61,7 +61,7 @@ export async function getNodeDetailsSingleFlight(apiBase: string, companyID: str
   return promise;
 }
 
-export async function getNodeProjectionSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<NodeProjectionItem[]> {
+export async function getNodeInformationProjectionSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<NodeProjectionItem[]> {
   const cacheKey = key(apiBase, companyID, nodeID);
   const cached = projectionCache.get(cacheKey);
   if (cached) return cached;

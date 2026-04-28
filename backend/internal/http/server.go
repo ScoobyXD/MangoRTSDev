@@ -27,14 +27,6 @@ func NewServer(repo store.Repository) *Server {
 	}
 }
 
-// resolveNodeTitle keeps node-create requests backward compatible while moving to title terminology.
-func resolveNodeTitle(title string, header string) string {
-	if strings.TrimSpace(title) != "" {
-		return strings.TrimSpace(title)
-	}
-	return strings.TrimSpace(header)
-}
-
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
@@ -74,19 +66,17 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			CompanyID string `json:"company_id"`
 			Title     string `json:"title"`
-			Header    string `json:"header"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
 			return
 		}
-		nodeTitle := resolveNodeTitle(req.Title, req.Header)
-		if strings.TrimSpace(req.CompanyID) == "" || nodeTitle == "" {
+		if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Title) == "" {
 			writeError(w, http.StatusBadRequest, "company_id_and_title_required")
 			return
 		}
 
-		item, err := s.repo.CreateNode(req.CompanyID, nodeTitle)
+		item, err := s.repo.CreateNode(req.CompanyID, strings.TrimSpace(req.Title))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_create_node")
 			return

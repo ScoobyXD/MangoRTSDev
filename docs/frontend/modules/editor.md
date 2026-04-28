@@ -9,7 +9,7 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 - Load selected node details and extract text-box records from node information.
 - Render draggable/resizable text boxes inside the editor canvas.
 - Persist text-box create/move/resize/edit updates back to backend node information APIs.
-- Surface lightweight context from the same selected node (header + non-text info preview).
+- Surface node context from the same selected node (metadata summary, history timeline, and non-text info preview).
 
 ## Important Data/Integration Paths
 - **Input from Node Map:** selected node state (`node-map-state-v1:<company_id>:<map_widget_id>`).

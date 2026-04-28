@@ -205,7 +205,7 @@ Blockers:
 ### Workspace Data Plane
 - ✅ Single source-of-truth workspace snapshot endpoint added (`/v1/workspace/snapshot`)
 - ✅ Initial bulk/snapshot API wired into hot modules (Node Map + Company Explorer)
-- ✅ Shared normalized client workspace store introduced across modules
+- ✅ Shared normalized client NodeRelationshipGraph store introduced across modules
 
 ### Event-driven Sync
 - ✅ Removed polling loop from Editor link synchronization
@@ -237,7 +237,7 @@ These are the currently implemented mechanisms that keep the client workspace ca
    - Subscribers are notified immediately after successful delta apply.
 
 4. **Fallback full refresh on stream uncertainty.**
-   - If stream payload is empty, malformed, or cannot be delta-applied, client falls back to `refreshWorkspaceSnapshot(...)`.
+   - If stream payload is empty, malformed, or cannot be delta-applied, client falls back to `refreshNodeRelationshipGraphSnapshot(...)`.
 
 5. **Conditional GET / ETag guard.**
    - Snapshot refresh sends `If-None-Match`.
@@ -248,7 +248,7 @@ These are the currently implemented mechanisms that keep the client workspace ca
    - Example: relationship-delete flow performs explicit snapshot refresh on 404-style mismatch to resynchronize state.
 
 7. **Optimistic local updates are a fast path, not final authority.**
-   - `upsertWorkspaceNode` / `removeWorkspaceNode` are local convergence helpers for latency.
+   - `upsertNodeRelationshipGraphNode` / `removeNodeRelationshipGraphNode` are local convergence helpers for latency.
    - SSE + snapshot refresh remain the source-of-truth convergence path.
 
 ### Remaining Risk (Important)

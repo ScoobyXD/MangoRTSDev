@@ -18,7 +18,7 @@ func NewPostgresRepo(db *sql.DB) *PostgresRepo {
 
 func (r *PostgresRepo) CreateNode(companyID, title string) (domain.Node, error) {
 	ctx := context.Background()
-	item := domain.Node{CompanyID: companyID, NodeID: newUUIDv7String(), Title: title, Header: title}
+	item := domain.Node{CompanyID: companyID, NodeID: newUUIDv7String(), Title: title}
 	err := r.db.QueryRowContext(ctx,
 		`insert into nodes (company_id, node_id, title, created_timestamp)
 		 values ($1, $2, $3, now())
@@ -28,7 +28,7 @@ func (r *PostgresRepo) CreateNode(companyID, title string) (domain.Node, error) 
 	if err != nil {
 		return domain.Node{}, err
 	}
-	return hydrateNodeTitle(item), nil
+	return item, nil
 }
 
 func (r *PostgresRepo) ListNodes(companyID string) ([]domain.Node, error) {
@@ -51,7 +51,7 @@ func (r *PostgresRepo) ListNodes(companyID string) ([]domain.Node, error) {
 		if err := rows.Scan(&item.CompanyID, &item.NodeID, &item.Title, &item.CreatedTimestamp); err != nil {
 			return nil, err
 		}
-		items = append(items, hydrateNodeTitle(item))
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -129,7 +129,7 @@ func (r *PostgresRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	if err != nil {
 		return domain.Node{}, err
 	}
-	return hydrateNodeTitle(item), nil
+	return item, nil
 }
 
 func (r *PostgresRepo) DeleteNode(companyID, nodeID string) error {
