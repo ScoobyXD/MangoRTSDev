@@ -1429,11 +1429,12 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   {/* Latency-obsession alignment: keep node-card render minimal.
                       We only render the title so no extra metadata fetch/render churn appears on the hot canvas path. */}
                   {editingNodeTitle?.nodeID === node.node_id ? (
-                    <input
-                      value={editingNodeTitle.value}
+                    <div
+                      contentEditable
+                      suppressContentEditableWarning
                       autoFocus
                       onPointerDown={(event) => event.stopPropagation()}
-                      onChange={(event) => setEditingNodeTitle({ nodeID: node.node_id, value: event.target.value })}
+                      onInput={(event) => setEditingNodeTitle({ nodeID: node.node_id, value: event.currentTarget.textContent ?? "" })}
                       onBlur={() => {
                         void updateNodeTitle(node.node_id, editingNodeTitle.value);
                         setEditingNodeTitle(null);
@@ -1446,8 +1447,25 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                         }
                         if (event.key === "Escape") setEditingNodeTitle(null);
                       }}
-                      style={{ width: "100%", maxWidth: "100%", textAlign: "center", fontSize: 20, fontWeight: 800, lineHeight: 1.2, fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", border: `1px solid ${accent}`, background: "rgba(255,255,255,0.95)" }}
-                    />
+                      /*
+                        Gold-standard inline edit behavior: keep exact read-mode typography and box
+                        metrics so only the caret appears when entering title edit mode.
+                      */
+                      style={{
+                        whiteSpace: "normal",
+                        overflowWrap: "anywhere",
+                        width: "100%",
+                        maxWidth: "100%",
+                        textAlign: "center",
+                        fontSize: 20,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+                        outline: "none",
+                      }}
+                    >
+                      {editingNodeTitle.value}
+                    </div>
                   ) : (
                     <div
                       style={{ whiteSpace: "normal", overflowWrap: "anywhere", fontSize: 20, fontWeight: 800, lineHeight: 1.2, fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif" }}
