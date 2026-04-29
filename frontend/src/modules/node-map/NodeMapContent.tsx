@@ -26,6 +26,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const WORLD_H = 2200;
 
   const [nodePositions, setNodePositions] = useState<Record<string, NodePosition>>({});
+  const [nodeSizes, setNodeSizes] = useState<Record<string, { w: number; h: number }>>({});
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
   const [relationshipAnchors, setRelationshipAnchors] = useState<Record<string, RelationshipAnchor>>({});
@@ -49,6 +50,17 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const [panelResize, setPanelResize] = useState<NodeMapPanelResizeState | null>(null);
 
   const [dragState, setDragState] = useState<NodeMapDragState | null>(null);
+  const [nodeResizeState, setNodeResizeState] = useState<{
+    nodeID: string;
+    pointerID: number;
+    startMouseX: number;
+    startMouseY: number;
+    startX: number;
+    startY: number;
+    startW: number;
+    startH: number;
+    edges: { left?: boolean; right?: boolean; top?: boolean; bottom?: boolean };
+  } | null>(null);
   const [panState, setPanState] = useState<NodeMapPanState | null>(null);
   const [selectionBox, setSelectionBox] = useState<NodeMapMultiSelectBox>({
     startX: 0,
@@ -297,6 +309,44 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     // without forcing read traffic for every canvas selection event.
     void loadDetails(detailsPanelNodeID);
   }, [detailsPanelNodeID]);
+
+  useEffect(() => {
+    if (!nodeResizeState) return;
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== nodeResizeState.pointerID) return;
+      event.preventDefault();
+      const dx = (event.clientX - nodeResizeState.startMouseX) / zoom;
+      const dy = (event.clientY - nodeResizeState.startMouseY) / zoom;
+      const minW = 112;
+      const minH = 74;
+      let nextW = nodeResizeState.startW;
+      let nextH = nodeResizeState.startH;
+      let nextX = nodeResizeState.startX;
+      let nextY = nodeResizeState.startY;
+      if (nodeResizeState.edges.right) nextW = Math.max(minW, nodeResizeState.startW + dx);
+      if (nodeResizeState.edges.bottom) nextH = Math.max(minH, nodeResizeState.startH + dy);
+      if (nodeResizeState.edges.left) {
+        nextW = Math.max(minW, nodeResizeState.startW - dx);
+        nextX = nodeResizeState.startX + (nodeResizeState.startW - nextW);
+      }
+      if (nodeResizeState.edges.top) {
+        nextH = Math.max(minH, nodeResizeState.startH - dy);
+        nextY = nodeResizeState.startY + (nodeResizeState.startH - nextH);
+      }
+      setNodeSizes((previous) => ({ ...previous, [nodeResizeState.nodeID]: { w: snapToGrid(nextW), h: snapToGrid(nextH) } }));
+      setNodePositions((previous) => ({ ...previous, [nodeResizeState.nodeID]: { x: clamp(snapToGrid(nextX), 0, WORLD_W - NODE_W), y: clamp(snapToGrid(nextY), 0, WORLD_H - NODE_H) } }));
+    };
+    const onUp = (event: PointerEvent) => {
+      if (event.pointerId !== nodeResizeState.pointerID) return;
+      setNodeResizeState(null);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [nodeResizeState, zoom]);
 
   useEffect(() => {
     const resize = () => {
@@ -1265,6 +1315,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
 
           {visibleNodes.map((node) => {
             const position = nodePositions[node.node_id] ?? { x: 120, y: 120 };
+            const size = nodeSizes[node.node_id] ?? { w: NODE_W, h: NODE_H };
             const isSelected = selectedNodeIDs.has(node.node_id);
             const isPrimary = node.node_id === selectedNodeID;
 
@@ -1276,8 +1327,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   position: "absolute",
                   left: position.x,
                   top: position.y,
-                  width: NODE_W,
-                  height: NODE_H,
+                  width: size.w,
+                  height: size.h,
                   borderRadius: 8,
                   border: `1px solid ${isSelected ? accent : "#505050"}`,
                   background: isSelected ? "#ffffff" : "rgba(252,252,252,0.93)",
@@ -1289,8 +1340,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   userSelect: "none",
                   cursor: dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab",
                   zIndex: isPrimary ? 5 : 4,
-                  resize: "both",
-                  overflow: "auto",
+                  overflow: "visible",
                 }}
                 onDoubleClick={(event) => {
                   event.stopPropagation();
@@ -1357,7 +1407,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                 >
                   {/* Latency-obsession alignment: keep node-card render minimal.
                       We only render the title so no extra metadata fetch/render churn appears on the hot canvas path. */}
-                  <div style={{ whiteSpace: "normal", overflowWrap: "anywhere", fontSize: 20, fontWeight: 800, lineHeight: 1.2 }}>
+                  <div style={{ whiteSpace: "normal", overflowWrap: "anywhere", fontSize: 20, fontWeight: 800, lineHeight: 1.2, fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif" }}>
                     {getNodeTitle(node)}
                   </div>
                 </div>
@@ -1395,7 +1445,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                         style={{
                           width: 20,
                           height: 20,
-                          borderRadius: 999,
+                          borderRadius: 4,
                           border: `1px solid ${accent}`,
                           background: "#ffffff",
                           color: accent,
@@ -1433,7 +1483,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                         style={{
                           width: 20,
                           height: 20,
-                          borderRadius: 999,
+                          borderRadius: 4,
                           border: `1px solid ${accent}`,
                           background: isSource ? accent : "#ffffff",
                           color: isSource ? "#ffffff" : accent,
@@ -1449,6 +1499,37 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                     </div>
                   );
                 })}
+                {[
+                  { key: "tl", edges: { left: true, top: true }, cursor: "nwse-resize", style: { left: -6, top: -6, width: 12, height: 12 } },
+                  { key: "tr", edges: { right: true, top: true }, cursor: "nesw-resize", style: { right: -6, top: -6, width: 12, height: 12 } },
+                  { key: "bl", edges: { left: true, bottom: true }, cursor: "nesw-resize", style: { left: -6, bottom: -6, width: 12, height: 12 } },
+                  { key: "br", edges: { right: true, bottom: true }, cursor: "nwse-resize", style: { right: -6, bottom: -6, width: 12, height: 12 } },
+                  { key: "l", edges: { left: true }, cursor: "ew-resize", style: { left: -4, top: 12, bottom: 12, width: 8 } },
+                  { key: "r", edges: { right: true }, cursor: "ew-resize", style: { right: -4, top: 12, bottom: 12, width: 8 } },
+                  { key: "t", edges: { top: true }, cursor: "ns-resize", style: { top: -4, left: 12, right: 12, height: 8 } },
+                  { key: "b", edges: { bottom: true }, cursor: "ns-resize", style: { bottom: -4, left: 12, right: 12, height: 8 } },
+                ].map((handle) => (
+                  <div
+                    key={handle.key}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setDragState(null);
+                      setNodeResizeState({
+                        nodeID: node.node_id,
+                        pointerID: event.pointerId,
+                        startMouseX: event.clientX,
+                        startMouseY: event.clientY,
+                        startX: position.x,
+                        startY: position.y,
+                        startW: size.w,
+                        startH: size.h,
+                        edges: handle.edges,
+                      });
+                    }}
+                    style={{ position: "absolute", ...handle.style, cursor: handle.cursor, zIndex: 9 }}
+                  />
+                ))}
               </div>
             );
           })}

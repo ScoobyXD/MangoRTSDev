@@ -370,7 +370,8 @@ Linked Company Explorer frames consume those selection events and map-state upda
 - World grid, relationship lines, node cards, side arrow actions, selection box, and group badge.
 - Node cards are title-only on the canvas (inline node id/info/relationship counters removed).
 - Node title is rendered large and centered to make the card label scannable at a glance.
-- Node card size is user-adjustable via the browser-native resize affordance on the card.
+- Node card size is user-adjustable from all sides and all corners (custom edge/corner resize hit-zones).
+- Side action controls for creating linked nodes/relationships render as square buttons (not circular chips).
 - Selecting a node on canvas no longer auto-triggers details fetches unless the details panel is open for that node (hot-path read suppression).
 - In-canvas instruction text.
 - Right-click context menu with `Create new node` at cursor location.
