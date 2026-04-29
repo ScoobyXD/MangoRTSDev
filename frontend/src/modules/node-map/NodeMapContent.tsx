@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, getNodeTitle, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
+import { type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
@@ -394,11 +395,19 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   useEffect(() => {
     if (!restoredViewport) return;
     selectionRevisionRef.current += 1;
+    const envelope: ContextMutationEnvelope = {
+      context_id: `active_node_selection:${companyID}:${mapScope}`,
+      source_module_id: mapScope,
+      sequence: selectionRevisionRef.current,
+      timestamp: new Date().toISOString(),
+      user_action_type: "node_selection_changed",
+    };
     emitDashboardEvent(EVENT_NODE_MAP_SELECTION_UPDATED, {
       mapWidgetID: mapScope,
       selectedNodeID,
       revision: selectionRevisionRef.current,
       changedAt: Date.now(),
+      envelope,
     });
   }, [mapScope, restoredViewport, selectedNodeID]);
 

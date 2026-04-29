@@ -127,6 +127,12 @@ Use this checklist format and keep it complete.
   - linked target resolution by kind supports traversal through intermediary graph hops
   - direct-neighbor resolution returns adjacency-only targets for explorer fanout
 - [x] `tests/frontend/modules/company-explorer/explorerSync.test.ts`
+- [x] `tests/frontend/modules/contextSyncContract.test.ts`
+  - stale event rejection when incoming sequence is older than last applied
+  - duplicate event idempotency guard for repeated delivery
+  - explicit sequence gap detection used to trigger scoped reconciliation
+  - envelope-first sequence parsing with legacy `revision` fallback for migration safety
+  - inline comments describe intent-vs-projection behavior in junior-friendly terms
   - ignores map-originated no-op selection echoes so suppression latches do not eat subsequent Explorer clicks
   - applies map selections only when Explorer semantic selection actually changes
   - scopes Explorer broadcast emission to semantic selection changes (node/tree)
@@ -135,6 +141,7 @@ Use this checklist format and keep it complete.
   - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)
   - node creation contract uses canonical `title` payload semantics only (legacy `header` fallback removed)
   - node rename contract via `PUT /v1/nodes/{node_id}` persists updated title
+  - workspace context event write path persists projection updates (`POST /v1/workspace/context-events` -> `GET /v1/workspace/context-projections`)
 
 ### Integration tests
 - [ ] None committed yet (to be added)

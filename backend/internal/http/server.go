@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
 
@@ -36,10 +37,84 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/node-relationships/", s.handleNodeRelationshipByID)
 	mux.HandleFunc("/v1/workspace/snapshot", s.handleWorkspaceSnapshot)
 	mux.HandleFunc("/v1/workspace/stream", s.handleWorkspaceStream)
+	mux.HandleFunc("/v1/workspace/context-events", s.handleWorkspaceContextEvents)
+	mux.HandleFunc("/v1/workspace/context-projections", s.handleWorkspaceContextProjections)
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
 	mux.HandleFunc("/v1/operations", s.handleOperations)
 	mux.HandleFunc("/v1/operations/", s.handleOperationByID)
 	return mux
+}
+
+func (s *Server) handleWorkspaceContextEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		CompanyID      string          `json:"company_id"`
+		WorkspaceID    string          `json:"workspace_id"`
+		ContextID      string          `json:"context_id"`
+		SourceModuleID string          `json:"source_module_id"`
+		Sequence       int64           `json:"sequence"`
+		UserActionType string          `json:"user_action_type"`
+		Payload        json.RawMessage `json:"payload"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.WorkspaceID) == "" || strings.TrimSpace(req.ContextID) == "" || strings.TrimSpace(req.SourceModuleID) == "" || req.Sequence <= 0 || strings.TrimSpace(req.UserActionType) == "" {
+		writeError(w, http.StatusBadRequest, "company_workspace_context_source_sequence_user_action_type_required")
+		return
+	}
+	payloadJSON := "{}"
+	if len(req.Payload) > 0 {
+		payloadJSON = string(req.Payload)
+	}
+	projection, err := s.repo.AppendWorkspaceContextEvent(domain.WorkspaceContextEvent{
+		CompanyID:      req.CompanyID,
+		WorkspaceID:    req.WorkspaceID,
+		ContextID:      req.ContextID,
+		SourceModuleID: req.SourceModuleID,
+		Sequence:       req.Sequence,
+		UserActionType: req.UserActionType,
+		PayloadJSON:    payloadJSON,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_append_workspace_context_event")
+		return
+	}
+	s.publishWorkspaceEvent(req.CompanyID, "workspace_context_projection_updated", map[string]any{
+		"workspace_id":     req.WorkspaceID,
+		"context_id":       req.ContextID,
+		"sequence":         projection.LastSequence,
+		"user_action_type": req.UserActionType,
+	})
+	writeJSON(w, http.StatusCreated, projection)
+}
+
+func (s *Server) handleWorkspaceContextProjections(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	contextID := strings.TrimSpace(r.URL.Query().Get("context_id"))
+	if companyID == "" || workspaceID == "" || contextID == "" {
+		writeError(w, http.StatusBadRequest, "company_workspace_context_required")
+		return
+	}
+	item, err := s.repo.GetWorkspaceContextProjection(companyID, workspaceID, contextID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "workspace_context_projection_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_get_workspace_context_projection")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, item)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

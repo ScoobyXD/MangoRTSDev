@@ -174,3 +174,22 @@ curl -X POST http://localhost:8080/v1/operations \
     "start_timestamp":"2026-04-18T00:00:00Z"
   }'
 ```
+
+
+### Workspace context event/projection contract
+
+For cross-module context synchronization, backend now supports:
+
+- `POST /v1/workspace/context-events` for append-only context mutation writes
+- `GET /v1/workspace/context-projections` for latest read projection by `company_id`, `workspace_id`, `context_id`
+
+Required event fields:
+- `company_id`
+- `workspace_id`
+- `context_id`
+- `source_module_id`
+- `sequence`
+- `user_action_type`
+
+Migration SQL:
+- `backend/db/migrations/20260429_workspace_context_events_and_projections.sql`
