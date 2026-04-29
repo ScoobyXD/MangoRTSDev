@@ -43,6 +43,12 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 - The API still appends history rows to `node_information`, but projection identity now remains stable in `node_projection_table`.
 - This prevents textbox duplication after refresh caused by projection-key drift during rapid save/blur sequences.
 
+## Blank-title inline-edit continuity fix (2026-04-29)
+- Editor now keeps the node-title header visible whenever a node is selected, even if the node title is currently blank.
+- This preserves the inline title editing surface after users backspace the full title.
+- Typing after blanking a title now correctly targets the title editor (after clicking title area) instead of accidentally creating a new canvas textbox due to missing header UI.
+- Editor canvas `onKeyDown` now explicitly ignores key events coming from `contentEditable`, `textarea`, and `input` targets so title typing cannot be interpreted as canvas textbox creation when no textbox exists yet.
+
 ## UX Notes
 - Node context header content is intentionally offset below the frame title strip to avoid overlap with top-left module chrome.
 - Node title uses single-click inline edit activation in the header (no double-click required), and click handling is isolated so editor-canvas textbox creation does not trigger from title edits.

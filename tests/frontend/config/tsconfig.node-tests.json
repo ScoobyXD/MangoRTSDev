@@ -28,7 +28,8 @@
     "../../../frontend/src/modules/node-map/NodeMapControls.ts",
     "../modules/node-map/NodeMapControls.test.ts",
     "../../../frontend/src/modules/node-map/relationshipDeleteSummary.ts",
-    "../modules/node-map/relationshipDeleteSummary.test.ts"
+    "../modules/node-map/relationshipDeleteSummary.test.ts",
+    "../modules/node-map/editorCanvasKeydownRouting.test.ts"
   ],
   "exclude": []
 }

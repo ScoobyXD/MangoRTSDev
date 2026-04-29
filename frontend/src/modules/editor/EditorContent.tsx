@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { getNodeTitle, NodeDocBox, NodeInformation, NODE_DOC_MIN_H, NODE_DOC_MIN_W, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, clamp } from "../node-map/shared";
+import { getNodeTitle, NodeDocBox, NodeInformation, NODE_DOC_MIN_H, NODE_DOC_MIN_W, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, clamp, shouldIgnoreCanvasKeydownTarget } from "../node-map/shared";
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
@@ -400,6 +400,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       style={{ position: "relative", width: "100%", height: "100%", background: "#ffffff", color: "#0d1a1e", overflow: "hidden" }}
       tabIndex={0}
       onKeyDown={(event) => {
+        if (shouldIgnoreCanvasKeydownTarget(event.target as HTMLElement | null)) return;
         if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
         const current = boxes.find((item) => item.local_id === activeBoxID);
         if (current) return;
@@ -414,7 +415,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         createBox("", x, y);
       }}
     >
-      {linkedNodeTitle && (
+      {/* Keep title editing available even when title text is blank.
+          If this surface disappears, typing can fall through to canvas box-creation. */}
+      {linkedNodeID.trim().length > 0 && (
         <div style={{ position: "absolute", top: 40, left: 10, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
           <div style={{ display: "grid", gap: 2 }}>
             <div style={{ pointerEvents: "auto" }}>
@@ -466,7 +469,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                   }}
                   style={{ outline: "none" }}
                 >
-                  {linkedNodeTitle}
+                  {linkedNodeTitle || "\u00A0"}
                 </span>
               </div>
             </div>

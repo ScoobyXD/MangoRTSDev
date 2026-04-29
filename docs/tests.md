@@ -113,6 +113,9 @@ Use this checklist format and keep it complete.
 - [x] `frontend/src/modules/node-map/relationshipDeleteSummary.test.ts`
   - success/failure summarization for batched relationship-line delete requests
   - preserves per-relationship failure reason reporting for visibility
+- [x] `tests/frontend/modules/node-map/editorCanvasKeydownRouting.test.ts`
+  - editor canvas key-routing guard ignores key events from contentEditable/input/textarea surfaces
+  - non-editable canvas targets continue through normal canvas key handling
 - [x] `frontend/src/app/frameLinking.test.ts`
   - context-menu link label fallback (`No other module selected`) when only one module is in active pool
   - graph-based pairwise link-plan generation for multi-module selection pools
@@ -135,6 +138,7 @@ Use this checklist format and keep it complete.
 - [ ] Node relationship graph create-node anti-refetch loop integration test (temporarily blocked: no existing browser/session harness to simulate EventSource + component lifecycle churn deterministically)
 - [ ] Node Map + Editor duplicate-details-request suppression integration test (runtime now uses single-flight NodeRecordStore reads; automated browser-level request-count assertion still temporarily blocked: no browser harness asserting per-action network request counts)
 - [ ] Editor text-box blur-save stale-state regression integration test (temporarily blocked: no browser harness asserting typed-value persistence across linked-node switches)
+- [ ] Editor blank-title keyboard routing regression test (temporarily blocked: no browser harness in repo to assert contentEditable key events do not trigger canvas `onKeyDown` textbox creation paths)
 - [ ] Cross-origin preflight minimization test for GET helpers (temporarily blocked: no automated CORS/request-capture harness in repo)
 - [ ] Frame header-plate visual regression test (temporarily blocked: no committed browser visual-diff harness for asserting edge-flush tag geometry and icon scale)
 
