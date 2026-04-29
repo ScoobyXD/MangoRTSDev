@@ -2,7 +2,7 @@
 // @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeNodeMapMultiSelectResult, mergeNodeMapMultiSelect } from "./NodeMapControls.js";
+import { computeNodeMapMultiSelectResult, mergeNodeMapMultiSelect } from "../../../../frontend/src/modules/node-map/NodeMapControls.js";
 
 const defaultLayout = {
   zoom: 1,
