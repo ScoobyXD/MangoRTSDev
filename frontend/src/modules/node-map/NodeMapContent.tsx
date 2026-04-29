@@ -78,7 +78,9 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const [relationshipRoleColors, setRelationshipRoleColors] = useState({ parent: "#ff8a00", peer: "#0095ff", child: "#6f5cff" });
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
   const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
-  const [editingNodeTitle, setEditingNodeTitle] = useState<{ nodeID: string; value: string } | null>(null);
+  const [editingNodeTitleNodeID, setEditingNodeTitleNodeID] = useState<string | null>(null);
+  const editingNodeTitleDraftRef = useRef("");
+  const editingNodeTitleElementRef = useRef<HTMLDivElement | null>(null);
   const connectionPathsRef = useRef<Array<{ id: string; points: { x: number; y: number }[] }>>([]);
   const suppressNextRelationshipLineClickRef = useRef(false);
   const selectionRevisionRef = useRef(0);
@@ -1165,6 +1167,19 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     context.globalAlpha = 1;
   }, [WORLD_H, WORLD_W, accent, connectionPaths, relationshipColorsEnabled, draftPath]);
 
+  useEffect(() => {
+    if (!editingNodeTitleNodeID || !editingNodeTitleElementRef.current) return;
+    const element = editingNodeTitleElementRef.current;
+    element.focus();
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, [editingNodeTitleNodeID]);
+
   return (
     <div style={{ fontSize: 11, height: "100%" }}>
       <div
@@ -1428,24 +1443,30 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                 >
                   {/* Latency-obsession alignment: keep node-card render minimal.
                       We only render the title so no extra metadata fetch/render churn appears on the hot canvas path. */}
-                  {editingNodeTitle?.nodeID === node.node_id ? (
+                  {editingNodeTitleNodeID === node.node_id ? (
                     <div
+                      ref={editingNodeTitleElementRef}
                       contentEditable
                       suppressContentEditableWarning
-                      autoFocus
                       onPointerDown={(event) => event.stopPropagation()}
-                      onInput={(event) => setEditingNodeTitle({ nodeID: node.node_id, value: event.currentTarget.textContent ?? "" })}
+                      onInput={(event) => {
+                        editingNodeTitleDraftRef.current = event.currentTarget.textContent ?? "";
+                      }}
                       onBlur={() => {
-                        void updateNodeTitle(node.node_id, editingNodeTitle.value);
-                        setEditingNodeTitle(null);
+                        void updateNodeTitle(node.node_id, editingNodeTitleDraftRef.current);
+                        setEditingNodeTitleNodeID(null);
                       }}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
                           event.preventDefault();
-                          void updateNodeTitle(node.node_id, editingNodeTitle.value);
-                          setEditingNodeTitle(null);
+                          void updateNodeTitle(node.node_id, editingNodeTitleDraftRef.current);
+                          setEditingNodeTitleNodeID(null);
                         }
-                        if (event.key === "Escape") setEditingNodeTitle(null);
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          if (editingNodeTitleElementRef.current) editingNodeTitleElementRef.current.textContent = getNodeTitle(node);
+                          setEditingNodeTitleNodeID(null);
+                        }
                       }}
                       /*
                         Gold-standard inline edit behavior: keep exact read-mode typography and box
@@ -1464,7 +1485,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                         outline: "none",
                       }}
                     >
-                      {editingNodeTitle.value}
+                      {getNodeTitle(node)}
                     </div>
                   ) : (
                     <div
@@ -1763,7 +1784,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           >
             <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", textAlign: "left" }} onClick={() => {
               const current = nodes.find((node) => node.node_id === nodeContextMenu.nodeID);
-              setEditingNodeTitle({ nodeID: nodeContextMenu.nodeID, value: current ? getNodeTitle(current) : "new node" });
+              editingNodeTitleDraftRef.current = current ? getNodeTitle(current) : "new node";
+              setEditingNodeTitleNodeID(nodeContextMenu.nodeID);
               setNodeContextMenu(null);
             }}>
               Rename node
