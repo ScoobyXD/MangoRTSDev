@@ -284,14 +284,19 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   }, [nodes, relationshipDraft]);
 
   useEffect(() => {
+    // Hot-path guard: selection changes happen frequently while dragging/multi-selecting.
+    // We only need node details reads when the details panel is open for the selected node.
+    if (!selectedNodeID) return;
+    if (detailsPanelNodeID !== selectedNodeID) return;
     void loadDetails(selectedNodeID);
-  }, [selectedNodeID]);
+  }, [selectedNodeID, detailsPanelNodeID]);
 
   useEffect(() => {
     if (!detailsPanelNodeID) return;
-    if (detailsPanelNodeID === selectedNodeID) return;
+    // Fetch details for whatever node the panel is pinned to; this keeps panel data fresh
+    // without forcing read traffic for every canvas selection event.
     void loadDetails(detailsPanelNodeID);
-  }, [detailsPanelNodeID, selectedNodeID]);
+  }, [detailsPanelNodeID]);
 
   useEffect(() => {
     const resize = () => {
@@ -1279,11 +1284,13 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   outline: isSelected ? `2px solid ${accent}` : "none",
                   outlineOffset: isSelected ? 1 : 0,
                   display: "grid",
-                  gridTemplateRows: "auto 1fr auto",
+                  gridTemplateRows: "1fr",
                   boxShadow: isSelected ? "0 0 0 3px rgba(111,231,238,0.32), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
                   userSelect: "none",
                   cursor: dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab",
                   zIndex: isPrimary ? 5 : 4,
+                  resize: "both",
+                  overflow: "auto",
                 }}
                 onDoubleClick={(event) => {
                   event.stopPropagation();
@@ -1338,18 +1345,25 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   setDragState({ nodeIDs: nextIDs, pointerID: event.pointerId, offsets });
                 }}
               >
-                <div style={{ borderBottom: "1px solid currentColor", padding: "8px 8px 7px", fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>
-                  <div style={{ whiteSpace: "normal", overflowWrap: "anywhere", maxHeight: 28, overflow: "hidden" }}>{getNodeTitle(node)}</div>
+                <div
+                  style={{
+                    display: "grid",
+                    placeItems: "center",
+                    width: "100%",
+                    height: "100%",
+                    textAlign: "center",
+                    padding: "10px",
+                  }}
+                >
+                  {/* Latency-obsession alignment: keep node-card render minimal.
+                      We only render the title so no extra metadata fetch/render churn appears on the hot canvas path. */}
+                  <div style={{ whiteSpace: "normal", overflowWrap: "anywhere", fontSize: 20, fontWeight: 800, lineHeight: 1.2 }}>
+                    {getNodeTitle(node)}
+                  </div>
                 </div>
                 {isSelected && (
                   <div style={{ position: "absolute", top: 6, right: 6, width: 12, height: 12, borderRadius: 999, background: accent, opacity: 0.85 }} />
                 )}
-                <div style={{ padding: "5px 8px", fontSize: 10, display: "grid", gap: 2 }}>
-                  <div>ID: {node.node_id.slice(0, 8)}</div>
-                  <div>Info: {details?.node.node_id === node.node_id ? details.information.length : "-"}</div>
-                  <div>Rel: {details?.node.node_id === node.node_id ? details.relationships.length : "-"}</div>
-                </div>
-                <div style={{ padding: "4px 8px", fontSize: 9, opacity: 0.7 }}>drag to move · double-click for details</div>
 
                 {([
                   ["left", { left: -12, top: "50%", transform: "translate(-50%, -50%)", flexDirection: "column" }],

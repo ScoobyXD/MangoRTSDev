@@ -368,6 +368,10 @@ Linked Company Explorer frames consume those selection events and map-state upda
 
 - Canvas consumes almost all remaining widget height (bottom utility rows removed).
 - World grid, relationship lines, node cards, side arrow actions, selection box, and group badge.
+- Node cards are title-only on the canvas (inline node id/info/relationship counters removed).
+- Node title is rendered large and centered to make the card label scannable at a glance.
+- Node card size is user-adjustable via the browser-native resize affordance on the card.
+- Selecting a node on canvas no longer auto-triggers details fetches unless the details panel is open for that node (hot-path read suppression).
 - In-canvas instruction text.
 - Right-click context menu with `Create new node` at cursor location.
 - Right-click context menu also includes `Enable relationship colors` with an explicit iOS-style on/off slider (knob left = off, knob right = on).
