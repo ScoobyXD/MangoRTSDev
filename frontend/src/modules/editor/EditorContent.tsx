@@ -399,7 +399,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       }}
     >
       {linkedNodeTitle && (
-        <div style={{ position: "absolute", top: 28, left: 10, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
+        <div style={{ position: "absolute", top: 40, left: 10, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
           <div style={{ display: "grid", gap: 2 }}>
             <div style={{ pointerEvents: "auto" }}>
               {editingTitleValue ? (
@@ -412,10 +412,10 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                     if (event.key === "Enter") { event.preventDefault(); void updateNodeTitle(editingTitleValue); setEditingTitleValue(""); }
                     if (event.key === "Escape") setEditingTitleValue("");
                   }}
-                  style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, border: `1px solid ${accent}`, background: "rgba(255,255,255,0.95)", padding: "2px 6px" }}
+                  style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, border: `1px solid ${accent}`, background: "rgba(255,255,255,0.95)", padding: "2px 6px" }}
                 />
               ) : (
-                <div onDoubleClick={() => setEditingTitleValue(linkedNodeTitle || "new node")} style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, cursor: "text" }}>
+                <div onDoubleClick={() => setEditingTitleValue(linkedNodeTitle || "new node")} style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, cursor: "text" }}>
                   Node: {linkedNodeTitle}
                 </div>
               )}
