@@ -2,7 +2,7 @@
 // @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
-import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary.js";
+import { summarizeRelationshipDeleteResults } from "../../../../frontend/src/modules/node-map/relationshipDeleteSummary.js";
 
 test("collects successful relationship IDs", () => {
   const summary = summarizeRelationshipDeleteResults(

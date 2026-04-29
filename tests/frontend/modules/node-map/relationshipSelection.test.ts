@@ -2,7 +2,7 @@
 // @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
-import { pathIntersectsRect, segmentIntersectsRect } from "./NodeMapControls.js";
+import { pathIntersectsRect, segmentIntersectsRect } from "../../../../frontend/src/modules/node-map/NodeMapControls.js";
 
 test("detects segment intersection when segment crosses rectangle", () => {
   const intersects = segmentIntersectsRect(

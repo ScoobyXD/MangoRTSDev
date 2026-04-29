@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, deriveLegacyMapLinks, mergeLinkPlan } from "./frameLinking.js";
-import type { FrameDataModel } from "../types.js";
+import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, deriveLegacyMapLinks, mergeLinkPlan } from "../../../frontend/src/app/frameLinking.js";
+import type { FrameDataModel } from "../../../frontend/src/types.js";
 
 const map: FrameDataModel = { id: "map-1", kind: "nodes-map", title: "Node Map", x: 0, y: 0, w: 8, h: 8, color: "#fff", accent: "#111" };
 const editor: FrameDataModel = { id: "editor-1", kind: "editor", title: "Editor", x: 0, y: 0, w: 8, h: 8, color: "#fff", accent: "#111" };

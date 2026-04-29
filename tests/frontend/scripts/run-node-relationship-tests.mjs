@@ -1,0 +1,48 @@
+import { execSync } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(scriptDir, "../../..");
+const frontendRoot = resolve(repoRoot, "frontend");
+const testFiles = [
+  resolve(frontendRoot, ".test-dist/tests/frontend/app/frameLinking.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/linkingGraph.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipProjection.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipSelection.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/NodeMapControls.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipDeleteSummary.test.js"),
+];
+const packageFile = resolve(frontendRoot, ".test-dist/package.json");
+const tscEntrypoint = resolve(frontendRoot, "node_modules/typescript/bin/tsc");
+
+function run(command) {
+  execSync(command, {
+    cwd: repoRoot,
+    stdio: "inherit",
+    env: process.env,
+  });
+}
+
+run(`"${process.execPath}" "${tscEntrypoint}" -p tests/frontend/config/tsconfig.node-tests.json`);
+
+for (const testFile of testFiles) {
+  let contents = readFileSync(testFile, "utf8");
+  contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/relationshipProjection"', '"../../../../frontend/src/modules/node-map/relationshipProjection.js"');
+  contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/relationshipDeleteSummary"', '"../../../../frontend/src/modules/node-map/relationshipDeleteSummary.js"');
+  contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/NodeMapControls"', '"../../../../frontend/src/modules/node-map/NodeMapControls.js"');
+  contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/shared"', '"../../../../frontend/src/modules/node-map/shared.js"');
+  contents = contents.replaceAll('"../../../frontend/src/modules/linkingGraph"', '"../../../frontend/src/modules/linkingGraph.js"');
+  contents = contents.replaceAll('"../../../frontend/src/app/frameLinking"', '"../../../frontend/src/app/frameLinking.js"');
+  contents = contents.replaceAll('"../../../frontend/src/types"', '"../../../frontend/src/types.js"');
+  writeFileSync(testFile, contents, "utf8");
+}
+
+mkdirSync(resolve(frontendRoot, ".test-dist"), { recursive: true });
+writeFileSync(packageFile, '{"type":"module"}\n', "utf8");
+
+for (const testFile of testFiles) {
+  console.log(`\n=== Frontend feature tests: ${testFile} ===`);
+  run(`"${process.execPath}" --test "${testFile}"`);
+}

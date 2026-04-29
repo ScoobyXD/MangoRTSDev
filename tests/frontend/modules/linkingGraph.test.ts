@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph, sanitizeFrameLinks, sanitizeFrameRegistry } from "./linkingGraph.js";
+import { resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph, sanitizeFrameLinks, sanitizeFrameRegistry } from "../../../frontend/src/modules/linkingGraph.js";
 
 test("sanitizeFrameLinks canonicalizes and deduplicates undirected edges", () => {
   const result = sanitizeFrameLinks([

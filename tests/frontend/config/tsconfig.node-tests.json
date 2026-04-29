@@ -1,0 +1,34 @@
+{
+  "extends": "../../../frontend/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "../../../frontend/.test-dist",
+    "rootDir": "../../..",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "allowImportingTsExtensions": false,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "sourceMap": false,
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": [
+    "../../../frontend/src/types.ts",
+    "../support/test-node-shims.d.ts",
+    "../../../frontend/src/app/frameLinking.ts",
+    "../app/frameLinking.test.ts",
+    "../../../frontend/src/modules/linkingGraph.ts",
+    "../modules/linkingGraph.test.ts",
+    "../../../frontend/src/modules/node-map/shared.ts",
+    "../../../frontend/src/modules/node-map/relationshipProjection.ts",
+    "../modules/node-map/relationshipProjection.test.ts",
+    "../modules/node-map/relationshipSelection.test.ts",
+    "../../../frontend/src/modules/node-map/NodeMapControls.ts",
+    "../modules/node-map/NodeMapControls.test.ts",
+    "../../../frontend/src/modules/node-map/relationshipDeleteSummary.ts",
+    "../modules/node-map/relationshipDeleteSummary.test.ts"
+  ],
+  "exclude": []
+}
