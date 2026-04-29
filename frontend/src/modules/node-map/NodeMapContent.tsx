@@ -1374,7 +1374,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   gridTemplateRows: "1fr",
                   boxShadow: isSelected ? "0 0 0 3px rgba(111,231,238,0.32), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
                   userSelect: "none",
-                  cursor: dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab",
+                  cursor: editingNodeTitleNodeID === node.node_id ? "text" : (dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab"),
                   zIndex: isPrimary ? 5 : 4,
                   overflow: "visible",
                 }}
@@ -1477,6 +1477,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                         overflowWrap: "anywhere",
                         width: "100%",
                         maxWidth: "100%",
+                        cursor: "text",
                         textAlign: "center",
                         fontSize: 20,
                         fontWeight: 800,
