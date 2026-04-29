@@ -403,19 +403,41 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           <div style={{ display: "grid", gap: 2 }}>
             <div style={{ pointerEvents: "auto" }}>
               {editingTitleValue ? (
-                <input
-                  value={editingTitleValue}
-                  autoFocus
-                  onClick={(event) => event.stopPropagation()}
-                  onDoubleClick={(event) => event.stopPropagation()}
-                  onChange={(event) => setEditingTitleValue(event.target.value)}
-                  onBlur={() => { void updateNodeTitle(editingTitleValue); setEditingTitleValue(""); }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") { event.preventDefault(); void updateNodeTitle(editingTitleValue); setEditingTitleValue(""); }
-                    if (event.key === "Escape") setEditingTitleValue("");
-                  }}
-                  style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, border: `1px solid ${accent}`, background: "rgba(255,255,255,0.95)", padding: "2px 6px" }}
-                />
+                <div style={{ display: "inline-flex", alignItems: "baseline", gap: 0 }}>
+                  <span style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent }}>
+                    Node:&nbsp;
+                  </span>
+                  <input
+                    value={editingTitleValue}
+                    autoFocus
+                    onClick={(event) => event.stopPropagation()}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    onChange={(event) => setEditingTitleValue(event.target.value)}
+                    onBlur={() => { void updateNodeTitle(editingTitleValue); setEditingTitleValue(""); }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") { event.preventDefault(); void updateNodeTitle(editingTitleValue); setEditingTitleValue(""); }
+                      if (event.key === "Escape") setEditingTitleValue("");
+                    }}
+                    /*
+                      Keep edit mode visually identical to read mode. We keep the "Node:" prefix
+                      visible and only swap the title text span into a seamless inline input.
+                    */
+                    style={{
+                      width: "100%",
+                      fontSize: 12,
+                      fontWeight: 800,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.12em",
+                      color: accent,
+                      border: "none",
+                      outline: "none",
+                      background: "transparent",
+                      padding: 0,
+                      margin: 0,
+                      fontFamily: "inherit",
+                    }}
+                  />
+                </div>
               ) : (
                 <div
                   onClick={(event) => {
