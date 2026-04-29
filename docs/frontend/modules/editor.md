@@ -45,6 +45,7 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 
 ## UX Notes
 - Node context header content is intentionally offset below the frame title strip to avoid overlap with top-left module chrome.
+- Node title uses single-click inline edit activation in the header (no double-click required), and click handling is isolated so editor-canvas textbox creation does not trigger from title edits.
 - Text boxes support drag and edge/corner resize interactions.
 - Double-clicking the canvas creates a new text box at pointer position.
 - Text value is persisted server-side; box geometry is preserved in local/per-user layout storage.

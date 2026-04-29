@@ -406,6 +406,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                 <input
                   value={editingTitleValue}
                   autoFocus
+                  onClick={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
                   onChange={(event) => setEditingTitleValue(event.target.value)}
                   onBlur={() => { void updateNodeTitle(editingTitleValue); setEditingTitleValue(""); }}
                   onKeyDown={(event) => {
@@ -415,7 +417,14 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                   style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, border: `1px solid ${accent}`, background: "rgba(255,255,255,0.95)", padding: "2px 6px" }}
                 />
               ) : (
-                <div onDoubleClick={() => setEditingTitleValue(linkedNodeTitle || "new node")} style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, cursor: "text" }}>
+                <div
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setEditingTitleValue(linkedNodeTitle || "new node");
+                  }}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, cursor: "text" }}
+                >
                   Node: {linkedNodeTitle}
                 </div>
               )}
