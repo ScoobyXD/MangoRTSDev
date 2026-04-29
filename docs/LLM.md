@@ -177,6 +177,14 @@ React 18 · TypeScript strict · Vite · Zero deps beyond React
 - Use teal-blue as the main complementary accent across grid/widget UI elements.
 - Approved widget colorways (until changed): **teal / neon orange / white / black** only.
 
+## UI Rules (Text Editing)
+
+- All text editing interactions in MangoOS must be visually seamless.
+- Clicking into editable text should only reveal the insertion caret at the text edge.
+- Entering edit mode must not introduce a bordered box, background fill, typography shrink, or layout jump.
+- Edit-mode typography must match read-mode typography exactly (font size, weight, letter spacing, line height, casing).
+- If a label prefix is visible in read mode (example: `Node:`), it must remain visually stable in edit mode while only the editable text segment changes.
+
 ## New Product Primitive: Case Hub
 
 This app now includes a **Case Hub** widget built around a central work object called a **Case**.
