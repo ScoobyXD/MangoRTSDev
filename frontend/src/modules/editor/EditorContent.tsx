@@ -414,7 +414,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         createBox("", x, y);
       }}
     >
-      {linkedNodeTitle && (
+      {/* Keep title editing available even when title text is blank.
+          If this surface disappears, typing can fall through to canvas box-creation. */}
+      {linkedNodeID.trim().length > 0 && (
         <div style={{ position: "absolute", top: 40, left: 10, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
           <div style={{ display: "grid", gap: 2 }}>
             <div style={{ pointerEvents: "auto" }}>
@@ -466,7 +468,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                   }}
                   style={{ outline: "none" }}
                 >
-                  {linkedNodeTitle}
+                  {linkedNodeTitle || "\u00A0"}
                 </span>
               </div>
             </div>
