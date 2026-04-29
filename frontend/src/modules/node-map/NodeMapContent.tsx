@@ -1450,11 +1450,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                     />
                   ) : (
                     <div
-                      onDoubleClick={(event) => {
-                        event.stopPropagation();
-                        setEditingNodeTitle({ nodeID: node.node_id, value: getNodeTitle(node) || "new node" });
-                      }}
-                      style={{ whiteSpace: "normal", overflowWrap: "anywhere", fontSize: 20, fontWeight: 800, lineHeight: 1.2, fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", cursor: "text" }}
+                      style={{ whiteSpace: "normal", overflowWrap: "anywhere", fontSize: 20, fontWeight: 800, lineHeight: 1.2, fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif" }}
                     >
                       {getNodeTitle(node)}
                     </div>
