@@ -97,7 +97,9 @@ func withCORS(next http.Handler) http.Handler {
 	allowedOrigin := getenvDefault("MIRAEOPUS_ALLOWED_ORIGIN", "*")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
+		// Keep CORS allow-list aligned with hot-path API verbs used by frontend modules.
+		// Node title updates use PUT and require successful preflight to avoid browser fetch failures.
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

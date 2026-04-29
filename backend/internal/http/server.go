@@ -99,6 +99,32 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 	nodeID := parts[0]
 
 	if len(parts) == 1 {
+		if r.Method == http.MethodPut {
+			var req struct {
+				CompanyID string `json:"company_id"`
+				Title     string `json:"title"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Title) == "" {
+				writeError(w, http.StatusBadRequest, "company_id_and_title_required")
+				return
+			}
+			item, err := s.repo.UpdateNodeTitle(req.CompanyID, nodeID, strings.TrimSpace(req.Title))
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "node_not_found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_update_node")
+				return
+			}
+			s.publishWorkspaceEvent(req.CompanyID, "node_updated", map[string]any{"node_id": nodeID, "node": item})
+			writeJSON(w, http.StatusOK, item)
+			return
+		}
 		if r.Method == http.MethodDelete {
 			companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 			if companyID == "" {

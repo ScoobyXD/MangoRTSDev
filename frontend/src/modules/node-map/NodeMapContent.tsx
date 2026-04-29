@@ -26,6 +26,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const WORLD_H = 2200;
 
   const [nodePositions, setNodePositions] = useState<Record<string, NodePosition>>({});
+  const [nodeSizes, setNodeSizes] = useState<Record<string, { w: number; h: number }>>({});
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
   const [relationshipAnchors, setRelationshipAnchors] = useState<Record<string, RelationshipAnchor>>({});
@@ -49,6 +50,17 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const [panelResize, setPanelResize] = useState<NodeMapPanelResizeState | null>(null);
 
   const [dragState, setDragState] = useState<NodeMapDragState | null>(null);
+  const [nodeResizeState, setNodeResizeState] = useState<{
+    nodeID: string;
+    pointerID: number;
+    startMouseX: number;
+    startMouseY: number;
+    startX: number;
+    startY: number;
+    startW: number;
+    startH: number;
+    edges: { left?: boolean; right?: boolean; top?: boolean; bottom?: boolean };
+  } | null>(null);
   const [panState, setPanState] = useState<NodeMapPanState | null>(null);
   const [selectionBox, setSelectionBox] = useState<NodeMapMultiSelectBox>({
     startX: 0,
@@ -66,6 +78,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const [relationshipRoleColors, setRelationshipRoleColors] = useState({ parent: "#ff8a00", peer: "#0095ff", child: "#6f5cff" });
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
   const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
+  const [editingNodeTitle, setEditingNodeTitle] = useState<{ nodeID: string; value: string } | null>(null);
   const connectionPathsRef = useRef<Array<{ id: string; points: { x: number; y: number }[] }>>([]);
   const suppressNextRelationshipLineClickRef = useRef(false);
   const selectionRevisionRef = useRef(0);
@@ -284,14 +297,57 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   }, [nodes, relationshipDraft]);
 
   useEffect(() => {
+    // Hot-path guard: selection changes happen frequently while dragging/multi-selecting.
+    // We only need node details reads when the details panel is open for the selected node.
+    if (!selectedNodeID) return;
+    if (detailsPanelNodeID !== selectedNodeID) return;
     void loadDetails(selectedNodeID);
-  }, [selectedNodeID]);
+  }, [selectedNodeID, detailsPanelNodeID]);
 
   useEffect(() => {
     if (!detailsPanelNodeID) return;
-    if (detailsPanelNodeID === selectedNodeID) return;
+    // Fetch details for whatever node the panel is pinned to; this keeps panel data fresh
+    // without forcing read traffic for every canvas selection event.
     void loadDetails(detailsPanelNodeID);
-  }, [detailsPanelNodeID, selectedNodeID]);
+  }, [detailsPanelNodeID]);
+
+  useEffect(() => {
+    if (!nodeResizeState) return;
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== nodeResizeState.pointerID) return;
+      event.preventDefault();
+      const dx = (event.clientX - nodeResizeState.startMouseX) / zoom;
+      const dy = (event.clientY - nodeResizeState.startMouseY) / zoom;
+      const minW = 112;
+      const minH = 74;
+      let nextW = nodeResizeState.startW;
+      let nextH = nodeResizeState.startH;
+      let nextX = nodeResizeState.startX;
+      let nextY = nodeResizeState.startY;
+      if (nodeResizeState.edges.right) nextW = Math.max(minW, nodeResizeState.startW + dx);
+      if (nodeResizeState.edges.bottom) nextH = Math.max(minH, nodeResizeState.startH + dy);
+      if (nodeResizeState.edges.left) {
+        nextW = Math.max(minW, nodeResizeState.startW - dx);
+        nextX = nodeResizeState.startX + (nodeResizeState.startW - nextW);
+      }
+      if (nodeResizeState.edges.top) {
+        nextH = Math.max(minH, nodeResizeState.startH - dy);
+        nextY = nodeResizeState.startY + (nodeResizeState.startH - nextH);
+      }
+      setNodeSizes((previous) => ({ ...previous, [nodeResizeState.nodeID]: { w: snapToGrid(nextW), h: snapToGrid(nextH) } }));
+      setNodePositions((previous) => ({ ...previous, [nodeResizeState.nodeID]: { x: clamp(snapToGrid(nextX), 0, WORLD_W - NODE_W), y: clamp(snapToGrid(nextY), 0, WORLD_H - NODE_H) } }));
+    };
+    const onUp = (event: PointerEvent) => {
+      if (event.pointerId !== nodeResizeState.pointerID) return;
+      setNodeResizeState(null);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [nodeResizeState, zoom]);
 
   useEffect(() => {
     const resize = () => {
@@ -517,7 +573,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     const sourceNode = nodes.find((node) => node.node_id === sourceNodeID);
     if (!sourceNode) return;
 
-    const node = await createNode(`${getNodeTitle(sourceNode)} ${direction}`);
+    const node = await createNode("new node");
     if (!node) return;
 
     try {
@@ -561,6 +617,26 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       setDetailsPanelNodeID(node.node_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node_relationship");
+    }
+  };
+
+  const updateNodeTitle = async (nodeID: string, nextTitle: string) => {
+    const value = trimOrEmpty(nextTitle);
+    if (!value) return;
+    setError("");
+    try {
+      const updated = await requestJSON<NodeRecord>(`/v1/nodes/${nodeID}`, {
+        method: "PUT",
+        body: JSON.stringify({ company_id: companyID, title: value }),
+      });
+      // Latency rule: update in-memory graph cache directly so we avoid a snapshot re-fetch.
+      upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
+      if (details?.node.node_id === nodeID) {
+        setDetails((previous) => (previous ? { ...previous, node: updated } : previous));
+      }
+      if (detailsPanelNodeID === nodeID) await loadDetails(nodeID);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_update_node");
     }
   };
 
@@ -1260,6 +1336,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
 
           {visibleNodes.map((node) => {
             const position = nodePositions[node.node_id] ?? { x: 120, y: 120 };
+            const size = nodeSizes[node.node_id] ?? { w: NODE_W, h: NODE_H };
             const isSelected = selectedNodeIDs.has(node.node_id);
             const isPrimary = node.node_id === selectedNodeID;
 
@@ -1271,19 +1348,20 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   position: "absolute",
                   left: position.x,
                   top: position.y,
-                  width: NODE_W,
-                  height: NODE_H,
+                  width: size.w,
+                  height: size.h,
                   borderRadius: 8,
                   border: `1px solid ${isSelected ? accent : "#505050"}`,
                   background: isSelected ? "#ffffff" : "rgba(252,252,252,0.93)",
                   outline: isSelected ? `2px solid ${accent}` : "none",
                   outlineOffset: isSelected ? 1 : 0,
                   display: "grid",
-                  gridTemplateRows: "auto 1fr auto",
+                  gridTemplateRows: "1fr",
                   boxShadow: isSelected ? "0 0 0 3px rgba(111,231,238,0.32), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
                   userSelect: "none",
                   cursor: dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab",
                   zIndex: isPrimary ? 5 : 4,
+                  overflow: "visible",
                 }}
                 onDoubleClick={(event) => {
                   event.stopPropagation();
@@ -1338,18 +1416,49 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   setDragState({ nodeIDs: nextIDs, pointerID: event.pointerId, offsets });
                 }}
               >
-                <div style={{ borderBottom: "1px solid currentColor", padding: "8px 8px 7px", fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>
-                  <div style={{ whiteSpace: "normal", overflowWrap: "anywhere", maxHeight: 28, overflow: "hidden" }}>{getNodeTitle(node)}</div>
+                <div
+                  style={{
+                    display: "grid",
+                    placeItems: "center",
+                    width: "100%",
+                    height: "100%",
+                    textAlign: "center",
+                    padding: "10px",
+                  }}
+                >
+                  {/* Latency-obsession alignment: keep node-card render minimal.
+                      We only render the title so no extra metadata fetch/render churn appears on the hot canvas path. */}
+                  {editingNodeTitle?.nodeID === node.node_id ? (
+                    <input
+                      value={editingNodeTitle.value}
+                      autoFocus
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onChange={(event) => setEditingNodeTitle({ nodeID: node.node_id, value: event.target.value })}
+                      onBlur={() => {
+                        void updateNodeTitle(node.node_id, editingNodeTitle.value);
+                        setEditingNodeTitle(null);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void updateNodeTitle(node.node_id, editingNodeTitle.value);
+                          setEditingNodeTitle(null);
+                        }
+                        if (event.key === "Escape") setEditingNodeTitle(null);
+                      }}
+                      style={{ width: "100%", maxWidth: "100%", textAlign: "center", fontSize: 20, fontWeight: 800, lineHeight: 1.2, fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", border: `1px solid ${accent}`, background: "rgba(255,255,255,0.95)" }}
+                    />
+                  ) : (
+                    <div
+                      style={{ whiteSpace: "normal", overflowWrap: "anywhere", fontSize: 20, fontWeight: 800, lineHeight: 1.2, fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif" }}
+                    >
+                      {getNodeTitle(node)}
+                    </div>
+                  )}
                 </div>
                 {isSelected && (
                   <div style={{ position: "absolute", top: 6, right: 6, width: 12, height: 12, borderRadius: 999, background: accent, opacity: 0.85 }} />
                 )}
-                <div style={{ padding: "5px 8px", fontSize: 10, display: "grid", gap: 2 }}>
-                  <div>ID: {node.node_id.slice(0, 8)}</div>
-                  <div>Info: {details?.node.node_id === node.node_id ? details.information.length : "-"}</div>
-                  <div>Rel: {details?.node.node_id === node.node_id ? details.relationships.length : "-"}</div>
-                </div>
-                <div style={{ padding: "4px 8px", fontSize: 9, opacity: 0.7 }}>drag to move · double-click for details</div>
 
                 {([
                   ["left", { left: -12, top: "50%", transform: "translate(-50%, -50%)", flexDirection: "column" }],
@@ -1381,7 +1490,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                         style={{
                           width: 20,
                           height: 20,
-                          borderRadius: 999,
+                          borderRadius: 4,
                           border: `1px solid ${accent}`,
                           background: "#ffffff",
                           color: accent,
@@ -1419,7 +1528,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                         style={{
                           width: 20,
                           height: 20,
-                          borderRadius: 999,
+                          borderRadius: 4,
                           border: `1px solid ${accent}`,
                           background: isSource ? accent : "#ffffff",
                           color: isSource ? "#ffffff" : accent,
@@ -1435,6 +1544,37 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                     </div>
                   );
                 })}
+                {[
+                  { key: "tl", edges: { left: true, top: true }, cursor: "nwse-resize", style: { left: -6, top: -6, width: 12, height: 12 } },
+                  { key: "tr", edges: { right: true, top: true }, cursor: "nesw-resize", style: { right: -6, top: -6, width: 12, height: 12 } },
+                  { key: "bl", edges: { left: true, bottom: true }, cursor: "nesw-resize", style: { left: -6, bottom: -6, width: 12, height: 12 } },
+                  { key: "br", edges: { right: true, bottom: true }, cursor: "nwse-resize", style: { right: -6, bottom: -6, width: 12, height: 12 } },
+                  { key: "l", edges: { left: true }, cursor: "ew-resize", style: { left: -4, top: 12, bottom: 12, width: 8 } },
+                  { key: "r", edges: { right: true }, cursor: "ew-resize", style: { right: -4, top: 12, bottom: 12, width: 8 } },
+                  { key: "t", edges: { top: true }, cursor: "ns-resize", style: { top: -4, left: 12, right: 12, height: 8 } },
+                  { key: "b", edges: { bottom: true }, cursor: "ns-resize", style: { bottom: -4, left: 12, right: 12, height: 8 } },
+                ].map((handle) => (
+                  <div
+                    key={handle.key}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setDragState(null);
+                      setNodeResizeState({
+                        nodeID: node.node_id,
+                        pointerID: event.pointerId,
+                        startMouseX: event.clientX,
+                        startMouseY: event.clientY,
+                        startX: position.x,
+                        startY: position.y,
+                        startW: size.w,
+                        startH: size.h,
+                        edges: handle.edges,
+                      });
+                    }}
+                    style={{ position: "absolute", ...handle.style, cursor: handle.cursor, zIndex: 9 }}
+                  />
+                ))}
               </div>
             );
           })}
@@ -1488,7 +1628,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                 borderRadius: 0,
               }}
               onClick={() => {
-                const title = trimOrEmpty(newNodeTitle) || "New node";
+                const title = trimOrEmpty(newNodeTitle) || "new node";
                 void createNode(title, { x: contextMenu.worldX, y: contextMenu.worldY });
                 if (!trimOrEmpty(newNodeTitle)) setNewNodeTitle("");
                 setContextMenu(null);
@@ -1603,8 +1743,12 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
             }}
             onPointerDown={(event) => event.stopPropagation()}
           >
-            <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", textAlign: "left" }} onClick={() => { setDetailsPanelNodeID(nodeContextMenu.nodeID); setNodeContextMenu(null); }}>
-              Edit node
+            <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", textAlign: "left" }} onClick={() => {
+              const current = nodes.find((node) => node.node_id === nodeContextMenu.nodeID);
+              setEditingNodeTitle({ nodeID: nodeContextMenu.nodeID, value: current ? getNodeTitle(current) : "new node" });
+              setNodeContextMenu(null);
+            }}>
+              Rename node
             </button>
             <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", color: "#a20026", textAlign: "left" }} onClick={() => { const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID]; setConfirmDelete({ nodeIDs: ids, relationshipIDs: [] }); setNodeContextMenu(null); }}>
               Delete node
