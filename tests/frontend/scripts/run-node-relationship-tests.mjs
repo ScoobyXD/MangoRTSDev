@@ -13,7 +13,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipSelection.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/NodeMapControls.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipDeleteSummary.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/editorCanvasKeydownRouting.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/explorerSync.test.js"),
 ];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
 const tscEntrypoint = resolve(frontendRoot, "node_modules/typescript/bin/tsc");
@@ -37,6 +37,7 @@ for (const testFile of testFiles) {
   contents = contents.replaceAll('"../../../frontend/src/modules/linkingGraph"', '"../../../frontend/src/modules/linkingGraph.js"');
   contents = contents.replaceAll('"../../../frontend/src/app/frameLinking"', '"../../../frontend/src/app/frameLinking.js"');
   contents = contents.replaceAll('"../../../frontend/src/types"', '"../../../frontend/src/types.js"');
+  contents = contents.replaceAll('"../../../../frontend/src/modules/company-explorer/explorerSync"', '"../../../../frontend/src/modules/company-explorer/explorerSync.js"');
   writeFileSync(testFile, contents, "utf8");
 }
 

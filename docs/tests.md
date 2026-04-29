@@ -126,6 +126,10 @@ Use this checklist format and keep it complete.
   - frame-link edge sanitization canonicalizes and deduplicates undirected graph edges
   - linked target resolution by kind supports traversal through intermediary graph hops
   - direct-neighbor resolution returns adjacency-only targets for explorer fanout
+- [x] `tests/frontend/modules/company-explorer/explorerSync.test.ts`
+  - ignores map-originated no-op selection echoes so suppression latches do not eat subsequent Explorer clicks
+  - applies map selections only when Explorer semantic selection actually changes
+  - scopes Explorer broadcast emission to semantic selection changes (node/tree)
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
   - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)
