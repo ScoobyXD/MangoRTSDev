@@ -13,6 +13,7 @@ var ErrNotFound = errors.New("not found")
 
 type Repository interface {
 	CreateNode(companyID, title string) (domain.Node, error)
+	UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error)
 	ListNodes(companyID string) ([]domain.Node, error)
 	ListNodeRelationships(companyID string) ([]domain.NodeRelationship, error)
 	DeleteNodeRelationship(companyID, relationshipID string) error
@@ -73,6 +74,19 @@ func (r *MemoryRepo) CreateNode(companyID, title string) (domain.Node, error) {
 	}
 	r.nodes[key(companyID, n.NodeID)] = n
 	return n, nil
+}
+
+func (r *MemoryRepo) UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := companyID + ":" + nodeID
+	node, ok := r.nodes[key]
+	if !ok {
+		return domain.Node{}, ErrNotFound
+	}
+	node.Title = title
+	r.nodes[key] = node
+	return node, nil
 }
 
 func (r *MemoryRepo) ListNodes(companyID string) ([]domain.Node, error) {

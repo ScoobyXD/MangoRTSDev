@@ -34,6 +34,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     edges: { top?: true; right?: true; bottom?: true; left?: true };
   } | null>(null);
   const [error, setError] = useState("");
+  const [editingTitleValue, setEditingTitleValue] = useState("");
   const lastSelectionRevisionRef = useRef(0);
 
   const readLocalLayout = useCallback((nodeID: string): LocalBoxLayout => {
@@ -125,6 +126,27 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const stableInformationID = box.information_id || created.information_id;
     setBoxes((prev) => prev.map((item) => (item.local_id === box.local_id ? { ...item, information_id: stableInformationID } : item)));
   }, [apiBase, companyID, requestJSON]);
+
+  const updateNodeTitle = useCallback(async (nextTitle: string) => {
+    const value = nextTitle.trim();
+    if (!linkedNodeID || !value) return;
+    setError("");
+    try {
+      const updated = await requestJSON<{ title: string }>(`/v1/nodes/${linkedNodeID}`, {
+        method: "PUT",
+        body: JSON.stringify({ company_id: companyID, title: value }),
+      });
+      // Keep UI hot-path local: update local title immediately after successful API write.
+      setLinkedNodeTitle(updated.title);
+      invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_update_node");
+    }
+  }, [apiBase, companyID, linkedNodeID, requestJSON]);
+
+  useEffect(() => {
+    setEditingTitleValue("");
+  }, [linkedNodeID]);
 
   useEffect(() => {
     const refresh = () => setLinkedMapWidgetID(readLinkedMapWidgetID());
@@ -377,10 +399,35 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       }}
     >
       {linkedNodeTitle && (
-        <div style={{ position: "absolute", top: 8, left: 10, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
+        <div style={{ position: "absolute", top: 40, left: 10, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
           <div style={{ display: "grid", gap: 2 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: accent }}>
-              Node: {linkedNodeTitle}
+            <div style={{ pointerEvents: "auto" }}>
+              {editingTitleValue ? (
+                <input
+                  value={editingTitleValue}
+                  autoFocus
+                  onClick={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  onChange={(event) => setEditingTitleValue(event.target.value)}
+                  onBlur={() => { void updateNodeTitle(editingTitleValue); setEditingTitleValue(""); }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") { event.preventDefault(); void updateNodeTitle(editingTitleValue); setEditingTitleValue(""); }
+                    if (event.key === "Escape") setEditingTitleValue("");
+                  }}
+                  style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, border: `1px solid ${accent}`, background: "rgba(255,255,255,0.95)", padding: "2px 6px" }}
+                />
+              ) : (
+                <div
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setEditingTitleValue(linkedNodeTitle || "new node");
+                  }}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, cursor: "text" }}
+                >
+                  Node: {linkedNodeTitle}
+                </div>
+              )}
             </div>
             <div style={{ fontSize: 10, opacity: 0.7 }}>
               {linkedNodeInfoPreview.length > 0 ? linkedNodeInfoPreview.join(" • ") : "No non-text node information yet"}

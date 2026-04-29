@@ -10,6 +10,7 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 - Render draggable/resizable text boxes inside the editor canvas.
 - Persist text-box create/move/resize/edit updates back to backend node information APIs.
 - Surface node context from the same selected node (metadata summary, history timeline, and non-text info preview).
+- Support generic node title updates directly from editor context header (`PUT /v1/nodes/:node_id`), including inline rename UX.
 
 ## Important Data/Integration Paths
 - **Input from Node Map:** selected node state (`node-map-state-v1:<company_id>:<map_widget_id>`).
@@ -17,6 +18,7 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 - **Explorer fallback context source:** editor can read explorer-driven node selection from `node-map-explorer-context-v1:<company_id>:<editor_widget_id>` when no direct map-state context is available.
 - **Backend read path:** `GET /v1/nodes/:node_id?company_id=...`.
 - **Backend write path:** `POST /v1/nodes/:node_id/information` for text-box payloads.
+- **Backend node-title update path:** `PUT /v1/nodes/:node_id` with `{ company_id, title }`.
 - **Backend projection read path:** `GET /v1/nodes/:node_id/projection?company_id=...` (typed node projection rows for hot editor loads).
 - **Event sync hooks:** `EVENT_FRAME_LINK_GRAPH_UPDATED`, `EVENT_NODE_MAP_SELECTION_UPDATED`, `EVENT_EXPLORER_CONTEXT_UPDATED`, and `storage` events.
 
@@ -42,6 +44,8 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 - This prevents textbox duplication after refresh caused by projection-key drift during rapid save/blur sequences.
 
 ## UX Notes
+- Node context header content is intentionally offset below the frame title strip to avoid overlap with top-left module chrome.
+- Node title uses single-click inline edit activation in the header (no double-click required), and click handling is isolated so editor-canvas textbox creation does not trigger from title edits.
 - Text boxes support drag and edge/corner resize interactions.
 - Double-clicking the canvas creates a new text box at pointer position.
 - Text value is persisted server-side; box geometry is preserved in local/per-user layout storage.

@@ -31,6 +31,23 @@ func (r *PostgresRepo) CreateNode(companyID, title string) (domain.Node, error) 
 	return item, nil
 }
 
+func (r *PostgresRepo) UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error) {
+	const q = `
+UPDATE nodes
+SET title = $3
+WHERE company_id = $1 AND node_id = $2
+RETURNING company_id, node_id, title, created_timestamp
+`
+	var item domain.Node
+	if err := r.db.QueryRow(q, companyID, nodeID, title).Scan(&item.CompanyID, &item.NodeID, &item.Title, &item.CreatedTimestamp); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Node{}, ErrNotFound
+		}
+		return domain.Node{}, err
+	}
+	return item, nil
+}
+
 func (r *PostgresRepo) ListNodes(companyID string) ([]domain.Node, error) {
 	ctx := context.Background()
 	rows, err := r.db.QueryContext(ctx,
