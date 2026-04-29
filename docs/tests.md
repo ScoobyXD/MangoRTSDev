@@ -113,6 +113,9 @@ Use this checklist format and keep it complete.
 - [x] `frontend/src/modules/node-map/relationshipDeleteSummary.test.ts`
   - success/failure summarization for batched relationship-line delete requests
   - preserves per-relationship failure reason reporting for visibility
+- [x] `tests/frontend/modules/node-map/editorCanvasKeydownRouting.test.ts`
+  - editor canvas key-routing guard ignores key events from contentEditable/input/textarea surfaces
+  - non-editable canvas targets continue through normal canvas key handling
 - [x] `frontend/src/app/frameLinking.test.ts`
   - context-menu link label fallback (`No other module selected`) when only one module is in active pool
   - graph-based pairwise link-plan generation for multi-module selection pools

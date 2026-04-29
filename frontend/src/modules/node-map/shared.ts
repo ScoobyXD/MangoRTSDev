@@ -107,6 +107,19 @@ export function snapToGrid(value: number): number {
   return Math.round(value / MINI_GRID) * MINI_GRID;
 }
 
+type KeydownTargetLike = {
+  isContentEditable?: boolean;
+  closest?: (selector: string) => KeydownTargetLike | null;
+};
+
+// Editor canvas key-routing guard:
+// key presses from editable controls must never be treated as canvas create-textbox intent.
+export function shouldIgnoreCanvasKeydownTarget(target: KeydownTargetLike | null | undefined): boolean {
+  if (!target) return false;
+  if (target.isContentEditable) return true;
+  return Boolean(target.closest?.("[contenteditable='true'], textarea, input"));
+}
+
 // Relationship anchor helper for opposite-side calculations.
 export function oppositeSide(direction: NodeDirection): NodeDirection {
   if (direction === "left") return "right";
