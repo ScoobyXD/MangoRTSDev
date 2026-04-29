@@ -3,6 +3,7 @@ import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeRecord, NodeRel
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
+import { applyExplorerRowSelection } from "./selectionState";
 
 type ExplorerTreeNode = {
   id: string;
@@ -31,6 +32,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [treeViewportHeight, setTreeViewportHeight] = useState(480);
   const [linkRevision, setLinkRevision] = useState(0);
   const [linkedMapFrameID, setLinkedMapFrameID] = useState("");
+  const [selectionBroadcastRevision, setSelectionBroadcastRevision] = useState(0);
   const lastMapSelectionRevisionRef = useRef(0);
   const suppressNextExplorerBroadcastRef = useRef(false);
 
@@ -173,6 +175,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       suppressNextExplorerBroadcastRef.current = true;
       setSelectedNodeID(selectedFromMap);
       setSelectedTreeID(`node-${selectedFromMap}`);
+      setSelectionBroadcastRevision((value) => value + 1);
       setExpanded((previous) => {
         if (previous.has("folder-root") && previous.has("folder-nodes")) return previous;
         const next = new Set(previous);
@@ -236,7 +239,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     } catch {
       // ignore local storage failures
     }
-  }, [companyID, scope, selectedNodeID, selectedTreeID, selectedTree, linkRevision]);
+  }, [companyID, scope, selectedNodeID, selectedTreeID, selectedTree, linkRevision, selectionBroadcastRevision]);
 
   return (
     <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(240px, 1.2fr) minmax(280px, 1fr)", background: "#ffffff", color: "#0f1f23" }}>
@@ -255,9 +258,16 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
             <div
               key={row.id}
               onClick={() => {
-                setSelectedTreeID(row.id);
-                if (row.kind === "node") setSelectedNodeID(row.nodeID ?? "");
-                if (row.kind === "folder" && row.id === "folder-all") setSelectedNodeID("");
+                const next = applyExplorerRowSelection({
+                  selectedTreeID,
+                  selectedNodeID,
+                  broadcastRevision: selectionBroadcastRevision,
+                }, row);
+                setSelectedTreeID(next.selectedTreeID);
+                setSelectedNodeID(next.selectedNodeID);
+                // Always bump revision on intentional row click, even when selection IDs
+                // are unchanged. This prevents stale linked-map selection drift.
+                setSelectionBroadcastRevision(next.broadcastRevision);
               }}
               style={{
                 position: "relative",
