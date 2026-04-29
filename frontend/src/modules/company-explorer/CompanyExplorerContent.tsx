@@ -3,7 +3,7 @@ import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeRecord, NodeRel
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
-import { applyExplorerRowSelection } from "./selectionState";
+import { deriveExplorerSelectionFromRow } from "./selectionState";
 
 type ExplorerTreeNode = {
   id: string;
@@ -30,9 +30,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const treeViewportRef = useRef<HTMLDivElement | null>(null);
   const [treeScrollTop, setTreeScrollTop] = useState(0);
   const [treeViewportHeight, setTreeViewportHeight] = useState(480);
-  const [linkRevision, setLinkRevision] = useState(0);
   const [linkedMapFrameID, setLinkedMapFrameID] = useState("");
-  const [selectionBroadcastRevision, setSelectionBroadcastRevision] = useState(0);
   const lastMapSelectionRevisionRef = useRef(0);
   const suppressNextExplorerBroadcastRef = useRef(false);
 
@@ -156,26 +154,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, [scope]);
 
   useEffect(() => {
-    const onStorage = (event: StorageEvent) => {
-      if (event.key && event.key !== FRAME_LINKS_KEY) return;
-      setLinkRevision((value) => value + 1);
-    };
-    const onGraphUpdated = () => setLinkRevision((value) => value + 1);
-    window.addEventListener("storage", onStorage);
-    window.addEventListener(EVENT_FRAME_LINK_GRAPH_UPDATED, onGraphUpdated);
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener(EVENT_FRAME_LINK_GRAPH_UPDATED, onGraphUpdated);
-    };
-  }, []);
-
-  useEffect(() => {
     const applyMapSelection = (selectedFromMap: string) => {
       if (!selectedFromMap) return;
       suppressNextExplorerBroadcastRef.current = true;
       setSelectedNodeID(selectedFromMap);
       setSelectedTreeID(`node-${selectedFromMap}`);
-      setSelectionBroadcastRevision((value) => value + 1);
       setExpanded((previous) => {
         if (previous.has("folder-root") && previous.has("folder-nodes")) return previous;
         const next = new Set(previous);
@@ -212,7 +195,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     };
   }, [companyID, linkedMapFrameID]);
 
-  useEffect(() => {
+  const broadcastExplorerSelection = (selection: { selectedTreeID: string; selectedNodeID: string; scopeLevel: number; selectedLabel: string }) => {
     if (suppressNextExplorerBroadcastRef.current) {
       suppressNextExplorerBroadcastRef.current = false;
       return;
@@ -221,13 +204,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       const graph = readFrameLinksFromStorage();
       const targetIDs = new Set(resolveDirectLinkedTargets({ sourceFrameID: scope, edges: graph }));
       if (targetIDs.size === 0) return;
-
       const payload = {
         sourceExplorerID: scope,
-        selectedNodeID,
-        selectedTreeID,
-        scopeLevel: selectedTree?.scopeLevel ?? 0,
-        selectedLabel: selectedTree?.label ?? "",
+        selectedNodeID: selection.selectedNodeID,
+        selectedTreeID: selection.selectedTreeID,
+        scopeLevel: selection.scopeLevel,
+        selectedLabel: selection.selectedLabel,
         ts: Date.now(),
       };
       for (const targetID of targetIDs) {
@@ -239,7 +221,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     } catch {
       // ignore local storage failures
     }
-  }, [companyID, scope, selectedNodeID, selectedTreeID, selectedTree, linkRevision, selectionBroadcastRevision]);
+  };
 
   return (
     <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(240px, 1.2fr) minmax(280px, 1fr)", background: "#ffffff", color: "#0f1f23" }}>
@@ -258,16 +240,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
             <div
               key={row.id}
               onClick={() => {
-                const next = applyExplorerRowSelection({
-                  selectedTreeID,
-                  selectedNodeID,
-                  broadcastRevision: selectionBroadcastRevision,
-                }, row);
+                const next = deriveExplorerSelectionFromRow({ selectedTreeID, selectedNodeID }, row);
                 setSelectedTreeID(next.selectedTreeID);
                 setSelectedNodeID(next.selectedNodeID);
-                // Always bump revision on intentional row click, even when selection IDs
-                // are unchanged. This prevents stale linked-map selection drift.
-                setSelectionBroadcastRevision(next.broadcastRevision);
+                // Emit immediately from the clicked row payload so same-row re-clicks still
+                // propagate deterministic ID-first context to linked modules.
+                broadcastExplorerSelection(next);
               }}
               style={{
                 position: "relative",

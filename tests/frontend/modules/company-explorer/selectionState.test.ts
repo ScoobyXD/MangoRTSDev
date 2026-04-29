@@ -1,25 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyExplorerRowSelection } from "../../../../frontend/src/modules/company-explorer/selectionState.js";
+import { deriveExplorerSelectionFromRow } from "../../../../frontend/src/modules/company-explorer/selectionState.js";
 
-test("clicking the same row still increments broadcast revision", () => {
-  const initial = { selectedTreeID: "node-a", selectedNodeID: "a", broadcastRevision: 4 };
-  const next = applyExplorerRowSelection(initial, { id: "node-a", kind: "node", nodeID: "a" });
-  assert.equal(next.broadcastRevision, 5);
-  assert.equal(next.selectedTreeID, "node-a");
-  assert.equal(next.selectedNodeID, "a");
+test("node row selection maps title row to canonical node id", () => {
+  const next = deriveExplorerSelectionFromRow(
+    { selectedTreeID: "folder-all", selectedNodeID: "" },
+    { id: "node-123", kind: "node", nodeID: "123", scopeLevel: 3, label: "Q2 Planning Note" },
+  );
+  assert.equal(next.selectedTreeID, "node-123");
+  assert.equal(next.selectedNodeID, "123");
+  assert.equal(next.scopeLevel, 3);
 });
 
-test("selecting folder-all clears selected node scope", () => {
-  const initial = { selectedTreeID: "node-a", selectedNodeID: "a", broadcastRevision: 0 };
-  const next = applyExplorerRowSelection(initial, { id: "folder-all", kind: "folder" });
+test("folder-all clears selected node scope", () => {
+  const next = deriveExplorerSelectionFromRow(
+    { selectedTreeID: "node-123", selectedNodeID: "123" },
+    { id: "folder-all", kind: "folder", scopeLevel: 1, label: "All Nodes (14)" },
+  );
   assert.equal(next.selectedNodeID, "");
-  assert.equal(next.selectedTreeID, "folder-all");
 });
 
-test("selecting non-reset folders preserves node selection", () => {
-  const initial = { selectedTreeID: "node-a", selectedNodeID: "a", broadcastRevision: 1 };
-  const next = applyExplorerRowSelection(initial, { id: "folder-notes", kind: "folder" });
-  assert.equal(next.selectedNodeID, "a");
+test("non-reset folders preserve selected node id", () => {
+  const next = deriveExplorerSelectionFromRow(
+    { selectedTreeID: "node-123", selectedNodeID: "123" },
+    { id: "folder-notes", kind: "folder", scopeLevel: 1, label: "Knowledge Notes" },
+  );
+  assert.equal(next.selectedNodeID, "123");
   assert.equal(next.selectedTreeID, "folder-notes");
 });

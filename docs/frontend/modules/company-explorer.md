@@ -133,9 +133,9 @@ Latency hardening update (2026-04-26):
 - Explorer suppresses immediate re-broadcast when applying map-originated selection updates to prevent context echo loops that can cause alternating node selection churn and repeated details GETs.
 
 Selection reliability update (2026-04-29):
-- Explorer now increments an explicit selection broadcast revision on every intentional tree-row click, even when `selectedTreeID`/`selectedNodeID` are unchanged.
-- This guarantees linked Node Map modules receive a fresh context signal when users re-click a note/node title to re-sync selection state.
-- This design preserves event-driven sync (no polling, no forced snapshot GET fallback), consistent with latency-obsession architecture hot-path rules.
+- Explorer now derives selection directly from the clicked row payload (`label` -> canonical `nodeID`) and emits linked-context updates immediately from that deterministic payload.
+- This guarantees node-title clicks propagate the correct node ID to linked Node Map frames, even when React state identity is unchanged from a prior click.
+- This design remains event-driven (no polling, no forced snapshot GET fallback), consistent with latency-obsession architecture hot-path rules.
 
 
 ---
