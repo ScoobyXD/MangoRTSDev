@@ -134,6 +134,18 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
     };
     return true;
   }
+  if (envelope.type === "node_updated") {
+    const node = asNodeRecord(data.node);
+    if (!node) return false;
+    const exists = currentNodes.some((item) => item.node_id === node.node_id);
+    if (!exists) return false;
+    entry.snapshot = {
+      nodes: currentNodes.map((item) => (item.node_id === node.node_id ? node : item)),
+      relationships: currentRelationships,
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
 
   if (envelope.type === "node_deleted") {
     const nodeID = typeof data.node_id === "string" ? data.node_id : "";

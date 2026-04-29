@@ -368,6 +368,11 @@ Linked Company Explorer frames consume those selection events and map-state upda
 
 - Canvas consumes almost all remaining widget height (bottom utility rows removed).
 - World grid, relationship lines, node cards, side arrow actions, selection box, and group badge.
+- Node cards are title-only on the canvas (inline node id/info/relationship counters removed).
+- Node title is rendered large and centered to make the card label scannable at a glance.
+- Node card size is user-adjustable from all sides and all corners (custom edge/corner resize hit-zones).
+- Side action controls for creating linked nodes/relationships render as square buttons (not circular chips).
+- Selecting a node on canvas no longer auto-triggers details fetches unless the details panel is open for that node (hot-path read suppression).
 - In-canvas instruction text.
 - Right-click context menu with `Create new node` at cursor location.
 - Right-click context menu also includes `Enable relationship colors` with an explicit iOS-style on/off slider (knob left = off, knob right = on).
@@ -380,7 +385,8 @@ Linked Company Explorer frames consume those selection events and map-state upda
 - Box rows are stacked flush with no vertical gaps between adjacent rows.
 - Role color pickers (`Parent`, `Peer`, `Child`) use RGB hex color inputs.
 - Canvas context menu placement is clamped within the viewport so all actions stay visible near canvas edges.
-- Right-click on a node opens node actions (`Edit node`, `Delete node`).
+- Right-click on a node opens node actions (`Rename node`, `Delete node`).
+- `Rename node` enters inline title-edit mode on the card and persists through the generic node-title update call (`PUT /v1/nodes/{node_id}`), while updating node-map cache without forcing full snapshot refetch.
 - Delete key support for selected node(s), guarded by themed confirmation modal.
 
 ### Node Map right overlay details panel

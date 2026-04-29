@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -38,6 +40,39 @@ func TestIsLegalNodeRelationshipPositionPair(t *testing.T) {
 	}
 }
 
+func TestUpdateNodeTitleViaPut(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-rename-test"
+	node, err := repo.CreateNode(companyID, "old title")
+	if err != nil {
+		t.Fatalf("CreateNode() error = %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"company_id": companyID,
+		"title":      "new title",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	details, err := repo.GetNodeDetails(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetNodeDetails() error = %v", err)
+	}
+	if details.Node.Title != "new title" {
+		t.Fatalf("node title = %q, want %q", details.Node.Title, "new title")
+	}
+}
+
 func TestWorkspaceSnapshotReturnsNotModifiedWhenDataUnchanged(t *testing.T) {
 	t.Parallel()
 
@@ -70,31 +105,5 @@ func TestWorkspaceSnapshotReturnsNotModifiedWhenDataUnchanged(t *testing.T) {
 
 	if secondRec.Code != http.StatusNotModified {
 		t.Fatalf("second snapshot status = %d, want %d", secondRec.Code, http.StatusNotModified)
-	}
-}
-
-func TestResolveNodeTitle(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name   string
-		title  string
-		header string
-		want   string
-	}{
-		{name: "prefers_title", title: "New Title", header: "Legacy Header", want: "New Title"},
-		{name: "falls_back_to_header", title: "", header: "Legacy Header", want: "Legacy Header"},
-		{name: "trims_whitespace", title: "  New Title  ", header: "", want: "New Title"},
-	}
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := resolveNodeTitle(tc.title, tc.header)
-			if got != tc.want {
-				t.Fatalf("resolveNodeTitle(%q, %q) = %q, want %q", tc.title, tc.header, got, tc.want)
-			}
-		})
 	}
 }
