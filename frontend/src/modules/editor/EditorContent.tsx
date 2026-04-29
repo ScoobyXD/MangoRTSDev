@@ -34,9 +34,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     edges: { top?: true; right?: true; bottom?: true; left?: true };
   } | null>(null);
   const [error, setError] = useState("");
-  const [editingTitleValue, setEditingTitleValue] = useState("");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const editingTitleRef = useRef<HTMLSpanElement | null>(null);
+  const editingTitleDraftRef = useRef("");
   const lastSelectionRevisionRef = useRef(0);
 
   const readLocalLayout = useCallback((nodeID: string): LocalBoxLayout => {
@@ -147,8 +147,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [apiBase, companyID, linkedNodeID, requestJSON]);
 
   useEffect(() => {
-    setEditingTitleValue("");
     setIsEditingTitle(false);
+    editingTitleDraftRef.current = "";
   }, [linkedNodeID]);
 
   useEffect(() => {
@@ -418,70 +418,49 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         <div style={{ position: "absolute", top: 40, left: 10, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
           <div style={{ display: "grid", gap: 2 }}>
             <div style={{ pointerEvents: "auto" }}>
-              {isEditingTitle ? (
-                <div style={{ display: "inline-flex", alignItems: "baseline", gap: 0 }}>
-                  <span style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent }}>
-                    Node:&nbsp;
-                  </span>
-                  <span
-                    ref={editingTitleRef}
-                    contentEditable
-                    suppressContentEditableWarning
-                    onClick={(event) => event.stopPropagation()}
-                    onDoubleClick={(event) => event.stopPropagation()}
-                    onInput={(event) => setEditingTitleValue(event.currentTarget.textContent ?? "")}
-                    onBlur={() => {
-                      void updateNodeTitle(editingTitleValue);
-                      setEditingTitleValue("");
-                      setIsEditingTitle(false);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void updateNodeTitle(editingTitleValue);
-                        setEditingTitleValue("");
-                        setIsEditingTitle(false);
-                      }
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        setEditingTitleValue("");
-                        setIsEditingTitle(false);
-                      }
-                    }}
-                    /*
-                      Keep edit mode visually identical to read mode. We keep the "Node:" prefix
-                      visible and only swap the title text span into a seamless inline input.
-                    */
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 800,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.12em",
-                      color: accent,
-                      border: "none",
-                      outline: "none",
-                      background: "transparent",
-                      padding: 0,
-                      margin: 0,
-                      fontFamily: "inherit",
-                    }}
-                  >
-                    {editingTitleValue}
-                  </span>
-                </div>
-              ) : (
-                <div
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setEditingTitleValue(linkedNodeTitle || "new node");
-                    setIsEditingTitle(true);
+              <div
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (isEditingTitle) return;
+                  editingTitleDraftRef.current = linkedNodeTitle || "new node";
+                  setIsEditingTitle(true);
+                }}
+                onDoubleClick={(event) => event.stopPropagation()}
+                style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, cursor: "text" }}
+              >
+                Node:&nbsp;
+                <span
+                  ref={editingTitleRef}
+                  contentEditable={isEditingTitle}
+                  suppressContentEditableWarning
+                  onClick={(event) => event.stopPropagation()}
+                  onInput={(event) => {
+                    editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
                   }}
-                  onDoubleClick={(event) => event.stopPropagation()}
-                  style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, cursor: "text" }}
+                  onBlur={() => {
+                    if (!isEditingTitle) return;
+                    const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
+                    void updateNodeTitle(latestTitle);
+                    setIsEditingTitle(false);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
+                      void updateNodeTitle(latestTitle);
+                      setIsEditingTitle(false);
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      if (editingTitleRef.current) editingTitleRef.current.textContent = linkedNodeTitle;
+                      setIsEditingTitle(false);
+                    }
+                  }}
+                  style={{ outline: "none" }}
                 >
-                  Node: {linkedNodeTitle}
-                </div>
-              )}
+                  {linkedNodeTitle}
+                </span>
+              </div>
             </div>
             <div style={{ fontSize: 10, opacity: 0.7 }}>
               {linkedNodeInfoPreview.length > 0 ? linkedNodeInfoPreview.join(" • ") : "No non-text node information yet"}
