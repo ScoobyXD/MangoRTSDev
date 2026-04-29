@@ -433,7 +433,15 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                   ref={editingTitleRef}
                   contentEditable={isEditingTitle}
                   suppressContentEditableWarning
-                  onClick={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    // Allow clicks directly on title text to enter edit mode too.
+                    // We still stop propagation to keep canvas interactions isolated.
+                    event.stopPropagation();
+                    if (!isEditingTitle) {
+                      editingTitleDraftRef.current = linkedNodeTitle || "new node";
+                      setIsEditingTitle(true);
+                    }
+                  }}
                   onInput={(event) => {
                     editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
                   }}
