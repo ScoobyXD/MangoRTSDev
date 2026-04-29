@@ -26,6 +26,9 @@ type Repository interface {
 	CreateLogicGate(companyID, header string) (domain.LogicGate, error)
 	CreateOperation(in CreateOperationInput) (domain.Operation, error)
 	GetOperation(companyID, operationID string) (domain.Operation, error)
+	AppendWorkspaceContextEvent(event domain.WorkspaceContextEvent) (domain.WorkspaceContextProjection, error)
+	GetWorkspaceContextProjection(companyID, workspaceID, contextID string) (domain.WorkspaceContextProjection, error)
+	ListWorkspaceContextEventsAfterSequence(companyID, workspaceID, contextID string, afterSequence int64, limit int) ([]domain.WorkspaceContextEvent, error)
 }
 
 type CreateOperationInput struct {
@@ -38,23 +41,27 @@ type CreateOperationInput struct {
 }
 
 type MemoryRepo struct {
-	mu         sync.RWMutex
-	nodes      map[string]domain.Node
-	nodeInfo   map[string][]domain.NodeInformation
-	nodeText   map[string]map[string]domain.NodeProjection
-	nodeRels   map[string][]domain.NodeRelationship
-	logicGates map[string]domain.LogicGate
-	operations map[string]domain.Operation
+	mu                 sync.RWMutex
+	nodes              map[string]domain.Node
+	nodeInfo           map[string][]domain.NodeInformation
+	nodeText           map[string]map[string]domain.NodeProjection
+	nodeRels           map[string][]domain.NodeRelationship
+	logicGates         map[string]domain.LogicGate
+	operations         map[string]domain.Operation
+	contextEvents      map[string][]domain.WorkspaceContextEvent
+	contextProjections map[string]domain.WorkspaceContextProjection
 }
 
 func NewMemoryRepo() *MemoryRepo {
 	return &MemoryRepo{
-		nodes:      map[string]domain.Node{},
-		nodeInfo:   map[string][]domain.NodeInformation{},
-		nodeText:   map[string]map[string]domain.NodeProjection{},
-		nodeRels:   map[string][]domain.NodeRelationship{},
-		logicGates: map[string]domain.LogicGate{},
-		operations: map[string]domain.Operation{},
+		nodes:              map[string]domain.Node{},
+		nodeInfo:           map[string][]domain.NodeInformation{},
+		nodeText:           map[string]map[string]domain.NodeProjection{},
+		nodeRels:           map[string][]domain.NodeRelationship{},
+		logicGates:         map[string]domain.LogicGate{},
+		operations:         map[string]domain.Operation{},
+		contextEvents:      map[string][]domain.WorkspaceContextEvent{},
+		contextProjections: map[string]domain.WorkspaceContextProjection{},
 	}
 }
 
@@ -256,6 +263,65 @@ func (r *MemoryRepo) DeleteNodeRelationship(companyID, relationshipID string) er
 	}
 	r.nodeRels[companyID] = filtered
 	return nil
+}
+
+func workspaceContextKey(companyID, workspaceID, contextID string) string {
+	return companyID + ":" + workspaceID + ":" + contextID
+}
+
+func (r *MemoryRepo) AppendWorkspaceContextEvent(event domain.WorkspaceContextEvent) (domain.WorkspaceContextProjection, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now().UTC()
+	event.CreatedAt = now
+	k := workspaceContextKey(event.CompanyID, event.WorkspaceID, event.ContextID)
+	r.contextEvents[k] = append(r.contextEvents[k], event)
+	current := r.contextProjections[k]
+	if event.Sequence >= current.LastSequence {
+		current.CompanyID = event.CompanyID
+		current.WorkspaceID = event.WorkspaceID
+		current.ContextID = event.ContextID
+		current.LastSequence = event.Sequence
+		current.LastEventAt = event.CreatedAt
+		current.LastPayloadJSON = event.PayloadJSON
+		current.UpdatedTimestamp = now
+		r.contextProjections[k] = current
+	}
+	return r.contextProjections[k], nil
+}
+
+func (r *MemoryRepo) GetWorkspaceContextProjection(companyID, workspaceID, contextID string) (domain.WorkspaceContextProjection, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.contextProjections[workspaceContextKey(companyID, workspaceID, contextID)]
+	if !ok {
+		return domain.WorkspaceContextProjection{}, ErrNotFound
+	}
+	return item, nil
+}
+
+func (r *MemoryRepo) ListWorkspaceContextEventsAfterSequence(companyID, workspaceID, contextID string, afterSequence int64, limit int) ([]domain.WorkspaceContextEvent, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	k := workspaceContextKey(companyID, workspaceID, contextID)
+	source := r.contextEvents[k]
+	if len(source) == 0 {
+		return []domain.WorkspaceContextEvent{}, nil
+	}
+	if limit <= 0 {
+		limit = 250
+	}
+	out := make([]domain.WorkspaceContextEvent, 0, min(limit, len(source)))
+	for _, item := range source {
+		if item.Sequence <= afterSequence {
+			continue
+		}
+		out = append(out, item)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 func (r *MemoryRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error) {

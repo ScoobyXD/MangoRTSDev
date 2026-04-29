@@ -3,6 +3,7 @@ import { getNodeTitle, NodeDocBox, NodeInformation, NODE_DOC_MIN_H, NODE_DOC_MIN
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
+import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 
 type LocalBoxLayout = Record<string, { x: number; y: number; w: number; h: number }>;
 
@@ -197,10 +198,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       refresh();
     };
     const onMapStateUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number }>).detail;
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
       if (!detail || detail.mapWidgetID !== linkedMapWidgetID) return;
-      const revision = typeof detail.revision === "number" ? detail.revision : 0;
-      if (revision > 0 && revision <= lastSelectionRevisionRef.current) return;
+      const revision = readIncomingSequence(detail);
+      if (revision > 0 && !isNewerSequence(lastSelectionRevisionRef.current, revision)) return;
+      if (revision > 0 && hasSequenceGap(lastSelectionRevisionRef.current, revision)) refresh();
       if (revision > 0) lastSelectionRevisionRef.current = revision;
       if (typeof detail.selectedNodeID === "string") {
         setLinkedNodeID(detail.selectedNodeID);
