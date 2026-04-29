@@ -2,8 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeRecord, NodeRelationship } from "../node-map/shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
-import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
-import { deriveExplorerSelectionFromRow } from "./selectionState";
+import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 
 type ExplorerTreeNode = {
   id: string;
@@ -14,6 +13,22 @@ type ExplorerTreeNode = {
   scopeLevel: number;
 };
 
+
+type ExplorerSelectionPayload = {
+  selectedTreeID: string;
+  selectedNodeID: string;
+  scopeLevel: number;
+  selectedLabel: string;
+};
+
+function deriveExplorerSelectionFromRow(currentNodeID: string, row: ExplorerTreeNode): ExplorerSelectionPayload {
+  return {
+    selectedTreeID: row.id,
+    selectedNodeID: row.kind === "node" ? (row.nodeID ?? "") : (row.id === "folder-all" ? "" : currentNodeID),
+    scopeLevel: row.scopeLevel,
+    selectedLabel: row.label,
+  };
+}
 // Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
 export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -195,13 +210,14 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     };
   }, [companyID, linkedMapFrameID]);
 
-  const broadcastExplorerSelection = (selection: { selectedTreeID: string; selectedNodeID: string; scopeLevel: number; selectedLabel: string }) => {
+  const broadcastExplorerSelection = (selection: ExplorerSelectionPayload) => {
     if (suppressNextExplorerBroadcastRef.current) {
       suppressNextExplorerBroadcastRef.current = false;
       return;
     }
     try {
       const graph = readFrameLinksFromStorage();
+      const registry = readFrameRegistryFromStorage();
       const targetIDs = new Set(resolveDirectLinkedTargets({ sourceFrameID: scope, edges: graph }));
       if (targetIDs.size === 0) return;
       const payload = {
@@ -214,6 +230,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       };
       for (const targetID of targetIDs) {
         if (!targetID) continue;
+        const targetKind = classifyFrameKind(registry[targetID]?.kind ?? "");
+        // Keep fan-out strict: only modules that consume selection context should receive it.
+        if (targetKind !== "map" && targetKind !== "editor") continue;
         const key = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${targetID}`;
         localStorage.setItem(key, JSON.stringify(payload));
         emitDashboardEvent(EVENT_EXPLORER_CONTEXT_UPDATED, { key, sourceExplorerID: scope, targetID });
@@ -240,7 +259,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
             <div
               key={row.id}
               onClick={() => {
-                const next = deriveExplorerSelectionFromRow({ selectedTreeID, selectedNodeID }, row);
+                const next = deriveExplorerSelectionFromRow(selectedNodeID, row);
                 setSelectedTreeID(next.selectedTreeID);
                 setSelectedNodeID(next.selectedNodeID);
                 // Emit immediately from the clicked row payload so same-row re-clicks still

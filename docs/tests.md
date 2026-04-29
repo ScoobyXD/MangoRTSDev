@@ -182,8 +182,3 @@ Every PR that changes behavior should answer:
 - Did this file (`docs/tests.md`) get updated?
 
 If any answer is "no", include a concrete follow-up issue with owner/date.
-
-
-## Frontend explorer sync regression tests
-
-- `tests/frontend/modules/company-explorer/selectionState.test.ts` verifies deterministic title-row to node-id selection mapping so linked modules always receive canonical ID context without extra network reads.

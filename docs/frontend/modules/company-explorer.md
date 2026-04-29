@@ -133,9 +133,9 @@ Latency hardening update (2026-04-26):
 - Explorer suppresses immediate re-broadcast when applying map-originated selection updates to prevent context echo loops that can cause alternating node selection churn and repeated details GETs.
 
 Selection reliability update (2026-04-29):
-- Explorer now derives selection directly from the clicked row payload (`label` -> canonical `nodeID`) and emits linked-context updates immediately from that deterministic payload.
-- This guarantees node-title clicks propagate the correct node ID to linked Node Map frames, even when React state identity is unchanged from a prior click.
-- This design remains event-driven (no polling, no forced snapshot GET fallback), consistent with latency-obsession architecture hot-path rules.
+- Explorer now derives selection directly inside `CompanyExplorerContent` from the clicked row payload (`label` -> canonical `nodeID`) and emits linked-context updates immediately from that deterministic payload.
+- Fan-out is restricted to linked `map`/`editor` frame kinds only, so modules that do not consume node selection context are not notified.
+- This guarantees node-title clicks propagate correct IDs while staying event-driven (no polling, no forced snapshot GET fallback), consistent with latency-obsession architecture hot-path rules.
 
 
 ---
