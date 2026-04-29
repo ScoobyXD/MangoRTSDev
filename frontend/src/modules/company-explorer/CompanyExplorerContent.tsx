@@ -35,6 +35,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const lastMapSelectionRevisionRef = useRef(0);
   const suppressNextExplorerBroadcastRef = useRef(false);
   const previousBroadcastSelectionRef = useRef({ selectedNodeID: "", selectedTreeID: "" });
+  const latestSelectionRef = useRef<ExplorerSelectionState>({ selectedNodeID: "", selectedTreeID: "" });
 
   const TREE_ROW_HEIGHT = 30;
   const TREE_OVERSCAN = 8;
@@ -104,6 +105,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID) ?? treeRows[0], [selectedTreeID, treeRows]);
 
   useEffect(() => {
+    latestSelectionRef.current = { selectedNodeID, selectedTreeID };
+  }, [selectedNodeID, selectedTreeID]);
+
+  useEffect(() => {
     if (!treeViewportRef.current) return;
     const measure = () => {
       const height = treeViewportRef.current?.clientHeight ?? 0;
@@ -171,7 +176,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   useEffect(() => {
     const applyMapSelection = (selectedFromMap: string) => {
-      const current = { selectedNodeID, selectedTreeID };
+      const current = latestSelectionRef.current;
       if (!shouldApplyMapSelection(current, selectedFromMap)) return;
       suppressNextExplorerBroadcastRef.current = true;
       setSelectedNodeID(selectedFromMap);
