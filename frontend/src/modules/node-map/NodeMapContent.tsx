@@ -1446,7 +1446,24 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                         }
                         if (event.key === "Escape") setEditingNodeTitle(null);
                       }}
-                      style={{ width: "100%", maxWidth: "100%", textAlign: "center", fontSize: 20, fontWeight: 800, lineHeight: 1.2, fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", border: `1px solid ${accent}`, background: "rgba(255,255,255,0.95)" }}
+                      /*
+                        Edit mode mirrors display mode (no bordered text box) so clicking into
+                        a title only reveals the caret. This keeps node-map title editing seamless.
+                      */
+                      style={{
+                        width: "100%",
+                        maxWidth: "100%",
+                        textAlign: "center",
+                        fontSize: 20,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+                        border: "none",
+                        outline: "none",
+                        background: "transparent",
+                        padding: 0,
+                        margin: 0,
+                      }}
                     />
                   ) : (
                     <div
