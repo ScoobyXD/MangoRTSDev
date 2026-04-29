@@ -1,28 +1,24 @@
 # Latency Obsession Architecture
 
 ## Goal
-Design the MangoOS hot-path architecture for:
-- 100000s of UI elements and simultaneous background operations per active workspace
-- 100000s of companies
-- 1000000s of users and ai agency
-- strict latency culture with sub-100ms targets for interactive reads
-- ***THIS IS SUPER IMPORTandANT:*** In the future we will have ai agents operate this app without a UI,
-    so we need to make sure everything can be done by ai agents headless with just APIs. 
-    And of course, it needs to work well with 10000s of ai agents all using the apis all at once.
+Design the MangoOS architecture for:
+- 1000000s of companies
+- Each company having 1000000s of users and ai agents
+- All having 1000000s of UI elements and simultaneous background operations
+- All of this with strict latency culture with sub-100ms targets for interactive reads
+- ***THIS IS SUPER IMPORTandANT:*** In the future we will have ai agents operate this app without a UI, so we need to make sure everything can be done by ai agents headless with just APIs. The future of the company relies on our ability to integrate agents, and to do that, we need APIs. And of course, it needs to work well with 10000s of ai agents all using the apis all at once.
 
 This document is the source of truth for architecture decisions and execution tracking.
-
 ---
 
-## Hot / Warm / Cold Path Definitions
+## Hot / Warm / Cold Path Definitionsgit a
 
 ### Hot Path (must be aggressively optimized)
 These paths are always latency-sensitive and product-critical:
-- **Everything in File Explorer module**
+- **Everything in Company Explorer module**
 - **Everything in Node Map module**
-- **Everything in Details module / node details retrieval**
-- **Everything in Editor module that reads or writes active node information**
-- **Everything in upcoming Logic Gate Canvas module**
+- **Everything in Editor module**
+- **Everything in upcoming Logic Gate Map module**
 
 Target:
 - p95 interactive read operations under **100ms** inside a region
