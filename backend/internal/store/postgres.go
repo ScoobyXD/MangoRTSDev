@@ -91,6 +91,32 @@ where company_id=$1 and workspace_id=$2 and context_id=$3`,
 	return out, nil
 }
 
+func (r *PostgresRepo) ListWorkspaceContextEventsAfterSequence(companyID, workspaceID, contextID string, afterSequence int64, limit int) ([]domain.WorkspaceContextEvent, error) {
+	if limit <= 0 {
+		limit = 250
+	}
+	rows, err := r.db.Query(`
+select company_id, workspace_id, context_id, source_module_id, sequence, user_action_type, payload_json::text, created_timestamp
+from workspace_context_events
+where company_id=$1 and workspace_id=$2 and context_id=$3 and sequence > $4
+order by sequence asc
+limit $5`,
+		companyID, workspaceID, contextID, afterSequence, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.WorkspaceContextEvent, 0)
+	for rows.Next() {
+		var item domain.WorkspaceContextEvent
+		if err := rows.Scan(&item.CompanyID, &item.WorkspaceID, &item.ContextID, &item.SourceModuleID, &item.Sequence, &item.UserActionType, &item.PayloadJSON, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *PostgresRepo) UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error) {
 	const q = `
 UPDATE nodes

@@ -182,6 +182,7 @@ For cross-module context synchronization, backend now supports:
 
 - `POST /v1/workspace/context-events` for append-only context mutation writes
 - `GET /v1/workspace/context-projections` for latest read projection by `company_id`, `workspace_id`, `context_id`
+- `GET /v1/workspace/context-deltas` for ordered event deltas after a provided sequence
 
 Required event fields:
 - `company_id`
@@ -191,5 +192,5 @@ Required event fields:
 - `sequence`
 - `user_action_type`
 
-Migration SQL:
-- `backend/db/migrations/20260429_workspace_context_events_and_projections.sql`
+Schema SQL (includes workspace context tables):
+- `backend/db/schema.sql`

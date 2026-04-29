@@ -142,6 +142,7 @@ Use this checklist format and keep it complete.
   - node creation contract uses canonical `title` payload semantics only (legacy `header` fallback removed)
   - node rename contract via `PUT /v1/nodes/{node_id}` persists updated title
   - workspace context event write path persists projection updates (`POST /v1/workspace/context-events` -> `GET /v1/workspace/context-projections`)
+  - ordered context delta feed returns persisted event rows after sequence (`GET /v1/workspace/context-deltas?after_sequence=`)
 
 ### Integration tests
 - [ ] None committed yet (to be added)

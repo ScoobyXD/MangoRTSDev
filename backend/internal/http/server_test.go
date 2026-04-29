@@ -138,4 +138,11 @@ func TestWorkspaceContextEventWriteAndProjectionRead(t *testing.T) {
 	if readRec.Code != http.StatusOK {
 		t.Fatalf("GET context-projections status = %d, want %d", readRec.Code, http.StatusOK)
 	}
+
+	deltaReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/context-deltas?company_id=11111111-1111-1111-1111-111111111111&workspace_id=22222222-2222-2222-2222-222222222222&context_id=active_node_selection&after_sequence=0", nil)
+	deltaRec := httptest.NewRecorder()
+	handler.ServeHTTP(deltaRec, deltaReq)
+	if deltaRec.Code != http.StatusOK {
+		t.Fatalf("GET context-deltas status = %d, want %d", deltaRec.Code, http.StatusOK)
+	}
 }

@@ -28,6 +28,7 @@ type Repository interface {
 	GetOperation(companyID, operationID string) (domain.Operation, error)
 	AppendWorkspaceContextEvent(event domain.WorkspaceContextEvent) (domain.WorkspaceContextProjection, error)
 	GetWorkspaceContextProjection(companyID, workspaceID, contextID string) (domain.WorkspaceContextProjection, error)
+	ListWorkspaceContextEventsAfterSequence(companyID, workspaceID, contextID string, afterSequence int64, limit int) ([]domain.WorkspaceContextEvent, error)
 }
 
 type CreateOperationInput struct {
@@ -297,6 +298,30 @@ func (r *MemoryRepo) GetWorkspaceContextProjection(companyID, workspaceID, conte
 		return domain.WorkspaceContextProjection{}, ErrNotFound
 	}
 	return item, nil
+}
+
+func (r *MemoryRepo) ListWorkspaceContextEventsAfterSequence(companyID, workspaceID, contextID string, afterSequence int64, limit int) ([]domain.WorkspaceContextEvent, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	k := workspaceContextKey(companyID, workspaceID, contextID)
+	source := r.contextEvents[k]
+	if len(source) == 0 {
+		return []domain.WorkspaceContextEvent{}, nil
+	}
+	if limit <= 0 {
+		limit = 250
+	}
+	out := make([]domain.WorkspaceContextEvent, 0, min(limit, len(source)))
+	for _, item := range source {
+		if item.Sequence <= afterSequence {
+			continue
+		}
+		out = append(out, item)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 func (r *MemoryRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error) {

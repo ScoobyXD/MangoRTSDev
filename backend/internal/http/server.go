@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/workspace/stream", s.handleWorkspaceStream)
 	mux.HandleFunc("/v1/workspace/context-events", s.handleWorkspaceContextEvents)
 	mux.HandleFunc("/v1/workspace/context-projections", s.handleWorkspaceContextProjections)
+	mux.HandleFunc("/v1/workspace/context-deltas", s.handleWorkspaceContextDeltas)
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
 	mux.HandleFunc("/v1/operations", s.handleOperations)
 	mux.HandleFunc("/v1/operations/", s.handleOperationByID)
@@ -115,6 +117,41 @@ func (s *Server) handleWorkspaceContextProjections(w http.ResponseWriter, r *htt
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, item)
+}
+
+func (s *Server) handleWorkspaceContextDeltas(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	contextID := strings.TrimSpace(r.URL.Query().Get("context_id"))
+	if companyID == "" || workspaceID == "" || contextID == "" {
+		writeError(w, http.StatusBadRequest, "company_workspace_context_required")
+		return
+	}
+	var afterSequence int64
+	if raw := strings.TrimSpace(r.URL.Query().Get("after_sequence")); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_after_sequence")
+			return
+		}
+		afterSequence = parsed
+	}
+	events, err := s.repo.ListWorkspaceContextEventsAfterSequence(companyID, workspaceID, contextID, afterSequence, 250)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_workspace_context_deltas")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+		"company_id":     companyID,
+		"workspace_id":   workspaceID,
+		"context_id":     contextID,
+		"after_sequence": afterSequence,
+		"events":         events,
+	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

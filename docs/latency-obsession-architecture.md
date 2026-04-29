@@ -537,3 +537,18 @@ Any such change must include:
 **Latency-architecture alignment outcome:**
 - Establishes concrete event-write + projection-read split on backend contract surface.
 - Creates an incremental path toward full ordered delta + reconcile + observability gates.
+
+
+### 2026-04-29 — Implemented solution: persisted workspace projection delta feed endpoint
+
+**Problem before this change (explicit):**
+- Projection updates emitted stream notifications, but there was no dedicated API to fetch persisted ordered deltas by sequence window.
+
+**Implemented solution (explicit):**
+- Added `GET /v1/workspace/context-deltas` with required scope params (`company_id`, `workspace_id`, `context_id`) and optional `after_sequence`.
+- Repository implementations now support listing context events after a sequence boundary for both in-memory and PostgreSQL stores.
+- Added handler-level coverage validating write -> projection read -> delta read flow.
+
+**Latency-architecture alignment outcome:**
+- Enables deterministic replay/recovery windows from persisted event history without full snapshot churn.
+- Completes the backend delta-feed surface needed for projection-driven consumers.
