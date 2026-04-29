@@ -269,6 +269,48 @@ To keep hot-path interactions deterministic under high concurrency, MangoOS uses
 
 
 
+
+
+### Event Log + Projection Architecture (Required; events table alone is insufficient)
+
+To be explicit: an `events` table by itself is **not** sufficient to meet MangoOS hot-path latency targets at projected scale.
+
+Required companion architecture:
+
+1. **Canonical append-only events log (write authority).**
+   - All UI, API, automation, and agent mutations enter through validated event writes.
+   - Event envelope must include stream identity + ordering + producer identity + action semantics.
+
+2. **Read-optimized projection tables/materialized views (read authority for hot paths).**
+   - Hot UI/API reads must come from projection/read-model tables, not raw event-history scans.
+   - Projection shapes must be keyed for immediate consumption by Node Map, Explorer, Editor, Logic Gate canvases.
+
+3. **Delta stream + sequence contract.**
+   - Projection updates must emit ordered deltas with explicit sequence semantics.
+   - Consumers reject stale/out-of-order deltas deterministically.
+
+4. **Targeted reconciliation on sequence gaps.**
+   - Gap or drift detection triggers scoped reconciliation for affected context/workspace.
+   - Blanket full refresh is fallback-only and must remain bounded/rare.
+
+5. **Hot cache and transport layers.**
+   - L1/L2/L3 cache contract remains mandatory for UI latency.
+   - Redis/Valkey + edge/regional caching policy applies to read-heavy APIs.
+
+6. **Partitioning and index discipline.**
+   - `company_id`-first partitioning/sharding remains required.
+   - Composite indexes must be designed around hot query predicates (`company_id`, `workspace_id`, context keys, sequence windows).
+
+7. **Observability + merge gates.**
+   - p50/p95/p99 latency, stream lag, sequence-gap rate, and reconciliation rate dashboards are required.
+   - Regressions must block merges for hot-path flows.
+
+8. **Agent/headless parity requirement.**
+   - Every workflow available in UI must be fully executable by headless APIs and AI agents with identical semantic outcomes.
+
+Non-negotiable rule:
+- **Events are canonical for writes/history; projections are canonical for hot reads.**
+
 ### Semantic vs UI layout policy (Editor + Node Map)
 
 - **Node information values** (text/value content attached to nodes) are server-side and projection-backed for hot reads.
