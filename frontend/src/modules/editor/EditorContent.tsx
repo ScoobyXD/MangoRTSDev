@@ -35,6 +35,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   } | null>(null);
   const [error, setError] = useState("");
   const [editingTitleValue, setEditingTitleValue] = useState("");
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const editingTitleRef = useRef<HTMLSpanElement | null>(null);
   const lastSelectionRevisionRef = useRef(0);
 
   const readLocalLayout = useCallback((nodeID: string): LocalBoxLayout => {
@@ -146,7 +148,21 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   useEffect(() => {
     setEditingTitleValue("");
+    setIsEditingTitle(false);
   }, [linkedNodeID]);
+
+  useEffect(() => {
+    if (!isEditingTitle || !editingTitleRef.current) return;
+    const element = editingTitleRef.current;
+    element.focus();
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, [isEditingTitle]);
 
   useEffect(() => {
     const refresh = () => setLinkedMapWidgetID(readLinkedMapWidgetID());
@@ -402,25 +418,63 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         <div style={{ position: "absolute", top: 40, left: 10, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
           <div style={{ display: "grid", gap: 2 }}>
             <div style={{ pointerEvents: "auto" }}>
-              {editingTitleValue ? (
-                <input
-                  value={editingTitleValue}
-                  autoFocus
-                  onClick={(event) => event.stopPropagation()}
-                  onDoubleClick={(event) => event.stopPropagation()}
-                  onChange={(event) => setEditingTitleValue(event.target.value)}
-                  onBlur={() => { void updateNodeTitle(editingTitleValue); setEditingTitleValue(""); }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") { event.preventDefault(); void updateNodeTitle(editingTitleValue); setEditingTitleValue(""); }
-                    if (event.key === "Escape") setEditingTitleValue("");
-                  }}
-                  style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, border: `1px solid ${accent}`, background: "rgba(255,255,255,0.95)", padding: "2px 6px" }}
-                />
+              {isEditingTitle ? (
+                <div style={{ display: "inline-flex", alignItems: "baseline", gap: 0 }}>
+                  <span style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent }}>
+                    Node:&nbsp;
+                  </span>
+                  <span
+                    ref={editingTitleRef}
+                    contentEditable
+                    suppressContentEditableWarning
+                    onClick={(event) => event.stopPropagation()}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    onInput={(event) => setEditingTitleValue(event.currentTarget.textContent ?? "")}
+                    onBlur={() => {
+                      void updateNodeTitle(editingTitleValue);
+                      setEditingTitleValue("");
+                      setIsEditingTitle(false);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void updateNodeTitle(editingTitleValue);
+                        setEditingTitleValue("");
+                        setIsEditingTitle(false);
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setEditingTitleValue("");
+                        setIsEditingTitle(false);
+                      }
+                    }}
+                    /*
+                      Keep edit mode visually identical to read mode. We keep the "Node:" prefix
+                      visible and only swap the title text span into a seamless inline input.
+                    */
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 800,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.12em",
+                      color: accent,
+                      border: "none",
+                      outline: "none",
+                      background: "transparent",
+                      padding: 0,
+                      margin: 0,
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {editingTitleValue}
+                  </span>
+                </div>
               ) : (
                 <div
                   onClick={(event) => {
                     event.stopPropagation();
                     setEditingTitleValue(linkedNodeTitle || "new node");
+                    setIsEditingTitle(true);
                   }}
                   onDoubleClick={(event) => event.stopPropagation()}
                   style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, cursor: "text" }}
