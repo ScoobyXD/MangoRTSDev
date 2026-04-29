@@ -15,6 +15,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipDeleteSummary.test.js"),
 ];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
+const tscEntrypoint = resolve(frontendRoot, "node_modules/typescript/bin/tsc");
 
 function run(command) {
   execSync(command, {
@@ -24,7 +25,7 @@ function run(command) {
   });
 }
 
-run("./frontend/node_modules/.bin/tsc -p tests/frontend/config/tsconfig.node-tests.json");
+run(`"${process.execPath}" "${tscEntrypoint}" -p tests/frontend/config/tsconfig.node-tests.json`);
 
 for (const testFile of testFiles) {
   let contents = readFileSync(testFile, "utf8");
