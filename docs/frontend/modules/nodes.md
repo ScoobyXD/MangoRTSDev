@@ -132,6 +132,13 @@ Nodes are positioned in **world coordinates**, while pan/zoom transform the worl
   - “Group selected: N” badge for multi-select.
 - Clicking blank canvas clears group selection.
 
+### 4.5 Node title inline editing (seamless caret behavior)
+
+- Node title editing in both **Node Map** and **Editor** is intentionally inline and seamless.
+- Clicking a title should only reveal a text caret; it must not introduce a temporary bordered/background input box.
+- Implementation rule: edit-mode typography must match read-mode typography so there is no visual compression/jump when entering edit mode.
+- This keeps title edits aligned with latency-obsession UX guidance: minimal render churn and no distracting state-switch visuals on hot interaction paths.
+
 ---
 
 ## 5) Relationship creation rules

@@ -414,7 +414,25 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                     if (event.key === "Enter") { event.preventDefault(); void updateNodeTitle(editingTitleValue); setEditingTitleValue(""); }
                     if (event.key === "Escape") setEditingTitleValue("");
                   }}
-                  style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, border: `1px solid ${accent}`, background: "rgba(255,255,255,0.95)", padding: "2px 6px" }}
+                  /*
+                    Keep edit mode visually identical to read mode.
+                    This avoids introducing a temporary "input box" shape and preserves
+                    the low-latency, low-churn feel required for quick title edits.
+                  */
+                  style={{
+                    width: "100%",
+                    fontSize: 12,
+                    fontWeight: 800,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.12em",
+                    color: accent,
+                    border: "none",
+                    outline: "none",
+                    background: "transparent",
+                    padding: 0,
+                    margin: 0,
+                    fontFamily: "inherit",
+                  }}
                 />
               ) : (
                 <div
