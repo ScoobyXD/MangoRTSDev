@@ -150,6 +150,47 @@ To keep hot-path interactions deterministic under high concurrency, MangoOS uses
    - Append/update paths keep authoritative history and feed projection updates.
    - Projection freshness is maintained on write and stream reconciliation.
 
+
+
+### Cross-Module Sync Architecture Contract (Locked)
+
+To scale linked workflows across Node Map, Company Explorer, Editor, Logic Gates, Operations, Messages/Email, and KPI surfaces, MangoOS adopts this synchronization contract.
+
+1. **Single semantic context plane (L2 canonical context store).**
+   - All cross-module context lives in one normalized workspace context store.
+   - Modules must not treat ad hoc localStorage keys as cross-module source-of-truth.
+   - LocalStorage may exist only as a bounded persistence transport/cache layer, never authority.
+
+2. **Versioned event envelope for every context mutation.**
+   - Every mutation event must carry:
+     - `context_id`
+     - `source_module_id`
+     - `sequence` (monotonic within workspace scope)
+     - `timestamp`
+     - `intent_type`
+   - Consumers must deterministically ignore stale/out-of-order events.
+
+3. **Authority model per context type.**
+   - Each context type has one explicit conflict rule.
+   - Example: `active_node_selection` uses last-write-wins under monotonic workspace sequence.
+   - Implicit side-path overwrite patterns (e.g., re-reading old peer state and reapplying it) are forbidden.
+
+4. **Intent vs projection split (anti-loop invariant).**
+   - Modules emit **intent** (e.g., “user selected node X”).
+   - Shared context engine commits canonical context and emits projection updates.
+   - Modules render from canonical projection updates only.
+   - Direct module-to-module authority writes are forbidden on hot sync paths.
+
+5. **Bounded reconciliation with explicit gap handling.**
+   - Keep snapshot + delta model for fast hot-path convergence.
+   - Event contract must include version/sequence guarantees.
+   - Sequence gaps trigger targeted reconciliation (scoped refresh), not blanket fallback churn.
+
+6. **Operational invariants and observability gates.**
+   - No infinite publish/consume loops for any context type.
+   - Duplicate intent delivery must be idempotent at projection layer.
+   - Every hot sync context publishes lag/error/drop metrics with p50/p95/p99 SLOs.
+
 ### Semantic vs UI layout policy (Editor + Node Map)
 
 - **Node information values** (text/value content attached to nodes) are server-side and projection-backed for hot reads.
@@ -327,6 +368,26 @@ Any such change must include:
 
 > ⚠️ **DO NOT EDIT THIS HISTORY SECTION UNLESS A USER EXPLICITLY ASKS YOU TO.**
 > This section is append-only and should only be updated when a user directly requests a history entry.
+
+
+### 2026-04-29 — Explicit cross-module context sync contract added
+
+**Why this entry exists (explicit):**
+- Linked module selection flows showed loop-prone behavior and authority ambiguity when Explorer, Node Map, and Editor were all connected.
+- Prior local fixes reduced specific regressions but did not provide a scalable contract for upcoming linked domains (Logic Gates, Operations, Messages/Email, KPI surfaces).
+
+**What was defined (explicit):**
+- Added a locked **Cross-Module Sync Architecture Contract** with:
+  - one semantic context plane (L2 canonical context store),
+  - versioned event envelope (`context_id`, `source_module_id`, `sequence`, `timestamp`, `intent_type`),
+  - explicit authority/conflict rules per context type,
+  - intent-vs-projection split as a hard anti-loop invariant,
+  - bounded reconciliation on sequence gaps,
+  - observability and idempotency invariants for hot sync paths.
+
+**Architecture intent outcome:**
+- Moves synchronization from patch-style module coupling to a deterministic, scalable protocol aligned with hot-path latency rules.
+- Establishes a future-proof contract for high-cardinality linked workflows and headless agent orchestration.
 
 ### 2026-04-26 — Frontend module-link latency hardening + full graph migration
 
