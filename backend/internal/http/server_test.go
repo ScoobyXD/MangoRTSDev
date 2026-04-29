@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -35,6 +37,39 @@ func TestIsLegalNodeRelationshipPositionPair(t *testing.T) {
 				t.Fatalf("isLegalNodeRelationshipPositionPair(%q, %q) = %t, want %t", tc.a, tc.b, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestUpdateNodeTitleViaPut(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-rename-test"
+	node, err := repo.CreateNode(companyID, "old title")
+	if err != nil {
+		t.Fatalf("CreateNode() error = %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"company_id": companyID,
+		"title":      "new title",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	details, err := repo.GetNodeDetails(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetNodeDetails() error = %v", err)
+	}
+	if details.Node.Title != "new title" {
+		t.Fatalf("node title = %q, want %q", details.Node.Title, "new title")
 	}
 }
 

@@ -127,6 +127,7 @@ Use this checklist format and keep it complete.
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
   - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)
   - node creation contract uses canonical `title` payload semantics only (legacy `header` fallback removed)
+  - node rename contract via `PUT /v1/nodes/{node_id}` persists updated title
 
 ### Integration tests
 - [ ] None committed yet (to be added)

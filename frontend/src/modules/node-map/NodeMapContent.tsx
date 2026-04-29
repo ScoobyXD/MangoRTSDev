@@ -78,6 +78,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const [relationshipRoleColors, setRelationshipRoleColors] = useState({ parent: "#ff8a00", peer: "#0095ff", child: "#6f5cff" });
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
   const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
+  const [editingNodeTitle, setEditingNodeTitle] = useState<{ nodeID: string; value: string } | null>(null);
   const connectionPathsRef = useRef<Array<{ id: string; points: { x: number; y: number }[] }>>([]);
   const suppressNextRelationshipLineClickRef = useRef(false);
   const selectionRevisionRef = useRef(0);
@@ -572,7 +573,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     const sourceNode = nodes.find((node) => node.node_id === sourceNodeID);
     if (!sourceNode) return;
 
-    const node = await createNode(`${getNodeTitle(sourceNode)} ${direction}`);
+    const node = await createNode("new node");
     if (!node) return;
 
     try {
@@ -616,6 +617,26 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       setDetailsPanelNodeID(node.node_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node_relationship");
+    }
+  };
+
+  const updateNodeTitle = async (nodeID: string, nextTitle: string) => {
+    const value = trimOrEmpty(nextTitle);
+    if (!value) return;
+    setError("");
+    try {
+      const updated = await requestJSON<NodeRecord>(`/v1/nodes/${nodeID}`, {
+        method: "PUT",
+        body: JSON.stringify({ company_id: companyID, title: value }),
+      });
+      // Latency rule: update in-memory graph cache directly so we avoid a snapshot re-fetch.
+      upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
+      if (details?.node.node_id === nodeID) {
+        setDetails((previous) => (previous ? { ...previous, node: updated } : previous));
+      }
+      if (detailsPanelNodeID === nodeID) await loadDetails(nodeID);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_update_node");
     }
   };
 
@@ -1407,9 +1428,37 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                 >
                   {/* Latency-obsession alignment: keep node-card render minimal.
                       We only render the title so no extra metadata fetch/render churn appears on the hot canvas path. */}
-                  <div style={{ whiteSpace: "normal", overflowWrap: "anywhere", fontSize: 20, fontWeight: 800, lineHeight: 1.2, fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif" }}>
-                    {getNodeTitle(node)}
-                  </div>
+                  {editingNodeTitle?.nodeID === node.node_id ? (
+                    <input
+                      value={editingNodeTitle.value}
+                      autoFocus
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onChange={(event) => setEditingNodeTitle({ nodeID: node.node_id, value: event.target.value })}
+                      onBlur={() => {
+                        void updateNodeTitle(node.node_id, editingNodeTitle.value);
+                        setEditingNodeTitle(null);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void updateNodeTitle(node.node_id, editingNodeTitle.value);
+                          setEditingNodeTitle(null);
+                        }
+                        if (event.key === "Escape") setEditingNodeTitle(null);
+                      }}
+                      style={{ width: "100%", maxWidth: "100%", textAlign: "center", fontSize: 20, fontWeight: 800, lineHeight: 1.2, fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", border: `1px solid ${accent}`, background: "rgba(255,255,255,0.95)" }}
+                    />
+                  ) : (
+                    <div
+                      onDoubleClick={(event) => {
+                        event.stopPropagation();
+                        setEditingNodeTitle({ nodeID: node.node_id, value: getNodeTitle(node) || "new node" });
+                      }}
+                      style={{ whiteSpace: "normal", overflowWrap: "anywhere", fontSize: 20, fontWeight: 800, lineHeight: 1.2, fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", cursor: "text" }}
+                    >
+                      {getNodeTitle(node)}
+                    </div>
+                  )}
                 </div>
                 {isSelected && (
                   <div style={{ position: "absolute", top: 6, right: 6, width: 12, height: 12, borderRadius: 999, background: accent, opacity: 0.85 }} />
@@ -1583,7 +1632,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                 borderRadius: 0,
               }}
               onClick={() => {
-                const title = trimOrEmpty(newNodeTitle) || "New node";
+                const title = trimOrEmpty(newNodeTitle) || "new node";
                 void createNode(title, { x: contextMenu.worldX, y: contextMenu.worldY });
                 if (!trimOrEmpty(newNodeTitle)) setNewNodeTitle("");
                 setContextMenu(null);
@@ -1698,8 +1747,12 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
             }}
             onPointerDown={(event) => event.stopPropagation()}
           >
-            <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", textAlign: "left" }} onClick={() => { setDetailsPanelNodeID(nodeContextMenu.nodeID); setNodeContextMenu(null); }}>
-              Edit node
+            <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", textAlign: "left" }} onClick={() => {
+              const current = nodes.find((node) => node.node_id === nodeContextMenu.nodeID);
+              setEditingNodeTitle({ nodeID: nodeContextMenu.nodeID, value: current ? getNodeTitle(current) : "new node" });
+              setNodeContextMenu(null);
+            }}>
+              Rename node
             </button>
             <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", color: "#a20026", textAlign: "left" }} onClick={() => { const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID]; setConfirmDelete({ nodeIDs: ids, relationshipIDs: [] }); setNodeContextMenu(null); }}>
               Delete node

@@ -385,7 +385,8 @@ Linked Company Explorer frames consume those selection events and map-state upda
 - Box rows are stacked flush with no vertical gaps between adjacent rows.
 - Role color pickers (`Parent`, `Peer`, `Child`) use RGB hex color inputs.
 - Canvas context menu placement is clamped within the viewport so all actions stay visible near canvas edges.
-- Right-click on a node opens node actions (`Edit node`, `Delete node`).
+- Right-click on a node opens node actions (`Rename node`, `Delete node`).
+- `Rename node` enters inline title-edit mode on the card and persists through the generic node-title update call (`PUT /v1/nodes/{node_id}`), while updating node-map cache without forcing full snapshot refetch.
 - Delete key support for selected node(s), guarded by themed confirmation modal.
 
 ### Node Map right overlay details panel
