@@ -400,6 +400,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       style={{ position: "relative", width: "100%", height: "100%", background: "#ffffff", color: "#0d1a1e", overflow: "hidden" }}
       tabIndex={0}
       onKeyDown={(event) => {
+        const eventTarget = event.target as HTMLElement | null;
+        if (eventTarget?.isContentEditable || eventTarget?.closest("[contenteditable='true'], textarea, input")) return;
         if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
         const current = boxes.find((item) => item.local_id === activeBoxID);
         if (current) return;
