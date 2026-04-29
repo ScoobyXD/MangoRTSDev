@@ -154,6 +154,89 @@ To keep hot-path interactions deterministic under high concurrency, MangoOS uses
    - Append/update paths keep authoritative history and feed projection updates.
    - Projection freshness is maintained on write and stream reconciliation.
 
+
+
+### Cross-Module Sync Architecture Contract (Locked)
+
+To scale linked workflows across Node Map, Company Explorer, Editor, Logic Gates, Operations, Messages/Email, and KPI surfaces, MangoOS adopts this synchronization contract.
+
+1. **Single semantic context plane (L2 canonical context store).**
+   - All cross-module context lives in one normalized workspace context store.
+   - Modules must not treat ad hoc localStorage keys as cross-module source-of-truth.
+   - LocalStorage may exist only as a bounded persistence transport/cache layer, never authority.
+
+2. **Versioned event envelope for every context mutation.**
+   - Every mutation event must carry:
+     - `context_id`
+     - `source_module_id`
+     - `sequence` (monotonic within workspace scope)
+     - `timestamp`
+     - `intent_type`
+   - Consumers must deterministically ignore stale/out-of-order events.
+
+3. **Authority model per context type.**
+   - Each context type has one explicit conflict rule.
+   - Example: `active_node_selection` uses last-write-wins under monotonic workspace sequence.
+   - Implicit side-path overwrite patterns (e.g., re-reading old peer state and reapplying it) are forbidden.
+
+4. **Intent vs projection split (anti-loop invariant).**
+   - Modules emit **intent** (e.g., “user selected node X”).
+   - Shared context engine commits canonical context and emits projection updates.
+   - Modules render from canonical projection updates only.
+   - Direct module-to-module authority writes are forbidden on hot sync paths.
+
+5. **Bounded reconciliation with explicit gap handling.**
+   - Keep snapshot + delta model for fast hot-path convergence.
+   - Event contract must include version/sequence guarantees.
+   - Sequence gaps trigger targeted reconciliation (scoped refresh), not blanket fallback churn.
+
+6. **Operational invariants and observability gates.**
+   - No infinite publish/consume loops for any context type.
+   - Duplicate intent delivery must be idempotent at projection layer.
+   - Every hot sync context publishes lag/error/drop metrics with p50/p95/p99 SLOs.
+
+
+
+### Event Log + Projection Architecture (Required; events table alone is insufficient)
+
+To be explicit: an `events` table by itself is **not** sufficient to meet MangoOS hot-path latency targets at projected scale.
+
+Required companion architecture:
+
+1. **Canonical append-only events log (write authority).**
+   - All UI, API, automation, and agent mutations enter through validated event writes.
+   - Event envelope must include stream identity + ordering + producer identity + action semantics.
+
+2. **Read-optimized projection tables/materialized views (read authority for hot paths).**
+   - Hot UI/API reads must come from projection/read-model tables, not raw event-history scans.
+   - Projection shapes must be keyed for immediate consumption by Node Map, Explorer, Editor, Logic Gate canvases.
+
+3. **Delta stream + sequence contract.**
+   - Projection updates must emit ordered deltas with explicit sequence semantics.
+   - Consumers reject stale/out-of-order deltas deterministically.
+
+4. **Targeted reconciliation on sequence gaps.**
+   - Gap or drift detection triggers scoped reconciliation for affected context/workspace.
+   - Blanket full refresh is fallback-only and must remain bounded/rare.
+
+5. **Hot cache and transport layers.**
+   - L1/L2/L3 cache contract remains mandatory for UI latency.
+   - Redis/Valkey + edge/regional caching policy applies to read-heavy APIs.
+
+6. **Partitioning and index discipline.**
+   - `company_id`-first partitioning/sharding remains required.
+   - Composite indexes must be designed around hot query predicates (`company_id`, `workspace_id`, context keys, sequence windows).
+
+7. **Observability + merge gates.**
+   - p50/p95/p99 latency, stream lag, sequence-gap rate, and reconciliation rate dashboards are required.
+   - Regressions must block merges for hot-path flows.
+
+8. **Agent/headless parity requirement.**
+   - Every workflow available in UI must be fully executable by headless APIs and AI agents with identical semantic outcomes.
+
+Non-negotiable rule:
+- **Events are canonical for writes/history; projections are canonical for hot reads.**
+
 ### Semantic vs UI layout policy (Editor + Node Map)
 
 - **Node information values** (text/value content attached to nodes) are server-side and projection-backed for hot reads.
@@ -203,6 +286,18 @@ Blockers:
 Blockers:
 - No systematic endpoint-by-endpoint query review completed.
 - No committed EXPLAIN artifacts/checks for hot routes.
+
+### Event Log + Projection Hard Requirements
+- ⛔ Canonical `events` table contract finalized (columns, sequence scope, idempotency, producer identity format)
+- ⛔ Projection/read-model tables defined for hot module reads (Node/Explorer/Editor/Logic Gate)
+- ⛔ Projection updater contract defined (ordered delta emission + sequence handling)
+- ⛔ Scoped reconciliation protocol implemented for sequence gaps/drift
+- ⛔ Hot API reads audited to confirm projection-backed access (no raw event scans on hot paths)
+
+Blockers:
+- Event envelope naming/format and sequence ownership scope not yet locked in schema docs.
+- No projection table DDL/index package exists yet for event-derived hot reads.
+- No enforced SLO for stream lag/reconciliation lag in CI gates.
 
 ### Workspace Data Plane
 - ✅ Single source-of-truth workspace snapshot endpoint added (`/v1/workspace/snapshot`)
@@ -331,6 +426,41 @@ Any such change must include:
 
 > ⚠️ **DO NOT EDIT THIS HISTORY SECTION UNLESS A USER EXPLICITLY ASKS YOU TO.**
 > This section is append-only and should only be updated when a user directly requests a history entry.
+
+
+### 2026-04-29 — Events+Projections requirement clarified (one-shot architecture lock)
+
+**Why this entry exists (explicit):**
+- Cross-module synchronization discussions converged on event-driven semantics, but there was risk of interpreting an events table as a complete solution.
+- At MangoOS scale targets, hot reads cannot depend on raw event-history scans.
+
+**What was defined (explicit):**
+- Added a locked architecture section stating that `events` is write/history authority only.
+- Added mandatory companion requirements: projection read-models, ordered delta contract, scoped reconciliation, cache policy, partition/index discipline, observability gates, and headless parity.
+- Added implementation checklist items for event/projection contracts so this work is tracked as first-class architecture, not optional follow-up.
+
+**Architecture intent outcome:**
+- Prevents under-scoped implementation that would miss sub-100ms hot-path targets.
+- Keeps event-sourced correctness while preserving low-latency UX and API scalability.
+
+### 2026-04-29 — Explicit cross-module context sync contract added
+
+**Why this entry exists (explicit):**
+- Linked module selection flows showed loop-prone behavior and authority ambiguity when Explorer, Node Map, and Editor were all connected.
+- Prior local fixes reduced specific regressions but did not provide a scalable contract for upcoming linked domains (Logic Gates, Operations, Messages/Email, KPI surfaces).
+
+**What was defined (explicit):**
+- Added a locked **Cross-Module Sync Architecture Contract** with:
+  - one semantic context plane (L2 canonical context store),
+  - versioned event envelope (`context_id`, `source_module_id`, `sequence`, `timestamp`, `intent_type`),
+  - explicit authority/conflict rules per context type,
+  - intent-vs-projection split as a hard anti-loop invariant,
+  - bounded reconciliation on sequence gaps,
+  - observability and idempotency invariants for hot sync paths.
+
+**Architecture intent outcome:**
+- Moves synchronization from patch-style module coupling to a deterministic, scalable protocol aligned with hot-path latency rules.
+- Establishes a future-proof contract for high-cardinality linked workflows and headless agent orchestration.
 
 ### 2026-04-26 — Frontend module-link latency hardening + full graph migration
 

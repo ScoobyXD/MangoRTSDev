@@ -3,7 +3,7 @@ import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeRecord, NodeRel
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
-import { shouldApplyMapSelection, shouldBroadcastSelection } from "./explorerSync";
+import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
 
 type ExplorerTreeNode = {
   id: string;
@@ -35,6 +35,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const lastMapSelectionRevisionRef = useRef(0);
   const suppressNextExplorerBroadcastRef = useRef(false);
   const previousBroadcastSelectionRef = useRef({ selectedNodeID: "", selectedTreeID: "" });
+  const latestSelectionRef = useRef<ExplorerSelectionState>({ selectedNodeID: "", selectedTreeID: "" });
 
   const TREE_ROW_HEIGHT = 30;
   const TREE_OVERSCAN = 8;
@@ -104,6 +105,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID) ?? treeRows[0], [selectedTreeID, treeRows]);
 
   useEffect(() => {
+    latestSelectionRef.current = { selectedNodeID, selectedTreeID };
+  }, [selectedNodeID, selectedTreeID]);
+
+  useEffect(() => {
     if (!treeViewportRef.current) return;
     const measure = () => {
       const height = treeViewportRef.current?.clientHeight ?? 0;
@@ -171,7 +176,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   useEffect(() => {
     const applyMapSelection = (selectedFromMap: string) => {
-      const current = { selectedNodeID, selectedTreeID };
+      const current = latestSelectionRef.current;
       if (!shouldApplyMapSelection(current, selectedFromMap)) return;
       suppressNextExplorerBroadcastRef.current = true;
       setSelectedNodeID(selectedFromMap);
@@ -210,7 +215,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return () => {
       window.removeEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapSelectionUpdated);
     };
-  }, [companyID, linkedMapFrameID, selectedNodeID, selectedTreeID]);
+  }, [companyID, linkedMapFrameID]);
 
   useEffect(() => {
     const nextSelection = { selectedNodeID, selectedTreeID };
