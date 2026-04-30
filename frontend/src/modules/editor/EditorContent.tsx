@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getNodeTitle, NodeDocBox, NodeInformation, NODE_DOC_MIN_H, NODE_DOC_MIN_W, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, clamp, shouldIgnoreCanvasKeydownTarget } from "../node-map/shared";
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
@@ -35,6 +35,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     edges: { top?: true; right?: true; bottom?: true; left?: true };
   } | null>(null);
   const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState<"editor" | "metadata" | "history">("editor");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const editingTitleRef = useRef<HTMLSpanElement | null>(null);
   const editingTitleDraftRef = useRef("");
@@ -253,10 +254,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         if (cancelled) return;
         setLinkedNodeTitle(getNodeTitle(details.node));
         const nonText = details.information.filter((item) => item.type !== "Text box");
-        setLinkedNodeInfoPreview([
-          `Text boxes: ${projections.length}`,
-          ...nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`),
-        ]);
+        setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
         setLinkedNodeMetadataRows([
           { label: "Node ID", value: details.node.node_id },
           { label: "Created", value: details.node.created_timestamp },
@@ -374,6 +372,14 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     setFocusBoxID("");
   }, [boxes, focusBoxID]);
 
+
+
+  const tabItems = useMemo(() => ([
+    { id: "editor", label: "Editor" },
+    { id: "metadata", label: "Metadata" },
+    { id: "history", label: "History" },
+  ] as const), []);
+
   const createBox = useCallback((initialText: string, x?: number, y?: number) => {
     const baseX = typeof x === "number" ? x : 24 + (boxes.length % 6) * 18;
     const baseY = typeof y === "number" ? y : 56 + (boxes.length % 6) * 14;
@@ -420,66 +426,94 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       {/* Keep title editing available even when title text is blank.
           If this surface disappears, typing can fall through to canvas box-creation. */}
       {linkedNodeID.trim().length > 0 && (
-        <div style={{ position: "absolute", top: 40, left: 10, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
-          <div style={{ display: "grid", gap: 2 }}>
-            <div style={{ pointerEvents: "auto" }}>
-              <div
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (isEditingTitle) return;
-                  editingTitleDraftRef.current = linkedNodeTitle || "new node";
-                  setIsEditingTitle(true);
-                }}
-                onDoubleClick={(event) => event.stopPropagation()}
-                style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, cursor: "text" }}
-              >
-                Node:&nbsp;
-                <span
-                  ref={editingTitleRef}
-                  contentEditable={isEditingTitle}
-                  suppressContentEditableWarning
+        <div style={{ position: "absolute", top: 6, left: 10, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, pointerEvents: "auto" }}>
+            {tabItems.map((tab) => {
+              const selected = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={(event) => { event.stopPropagation(); setActiveTab(tab.id); }}
+                  style={{
+                    border: `1px solid ${selected ? accent : "rgba(3,25,30,0.22)"}`,
+                    background: selected ? "rgba(255,255,255,0.98)" : "rgba(255,255,255,0.86)",
+                    color: "#0d1a1e",
+                    fontSize: 10,
+                    fontWeight: 800,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    padding: "3px 8px",
+                    borderRadius: 4,
+                    cursor: "pointer",
+                  }}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {activeTab === "editor" && (
+            <div style={{ display: "grid", gap: 2 }}>
+              <div style={{ pointerEvents: "auto" }}>
+                <div
                   onClick={(event) => {
-                    // Allow clicks directly on title text to enter edit mode too.
-                    // We still stop propagation to keep canvas interactions isolated.
                     event.stopPropagation();
-                    if (!isEditingTitle) {
-                      editingTitleDraftRef.current = linkedNodeTitle || "new node";
-                      setIsEditingTitle(true);
-                    }
+                    if (isEditingTitle) return;
+                    editingTitleDraftRef.current = linkedNodeTitle || "new node";
+                    setIsEditingTitle(true);
                   }}
-                  onInput={(event) => {
-                    editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
-                  }}
-                  onBlur={() => {
-                    if (!isEditingTitle) return;
-                    const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
-                    void updateNodeTitle(latestTitle);
-                    setIsEditingTitle(false);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, cursor: "text" }}
+                >
+                  Node:&nbsp;
+                  <span
+                    ref={editingTitleRef}
+                    contentEditable={isEditingTitle}
+                    suppressContentEditableWarning
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (!isEditingTitle) {
+                        editingTitleDraftRef.current = linkedNodeTitle || "new node";
+                        setIsEditingTitle(true);
+                      }
+                    }}
+                    onInput={(event) => {
+                      editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
+                    }}
+                    onBlur={() => {
+                      if (!isEditingTitle) return;
                       const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
                       void updateNodeTitle(latestTitle);
                       setIsEditingTitle(false);
-                    }
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      if (editingTitleRef.current) editingTitleRef.current.textContent = linkedNodeTitle;
-                      setIsEditingTitle(false);
-                    }
-                  }}
-                  style={{ outline: "none" }}
-                >
-                  {linkedNodeTitle || "\u00A0"}
-                </span>
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
+                        void updateNodeTitle(latestTitle);
+                        setIsEditingTitle(false);
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        if (editingTitleRef.current) editingTitleRef.current.textContent = linkedNodeTitle;
+                        setIsEditingTitle(false);
+                      }
+                    }}
+                    style={{ outline: "none" }}
+                  >
+                    {linkedNodeTitle || "\u00A0"}
+                  </span>
+                </div>
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.7 }}>
+                {linkedNodeInfoPreview.length > 0 ? linkedNodeInfoPreview.join(" • ") : "No non-text node information yet"}
               </div>
             </div>
-            <div style={{ fontSize: 10, opacity: 0.7 }}>
-              {linkedNodeInfoPreview.length > 0 ? linkedNodeInfoPreview.join(" • ") : "No non-text node information yet"}
-            </div>
-          </div>
-          {linkedNodeMetadataRows.length > 0 && (
+          )}
+
+          {activeTab === "metadata" && linkedNodeMetadataRows.length > 0 && (
             <section style={{ pointerEvents: "auto", display: "grid", gap: 6, maxWidth: 520 }}>
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>Metadata</div>
               <div style={{ display: "grid", gap: 4 }}>
@@ -492,7 +526,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
               </div>
             </section>
           )}
-          {linkedNodeHistoryRows.length > 0 && (
+
+          {activeTab === "history" && linkedNodeHistoryRows.length > 0 && (
             <section style={{ pointerEvents: "auto", display: "grid", gap: 6, maxWidth: 640 }}>
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>History</div>
               <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(3,25,30,0.14)", borderRadius: 6, padding: "6px 8px 6px 22px" }}>
