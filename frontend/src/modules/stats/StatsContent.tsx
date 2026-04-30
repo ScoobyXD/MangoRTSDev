@@ -135,7 +135,7 @@ export const StatsContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   return (
     <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateRows: "auto 1fr", background: "#ffffff", color: "#0f1f23" }}>
-      <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(3,25,30,0.14)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>{title}</div>
+      <div style={{ padding: "12px 10px 8px", borderBottom: "1px solid rgba(3,25,30,0.14)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>{title}</div>
       <div style={{ overflow: "auto", padding: 12, display: "grid", gap: 8, alignContent: "start" }}>
         {statsRows.length === 0 && !error && <div style={{ fontSize: 12, opacity: 0.72 }}>Select a linked context source to view stats.</div>}
         {statsRows.map((row) => (
