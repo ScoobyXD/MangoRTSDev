@@ -4,8 +4,9 @@ import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_N
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
+import type { NodeInformation } from "../node-map/shared";
 
-// Editor module: node-linked read/write metadata surface without text box editing.
+// Editor module: node-linked document canvas with a single Google-Doc-like editable surface.
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
@@ -16,11 +17,14 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
   const [linkedNodeMetadataRows, setLinkedNodeMetadataRows] = useState<Array<{ label: string; value: string }>>([]);
   const [linkedNodeHistoryRows, setLinkedNodeHistoryRows] = useState<string[]>([]);
+  const [documentText, setDocumentText] = useState("");
+  const [documentInformationID, setDocumentInformationID] = useState("");
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<"editor" | "metadata" | "history">("editor");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const editingTitleRef = useRef<HTMLSpanElement | null>(null);
   const editingTitleDraftRef = useRef("");
+  const editorDocRef = useRef<HTMLDivElement | null>(null);
   const lastSelectionRevisionRef = useRef(0);
 
   const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
@@ -31,6 +35,30 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
   }, [apiBase]);
+
+  const saveDocument = useCallback(async (nextText: string) => {
+    if (!linkedNodeID) return;
+    const stableInformationID = documentInformationID
+      || (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0").slice(0, 12)}`);
+    setError("");
+    try {
+      await requestJSON<NodeInformation>(`/v1/nodes/${linkedNodeID}/information`, {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyID,
+          type: "Text box",
+          information: nextText,
+          information_id: stableInformationID,
+        }),
+      });
+      setDocumentInformationID(stableInformationID);
+      invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_save_document");
+    }
+  }, [apiBase, companyID, documentInformationID, linkedNodeID, requestJSON]);
 
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
@@ -94,6 +122,19 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     selection.removeAllRanges();
     selection.addRange(range);
   }, [isEditingTitle]);
+
+  useEffect(() => {
+    if (activeTab !== "editor" || !editorDocRef.current) return;
+    const element = editorDocRef.current;
+    element.focus();
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(documentText.length > 0);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, [activeTab, linkedNodeID, documentText]);
 
   useEffect(() => {
     const refresh = () => setLinkedMapWidgetID(readLinkedMapWidgetID());
@@ -169,6 +210,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setLinkedNodeInfoPreview([]);
       setLinkedNodeMetadataRows([]);
       setLinkedNodeHistoryRows([]);
+      setDocumentText("");
+      setDocumentInformationID("");
       return;
     }
     (async () => {
@@ -194,6 +237,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           ...details.information.slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`),
         ];
         setLinkedNodeHistoryRows(historyRows);
+        const first = projections[0];
+        setDocumentText(first?.information ?? "");
+        setDocumentInformationID(first?.information_id ?? "");
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load linked node information");
       }
@@ -208,9 +254,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   ] as const), []);
 
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%", background: "#ffffff", color: "#0d1a1e", overflow: "auto", userSelect: "text" }}>
+    <div style={{ position: "relative", width: "100%", height: "100%", background: "#ffffff", color: "#0d1a1e", overflow: "hidden", userSelect: "text" }}>
       {linkedNodeID.trim().length > 0 && (
-        <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8 }}>
+        <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 2 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, paddingLeft: 106 }}>
             {tabItems.map((tab) => {
               const selected = activeTab === tab.id;
@@ -292,7 +338,29 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           )}
         </div>
       )}
-      {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020" }}>{error}</div>}
+
+      {linkedNodeID.trim().length > 0 && activeTab === "editor" && (
+        <div style={{ position: "absolute", inset: 0, padding: "86px 24px 24px" }}>
+          <div
+            ref={editorDocRef}
+            contentEditable
+            suppressContentEditableWarning
+            spellCheck
+            onInput={(event) => setDocumentText(event.currentTarget.textContent ?? "")}
+            onBlur={(event) => { void saveDocument(event.currentTarget.textContent ?? ""); }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+            }}
+            style={{ minHeight: "100%", outline: "none", fontSize: 15, lineHeight: 1.55, fontFamily: "'Manrope', 'Helvetica Neue', sans-serif", whiteSpace: "pre-wrap", caretColor: accent }}
+          >
+            {documentText}
+          </div>
+        </div>
+      )}
+      {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020", zIndex: 3 }}>{error}</div>}
     </div>
   );
 };
