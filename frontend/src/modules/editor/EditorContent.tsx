@@ -426,7 +426,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       {/* Keep title editing available even when title text is blank.
           If this surface disappears, typing can fall through to canvas box-creation. */}
       {linkedNodeID.trim().length > 0 && (
-        <div style={{ position: "absolute", top: 6, left: 10, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
+        <div style={{ position: "absolute", top: 4, left: 116, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, pointerEvents: "auto" }}>
             {tabItems.map((tab) => {
               const selected = activeTab === tab.id;
@@ -443,7 +443,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                     fontWeight: 800,
                     letterSpacing: "0.1em",
                     textTransform: "uppercase",
-                    padding: "3px 8px",
+                    padding: "4px 10px",
                     borderRadius: 4,
                     cursor: "pointer",
                   }}
