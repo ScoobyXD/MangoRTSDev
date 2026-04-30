@@ -379,7 +379,7 @@ export function useNodeMapDeleteKeyboardControl(input: {
       const relationshipIDs = Array.from(input.selectedRelationshipIDs);
       const nodeIDs = input.selectedNodeIDs.size > 0 ? Array.from(input.selectedNodeIDs) : (input.selectedNodeID ? [input.selectedNodeID] : []);
       const hasSelection = relationshipIDs.length > 0 || nodeIDs.length > 0;
-      if (!hasSelection || (!input.canvasActive && relationshipIDs.length === 0)) return;
+      if (!hasSelection) return;
       event.preventDefault();
       event.stopPropagation();
       input.setConfirmDelete({ nodeIDs, relationshipIDs });
