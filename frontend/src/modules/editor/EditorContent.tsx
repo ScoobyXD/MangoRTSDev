@@ -17,7 +17,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
   const [linkedNodeMetadataRows, setLinkedNodeMetadataRows] = useState<Array<{ label: string; value: string }>>([]);
   const [linkedNodeHistoryRows, setLinkedNodeHistoryRows] = useState<string[]>([]);
-  const [documentText, setDocumentText] = useState("");
   const [documentInformationID, setDocumentInformationID] = useState("");
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<"editor" | "metadata" | "history">("editor");
@@ -25,6 +24,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const editingTitleRef = useRef<HTMLSpanElement | null>(null);
   const editingTitleDraftRef = useRef("");
   const editorDocRef = useRef<HTMLDivElement | null>(null);
+  const documentDraftRef = useRef("");
   const lastSelectionRevisionRef = useRef(0);
 
   const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
@@ -124,17 +124,17 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [isEditingTitle]);
 
   useEffect(() => {
-    if (activeTab !== "editor" || !editorDocRef.current) return;
+    if (!editorDocRef.current) return;
     const element = editorDocRef.current;
     element.focus();
     const selection = window.getSelection();
     if (!selection) return;
     const range = document.createRange();
     range.selectNodeContents(element);
-    range.collapse(documentText.length > 0);
+    range.collapse((editorDocRef.current?.textContent ?? "").length > 0);
     selection.removeAllRanges();
     selection.addRange(range);
-  }, [activeTab, linkedNodeID, documentText]);
+  }, [linkedNodeID]);
 
   useEffect(() => {
     const refresh = () => setLinkedMapWidgetID(readLinkedMapWidgetID());
@@ -210,8 +210,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setLinkedNodeInfoPreview([]);
       setLinkedNodeMetadataRows([]);
       setLinkedNodeHistoryRows([]);
-      setDocumentText("");
+      documentDraftRef.current = "";
       setDocumentInformationID("");
+      if (editorDocRef.current) editorDocRef.current.textContent = "";
       return;
     }
     (async () => {
@@ -238,8 +239,10 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         ];
         setLinkedNodeHistoryRows(historyRows);
         const first = projections[0];
-        setDocumentText(first?.information ?? "");
+        const initialDocument = first?.information ?? "";
+        documentDraftRef.current = initialDocument;
         setDocumentInformationID(first?.information_id ?? "");
+        if (editorDocRef.current && editorDocRef.current.textContent !== initialDocument) editorDocRef.current.textContent = initialDocument;
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load linked node information");
       }
@@ -339,25 +342,27 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         </div>
       )}
 
-      {linkedNodeID.trim().length > 0 && activeTab === "editor" && (
+      {linkedNodeID.trim().length > 0 && (
         <div style={{ position: "absolute", inset: 0, padding: "86px 24px 24px" }}>
           <div
             ref={editorDocRef}
             contentEditable
             suppressContentEditableWarning
             spellCheck
-            onInput={(event) => setDocumentText(event.currentTarget.textContent ?? "")}
-            onBlur={(event) => { void saveDocument(event.currentTarget.textContent ?? ""); }}
+            onInput={(event) => { documentDraftRef.current = event.currentTarget.textContent ?? ""; }}
+            onBlur={(event) => {
+              const nextText = event.currentTarget.textContent ?? "";
+              documentDraftRef.current = nextText;
+              void saveDocument(nextText);
+            }}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.preventDefault();
                 event.currentTarget.blur();
               }
             }}
-            style={{ minHeight: "100%", outline: "none", fontSize: 15, lineHeight: 1.55, fontFamily: "'Manrope', 'Helvetica Neue', sans-serif", whiteSpace: "pre-wrap", caretColor: accent }}
-          >
-            {documentText}
-          </div>
+            style={{ minHeight: "100%", outline: "none", fontSize: 15, lineHeight: 1.55, fontFamily: "'Manrope', 'Helvetica Neue', sans-serif", whiteSpace: "pre-wrap", caretColor: accent, cursor: "text" }}
+          />
         </div>
       )}
       {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020", zIndex: 3 }}>{error}</div>}
