@@ -1198,7 +1198,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           overflow: "hidden",
           height: "100%",
           width: "100%",
-          backgroundColor: "rgba(255,255,255,0.78)",
+          backgroundColor: "transparent",
         }}
         onContextMenu={(event) => {
           event.preventDefault();
