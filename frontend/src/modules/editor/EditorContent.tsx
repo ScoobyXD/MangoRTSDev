@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { getNodeTitle, NodeDocBox, NodeInformation, NODE_DOC_MIN_H, NODE_DOC_MIN_W, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, clamp } from "../node-map/shared";
+import { getNodeTitle, NodeDocBox, NodeInformation, NODE_DOC_MIN_H, NODE_DOC_MIN_W, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, clamp, shouldIgnoreCanvasKeydownTarget } from "../node-map/shared";
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
+import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 
 type LocalBoxLayout = Record<string, { x: number; y: number; w: number; h: number }>;
 
@@ -197,10 +198,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       refresh();
     };
     const onMapStateUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number }>).detail;
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
       if (!detail || detail.mapWidgetID !== linkedMapWidgetID) return;
-      const revision = typeof detail.revision === "number" ? detail.revision : 0;
-      if (revision > 0 && revision <= lastSelectionRevisionRef.current) return;
+      const revision = readIncomingSequence(detail);
+      if (revision > 0 && !isNewerSequence(lastSelectionRevisionRef.current, revision)) return;
+      if (revision > 0 && hasSequenceGap(lastSelectionRevisionRef.current, revision)) refresh();
       if (revision > 0) lastSelectionRevisionRef.current = revision;
       if (typeof detail.selectedNodeID === "string") {
         setLinkedNodeID(detail.selectedNodeID);
@@ -400,8 +402,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       style={{ position: "relative", width: "100%", height: "100%", background: "#ffffff", color: "#0d1a1e", overflow: "hidden" }}
       tabIndex={0}
       onKeyDown={(event) => {
-        const eventTarget = event.target as HTMLElement | null;
-        if (eventTarget?.isContentEditable || eventTarget?.closest("[contenteditable='true'], textarea, input")) return;
+        if (shouldIgnoreCanvasKeydownTarget(event.target as HTMLElement | null)) return;
         if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
         const current = boxes.find((item) => item.local_id === activeBoxID);
         if (current) return;

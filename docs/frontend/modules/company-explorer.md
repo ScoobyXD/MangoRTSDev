@@ -132,6 +132,11 @@ Latency hardening update (2026-04-26):
 - Explorer now also listens to semantic Node Map selection events and linked map-state updates, so selecting a node in Node Map updates Explorer row selection (`node-<id>`) and keeps linked Editor context in sync bidirectionally.
 - Explorer suppresses immediate re-broadcast when applying map-originated selection updates to prevent context echo loops that can cause alternating node selection churn and repeated details GETs.
 
+Selection sync hardening update (2026-04-29):
+- Explorer->linked-target context broadcast is now semantic-change scoped (publish only when selected node/tree actually changes).
+- Map-originated selection echoes are treated as no-op when Explorer already holds the same selected node/tree, which prevents "every other click" suppression churn.
+- This keeps anti-loop behavior while protecting hot-path click reliability for linked Explorer<->Node Map flows.
+
 ---
 
 ## 6) Data/backend stance

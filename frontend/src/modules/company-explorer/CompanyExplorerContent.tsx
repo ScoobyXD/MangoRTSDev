@@ -3,6 +3,8 @@ import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeRecord, NodeRel
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
+import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
+import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 
 type ExplorerTreeNode = {
   id: string;
@@ -33,6 +35,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [linkedMapFrameID, setLinkedMapFrameID] = useState("");
   const lastMapSelectionRevisionRef = useRef(0);
   const suppressNextExplorerBroadcastRef = useRef(false);
+  const previousBroadcastSelectionRef = useRef({ selectedNodeID: "", selectedTreeID: "" });
+  const latestSelectionRef = useRef<ExplorerSelectionState>({ selectedNodeID: "", selectedTreeID: "" });
+  const explorerContextSequenceRef = useRef(0);
 
   const TREE_ROW_HEIGHT = 30;
   const TREE_OVERSCAN = 8;
@@ -102,6 +107,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID) ?? treeRows[0], [selectedTreeID, treeRows]);
 
   useEffect(() => {
+    latestSelectionRef.current = { selectedNodeID, selectedTreeID };
+  }, [selectedNodeID, selectedTreeID]);
+
+  useEffect(() => {
     if (!treeViewportRef.current) return;
     const measure = () => {
       const height = treeViewportRef.current?.clientHeight ?? 0;
@@ -169,7 +178,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   useEffect(() => {
     const applyMapSelection = (selectedFromMap: string) => {
-      if (!selectedFromMap) return;
+      const current = latestSelectionRef.current;
+      if (!shouldApplyMapSelection(current, selectedFromMap)) return;
       suppressNextExplorerBroadcastRef.current = true;
       setSelectedNodeID(selectedFromMap);
       setSelectedTreeID(`node-${selectedFromMap}`);
@@ -195,10 +205,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     };
     readFromMapState();
     const onMapSelectionUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number }>).detail;
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
       if (!detail || detail.mapWidgetID !== linkedMapFrameID) return;
-      const revision = typeof detail.revision === "number" ? detail.revision : 0;
-      if (revision > 0 && revision <= lastMapSelectionRevisionRef.current) return;
+      const revision = readIncomingSequence(detail);
+      if (revision > 0 && !isNewerSequence(lastMapSelectionRevisionRef.current, revision)) return;
+      if (revision > 0 && hasSequenceGap(lastMapSelectionRevisionRef.current, revision)) readFromMapState();
       if (revision > 0) lastMapSelectionRevisionRef.current = revision;
       if (typeof detail.selectedNodeID !== "string") return;
       applyMapSelection(detail.selectedNodeID);
@@ -210,6 +221,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, [companyID, linkedMapFrameID]);
 
   useEffect(() => {
+    const nextSelection = { selectedNodeID, selectedTreeID };
+    if (!shouldBroadcastSelection(previousBroadcastSelectionRef.current, nextSelection)) return;
+    previousBroadcastSelectionRef.current = nextSelection;
+
     if (suppressNextExplorerBroadcastRef.current) {
       suppressNextExplorerBroadcastRef.current = false;
       return;
@@ -219,15 +234,23 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       const targetIDs = new Set(resolveDirectLinkedTargets({ sourceFrameID: scope, edges: graph }));
       if (targetIDs.size === 0) return;
 
-      const payload = {
-        sourceExplorerID: scope,
-        selectedNodeID,
-        selectedTreeID,
-        scopeLevel: selectedTree?.scopeLevel ?? 0,
-        selectedLabel: selectedTree?.label ?? "",
-        ts: Date.now(),
-      };
+      explorerContextSequenceRef.current += 1;
       for (const targetID of targetIDs) {
+        const payload = {
+          sourceExplorerID: scope,
+          selectedNodeID,
+          selectedTreeID,
+          scopeLevel: selectedTree?.scopeLevel ?? 0,
+          selectedLabel: selectedTree?.label ?? "",
+          ts: Date.now(),
+          envelope: {
+            context_id: `explorer_navigation_context:${companyID}:${targetID}`,
+            source_module_id: scope,
+            sequence: explorerContextSequenceRef.current,
+            timestamp: new Date().toISOString(),
+            user_action_type: "explorer_selection_changed",
+          } satisfies ContextMutationEnvelope,
+        };
         if (!targetID) continue;
         const key = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${targetID}`;
         localStorage.setItem(key, JSON.stringify(payload));

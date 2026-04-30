@@ -113,6 +113,9 @@ Use this checklist format and keep it complete.
 - [x] `frontend/src/modules/node-map/relationshipDeleteSummary.test.ts`
   - success/failure summarization for batched relationship-line delete requests
   - preserves per-relationship failure reason reporting for visibility
+- [x] `tests/frontend/modules/node-map/editorCanvasKeydownRouting.test.ts`
+  - editor canvas key-routing guard ignores key events from contentEditable/input/textarea surfaces
+  - non-editable canvas targets continue through normal canvas key handling
 - [x] `frontend/src/app/frameLinking.test.ts`
   - context-menu link label fallback (`No other module selected`) when only one module is in active pool
   - graph-based pairwise link-plan generation for multi-module selection pools
@@ -126,11 +129,23 @@ Use this checklist format and keep it complete.
   - frame-link edge sanitization canonicalizes and deduplicates undirected graph edges
   - linked target resolution by kind supports traversal through intermediary graph hops
   - direct-neighbor resolution returns adjacency-only targets for explorer fanout
+- [x] `tests/frontend/modules/company-explorer/explorerSync.test.ts`
+- [x] `tests/frontend/modules/contextSyncContract.test.ts`
+  - stale event rejection when incoming sequence is older than last applied
+  - duplicate event idempotency guard for repeated delivery
+  - explicit sequence gap detection used to trigger scoped reconciliation
+  - envelope-first sequence parsing with legacy `revision` fallback for migration safety
+  - inline comments describe intent-vs-projection behavior in junior-friendly terms
+  - ignores map-originated no-op selection echoes so suppression latches do not eat subsequent Explorer clicks
+  - applies map selections only when Explorer semantic selection actually changes
+  - scopes Explorer broadcast emission to semantic selection changes (node/tree)
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
   - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)
   - node creation contract uses canonical `title` payload semantics only (legacy `header` fallback removed)
   - node rename contract via `PUT /v1/nodes/{node_id}` persists updated title
+  - workspace context event write path persists projection updates (`POST /v1/workspace/context-events` -> `GET /v1/workspace/context-projections`)
+  - ordered context delta feed returns persisted event rows after sequence (`GET /v1/workspace/context-deltas?after_sequence=`)
 
 ### Integration tests
 - [ ] None committed yet (to be added)
