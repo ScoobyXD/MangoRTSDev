@@ -474,7 +474,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         zIndex: nested ? 200 : (isDragging ? 100 : 1),
         color: theme.text,
         boxShadow: isSelected
-          ? "0 8px 20px rgba(2,22,46,0.24)"
+          ? `0 0 0 2px ${frame.accent}, 0 8px 20px rgba(2,22,46,0.24)`
           : nested
             ? "0 3px 16px rgba(0,0,0,0.18)"
             : undefined,
