@@ -310,6 +310,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                 </span>
               </div>
               {linkedNodeInfoPreview.length > 0 && <div style={{ fontSize: 10, opacity: 0.7 }}>{linkedNodeInfoPreview.join(" • ")}</div>}
+              <div style={{ fontSize: 11, opacity: 0.75 }}>Text box editing has been removed from this module.</div>
             </div>
           )}
 

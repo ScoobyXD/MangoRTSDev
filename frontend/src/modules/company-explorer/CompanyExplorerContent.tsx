@@ -26,8 +26,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [selectedNodeID, setSelectedNodeID] = useState("");
   const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["folder-root", "folder-nodes", "folder-notes", "folder-logic"]));
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
   const treeViewportRef = useRef<HTMLDivElement | null>(null);
   const [treeScrollTop, setTreeScrollTop] = useState(0);
   const [treeViewportHeight, setTreeViewportHeight] = useState(480);
@@ -45,17 +43,14 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLoading(true);
       try {
         await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
         if (cancelled) return;
         const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
         setNodes(snapshot.nodes ?? []);
         setRelationships(snapshot.relationships ?? []);
-      } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : "failed_to_load_nodes");
-      } finally {
-        if (!cancelled) setLoading(false);
+      } catch {
+        // ignore initial load failures; subscription updates can still hydrate state later
       }
     })();
     return () => { cancelled = true; };
@@ -262,11 +257,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, [companyID, scope, selectedNodeID, selectedTreeID, selectedTree, linkRevision]);
 
   return (
-    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(240px, 1.2fr) minmax(280px, 1fr)", background: "#ffffff", color: "#0f1f23" }}>
+    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(240px, 1fr)", background: "#ffffff", color: "#0f1f23", overflow: "hidden", minWidth: 0 }}>
       <div
+        className="company-explorer-scroll"
         ref={treeViewportRef}
         onScroll={(event) => setTreeScrollTop((event.currentTarget as HTMLDivElement).scrollTop)}
-        style={{ borderRight: "1px solid rgba(3,25,30,0.14)", overflow: "auto" }}
+        style={{ borderRight: "1px solid rgba(3,25,30,0.14)", overflow: "auto", minWidth: 0 }}
       >
         <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(3,25,30,0.14)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Company Explorer</div>
         <div style={{ height: virtualizedTree.topSpacer }} />
@@ -330,23 +326,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         <div style={{ height: virtualizedTree.bottomSpacer }} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateRows: "auto 1fr", overflow: "hidden" }}>
-        <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(3,25,30,0.14)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Selection</div>
-        <div style={{ overflow: "auto", padding: 12, display: "grid", gap: 10, alignContent: "start" }}>
-          <div style={{ fontSize: 13, fontWeight: 700 }}>{selectedTree?.label ?? "Company"}</div>
-          {loading && <div style={{ fontSize: 12, opacity: 0.72 }}>Loading...</div>}
-          {!loading && selectedNodeID && (
-            <>
-              <div style={{ fontSize: 12, opacity: 0.82 }}>Node ID: {selectedNodeID}</div>
-              <div style={{ fontSize: 12, opacity: 0.82 }}>Linked modules can consume this selection via explorer context events.</div>
-            </>
-          )}
-          {!selectedNodeID && !loading && (
-            <div style={{ fontSize: 12, opacity: 0.82 }}>Select a node-level file in the tree to propagate selection to linked modules.</div>
-          )}
-          {error && <div style={{ fontSize: 11, color: "#b00020" }}>{error}</div>}
-        </div>
-      </div>
     </div>
   );
 };
