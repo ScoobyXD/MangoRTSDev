@@ -1273,12 +1273,12 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: "0 0",
             backgroundImage: `
-              linear-gradient(rgba(17,17,17,0.16), rgba(17,17,17,0.16)),
-              linear-gradient(rgba(17,17,17,0.16), rgba(17,17,17,0.16))
+              linear-gradient(to right, transparent calc(50% - 3px), rgba(17,17,17,0.12) calc(50% - 3px), rgba(17,17,17,0.12) calc(50% + 3px), transparent calc(50% + 3px)),
+              linear-gradient(to bottom, transparent calc(50% - 3px), rgba(17,17,17,0.12) calc(50% - 3px), rgba(17,17,17,0.12) calc(50% + 3px), transparent calc(50% + 3px))
             `,
-            backgroundSize: `7px 1px, 1px 7px`,
+            backgroundSize: `${MINI_GRID}px ${MINI_GRID}px`,
             backgroundRepeat: "repeat",
-            backgroundPosition: `${MINI_GRID / 2 - 3.5}px ${MINI_GRID / 2}px, ${MINI_GRID / 2}px ${MINI_GRID / 2 - 3.5}px`,
+            backgroundPosition: "0 0",
           }}
         >
           <canvas
