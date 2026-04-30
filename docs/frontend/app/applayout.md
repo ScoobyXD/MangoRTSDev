@@ -79,3 +79,16 @@ The app layout keeps compatibility for persisted payloads:
 - Legacy compatibility key persistence (`node-doc-widget-links-v1`, `company-explorer-widget-links-v1`) was removed from app-layer write paths to eliminate drag/resize-induced link churn.
 - Frame metadata for graph consumers is now persisted separately as `frame-module-registry-v1` (`{ frameID -> { kind } }`) and only rewritten when membership/kind signature changes.
 - This isolates high-frequency geometry updates from cross-module linking state propagation.
+
+
+## Frame delete confirmation hardening (2026-04-30)
+
+- Frame deletion is now confirmation-gated in `applayout` for both entry paths:
+  - keyboard `Delete` / `Backspace` when frame selection exists
+  - frame right-click menu `Delete`
+- Deletion now follows an explicit two-step flow:
+  1. collect current target frame IDs (single or multi-select)
+  2. open confirmation modal (`Are you sure you want to delete N frame(s)?`)
+  3. only remove frames after explicit `Yes`
+- This aligns frame deletion safety with existing Node Map delete-confirm behavior, reducing accidental destructive actions on hot interaction paths.
+- Confirmation dialog copy includes Undo guidance (`Ctrl/Cmd + Z`) so recovery remains obvious for rapid workflows.

@@ -595,6 +595,7 @@ const App: React.FC = () => {
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [frameRightClickMenu, setFrameRightClickMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [frameDeleteConfirmation, setFrameDeleteConfirmation] = useState<{ frameIDs: string[] } | null>(null);
   const [moduleTypeMenu, setModuleTypeMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number; gridX: number; gridY: number } | null>(null);
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number } | null>(null);
@@ -840,13 +841,26 @@ const App: React.FC = () => {
     persistFrameRegistry(registry);
   }, [frames]);
 
+  const confirmDeleteFrameSelection = useCallback((frameIDs: string[]) => {
+    if (frameIDs.length === 0) return;
+    // Keep IDs unique so the confirmation copy and delete result stay deterministic.
+    const uniqueFrameIDs = Array.from(new Set(frameIDs));
+    setFrameDeleteConfirmation({ frameIDs: uniqueFrameIDs });
+  }, []);
+
   const deleteSelectedFrame = useCallback(() => {
     const ids = selectedFrameIds.size > 0 ? selectedFrameIds : (selectedFrameId ? new Set([selectedFrameId]) : new Set<string>());
     if (ids.size === 0) return;
-    updateActiveFrames((prev) => prev.filter((w) => !ids.has(w.id)));
+    confirmDeleteFrameSelection(Array.from(ids));
+  }, [confirmDeleteFrameSelection, selectedFrameId, selectedFrameIds]);
+
+  const applyConfirmedFrameDelete = useCallback((frameIDs: string[]) => {
+    if (frameIDs.length === 0) return;
+    const frameIDSet = new Set(frameIDs);
+    updateActiveFrames((prev) => prev.filter((frame) => !frameIDSet.has(frame.id)));
     setSelectedFrameId(null);
     setSelectedFrameIds(new Set());
-  }, [selectedFrameId, selectedFrameIds, updateActiveFrames]);
+  }, [updateActiveFrames]);
 
   const copySelectedFrame = useCallback(() => {
     if (!selectedFrameId) return;
@@ -1345,8 +1359,25 @@ const App: React.FC = () => {
               <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} /> {theme.toUpperCase()}
             </button>
           ))}
-          <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { updateActiveFrames((prev) => prev.filter((w) => w.id !== frameRightClickMenu.id)); closeMenus(); }} {...hoverHandlers}>Delete</button>
+          <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { confirmDeleteFrameSelection([frameRightClickMenu.id]); closeMenus(); }} {...hoverHandlers}>Delete</button>
         </FrameRightClickMenu>
+      )}
+
+      {frameDeleteConfirmation && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
+          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700 }}>
+              Are you sure you want to delete {frameDeleteConfirmation.frameIDs.length} frame{frameDeleteConfirmation.frameIDs.length === 1 ? "" : "s"}?
+            </div>
+            <div style={{ fontSize: 11, lineHeight: 1.35, color: "#2e2e2e" }}>
+              This removes the selected frame from the active view immediately. Use Undo (Ctrl/Cmd + Z) if this was accidental.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button onClick={() => { applyConfirmedFrameDelete(frameDeleteConfirmation.frameIDs); setFrameDeleteConfirmation(null); }} style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#d8fff6", cursor: "pointer", fontWeight: 700 }}>Yes</button>
+              <button onClick={() => setFrameDeleteConfirmation(null)} style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {moduleTypeMenu && (

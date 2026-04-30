@@ -59,7 +59,7 @@ Use this checklist before editing features so existing behavior is not accidenta
 - Add new module via `+` in header.
 - Duplicate module via module context menu.
 - Delete module via module context menu.
-- Delete selected module via keyboard Delete/Backspace.
+- Delete selected module via keyboard Delete/Backspace (confirmation required before frame removal).
 
 ### 3) Edit Mode + Manipulation
 - Edit mode toggle available in header and canvas context menu.
@@ -144,7 +144,7 @@ newSize = origSize - shift
 ## Context Menus
 
 Menus use `FloatingMenu` with outside-click handling:
-1. **Widget menu** (right-click widget): Duplicate, Delete — always available
+1. **Widget menu** (right-click widget): Duplicate, Delete (with confirmation) — always available
 2. **Module type menu** (single-click module name tag): pick any module type from `WIDGET_LIBRARY`
 3. **Canvas menu** (right-click empty space): Toggle Edit Mode (shows current ON/OFF state), Canvas Color, Plus Color
 4. **Header menu** (right-click top header bar): Header Bar color, Header Text color, Tab Box color, Tab Text color
