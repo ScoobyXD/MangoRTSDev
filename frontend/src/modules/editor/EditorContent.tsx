@@ -258,6 +258,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%", background: "#ffffff", color: "#0d1a1e", overflow: "hidden", userSelect: "text" }}>
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 0, borderBottom: "1px solid rgba(3,25,30,0.14)", transform: "translateY(8px)", pointerEvents: "none", zIndex: 1 }} />
+      <div style={{ position: "absolute", top: 0, left: 0, right: 9, height: 6, borderBottom: "1px solid rgba(3,25,30,0.14)", transform: "translateY(8px)", pointerEvents: "none", zIndex: 1 }} />
       {linkedNodeID.trim().length > 0 && (
         <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 2 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, paddingLeft: 106 }}>
