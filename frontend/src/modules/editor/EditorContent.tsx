@@ -257,7 +257,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   ] as const), []);
 
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%", background: "#ffffff", color: "#0d1a1e", overflow: "hidden", userSelect: "text" }}>
+    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateRows: "auto 1fr", background: "#ffffff", color: "#0d1a1e", overflow: "hidden", userSelect: "text" }}>
+      <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(3,25,30,0.14)", minHeight: 0 }} />
+      <div style={{ position: "relative", minHeight: 0 }}>
       {linkedNodeID.trim().length > 0 && (
         <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 2 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, paddingLeft: 106 }}>
@@ -366,6 +368,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         </div>
       )}
       {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020", zIndex: 3 }}>{error}</div>}
+      </div>
     </div>
   );
 };
