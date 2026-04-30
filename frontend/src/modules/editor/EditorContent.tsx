@@ -465,9 +465,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                     setIsEditingTitle(true);
                   }}
                   onDoubleClick={(event) => event.stopPropagation()}
-                  style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, cursor: "text" }}
+                  style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.12em", color: accent, cursor: "text" }}
                 >
-                  Node:&nbsp;
+                  <span style={{ textTransform: "uppercase" }}>Node:</span>&nbsp;
                   <span
                     ref={editingTitleRef}
                     contentEditable={isEditingTitle}
