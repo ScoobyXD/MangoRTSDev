@@ -15,7 +15,7 @@ export interface LinkPlan {
 }
 
 export interface FrameDeleteConfirmationState {
-  frameID: string;
+  frameIDs: string[];
   frameTitle: string;
 }
 
@@ -89,10 +89,10 @@ export function buildLinkModulesLabel(pool: FrameDataModel[], linkPlan: LinkPlan
 }
 
 // Build stable frame-delete confirmation copy so destructive prompts are always predictable.
-export function buildFrameDeleteConfirmationState(input: { frameID: string; frameTitle: string }): FrameDeleteConfirmationState {
+export function buildFrameDeleteConfirmationState(input: { frameIDs: string[]; frameTitle: string }): FrameDeleteConfirmationState {
   const trimmedTitle = input.frameTitle.trim();
   return {
-    frameID: input.frameID,
+    frameIDs: input.frameIDs,
     frameTitle: trimmedTitle.length > 0 ? trimmedTitle : "Untitled frame",
   };
 }

@@ -756,11 +756,14 @@ const App: React.FC = () => {
   }, [gridCols, gridRows, updateActiveFrames]);
 
   const closeMenus = useCallback(() => { setFrameRightClickMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); }, []);
-  const requestFrameDelete = useCallback((frameID: string) => {
-    const frame = frames.find((item) => item.id === frameID);
-    if (!frame) return;
+  const requestFrameDelete = useCallback((frameIDs: string[]) => {
+    if (frameIDs.length === 0) return;
+    const unique = Array.from(new Set(frameIDs));
+    const firstFrame = frames.find((item) => item.id === unique[0]);
+    if (!firstFrame) return;
+    const frameTitle = unique.length === 1 ? firstFrame.title : `${unique.length} selected frames`;
     // Keep delete-modal copy stable and ready before the context menu closes.
-    setFrameDeleteConfirmation(buildFrameDeleteConfirmationState({ frameID, frameTitle: frame.title }));
+    setFrameDeleteConfirmation(buildFrameDeleteConfirmationState({ frameIDs: unique, frameTitle }));
   }, [frames]);
 
   const linkPool = useMemo(() => buildLinkPool({
@@ -850,10 +853,8 @@ const App: React.FC = () => {
   const deleteSelectedFrame = useCallback(() => {
     const ids = selectedFrameIds.size > 0 ? selectedFrameIds : (selectedFrameId ? new Set([selectedFrameId]) : new Set<string>());
     if (ids.size === 0) return;
-    updateActiveFrames((prev) => prev.filter((w) => !ids.has(w.id)));
-    setSelectedFrameId(null);
-    setSelectedFrameIds(new Set());
-  }, [selectedFrameId, selectedFrameIds, updateActiveFrames]);
+    requestFrameDelete(Array.from(ids));
+  }, [requestFrameDelete, selectedFrameId, selectedFrameIds]);
 
   const copySelectedFrame = useCallback(() => {
     if (!selectedFrameId) return;
@@ -1352,7 +1353,7 @@ const App: React.FC = () => {
               <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} /> {theme.toUpperCase()}
             </button>
           ))}
-          <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { requestFrameDelete(frameRightClickMenu.id); closeMenus(); }} {...hoverHandlers}>Delete</button>
+          <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { requestFrameDelete([frameRightClickMenu.id]); closeMenus(); }} {...hoverHandlers}>Delete</button>
         </FrameRightClickMenu>
       )}
 
@@ -1364,8 +1365,11 @@ const App: React.FC = () => {
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button
                 onClick={() => {
-                  updateActiveFrames((prev) => prev.filter((w) => w.id !== frameDeleteConfirmation.frameID));
+                  const frameIDs = new Set(frameDeleteConfirmation.frameIDs);
+                  updateActiveFrames((prev) => prev.filter((w) => !frameIDs.has(w.id)));
                   setFrameDeleteConfirmation(null);
+                  setSelectedFrameId(null);
+                  setSelectedFrameIds(new Set());
                 }}
                 style={{ border: "1px solid #c62828", background: "#ffe9ec", cursor: "pointer", fontWeight: 700 }}
               >
