@@ -19,6 +19,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
   const [linkedNodeMetadataRows, setLinkedNodeMetadataRows] = useState<Array<{ label: string; value: string }>>([]);
   const [linkedNodeHistoryRows, setLinkedNodeHistoryRows] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<"editor" | "metadata" | "history">("editor");
   const [boxes, setBoxes] = useState<NodeDocBox[]>([]);
   const [activeBoxID, setActiveBoxID] = useState<string>("");
   const [focusBoxID, setFocusBoxID] = useState<string>("");
@@ -150,6 +151,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   useEffect(() => {
     setIsEditingTitle(false);
     editingTitleDraftRef.current = "";
+    setActiveTab("editor");
   }, [linkedNodeID]);
 
   useEffect(() => {
@@ -253,10 +255,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         if (cancelled) return;
         setLinkedNodeTitle(getNodeTitle(details.node));
         const nonText = details.information.filter((item) => item.type !== "Text box");
-        setLinkedNodeInfoPreview([
-          `Text boxes: ${projections.length}`,
-          ...nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`),
-        ]);
+        setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
         setLinkedNodeMetadataRows([
           { label: "Node ID", value: details.node.node_id },
           { label: "Created", value: details.node.created_timestamp },
@@ -421,85 +420,118 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           If this surface disappears, typing can fall through to canvas box-creation. */}
       {linkedNodeID.trim().length > 0 && (
         <div style={{ position: "absolute", top: 40, left: 10, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
-          <div style={{ display: "grid", gap: 2 }}>
-            <div style={{ pointerEvents: "auto" }}>
-              <div
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (isEditingTitle) return;
-                  editingTitleDraftRef.current = linkedNodeTitle || "new node";
-                  setIsEditingTitle(true);
-                }}
-                onDoubleClick={(event) => event.stopPropagation()}
-                style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, cursor: "text" }}
-              >
-                Node:&nbsp;
-                <span
-                  ref={editingTitleRef}
-                  contentEditable={isEditingTitle}
-                  suppressContentEditableWarning
-                  onClick={(event) => {
-                    // Allow clicks directly on title text to enter edit mode too.
-                    // We still stop propagation to keep canvas interactions isolated.
-                    event.stopPropagation();
-                    if (!isEditingTitle) {
+          <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ pointerEvents: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+              {([
+                ["editor", "Editor"],
+                ["metadata", "Metadata"],
+                ["history", "History"],
+              ] as const).map(([tabKey, label]) => {
+                const active = activeTab === tabKey;
+                return (
+                  <button
+                    key={tabKey}
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setActiveTab(tabKey);
+                    }}
+                    style={{
+                      border: `1px solid ${active ? accent : "rgba(3,25,30,0.24)"}`,
+                      background: active ? "rgba(255,255,255,0.94)" : "rgba(255,255,255,0.7)",
+                      color: active ? accent : "#23373c",
+                      borderRadius: 999,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      padding: "4px 10px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {activeTab === "editor" && (
+              <div style={{ display: "grid", gap: 2 }}>
+                <div style={{ pointerEvents: "auto" }}>
+                  <div
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (isEditingTitle) return;
                       editingTitleDraftRef.current = linkedNodeTitle || "new node";
                       setIsEditingTitle(true);
-                    }
-                  }}
-                  onInput={(event) => {
-                    editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
-                  }}
-                  onBlur={() => {
-                    if (!isEditingTitle) return;
-                    const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
-                    void updateNodeTitle(latestTitle);
-                    setIsEditingTitle(false);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
-                      void updateNodeTitle(latestTitle);
-                      setIsEditingTitle(false);
-                    }
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      if (editingTitleRef.current) editingTitleRef.current.textContent = linkedNodeTitle;
-                      setIsEditingTitle(false);
-                    }
-                  }}
-                  style={{ outline: "none" }}
-                >
-                  {linkedNodeTitle || "\u00A0"}
-                </span>
-              </div>
-            </div>
-            <div style={{ fontSize: 10, opacity: 0.7 }}>
-              {linkedNodeInfoPreview.length > 0 ? linkedNodeInfoPreview.join(" • ") : "No non-text node information yet"}
-            </div>
-          </div>
-          {linkedNodeMetadataRows.length > 0 && (
-            <section style={{ pointerEvents: "auto", display: "grid", gap: 6, maxWidth: 520 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>Metadata</div>
-              <div style={{ display: "grid", gap: 4 }}>
-                {linkedNodeMetadataRows.map((row) => (
-                  <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(3,25,30,0.14)", borderRadius: 6, padding: "4px 6px" }}>
-                    <span style={{ opacity: 0.75 }}>{row.label}</span>
-                    <strong>{row.value}</strong>
+                    }}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: accent, cursor: "text" }}
+                  >
+                    Node:&nbsp;
+                    <span
+                      ref={editingTitleRef}
+                      contentEditable={isEditingTitle}
+                      suppressContentEditableWarning
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (!isEditingTitle) {
+                          editingTitleDraftRef.current = linkedNodeTitle || "new node";
+                          setIsEditingTitle(true);
+                        }
+                      }}
+                      onInput={(event) => {
+                        editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
+                      }}
+                      onBlur={() => {
+                        if (!isEditingTitle) return;
+                        const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
+                        void updateNodeTitle(latestTitle);
+                        setIsEditingTitle(false);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
+                          void updateNodeTitle(latestTitle);
+                          setIsEditingTitle(false);
+                        }
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          if (editingTitleRef.current) editingTitleRef.current.textContent = linkedNodeTitle;
+                          setIsEditingTitle(false);
+                        }
+                      }}
+                      style={{ outline: "none" }}
+                    >
+                      {linkedNodeTitle || "\u00A0"}
+                    </span>
                   </div>
-                ))}
+                </div>
+                <div style={{ fontSize: 10, opacity: 0.7 }}>
+                  {linkedNodeInfoPreview.length > 0 ? linkedNodeInfoPreview.join(" • ") : "No non-text node information yet"}
+                </div>
               </div>
-            </section>
-          )}
-          {linkedNodeHistoryRows.length > 0 && (
-            <section style={{ pointerEvents: "auto", display: "grid", gap: 6, maxWidth: 640 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>History</div>
-              <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(3,25,30,0.14)", borderRadius: 6, padding: "6px 8px 6px 22px" }}>
-                {linkedNodeHistoryRows.map((row, index) => <li key={`${row}-${index}`}>{row}</li>)}
-              </ul>
-            </section>
-          )}
+            )}
+            {activeTab === "metadata" && linkedNodeMetadataRows.length > 0 && (
+              <section style={{ pointerEvents: "auto", display: "grid", gap: 6, maxWidth: 520 }}>
+                <div style={{ display: "grid", gap: 4 }}>
+                  {linkedNodeMetadataRows.map((row) => (
+                    <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(3,25,30,0.14)", borderRadius: 6, padding: "4px 6px" }}>
+                      <span style={{ opacity: 0.75 }}>{row.label}</span>
+                      <strong>{row.value}</strong>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+            {activeTab === "history" && linkedNodeHistoryRows.length > 0 && (
+              <section style={{ pointerEvents: "auto", display: "grid", gap: 6, maxWidth: 640 }}>
+                <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(3,25,30,0.14)", borderRadius: 6, padding: "6px 8px 6px 22px" }}>
+                  {linkedNodeHistoryRows.map((row, index) => <li key={`${row}-${index}`}>{row}</li>)}
+                </ul>
+              </section>
+            )}
+          </div>
         </div>
       )}
       {boxes.map((box) => (
