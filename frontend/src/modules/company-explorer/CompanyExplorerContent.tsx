@@ -262,7 +262,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         className="company-explorer-scroll"
         ref={treeViewportRef}
         onScroll={(event) => setTreeScrollTop((event.currentTarget as HTMLDivElement).scrollTop)}
-        style={{ overflow: "auto", minWidth: 0 }}
+        style={{ overflow: "scroll", minWidth: 0, ["--company-explorer-scroll-accent" as string]: accent }}
       >
         <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(3,25,30,0.14)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Company Explorer</div>
         <div style={{ height: virtualizedTree.topSpacer }} />

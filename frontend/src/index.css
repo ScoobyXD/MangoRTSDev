@@ -53,8 +53,9 @@ button, input {
 
 /* Company Explorer scrollbar treatment (thin, high-contrast industrial look). */
 .company-explorer-scroll {
+  --company-explorer-scroll-accent: #00b8cc;
   scrollbar-width: thin;
-  scrollbar-color: rgba(9, 98, 109, 0.72) rgba(10, 34, 39, 0.14);
+  scrollbar-color: var(--company-explorer-scroll-accent) rgba(10, 34, 39, 0.18);
 }
 
 .company-explorer-scroll::-webkit-scrollbar {
@@ -74,11 +75,11 @@ button, input {
 }
 
 .company-explorer-scroll::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, rgba(0, 169, 191, 0.86), rgba(8, 94, 105, 0.9));
+  background: color-mix(in srgb, var(--company-explorer-scroll-accent) 85%, #0a2f35);
   border-radius: 999px;
-  border: 1px solid rgba(198, 248, 255, 0.55);
+  border: 1px solid color-mix(in srgb, var(--company-explorer-scroll-accent) 40%, #d9fbff);
 }
 
 .company-explorer-scroll::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, rgba(0, 202, 226, 0.92), rgba(11, 110, 122, 0.95));
+  background: color-mix(in srgb, var(--company-explorer-scroll-accent) 92%, #08373d);
 }
