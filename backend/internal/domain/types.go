@@ -62,3 +62,24 @@ type Operation struct {
 	StartTimestamp time.Time  `json:"start_timestamp"`
 	EndTimestamp   *time.Time `json:"end_timestamp,omitempty"`
 }
+
+type WorkspaceContextEvent struct {
+	CompanyID      string    `json:"company_id"`
+	WorkspaceID    string    `json:"workspace_id"`
+	ContextID      string    `json:"context_id"`
+	SourceModuleID string    `json:"source_module_id"`
+	Sequence       int64     `json:"sequence"`
+	UserActionType string    `json:"user_action_type"`
+	PayloadJSON    string    `json:"payload_json"`
+	CreatedAt      time.Time `json:"created_timestamp"`
+}
+
+type WorkspaceContextProjection struct {
+	CompanyID        string    `json:"company_id"`
+	WorkspaceID      string    `json:"workspace_id"`
+	ContextID        string    `json:"context_id"`
+	LastSequence     int64     `json:"last_sequence"`
+	LastEventAt      time.Time `json:"last_event_timestamp"`
+	LastPayloadJSON  string    `json:"last_payload_json"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}

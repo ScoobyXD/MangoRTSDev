@@ -107,3 +107,42 @@ func TestWorkspaceSnapshotReturnsNotModifiedWhenDataUnchanged(t *testing.T) {
 		t.Fatalf("second snapshot status = %d, want %d", secondRec.Code, http.StatusNotModified)
 	}
 }
+
+func TestWorkspaceContextEventWriteAndProjectionRead(t *testing.T) {
+	t.Parallel()
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	body, _ := json.Marshal(map[string]any{
+		"company_id":       "11111111-1111-1111-1111-111111111111",
+		"workspace_id":     "22222222-2222-2222-2222-222222222222",
+		"context_id":       "active_node_selection",
+		"source_module_id": "node-map-frame-1",
+		"sequence":         1,
+		"user_action_type": "node_selection_changed",
+		"payload": map[string]any{
+			"selected_node_id": "abc",
+		},
+	})
+	writeReq := httptest.NewRequest(http.MethodPost, "/v1/workspace/context-events", bytes.NewReader(body))
+	writeReq.Header.Set("Content-Type", "application/json")
+	writeRec := httptest.NewRecorder()
+	handler.ServeHTTP(writeRec, writeReq)
+	if writeRec.Code != http.StatusCreated {
+		t.Fatalf("POST context-events status = %d, want %d", writeRec.Code, http.StatusCreated)
+	}
+
+	readReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/context-projections?company_id=11111111-1111-1111-1111-111111111111&workspace_id=22222222-2222-2222-2222-222222222222&context_id=active_node_selection", nil)
+	readRec := httptest.NewRecorder()
+	handler.ServeHTTP(readRec, readReq)
+	if readRec.Code != http.StatusOK {
+		t.Fatalf("GET context-projections status = %d, want %d", readRec.Code, http.StatusOK)
+	}
+
+	deltaReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/context-deltas?company_id=11111111-1111-1111-1111-111111111111&workspace_id=22222222-2222-2222-2222-222222222222&context_id=active_node_selection&after_sequence=0", nil)
+	deltaRec := httptest.NewRecorder()
+	handler.ServeHTTP(deltaRec, deltaReq)
+	if deltaRec.Code != http.StatusOK {
+		t.Fatalf("GET context-deltas status = %d, want %d", deltaRec.Code, http.StatusOK)
+	}
+}

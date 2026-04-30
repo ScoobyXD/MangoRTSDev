@@ -98,7 +98,7 @@ To scale linked workflows across Node Map, Company Explorer, Editor, Logic Gates
      - `source_module_id`
      - `sequence` (monotonic within workspace scope)
      - `timestamp`
-     - `intent_type`
+     - `user_action_type`
    - Consumers must deterministically ignore stale/out-of-order events.
 
 3. **Authority model per context type.**
@@ -122,6 +122,22 @@ To scale linked workflows across Node Map, Company Explorer, Editor, Logic Gates
    - Duplicate intent delivery must be idempotent at projection layer.
    - Every hot sync context publishes lag/error/drop metrics with p50/p95/p99 SLOs.
 
+
+
+
+### Cross-Module Sync Contract Implementation Checklist
+To keep implementation and reviews deterministic, every hot-path cross-module context type must define:
+
+1. **Context identifier** (`context_id`) and workspace scope.
+2. **Authority + conflict rule** (for example last-write-wins under monotonic sequence).
+3. **Required event envelope fields** (`context_id`, `source_module_id`, `sequence`, `timestamp`, `user_action_type`).
+4. **Gap handling rule** (`incoming_sequence > last_applied_sequence + 1` => targeted reconcile).
+5. **Idempotency rule** (duplicate event delivery cannot double-apply projection state).
+6. **Projection ownership** (modules render from projection updates, not peer-authority writes).
+
+Junior engineer note:
+- Think of **intent** as "a request to change context" and **projection** as "the approved shared state everyone renders from."
+- This separation prevents echo loops and conflicting module writes.
 
 ### Event Log + Projection Architecture (Required; events table alone is insufficient)
 
@@ -450,7 +466,7 @@ Any such change must include:
 **What was defined (explicit):**
 - Added a locked **Cross-Module Sync Architecture Contract** with:
   - one semantic context plane (L2 canonical context store),
-  - versioned event envelope (`context_id`, `source_module_id`, `sequence`, `timestamp`, `intent_type`),
+  - versioned event envelope (`context_id`, `source_module_id`, `sequence`, `timestamp`, `user_action_type`),
   - explicit authority/conflict rules per context type,
   - intent-vs-projection split as a hard anti-loop invariant,
   - bounded reconciliation on sequence gaps,
@@ -484,3 +500,81 @@ Any such change must include:
 **Latency-architecture alignment outcome:**
 - Better compliance with “event-driven sync” while reducing broad fan-out.
 - Better compliance with “batch updates / avoid global rerenders” by isolating high-frequency interaction state from cross-module context propagation.
+
+
+### 2026-04-29 — Implemented solution: cross-module sequence contract wired into Mango runtime
+
+**Problem before this change (explicit):**
+- Module sync listeners used ad hoc `revision` parsing and lacked a shared sequence contract helper.
+- Event payloads did not consistently carry the locked envelope fields required by architecture policy.
+
+**Implemented solution (explicit):**
+- Added shared `contextSyncContract` utilities in frontend runtime for:
+  - sequence freshness checks,
+  - sequence-gap detection,
+  - envelope-first sequence parsing with legacy `revision` fallback for migration safety.
+- Node Map selection events now emit the explicit envelope (`context_id`, `source_module_id`, `sequence`, `timestamp`, `user_action_type`) alongside legacy fields.
+- Explorer and Editor listeners now consume sequence via shared contract helpers and trigger targeted local refresh on detected gaps.
+- Explorer context fan-out now emits contract envelope metadata per target to align with projection-oriented synchronization semantics.
+
+**Latency-architecture alignment outcome:**
+- Reduces cross-module drift risk by centralizing stale/out-of-order handling rules.
+- Moves runtime behavior from best-effort revision guards toward explicit contract semantics required for hot-path scale.
+
+
+### 2026-04-29 — Implemented solution: backend workspace context event log + projection path
+
+**Problem before this change (explicit):**
+- Cross-module event envelope work existed in frontend, but backend lacked a canonical event write path and projection read path for context sync.
+
+**Implemented solution (explicit):**
+- Added backend API write endpoint: `POST /v1/workspace/context-events` (append event + upsert projection with monotonic sequence guard).
+- Added backend API read endpoint: `GET /v1/workspace/context-projections` (read authority for latest context projection per workspace/context).
+- Added repository support for both in-memory and PostgreSQL implementations.
+- Added SQL migration for `workspace_context_events` and `workspace_context_projections` tables with `company_id`-leading keys and supporting indexes.
+- Added server tests that validate event-write -> projection-read flow.
+
+**Latency-architecture alignment outcome:**
+- Establishes concrete event-write + projection-read split on backend contract surface.
+- Creates an incremental path toward full ordered delta + reconcile + observability gates.
+
+
+### 2026-04-29 — Implemented solution: persisted workspace projection delta feed endpoint
+
+**Problem before this change (explicit):**
+- Projection updates emitted stream notifications, but there was no dedicated API to fetch persisted ordered deltas by sequence window.
+
+**Implemented solution (explicit):**
+- Added `GET /v1/workspace/context-deltas` with required scope params (`company_id`, `workspace_id`, `context_id`) and optional `after_sequence`.
+- Repository implementations now support listing context events after a sequence boundary for both in-memory and PostgreSQL stores.
+- Added handler-level coverage validating write -> projection read -> delta read flow.
+
+**Latency-architecture alignment outcome:**
+- Enables deterministic replay/recovery windows from persisted event history without full snapshot churn.
+- Completes the backend delta-feed surface needed for projection-driven consumers.
+
+
+### 2026-04-29 — Implemented solution: status checkpoint for cross-module sync program
+
+**Problem before this entry (explicit):**
+- Multiple architecture milestones were delivered across frontend and backend, but there was no single history checkpoint stating what is complete vs still pending.
+
+**Implemented solution (explicit):**
+- Added this status checkpoint to capture current implementation progress against the agreed six-point cross-module sync delivery list.
+
+**Current progress (explicit):**
+1. **Canonical backend event write path** — implemented (`POST /v1/workspace/context-events`).
+2. **Projection read authority** — implemented (`workspace_context_projections` + `GET /v1/workspace/context-projections`).
+3. **Persisted sequence contract** — implemented (event `sequence` persisted and monotonic projection upsert guard).
+4. **Persisted delta feed endpoint** — implemented (`GET /v1/workspace/context-deltas?after_sequence=`).
+5. **Gap-driven scoped reconciliation endpoint contract** — partially complete (sequence/projection/delta primitives exist, but no explicit reconcile endpoint contract yet).
+6. **Observability + SLO merge gates (lag/gap/reconcile)** — not implemented yet.
+
+**What is left to do (explicit):**
+- Define and implement a first-class reconcile API contract (scoped request/response, watermark semantics, bounded retries, and fallback behavior).
+- Add production-grade metrics and dashboards for stream lag, sequence-gap rate, and reconciliation rate.
+- Enforce CI/CD merge gates that block hot-path regressions when SLO thresholds are violated.
+
+**Latency-architecture alignment outcome:**
+- Mango now has a concrete event-write + projection-read + persisted-delta foundation.
+- Remaining work is concentrated on operational hardening and explicit reconcile contract finalization.

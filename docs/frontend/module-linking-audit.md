@@ -45,3 +45,32 @@ Priority model currently implemented:
 4. Ignore events whose `mapWidgetID`/target does not match the current linked topology.
 
 This design makes view selection topology-aware (via links), scoped (via frame IDs), and resilient to stale events (via revisions and no-op guards).
+
+
+## 7) Gaps identified by latency architecture contract
+Current behavior is functional, but these gaps were identified during architecture review:
+
+1. **Event envelope field mismatch.**
+   - Current broadcasts are typed but not yet standardized on a locked envelope requiring `context_id`, `source_module_id`, `sequence`, `timestamp`, and `user_action_type`.
+
+2. **Sequence semantics are module-local.**
+   - Current revision guards are "monotonic-ish" and scoped to module behavior rather than a single canonical workspace sequence contract.
+
+3. **Authority is still partly implicit.**
+   - Some context write/read decisions are embedded in module logic instead of a single explicit authority matrix per context type.
+
+4. **Reconciliation trigger is not yet formalized.**
+   - We already do selective refresh in places, but sequence-gap-triggered targeted reconciliation must be explicit and testable.
+
+## 8) Migration target (explicit contract)
+The target state is:
+
+- modules emit **intent** messages only, including `user_action_type`
+- shared context engine validates ordering/idempotency
+- projection updates are emitted with sequence semantics
+- modules render from projection updates
+- sequence gaps trigger scoped reconcile
+
+Junior engineer note:
+- If two modules can both overwrite the same context directly, bugs look random.
+- The contract removes that randomness by giving one canonical path for writes and reads.

@@ -31,6 +31,92 @@ func (r *PostgresRepo) CreateNode(companyID, title string) (domain.Node, error) 
 	return item, nil
 }
 
+func (r *PostgresRepo) AppendWorkspaceContextEvent(event domain.WorkspaceContextEvent) (domain.WorkspaceContextProjection, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.WorkspaceContextProjection{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+insert into workspace_context_events (
+ company_id, workspace_id, context_id, source_module_id, sequence, user_action_type, payload_json
+) values ($1,$2,$3,$4,$5,$6,$7)`,
+		event.CompanyID, event.WorkspaceID, event.ContextID, event.SourceModuleID, event.Sequence, event.UserActionType, event.PayloadJSON); err != nil {
+		return domain.WorkspaceContextProjection{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+insert into workspace_context_projections (
+ company_id, workspace_id, context_id, last_sequence, last_event_timestamp, last_payload_json, updated_timestamp
+) values ($1,$2,$3,$4,now(),$5,now())
+on conflict (company_id, workspace_id, context_id) do update
+set last_sequence = excluded.last_sequence,
+    last_event_timestamp = excluded.last_event_timestamp,
+    last_payload_json = excluded.last_payload_json,
+    updated_timestamp = now()
+where workspace_context_projections.last_sequence <= excluded.last_sequence`,
+		event.CompanyID, event.WorkspaceID, event.ContextID, event.Sequence, event.PayloadJSON); err != nil {
+		return domain.WorkspaceContextProjection{}, err
+	}
+	var out domain.WorkspaceContextProjection
+	if err := tx.QueryRowContext(ctx, `
+select company_id, workspace_id, context_id, last_sequence, last_event_timestamp, last_payload_json, updated_timestamp
+from workspace_context_projections
+where company_id=$1 and workspace_id=$2 and context_id=$3`,
+		event.CompanyID, event.WorkspaceID, event.ContextID).Scan(
+		&out.CompanyID, &out.WorkspaceID, &out.ContextID, &out.LastSequence, &out.LastEventAt, &out.LastPayloadJSON, &out.UpdatedTimestamp,
+	); err != nil {
+		return domain.WorkspaceContextProjection{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.WorkspaceContextProjection{}, err
+	}
+	return out, nil
+}
+
+func (r *PostgresRepo) GetWorkspaceContextProjection(companyID, workspaceID, contextID string) (domain.WorkspaceContextProjection, error) {
+	var out domain.WorkspaceContextProjection
+	if err := r.db.QueryRow(`
+select company_id, workspace_id, context_id, last_sequence, last_event_timestamp, last_payload_json, updated_timestamp
+from workspace_context_projections
+where company_id=$1 and workspace_id=$2 and context_id=$3`,
+		companyID, workspaceID, contextID).Scan(
+		&out.CompanyID, &out.WorkspaceID, &out.ContextID, &out.LastSequence, &out.LastEventAt, &out.LastPayloadJSON, &out.UpdatedTimestamp,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.WorkspaceContextProjection{}, ErrNotFound
+		}
+		return domain.WorkspaceContextProjection{}, err
+	}
+	return out, nil
+}
+
+func (r *PostgresRepo) ListWorkspaceContextEventsAfterSequence(companyID, workspaceID, contextID string, afterSequence int64, limit int) ([]domain.WorkspaceContextEvent, error) {
+	if limit <= 0 {
+		limit = 250
+	}
+	rows, err := r.db.Query(`
+select company_id, workspace_id, context_id, source_module_id, sequence, user_action_type, payload_json::text, created_timestamp
+from workspace_context_events
+where company_id=$1 and workspace_id=$2 and context_id=$3 and sequence > $4
+order by sequence asc
+limit $5`,
+		companyID, workspaceID, contextID, afterSequence, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.WorkspaceContextEvent, 0)
+	for rows.Next() {
+		var item domain.WorkspaceContextEvent
+		if err := rows.Scan(&item.CompanyID, &item.WorkspaceID, &item.ContextID, &item.SourceModuleID, &item.Sequence, &item.UserActionType, &item.PayloadJSON, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *PostgresRepo) UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error) {
 	const q = `
 UPDATE nodes
