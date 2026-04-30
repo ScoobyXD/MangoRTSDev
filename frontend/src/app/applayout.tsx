@@ -464,8 +464,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         width: frame.w * stepX,
         height: frame.h * stepY,
         background: frame.color,
-        // Keep border width constant between selected/non-selected to prevent tiny content jump.
-        border: nested ? `2px dashed ${frame.accent}` : `2px solid ${isSelected ? "#00e9ff" : frame.accent}`,
+        border: "none",
         boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
@@ -475,7 +474,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         zIndex: nested ? 200 : (isDragging ? 100 : 1),
         color: theme.text,
         boxShadow: isSelected
-          ? "0 0 0 3px rgba(0,233,255,0.42), 0 8px 20px rgba(2,22,46,0.24)"
+          ? "0 8px 20px rgba(2,22,46,0.24)"
           : nested
             ? "0 3px 16px rgba(0,0,0,0.18)"
             : undefined,
@@ -526,9 +525,8 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
           alignItems: "center",
           gap: 8,
           padding: "4px 6px",
-          // Keep right/bottom edges explicit so the plate reads as a clean rectangle extending from frame edges.
-          borderRight: `2px solid ${frame.accent}`,
-          borderBottom: `2px solid ${frame.accent}`,
+          borderRight: "none",
+          borderBottom: "none",
           background: frame.color,
           cursor: isDragging ? "grabbing" : "grab",
           fontFamily: "'IBM Plex Mono', monospace",
