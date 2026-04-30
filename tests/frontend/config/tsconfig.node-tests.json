@@ -19,6 +19,7 @@
     "../support/test-node-shims.d.ts",
     "../../../frontend/src/app/frameLinking.ts",
     "../app/frameLinking.test.ts",
+    "../app/frameDeleteConfirmation.test.ts",
     "../../../frontend/src/modules/linkingGraph.ts",
     "../modules/linkingGraph.test.ts",
     "../../../frontend/src/modules/node-map/shared.ts",

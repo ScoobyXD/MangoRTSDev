@@ -8,6 +8,7 @@ const repoRoot = resolve(scriptDir, "../../..");
 const frontendRoot = resolve(repoRoot, "frontend");
 const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/app/frameLinking.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/app/frameDeleteConfirmation.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/linkingGraph.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipProjection.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipSelection.test.js"),
