@@ -257,11 +257,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, [companyID, scope, selectedNodeID, selectedTreeID, selectedTree, linkRevision]);
 
   return (
-    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(240px, 1fr)", background: "#ffffff", color: "#0f1f23" }}>
+    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(240px, 1fr)", background: "#ffffff", color: "#0f1f23", overflow: "hidden", minWidth: 0 }}>
       <div
+        className="company-explorer-scroll"
         ref={treeViewportRef}
         onScroll={(event) => setTreeScrollTop((event.currentTarget as HTMLDivElement).scrollTop)}
-        style={{ borderRight: "1px solid rgba(3,25,30,0.14)", overflow: "auto" }}
+        style={{ borderRight: "1px solid rgba(3,25,30,0.14)", overflow: "auto", minWidth: 0 }}
       >
         <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(3,25,30,0.14)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Company Explorer</div>
         <div style={{ height: virtualizedTree.topSpacer }} />
