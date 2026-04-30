@@ -405,7 +405,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   return (
     <div
       ref={canvasRef}
-      style={{ position: "relative", width: "100%", height: "100%", background: "#ffffff", color: "#0d1a1e", overflow: "hidden" }}
+      style={{ position: "relative", width: "100%", height: "100%", background: "#ffffff", color: "#0d1a1e", overflow: "hidden", userSelect: "text" }}
       tabIndex={0}
       onKeyDown={(event) => {
         if (shouldIgnoreCanvasKeydownTarget(event.target as HTMLElement | null)) return;
@@ -426,8 +426,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       {/* Keep title editing available even when title text is blank.
           If this surface disappears, typing can fall through to canvas box-creation. */}
       {linkedNodeID.trim().length > 0 && (
-        <div style={{ position: "absolute", top: 4, left: 116, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, pointerEvents: "auto" }}>
+        <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, pointerEvents: "auto", paddingLeft: 106 }}>
             {tabItems.map((tab) => {
               const selected = activeTab === tab.id;
               return (
@@ -507,9 +507,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                   </span>
                 </div>
               </div>
-              <div style={{ fontSize: 10, opacity: 0.7 }}>
-                {linkedNodeInfoPreview.length > 0 ? linkedNodeInfoPreview.join(" • ") : "No non-text node information yet"}
-              </div>
+              {linkedNodeInfoPreview.length > 0 && <div style={{ fontSize: 10, opacity: 0.7 }}>{linkedNodeInfoPreview.join(" • ")}</div>}
             </div>
           )}
 
@@ -614,8 +612,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         />
       ))}
       {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020" }}>{error}</div>}
-      {!linkedMapWidgetID && <div style={{ position: "absolute", top: 12, left: 10, fontSize: 11, opacity: 0.72 }}>Right-click selected modules and use “Link modules”.</div>}
-      {linkedMapWidgetID && !linkedNodeID && <div style={{ position: "absolute", top: 12, left: 10, fontSize: 11, opacity: 0.72 }}>Select a node in Node Map (Shift/Ctrl-click modules to multi-select and link).</div>}
     </div>
   );
 };
