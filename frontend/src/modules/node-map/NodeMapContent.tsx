@@ -1198,7 +1198,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           overflow: "hidden",
           height: "100%",
           width: "100%",
-          backgroundColor: "rgba(255,255,255,0.78)",
+          backgroundColor: "transparent",
         }}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -1272,9 +1272,13 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
             height: WORLD_H,
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: "0 0",
-            backgroundImage: `linear-gradient(to right, rgba(17,17,17,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(17,17,17,0.08) 1px, transparent 1px)`,
-            backgroundSize: `${MINI_GRID}px ${MINI_GRID}px`,
-            backgroundPosition: "-1px -1px",
+            backgroundImage: `
+              linear-gradient(rgba(17,17,17,0.16), rgba(17,17,17,0.16)),
+              linear-gradient(rgba(17,17,17,0.16), rgba(17,17,17,0.16))
+            `,
+            backgroundSize: `7px 1px, 1px 7px`,
+            backgroundRepeat: "repeat",
+            backgroundPosition: `${MINI_GRID / 2 - 3.5}px ${MINI_GRID / 2}px, ${MINI_GRID / 2}px ${MINI_GRID / 2 - 3.5}px`,
           }}
         >
           <canvas
