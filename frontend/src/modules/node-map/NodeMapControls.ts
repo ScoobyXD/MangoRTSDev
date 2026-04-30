@@ -370,16 +370,17 @@ export function useNodeMapDeleteKeyboardControl(input: {
 }) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target) {
-        const tag = target.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
-      }
       if (event.key !== "Delete" && event.key !== "Backspace") return;
       const relationshipIDs = Array.from(input.selectedRelationshipIDs);
       const nodeIDs = input.selectedNodeIDs.size > 0 ? Array.from(input.selectedNodeIDs) : (input.selectedNodeID ? [input.selectedNodeID] : []);
       const hasSelection = relationshipIDs.length > 0 || nodeIDs.length > 0;
       if (!hasSelection) return;
+
+      const target = event.target as HTMLElement | null;
+      if (target && !input.canvasActive) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+      }
       event.preventDefault();
       event.stopPropagation();
       input.setConfirmDelete({ nodeIDs, relationshipIDs });
