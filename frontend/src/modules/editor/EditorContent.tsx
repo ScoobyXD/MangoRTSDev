@@ -258,6 +258,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   return (
     <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateRows: "auto 1fr", background: "#ffffff", color: "#0d1a1e", overflow: "hidden", userSelect: "text" }}>
+       <div style={{ padding: "12px 10px 8px", borderBottom: "1px solid rgba(3,25,30,0.14)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}></div>
       <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(3,25,30,0.14)", minHeight: 0 }} />
       <div style={{ position: "relative", minHeight: 0 }}>
       {linkedNodeID.trim().length > 0 && (
@@ -324,7 +325,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>Metadata</div>
               <div style={{ display: "grid", gap: 4 }}>
                 {linkedNodeMetadataRows.map((row) => (
-                  <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(3,25,30,0.14)", borderRadius: 6, padding: "4px 6px" }}>
+                  <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: "rgba(255, 255, 255, 0.8)", border: "1px solid rgba(3,25,30,0.14)", borderRadius: 6, padding: "4px 6px" }}>
                     <span style={{ opacity: 0.75 }}>{row.label}</span>
                     <strong>{row.value}</strong>
                   </div>
