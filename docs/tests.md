@@ -119,6 +119,9 @@ Use this checklist format and keep it complete.
   - legacy editor/explorer -> Node Map compatibility derivation through indirect link graph paths
   - context-frame pool fallback when no explicit selection set exists
   - delink behavior removes all graph edges touching selected/context modules
+- [x] `frontend/src/app/frameDeleteConfirmation.test.ts`
+  - frame-delete confirmation payload preserves explicit frame titles
+  - blank/whitespace-only frame titles are normalized to `Untitled frame` for consistent confirmation copy
 - [x] `frontend/src/modules/linkingGraph.test.ts`
   - frame-link edge sanitization canonicalizes and deduplicates undirected graph edges
   - linked target resolution by kind supports traversal through intermediary graph hops
