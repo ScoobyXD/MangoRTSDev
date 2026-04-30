@@ -3,11 +3,13 @@ import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight } from "../node-map/NodeRecordStore";
+import { getWorkspaceContextProjection, readSelectedNodeIDFromProjection } from "../workspaceContextApi";
 
 // Generic Stats module: displays metric cards for the nearest linked context source.
 export const StatsContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
+  const workspaceID = (import.meta.env.VITE_WORKSPACE_ID as string | undefined)?.trim() ?? "22222222-2222-2222-2222-222222222222";
   const scope = widgetId?.trim() ? widgetId : "global";
   const [linkedMapWidgetID, setLinkedMapWidgetID] = useState("");
   const [linkedSourceKind, setLinkedSourceKind] = useState<"map" | "editor" | "explorer" | "logic-map" | "">("");
@@ -41,20 +43,6 @@ export const StatsContent: React.FC<{ accent: string; widgetId?: string; hideTop
 
   useEffect(() => {
     const refreshSelection = () => {
-      if (linkedMapWidgetID) {
-        try {
-          const raw = localStorage.getItem(`node-map-state-v1:${companyID}:${linkedMapWidgetID}`);
-          if (raw) {
-            const parsed = JSON.parse(raw) as { selectedNodeID?: string };
-            if (typeof parsed.selectedNodeID === "string") {
-              setSelectedContextID(parsed.selectedNodeID);
-              return;
-            }
-          }
-        } catch {
-          // ignore malformed map state
-        }
-      }
       try {
         const raw = localStorage.getItem(`${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
         if (!raw) {
@@ -67,16 +55,31 @@ export const StatsContent: React.FC<{ accent: string; widgetId?: string; hideTop
         setSelectedContextID("");
       }
     };
+    const refreshSelectionFromCanonical = async () => {
+      if (!linkedMapWidgetID) {
+        refreshSelection();
+        return;
+      }
+      try {
+        const projection = await getWorkspaceContextProjection(apiBase, companyID, workspaceID, `active_node_selection:${companyID}:${linkedMapWidgetID}`);
+        const selected = readSelectedNodeIDFromProjection(projection);
+        if (selected) {
+          setSelectedContextID(selected);
+          return;
+        }
+      } catch {}
+      refreshSelection();
+    };
 
-    refreshSelection();
+    void refreshSelectionFromCanonical();
     const onStorage = (event: StorageEvent) => {
       const mapStateKey = linkedMapWidgetID ? `node-map-state-v1:${companyID}:${linkedMapWidgetID}` : "";
       const explorerContextKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
       if (event.key && event.key !== mapStateKey && event.key !== explorerContextKey) return;
-      refreshSelection();
+      void refreshSelectionFromCanonical();
     };
     const onMapSelection = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string }>).detail;
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; envelope?: { sequence?: number } }>).detail;
       if (!detail || detail.mapWidgetID !== linkedMapWidgetID || typeof detail.selectedNodeID !== "string") return;
       setSelectedContextID(detail.selectedNodeID);
     };
@@ -85,7 +88,7 @@ export const StatsContent: React.FC<{ accent: string; widgetId?: string; hideTop
       if (!detail) return;
       const expectedKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
       if (detail.key !== expectedKey && detail.targetID !== scope) return;
-      refreshSelection();
+      void refreshSelectionFromCanonical();
     };
 
     window.addEventListener("storage", onStorage);
@@ -96,7 +99,7 @@ export const StatsContent: React.FC<{ accent: string; widgetId?: string; hideTop
       window.removeEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapSelection);
       window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerUpdate);
     };
-  }, [companyID, linkedMapWidgetID, scope]);
+  }, [apiBase, companyID, linkedMapWidgetID, scope, workspaceID]);
 
   useEffect(() => {
     let cancelled = false;

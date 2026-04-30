@@ -179,6 +179,16 @@ Required companion architecture:
 Non-negotiable rule:
 - **Events are canonical for writes/history; projections are canonical for hot reads.**
 
+### Deferred Contract Hardening Note (2026-04-30)
+The following items are intentionally deferred and planned for a later implementation phase:
+
+1. Explicit watermarking/cursor handoff contract for context delta/reconcile APIs.
+2. Finer-grained error semantics for context sync APIs (for example: sequence conflict vs transient store failure).
+3. Policy-level idempotency keys beyond sequence monotonicity guarantees.
+
+Reason for deferment:
+- Current priority is completing end-to-end canonical sequence migration and functional correctness before expanding operational/error-contract surface area.
+
 ## Core Architectural Rules
 
 ## 1) No N+1 on Hot Paths

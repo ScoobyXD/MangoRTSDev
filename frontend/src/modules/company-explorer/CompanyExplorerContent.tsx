@@ -5,6 +5,7 @@ import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot,
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
+import { getWorkspaceContextProjection, readSelectedNodeIDFromProjection } from "../workspaceContextApi";
 
 type ExplorerTreeNode = {
   id: string;
@@ -19,6 +20,7 @@ type ExplorerTreeNode = {
 export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
+  const workspaceID = (import.meta.env.VITE_WORKSPACE_ID as string | undefined)?.trim() ?? "22222222-2222-2222-2222-222222222222";
   const scope = widgetId?.trim() ? widgetId : "global";
 
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
@@ -191,25 +193,24 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         return next;
       });
     };
-    const readFromMapState = () => {
+    const refreshFromCanonicalSelection = async () => {
       if (!linkedMapFrameID) return;
-      const mapStateKey = `node-map-state-v1:${companyID}:${linkedMapFrameID}`;
-      try {
-        const raw = localStorage.getItem(mapStateKey);
-        if (!raw) return;
-        const parsed = JSON.parse(raw) as { selectedNodeID?: string };
-        if (typeof parsed.selectedNodeID === "string") applyMapSelection(parsed.selectedNodeID);
-      } catch {
-        // ignore malformed map state payload
-      }
+      const projection = await getWorkspaceContextProjection(apiBase, companyID, workspaceID, `active_node_selection:${companyID}:${linkedMapFrameID}`);
+      const selected = readSelectedNodeIDFromProjection(projection);
+      if (selected) applyMapSelection(selected);
     };
-    readFromMapState();
+    void refreshFromCanonicalSelection().catch(() => {
+      // ignore canonical read failures; consumer will retry on subsequent events
+    });
     const onMapSelectionUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; envelope?: ContextMutationEnvelope }>).detail;
       if (!detail || detail.mapWidgetID !== linkedMapFrameID) return;
       const revision = readIncomingSequence(detail);
       if (revision > 0 && !isNewerSequence(lastMapSelectionRevisionRef.current, revision)) return;
-      if (revision > 0 && hasSequenceGap(lastMapSelectionRevisionRef.current, revision)) readFromMapState();
+      if (revision > 0 && hasSequenceGap(lastMapSelectionRevisionRef.current, revision)) {
+        void refreshFromCanonicalSelection().catch(() => {});
+        return;
+      }
       if (revision > 0) lastMapSelectionRevisionRef.current = revision;
       if (typeof detail.selectedNodeID !== "string") return;
       applyMapSelection(detail.selectedNodeID);
@@ -218,7 +219,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return () => {
       window.removeEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapSelectionUpdated);
     };
-  }, [companyID, linkedMapFrameID]);
+  }, [apiBase, companyID, linkedMapFrameID, workspaceID]);
 
   useEffect(() => {
     const nextSelection = { selectedNodeID, selectedTreeID };

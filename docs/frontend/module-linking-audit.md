@@ -71,6 +71,23 @@ The target state is:
 - modules render from projection updates
 - sequence gaps trigger scoped reconcile
 
+## 9) Migration status update (2026-04-30)
+
+Implemented in this phase:
+
+1. Node Map selection intent now writes through backend workspace context API (`POST /v1/workspace/context-events`) before broadcasting updates to peers.
+2. Local `revision` fallback in shared sequence parsing was removed; canonical envelope sequence is now required for sequence guards.
+3. Explorer / Editor / Stats now attempt canonical projection reads first for linked map selection context, and no longer treat Node Map localStorage map-state as primary authority.
+
+Still in progress:
+
+1. Explorer / Editor / Stats still keep limited localStorage fallback reads for explorer-context compatibility only; full fallback removal is pending final cutover.
+2. Explicit reconcile endpoint contract (gap-recover policy with formal cursor/watermark handoff) is still pending.
+
+Junior engineer note:
+- We intentionally remove sequence-authority split first (writes), then tighten read paths next.
+- This sequencing avoids a risky "all modules switch everything at once" rollout.
+
 Junior engineer note:
 - If two modules can both overwrite the same context directly, bugs look random.
 - The contract removes that randomness by giving one canonical path for writes and reads.

@@ -6,8 +6,6 @@ export type ContextMutationEnvelope = {
   user_action_type: string;
 };
 
-export type LegacyRevisionDetail = { revision?: number };
-
 /**
  * Returns true only when this event is newer than what we already applied.
  */
@@ -23,12 +21,10 @@ export function hasSequenceGap(lastAppliedSequence: number, incomingSequence: nu
 }
 
 /**
- * Reads sequence from the new contract envelope and falls back to legacy revision.
- *
- * Junior engineer note:
- * We keep this fallback so old events do not break during migration.
+ * Reads sequence only from the canonical envelope.
+ * Legacy revision-only payloads are treated as zero (ignored by sequence guards).
  */
-export function readIncomingSequence(detail: { envelope?: ContextMutationEnvelope } & LegacyRevisionDetail): number {
+export function readIncomingSequence(detail: { envelope?: ContextMutationEnvelope }): number {
   if (detail.envelope && Number.isFinite(detail.envelope.sequence)) return detail.envelope.sequence;
-  return typeof detail.revision === "number" ? detail.revision : 0;
+  return 0;
 }

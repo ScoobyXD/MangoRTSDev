@@ -4,6 +4,7 @@ import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_N
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
+import { getWorkspaceContextProjection, readSelectedNodeIDFromProjection } from "../workspaceContextApi";
 
 type LocalBoxLayout = Record<string, { x: number; y: number; w: number; h: number }>;
 
@@ -11,6 +12,7 @@ type LocalBoxLayout = Record<string, { x: number; y: number; w: number; h: numbe
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
+  const workspaceID = (import.meta.env.VITE_WORKSPACE_ID as string | undefined)?.trim() ?? "22222222-2222-2222-2222-222222222222";
   const scope = widgetId?.trim() ? widgetId : "global";
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [linkedMapWidgetID, setLinkedMapWidgetID] = useState("");
@@ -89,19 +91,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       registry,
     });
   }, [scope]);
-
-  // Reads currently selected node from linked node-map persisted state.
-  const readSelectedNodeFromMap = useCallback((mapWidgetID: string): string => {
-    if (!mapWidgetID) return "";
-    try {
-      const raw = localStorage.getItem(`node-map-state-v1:${companyID}:${mapWidgetID}`);
-      if (!raw) return "";
-      const parsed = JSON.parse(raw) as { selectedNodeID?: string };
-      return typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "";
-    } catch {
-      return "";
-    }
-  }, [companyID]);
 
   const readSelectedNodeFromExplorerContext = useCallback((): string => {
     try {
@@ -182,15 +171,20 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [readLinkedMapWidgetID]);
 
   useEffect(() => {
-    const refresh = () => {
-      const selectedFromMap = readSelectedNodeFromMap(linkedMapWidgetID);
-      if (selectedFromMap) {
-        setLinkedNodeID(selectedFromMap);
-        return;
-      }
-      setLinkedNodeID(readSelectedNodeFromExplorerContext());
+    const refresh = () => setLinkedNodeID(readSelectedNodeFromExplorerContext());
+    const refreshFromCanonical = async () => {
+      if (!linkedMapWidgetID) return;
+      try {
+        const projection = await getWorkspaceContextProjection(apiBase, companyID, workspaceID, `active_node_selection:${companyID}:${linkedMapWidgetID}`);
+        const selected = readSelectedNodeIDFromProjection(projection);
+        if (selected) {
+          setLinkedNodeID(selected);
+          return;
+        }
+      } catch {}
+      refresh();
     };
-    refresh();
+    void refreshFromCanonical().catch(() => {});
     const onStorage = (event: StorageEvent) => {
       const mapStateKey = linkedMapWidgetID ? `node-map-state-v1:${companyID}:${linkedMapWidgetID}` : "";
       const explorerContextKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
@@ -198,17 +192,20 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       refresh();
     };
     const onMapStateUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; envelope?: ContextMutationEnvelope }>).detail;
       if (!detail || detail.mapWidgetID !== linkedMapWidgetID) return;
       const revision = readIncomingSequence(detail);
       if (revision > 0 && !isNewerSequence(lastSelectionRevisionRef.current, revision)) return;
-      if (revision > 0 && hasSequenceGap(lastSelectionRevisionRef.current, revision)) refresh();
+      if (revision > 0 && hasSequenceGap(lastSelectionRevisionRef.current, revision)) {
+        void refreshFromCanonical().catch(() => {});
+        return;
+      }
       if (revision > 0) lastSelectionRevisionRef.current = revision;
       if (typeof detail.selectedNodeID === "string") {
         setLinkedNodeID(detail.selectedNodeID);
         return;
       }
-      refresh();
+      void refreshFromCanonical().catch(() => {});
     };
     const onExplorerContextUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ key?: string; targetID?: string }>).detail;
@@ -230,7 +227,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       window.removeEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapStateUpdated);
       window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
     };
-  }, [companyID, linkedMapWidgetID, readSelectedNodeFromMap, readSelectedNodeFromExplorerContext, scope]);
+  }, [apiBase, companyID, linkedMapWidgetID, readSelectedNodeFromExplorerContext, scope, workspaceID]);
 
   useEffect(() => {
     let cancelled = false;

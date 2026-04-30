@@ -131,7 +131,7 @@ Use this checklist format and keep it complete.
   - stale event rejection when incoming sequence is older than last applied
   - duplicate event idempotency guard for repeated delivery
   - explicit sequence gap detection used to trigger scoped reconciliation
-  - envelope-first sequence parsing with legacy `revision` fallback for migration safety
+  - envelope-only sequence parsing (legacy `revision` fallback removed as part of canonical-sequence migration)
   - inline comments describe intent-vs-projection behavior in junior-friendly terms
   - ignores map-originated no-op selection echoes so suppression latches do not eat subsequent Explorer clicks
   - applies map selections only when Explorer semantic selection actually changes

@@ -15,7 +15,7 @@ test("flags explicit sequence gaps for scoped reconciliation", () => {
 });
 
 
-test("prefers envelope sequence and keeps legacy revision fallback during migration", () => {
-  assert.equal(readIncomingSequence({ revision: 7 }), 7);
-  assert.equal(readIncomingSequence({ envelope: { context_id: "c", source_module_id: "m", sequence: 9, timestamp: "2026-04-29T00:00:00.000Z", user_action_type: "node_selection_changed" }, revision: 7 }), 9);
+test("reads canonical envelope sequence only", () => {
+  assert.equal(readIncomingSequence({}), 0);
+  assert.equal(readIncomingSequence({ envelope: { context_id: "c", source_module_id: "m", sequence: 9, timestamp: "2026-04-29T00:00:00.000Z", user_action_type: "node_selection_changed" } }), 9);
 });

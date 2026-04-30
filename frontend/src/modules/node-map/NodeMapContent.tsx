@@ -7,11 +7,13 @@ import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceS
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
 import { getNodeRecordSingleFlight, invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
+import { postWorkspaceContextEvent } from "../workspaceContextApi";
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
 export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
+  const workspaceID = (import.meta.env.VITE_WORKSPACE_ID as string | undefined)?.trim() ?? "22222222-2222-2222-2222-222222222222";
   const mapScope = widgetId?.trim() ? widgetId : "global";
   const mapStateKey = `node-map-state-v1:${companyID}:${mapScope}`;
 
@@ -394,22 +396,43 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
 
   useEffect(() => {
     if (!restoredViewport) return;
-    selectionRevisionRef.current += 1;
-    const envelope: ContextMutationEnvelope = {
-      context_id: `active_node_selection:${companyID}:${mapScope}`,
-      source_module_id: mapScope,
-      sequence: selectionRevisionRef.current,
-      timestamp: new Date().toISOString(),
-      user_action_type: "node_selection_changed",
-    };
-    emitDashboardEvent(EVENT_NODE_MAP_SELECTION_UPDATED, {
-      mapWidgetID: mapScope,
-      selectedNodeID,
-      revision: selectionRevisionRef.current,
-      changedAt: Date.now(),
-      envelope,
-    });
-  }, [mapScope, restoredViewport, selectedNodeID]);
+    let cancelled = false;
+    (async () => {
+      // Junior note:
+      // Local revision values are no longer sequence authority.
+      // We write intent to the backend, then broadcast with the sequence
+      // acknowledged by the canonical context projection.
+      selectionRevisionRef.current += 1;
+      const candidateSequence = selectionRevisionRef.current;
+      const envelope: ContextMutationEnvelope = {
+        context_id: `active_node_selection:${companyID}:${mapScope}`,
+        source_module_id: mapScope,
+        sequence: candidateSequence,
+        timestamp: new Date().toISOString(),
+        user_action_type: "node_selection_changed",
+      };
+      try {
+        const projection = await postWorkspaceContextEvent(apiBase, {
+          company_id: companyID,
+          workspace_id: workspaceID,
+          context_id: envelope.context_id,
+          source_module_id: envelope.source_module_id,
+          sequence: envelope.sequence,
+          timestamp: envelope.timestamp,
+          user_action_type: envelope.user_action_type,
+          payload: { selected_node_id: selectedNodeID },
+        });
+        if (cancelled) return;
+        const canonicalSequence = Number.isFinite(projection.last_sequence) ? projection.last_sequence : candidateSequence;
+        selectionRevisionRef.current = Math.max(selectionRevisionRef.current, canonicalSequence);
+        emitDashboardEvent(EVENT_NODE_MAP_SELECTION_UPDATED, { mapWidgetID: mapScope, selectedNodeID, changedAt: Date.now(), envelope: { ...envelope, sequence: canonicalSequence } });
+      } catch {
+        if (cancelled) return;
+        emitDashboardEvent(EVENT_NODE_MAP_SELECTION_UPDATED, { mapWidgetID: mapScope, selectedNodeID, changedAt: Date.now(), envelope });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [apiBase, companyID, mapScope, restoredViewport, selectedNodeID, workspaceID]);
 
   useEffect(() => {
     setNodePositions((previous) => {
