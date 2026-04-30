@@ -1,39 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getNodeTitle, NodeDocBox, NodeInformation, NODE_DOC_MIN_H, NODE_DOC_MIN_W, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, clamp, shouldIgnoreCanvasKeydownTarget } from "../node-map/shared";
+import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 
-type LocalBoxLayout = Record<string, { x: number; y: number; w: number; h: number }>;
-
-// Editor module: node-linked document canvas for text boxes and notes.
+// Editor module: node-linked read/write metadata surface without text box editing.
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const scope = widgetId?.trim() ? widgetId : "global";
-  const canvasRef = useRef<HTMLDivElement | null>(null);
   const [linkedMapWidgetID, setLinkedMapWidgetID] = useState("");
   const [linkedNodeID, setLinkedNodeID] = useState("");
   const [linkedNodeTitle, setLinkedNodeTitle] = useState("");
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
   const [linkedNodeMetadataRows, setLinkedNodeMetadataRows] = useState<Array<{ label: string; value: string }>>([]);
   const [linkedNodeHistoryRows, setLinkedNodeHistoryRows] = useState<string[]>([]);
-  const [boxes, setBoxes] = useState<NodeDocBox[]>([]);
-  const [activeBoxID, setActiveBoxID] = useState<string>("");
-  const [focusBoxID, setFocusBoxID] = useState<string>("");
-  const [placing, setPlacing] = useState<{ id: string; pointerID: number; dx: number; dy: number } | null>(null);
-  const [resizing, setResizing] = useState<{
-    id: string;
-    pointerID: number;
-    startX: number;
-    startY: number;
-    startW: number;
-    startH: number;
-    startBoxX: number;
-    startBoxY: number;
-    edges: { top?: true; right?: true; bottom?: true; left?: true };
-  } | null>(null);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<"editor" | "metadata" | "history">("editor");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -41,57 +23,21 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const editingTitleDraftRef = useRef("");
   const lastSelectionRevisionRef = useRef(0);
 
-  const readLocalLayout = useCallback((nodeID: string): LocalBoxLayout => {
-    if (!nodeID) return {};
-    const key = `editor-local-layout-v1:${companyID}:${scope}:${nodeID}`;
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return {};
-      const parsed = JSON.parse(raw) as LocalBoxLayout;
-      if (!parsed || typeof parsed !== "object") return {};
-      return parsed;
-    } catch {
-      return {};
-    }
-  }, [companyID, scope]);
-
-  const writeLocalLayout = useCallback((nodeID: string, next: LocalBoxLayout) => {
-    if (!nodeID) return;
-    const key = `editor-local-layout-v1:${companyID}:${scope}:${nodeID}`;
-    try {
-      localStorage.setItem(key, JSON.stringify(next));
-    } catch {
-      // ignore storage failures in local-only layout path
-    }
-  }, [companyID, scope]);
-
-  // API helper for editor load/save flows tied to selected node context.
   const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const headers = new Headers(init?.headers);
-    // Avoid setting Content-Type for body-less requests to prevent unnecessary preflights on GETs.
     if (init?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    const response = await fetch(`${apiBase}${path}`, {
-      ...init,
-      headers,
-    });
+    const response = await fetch(`${apiBase}${path}`, { ...init, headers });
     if (!response.ok) throw new Error(await response.text() || `Request failed (${response.status})`);
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
   }, [apiBase]);
 
-  // Resolves linked map frame via graph links + frame registry metadata.
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
     const registry = readFrameRegistryFromStorage();
-    return resolveLinkedFrameByKindFromGraph({
-      startFrameID: scope,
-      targetKind: "map",
-      edges,
-      registry,
-    });
+    return resolveLinkedFrameByKindFromGraph({ startFrameID: scope, targetKind: "map", edges, registry });
   }, [scope]);
 
-  // Reads currently selected node from linked node-map persisted state.
   const readSelectedNodeFromMap = useCallback((mapWidgetID: string): string => {
     if (!mapWidgetID) return "";
     try {
@@ -115,22 +61,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [companyID, scope]);
 
-  // Persist a single document box into node information rows (Text box type).
-  // Important identity rule:
-  // - `node_information` rows are append-history records (new server ID each write).
-  // - `node_projection_table` rows are keyed by the textbox identity (`information_id`) we send.
-  // For Editor correctness we must keep a stable textbox `information_id` client-side and never
-  // overwrite it with the append-history ID returned by the API on later saves.
-  const saveBox = useCallback(async (nodeID: string, box: NodeDocBox) => {
-    const created = await requestJSON<NodeInformation>(`/v1/nodes/${nodeID}/information`, {
-      method: "POST",
-      body: JSON.stringify({ company_id: companyID, type: "Text box", information: box.information, information_id: box.information_id }),
-    });
-    invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
-    const stableInformationID = box.information_id || created.information_id;
-    setBoxes((prev) => prev.map((item) => (item.local_id === box.local_id ? { ...item, information_id: stableInformationID } : item)));
-  }, [apiBase, companyID, requestJSON]);
-
   const updateNodeTitle = useCallback(async (nextTitle: string) => {
     const value = nextTitle.trim();
     if (!linkedNodeID || !value) return;
@@ -140,7 +70,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         method: "PUT",
         body: JSON.stringify({ company_id: companyID, title: value }),
       });
-      // Keep UI hot-path local: update local title immediately after successful API write.
       setLinkedNodeTitle(updated.title);
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
     } catch (err) {
@@ -236,8 +165,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   useEffect(() => {
     let cancelled = false;
     if (!linkedNodeID) {
-      setBoxes([]);
-      setActiveBoxID("");
       setLinkedNodeTitle("");
       setLinkedNodeInfoPreview([]);
       setLinkedNodeMetadataRows([]);
@@ -260,119 +187,19 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           { label: "Created", value: details.node.created_timestamp },
           { label: "Relationships", value: String(details.relationships.length) },
           { label: "Information records", value: String(details.information.length) },
+          { label: "Text boxes", value: String(projections.length) },
         ]);
         const historyRows = [
           details.node.created_timestamp ? `Node created at ${details.node.created_timestamp}` : "Node created",
           ...details.information.slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`),
         ];
         setLinkedNodeHistoryRows(historyRows);
-        const layout = readLocalLayout(linkedNodeID);
-        const nextBoxes = projections.map((item, index) => {
-          const position = layout[item.information_id];
-          return {
-            local_id: item.information_id,
-            information_id: item.information_id,
-            x: position?.x ?? (24 + (index % 6) * 18),
-            y: position?.y ?? (56 + (index % 6) * 14),
-            w: position?.w ?? 320,
-            h: position?.h ?? 52,
-            information: item.information,
-          } as NodeDocBox;
-        });
-        setBoxes(nextBoxes);
-        if (nextBoxes.length > 0) setActiveBoxID(nextBoxes[nextBoxes.length - 1].local_id);
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load linked node information");
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, companyID, linkedNodeID, readLocalLayout]);
-
-  useEffect(() => {
-    if (!placing || !canvasRef.current) return;
-    const onMove = (event: PointerEvent) => {
-      if (event.pointerId !== placing.pointerID || !canvasRef.current) return;
-      const bounds = canvasRef.current.getBoundingClientRect();
-      const x = clamp(event.clientX - bounds.left - placing.dx, 8, Math.max(8, bounds.width - 140));
-      const y = clamp(event.clientY - bounds.top - placing.dy, 34, Math.max(34, bounds.height - 40));
-      setBoxes((prev) => prev.map((item) => (item.local_id === placing.id ? { ...item, x, y } : item)));
-    };
-    const onUp = () => {
-      const moved = boxes.find((item) => item.local_id === placing.id);
-      if (linkedNodeID && moved) {
-        writeLocalLayout(linkedNodeID, {
-          ...readLocalLayout(linkedNodeID),
-          [moved.local_id]: { x: moved.x, y: moved.y, w: moved.w, h: moved.h },
-        });
-      }
-      setPlacing(null);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    return () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
-  }, [boxes, linkedNodeID, placing, readLocalLayout, writeLocalLayout]);
-
-  useEffect(() => {
-    if (!resizing || !canvasRef.current) return;
-    const onMove = (event: PointerEvent) => {
-      if (event.pointerId !== resizing.pointerID || !canvasRef.current) return;
-      const bounds = canvasRef.current.getBoundingClientRect();
-      const dx = event.clientX - resizing.startX;
-      const dy = event.clientY - resizing.startY;
-      setBoxes((prev) => prev.map((item) => {
-        if (item.local_id !== resizing.id) return item;
-        let nextX = resizing.startBoxX;
-        let nextY = resizing.startBoxY;
-        let nextW = resizing.startW;
-        let nextH = resizing.startH;
-        if (resizing.edges.right) nextW = resizing.startW + dx;
-        if (resizing.edges.bottom) nextH = resizing.startH + dy;
-        if (resizing.edges.left) {
-          nextX = resizing.startBoxX + dx;
-          nextW = resizing.startW - dx;
-        }
-        if (resizing.edges.top) {
-          nextY = resizing.startBoxY + dy;
-          nextH = resizing.startH - dy;
-        }
-        nextW = clamp(nextW, NODE_DOC_MIN_W, Math.max(NODE_DOC_MIN_W, bounds.width - 12));
-        nextH = clamp(nextH, NODE_DOC_MIN_H, Math.max(NODE_DOC_MIN_H, bounds.height - 12));
-        nextX = clamp(nextX, 8, Math.max(8, bounds.width - nextW - 8));
-        nextY = clamp(nextY, 34, Math.max(34, bounds.height - nextH - 8));
-        return { ...item, x: nextX, y: nextY, w: nextW, h: nextH };
-      }));
-    };
-    const onUp = (event: PointerEvent) => {
-      if (event.pointerId !== resizing.pointerID) return;
-      const next = boxes.find((item) => item.local_id === resizing.id);
-      if (linkedNodeID && next) {
-        writeLocalLayout(linkedNodeID, {
-          ...readLocalLayout(linkedNodeID),
-          [next.local_id]: { x: next.x, y: next.y, w: next.w, h: next.h },
-        });
-      }
-      setResizing(null);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [boxes, linkedNodeID, resizing, readLocalLayout, writeLocalLayout]);
-
-
-  useEffect(() => {
-    if (!focusBoxID) return;
-    const textarea = canvasRef.current?.querySelector<HTMLTextAreaElement>(`textarea[data-box-id="${focusBoxID}"]`);
-    if (!textarea) return;
-    textarea.focus();
-    const length = textarea.value.length;
-    textarea.setSelectionRange(length, length);
-    setFocusBoxID("");
-  }, [boxes, focusBoxID]);
-
-
+  }, [apiBase, companyID, linkedNodeID]);
 
   const tabItems = useMemo(() => ([
     { id: "editor", label: "Editor" },
@@ -380,74 +207,15 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     { id: "history", label: "History" },
   ] as const), []);
 
-  const createBox = useCallback((initialText: string, x?: number, y?: number) => {
-    const baseX = typeof x === "number" ? x : 24 + (boxes.length % 6) * 18;
-    const baseY = typeof y === "number" ? y : 56 + (boxes.length % 6) * 14;
-    const localID = `docbox-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`;
-    // Generate a stable UUID immediately so rapid blur/save sequences cannot fork projection IDs.
-    // This keeps one textbox mapped to one projection row even under fast user interactions.
-    const informationID = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0").slice(0, 12)}`;
-    const next: NodeDocBox = { local_id: localID, information_id: informationID, x: baseX, y: baseY, w: 320, h: 52, information: initialText };
-    setBoxes((prev) => [...prev, next]);
-    setActiveBoxID(localID);
-    setFocusBoxID(localID);
-    if (linkedNodeID) {
-      writeLocalLayout(linkedNodeID, {
-        ...readLocalLayout(linkedNodeID),
-        [localID]: { x: next.x, y: next.y, w: next.w, h: next.h },
-      });
-    }
-    if (linkedNodeID && initialText.trim().length > 0) void saveBox(linkedNodeID, next);
-  }, [boxes.length, linkedNodeID, readLocalLayout, saveBox, writeLocalLayout]);
-
   return (
-    <div
-      ref={canvasRef}
-      style={{ position: "relative", width: "100%", height: "100%", background: "#ffffff", color: "#0d1a1e", overflow: "hidden", userSelect: "text" }}
-      tabIndex={0}
-      onKeyDown={(event) => {
-        if (shouldIgnoreCanvasKeydownTarget(event.target as HTMLElement | null)) return;
-        if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
-        const current = boxes.find((item) => item.local_id === activeBoxID);
-        if (current) return;
-        createBox(event.key);
-        event.preventDefault();
-      }}
-      onDoubleClick={(event) => {
-        if (!canvasRef.current) return;
-        const bounds = canvasRef.current.getBoundingClientRect();
-        const x = clamp(event.clientX - bounds.left, 12, Math.max(12, bounds.width - 340));
-        const y = clamp(event.clientY - bounds.top, 40, Math.max(40, bounds.height - 90));
-        createBox("", x, y);
-      }}
-    >
-      {/* Keep title editing available even when title text is blank.
-          If this surface disappears, typing can fall through to canvas box-creation. */}
+    <div style={{ position: "relative", width: "100%", height: "100%", background: "#ffffff", color: "#0d1a1e", overflow: "auto", userSelect: "text" }}>
       {linkedNodeID.trim().length > 0 && (
-        <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, pointerEvents: "none" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, pointerEvents: "auto", paddingLeft: 106 }}>
+        <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, paddingLeft: 106 }}>
             {tabItems.map((tab) => {
               const selected = activeTab === tab.id;
               return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={(event) => { event.stopPropagation(); setActiveTab(tab.id); }}
-                  style={{
-                    border: `1px solid ${selected ? accent : "rgba(3,25,30,0.22)"}`,
-                    background: selected ? "rgba(255,255,255,0.98)" : "rgba(255,255,255,0.86)",
-                    color: "#0d1a1e",
-                    fontSize: 10,
-                    fontWeight: 800,
-                    letterSpacing: "0.1em",
-                    textTransform: "uppercase",
-                    padding: "4px 10px",
-                    borderRadius: 4,
-                    cursor: "pointer",
-                  }}
-                >
+                <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} style={{ border: `1px solid ${selected ? accent : "rgba(3,25,30,0.22)"}`, background: selected ? "rgba(255,255,255,0.98)" : "rgba(255,255,255,0.86)", color: "#0d1a1e", fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 10px", borderRadius: 4, cursor: "pointer" }}>
                   {tab.label}
                 </button>
               );
@@ -455,64 +223,53 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           </div>
 
           {activeTab === "editor" && (
-            <div style={{ display: "grid", gap: 2 }}>
-              <div style={{ pointerEvents: "auto" }}>
-                <div
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (isEditingTitle) return;
-                    editingTitleDraftRef.current = linkedNodeTitle || "new node";
-                    setIsEditingTitle(true);
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.12em", color: accent, cursor: "text" }}>
+                <span style={{ textTransform: "uppercase" }}>Node:</span>&nbsp;
+                <span
+                  ref={editingTitleRef}
+                  contentEditable={isEditingTitle}
+                  suppressContentEditableWarning
+                  onClick={() => {
+                    if (!isEditingTitle) {
+                      editingTitleDraftRef.current = linkedNodeTitle || "new node";
+                      setIsEditingTitle(true);
+                    }
                   }}
-                  onDoubleClick={(event) => event.stopPropagation()}
-                  style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.12em", color: accent, cursor: "text" }}
-                >
-                  <span style={{ textTransform: "uppercase" }}>Node:</span>&nbsp;
-                  <span
-                    ref={editingTitleRef}
-                    contentEditable={isEditingTitle}
-                    suppressContentEditableWarning
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      if (!isEditingTitle) {
-                        editingTitleDraftRef.current = linkedNodeTitle || "new node";
-                        setIsEditingTitle(true);
-                      }
-                    }}
-                    onInput={(event) => {
-                      editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
-                    }}
-                    onBlur={() => {
-                      if (!isEditingTitle) return;
+                  onInput={(event) => {
+                    editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
+                  }}
+                  onBlur={() => {
+                    if (!isEditingTitle) return;
+                    const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
+                    void updateNodeTitle(latestTitle);
+                    setIsEditingTitle(false);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
                       const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
                       void updateNodeTitle(latestTitle);
                       setIsEditingTitle(false);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
-                        void updateNodeTitle(latestTitle);
-                        setIsEditingTitle(false);
-                      }
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        if (editingTitleRef.current) editingTitleRef.current.textContent = linkedNodeTitle;
-                        setIsEditingTitle(false);
-                      }
-                    }}
-                    style={{ outline: "none" }}
-                  >
-                    {linkedNodeTitle || "\u00A0"}
-                  </span>
-                </div>
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      if (editingTitleRef.current) editingTitleRef.current.textContent = linkedNodeTitle;
+                      setIsEditingTitle(false);
+                    }
+                  }}
+                  style={{ outline: "none" }}
+                >
+                  {linkedNodeTitle || "\u00A0"}
+                </span>
               </div>
               {linkedNodeInfoPreview.length > 0 && <div style={{ fontSize: 10, opacity: 0.7 }}>{linkedNodeInfoPreview.join(" • ")}</div>}
+              <div style={{ fontSize: 11, opacity: 0.75 }}>Text box editing has been removed from this module.</div>
             </div>
           )}
 
           {activeTab === "metadata" && linkedNodeMetadataRows.length > 0 && (
-            <section style={{ pointerEvents: "auto", display: "grid", gap: 6, maxWidth: 520 }}>
+            <section style={{ display: "grid", gap: 6, maxWidth: 520 }}>
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>Metadata</div>
               <div style={{ display: "grid", gap: 4 }}>
                 {linkedNodeMetadataRows.map((row) => (
@@ -526,7 +283,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           )}
 
           {activeTab === "history" && linkedNodeHistoryRows.length > 0 && (
-            <section style={{ pointerEvents: "auto", display: "grid", gap: 6, maxWidth: 640 }}>
+            <section style={{ display: "grid", gap: 6, maxWidth: 640 }}>
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>History</div>
               <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(3,25,30,0.14)", borderRadius: 6, padding: "6px 8px 6px 22px" }}>
                 {linkedNodeHistoryRows.map((row, index) => <li key={`${row}-${index}`}>{row}</li>)}
@@ -535,82 +292,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           )}
         </div>
       )}
-      {boxes.map((box) => (
-        <div key={box.local_id} style={{ position: "absolute", left: box.x, top: box.y, width: box.w, height: box.h, minWidth: NODE_DOC_MIN_W, minHeight: NODE_DOC_MIN_H }}>
-          <textarea
-            data-box-id={box.local_id}
-            value={box.information}
-            onPointerDown={(event) => event.stopPropagation()}
-            onMouseDown={(event) => event.stopPropagation()}
-            onFocus={() => setActiveBoxID(box.local_id)}
-            onChange={(event) => {
-              const value = event.target.value;
-              setBoxes((prev) => prev.map((item) => (item.local_id === box.local_id ? { ...item, information: value } : item)));
-            }}
-            onBlur={(event) => {
-              if (!linkedNodeID) return;
-              const latest = boxes.find((item) => item.local_id === box.local_id);
-              const nextValue = event.currentTarget.value;
-              if (latest) void saveBox(linkedNodeID, { ...latest, information: nextValue });
-            }}
-            style={{
-              width: "100%",
-              height: "100%",
-              border: "1px solid rgba(0,0,0,0.38)",
-              outline: box.local_id === activeBoxID ? `1px solid ${accent}` : "none",
-              background: "rgba(255,255,255,0.42)",
-              resize: "none",
-              color: "#111",
-              fontSize: 15,
-              lineHeight: 1.45,
-              fontFamily: "'Manrope', 'Helvetica Neue', sans-serif",
-              padding: "6px 8px",
-            }}
-          />
-          {([
-            [{ top: true, left: true }, { top: -5, left: -5, cursor: "nwse-resize" }],
-            [{ top: true }, { top: -5, left: 10, right: 10, height: 8, cursor: "ns-resize" }],
-            [{ top: true, right: true }, { top: -5, right: -5, cursor: "nesw-resize" }],
-            [{ right: true }, { top: 10, right: -5, bottom: 10, width: 8, cursor: "ew-resize" }],
-            [{ bottom: true, right: true }, { bottom: -5, right: -5, cursor: "nwse-resize" }],
-            [{ bottom: true }, { bottom: -5, left: 10, right: 10, height: 8, cursor: "ns-resize" }],
-            [{ bottom: true, left: true }, { bottom: -5, left: -5, cursor: "nesw-resize" }],
-            [{ left: true }, { top: 10, left: -5, bottom: 10, width: 8, cursor: "ew-resize" }],
-          ] as const).map(([edges, style], index) => (
-            <div
-              key={`${box.local_id}-resize-${index}`}
-              style={{ position: "absolute", ...style }}
-              onPointerDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                setActiveBoxID(box.local_id);
-                setResizing({
-                  id: box.local_id,
-                  pointerID: event.pointerId,
-                  startX: event.clientX,
-                  startY: event.clientY,
-                  startW: box.w,
-                  startH: box.h,
-                  startBoxX: box.x,
-                  startBoxY: box.y,
-                  edges,
-                });
-              }}
-            />
-          ))}
-        </div>
-      ))}
-      {boxes.map((box) => (
-        <div
-          key={`${box.local_id}-handle`}
-          style={{ position: "absolute", left: box.x - 12, top: box.y + 6, width: 8, height: 22, borderRadius: 999, background: "rgba(0,0,0,0.16)", cursor: "grab" }}
-          onPointerDown={(event) => {
-            event.preventDefault();
-            setActiveBoxID(box.local_id);
-            setPlacing({ id: box.local_id, pointerID: event.pointerId, dx: event.clientX - (canvasRef.current?.getBoundingClientRect().left ?? 0) - box.x, dy: event.clientY - (canvasRef.current?.getBoundingClientRect().top ?? 0) - box.y });
-          }}
-        />
-      ))}
       {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020" }}>{error}</div>}
     </div>
   );
