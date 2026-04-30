@@ -14,6 +14,11 @@ export interface LinkPlan {
   edges: FrameLinkEdge[];
 }
 
+export interface FrameDeleteConfirmationState {
+  frameIDs: string[];
+  frameTitle: string;
+}
+
 export function classifyFrameKind(kind: string): LinkableKind | null {
   if (kind === "nodes" || kind === "nodes-map") return "map";
   if (kind === "editor" || kind === "node-doc") return "editor";
@@ -81,6 +86,15 @@ export function buildLinkModulesLabel(pool: FrameDataModel[], linkPlan: LinkPlan
   if (pool.length <= 1) return "No other module selected";
   if (!linkPlan) return "Select two or more linkable modules";
   return pool.map((frame) => frame.title).join(" + ");
+}
+
+// Build stable frame-delete confirmation copy so destructive prompts are always predictable.
+export function buildFrameDeleteConfirmationState(input: { frameIDs: string[]; frameTitle: string }): FrameDeleteConfirmationState {
+  const trimmedTitle = input.frameTitle.trim();
+  return {
+    frameIDs: input.frameIDs,
+    frameTitle: trimmedTitle.length > 0 ? trimmedTitle : "Untitled frame",
+  };
 }
 
 export function mergeLinkPlan(current: FrameLinkEdge[], plan: LinkPlan | null): FrameLinkEdge[] {
