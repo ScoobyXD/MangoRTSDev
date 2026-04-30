@@ -50,3 +50,16 @@ button, input {
 .node-details-panel::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(180deg, rgba(7, 86, 94, 0.62), rgba(7, 86, 94, 0.42));
 }
+
+/* Company Explorer scrollbar treatment (thin, high-contrast industrial look). */
+.company-explorer-scroll {
+  --company-explorer-scroll-accent: #00b8cc;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.company-explorer-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
