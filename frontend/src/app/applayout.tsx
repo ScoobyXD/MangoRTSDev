@@ -101,7 +101,7 @@ function isHexColor(value: unknown): value is string {
 // Storage migration guard: sanitize persisted frame payloads from localStorage.
 function coerceFrame(value: unknown): FrameDataModel | null {
   if (!isObject(value)) return null;
-  const { id, kind, parentId, theme, x, y, w, h, title, color, accent } = value;
+  const { id, kind, parentId, theme, glass, x, y, w, h, title, color, accent } = value;
   if (
     typeof id !== "string" || typeof kind !== "string" || typeof x !== "number" || typeof y !== "number" ||
     typeof w !== "number" || typeof h !== "number" || typeof title !== "string" || typeof color !== "string" || typeof accent !== "string"
@@ -160,7 +160,7 @@ function persistFrameLinks(next: FrameLinkEdge[]) {
 
 // Load saved dashboard views/tabs with legacy widget compatibility fallback.
 function loadViews(): { tabs: ViewTab[]; activeId: string } {
-  const fallback = { tabs: [{ id: "view-default", name: "Main View", frames: INITIAL_WIDGETS }], activeId: "view-default" };
+  const fallback = { tabs: [{ id: "view-default", name: "Mango Node View", frames: INITIAL_WIDGETS }], activeId: "view-default" };
   try {
     const raw = localStorage.getItem(VIEWS_KEY);
     if (!raw) return fallback;
@@ -395,6 +395,12 @@ interface FrameCardProps {
 const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nestedChildren, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked, edgeHit }) => {
   const Content = CONTENT_MAP[frame.kind];
   const theme = COLORWAYS[frame.theme ?? "teal"];
+  const isGlass = frame.glass === true;
+  const glassSurface = frame.theme === "dark"
+    ? "rgba(16, 18, 20, 0.56)"
+    : frame.theme === "light"
+      ? "rgba(255, 255, 255, 0.44)"
+      : "rgba(0, 233, 255, 0.34)";
   const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-map" || frame.kind === "editor" || frame.kind === "node-doc";
   const isEdgeToEdgeContentFrame = isNodesFrame || frame.kind === "company-explorer";
   const left = frame.x * stepX;
@@ -509,7 +515,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
           padding: "6px 8px",
           borderRight: "none",
           borderBottom: "none",
-          background: frame.color,
+          background: isGlass ? "rgba(255,255,255,0.16)" : frame.color,
           cursor: isDragging ? "grabbing" : "grab",
           fontFamily: "'IBM Plex Mono', monospace",
         }}
@@ -527,7 +533,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
             </svg>
           )}
       </div>
-      <div style={{ flex: 1, minHeight: 0, padding: isEdgeToEdgeContentFrame ? 0 : "8px 10px", overflow: frame.kind === "company-explorer" ? "hidden" : "auto", fontFamily: "'IBM Plex Mono', monospace" }}>
+      <div style={{ flex: 1, minHeight: 0, padding: isEdgeToEdgeContentFrame ? 0 : "8px 10px", overflow: frame.kind === "company-explorer" ? "hidden" : "auto", fontFamily: "'IBM Plex Mono', monospace", opacity: isGlass ? 0.78 : 1 }}>
         <div style={{ width: `${100 / contentScale}%`, height: `${100 / contentScale}%`, transform: `scale(${contentScale})`, transformOrigin: "top left" }}>
           {Content ? <Content accent={frame.accent} widgetId={frame.id} hideTopControls={isNodesFrame} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: frame.accent }}>{frame.title}</span></div>}
         </div>
@@ -934,6 +940,14 @@ const App: React.FC = () => {
   }, [tabs.length, activeTabId]);
 
 
+  const openMangoNodeView = useCallback((tabID: string) => {
+    const framesForView = createMangoNodeViewFrames();
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Mango Node View", frames: framesForView } : tab)));
+    setFrameLinks((previous) => mergeLinkPlan(previous, computeLinkPlan(framesForView)));
+    setActiveTabId(tabID);
+    setEditMode(true);
+  }, []);
+
   const saveCurrentAsTemplate = useCallback((tabID: string) => {
     const source = tabs.find((tab) => tab.id === tabID);
     if (!source) return;
@@ -1276,6 +1290,7 @@ const App: React.FC = () => {
         <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
+          <button style={menuBtnBase} onClick={() => { openMangoNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Mango Node View</button>
           <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>
         </FrameRightClickMenu>
       )}
@@ -1323,6 +1338,12 @@ const App: React.FC = () => {
               <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} /> {theme === "light" ? "LIGHT" : theme.toUpperCase()}
             </button>
           ))}
+          <button style={menuBtnBase} onClick={() => {
+            updateActiveFrames((prev) => prev.map((w) => (w.id === frameRightClickMenu.id ? { ...w, glass: !w.glass } : w)));
+            closeMenus();
+          }} {...hoverHandlers}>
+            {frames.find((w) => w.id === frameRightClickMenu.id)?.glass ? "Disable Glass" : "Enable Glass"}
+          </button>
           <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { confirmDeleteFrameSelection([frameRightClickMenu.id]); closeMenus(); }} {...hoverHandlers}>Delete</button>
         </FrameRightClickMenu>
       )}
