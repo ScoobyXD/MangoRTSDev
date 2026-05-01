@@ -4,59 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 
 	"miraeopus/backend/internal/domain"
 )
 
 type PostgresRepo struct {
 	db *sql.DB
-}
-
-func (r *PostgresRepo) ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error) {
-	rows, err := r.db.Query(`select company_id, logic_gate_relationship_id, logic_gate_id_a, logic_gate_id_b, a_position::text, b_position::text, created_timestamp from logic_gate_relationships where company_id=$1 order by created_timestamp asc`, companyID)
-	if err != nil { return nil, err }
-	defer rows.Close()
-	items := make([]domain.LogicGateRelationship, 0)
-	for rows.Next() {
-		var item domain.LogicGateRelationship
-		if err := rows.Scan(&item.CompanyID, &item.LogicGateRelationshipID, &item.LogicGateIDA, &item.LogicGateIDB, &item.APosition, &item.BPosition, &item.CreatedTimestamp); err != nil { return nil, err }
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (r *PostgresRepo) AddLogicGateInformation(companyID, logicGateID, infoType, information, informationID string) (domain.LogicGateInformation, error) {
-	item := domain.LogicGateInformation{}
-	err := r.db.QueryRow(`insert into logic_gate_information (company_id, information_id, logic_gate_id, type, information, created_timestamp, updated_timestamp)
-values ($1, coalesce(nullif($2,''),$3), $4, $5::information_type, $6, now(), now())
-returning company_id, information_id, logic_gate_id, type::text, information, created_timestamp, updated_timestamp`,
-		companyID, informationID, newUUIDv7String(), logicGateID, infoType, information).
-		Scan(&item.CompanyID, &item.InformationID, &item.LogicGateID, &item.Type, &item.Information, &item.CreatedTimestamp, &item.UpdatedTimestamp)
-	if err != nil {
-		if strings.Contains(err.Error(), "violates foreign key") { return domain.LogicGateInformation{}, ErrNotFound }
-		return domain.LogicGateInformation{}, err
-	}
-	return item, nil
-}
-
-func (r *PostgresRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.LogicGateDetails, error) {
-	var gate domain.LogicGate
-	if err := r.db.QueryRow(`select company_id, logic_gate_id, header, created_timestamp from logic_gates where company_id=$1 and logic_gate_id=$2`, companyID, logicGateID).
-		Scan(&gate.CompanyID, &gate.LogicGateID, &gate.Header, &gate.CreatedTimestamp); err != nil {
-		if errors.Is(err, sql.ErrNoRows) { return domain.LogicGateDetails{}, ErrNotFound }
-		return domain.LogicGateDetails{}, err
-	}
-	infoRows, err := r.db.Query(`select company_id, information_id, logic_gate_id, type::text, information, created_timestamp, updated_timestamp from logic_gate_information where company_id=$1 and logic_gate_id=$2 order by created_timestamp asc`, companyID, logicGateID)
-	if err != nil { return domain.LogicGateDetails{}, err }
-	defer infoRows.Close()
-	info := make([]domain.LogicGateInformation, 0)
-	for infoRows.Next() { var item domain.LogicGateInformation; if err := infoRows.Scan(&item.CompanyID,&item.InformationID,&item.LogicGateID,&item.Type,&item.Information,&item.CreatedTimestamp,&item.UpdatedTimestamp); err != nil { return domain.LogicGateDetails{}, err }; info = append(info, item) }
-	rels, err := r.ListLogicGateRelationships(companyID)
-	if err != nil { return domain.LogicGateDetails{}, err }
-	filtered := make([]domain.LogicGateRelationship, 0)
-	for _, rel := range rels { if rel.LogicGateIDA == logicGateID || rel.LogicGateIDB == logicGateID { filtered = append(filtered, rel) } }
-	return domain.LogicGateDetails{LogicGate: gate, Information: info, Relationships: filtered}, nil
 }
 
 func NewPostgresRepo(db *sql.DB) *PostgresRepo {
@@ -591,34 +544,6 @@ func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGa
 	).Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp)
 	if err != nil {
 		return domain.LogicGate{}, err
-	}
-	return item, nil
-}
-
-func (r *PostgresRepo) ListLogicGates(companyID string) ([]domain.LogicGate, error) {
-	rows, err := r.db.Query(`select company_id, logic_gate_id, header, created_timestamp from logic_gates where company_id=$1 order by created_timestamp asc`, companyID)
-	if err != nil { return nil, err }
-	defer rows.Close()
-	items := make([]domain.LogicGate, 0)
-	for rows.Next() {
-		var item domain.LogicGate
-		if err := rows.Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp); err != nil { return nil, err }
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (r *PostgresRepo) CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error) {
-	var item domain.LogicGateRelationship
-	item = domain.LogicGateRelationship{CompanyID: companyID, LogicGateRelationshipID: newUUIDv7String(), LogicGateIDA: logicGateIDA, LogicGateIDB: logicGateIDB, APosition: aPosition, BPosition: bPosition}
-	err := r.db.QueryRow(`insert into logic_gate_relationships (company_id, logic_gate_relationship_id, logic_gate_id_a, logic_gate_id_b, a_position, b_position, created_timestamp)
-values ($1,$2,$3,$4,$5::logic_gate_relationship_position,$6::logic_gate_relationship_position,now())
-returning company_id, logic_gate_relationship_id, logic_gate_id_a, logic_gate_id_b, a_position::text, b_position::text, created_timestamp`,
-		item.CompanyID, item.LogicGateRelationshipID, item.LogicGateIDA, item.LogicGateIDB, item.APosition, item.BPosition).
-		Scan(&item.CompanyID, &item.LogicGateRelationshipID, &item.LogicGateIDA, &item.LogicGateIDB, &item.APosition, &item.BPosition, &item.CreatedTimestamp)
-	if err != nil {
-		if strings.Contains(err.Error(), "violates foreign key") { return domain.LogicGateRelationship{}, ErrNotFound }
-		return domain.LogicGateRelationship{}, err
 	}
 	return item, nil
 }

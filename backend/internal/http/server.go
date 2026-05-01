@@ -42,8 +42,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/workspace/context-projections", s.handleWorkspaceContextProjections)
 	mux.HandleFunc("/v1/workspace/context-deltas", s.handleWorkspaceContextDeltas)
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
-	mux.HandleFunc("/v1/logic-gates/", s.handleLogicGateSubresource)
-	mux.HandleFunc("/v1/logic-gate-relationships", s.handleLogicGateRelationships)
 	mux.HandleFunc("/v1/operations", s.handleOperations)
 	mux.HandleFunc("/v1/operations/", s.handleOperationByID)
 	return mux
@@ -572,14 +570,6 @@ func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[str
 }
 
 func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-		if companyID == "" { writeError(w, http.StatusBadRequest, "company_id_required"); return }
-		items, err := s.repo.ListLogicGates(companyID)
-		if err != nil { writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates"); return }
-		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"logic_gates": items})
-		return
-	}
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -602,71 +592,6 @@ func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, item)
-}
-
-func isLegalLogicGateRelationshipPositionPair(a, b string) bool {
-	return (a == "Input" && b == "Output") || (a == "Output" && b == "Input")
-}
-
-func (s *Server) handleLogicGateRelationships(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-		if companyID == "" { writeError(w, http.StatusBadRequest, "company_id_required"); return }
-		items, err := s.repo.ListLogicGateRelationships(companyID)
-		if err != nil { writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships"); return }
-		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"relationships": items})
-		return
-	}
-	if r.Method != http.MethodPost { writeError(w, http.StatusMethodNotAllowed, "method_not_allowed"); return }
-	var req struct {
-		CompanyID   string `json:"company_id"`
-		LogicGateIDA string `json:"logic_gate_id_a"`
-		LogicGateIDB string `json:"logic_gate_id_b"`
-		APosition   string `json:"a_position"`
-		BPosition   string `json:"b_position"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil { writeError(w, http.StatusBadRequest, "invalid_json"); return }
-	if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.LogicGateIDA) == "" || strings.TrimSpace(req.LogicGateIDB) == "" {
-		writeError(w, http.StatusBadRequest, "company_id_logic_gate_ids_required"); return
-	}
-	if !isLegalLogicGateRelationshipPositionPair(req.APosition, req.BPosition) {
-		writeError(w, http.StatusBadRequest, "invalid_logic_gate_relationship_position_pair"); return
-	}
-	item, err := s.repo.CreateLogicGateRelationship(req.CompanyID, req.LogicGateIDA, req.LogicGateIDB, req.APosition, req.BPosition)
-	if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "logic_gate_not_found"); return }
-	if err != nil { writeError(w, http.StatusInternalServerError, "failed_to_create_logic_gate_relationship"); return }
-	writeJSON(w, http.StatusCreated, item)
-}
-
-func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/v1/logic-gates/"), "/")
-	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" { writeError(w, http.StatusNotFound, "not_found"); return }
-	logicGateID := parts[0]
-	if len(parts) == 1 {
-		if r.Method != http.MethodGet { writeError(w, http.StatusMethodNotAllowed, "method_not_allowed"); return }
-		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-		if companyID == "" { writeError(w, http.StatusBadRequest, "company_id_required"); return }
-		details, err := s.repo.GetLogicGateDetails(companyID, logicGateID)
-		if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "logic_gate_not_found"); return }
-		if err != nil { writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate"); return }
-		writeJSONMaybeNotModified(w, r, http.StatusOK, details); return
-	}
-	if len(parts) == 2 && parts[1] == "information" {
-		if r.Method != http.MethodPost { writeError(w, http.StatusMethodNotAllowed, "method_not_allowed"); return }
-		var req struct {
-			CompanyID     string `json:"company_id"`
-			Type          string `json:"type"`
-			Information   string `json:"information"`
-			InformationID string `json:"information_id"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil { writeError(w, http.StatusBadRequest, "invalid_json"); return }
-		if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Type) == "" || strings.TrimSpace(req.Information) == "" { writeError(w, http.StatusBadRequest, "company_id_type_information_required"); return }
-		item, err := s.repo.AddLogicGateInformation(req.CompanyID, logicGateID, req.Type, req.Information, req.InformationID)
-		if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "logic_gate_not_found"); return }
-		if err != nil { writeError(w, http.StatusInternalServerError, "failed_to_add_logic_gate_information"); return }
-		writeJSON(w, http.StatusCreated, item); return
-	}
-	writeError(w, http.StatusNotFound, "not_found")
 }
 
 func (s *Server) handleOperations(w http.ResponseWriter, r *http.Request) {

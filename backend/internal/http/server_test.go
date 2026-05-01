@@ -40,19 +40,6 @@ func TestIsLegalNodeRelationshipPositionPair(t *testing.T) {
 	}
 }
 
-func TestIsLegalLogicGateRelationshipPositionPair(t *testing.T) {
-	t.Parallel()
-	if !isLegalLogicGateRelationshipPositionPair("Input", "Output") {
-		t.Fatal("expected Input/Output to be legal")
-	}
-	if !isLegalLogicGateRelationshipPositionPair("Output", "Input") {
-		t.Fatal("expected Output/Input to be legal")
-	}
-	if isLegalLogicGateRelationshipPositionPair("Input", "Input") {
-		t.Fatal("expected Input/Input to be illegal")
-	}
-}
-
 func TestUpdateNodeTitleViaPut(t *testing.T) {
 	t.Parallel()
 
