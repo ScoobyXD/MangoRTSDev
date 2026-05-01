@@ -6,6 +6,7 @@ import { NodeMapContent } from "../node-map/NodeMapContent";
 export const LogicMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = (props) => (
   <NodeMapContent
     {...props}
+    entityMode="logic-gate"
     relationshipRoleLabels={{ parent: "Input", peer: "Peer", child: "Output" }}
   />
 );
