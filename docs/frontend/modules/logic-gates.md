@@ -5,8 +5,8 @@ Logic Gate Map is the dedicated visual workspace for creating and connecting `lo
 
 It intentionally mirrors Node Map interaction patterns so users do not learn a second canvas model:
 - create logic gates on the canvas,
-- create linked logic gates with `+` side controls,
-- connect existing gates with arrow side controls,
+- create linked logic gates with `+` side controls on the left and right sides,
+- connect existing gates with relationship side controls,
 - drag, resize, pan, zoom, multi-select, and delete gates or relationship lines,
 - link selection context into Company Explorer and Editor.
 
@@ -45,8 +45,11 @@ The only valid row pairs are:
 Self-relationships are rejected.
 
 Side convention:
-- `left` and `top` are `Input` ports.
-- `right` and `bottom` are `Output` ports.
+- `left` is the only `Input` port.
+- `top`, `right`, and `bottom` are `Output` ports.
+- New linked gates and relationship drafts can only start from `left` or `right`.
+- During an active relationship draft, an input source can attach to `top`, `right`, or `bottom` output sides.
+- During an active relationship draft, an output source can attach only to the target `left` input side.
 
 Junior engineer note:
 - The source gate is always written as `logic_gate_id_a`.

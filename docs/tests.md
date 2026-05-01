@@ -104,9 +104,10 @@ Use this checklist format and keep it complete.
   - projected visual relationship line metadata output
 - [x] `tests/frontend/modules/logic-gate-map/relationshipProjection.test.ts`
   - side -> Input/Output mapping
+  - left/right-only relationship draft and linked-gate creation controls
   - `+` linked-gate Input/Output semantics
   - existing-gate payload mapping
-  - illegal same-role side-pair rejection
+  - input-to-output and output-to-input side-pair enforcement
   - selected-gate opposite-side role resolution
   - input/output anchor inference
   - projected visual relationship metadata output

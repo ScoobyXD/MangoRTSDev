@@ -2,7 +2,7 @@
 // @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, inferRelationshipAnchor, isLegalRelationshipSidePair, projectRelationshipVisual, relationshipRoleFromSide, selectedRoleForRelationship } from "../../../../frontend/src/modules/logic-gate-map/relationshipProjection.js";
+import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, canStartRelationshipFromSide, inferRelationshipAnchor, isLegalRelationshipSidePair, projectRelationshipVisual, relationshipRoleFromSide, selectedRoleForRelationship } from "../../../../frontend/src/modules/logic-gate-map/relationshipProjection.js";
 import { NodeRelationship } from "../../../../frontend/src/modules/logic-gate-map/shared.js";
 
 function relationship(overrides: Partial<NodeRelationship>): NodeRelationship {
@@ -23,9 +23,16 @@ function relationship(overrides: Partial<NodeRelationship>): NodeRelationship {
 
 test("maps logic-gate sides to input and output ports", () => {
   assert.equal(relationshipRoleFromSide("left"), "Input");
-  assert.equal(relationshipRoleFromSide("top"), "Input");
+  assert.equal(relationshipRoleFromSide("top"), "Output");
   assert.equal(relationshipRoleFromSide("right"), "Output");
   assert.equal(relationshipRoleFromSide("bottom"), "Output");
+});
+
+test("only left and right sides can start logic-gate creation or relationship drafts", () => {
+  assert.equal(canStartRelationshipFromSide("left"), true);
+  assert.equal(canStartRelationshipFromSide("right"), true);
+  assert.equal(canStartRelationshipFromSide("top"), false);
+  assert.equal(canStartRelationshipFromSide("bottom"), false);
 });
 
 test("plus-link relationships always connect input to output", () => {
@@ -41,25 +48,32 @@ test("plus-link relationships always connect input to output", () => {
   });
 });
 
-test("existing-gate attach flow rejects same-role side pairs", () => {
+test("existing-gate attach flow connects inputs only to output sides", () => {
   assert.equal(isLegalRelationshipSidePair("left", "right"), true);
+  assert.equal(isLegalRelationshipSidePair("left", "top"), true);
+  assert.equal(isLegalRelationshipSidePair("left", "bottom"), true);
+  assert.equal(isLegalRelationshipSidePair("left", "left"), false);
+});
+
+test("existing-gate attach flow connects outputs only to input sides", () => {
   assert.equal(isLegalRelationshipSidePair("right", "left"), true);
-  assert.equal(isLegalRelationshipSidePair("top", "bottom"), true);
-  assert.equal(isLegalRelationshipSidePair("bottom", "top"), true);
-  assert.equal(isLegalRelationshipSidePair("left", "top"), false);
-  assert.equal(isLegalRelationshipSidePair("right", "bottom"), false);
+  assert.equal(isLegalRelationshipSidePair("top", "left"), true);
+  assert.equal(isLegalRelationshipSidePair("bottom", "left"), true);
+  assert.equal(isLegalRelationshipSidePair("right", "top"), false);
+  assert.equal(isLegalRelationshipSidePair("top", "bottom"), false);
+  assert.equal(isLegalRelationshipSidePair("bottom", "right"), false);
 });
 
 test("uses target/source input-output semantics for existing-gate writes", () => {
-  assert.deepEqual(buildExistingNodeRelationshipPayload("top", "bottom"), {
+  assert.deepEqual(buildExistingNodeRelationshipPayload("left", "top"), {
     a_position: "Output",
     b_position: "Input",
-    anchor: { from: "top", to: "bottom" },
+    anchor: { from: "left", to: "top" },
   });
-  assert.deepEqual(buildExistingNodeRelationshipPayload("bottom", "top"), {
+  assert.deepEqual(buildExistingNodeRelationshipPayload("right", "left"), {
     a_position: "Input",
     b_position: "Output",
-    anchor: { from: "bottom", to: "top" },
+    anchor: { from: "right", to: "left" },
   });
 });
 
@@ -73,6 +87,20 @@ test("resolves selected role from the opposite side of a logic-gate relationship
 test("infers deterministic anchors for input/output relationships", () => {
   assert.deepEqual(inferRelationshipAnchor(relationship({ a_position: "Input", b_position: "Output" }), {}), { from: "right", to: "left" });
   assert.deepEqual(inferRelationshipAnchor(relationship({ a_position: "Output", b_position: "Input" }), {}), { from: "left", to: "right" });
+  assert.deepEqual(
+    inferRelationshipAnchor(relationship({ a_position: "Input", b_position: "Output" }), {
+      "logic-a": { x: 100, y: 100 },
+      "logic-b": { x: 120, y: 360 },
+    }),
+    { from: "bottom", to: "left" },
+  );
+  assert.deepEqual(
+    inferRelationshipAnchor(relationship({ a_position: "Output", b_position: "Input" }), {
+      "logic-a": { x: 100, y: 360 },
+      "logic-b": { x: 120, y: 100 },
+    }),
+    { from: "left", to: "bottom" },
+  );
 });
 
 test("projects visual relationship metadata with input/output colors", () => {
