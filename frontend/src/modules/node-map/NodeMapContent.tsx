@@ -1832,8 +1832,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   if (confirmDelete.relationshipIDs.length > 0) void deleteRelationships(confirmDelete.relationshipIDs);
                   if (confirmDelete.nodeIDs.length > 0) void deleteNodes(confirmDelete.nodeIDs);
                   setConfirmDelete(null);
-                }} style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#d8fff6", cursor: "pointer", fontWeight: 700 }}>Yes</button>
-                <button onClick={() => setConfirmDelete(null)} style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
+                }} style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}>Yes</button>
+                <button onClick={() => setConfirmDelete(null)} style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
               </div>
             </div>
           </div>
