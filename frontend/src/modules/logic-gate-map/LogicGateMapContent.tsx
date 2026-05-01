@@ -3,12 +3,19 @@ import { INFO_TYPES, LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LOGIC_GATE_MAP_
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { type ContextMutationEnvelope } from "../contextSyncContract";
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "./LogicGateRelationshipGraph";
-import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
+import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, canStartRelationshipFromSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "../node-map/relationshipDeleteSummary";
 import { invalidateLogicGateRecordStoreCaches } from "./LogicGateRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
 
 // Logic Gate Map module: node-map canvas behavior with logic-gate persistence and Input/Output edges.
+const LOGIC_GATE_SIDE_CONTROLS: Array<{ direction: NodeDirection; style: React.CSSProperties }> = [
+  { direction: "left", style: { left: -12, top: "50%", transform: "translate(-50%, -50%)", flexDirection: "column" } },
+  { direction: "right", style: { right: -12, top: "50%", transform: "translate(50%, -50%)", flexDirection: "column" } },
+  { direction: "top", style: { top: -12, left: "50%", transform: "translate(-50%, -50%)", flexDirection: "row" } },
+  { direction: "bottom", style: { bottom: -12, left: "50%", transform: "translate(-50%, 50%)", flexDirection: "row" } },
+];
+
 export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "teal" }) => {
   const SELECTION_CYAN = "rgb(0, 233, 255)";
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -578,6 +585,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   };
 
   const createLinkedNode = async (sourceNodeID: string, direction: NodeDirection) => {
+    if (!canStartRelationshipFromSide(direction)) return;
     const sourceNode = nodes.find((node) => node.node_id === sourceNodeID);
     if (!sourceNode) return;
 
@@ -1488,50 +1496,51 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
                   <div style={{ position: "absolute", top: 6, right: 6, width: 12, height: 12, borderRadius: 999, background: SELECTION_CYAN, opacity: 0.92 }} />
                 )}
 
-                {([
-                  ["left", { left: -12, top: "50%", transform: "translate(-50%, -50%)", flexDirection: "column" }],
-                  ["right", { right: -12, top: "50%", transform: "translate(50%, -50%)", flexDirection: "column" }],
-                  ["top", { top: -12, left: "50%", transform: "translate(-50%, -50%)", flexDirection: "row" }],
-                  ["bottom", { bottom: -12, left: "50%", transform: "translate(-50%, 50%)", flexDirection: "row" }],
-                ] as const).map(([direction, sideStyle]) => {
+                {LOGIC_GATE_SIDE_CONTROLS.map(({ direction, style: sideStyle }) => {
                   const isDrafting = !!relationshipDraft;
                   const isSource = relationshipDraft?.sourceNodeID === node.node_id && relationshipDraft.sourceSide === direction;
+                  const isLegalDraftTarget = !!relationshipDraft && relationshipDraft.sourceNodeID !== node.node_id && isLegalRelationshipSidePair(relationshipDraft.sourceSide, direction);
+                  const canStartFromSide = canStartRelationshipFromSide(direction);
+                  const showControls = isDrafting ? (isSource || isLegalDraftTarget) : (isPrimary && canStartFromSide);
+                  if (!showControls) return null;
                   return (
                     <div
                       key={direction}
                       style={{
                         position: "absolute",
                         ...sideStyle,
-                        display: isPrimary || isDrafting ? "flex" : "none",
+                        display: "flex",
                         gap: 4,
                       }}
                     >
-                      <button
-                        title={`Create ${direction} logic gate`}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setError("");
-                          setRelationshipDraft(null);
-                          void createLinkedNode(node.node_id, direction);
-                        }}
-                        style={{
-                          width: 20,
-                          height: 20,
-                          borderRadius: 4,
-                          border: `1px solid ${accent}`,
-                          background: panelSurface,
-                          color: accent,
-                          display: isDrafting ? "none" : "grid",
-                          placeItems: "center",
-                          fontSize: 14,
-                          lineHeight: 1,
-                          cursor: "pointer",
-                          padding: 0,
-                        }}
-                      >
-                        +
-                      </button>
+                      {!isDrafting && canStartFromSide && (
+                        <button
+                          title={`Create ${direction} logic gate`}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setError("");
+                            setRelationshipDraft(null);
+                            void createLinkedNode(node.node_id, direction);
+                          }}
+                          style={{
+                            width: 20,
+                            height: 20,
+                            borderRadius: 4,
+                            border: `1px solid ${accent}`,
+                            background: panelSurface,
+                            color: accent,
+                            display: "grid",
+                            placeItems: "center",
+                            fontSize: 14,
+                            lineHeight: 1,
+                            cursor: "pointer",
+                            padding: 0,
+                          }}
+                        >
+                          +
+                        </button>
+                      )}
                       <button
                         title={isDrafting ? `Attach relationship on ${direction}` : `Create relationship from ${direction}`}
                         onPointerDown={(event) => event.stopPropagation()}
@@ -1548,6 +1557,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
                             setRelationshipDraft(null);
                             return;
                           }
+                          if (!canStartFromSide) return;
                           const start = getAnchorPoint(node.node_id, direction);
                           if (!start) return;
                           setSelectedRelationshipIDs(new Set());
@@ -1562,8 +1572,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
                           color: isSource ? "#ffffff" : accent,
                           display: "grid",
                           placeItems: "center",
-                          cursor: relationshipDraft?.sourceNodeID === node.node_id || (relationshipDraft && !isLegalRelationshipSidePair(relationshipDraft.sourceSide, direction)) ? "not-allowed" : "pointer",
-                          opacity: relationshipDraft && !isLegalRelationshipSidePair(relationshipDraft.sourceSide, direction) ? 0.35 : 1,
+                          cursor: relationshipDraft?.sourceNodeID === node.node_id ? "not-allowed" : "pointer",
                           padding: 0,
                         }}
                       >

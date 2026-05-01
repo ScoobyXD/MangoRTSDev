@@ -8,14 +8,18 @@ export type RelationshipWritePayload = {
   anchor: RelationshipAnchor;
 };
 
-// Port convention for Logic Gate Map: left/top are inputs, right/bottom are outputs.
+// Port convention for Logic Gate Map: left is the input side; every other side is output-only.
 export function relationshipRoleFromSide(side: NodeDirection): LogicGateRelationshipRole {
-  return side === "left" || side === "top" ? "Input" : "Output";
+  return side === "left" ? "Input" : "Output";
+}
+
+export function canStartRelationshipFromSide(side: NodeDirection): boolean {
+  return side === "left" || side === "right";
 }
 
 export function buildLinkedNodePayloadFromSourceSide(side: NodeDirection): RelationshipWritePayload {
   const sourceRole = relationshipRoleFromSide(side);
-  const targetSide = side === "left" ? "right" : side === "right" ? "left" : side === "top" ? "bottom" : "top";
+  const targetSide = sourceRole === "Input" ? "right" : "left";
   const targetRole = relationshipRoleFromSide(targetSide);
   return {
     a_position: targetRole,
@@ -65,22 +69,27 @@ export function inferRelationshipAnchor(
   rememberedAnchor?: RelationshipAnchor,
 ): RelationshipAnchor {
   if (rememberedAnchor) return rememberedAnchor;
-  if (relationship.a_position === "Input" && relationship.b_position === "Output") {
-    return { from: "right", to: "left" };
-  }
-  if (relationship.a_position === "Output" && relationship.b_position === "Input") {
-    return { from: "left", to: "right" };
-  }
-
   const source = nodePositions[relationship.node_id_a];
   const target = nodePositions[relationship.node_id_b];
-  if (!source || !target) return { from: "right", to: "left" };
-  const dx = target.x - source.x;
-  const dy = target.y - source.y;
-  if (Math.abs(dy) > Math.abs(dx) * 1.15) {
-    return dy >= 0 ? { from: "bottom", to: "top" } : { from: "top", to: "bottom" };
+
+  const inferOutputSide = (node: NodePosition | undefined, other: NodePosition | undefined): NodeDirection => {
+    if (!node || !other) return "right";
+    const dx = other.x - node.x;
+    const dy = other.y - node.y;
+    if (Math.abs(dy) > Math.abs(dx) * 1.15) {
+      return dy >= 0 ? "bottom" : "top";
+    }
+    return "right";
+  };
+
+  if (relationship.a_position === "Input" && relationship.b_position === "Output") {
+    return { from: inferOutputSide(source, target), to: "left" };
   }
-  return dx >= 0 ? { from: "right", to: "left" } : { from: "left", to: "right" };
+  if (relationship.a_position === "Output" && relationship.b_position === "Input") {
+    return { from: "left", to: inferOutputSide(target, source) };
+  }
+
+  return { from: "right", to: "left" };
 }
 
 export function projectRelationshipVisual(
