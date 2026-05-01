@@ -287,6 +287,116 @@ func TestInformationAPIsRejectBlankInformation(t *testing.T) {
 	}
 }
 
+func TestWorkspaceFolderAPIsSupportNestedFoldersAndMembership(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-folder-api-test"
+
+	node, err := repo.CreateNode(companyID, "Foldered node")
+	if err != nil {
+		t.Fatalf("CreateNode() error = %v", err)
+	}
+
+	createFolder := func(name, parentFolderID string) string {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{
+			"company_id":       companyID,
+			"parent_folder_id": parentFolderID,
+			"folder_kind":      "node",
+			"name":             name,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/workspace/folders", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST workspace folders status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+		}
+		var payload struct {
+			FolderID string `json:"folder_id"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode folder: %v", err)
+		}
+		if payload.FolderID == "" {
+			t.Fatalf("folder_id was empty")
+		}
+		return payload.FolderID
+	}
+
+	parentID := createFolder("Customers", "")
+	childID := createFolder("Onboarding", parentID)
+
+	assignBody, _ := json.Marshal(map[string]string{
+		"company_id": companyID,
+		"folder_id":  childID,
+		"item_type":  "node",
+		"item_id":    node.NodeID,
+	})
+	assignReq := httptest.NewRequest(http.MethodPost, "/v1/workspace/folder-items", bytes.NewReader(assignBody))
+	assignReq.Header.Set("Content-Type", "application/json")
+	assignRec := httptest.NewRecorder()
+	handler.ServeHTTP(assignRec, assignReq)
+	if assignRec.Code != http.StatusOK {
+		t.Fatalf("POST workspace folder-items status = %d, want %d body=%s", assignRec.Code, http.StatusOK, assignRec.Body.String())
+	}
+
+	itemsReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/folder-items?company_id="+companyID+"&folder_id="+childID+"&item_type=node", nil)
+	itemsRec := httptest.NewRecorder()
+	handler.ServeHTTP(itemsRec, itemsReq)
+	if itemsRec.Code != http.StatusOK {
+		t.Fatalf("GET workspace folder-items status = %d, want %d body=%s", itemsRec.Code, http.StatusOK, itemsRec.Body.String())
+	}
+	var itemsPayload struct {
+		Items []struct {
+			FolderID string `json:"folder_id"`
+			ItemType string `json:"item_type"`
+			ItemID   string `json:"item_id"`
+		} `json:"folder_items"`
+	}
+	if err := json.NewDecoder(itemsRec.Body).Decode(&itemsPayload); err != nil {
+		t.Fatalf("decode folder items: %v", err)
+	}
+	if len(itemsPayload.Items) != 1 || itemsPayload.Items[0].FolderID != childID || itemsPayload.Items[0].ItemID != node.NodeID {
+		t.Fatalf("folder item payload = %+v, want node in child folder", itemsPayload.Items)
+	}
+
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID, nil)
+	snapshotRec := httptest.NewRecorder()
+	handler.ServeHTTP(snapshotRec, snapshotReq)
+	if snapshotRec.Code != http.StatusOK {
+		t.Fatalf("GET workspace snapshot status = %d, want %d body=%s", snapshotRec.Code, http.StatusOK, snapshotRec.Body.String())
+	}
+	var snapshot struct {
+		Folders []struct {
+			FolderID       string  `json:"folder_id"`
+			ParentFolderID *string `json:"parent_folder_id"`
+		} `json:"folders"`
+		FolderItems []struct {
+			FolderID string `json:"folder_id"`
+			ItemID   string `json:"item_id"`
+		} `json:"folder_items"`
+	}
+	if err := json.NewDecoder(snapshotRec.Body).Decode(&snapshot); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if len(snapshot.Folders) != 2 || len(snapshot.FolderItems) != 1 {
+		t.Fatalf("snapshot folder counts = folders:%d items:%d, want 2/1", len(snapshot.Folders), len(snapshot.FolderItems))
+	}
+	foundChild := false
+	for _, folder := range snapshot.Folders {
+		if folder.FolderID == childID && folder.ParentFolderID != nil && *folder.ParentFolderID == parentID {
+			foundChild = true
+		}
+	}
+	if !foundChild {
+		t.Fatalf("snapshot did not preserve nested child folder parent")
+	}
+}
+
 func TestUpdateNodeTitleViaPut(t *testing.T) {
 	t.Parallel()
 

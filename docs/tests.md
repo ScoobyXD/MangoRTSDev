@@ -138,6 +138,11 @@ Use this checklist format and keep it complete.
   - linked target resolution by kind supports traversal through intermediary graph hops
   - direct-neighbor resolution returns adjacency-only targets for explorer fanout
 - [x] `tests/frontend/modules/company-explorer/explorerSync.test.ts`
+- [x] `tests/frontend/modules/folders/workspaceFolders.test.ts`
+  - nested folder subtree expansion for map scope
+  - node folder filtering keeps only folder/descendant contents
+  - relationship filtering keeps only relationships whose endpoints are both in scope
+  - logic-gate folder filtering ignores node placements and hides cross-scope relationships
 - [x] `tests/frontend/modules/contextSyncContract.test.ts`
   - stale event rejection when incoming sequence is older than last applied
   - duplicate event idempotency guard for repeated delivery
@@ -157,6 +162,7 @@ Use this checklist format and keep it complete.
   - logic gate relationship position-pair legality helper (Input/Output or Output/Input only)
   - logic gate create/read/information/relationship API flow
   - node and logic-gate information APIs reject blank/whitespace-only `information` so empty editor blurs do not persist rows
+  - workspace folder APIs create nested folders, assign node placements, and include folder data in workspace snapshots
 
 ### Integration tests
 - [ ] None committed yet (to be added)

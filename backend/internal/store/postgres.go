@@ -250,6 +250,13 @@ func (r *PostgresRepo) DeleteNode(companyID, nodeID string) error {
 	); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from workspace_folder_items
+		 where company_id=$1 and item_type='node' and item_id=$2`,
+		companyID, nodeID,
+	); err != nil {
+		return err
+	}
 
 	if _, err := tx.ExecContext(ctx,
 		`delete from node_information
@@ -623,6 +630,13 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
+		`delete from workspace_folder_items
+		 where company_id=$1 and item_type='logic_gate' and item_id=$2`,
+		companyID, logicGateID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
 		`delete from logic_gate_information
 		 where company_id=$1 and logic_gate_id=$2`,
 		companyID, logicGateID,
@@ -955,6 +969,259 @@ func (r *PostgresRepo) GetLogicGateDetails(companyID, logicGateID string) (domai
 		Information:   information,
 		Relationships: relationships,
 	}, nil
+}
+
+func (r *PostgresRepo) CreateWorkspaceFolder(companyID, parentFolderID, folderKind, name string) (domain.WorkspaceFolder, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.WorkspaceFolder{}, err
+	}
+	defer tx.Rollback()
+
+	var parent any
+	if parentFolderID != "" {
+		var parentKind string
+		if err := tx.QueryRowContext(ctx,
+			`select folder_kind
+			 from workspace_folders
+			 where company_id=$1 and folder_id=$2`,
+			companyID, parentFolderID,
+		).Scan(&parentKind); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return domain.WorkspaceFolder{}, ErrNotFound
+			}
+			return domain.WorkspaceFolder{}, err
+		}
+		if parentKind != folderKind {
+			return domain.WorkspaceFolder{}, ErrNotFound
+		}
+		parent = parentFolderID
+	}
+
+	item := domain.WorkspaceFolder{
+		CompanyID:  companyID,
+		FolderID:   newUUIDv7String(),
+		FolderKind: folderKind,
+		Name:       name,
+	}
+	var parentOut sql.NullString
+	if err := tx.QueryRowContext(ctx,
+		`insert into workspace_folders
+		 (company_id, folder_id, parent_folder_id, folder_kind, name, created_timestamp, updated_timestamp)
+		 values ($1, $2, $3, $4, $5, now(), now())
+		 returning company_id, folder_id, parent_folder_id, folder_kind, name, created_timestamp, updated_timestamp`,
+		item.CompanyID, item.FolderID, parent, item.FolderKind, item.Name,
+	).Scan(
+		&item.CompanyID,
+		&item.FolderID,
+		&parentOut,
+		&item.FolderKind,
+		&item.Name,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	); err != nil {
+		return domain.WorkspaceFolder{}, err
+	}
+	if parentOut.Valid {
+		item.ParentFolderID = &parentOut.String
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.WorkspaceFolder{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) ListWorkspaceFolders(companyID, folderKind string) ([]domain.WorkspaceFolder, error) {
+	ctx := context.Background()
+	var kindParam any
+	if folderKind != "" {
+		kindParam = folderKind
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`select company_id, folder_id, parent_folder_id, folder_kind, name, created_timestamp, updated_timestamp
+		 from workspace_folders
+		 where company_id=$1 and ($2::text is null or folder_kind=$2)
+		 order by created_timestamp asc`,
+		companyID, kindParam,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.WorkspaceFolder, 0)
+	for rows.Next() {
+		var item domain.WorkspaceFolder
+		var parent sql.NullString
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.FolderID,
+			&parent,
+			&item.FolderKind,
+			&item.Name,
+			&item.CreatedTimestamp,
+			&item.UpdatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		if parent.Valid {
+			item.ParentFolderID = &parent.String
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) DeleteWorkspaceFolder(companyID, folderID string) error {
+	ctx := context.Background()
+	deleted, err := r.db.ExecContext(ctx,
+		`delete from workspace_folders
+		 where company_id=$1 and folder_id=$2`,
+		companyID, folderID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := deleted.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	// The self-referential folder FK and folder_items FK both cascade. Deleting
+	// the root folder removes descendants and placements without touching nodes/gates.
+	return nil
+}
+
+func (r *PostgresRepo) AssignWorkspaceFolderItem(companyID, folderID, itemType, itemID string) (domain.WorkspaceFolderItem, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.WorkspaceFolderItem{}, err
+	}
+	defer tx.Rollback()
+
+	var folderKind string
+	if err := tx.QueryRowContext(ctx,
+		`select folder_kind
+		 from workspace_folders
+		 where company_id=$1 and folder_id=$2`,
+		companyID, folderID,
+	).Scan(&folderKind); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.WorkspaceFolderItem{}, ErrNotFound
+		}
+		return domain.WorkspaceFolderItem{}, err
+	}
+	if folderKind != itemType {
+		return domain.WorkspaceFolderItem{}, ErrNotFound
+	}
+
+	var exists bool
+	var existsQuery string
+	if itemType == "node" {
+		existsQuery = `select exists(select 1 from nodes where company_id=$1 and node_id=$2)`
+	} else if itemType == "logic_gate" {
+		existsQuery = `select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`
+	} else {
+		return domain.WorkspaceFolderItem{}, ErrNotFound
+	}
+	if err := tx.QueryRowContext(ctx, existsQuery, companyID, itemID).Scan(&exists); err != nil {
+		return domain.WorkspaceFolderItem{}, err
+	}
+	if !exists {
+		return domain.WorkspaceFolderItem{}, ErrNotFound
+	}
+
+	var item domain.WorkspaceFolderItem
+	if err := tx.QueryRowContext(ctx,
+		`insert into workspace_folder_items
+		 (company_id, folder_id, item_type, item_id, created_timestamp, updated_timestamp)
+		 values ($1, $2, $3, $4, now(), now())
+		 on conflict (company_id, item_type, item_id)
+		 do update set
+		   folder_id=excluded.folder_id,
+		   updated_timestamp=now()
+		 returning company_id, folder_id, item_type, item_id, created_timestamp, updated_timestamp`,
+		companyID, folderID, itemType, itemID,
+	).Scan(
+		&item.CompanyID,
+		&item.FolderID,
+		&item.ItemType,
+		&item.ItemID,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	); err != nil {
+		return domain.WorkspaceFolderItem{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.WorkspaceFolderItem{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) ListWorkspaceFolderItems(companyID, folderID, itemType string) ([]domain.WorkspaceFolderItem, error) {
+	ctx := context.Background()
+	var folderParam any
+	if folderID != "" {
+		folderParam = folderID
+	}
+	var itemTypeParam any
+	if itemType != "" {
+		itemTypeParam = itemType
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`select company_id, folder_id, item_type, item_id, created_timestamp, updated_timestamp
+		 from workspace_folder_items
+		 where company_id=$1
+		   and ($2::uuid is null or folder_id=$2::uuid)
+		   and ($3::text is null or item_type=$3)
+		 order by created_timestamp asc`,
+		companyID, folderParam, itemTypeParam,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.WorkspaceFolderItem, 0)
+	for rows.Next() {
+		var item domain.WorkspaceFolderItem
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.FolderID,
+			&item.ItemType,
+			&item.ItemID,
+			&item.CreatedTimestamp,
+			&item.UpdatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) RemoveWorkspaceFolderItem(companyID, itemType, itemID string) error {
+	ctx := context.Background()
+	deleted, err := r.db.ExecContext(ctx,
+		`delete from workspace_folder_items
+		 where company_id=$1 and item_type=$2 and item_id=$3`,
+		companyID, itemType, itemID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := deleted.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (r *PostgresRepo) CreateOperation(in CreateOperationInput) (domain.Operation, error) {

@@ -2,11 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LOGIC_GATE_MAP_STATE_KEY_PREFIX, LogicGateRecord, LogicGateRelationship, MINI_GRID, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, getNodeTitle, snapToGrid, toLogicGateCanvasRecord, toLogicGateCanvasRelationship, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { type ContextMutationEnvelope } from "../contextSyncContract";
-import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "./LogicGateRelationshipGraph";
+import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode, upsertWorkspaceFolderItemInLogicGateRelationshipGraph } from "./LogicGateRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, canStartRelationshipFromSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "../node-map/relationshipDeleteSummary";
 import { invalidateLogicGateRecordStoreCaches } from "./LogicGateRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
+import { filterLogicGateGraphToFolderScope, type WorkspaceFolder, type WorkspaceFolderItem } from "../folders/workspaceFolders";
 
 // Logic Gate Map module: node-map canvas behavior with logic-gate persistence and Input/Output edges.
 const LOGIC_GATE_SIDE_CONTROLS: Array<{ direction: NodeDirection; style: React.CSSProperties }> = [
@@ -36,8 +37,13 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
 
   const [nodePositions, setNodePositions] = useState<Record<string, NodePosition>>({});
   const [nodeSizes, setNodeSizes] = useState<Record<string, { w: number; h: number }>>({});
+  const [allNodes, setAllNodes] = useState<NodeRecord[]>([]);
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
+  const [folders, setFolders] = useState<WorkspaceFolder[]>([]);
+  const [folderItems, setFolderItems] = useState<WorkspaceFolderItem[]>([]);
+  const [activeFolderID, setActiveFolderID] = useState("");
+  const [activeFolderLabel, setActiveFolderLabel] = useState("");
   const [relationshipAnchors, setRelationshipAnchors] = useState<Record<string, RelationshipAnchor>>({});
   const [selectedNodeID, setSelectedNodeID] = useState<string>("");
   const [selectedNodeIDs, setSelectedNodeIDs] = useState<Set<string>>(new Set());
@@ -126,6 +132,28 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const projectVisibleRelationships = (snapshotNodes: NodeRecord[], snapshotRelationships: NodeRelationship[]) => {
     const allowed = new Set(snapshotNodes.map((node) => node.node_id));
     return snapshotRelationships.filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b));
+  };
+
+  const applyFolderScope = (
+    snapshotNodes: NodeRecord[],
+    snapshotRelationships: NodeRelationship[],
+    snapshotFolders: WorkspaceFolder[],
+    snapshotFolderItems: WorkspaceFolderItem[],
+    folderID = activeFolderID,
+  ) => {
+    const scoped = filterLogicGateGraphToFolderScope({
+      nodes: snapshotNodes,
+      relationships: snapshotRelationships,
+      folders: snapshotFolders,
+      folderItems: snapshotFolderItems,
+      folderID,
+    });
+    setAllNodes(snapshotNodes);
+    setFolders(snapshotFolders);
+    setFolderItems(snapshotFolderItems);
+    setNodes(scoped.nodes);
+    setRelationships(scoped.relationships);
+    return scoped.nodes;
   };
 
   const startNodeMapMultiSelect = (pointerID: number, clientX: number, clientY: number, additive: boolean) => {
@@ -250,8 +278,8 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     setError("");
     try {
       await refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-      const nextNodes = getLogicGateRelationshipGraphSnapshot(apiBase, companyID).nodes ?? [];
-      setNodes(nextNodes);
+      const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+      const nextNodes = applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? []);
 
       const hasSelection = selectedNodeID && nextNodes.some((item) => item.node_id === selectedNodeID);
       if (hasSelection) return;
@@ -293,11 +321,14 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   useEffect(() => {
     return subscribeLogicGateRelationshipGraph(apiBase, companyID, () => {
       const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-      const snapshotNodes = snapshot.nodes ?? [];
-      setNodes(snapshotNodes);
-      setRelationships(projectVisibleRelationships(snapshotNodes, snapshot.relationships ?? []));
+      applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? []);
     });
-  }, [apiBase, companyID]);
+  }, [apiBase, companyID, activeFolderID]);
+
+  useEffect(() => {
+    const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+    applyFolderScope(snapshot.nodes ?? allNodes, snapshot.relationships ?? [], snapshot.folders ?? folders, snapshot.folder_items ?? folderItems);
+  }, [activeFolderID]);
 
   useEffect(() => {
     setSelectedRelationshipIDs((previous) => {
@@ -307,6 +338,14 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       return next.size === previous.size ? previous : next;
     });
   }, [relationships]);
+
+  useEffect(() => {
+    if (!selectedNodeID) return;
+    if (nodes.some((node) => node.node_id === selectedNodeID)) return;
+    const fallback = nodes[0]?.node_id ?? "";
+    setSelectedNodeID(fallback);
+    setSelectedNodeIDs(fallback ? new Set([fallback]) : new Set());
+  }, [nodes, selectedNodeID]);
 
   useEffect(() => {
     if (!relationshipDraft) return;
@@ -454,13 +493,22 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       try {
         const raw = localStorage.getItem(explorerKey);
         if (!raw) return;
-        const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedLogicGateID?: string; ts?: number };
+        const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedLogicGateID?: string; selectedFolderID?: string; selectedFolderKind?: string; selectedLabel?: string; ts?: number };
         if (typeof parsed.ts !== "number" || parsed.ts <= explorerContextRef.current) return;
         explorerContextRef.current = parsed.ts;
+        if (parsed.selectedFolderKind === "logic_gate") {
+          setActiveFolderID(typeof parsed.selectedFolderID === "string" ? parsed.selectedFolderID : "");
+          setActiveFolderLabel(typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : "");
+          setSelectedNodeID("");
+          setSelectedNodeIDs(new Set());
+          return;
+        }
         const selectedLogicGateID = parsed.selectedLogicGateID || parsed.selectedNodeID || "";
         if (!selectedLogicGateID) return;
-        const exists = nodes.some((node) => node.node_id === selectedLogicGateID);
+        const exists = allNodes.some((node) => node.node_id === selectedLogicGateID);
         if (!exists) return;
+        setActiveFolderID("");
+        setActiveFolderLabel("");
         setSelectedNodeID(selectedLogicGateID);
         setSelectedNodeIDs(new Set([selectedLogicGateID]));
       } catch {
@@ -483,7 +531,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
     };
-  }, [companyID, mapScope, nodes]);
+  }, [companyID, mapScope, allNodes]);
 
   useNodeMapPanControls({ panState, setPan, setPanState });
 
@@ -566,6 +614,15 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       // Apply optimistic logic-gate insertion through the shared graph cache so subscribers
       // get immediate convergence without issuing a snapshot GET.
       upsertLogicGateRelationshipGraphNode(apiBase, companyID, node);
+      if (activeFolderID) {
+        const folderItem = await requestJSON<WorkspaceFolderItem>("/v1/workspace/folder-items", {
+          method: "POST",
+          body: JSON.stringify({ company_id: companyID, folder_id: activeFolderID, item_type: "logic_gate", item_id: node.node_id }),
+        });
+        // Folder placement is durable API state, not local UI state. Updating the
+        // cache here keeps folder-filtered maps responsive after creation.
+        upsertWorkspaceFolderItemInLogicGateRelationshipGraph(apiBase, companyID, folderItem);
+      }
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       if (worldPos) {

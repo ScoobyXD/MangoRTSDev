@@ -1,9 +1,12 @@
 // Node relationship graph cache/sync plane for Node Map + Company Explorer.
+import type { WorkspaceFolder, WorkspaceFolderItem } from "../folders/workspaceFolders";
 import { NodeRecord, NodeRelationship } from "./shared";
 
 export type NodeRelationshipGraphSnapshot = {
   nodes: NodeRecord[];
   relationships: NodeRelationship[];
+  folders?: WorkspaceFolder[];
+  folder_items?: WorkspaceFolderItem[];
   generated_at?: string;
 };
 
@@ -57,6 +60,8 @@ export function upsertNodeRelationshipGraphNode(apiBase: string, companyID: stri
   entry.snapshot = {
     nodes: exists ? currentNodes.map((item) => (item.node_id === node.node_id ? node : item)) : [...currentNodes, node],
     relationships: entry.snapshot.relationships ?? [],
+    folders: entry.snapshot.folders ?? [],
+    folder_items: entry.snapshot.folder_items ?? [],
     generated_at: new Date().toISOString(),
   };
   notify(entry);
@@ -71,10 +76,41 @@ export function removeNodeRelationshipGraphNode(apiBase: string, companyID: stri
   const currentNodes = entry.snapshot.nodes ?? [];
   const nextNodes = currentNodes.filter((item) => item.node_id !== nodeID);
   const nextRelationships = (entry.snapshot.relationships ?? []).filter((item) => item.node_id_a !== nodeID && item.node_id_b !== nodeID);
+  const nextFolderItems = (entry.snapshot.folder_items ?? []).filter((item) => item.item_type !== "node" || item.item_id !== nodeID);
   if (nextNodes.length === currentNodes.length && nextRelationships.length === (entry.snapshot.relationships ?? []).length) return;
   entry.snapshot = {
     nodes: nextNodes,
     relationships: nextRelationships,
+    folders: entry.snapshot.folders ?? [],
+    folder_items: nextFolderItems,
+    generated_at: new Date().toISOString(),
+  };
+  notify(entry);
+}
+
+export function upsertWorkspaceFolderItemInNodeRelationshipGraph(apiBase: string, companyID: string, item: WorkspaceFolderItem): void {
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  const current = entry.snapshot.folder_items ?? [];
+  const exists = current.some((row) => row.item_type === item.item_type && row.item_id === item.item_id);
+  entry.snapshot = {
+    ...entry.snapshot,
+    folder_items: exists
+      ? current.map((row) => (row.item_type === item.item_type && row.item_id === item.item_id ? item : row))
+      : [...current, item],
+    generated_at: new Date().toISOString(),
+  };
+  notify(entry);
+}
+
+export function upsertWorkspaceFolderInNodeRelationshipGraph(apiBase: string, companyID: string, folder: WorkspaceFolder): void {
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  const current = entry.snapshot.folders ?? [];
+  const exists = current.some((row) => row.folder_id === folder.folder_id);
+  entry.snapshot = {
+    ...entry.snapshot,
+    folders: exists ? current.map((row) => (row.folder_id === folder.folder_id ? folder : row)) : [...current, folder],
     generated_at: new Date().toISOString(),
   };
   notify(entry);
@@ -130,6 +166,8 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
     entry.snapshot = {
       nodes: exists ? currentNodes.map((item) => (item.node_id === node.node_id ? node : item)) : [...currentNodes, node],
       relationships: currentRelationships,
+      folders: previous.folders ?? [],
+      folder_items: previous.folder_items ?? [],
       generated_at: envelope.ts,
     };
     return true;
@@ -142,6 +180,8 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
     entry.snapshot = {
       nodes: currentNodes.map((item) => (item.node_id === node.node_id ? node : item)),
       relationships: currentRelationships,
+      folders: previous.folders ?? [],
+      folder_items: previous.folder_items ?? [],
       generated_at: envelope.ts,
     };
     return true;
@@ -153,6 +193,8 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
     entry.snapshot = {
       nodes: currentNodes.filter((item) => item.node_id !== nodeID),
       relationships: currentRelationships.filter((item) => item.node_id_a !== nodeID && item.node_id_b !== nodeID),
+      folders: previous.folders ?? [],
+      folder_items: (previous.folder_items ?? []).filter((item) => item.item_type !== "node" || item.item_id !== nodeID),
       generated_at: envelope.ts,
     };
     return true;
@@ -167,6 +209,8 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
       relationships: exists
         ? currentRelationships.map((item) => (item.node_relationship_id === relationship.node_relationship_id ? relationship : item))
         : [...currentRelationships, relationship],
+      folders: previous.folders ?? [],
+      folder_items: previous.folder_items ?? [],
       generated_at: envelope.ts,
     };
     return true;
@@ -178,6 +222,48 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
     entry.snapshot = {
       nodes: currentNodes,
       relationships: currentRelationships.filter((item) => item.node_relationship_id !== relationshipID),
+      folders: previous.folders ?? [],
+      folder_items: previous.folder_items ?? [],
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+
+  if (envelope.type === "workspace_folder_created") {
+    const folder = data.folder as WorkspaceFolder | undefined;
+    if (!folder || typeof folder.folder_id !== "string") return false;
+    const currentFolders = previous.folders ?? [];
+    entry.snapshot = {
+      ...previous,
+      folders: currentFolders.some((item) => item.folder_id === folder.folder_id)
+        ? currentFolders.map((item) => (item.folder_id === folder.folder_id ? folder : item))
+        : [...currentFolders, folder],
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+
+  if (envelope.type === "workspace_folder_item_assigned") {
+    const folderItem = data.folder_item as WorkspaceFolderItem | undefined;
+    if (!folderItem || typeof folderItem.item_id !== "string" || typeof folderItem.item_type !== "string") return false;
+    const currentItems = previous.folder_items ?? [];
+    entry.snapshot = {
+      ...previous,
+      folder_items: currentItems.some((item) => item.item_type === folderItem.item_type && item.item_id === folderItem.item_id)
+        ? currentItems.map((item) => (item.item_type === folderItem.item_type && item.item_id === folderItem.item_id ? folderItem : item))
+        : [...currentItems, folderItem],
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+
+  if (envelope.type === "workspace_folder_item_removed") {
+    const itemType = typeof data.item_type === "string" ? data.item_type : "";
+    const itemID = typeof data.item_id === "string" ? data.item_id : "";
+    if (!itemType || !itemID) return false;
+    entry.snapshot = {
+      ...previous,
+      folder_items: (previous.folder_items ?? []).filter((item) => item.item_type !== itemType || item.item_id !== itemID),
       generated_at: envelope.ts,
     };
     return true;
@@ -208,6 +294,8 @@ export async function refreshNodeRelationshipGraphSnapshot(apiBase: string, comp
     entry.snapshot = {
       nodes: payload.nodes ?? [],
       relationships: payload.relationships ?? [],
+      folders: payload.folders ?? [],
+      folder_items: payload.folder_items ?? [],
       generated_at: payload.generated_at,
     };
     notify(entry);

@@ -139,18 +139,33 @@ Selection sync hardening update (2026-04-29):
 - Map-originated selection echoes are treated as no-op when Explorer already holds the same selected node/tree, which prevents "every other click" suppression churn.
 - This keeps anti-loop behavior while protecting hot-path click reliability for linked Explorer<->Node Map flows.
 
+Folder runtime update (2026-05-01):
+- Explorer folders are now durable backend rows, not local-only UI state.
+- `workspace_folders` stores nested folders separately for `node` and `logic_gate` trees.
+- `workspace_folder_items` stores one placement per node or logic gate, matching file-explorer move semantics.
+- Selecting a node folder broadcasts `selectedFolderID`/`selectedFolderKind=node`; linked Node Map filters its cached graph to nodes placed in that folder or any descendant folder.
+- Selecting a logic-gate folder broadcasts `selectedFolderID`/`selectedFolderKind=logic_gate`; linked Logic Gate Map applies the same folder-scope rule for gates.
+- Relationships are displayed only when both endpoints are inside the active folder scope. Cross-folder relationships stay persisted but are hidden in that scoped map view.
+
 ---
 
 ## 6) Data/backend stance
 
-No new backend schema is required for this phase.
+Workspace folder structure is API-backed for UI and future headless agents.
 
 Implementation principle:
 
 - keep existing node/relationship/information contracts,
-- add frontend orchestration logic so linked modules query/update/delete against the correct active IDs and scope.
+- store folder hierarchy and item placement with small indexed tables,
+- keep map filtering against the existing workspace snapshot cache for current runtime,
+- expose direct folder APIs so agents can create folders and move nodes/gates without a browser.
 
-This keeps source-of-truth entity IDs and persistence semantics intact.
+Headless API surface:
+- `GET/POST /v1/workspace/folders`
+- `DELETE /v1/workspace/folders/{folder_id}`
+- `GET/POST/DELETE /v1/workspace/folder-items`
+
+This keeps source-of-truth entity IDs and persistence semantics intact while making Explorer organization durable.
 
 ---
 

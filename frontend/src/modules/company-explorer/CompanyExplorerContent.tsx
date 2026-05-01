@@ -1,12 +1,13 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeRecord, NodeRelationship } from "../node-map/shared";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, NodeRecord as LogicGateRecord, NodeRelationship as LogicGateRelationship } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
-import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
-import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph } from "../logic-gate-map/LogicGateRelationshipGraph";
-import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
+import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertWorkspaceFolderInNodeRelationshipGraph, upsertWorkspaceFolderItemInNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
+import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertWorkspaceFolderInLogicGateRelationshipGraph, upsertWorkspaceFolderItemInLogicGateRelationshipGraph } from "../logic-gate-map/LogicGateRelationshipGraph";
+import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
+import { type WorkspaceFolder, type WorkspaceFolderItem, type WorkspaceFolderKind } from "../folders/workspaceFolders";
 
 type ExplorerTreeNode = {
   id: string;
@@ -15,6 +16,8 @@ type ExplorerTreeNode = {
   kind: "folder" | "node" | "logic_gate";
   nodeID?: string;
   logicGateID?: string;
+  folderID?: string;
+  folderKind?: WorkspaceFolderKind;
   scopeLevel: number;
 };
 
@@ -26,9 +29,14 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [logicGates, setLogicGates] = useState<LogicGateRecord[]>([]);
+  const [folders, setFolders] = useState<WorkspaceFolder[]>([]);
+  const [folderItems, setFolderItems] = useState<WorkspaceFolderItem[]>([]);
   const [selectedTreeID, setSelectedTreeID] = useState("folder-all");
   const [selectedNodeID, setSelectedNodeID] = useState("");
   const [selectedLogicGateID, setSelectedLogicGateID] = useState("");
+  const [lastSelectedItem, setLastSelectedItem] = useState<{ itemType: WorkspaceFolderKind; itemID: string } | null>(null);
+  const [folderDraftName, setFolderDraftName] = useState("");
+  const [error, setError] = useState("");
   const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
   const [logicGateRelationships, setLogicGateRelationships] = useState<LogicGateRelationship[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["folder-root", "folder-nodes", "folder-notes", "folder-logic"]));
@@ -58,6 +66,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
         setNodes(snapshot.nodes ?? []);
         setRelationships(snapshot.relationships ?? []);
+        setFolders(snapshot.folders ?? []);
+        setFolderItems(snapshot.folder_items ?? []);
       } catch {
         // ignore initial load failures; subscription updates can still hydrate state later
       }
@@ -70,6 +80,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
       setNodes(snapshot.nodes ?? []);
       setRelationships(snapshot.relationships ?? []);
+      setFolders(snapshot.folders ?? []);
+      setFolderItems(snapshot.folder_items ?? []);
     });
   }, [apiBase, companyID]);
 
@@ -82,6 +94,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
         setLogicGates(snapshot.nodes ?? []);
         setLogicGateRelationships(snapshot.relationships ?? []);
+        if ((snapshot.folders ?? []).length > 0 || (snapshot.folder_items ?? []).length > 0) {
+          setFolders(snapshot.folders ?? []);
+          setFolderItems(snapshot.folder_items ?? []);
+        }
       } catch {
         // Logic Gate Map has its own graph cache; subscription updates can still hydrate later.
       }
@@ -94,6 +110,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
       setLogicGates(snapshot.nodes ?? []);
       setLogicGateRelationships(snapshot.relationships ?? []);
+      if ((snapshot.folders ?? []).length > 0 || (snapshot.folder_items ?? []).length > 0) {
+        setFolders(snapshot.folders ?? []);
+        setFolderItems(snapshot.folder_items ?? []);
+      }
     });
   }, [apiBase, companyID]);
 
@@ -106,31 +126,87 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return new Set(nodes.filter((node) => !attached.has(node.node_id)).map((node) => node.node_id));
   }, [nodes, relationships]);
 
-  // Build ctrl+f-friendly hierarchy rows (Company/Nodes/Logic Gates/Knowledge Notes).
+  // Build a file-explorer tree from durable folder rows plus one placement row per item.
+  // Folder selection is recursive for map scope, but the tree shows immediate children
+  // at each level so the hierarchy stays predictable for users and headless agents.
   const treeRows = useMemo<ExplorerTreeNode[]>(() => {
     const rows: ExplorerTreeNode[] = [];
+    const nodeByID = new Map(nodes.map((node) => [node.node_id, node]));
+    const logicGateByID = new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
+    const assignedNodes = new Set(folderItems.filter((item) => item.item_type === "node").map((item) => item.item_id));
+    const assignedLogicGates = new Set(folderItems.filter((item) => item.item_type === "logic_gate").map((item) => item.item_id));
+    const foldersByParent = new Map<string, WorkspaceFolder[]>();
+    for (const folder of folders) {
+      const key = `${folder.folder_kind}:${folder.parent_folder_id ?? ""}`;
+      const bucket = foldersByParent.get(key) ?? [];
+      bucket.push(folder);
+      foldersByParent.set(key, bucket);
+    }
+    for (const bucket of foldersByParent.values()) {
+      bucket.sort((a, b) => a.name.localeCompare(b.name) || a.created_timestamp.localeCompare(b.created_timestamp));
+    }
+    const itemsByFolder = new Map<string, WorkspaceFolderItem[]>();
+    for (const item of folderItems) {
+      const key = `${item.item_type}:${item.folder_id}`;
+      const bucket = itemsByFolder.get(key) ?? [];
+      bucket.push(item);
+      itemsByFolder.set(key, bucket);
+    }
+
+    const pushFolderBranch = (folderKind: WorkspaceFolderKind, parentFolderID: string, depth: number) => {
+      const childFolders = foldersByParent.get(`${folderKind}:${parentFolderID}`) ?? [];
+      for (const folder of childFolders) {
+        const directItems = itemsByFolder.get(`${folderKind}:${folder.folder_id}`) ?? [];
+        const rowID = `workspace-folder-${folder.folder_id}`;
+        rows.push({
+          id: rowID,
+          label: directItems.length > 0 ? `${folder.name} (${directItems.length})` : folder.name,
+          depth,
+          kind: "folder",
+          folderID: folder.folder_id,
+          folderKind,
+          scopeLevel: depth,
+        });
+        if (!expanded.has(rowID)) continue;
+        pushFolderBranch(folderKind, folder.folder_id, depth + 1);
+        for (const item of directItems) {
+          if (folderKind === "node") {
+            const node = nodeByID.get(item.item_id);
+            if (node) rows.push({ id: `node-${node.node_id}`, label: getNodeTitle(node) || node.node_id, depth: depth + 1, kind: "node", nodeID: node.node_id, scopeLevel: depth + 1 });
+          } else {
+            const logicGate = logicGateByID.get(item.item_id);
+            if (logicGate) rows.push({ id: `logic-gate-${logicGate.logic_gate_id}`, label: getLogicGateTitle(logicGate) || logicGate.logic_gate_id, depth: depth + 1, kind: "logic_gate", logicGateID: logicGate.logic_gate_id, scopeLevel: depth + 1 });
+          }
+        }
+      }
+    };
+
     rows.push({ id: "folder-root", label: "Company", depth: 0, kind: "folder", scopeLevel: 0 });
 
-    rows.push({ id: "folder-nodes", label: "Nodes", depth: 1, kind: "folder", scopeLevel: 1 });
+    rows.push({ id: "folder-nodes", label: "Nodes", depth: 1, kind: "folder", folderKind: "node", scopeLevel: 1 });
     if (expanded.has("folder-nodes")) {
-      rows.push({ id: "folder-all", label: `All Nodes (${nodes.length})`, depth: 2, kind: "folder", scopeLevel: 1 });
+      rows.push({ id: "folder-all", label: `All Nodes (${nodes.length})`, depth: 2, kind: "folder", folderKind: "node", scopeLevel: 1 });
+      pushFolderBranch("node", "", 2);
       for (const node of nodes) {
-        rows.push({ id: `node-${node.node_id}`, label: getNodeTitle(node) || node.node_id, depth: 3, kind: "node", nodeID: node.node_id, scopeLevel: 3 });
+        if (!assignedNodes.has(node.node_id)) rows.push({ id: `node-${node.node_id}`, label: getNodeTitle(node) || node.node_id, depth: 2, kind: "node", nodeID: node.node_id, scopeLevel: 2 });
       }
     }
 
-    rows.push({ id: "folder-logic", label: "Logic Gates", depth: 1, kind: "folder", scopeLevel: 1 });
+    rows.push({ id: "folder-logic", label: "Logic Gates", depth: 1, kind: "folder", folderKind: "logic_gate", scopeLevel: 1 });
     if (expanded.has("folder-logic")) {
-      rows.push({ id: "folder-logic-all", label: `All Logic Gates (${logicGates.length})`, depth: 2, kind: "folder", scopeLevel: 2 });
+      rows.push({ id: "folder-logic-all", label: `All Logic Gates (${logicGates.length})`, depth: 2, kind: "folder", folderKind: "logic_gate", scopeLevel: 2 });
+      pushFolderBranch("logic_gate", "", 2);
       for (const logicGate of logicGates) {
-        rows.push({
-          id: `logic-gate-${logicGate.logic_gate_id}`,
-          label: getLogicGateTitle(logicGate) || logicGate.logic_gate_id,
-          depth: 3,
-          kind: "logic_gate",
-          logicGateID: logicGate.logic_gate_id,
-          scopeLevel: 3,
-        });
+        if (!assignedLogicGates.has(logicGate.logic_gate_id)) {
+          rows.push({
+            id: `logic-gate-${logicGate.logic_gate_id}`,
+            label: getLogicGateTitle(logicGate) || logicGate.logic_gate_id,
+            depth: 2,
+            kind: "logic_gate",
+            logicGateID: logicGate.logic_gate_id,
+            scopeLevel: 2,
+          });
+        }
       }
     }
 
@@ -140,9 +216,13 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
 
     return rows;
-  }, [expanded, nodes, logicGates, unattachedNodeIDs]);
+  }, [expanded, nodes, logicGates, folders, folderItems, unattachedNodeIDs]);
 
   const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID) ?? treeRows[0], [selectedTreeID, treeRows]);
+  const selectedFolderKind = selectedTree?.kind === "folder" ? selectedTree.folderKind : undefined;
+  const selectedFolderID = selectedTree?.kind === "folder" ? selectedTree.folderID ?? "" : "";
+  const folderCreateKind: WorkspaceFolderKind = selectedFolderKind ?? (selectedLogicGateID ? "logic_gate" : "node");
+  const folderCreateParentID = selectedTree?.kind === "folder" && selectedTree.folderKind ? selectedTree.folderID ?? "" : "";
 
   useEffect(() => {
     latestSelectionRef.current = { selectedNodeID, selectedTreeID };
@@ -177,6 +257,82 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       bottomSpacer: Math.max(0, (total - end) * TREE_ROW_HEIGHT),
     };
   }, [treeRows, treeViewportHeight, treeScrollTop]);
+
+  const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
+    const headers = new Headers(init?.headers);
+    if (init?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+    const response = await fetch(`${apiBase}${path}`, { ...init, headers });
+    if (!response.ok) {
+      let reason = `request_failed_${response.status}`;
+      try {
+        const payload = await response.json();
+        if (payload?.error) reason = payload.error;
+      } catch {
+        // keep status fallback
+      }
+      throw new Error(reason);
+    }
+    return response.json() as Promise<T>;
+  }, [apiBase]);
+
+  const createFolder = useCallback(async () => {
+    const name = folderDraftName.trim() || "New Folder";
+    setError("");
+    try {
+      const folder = await requestJSON<WorkspaceFolder>("/v1/workspace/folders", {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyID,
+          parent_folder_id: folderCreateParentID,
+          folder_kind: folderCreateKind,
+          name,
+        }),
+      });
+      setFolderDraftName("");
+      setFolders((previous) => previous.some((item) => item.folder_id === folder.folder_id) ? previous : [...previous, folder]);
+      setExpanded((previous) => {
+        const next = new Set(previous);
+        next.add(folderCreateParentID ? `workspace-folder-${folderCreateParentID}` : (folderCreateKind === "logic_gate" ? "folder-logic" : "folder-nodes"));
+        next.add(`workspace-folder-${folder.folder_id}`);
+        return next;
+      });
+      if (folder.folder_kind === "logic_gate") upsertWorkspaceFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
+      else upsertWorkspaceFolderInNodeRelationshipGraph(apiBase, companyID, folder);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_create_folder");
+    }
+  }, [apiBase, companyID, folderCreateKind, folderCreateParentID, folderDraftName, requestJSON]);
+
+  const moveLastSelectedItemHere = useCallback(async () => {
+    if (!lastSelectedItem || !selectedFolderID || lastSelectedItem.itemType !== selectedFolderKind) return;
+    setError("");
+    try {
+      const item = await requestJSON<WorkspaceFolderItem>("/v1/workspace/folder-items", {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyID,
+          folder_id: selectedFolderID,
+          item_type: lastSelectedItem.itemType,
+          item_id: lastSelectedItem.itemID,
+        }),
+      });
+      setFolderItems((previous) => {
+        const exists = previous.some((row) => row.item_type === item.item_type && row.item_id === item.item_id);
+        return exists
+          ? previous.map((row) => (row.item_type === item.item_type && row.item_id === item.item_id ? item : row))
+          : [...previous, item];
+      });
+      if (item.item_type === "logic_gate") upsertWorkspaceFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
+      else upsertWorkspaceFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
+      setExpanded((previous) => {
+        const next = new Set(previous);
+        next.add(`workspace-folder-${selectedFolderID}`);
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_move_item");
+    }
+  }, [apiBase, companyID, lastSelectedItem, requestJSON, selectedFolderID, selectedFolderKind]);
 
   useEffect(() => {
     const refreshLinkedMap = () => {
@@ -232,6 +388,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       suppressNextExplorerBroadcastRef.current = true;
       setSelectedNodeID(selectedFromMap);
       setSelectedLogicGateID("");
+      if (selectedFromMap) setLastSelectedItem({ itemType: "node", itemID: selectedFromMap });
       setSelectedTreeID(`node-${selectedFromMap}`);
       setExpanded((previous) => {
         if (previous.has("folder-root") && previous.has("folder-nodes")) return previous;
@@ -279,6 +436,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       suppressNextExplorerBroadcastRef.current = true;
       setSelectedLogicGateID(selectedFromMap);
       setSelectedNodeID("");
+      if (selectedFromMap) setLastSelectedItem({ itemType: "logic_gate", itemID: selectedFromMap });
       setSelectedTreeID(nextTreeID);
       setExpanded((previous) => {
         if (previous.has("folder-root") && previous.has("folder-logic")) return previous;
@@ -336,11 +494,15 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       explorerContextSequenceRef.current += 1;
       for (const targetID of targetIDs) {
         if (!targetID) continue;
-        const isLogicGateContext = selectedLogicGateID.trim().length > 0;
+        const registry = readFrameRegistryFromStorage();
+        const targetKind = classifyFrameKind(registry[targetID]?.kind ?? "");
+        const isLogicGateContext = selectedLogicGateID.trim().length > 0 || selectedFolderKind === "logic_gate" || (!selectedNodeID && !selectedFolderKind && targetKind === "logic-map");
         const payload = {
           sourceExplorerID: scope,
           selectedNodeID,
           selectedLogicGateID,
+          selectedFolderID,
+          selectedFolderKind,
           selectedTreeID,
           scopeLevel: selectedTree?.scopeLevel ?? 0,
           selectedLabel: selectedTree?.label ?? "",
@@ -361,7 +523,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     } catch {
       // ignore local storage failures
     }
-  }, [companyID, scope, selectedNodeID, selectedLogicGateID, selectedTreeID, selectedTree, linkRevision]);
+  }, [companyID, scope, selectedNodeID, selectedLogicGateID, selectedFolderID, selectedFolderKind, selectedTreeID, selectedTree, linkRevision]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
@@ -371,6 +533,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const selectedRowBackground = isDarkTheme ? "rgba(0,233,255,0.2)" : "rgba(0, 233, 255, 0.28)";
   const treeGuideColor = isDarkTheme ? "rgba(185,222,230,0.3)" : "rgba(15,56,66,0.22)";
   const folderToggleColor = isDarkTheme ? "#95c7d1" : "#326872";
+  const movableItem = selectedFolderID && lastSelectedItem?.itemType === selectedFolderKind ? lastSelectedItem : null;
 
   return (
     <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(240px, 1fr)", background: surfaceBackground, color: surfaceText, overflow: "hidden", minWidth: 0 }}>
@@ -381,6 +544,34 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         style={{ overflow: "auto", minWidth: 0, ["--company-explorer-scroll-accent" as string]: accent }}
       >
         <div style={{ padding: "9px 10px", borderBottom: `1px solid ${ruleColor}`, fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Company Explorer</div>
+        <div style={{ display: "grid", gap: 6, padding: "8px 10px", borderBottom: `1px solid ${ruleColor}` }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 6 }}>
+            <input
+              value={folderDraftName}
+              onChange={(event) => setFolderDraftName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void createFolder();
+              }}
+              placeholder="Folder name"
+              style={{ minWidth: 0, border: `1px solid ${rowRuleColor}`, background: surfaceBackground, color: surfaceText, fontSize: 11, padding: "6px 7px", borderRadius: 4 }}
+            />
+            <button
+              onClick={() => void createFolder()}
+              style={{ border: `1px solid ${accent}`, background: "transparent", color: surfaceText, cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", borderRadius: 4 }}
+            >
+              New {folderCreateKind === "logic_gate" ? "logic" : "node"} folder
+            </button>
+          </div>
+          {movableItem && (
+            <button
+              onClick={() => void moveLastSelectedItemHere()}
+              style={{ border: `1px solid ${accent}`, background: selectedRowBackground, color: surfaceText, cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", borderRadius: 4, textAlign: "left" }}
+            >
+              Move selected {movableItem.itemType === "logic_gate" ? "logic gate" : "node"} here
+            </button>
+          )}
+          {error && <div style={{ color: "#b00020", fontSize: 11, fontWeight: 700 }}>Error: {error}</div>}
+        </div>
         <div style={{ height: virtualizedTree.topSpacer }} />
         {virtualizedTree.rows.map((row) => {
           const isFolder = row.kind === "folder";
@@ -394,12 +585,14 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 if (row.kind === "node") {
                   setSelectedNodeID(row.nodeID ?? "");
                   setSelectedLogicGateID("");
+                  if (row.nodeID) setLastSelectedItem({ itemType: "node", itemID: row.nodeID });
                 }
                 if (row.kind === "logic_gate") {
                   setSelectedLogicGateID(row.logicGateID ?? "");
                   setSelectedNodeID("");
+                  if (row.logicGateID) setLastSelectedItem({ itemType: "logic_gate", itemID: row.logicGateID });
                 }
-                if (row.kind === "folder" && (row.id === "folder-all" || row.id === "folder-logic-all")) {
+                if (row.kind === "folder") {
                   setSelectedNodeID("");
                   setSelectedLogicGateID("");
                 }
@@ -442,7 +635,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                   }}
                   style={{ border: "none", background: "transparent", width: 18, cursor: "pointer", color: folderToggleColor, fontWeight: 700 }}
                 >
-                  {isOpen ? "▾" : "▸"}
+                  {isOpen ? "v" : ">"}
                 </button>
               ) : <span style={{ width: 18 }} />}
               <span>{row.label}</span>

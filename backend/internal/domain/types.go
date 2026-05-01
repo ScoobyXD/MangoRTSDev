@@ -89,6 +89,25 @@ type LogicGateDetails struct {
 	Relationships []LogicGateRelationship `json:"relationships"`
 }
 
+type WorkspaceFolder struct {
+	CompanyID        string    `json:"company_id"`
+	FolderID         string    `json:"folder_id"`
+	ParentFolderID   *string   `json:"parent_folder_id,omitempty"`
+	FolderKind       string    `json:"folder_kind"`
+	Name             string    `json:"name"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type WorkspaceFolderItem struct {
+	CompanyID        string    `json:"company_id"`
+	FolderID         string    `json:"folder_id"`
+	ItemType         string    `json:"item_type"`
+	ItemID           string    `json:"item_id"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
 type Operation struct {
 	CompanyID      string     `json:"company_id"`
 	OperationID    string     `json:"operation_id"`

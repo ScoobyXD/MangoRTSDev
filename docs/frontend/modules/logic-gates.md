@@ -30,6 +30,10 @@ Endpoints used:
 - `POST /v1/logic-gate-relationships`
   - payload: `{ company_id, logic_gate_id_a, logic_gate_id_b, a_position, b_position }`
 - `DELETE /v1/logic-gate-relationships/:logic_gate_relationship_id?company_id=...`
+- `GET/POST /v1/workspace/folders`
+  - `folder_kind` must be `logic_gate` for Logic Gate Map organization.
+- `GET/POST/DELETE /v1/workspace/folder-items`
+  - `item_type` must be `logic_gate` when moving gates into explorer folders.
 
 ## Relationship Semantics
 Logic gate relationships are not parent/child/peer.
@@ -65,6 +69,8 @@ Logic Gate Map follows the latency architecture rules:
 - unchanged snapshot responses use ETag/304,
 - visible gate rendering uses the same viewport culling strategy as Node Map,
 - layout geometry stays local to the browser and does not enter the hot backend path.
+- Company Explorer folder selection filters the cached snapshot in memory. A selected folder includes descendant folders, and relationship lines render only when both gates are inside that active scope.
+- New logic gates created while a folder scope is active are assigned to that folder through the folder-items API.
 
 ## Linking Behavior
 Frame linking uses the existing `frame-module-links-v1` graph and `logic-map` frame kind.

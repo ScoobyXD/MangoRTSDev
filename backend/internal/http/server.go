@@ -41,6 +41,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/workspace/context-events", s.handleWorkspaceContextEvents)
 	mux.HandleFunc("/v1/workspace/context-projections", s.handleWorkspaceContextProjections)
 	mux.HandleFunc("/v1/workspace/context-deltas", s.handleWorkspaceContextDeltas)
+	mux.HandleFunc("/v1/workspace/folders", s.handleWorkspaceFolders)
+	mux.HandleFunc("/v1/workspace/folders/", s.handleWorkspaceFolderByID)
+	mux.HandleFunc("/v1/workspace/folder-items", s.handleWorkspaceFolderItems)
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
 	mux.HandleFunc("/v1/logic-gates/", s.handleLogicGateSubresource)
 	mux.HandleFunc("/v1/logic-gate-relationships", s.handleLogicGateRelationships)
@@ -155,6 +158,170 @@ func (s *Server) handleWorkspaceContextDeltas(w http.ResponseWriter, r *http.Req
 		"after_sequence": afterSequence,
 		"events":         events,
 	})
+}
+
+func (s *Server) handleWorkspaceFolders(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		folderKind := strings.TrimSpace(r.URL.Query().Get("folder_kind"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if folderKind != "" && !isValidWorkspaceFolderKind(folderKind) {
+			writeError(w, http.StatusBadRequest, "invalid_folder_kind")
+			return
+		}
+		items, err := s.repo.ListWorkspaceFolders(companyID, folderKind)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_workspace_folders")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"folders": items})
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		CompanyID      string `json:"company_id"`
+		ParentFolderID string `json:"parent_folder_id"`
+		FolderKind     string `json:"folder_kind"`
+		Name           string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	req.CompanyID = strings.TrimSpace(req.CompanyID)
+	req.ParentFolderID = strings.TrimSpace(req.ParentFolderID)
+	req.FolderKind = strings.TrimSpace(req.FolderKind)
+	req.Name = strings.TrimSpace(req.Name)
+	if req.CompanyID == "" || req.Name == "" || !isValidWorkspaceFolderKind(req.FolderKind) {
+		writeError(w, http.StatusBadRequest, "company_id_folder_kind_name_required")
+		return
+	}
+	item, err := s.repo.CreateWorkspaceFolder(req.CompanyID, req.ParentFolderID, req.FolderKind, req.Name)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "parent_folder_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_create_workspace_folder")
+		return
+	}
+	s.publishWorkspaceEvent(req.CompanyID, "workspace_folder_created", map[string]any{"folder_id": item.FolderID, "folder": item})
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) handleWorkspaceFolderByID(w http.ResponseWriter, r *http.Request) {
+	folderID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/workspace/folders/"))
+	if folderID == "" || strings.Contains(folderID, "/") {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if r.Method != http.MethodDelete {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	if err := s.repo.DeleteWorkspaceFolder(companyID, folderID); errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "workspace_folder_not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_delete_workspace_folder")
+		return
+	}
+	s.publishWorkspaceEvent(companyID, "workspace_folder_deleted", map[string]any{"folder_id": folderID})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleWorkspaceFolderItems(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
+		itemType := strings.TrimSpace(r.URL.Query().Get("item_type"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if itemType != "" && !isValidWorkspaceFolderKind(itemType) {
+			writeError(w, http.StatusBadRequest, "invalid_item_type")
+			return
+		}
+		items, err := s.repo.ListWorkspaceFolderItems(companyID, folderID, itemType)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_workspace_folder_items")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"folder_items": items})
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var req struct {
+			CompanyID string `json:"company_id"`
+			FolderID  string `json:"folder_id"`
+			ItemType  string `json:"item_type"`
+			ItemID    string `json:"item_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		req.CompanyID = strings.TrimSpace(req.CompanyID)
+		req.FolderID = strings.TrimSpace(req.FolderID)
+		req.ItemType = strings.TrimSpace(req.ItemType)
+		req.ItemID = strings.TrimSpace(req.ItemID)
+		if req.CompanyID == "" || req.FolderID == "" || req.ItemID == "" || !isValidWorkspaceFolderKind(req.ItemType) {
+			writeError(w, http.StatusBadRequest, "company_folder_item_required")
+			return
+		}
+		item, err := s.repo.AssignWorkspaceFolderItem(req.CompanyID, req.FolderID, req.ItemType, req.ItemID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "workspace_folder_or_item_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_assign_workspace_folder_item")
+			return
+		}
+		s.publishWorkspaceEvent(req.CompanyID, "workspace_folder_item_assigned", map[string]any{"folder_item": item})
+		writeJSON(w, http.StatusOK, item)
+		return
+	}
+
+	if r.Method == http.MethodDelete {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		itemType := strings.TrimSpace(r.URL.Query().Get("item_type"))
+		itemID := strings.TrimSpace(r.URL.Query().Get("item_id"))
+		if companyID == "" || itemID == "" || !isValidWorkspaceFolderKind(itemType) {
+			writeError(w, http.StatusBadRequest, "company_item_required")
+			return
+		}
+		if err := s.repo.RemoveWorkspaceFolderItem(companyID, itemType, itemID); errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "workspace_folder_item_not_found")
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_remove_workspace_folder_item")
+			return
+		}
+		s.publishWorkspaceEvent(companyID, "workspace_folder_item_removed", map[string]any{"item_type": itemType, "item_id": itemID})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+		return
+	}
+
+	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+}
+
+func isValidWorkspaceFolderKind(value string) bool {
+	return value == "node" || value == "logic_gate"
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -477,6 +644,16 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships")
 		return
 	}
+	folders, err := s.repo.ListWorkspaceFolders(companyID, "")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_workspace_folders")
+		return
+	}
+	folderItems, err := s.repo.ListWorkspaceFolderItems(companyID, "", "")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_workspace_folder_items")
+		return
+	}
 	// Keep snapshot payload deterministic for unchanged data so ETag-based 304 responses
 	// actually work. Using a "now" timestamp here makes every response look different and
 	// defeats conditional GETs on this hot path.
@@ -485,6 +662,8 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		"relationships":            relationships,
 		"logic_gates":              logicGates,
 		"logic_gate_relationships": logicGateRelationships,
+		"folders":                  folders,
+		"folder_items":             folderItems,
 	})
 }
 

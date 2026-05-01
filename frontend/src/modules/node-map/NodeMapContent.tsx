@@ -2,11 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, getNodeTitle, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { type ContextMutationEnvelope } from "../contextSyncContract";
-import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "./NodeRelationshipGraph";
+import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertWorkspaceFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
 import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
+import { filterNodeGraphToFolderScope, type WorkspaceFolder, type WorkspaceFolderItem } from "../folders/workspaceFolders";
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
 export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "teal" }) => {
@@ -29,8 +30,13 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
 
   const [nodePositions, setNodePositions] = useState<Record<string, NodePosition>>({});
   const [nodeSizes, setNodeSizes] = useState<Record<string, { w: number; h: number }>>({});
+  const [allNodes, setAllNodes] = useState<NodeRecord[]>([]);
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
+  const [folders, setFolders] = useState<WorkspaceFolder[]>([]);
+  const [folderItems, setFolderItems] = useState<WorkspaceFolderItem[]>([]);
+  const [activeFolderID, setActiveFolderID] = useState("");
+  const [activeFolderLabel, setActiveFolderLabel] = useState("");
   const [relationshipAnchors, setRelationshipAnchors] = useState<Record<string, RelationshipAnchor>>({});
   const [selectedNodeID, setSelectedNodeID] = useState<string>("");
   const [selectedNodeIDs, setSelectedNodeIDs] = useState<Set<string>>(new Set());
@@ -119,6 +125,28 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const projectVisibleRelationships = (snapshotNodes: NodeRecord[], snapshotRelationships: NodeRelationship[]) => {
     const allowed = new Set(snapshotNodes.map((node) => node.node_id));
     return snapshotRelationships.filter((relationship) => allowed.has(relationship.node_id_a) && allowed.has(relationship.node_id_b));
+  };
+
+  const applyFolderScope = (
+    snapshotNodes: NodeRecord[],
+    snapshotRelationships: NodeRelationship[],
+    snapshotFolders: WorkspaceFolder[],
+    snapshotFolderItems: WorkspaceFolderItem[],
+    folderID = activeFolderID,
+  ) => {
+    const scoped = filterNodeGraphToFolderScope({
+      nodes: snapshotNodes,
+      relationships: snapshotRelationships,
+      folders: snapshotFolders,
+      folderItems: snapshotFolderItems,
+      folderID,
+    });
+    setAllNodes(snapshotNodes);
+    setFolders(snapshotFolders);
+    setFolderItems(snapshotFolderItems);
+    setNodes(scoped.nodes);
+    setRelationships(scoped.relationships);
+    return scoped.nodes;
   };
 
   const startNodeMapMultiSelect = (pointerID: number, clientX: number, clientY: number, additive: boolean) => {
@@ -245,8 +273,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     setError("");
     try {
       await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
-      const nextNodes = getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes ?? [];
-      setNodes(nextNodes);
+      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+      const nextNodes = applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? []);
 
       const hasSelection = selectedNodeID && nextNodes.some((item) => item.node_id === selectedNodeID);
       if (hasSelection) return;
@@ -288,11 +316,14 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   useEffect(() => {
     return subscribeNodeRelationshipGraph(apiBase, companyID, () => {
       const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-      const snapshotNodes = snapshot.nodes ?? [];
-      setNodes(snapshotNodes);
-      setRelationships(projectVisibleRelationships(snapshotNodes, snapshot.relationships ?? []));
+      applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? []);
     });
-  }, [apiBase, companyID]);
+  }, [apiBase, companyID, activeFolderID]);
+
+  useEffect(() => {
+    const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+    applyFolderScope(snapshot.nodes ?? allNodes, snapshot.relationships ?? [], snapshot.folders ?? folders, snapshot.folder_items ?? folderItems);
+  }, [activeFolderID]);
 
   useEffect(() => {
     setSelectedRelationshipIDs((previous) => {
@@ -302,6 +333,14 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       return next.size === previous.size ? previous : next;
     });
   }, [relationships]);
+
+  useEffect(() => {
+    if (!selectedNodeID) return;
+    if (nodes.some((node) => node.node_id === selectedNodeID)) return;
+    const fallback = nodes[0]?.node_id ?? "";
+    setSelectedNodeID(fallback);
+    setSelectedNodeIDs(fallback ? new Set([fallback]) : new Set());
+  }, [nodes, selectedNodeID]);
 
   useEffect(() => {
     if (!relationshipDraft) return;
@@ -448,12 +487,21 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       try {
         const raw = localStorage.getItem(explorerKey);
         if (!raw) return;
-        const parsed = JSON.parse(raw) as { selectedNodeID?: string; ts?: number };
+        const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedFolderID?: string; selectedFolderKind?: string; selectedLabel?: string; ts?: number };
         if (typeof parsed.ts !== "number" || parsed.ts <= explorerContextRef.current) return;
         explorerContextRef.current = parsed.ts;
+        if (parsed.selectedFolderKind === "node") {
+          setActiveFolderID(typeof parsed.selectedFolderID === "string" ? parsed.selectedFolderID : "");
+          setActiveFolderLabel(typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : "");
+          setSelectedNodeID("");
+          setSelectedNodeIDs(new Set());
+          return;
+        }
         if (!parsed.selectedNodeID) return;
-        const exists = nodes.some((node) => node.node_id === parsed.selectedNodeID);
+        const exists = allNodes.some((node) => node.node_id === parsed.selectedNodeID);
         if (!exists) return;
+        setActiveFolderID("");
+        setActiveFolderLabel("");
         setSelectedNodeID(parsed.selectedNodeID);
         setSelectedNodeIDs(new Set([parsed.selectedNodeID]));
       } catch {
@@ -476,7 +524,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
     };
-  }, [companyID, mapScope, nodes]);
+  }, [companyID, mapScope, allNodes]);
 
   useNodeMapPanControls({ panState, setPan, setPanState });
 
@@ -558,6 +606,15 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       // Apply optimistic node insertion via NodeRelationshipGraph so all subscribers (Node Map + Explorer)
       // get immediate convergence without issuing a snapshot GET.
       upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+      if (activeFolderID) {
+        const folderItem = await requestJSON<WorkspaceFolderItem>("/v1/workspace/folder-items", {
+          method: "POST",
+          body: JSON.stringify({ company_id: companyID, folder_id: activeFolderID, item_type: "node", item_id: node.node_id }),
+        });
+        // Folder placement is a separate API row so agents can move items headlessly.
+        // Updating the graph cache here keeps filtered folder maps responsive.
+        upsertWorkspaceFolderItemInNodeRelationshipGraph(apiBase, companyID, folderItem);
+      }
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       if (worldPos) {

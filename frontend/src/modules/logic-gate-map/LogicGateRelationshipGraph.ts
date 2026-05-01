@@ -1,3 +1,7 @@
+import type {
+  WorkspaceFolder,
+  WorkspaceFolderItem,
+} from "../folders/workspaceFolders";
 import {
   LogicGateRecord,
   LogicGateRelationship,
@@ -12,6 +16,8 @@ export type LogicGateRelationshipGraphSnapshot = {
   relationships: NodeRelationship[];
   logic_gates?: LogicGateRecord[];
   logic_gate_relationships?: LogicGateRelationship[];
+  folders?: WorkspaceFolder[];
+  folder_items?: WorkspaceFolderItem[];
   generated_at?: string;
 };
 
@@ -58,6 +64,8 @@ export function upsertLogicGateRelationshipGraphNode(apiBase: string, companyID:
   entry.snapshot = {
     nodes: exists ? currentNodes.map((item) => (item.node_id === logicGate.node_id ? logicGate : item)) : [...currentNodes, logicGate],
     relationships: entry.snapshot.relationships ?? [],
+    folders: entry.snapshot.folders ?? [],
+    folder_items: entry.snapshot.folder_items ?? [],
     generated_at: new Date().toISOString(),
   };
   notify(entry);
@@ -75,6 +83,36 @@ export function removeLogicGateRelationshipGraphNode(apiBase: string, companyID:
   entry.snapshot = {
     nodes: nextNodes,
     relationships: nextRelationships,
+    folders: entry.snapshot.folders ?? [],
+    folder_items: (entry.snapshot.folder_items ?? []).filter((item) => item.item_type !== "logic_gate" || item.item_id !== logicGateID),
+    generated_at: new Date().toISOString(),
+  };
+  notify(entry);
+}
+
+export function upsertWorkspaceFolderItemInLogicGateRelationshipGraph(apiBase: string, companyID: string, item: WorkspaceFolderItem): void {
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  const current = entry.snapshot.folder_items ?? [];
+  const exists = current.some((row) => row.item_type === item.item_type && row.item_id === item.item_id);
+  entry.snapshot = {
+    ...entry.snapshot,
+    folder_items: exists
+      ? current.map((row) => (row.item_type === item.item_type && row.item_id === item.item_id ? item : row))
+      : [...current, item],
+    generated_at: new Date().toISOString(),
+  };
+  notify(entry);
+}
+
+export function upsertWorkspaceFolderInLogicGateRelationshipGraph(apiBase: string, companyID: string, folder: WorkspaceFolder): void {
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  const current = entry.snapshot.folders ?? [];
+  const exists = current.some((row) => row.folder_id === folder.folder_id);
+  entry.snapshot = {
+    ...entry.snapshot,
+    folders: exists ? current.map((row) => (row.folder_id === folder.folder_id ? folder : row)) : [...current, folder],
     generated_at: new Date().toISOString(),
   };
   notify(entry);
@@ -126,6 +164,8 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
     entry.snapshot = {
       nodes: exists ? currentNodes.map((item) => (item.node_id === logicGate.node_id ? logicGate : item)) : [...currentNodes, logicGate],
       relationships: currentRelationships,
+      folders: entry.snapshot.folders ?? [],
+      folder_items: entry.snapshot.folder_items ?? [],
       generated_at: envelope.ts,
     };
     return true;
@@ -138,6 +178,8 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
     entry.snapshot = {
       nodes: currentNodes.map((item) => (item.node_id === logicGate.node_id ? logicGate : item)),
       relationships: currentRelationships,
+      folders: entry.snapshot.folders ?? [],
+      folder_items: entry.snapshot.folder_items ?? [],
       generated_at: envelope.ts,
     };
     return true;
@@ -148,6 +190,8 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
     entry.snapshot = {
       nodes: currentNodes.filter((item) => item.node_id !== logicGateID),
       relationships: currentRelationships.filter((item) => item.node_id_a !== logicGateID && item.node_id_b !== logicGateID),
+      folders: entry.snapshot.folders ?? [],
+      folder_items: (entry.snapshot.folder_items ?? []).filter((item) => item.item_type !== "logic_gate" || item.item_id !== logicGateID),
       generated_at: envelope.ts,
     };
     return true;
@@ -161,6 +205,8 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
       relationships: exists
         ? currentRelationships.map((item) => (item.node_relationship_id === relationship.node_relationship_id ? relationship : item))
         : [...currentRelationships, relationship],
+      folders: entry.snapshot.folders ?? [],
+      folder_items: entry.snapshot.folder_items ?? [],
       generated_at: envelope.ts,
     };
     return true;
@@ -171,6 +217,45 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
     entry.snapshot = {
       nodes: currentNodes,
       relationships: currentRelationships.filter((item) => item.node_relationship_id !== relationshipID),
+      folders: entry.snapshot.folders ?? [],
+      folder_items: entry.snapshot.folder_items ?? [],
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+  if (envelope.type === "workspace_folder_created") {
+    const folder = data.folder as WorkspaceFolder | undefined;
+    if (!folder || typeof folder.folder_id !== "string") return false;
+    const currentFolders = entry.snapshot.folders ?? [];
+    entry.snapshot = {
+      ...entry.snapshot,
+      folders: currentFolders.some((item) => item.folder_id === folder.folder_id)
+        ? currentFolders.map((item) => (item.folder_id === folder.folder_id ? folder : item))
+        : [...currentFolders, folder],
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+  if (envelope.type === "workspace_folder_item_assigned") {
+    const folderItem = data.folder_item as WorkspaceFolderItem | undefined;
+    if (!folderItem || typeof folderItem.item_id !== "string" || typeof folderItem.item_type !== "string") return false;
+    const currentItems = entry.snapshot.folder_items ?? [];
+    entry.snapshot = {
+      ...entry.snapshot,
+      folder_items: currentItems.some((item) => item.item_type === folderItem.item_type && item.item_id === folderItem.item_id)
+        ? currentItems.map((item) => (item.item_type === folderItem.item_type && item.item_id === folderItem.item_id ? folderItem : item))
+        : [...currentItems, folderItem],
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+  if (envelope.type === "workspace_folder_item_removed") {
+    const itemType = typeof data.item_type === "string" ? data.item_type : "";
+    const itemID = typeof data.item_id === "string" ? data.item_id : "";
+    if (!itemType || !itemID) return false;
+    entry.snapshot = {
+      ...entry.snapshot,
+      folder_items: (entry.snapshot.folder_items ?? []).filter((item) => item.item_type !== itemType || item.item_id !== itemID),
       generated_at: envelope.ts,
     };
     return true;
@@ -199,6 +284,8 @@ export async function refreshLogicGateRelationshipGraphSnapshot(apiBase: string,
       relationships: (payload.logic_gate_relationships ?? []).map(toLogicGateCanvasRelationship),
       logic_gates: payload.logic_gates ?? [],
       logic_gate_relationships: payload.logic_gate_relationships ?? [],
+      folders: payload.folders ?? [],
+      folder_items: payload.folder_items ?? [],
       generated_at: payload.generated_at,
     };
     notify(entry);
@@ -222,7 +309,7 @@ function ensureStream(apiBase: string, companyID: string): void {
       const envelope = JSON.parse(payload) as WorkspaceStreamEnvelope;
       if (envelope.company_id !== companyID) return;
       if (isNonLogicGateGraphWorkspaceEvent(envelope.type)) return;
-      if (!envelope.type.startsWith("logic_gate_")) return;
+      if (!envelope.type.startsWith("logic_gate_") && !envelope.type.startsWith("workspace_folder_")) return;
       const applied = applyLogicGateRelationshipGraphDelta(entry, envelope);
       if (applied) notify(entry);
       else void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
@@ -255,4 +342,3 @@ export function getLogicGateRelationshipGraphSnapshot(apiBase: string, companyID
   const key = `${apiBase}:${companyID}`;
   return getEntry(key).snapshot;
 }
-

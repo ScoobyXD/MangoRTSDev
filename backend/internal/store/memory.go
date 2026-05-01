@@ -34,6 +34,12 @@ type Repository interface {
 	AddLogicGateInformation(companyID, logicGateID, infoType, information, informationID string) (domain.LogicGateInformation, error)
 	ListLogicGateProjections(companyID, logicGateID string) ([]domain.LogicGateProjection, error)
 	CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error)
+	CreateWorkspaceFolder(companyID, parentFolderID, folderKind, name string) (domain.WorkspaceFolder, error)
+	ListWorkspaceFolders(companyID, folderKind string) ([]domain.WorkspaceFolder, error)
+	DeleteWorkspaceFolder(companyID, folderID string) error
+	AssignWorkspaceFolderItem(companyID, folderID, itemType, itemID string) (domain.WorkspaceFolderItem, error)
+	ListWorkspaceFolderItems(companyID, folderID, itemType string) ([]domain.WorkspaceFolderItem, error)
+	RemoveWorkspaceFolderItem(companyID, itemType, itemID string) error
 	CreateOperation(in CreateOperationInput) (domain.Operation, error)
 	GetOperation(companyID, operationID string) (domain.Operation, error)
 	AppendWorkspaceContextEvent(event domain.WorkspaceContextEvent) (domain.WorkspaceContextProjection, error)
@@ -60,6 +66,8 @@ type MemoryRepo struct {
 	logicGateInfo      map[string][]domain.LogicGateInformation
 	logicGateText      map[string]map[string]domain.LogicGateProjection
 	logicGateRels      map[string][]domain.LogicGateRelationship
+	folders            map[string]domain.WorkspaceFolder
+	folderItems        map[string]domain.WorkspaceFolderItem
 	operations         map[string]domain.Operation
 	contextEvents      map[string][]domain.WorkspaceContextEvent
 	contextProjections map[string]domain.WorkspaceContextProjection
@@ -75,6 +83,8 @@ func NewMemoryRepo() *MemoryRepo {
 		logicGateInfo:      map[string][]domain.LogicGateInformation{},
 		logicGateText:      map[string]map[string]domain.LogicGateProjection{},
 		logicGateRels:      map[string][]domain.LogicGateRelationship{},
+		folders:            map[string]domain.WorkspaceFolder{},
+		folderItems:        map[string]domain.WorkspaceFolderItem{},
 		operations:         map[string]domain.Operation{},
 		contextEvents:      map[string][]domain.WorkspaceContextEvent{},
 		contextProjections: map[string]domain.WorkspaceContextProjection{},
@@ -83,6 +93,10 @@ func NewMemoryRepo() *MemoryRepo {
 
 func key(companyID, id string) string {
 	return companyID + ":" + id
+}
+
+func folderItemKey(companyID, itemType, itemID string) string {
+	return companyID + ":" + itemType + ":" + itemID
 }
 
 func (r *MemoryRepo) CreateNode(companyID, title string) (domain.Node, error) {
@@ -162,6 +176,7 @@ func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
 	delete(r.nodes, k)
 	delete(r.nodeInfo, k)
 	delete(r.nodeText, k)
+	delete(r.folderItems, folderItemKey(companyID, "node", nodeID))
 
 	filtered := make([]domain.NodeRelationship, 0, len(r.nodeRels[companyID]))
 	for _, rel := range r.nodeRels[companyID] {
@@ -435,6 +450,7 @@ func (r *MemoryRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	delete(r.logicGates, k)
 	delete(r.logicGateInfo, k)
 	delete(r.logicGateText, k)
+	delete(r.folderItems, folderItemKey(companyID, "logic_gate", logicGateID))
 
 	filtered := make([]domain.LogicGateRelationship, 0, len(r.logicGateRels[companyID]))
 	for _, rel := range r.logicGateRels[companyID] {
@@ -596,6 +612,163 @@ func (r *MemoryRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.
 		Information:   info,
 		Relationships: relationships,
 	}, nil
+}
+
+func (r *MemoryRepo) CreateWorkspaceFolder(companyID, parentFolderID, folderKind, name string) (domain.WorkspaceFolder, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var parent *string
+	if parentFolderID != "" {
+		parentFolder, ok := r.folders[key(companyID, parentFolderID)]
+		if !ok || parentFolder.FolderKind != folderKind {
+			return domain.WorkspaceFolder{}, ErrNotFound
+		}
+		parentValue := parentFolderID
+		parent = &parentValue
+	}
+
+	now := time.Now().UTC()
+	item := domain.WorkspaceFolder{
+		CompanyID:        companyID,
+		FolderID:         newUUIDv7String(),
+		ParentFolderID:   parent,
+		FolderKind:       folderKind,
+		Name:             name,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	r.folders[key(companyID, item.FolderID)] = item
+	return item, nil
+}
+
+func (r *MemoryRepo) ListWorkspaceFolders(companyID, folderKind string) ([]domain.WorkspaceFolder, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.WorkspaceFolder, 0)
+	for _, folder := range r.folders {
+		if folder.CompanyID != companyID {
+			continue
+		}
+		if folderKind != "" && folder.FolderKind != folderKind {
+			continue
+		}
+		items = append(items, folder)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
+	return items, nil
+}
+
+func (r *MemoryRepo) DeleteWorkspaceFolder(companyID, folderID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.folders[key(companyID, folderID)]; !ok {
+		return ErrNotFound
+	}
+
+	// Delete the selected folder and every descendant. This matches file-explorer
+	// folder semantics while keeping item delete independent from node/gate delete.
+	toDelete := map[string]bool{folderID: true}
+	changed := true
+	for changed {
+		changed = false
+		for _, folder := range r.folders {
+			if folder.CompanyID != companyID || folder.ParentFolderID == nil {
+				continue
+			}
+			if toDelete[*folder.ParentFolderID] && !toDelete[folder.FolderID] {
+				toDelete[folder.FolderID] = true
+				changed = true
+			}
+		}
+	}
+
+	for id := range toDelete {
+		delete(r.folders, key(companyID, id))
+	}
+	for k, item := range r.folderItems {
+		if item.CompanyID == companyID && toDelete[item.FolderID] {
+			delete(r.folderItems, k)
+		}
+	}
+	return nil
+}
+
+func (r *MemoryRepo) AssignWorkspaceFolderItem(companyID, folderID, itemType, itemID string) (domain.WorkspaceFolderItem, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	folder, ok := r.folders[key(companyID, folderID)]
+	if !ok || folder.FolderKind != itemType {
+		return domain.WorkspaceFolderItem{}, ErrNotFound
+	}
+	if itemType == "node" {
+		if _, ok := r.nodes[key(companyID, itemID)]; !ok {
+			return domain.WorkspaceFolderItem{}, ErrNotFound
+		}
+	} else if itemType == "logic_gate" {
+		if _, ok := r.logicGates[key(companyID, itemID)]; !ok {
+			return domain.WorkspaceFolderItem{}, ErrNotFound
+		}
+	} else {
+		return domain.WorkspaceFolderItem{}, ErrNotFound
+	}
+
+	now := time.Now().UTC()
+	k := folderItemKey(companyID, itemType, itemID)
+	created := now
+	if existing, ok := r.folderItems[k]; ok {
+		created = existing.CreatedTimestamp
+	}
+	item := domain.WorkspaceFolderItem{
+		CompanyID:        companyID,
+		FolderID:         folderID,
+		ItemType:         itemType,
+		ItemID:           itemID,
+		CreatedTimestamp: created,
+		UpdatedTimestamp: now,
+	}
+	r.folderItems[k] = item
+	return item, nil
+}
+
+func (r *MemoryRepo) ListWorkspaceFolderItems(companyID, folderID, itemType string) ([]domain.WorkspaceFolderItem, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.WorkspaceFolderItem, 0)
+	for _, item := range r.folderItems {
+		if item.CompanyID != companyID {
+			continue
+		}
+		if folderID != "" && item.FolderID != folderID {
+			continue
+		}
+		if itemType != "" && item.ItemType != itemType {
+			continue
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
+	return items, nil
+}
+
+func (r *MemoryRepo) RemoveWorkspaceFolderItem(companyID, itemType, itemID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	k := folderItemKey(companyID, itemType, itemID)
+	if _, ok := r.folderItems[k]; !ok {
+		return ErrNotFound
+	}
+	delete(r.folderItems, k)
+	return nil
 }
 
 func (r *MemoryRepo) CreateOperation(in CreateOperationInput) (domain.Operation, error) {
