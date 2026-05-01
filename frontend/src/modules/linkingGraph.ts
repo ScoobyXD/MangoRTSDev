@@ -116,19 +116,6 @@ export function resolveLinkedFrameByKindFromGraph(args: {
   return "";
 }
 
-// Prefer classic node-map links and transparently fall back to logic-map links.
-// This keeps existing editor/explorer workflows fast while allowing logic-gate maps
-// to participate in the same context-sync graph without extra link configuration.
-export function resolveLinkedMapOrLogicMapFrameFromGraph(args: {
-  startFrameID: string;
-  edges: FrameLinkEdge[];
-  registry: Record<string, FrameRegistryItem>;
-}): string {
-  const mapFrame = resolveLinkedFrameByKindFromGraph({ ...args, targetKind: "map" });
-  if (mapFrame) return mapFrame;
-  return resolveLinkedFrameByKindFromGraph({ ...args, targetKind: "logic-map" });
-}
-
 export function resolveDirectLinkedTargets(args: {
   sourceFrameID: string;
   edges: FrameLinkEdge[];

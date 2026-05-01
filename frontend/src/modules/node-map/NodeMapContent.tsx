@@ -9,24 +9,12 @@ import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
-export const NodeMapContent: React.FC<{
-  accent: string;
-  widgetId?: string;
-  hideTopControls?: boolean;
-  theme?: "teal" | "light" | "dark";
-  relationshipRoleLabels?: { parent: string; peer: string; child: string };
-  entityMode?: "node" | "logic-gate";
-}> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "teal", relationshipRoleLabels = { parent: "Parent", peer: "Peer", child: "Child" }, entityMode = "node" }) => {
+export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "teal" }) => {
   const SELECTION_CYAN = "rgb(0, 233, 255)";
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const mapScope = widgetId?.trim() ? widgetId : "global";
   const mapStateKey = `node-map-state-v1:${companyID}:${mapScope}`;
-  const isLogicGateMode = entityMode === "logic-gate";
-  const entitiesPath = isLogicGateMode ? "/v1/logic-gates" : "/v1/nodes";
-  const relationshipsPath = isLogicGateMode ? "/v1/logic-gate-relationships" : "/v1/node-relationships";
-  const entityIdKey = isLogicGateMode ? "logic_gate_id" : "node_id";
-  const entityTitleKey = isLogicGateMode ? "header" : "title";
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const relationshipCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -106,12 +94,6 @@ export const NodeMapContent: React.FC<{
   const panelSurface = isDarkTheme ? "rgba(19,24,31,0.96)" : "rgba(255,255,255,0.95)";
   const panelSubtleSurface = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.8)";
   const panelText = isDarkTheme ? "#f3f7fb" : "#111111";
-  const readEntityID = (entity: NodeRecord): string => String((entity as Record<string, unknown>)[entityIdKey] ?? entity.node_id ?? "");
-  const readEntityTitle = (entity: NodeRecord): string => String((entity as Record<string, unknown>)[entityTitleKey] ?? (entity as Record<string, unknown>).title ?? "");
-  const relationshipNodeIDAKey = isLogicGateMode ? "logic_gate_id_a" : "node_id_a";
-  const relationshipNodeIDBKey = isLogicGateMode ? "logic_gate_id_b" : "node_id_b";
-  const readRelationshipA = (relationship: NodeRelationship): string => String((relationship as Record<string, unknown>)[relationshipNodeIDAKey] ?? relationship.node_id_a ?? "");
-  const readRelationshipB = (relationship: NodeRelationship): string => String((relationship as Record<string, unknown>)[relationshipNodeIDBKey] ?? relationship.node_id_b ?? "");
 
   // Keep relationship projection derivation centralized so callers can reuse the exact same
   // filtering logic without triggering additional network calls.
@@ -243,19 +225,8 @@ export const NodeMapContent: React.FC<{
     setLoading(true);
     setError("");
     try {
-      let nextNodes: NodeRecord[] = [];
-      if (isLogicGateMode) {
-        const payload = await requestJSON<{ logic_gates?: Array<Record<string, unknown>> }>(`${entitiesPath}?company_id=${encodeURIComponent(companyID)}`);
-        nextNodes = (payload.logic_gates ?? []).map((gate) => ({
-          company_id: String(gate.company_id ?? companyID),
-          node_id: String(gate.logic_gate_id ?? ""),
-          title: String(gate.header ?? ""),
-          created_timestamp: String(gate.created_timestamp ?? new Date().toISOString()),
-        }));
-      } else {
-        await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
-        nextNodes = getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes ?? [];
-      }
+      await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+      const nextNodes = getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes ?? [];
       setNodes(nextNodes);
 
       const hasSelection = selectedNodeID && nextNodes.some((item) => item.node_id === selectedNodeID);
@@ -282,7 +253,6 @@ export const NodeMapContent: React.FC<{
   // IMPORTANT: this intentionally does not fetch. Fetching here created a hot-path feedback loop:
   // nodes changed -> refresh snapshot -> subscription setNodes -> nodes changed again.
   const loadGraphRelationshipsFromSnapshot = (graphNodes: NodeRecord[]) => {
-    if (isLogicGateMode) return;
     if (graphNodes.length === 0) {
       setRelationships([]);
       return;
@@ -297,36 +267,13 @@ export const NodeMapContent: React.FC<{
   }, []);
 
   useEffect(() => {
-    if (!isLogicGateMode) return;
-    const load = async () => {
-      if (nodes.length === 0) {
-        setRelationships([]);
-        return;
-      }
-      const payload = await requestJSON<{ relationships?: Array<Record<string, unknown>> }>(`${relationshipsPath}?company_id=${encodeURIComponent(companyID)}`);
-      const mapped = (payload.relationships ?? []).map((relationship) => ({
-        company_id: String(relationship.company_id ?? companyID),
-        node_relationship_id: String(relationship.logic_gate_relationship_id ?? ""),
-        node_id_a: String(relationship.logic_gate_id_a ?? ""),
-        node_id_b: String(relationship.logic_gate_id_b ?? ""),
-        a_position: String(relationship.a_position ?? "Input"),
-        b_position: String(relationship.b_position ?? "Output"),
-        created_timestamp: String(relationship.created_timestamp ?? new Date().toISOString()),
-      }));
-      setRelationships(projectVisibleRelationships(nodes, mapped));
-    };
-    void load();
-  }, [isLogicGateMode, nodes, relationshipsPath, companyID]);
-
-  useEffect(() => {
-    if (isLogicGateMode) return;
     return subscribeNodeRelationshipGraph(apiBase, companyID, () => {
       const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
       const snapshotNodes = snapshot.nodes ?? [];
       setNodes(snapshotNodes);
       setRelationships(projectVisibleRelationships(snapshotNodes, snapshot.relationships ?? []));
     });
-  }, [apiBase, companyID, isLogicGateMode]);
+  }, [apiBase, companyID]);
 
   useEffect(() => {
     setSelectedRelationshipIDs((previous) => {
@@ -584,20 +531,14 @@ export const NodeMapContent: React.FC<{
     if (!value) return null;
     setError("");
     try {
-      const rawNode = await requestJSON<Record<string, unknown>>(entitiesPath, {
+      const node = await requestJSON<NodeRecord>("/v1/nodes", {
         method: "POST",
-        body: JSON.stringify(isLogicGateMode ? { company_id: companyID, header: value } : { company_id: companyID, title: value }),
+        body: JSON.stringify({ company_id: companyID, title: value }),
       });
-      const node: NodeRecord = {
-        company_id: String(rawNode.company_id ?? companyID),
-        node_id: String((rawNode.logic_gate_id ?? rawNode.node_id) ?? ""),
-        title: String((rawNode.header ?? rawNode.title) ?? value),
-        created_timestamp: String(rawNode.created_timestamp ?? new Date().toISOString()),
-      };
       // Hot-path rule: avoid full snapshot refetch on create.
       // Apply optimistic node insertion via NodeRelationshipGraph so all subscribers (Node Map + Explorer)
       // get immediate convergence without issuing a snapshot GET.
-      if (!isLogicGateMode) upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+      upsertNodeRelationshipGraphNode(apiBase, companyID, node);
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       if (worldPos) {
@@ -625,24 +566,16 @@ export const NodeMapContent: React.FC<{
 
     try {
       const payload = buildLinkedNodePayloadFromSourceSide(direction);
-      const rawRelationship = await requestJSON<Record<string, unknown>>(relationshipsPath, {
+      const relationship = await requestJSON<NodeRelationship>("/v1/node-relationships", {
         method: "POST",
         body: JSON.stringify({
           company_id: companyID,
-          ...(isLogicGateMode ? { logic_gate_id_a: sourceNodeID, logic_gate_id_b: node.node_id } : { node_id_a: sourceNodeID, node_id_b: node.node_id }),
+          node_id_a: sourceNodeID,
+          node_id_b: node.node_id,
           a_position: payload.a_position,
           b_position: payload.b_position,
         }),
       });
-      const relationship: NodeRelationship = {
-        company_id: String(rawRelationship.company_id ?? companyID),
-        node_relationship_id: String(rawRelationship.logic_gate_relationship_id ?? rawRelationship.node_relationship_id ?? ""),
-        node_id_a: String(rawRelationship.logic_gate_id_a ?? rawRelationship.node_id_a ?? sourceNodeID),
-        node_id_b: String(rawRelationship.logic_gate_id_b ?? rawRelationship.node_id_b ?? node.node_id),
-        a_position: String(rawRelationship.a_position ?? payload.a_position),
-        b_position: String(rawRelationship.b_position ?? payload.b_position),
-        created_timestamp: String(rawRelationship.created_timestamp ?? new Date().toISOString()),
-      };
 
       const origin = nodePositions[sourceNodeID] ?? { x: 120, y: 120 };
       const linkedNodeClearance = MINI_GRID * 4;
@@ -667,8 +600,7 @@ export const NodeMapContent: React.FC<{
         [relationship.node_relationship_id]: payload.anchor,
       }));
 
-      if (isLogicGateMode) setRelationships((previous) => [...previous, relationship]);
-      else loadGraphRelationshipsFromSnapshot([...nodes, node]);
+      loadGraphRelationshipsFromSnapshot([...nodes, node]);
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       setDetailsPanelNodeID(node.node_id);
@@ -682,7 +614,6 @@ export const NodeMapContent: React.FC<{
     if (!value) return;
     setError("");
     try {
-      if (isLogicGateMode) return;
       const updated = await requestJSON<NodeRecord>(`/v1/nodes/${nodeID}`, {
         method: "PUT",
         body: JSON.stringify({ company_id: companyID, title: value }),
@@ -704,30 +635,21 @@ export const NodeMapContent: React.FC<{
       return;
     }
     const payload = buildExistingNodeRelationshipPayload(sourceSide, targetSide);
-    const rawRelationship = await requestJSON<Record<string, unknown>>(relationshipsPath, {
+    const relationship = await requestJSON<NodeRelationship>("/v1/node-relationships", {
       method: "POST",
       body: JSON.stringify({
         company_id: companyID,
-        ...(isLogicGateMode ? { logic_gate_id_a: sourceNodeID, logic_gate_id_b: targetNodeID } : { node_id_a: sourceNodeID, node_id_b: targetNodeID }),
+        node_id_a: sourceNodeID,
+        node_id_b: targetNodeID,
         a_position: payload.a_position,
         b_position: payload.b_position,
       }),
     });
-    const relationship: NodeRelationship = {
-      company_id: String(rawRelationship.company_id ?? companyID),
-      node_relationship_id: String(rawRelationship.logic_gate_relationship_id ?? rawRelationship.node_relationship_id ?? ""),
-      node_id_a: String(rawRelationship.logic_gate_id_a ?? rawRelationship.node_id_a ?? sourceNodeID),
-      node_id_b: String(rawRelationship.logic_gate_id_b ?? rawRelationship.node_id_b ?? targetNodeID),
-      a_position: String(rawRelationship.a_position ?? payload.a_position),
-      b_position: String(rawRelationship.b_position ?? payload.b_position),
-      created_timestamp: String(rawRelationship.created_timestamp ?? new Date().toISOString()),
-    };
     setRelationshipAnchors((previous) => ({
       ...previous,
       [relationship.node_relationship_id]: payload.anchor,
     }));
-    if (isLogicGateMode) setRelationships((previous) => [...previous, relationship]);
-    else loadGraphRelationshipsFromSnapshot(nodes);
+    loadGraphRelationshipsFromSnapshot(nodes);
   };
 
   // Delete-node action with selection/context cleanup and snapshot refresh.
@@ -1772,9 +1694,9 @@ export const NodeMapContent: React.FC<{
               }}
             >
               {([
-                [relationshipRoleLabels.parent, "parent"],
-                [relationshipRoleLabels.peer, "peer"],
-                [relationshipRoleLabels.child, "child"],
+                ["Parent", "parent"],
+                ["Peer", "peer"],
+                ["Child", "child"],
               ] as const).map(([label, key], index) => (
                 <label
                   key={key}

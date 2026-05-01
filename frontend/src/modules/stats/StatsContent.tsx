@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
-import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedMapOrLogicMapFrameFromGraph } from "../linkingGraph";
+import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight } from "../node-map/NodeRecordStore";
 
 // Generic Stats module: displays metric cards for the nearest linked context source.
@@ -19,7 +19,7 @@ export const StatsContent: React.FC<{ accent: string; widgetId?: string; hideTop
     const refreshLinks = () => {
       const edges = readFrameLinksFromStorage();
       const registry = readFrameRegistryFromStorage();
-      const mapFrameID = resolveLinkedMapOrLogicMapFrameFromGraph({ startFrameID: scope, edges, registry });
+      const mapFrameID = resolveLinkedFrameByKindFromGraph({ startFrameID: scope, targetKind: "map", edges, registry });
       setLinkedMapWidgetID(mapFrameID);
 
       const sourceKind = classifyFrameKind(registry[mapFrameID]?.kind ?? "") ?? "";
