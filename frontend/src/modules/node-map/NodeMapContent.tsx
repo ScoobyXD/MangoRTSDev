@@ -569,8 +569,9 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       });
 
       const origin = nodePositions[sourceNodeID] ?? { x: 120, y: 120 };
-      const horizontalGap = NODE_W + MINI_GRID * 3;
-      const verticalGap = NODE_H + MINI_GRID * 3;
+      const linkedNodeClearance = MINI_GRID * 14;
+      const horizontalGap = NODE_W + linkedNodeClearance;
+      const verticalGap = NODE_H + linkedNodeClearance;
       const shift =
         direction === "left" ? { x: -horizontalGap, y: 0 }
           : direction === "right" ? { x: horizontalGap, y: 0 }
