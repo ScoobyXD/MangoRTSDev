@@ -23,8 +23,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const [panInitialized, setPanInitialized] = useState(false);
   const [restoredViewport, setRestoredViewport] = useState(false);
 
-  const WORLD_W = 3200;
-  const WORLD_H = 2200;
+  const WORLD_W = 6400;
+  const WORLD_H = 4400;
 
   const [nodePositions, setNodePositions] = useState<Record<string, NodePosition>>({});
   const [nodeSizes, setNodeSizes] = useState<Record<string, { w: number; h: number }>>({});
@@ -1190,10 +1190,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
             height: WORLD_H,
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: "0 0",
-            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${MINI_GRID}' height='${MINI_GRID}' viewBox='0 0 ${MINI_GRID} ${MINI_GRID}'%3E%3Cpath d='M${MINI_GRID / 2 - 1} ${MINI_GRID / 2}h2M${MINI_GRID / 2} ${MINI_GRID / 2 - 1}v2' stroke='rgba(17,17,17,0.18)' stroke-width='1' stroke-linecap='square'/%3E%3C/svg%3E")`,
-            backgroundSize: `${MINI_GRID}px ${MINI_GRID}px`,
-            backgroundRepeat: "repeat",
-            backgroundPosition: "0 0",
           }}
         >
           <canvas
