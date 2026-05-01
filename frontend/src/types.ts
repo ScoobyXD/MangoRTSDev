@@ -3,7 +3,8 @@ export interface FrameDataModel {
   id: string;
   kind: string;
   parentId?: string;
-  theme?: "teal" | "orange" | "white" | "black";
+  theme?: "teal" | "light" | "dark";
+  glass?: boolean;
   x: number;
   y: number;
   w: number;
