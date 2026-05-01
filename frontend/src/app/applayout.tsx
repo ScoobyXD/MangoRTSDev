@@ -42,12 +42,17 @@ const UI_THEME = {
 
 
 
-const INITIAL_WIDGETS: FrameDataModel[] = [
-  { id: "w-company-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 11, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
-  { id: "w-nodes", theme: "teal", kind: "nodes-map", x: 12, y: 1, w: 20, h: 30, title: "Node Map", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-editor", theme: "orange", kind: "editor", x: 32, y: 1, w: 11, h: 20, title: "Editor", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
-  { id: "w-stats", theme: "black", kind: "stats", x: 32, y: 21, w: 11, h: 10, title: "Stats", color: COLORWAYS.black.color, accent: COLORWAYS.black.accent },
-];
+
+const createMangoNodeViewFrames = (): FrameDataModel[] => {
+  const rootId = "mango-node-map";
+  return [
+    { id: rootId, theme: "white", kind: "nodes-map", x: 1, y: 1, w: 42, h: 30, title: "Node Map", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+    { id: "mango-company-explorer", parentId: rootId, theme: "white", kind: "company-explorer", x: 0, y: 0, w: 6, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+    { id: "mango-editor", parentId: rootId, theme: "white", kind: "editor", x: 36, y: 0, w: 6, h: 30, title: "Editor", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  ];
+};
+
+const INITIAL_WIDGETS: FrameDataModel[] = createMangoNodeViewFrames();
 
 interface ViewTab {
   id: string;
@@ -161,7 +166,7 @@ function persistFrameLinks(next: FrameLinkEdge[]) {
 
 // Load saved dashboard views/tabs with legacy widget compatibility fallback.
 function loadViews(): { tabs: ViewTab[]; activeId: string } {
-  const fallback = { tabs: [{ id: "view-default", name: "Main View", frames: INITIAL_WIDGETS }], activeId: "view-default" };
+  const fallback = { tabs: [{ id: "view-default", name: "Mango Node View", frames: INITIAL_WIDGETS }], activeId: "view-default" };
   try {
     const raw = localStorage.getItem(VIEWS_KEY);
     if (!raw) return fallback;
@@ -935,6 +940,14 @@ const App: React.FC = () => {
   }, [tabs.length, activeTabId]);
 
 
+  const openMangoNodeView = useCallback((tabID: string) => {
+    const framesForView = createMangoNodeViewFrames();
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Mango Node View", frames: framesForView } : tab)));
+    setFrameLinks((previous) => mergeLinkPlan(previous, computeLinkPlan(framesForView)));
+    setActiveTabId(tabID);
+    setEditMode(true);
+  }, []);
+
   const saveCurrentAsTemplate = useCallback((tabID: string) => {
     const source = tabs.find((tab) => tab.id === tabID);
     if (!source) return;
@@ -1277,6 +1290,7 @@ const App: React.FC = () => {
         <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
+          <button style={menuBtnBase} onClick={() => { openMangoNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Mango Node View</button>
           <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>
         </FrameRightClickMenu>
       )}
