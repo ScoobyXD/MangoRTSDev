@@ -258,8 +258,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   return (
     <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateRows: "auto 1fr", background: "#ffffff", color: "#0d1a1e", overflow: "hidden", userSelect: "text" }}>
-       <div style={{ padding: "12px 10px 8px", borderBottom: "1px solid rgba(3,25,30,0.14)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}></div>
-      <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(3,25,30,0.14)", minHeight: 0 }} />
       <div style={{ position: "relative", minHeight: 0 }}>
       {linkedNodeID.trim().length > 0 && (
         <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 2 }}>
@@ -273,10 +271,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
               );
             })}
           </div>
-
+          
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 21, borderBottom: "1px solid rgba(3,25,30,0.14)", transform: "translateY(8px)", pointerEvents: "none", zIndex: 1 }} />
           {activeTab === "editor" && (
             <div style={{ display: "grid", gap: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.12em", color: accent, cursor: "text" }}>
+              <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.12em", color: accent, cursor: "text" }}>
                 <span style={{ textTransform: "uppercase" }}>Node:</span>&nbsp;
                 <span
                   ref={editingTitleRef}
@@ -316,7 +315,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                 </span>
               </div>
               {linkedNodeInfoPreview.length > 0 && <div style={{ fontSize: 10, opacity: 0.7 }}>{linkedNodeInfoPreview.join(" • ")}</div>}
-              <div style={{ fontSize: 11, opacity: 0.75 }}>Text box editing has been removed from this module.</div>
             </div>
           )}
 
