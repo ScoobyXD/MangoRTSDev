@@ -23,13 +23,12 @@ const HALF_STEP = 0.5;
 
 const COLORWAYS = {
   teal: { color: "#00e9ff", accent: "#006f85", text: "#042028", tagBg: "#042028", tagText: "#ffffff" },
-  orange: { color: "#ff6a00", accent: "#5a2200", text: "#120900", tagBg: "#120900", tagText: "#ffffff" },
-  white: { color: "#ffffff", accent: "#111111", text: "#111111", tagBg: "#111111", tagText: "#ffffff" },
-  black: { color: "#0c0c0c", accent: "#ffffff", text: "#ffffff", tagBg: "#ffffff", tagText: "#050505" },
+  light: { color: "#ffffff", accent: "#111111", text: "#111111", tagBg: "rgb(0, 233, 255)", tagText: "#041d22" },
+  dark: { color: "#101214", accent: "#ffffff", text: "#ffffff", tagBg: "#ffffff", tagText: "#050505" },
 } as const;
 
 type ColorwayKey = keyof typeof COLORWAYS;
-const COLORWAY_ORDER: ColorwayKey[] = ["teal", "orange", "white", "black"];
+const COLORWAY_ORDER: ColorwayKey[] = ["teal", "light", "dark"];
 
 const UI_THEME = {
   surface: "#f7fffe",
@@ -43,10 +42,10 @@ const UI_THEME = {
 
 
 const INITIAL_WIDGETS: FrameDataModel[] = [
-  { id: "w-company-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 11, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  { id: "w-company-explorer", theme: "light", kind: "company-explorer", x: 1, y: 1, w: 11, h: 30, title: "Company Explorer", color: COLORWAYS.light.color, accent: COLORWAYS.light.accent },
   { id: "w-nodes", theme: "teal", kind: "nodes-map", x: 12, y: 1, w: 20, h: 30, title: "Node Map", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-editor", theme: "orange", kind: "editor", x: 32, y: 1, w: 11, h: 20, title: "Editor", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
-  { id: "w-stats", theme: "black", kind: "stats", x: 32, y: 21, w: 11, h: 10, title: "Stats", color: COLORWAYS.black.color, accent: COLORWAYS.black.accent },
+  { id: "w-editor", theme: "light", kind: "editor", x: 32, y: 1, w: 11, h: 20, title: "Editor", color: COLORWAYS.light.color, accent: COLORWAYS.light.accent },
+  { id: "w-stats", theme: "dark", kind: "stats", x: 32, y: 21, w: 11, h: 10, title: "Stats", color: COLORWAYS.dark.color, accent: COLORWAYS.dark.accent },
 ];
 
 interface ViewTab {
@@ -102,7 +101,7 @@ function isHexColor(value: unknown): value is string {
 // Storage migration guard: sanitize persisted frame payloads from localStorage.
 function coerceFrame(value: unknown): FrameDataModel | null {
   if (!isObject(value)) return null;
-  const { id, kind, parentId, theme, x, y, w, h, title, color, accent } = value;
+  const { id, kind, parentId, theme, glass, x, y, w, h, title, color, accent } = value;
   if (
     typeof id !== "string" || typeof kind !== "string" || typeof x !== "number" || typeof y !== "number" ||
     typeof w !== "number" || typeof h !== "number" || typeof title !== "string" || typeof color !== "string" || typeof accent !== "string"
@@ -114,7 +113,8 @@ function coerceFrame(value: unknown): FrameDataModel | null {
     id,
     kind: normalizedKind,
     parentId: typeof parentId === "string" && parentId.trim() ? parentId : undefined,
-    theme: isColorway(theme) ? theme : "teal",
+    theme: isColorway(theme) ? theme : theme === "white" ? "light" : theme === "black" ? "dark" : theme === "orange" ? "light" : "teal",
+    glass: glass === true,
     x: Math.max(0, snapToHalfStep(x)),
     y: Math.max(0, snapToHalfStep(y)),
     w: Math.max(MIN_W, Math.round(w)),
@@ -396,6 +396,12 @@ interface FrameCardProps {
 const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nestedChildren, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked, edgeHit }) => {
   const Content = CONTENT_MAP[frame.kind];
   const theme = COLORWAYS[frame.theme ?? "teal"];
+  const isGlass = frame.glass === true;
+  const glassSurface = frame.theme === "dark"
+    ? "rgba(16, 18, 20, 0.56)"
+    : frame.theme === "light"
+      ? "rgba(255, 255, 255, 0.44)"
+      : "rgba(0, 233, 255, 0.34)";
   const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-map" || frame.kind === "editor" || frame.kind === "node-doc";
   const isEdgeToEdgeContentFrame = isNodesFrame || frame.kind === "company-explorer";
   const left = frame.x * stepX;
@@ -446,8 +452,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         top,
         width: frame.w * stepX,
         height: frame.h * stepY,
-        background: frame.color,
-        border: "none",
+        background: isGlass ? glassSurface : frame.color,
         boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
@@ -461,6 +466,9 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
           : nested
             ? "0 3px 16px rgba(0,0,0,0.18)"
             : undefined,
+        backdropFilter: isGlass ? "blur(10px)" : undefined,
+        WebkitBackdropFilter: isGlass ? "blur(10px)" : undefined,
+        border: isGlass ? "1px solid rgba(255,255,255,0.45)" : "none",
       }}
       onClick={(e) => e.stopPropagation()}
       onMouseDownCapture={(e) => {
@@ -510,7 +518,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
           padding: "6px 8px",
           borderRight: "none",
           borderBottom: "none",
-          background: frame.color,
+          background: isGlass ? "rgba(255,255,255,0.16)" : frame.color,
           cursor: isDragging ? "grabbing" : "grab",
           fontFamily: "'IBM Plex Mono', monospace",
         }}
@@ -528,7 +536,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
             </svg>
           )}
       </div>
-      <div style={{ flex: 1, minHeight: 0, padding: isEdgeToEdgeContentFrame ? 0 : "8px 10px", overflow: frame.kind === "company-explorer" ? "hidden" : "auto", fontFamily: "'IBM Plex Mono', monospace" }}>
+      <div style={{ flex: 1, minHeight: 0, padding: isEdgeToEdgeContentFrame ? 0 : "8px 10px", overflow: frame.kind === "company-explorer" ? "hidden" : "auto", fontFamily: "'IBM Plex Mono', monospace", opacity: isGlass ? 0.78 : 1 }}>
         <div style={{ width: `${100 / contentScale}%`, height: `${100 / contentScale}%`, transform: `scale(${contentScale})`, transformOrigin: "top left" }}>
           {Content ? <Content accent={frame.accent} widgetId={frame.id} hideTopControls={isNodesFrame} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: frame.accent }}>{frame.title}</span></div>}
         </div>
@@ -1321,9 +1329,15 @@ const App: React.FC = () => {
               updateActiveFrames((prev) => prev.map((w) => (w.id === frameRightClickMenu.id ? applyColorway(w, theme) : w)));
               closeMenus();
             }} {...hoverHandlers}>
-              <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} /> {theme.toUpperCase()}
+              <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} /> {theme === "light" ? "LIGHT" : theme.toUpperCase()}
             </button>
           ))}
+          <button style={menuBtnBase} onClick={() => {
+            updateActiveFrames((prev) => prev.map((w) => (w.id === frameRightClickMenu.id ? { ...w, glass: !w.glass } : w)));
+            closeMenus();
+          }} {...hoverHandlers}>
+            {frames.find((w) => w.id === frameRightClickMenu.id)?.glass ? "Disable Glass" : "Enable Glass"}
+          </button>
           <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { confirmDeleteFrameSelection([frameRightClickMenu.id]); closeMenus(); }} {...hoverHandlers}>Delete</button>
         </FrameRightClickMenu>
       )}
