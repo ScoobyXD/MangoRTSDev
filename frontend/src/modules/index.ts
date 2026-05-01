@@ -14,9 +14,9 @@ export interface ModuleTemplate {
 
 // Master module library used by add-module flow and module-picker context menu.
 export const MODULE_LIBRARY: ModuleTemplate[] = [
-  { kind: "nodes-map", label: "Node Map", defaultW: 16, defaultH: 14, render: NodeMapContent },
-  { kind: "editor", label: "Editor", defaultW: 16, defaultH: 14, render: EditorContent },
   { kind: "company-explorer", label: "Company Explorer", defaultW: 18, defaultH: 14, render: CompanyExplorerContent },
+  { kind: "editor", label: "Editor", defaultW: 16, defaultH: 14, render: EditorContent },
+  { kind: "nodes-map", label: "Node Map", defaultW: 16, defaultH: 14, render: NodeMapContent },
   { kind: "stats", label: "Stats", defaultW: 12, defaultH: 10, render: StatsContent },
 ];
 
