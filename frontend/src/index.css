@@ -26,31 +26,6 @@ button, input {
   font-family: inherit;
 }
 
-/* Node-details panel custom scrollbar styling for dense information panes. */
-.node-details-panel {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(7, 86, 94, 0.5) rgba(255, 255, 255, 0.28);
-}
-
-.node-details-panel::-webkit-scrollbar {
-  width: 10px;
-}
-
-.node-details-panel::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.28);
-  border-radius: 999px;
-}
-
-.node-details-panel::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, rgba(7, 86, 94, 0.5), rgba(7, 86, 94, 0.32));
-  border-radius: 999px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-}
-
-.node-details-panel::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, rgba(7, 86, 94, 0.62), rgba(7, 86, 94, 0.42));
-}
-
 /* Company Explorer scrollbar treatment (thin, high-contrast industrial look). */
 .company-explorer-scroll {
   --company-explorer-scroll-accent: #00b8cc;
