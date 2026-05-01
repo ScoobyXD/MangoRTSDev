@@ -1249,10 +1249,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
             return;
           }
 
-          if (!(event.target as HTMLElement).closest("[data-node-card='true']")) {
-            setSelectedNodeIDs(new Set());
-            setSelectedNodeID("");
-          }
           if (relationshipDraft) setRelationshipDraft(null);
           setPanState({
             pointerID: event.pointerId,
