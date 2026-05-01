@@ -22,6 +22,8 @@ const CHILD_GRID_DIVISOR = 2;
 const CHILD_EDGE_GAP = 0.5;
 const HALF_STEP = 0.5;
 
+const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
+
 const COLORWAYS = {
   teal: { color: "#00e9ff", accent: "#006f85", text: "#042028", tagBg: "#042028", tagText: "#ffffff" },
   light: { color: "#ffffff", accent: "#111111", text: "#111111", tagBg: "rgb(0, 233, 255)", tagText: "#041d22" },
@@ -718,8 +720,8 @@ const App: React.FC = () => {
     return { ...frame, theme, color: swatch.color, accent: swatch.accent };
   }, []);
 
-  const addFrame = useCallback((kind = "chart", preferred?: { x: number; y: number }) => {
-    const template = FRAME_MODULE_LIBRARY.find((item) => item.kind === kind);
+  const addFrame = useCallback((kind = DEFAULT_FRAME_KIND, preferred?: { x: number; y: number }) => {
+    const template = FRAME_MODULE_LIBRARY.find((item) => item.kind === kind) ?? FRAME_MODULE_LIBRARY[0];
     if (!template) return;
     const id = createFrameId();
     const theme = COLORWAY_ORDER[(frameCounter + 1) % COLORWAY_ORDER.length];
@@ -1376,7 +1378,7 @@ const App: React.FC = () => {
 
       {canvasMenu && (
         <FrameRightClickMenu x={canvasMenu.x} y={canvasMenu.y} onClose={closeMenus}>
-          <button style={menuBtnBase} onClick={() => { addFrame("chart", { x: canvasMenu.gridX, y: canvasMenu.gridY }); setEditMode(true); closeMenus(); }} {...hoverHandlers}>
+          <button style={menuBtnBase} onClick={() => { addFrame(DEFAULT_FRAME_KIND, { x: canvasMenu.gridX, y: canvasMenu.gridY }); setEditMode(true); closeMenus(); }} {...hoverHandlers}>
             Create new frame
           </button>
           <button style={menuBtnBase} onClick={() => { setEditMode((v) => !v); closeMenus(); }} {...hoverHandlers}>
