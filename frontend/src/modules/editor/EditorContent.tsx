@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
-import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
+import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedMapOrLogicMapFrameFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import type { NodeInformation } from "../node-map/shared";
@@ -14,6 +14,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [linkedMapWidgetID, setLinkedMapWidgetID] = useState("");
   const [linkedNodeID, setLinkedNodeID] = useState("");
   const [linkedNodeTitle, setLinkedNodeTitle] = useState("");
+  const [linkedSourceKind, setLinkedSourceKind] = useState<"map" | "logic-map" | "editor" | "explorer" | "">("");
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
   const [linkedNodeMetadataRows, setLinkedNodeMetadataRows] = useState<Array<{ label: string; value: string }>>([]);
   const [linkedNodeHistoryRows, setLinkedNodeHistoryRows] = useState<string[]>([]);
@@ -64,7 +65,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
     const registry = readFrameRegistryFromStorage();
-    return resolveLinkedFrameByKindFromGraph({ startFrameID: scope, targetKind: "map", edges, registry });
+    const linked = resolveLinkedMapOrLogicMapFrameFromGraph({ startFrameID: scope, edges, registry });
+    setLinkedSourceKind(classifyFrameKind(registry[linked]?.kind ?? "") ?? "");
+    return linked;
   }, [scope]);
 
   const readSelectedNodeFromMap = useCallback((mapWidgetID: string): string => {
@@ -285,7 +288,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           {activeTab === "editor" && (
             <div style={{ display: "grid", gap: 8 }}>
               <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.12em", color: accent, cursor: "text" }}>
-                <span style={{ textTransform: "uppercase" }}>Node:</span>&nbsp;
+                <span style={{ textTransform: "uppercase" }}>{linkedSourceKind === "logic-map" ? "Logic Gate:" : "Node:"}</span>&nbsp;
                 <span
                   ref={editingTitleRef}
                   contentEditable={isEditingTitle}

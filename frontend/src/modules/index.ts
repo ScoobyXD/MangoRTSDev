@@ -1,5 +1,6 @@
 import React from "react";
 import { NodeMapContent } from "./node-map/NodeMapContent";
+import { LogicMapContent } from "./logic-map/LogicMapContent";
 import { EditorContent } from "./editor/EditorContent";
 import { CompanyExplorerContent } from "./company-explorer";
 import { StatsContent } from "./stats/StatsContent";
@@ -17,6 +18,7 @@ export const MODULE_LIBRARY: ModuleTemplate[] = [
   { kind: "company-explorer", label: "Company Explorer", defaultW: 18, defaultH: 14, render: CompanyExplorerContent },
   { kind: "editor", label: "Editor", defaultW: 16, defaultH: 14, render: EditorContent },
   { kind: "nodes-map", label: "Node Map", defaultW: 16, defaultH: 14, render: NodeMapContent },
+  { kind: "logic-map", label: "Logic Gate Map", defaultW: 16, defaultH: 14, render: LogicMapContent },
   { kind: "stats", label: "Stats", defaultW: 12, defaultH: 10, render: StatsContent },
 ];
 
