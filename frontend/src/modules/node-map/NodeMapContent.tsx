@@ -569,7 +569,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       });
 
       const origin = nodePositions[sourceNodeID] ?? { x: 120, y: 120 };
-      const linkedNodeClearance = MINI_GRID * 14;
+      const linkedNodeClearance = MINI_GRID * 4;
       const horizontalGap = NODE_W + linkedNodeClearance;
       const verticalGap = NODE_H + linkedNodeClearance;
       const shift =
