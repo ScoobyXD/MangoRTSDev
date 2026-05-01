@@ -1530,16 +1530,9 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                         }}
                       >
                         {isDrafting ? (
-                          <span
-                            aria-hidden="true"
-                            style={{
-                              width: 12,
-                              height: 10,
-                              display: "inline-block",
-                              clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)",
-                              background: isSource ? "#ffffff" : accent,
-                            }}
-                          />
+                          <svg aria-hidden="true" width="12" height="13" viewBox="0 0 17 19" style={{ display: "block" }}>
+                            <polygon points="8.5,1.5 15.5,5.5 15.5,13.5 8.5,17.5 1.5,13.5 1.5,5.5" fill="none" stroke={isSource ? "#ffffff" : accent} strokeWidth="1.8" />
+                          </svg>
                         ) : (direction === "top" ? "↑" : direction === "right" ? "→" : direction === "bottom" ? "↓" : "←")}
                       </button>
                     </div>
