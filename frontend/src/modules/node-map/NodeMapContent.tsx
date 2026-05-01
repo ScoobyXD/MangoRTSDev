@@ -9,7 +9,7 @@ import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
-export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
+export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "teal" }) => {
   const SELECTION_CYAN = "rgb(0, 233, 255)";
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
@@ -86,6 +86,14 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const connectionPathsRef = useRef<Array<{ id: string; points: { x: number; y: number }[] }>>([]);
   const suppressNextRelationshipLineClickRef = useRef(false);
   const selectionRevisionRef = useRef(0);
+  const isDarkTheme = theme === "dark";
+  const nodeCardBackground = isDarkTheme ? "rgba(20,26,32,0.95)" : "rgba(252,252,252,0.93)";
+  const nodeCardSelectedBackground = isDarkTheme ? "rgba(32,40,49,0.98)" : "#ffffff";
+  const nodeCardBorder = isDarkTheme ? "rgba(201,220,233,0.42)" : "#505050";
+  const nodeCardText = isDarkTheme ? "#f3f7fb" : "#101010";
+  const panelSurface = isDarkTheme ? "rgba(19,24,31,0.96)" : "rgba(255,255,255,0.95)";
+  const panelSubtleSurface = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.8)";
+  const panelText = isDarkTheme ? "#f3f7fb" : "#111111";
 
   // Keep relationship projection derivation centralized so callers can reuse the exact same
   // filtering logic without triggering additional network calls.
@@ -1292,14 +1300,15 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   width: size.w,
                   height: size.h,
                   borderRadius: 8,
-                  border: `1px solid ${isSelected ? SELECTION_CYAN : "#505050"}`,
-                  background: isSelected ? "#ffffff" : "rgba(252,252,252,0.93)",
+                  border: `1px solid ${isSelected ? SELECTION_CYAN : nodeCardBorder}`,
+                  background: isSelected ? nodeCardSelectedBackground : nodeCardBackground,
                   outline: isSelected ? `2px solid ${SELECTION_CYAN}` : "none",
                   outlineOffset: isSelected ? 1 : 0,
                   display: "grid",
                   gridTemplateRows: "1fr",
                   boxShadow: isSelected ? "0 0 0 3px rgba(0,233,255,0.35), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
                   userSelect: "none",
+                  color: nodeCardText,
                   cursor: editingNodeTitleNodeID === node.node_id ? "text" : (dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab"),
                   zIndex: isPrimary ? 5 : 4,
                   overflow: "visible",
@@ -1480,7 +1489,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                           height: 20,
                           borderRadius: 4,
                           border: `1px solid ${accent}`,
-                          background: "#ffffff",
+                          background: panelSurface,
                           color: accent,
                           display: isDrafting ? "none" : "grid",
                           placeItems: "center",
@@ -1518,7 +1527,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                           height: 20,
                           borderRadius: 4,
                           border: `1px solid ${accent}`,
-                          background: isSource ? accent : "#ffffff",
+                          background: isSource ? accent : panelSurface,
                           color: isSource ? "#ffffff" : accent,
                           display: "grid",
                           placeItems: "center",
@@ -1594,7 +1603,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
               position: "absolute",
               left: contextMenu.x,
               top: contextMenu.y,
-              background: "rgba(255,255,255,0.95)",
+              background: panelSurface,
               border: `1px solid ${accent}`,
               borderRadius: 8,
               padding: 8,
@@ -1611,7 +1620,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
               style={{
                 width: "100%",
                 border: "1px solid rgba(0,0,0,0.16)",
-                background: "rgba(255,255,255,0.8)",
+                background: panelSubtleSurface,
                 cursor: "pointer",
                 fontSize: 11,
                 fontWeight: 700,
@@ -1632,7 +1641,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
               style={{
                 width: "100%",
                 border: "1px solid rgba(0,0,0,0.16)",
-                background: "rgba(255,255,255,0.8)",
+                background: panelSubtleSurface,
                 cursor: "pointer",
                 fontSize: 11,
                 fontWeight: 700,
@@ -1642,7 +1651,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: 6,
-                color: "#111111",
+                color: panelText,
                 borderRadius: 0,
               }}
               onClick={() => setRelationshipColorsEnabled((previous) => !previous)}
@@ -1670,7 +1679,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                     width: 14,
                     height: 14,
                     borderRadius: "50%",
-                    background: "#ffffff",
+                    background: panelSurface,
                     boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
                   }}
                 />
@@ -1702,7 +1711,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                     border: "1px solid rgba(0,0,0,0.16)",
                     borderTop: index === 0 ? "1px solid rgba(0,0,0,0.16)" : "0",
                     borderRadius: 0,
-                    background: "rgba(255,255,255,0.72)",
+                    background: panelSubtleSurface,
                   }}
                 >
                   <span>{label}</span>
@@ -1724,7 +1733,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
               left: nodeContextMenu.x,
               top: nodeContextMenu.y,
               transform: "translate(8px, 8px)",
-              background: "rgba(255,255,255,0.95)",
+              background: panelSurface,
               border: `1px solid ${accent}`,
               borderRadius: 8,
               padding: 4,
@@ -1756,7 +1765,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
               left: relationshipContextMenu.x,
               top: relationshipContextMenu.y,
               transform: "translate(8px, 8px)",
-              background: "rgba(255,255,255,0.95)",
+              background: panelSurface,
               border: `1px solid ${accent}`,
               borderRadius: 8,
               padding: 4,
@@ -1825,7 +1834,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
 
         {confirmDelete && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-            <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
+            <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: panelSurface, padding: 12, display: "grid", gap: 10 }}>
               <div style={{ fontSize: 12, fontWeight: 700 }}>
                 Are you sure you want to delete {confirmDelete.nodeIDs.length} node{confirmDelete.nodeIDs.length === 1 ? "" : "s"}
                 {confirmDelete.relationshipIDs.length > 0 ? ` and ${confirmDelete.relationshipIDs.length} relationship line${confirmDelete.relationshipIDs.length === 1 ? "" : "s"}` : ""}?
