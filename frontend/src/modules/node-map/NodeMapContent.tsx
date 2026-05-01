@@ -1818,19 +1818,22 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
         )}
 
         {confirmDelete && (
-          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 60, display: "grid", placeItems: "center" }}>
-            <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: `1px solid ${accent}`, background: "rgba(255,255,255,0.92)", padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
+            <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
               <div style={{ fontSize: 12, fontWeight: 700 }}>
                 Are you sure you want to delete {confirmDelete.nodeIDs.length} node{confirmDelete.nodeIDs.length === 1 ? "" : "s"}
                 {confirmDelete.relationshipIDs.length > 0 ? ` and ${confirmDelete.relationshipIDs.length} relationship line${confirmDelete.relationshipIDs.length === 1 ? "" : "s"}` : ""}?
+              </div>
+              <div style={{ fontSize: 11, lineHeight: 1.35, color: "#2e2e2e" }}>
+                This removes the selected node data immediately. Use Undo (Ctrl/Cmd + Z) if this was accidental.
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 <button onClick={() => {
                   if (confirmDelete.relationshipIDs.length > 0) void deleteRelationships(confirmDelete.relationshipIDs);
                   if (confirmDelete.nodeIDs.length > 0) void deleteNodes(confirmDelete.nodeIDs);
                   setConfirmDelete(null);
-                }} style={{ border: `1px solid ${accent}`, background: "#d8fff6", cursor: "pointer", fontWeight: 700 }}>Yes</button>
-                <button onClick={() => setConfirmDelete(null)} style={{ border: `1px solid ${accent}`, background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
+                }} style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#d8fff6", cursor: "pointer", fontWeight: 700 }}>Yes</button>
+                <button onClick={() => setConfirmDelete(null)} style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
               </div>
             </div>
           </div>
