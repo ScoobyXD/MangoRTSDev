@@ -1411,10 +1411,12 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                         WebkitBoxOrient: "vertical",
                         cursor: "text",
                         textAlign: "center",
-                        fontSize: 20,
+                        fontSize: 18,
                         fontWeight: 800,
-                        lineHeight: 1.2,
-                        fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+                        lineHeight: 1.15,
+                        letterSpacing: "0.03em",
+                        fontFamily: "'IBM Plex Mono', monospace",
+                        textTransform: "uppercase",
                         outline: "none",
                       }}
                     >
@@ -1432,10 +1434,12 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                         display: "-webkit-box",
                         WebkitLineClamp: 3,
                         WebkitBoxOrient: "vertical",
-                        fontSize: 20,
+                        fontSize: 18,
                         fontWeight: 800,
-                        lineHeight: 1.2,
-                        fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+                        lineHeight: 1.15,
+                        letterSpacing: "0.03em",
+                        fontFamily: "'IBM Plex Mono', monospace",
+                        textTransform: "uppercase",
                       }}
                     >
                       {getNodeTitle(node)}
@@ -1525,7 +1529,11 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                           padding: 0,
                         }}
                       >
-                        {isDrafting ? "◎" : (direction === "top" ? "↑" : direction === "right" ? "→" : direction === "bottom" ? "↓" : "←")}
+                        {isDrafting ? (
+                          <svg aria-hidden="true" width="12" height="13" viewBox="0 0 17 19" style={{ display: "block" }}>
+                            <polygon points="8.5,1.5 15.5,5.5 15.5,13.5 8.5,17.5 1.5,13.5 1.5,5.5" fill="none" stroke={isSource ? "#ffffff" : accent} strokeWidth="1.8" />
+                          </svg>
+                        ) : (direction === "top" ? "↑" : direction === "right" ? "→" : direction === "bottom" ? "↓" : "←")}
                       </button>
                     </div>
                   );
