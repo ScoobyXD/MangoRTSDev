@@ -1425,7 +1425,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                         lineHeight: 1.15,
                         letterSpacing: "0.03em",
                         fontFamily: "'IBM Plex Mono', monospace",
-                        textTransform: "uppercase",
                         outline: "none",
                       }}
                     >
@@ -1448,7 +1447,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                         lineHeight: 1.15,
                         letterSpacing: "0.03em",
                         fontFamily: "'IBM Plex Mono', monospace",
-                        textTransform: "uppercase",
                       }}
                     >
                       {getNodeTitle(node)}
