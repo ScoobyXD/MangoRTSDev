@@ -41,12 +41,17 @@ const UI_THEME = {
 
 
 
-const INITIAL_WIDGETS: FrameDataModel[] = [
-  { id: "w-company-explorer", theme: "light", kind: "company-explorer", x: 1, y: 1, w: 11, h: 30, title: "Company Explorer", color: COLORWAYS.light.color, accent: COLORWAYS.light.accent },
-  { id: "w-nodes", theme: "teal", kind: "nodes-map", x: 12, y: 1, w: 20, h: 30, title: "Node Map", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-editor", theme: "light", kind: "editor", x: 32, y: 1, w: 11, h: 20, title: "Editor", color: COLORWAYS.light.color, accent: COLORWAYS.light.accent },
-  { id: "w-stats", theme: "dark", kind: "stats", x: 32, y: 21, w: 11, h: 10, title: "Stats", color: COLORWAYS.dark.color, accent: COLORWAYS.dark.accent },
-];
+
+const createMangoNodeViewFrames = (): FrameDataModel[] => {
+  const rootId = "mango-node-map";
+  return [
+    { id: rootId, theme: "white", kind: "nodes-map", x: 1, y: 1, w: 42, h: 30, title: "Node Map", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+    { id: "mango-company-explorer", parentId: rootId, theme: "white", kind: "company-explorer", x: 1, y: 1, w: 7, h: 27, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+    { id: "mango-editor", parentId: rootId, theme: "white", kind: "editor", x: 34, y: 1, w: 7, h: 27, title: "Editor", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  ];
+};
+
+const INITIAL_WIDGETS: FrameDataModel[] = createMangoNodeViewFrames();
 
 interface ViewTab {
   id: string;
