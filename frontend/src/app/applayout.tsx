@@ -9,6 +9,7 @@ import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { emitDashboardEvent, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
 import { FRAME_REGISTRY_KEY } from "../modules/linkingGraph";
 import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, FRAME_LINKS_KEY, mergeLinkPlan, sanitizeFrameLinks, type FrameLinkEdge } from "./frameLinking";
+import { createDefaultNodeViewFrames } from "./DefaultViews";
 
 const CELL_SIZE = 28;
 const HEADER_H = 48;
@@ -40,13 +41,6 @@ const UI_THEME = {
 
 
 
-
-const INITIAL_WIDGETS: FrameDataModel[] = [
-  { id: "w-company-explorer", theme: "light", kind: "company-explorer", x: 1, y: 1, w: 11, h: 30, title: "Company Explorer", color: COLORWAYS.light.color, accent: COLORWAYS.light.accent },
-  { id: "w-nodes", theme: "teal", kind: "nodes-map", x: 12, y: 1, w: 20, h: 30, title: "Node Map", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-editor", theme: "light", kind: "editor", x: 32, y: 1, w: 11, h: 20, title: "Editor", color: COLORWAYS.light.color, accent: COLORWAYS.light.accent },
-  { id: "w-stats", theme: "dark", kind: "stats", x: 32, y: 21, w: 11, h: 10, title: "Stats", color: COLORWAYS.dark.color, accent: COLORWAYS.dark.accent },
-];
 
 interface ViewTab {
   id: string;
@@ -160,7 +154,7 @@ function persistFrameLinks(next: FrameLinkEdge[]) {
 
 // Load saved dashboard views/tabs with legacy widget compatibility fallback.
 function loadViews(): { tabs: ViewTab[]; activeId: string } {
-  const fallback = { tabs: [{ id: "view-default", name: "Mango Node View", frames: INITIAL_WIDGETS }], activeId: "view-default" };
+  const fallback = { tabs: [{ id: "view-default", name: "Default Node View", frames: createDefaultNodeViewFrames() }], activeId: "view-default" };
   try {
     const raw = localStorage.getItem(VIEWS_KEY);
     if (!raw) return fallback;
@@ -940,9 +934,9 @@ const App: React.FC = () => {
   }, [tabs.length, activeTabId]);
 
 
-  const openMangoNodeView = useCallback((tabID: string) => {
-    const framesForView = createMangoNodeViewFrames();
-    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Mango Node View", frames: framesForView } : tab)));
+  const openDefaultNodeView = useCallback((tabID: string) => {
+    const framesForView = createDefaultNodeViewFrames();
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Default Node View", frames: framesForView } : tab)));
     setFrameLinks((previous) => mergeLinkPlan(previous, computeLinkPlan(framesForView)));
     setActiveTabId(tabID);
     setEditMode(true);
@@ -1290,7 +1284,7 @@ const App: React.FC = () => {
         <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
-          <button style={menuBtnBase} onClick={() => { openMangoNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Mango Node View</button>
+          <button style={menuBtnBase} onClick={() => { openDefaultNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Default Node View</button>
           <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>
         </FrameRightClickMenu>
       )}
