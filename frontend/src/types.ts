@@ -4,7 +4,6 @@ export interface FrameDataModel {
   kind: string;
   parentId?: string;
   theme?: "teal" | "light" | "dark";
-  glass?: boolean;
   x: number;
   y: number;
   w: number;

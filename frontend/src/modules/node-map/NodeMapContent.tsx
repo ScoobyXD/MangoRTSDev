@@ -10,6 +10,7 @@ import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
 export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId, hideTopControls: _hideTopControls }) => {
+  const SELECTION_CYAN = "rgb(0, 233, 255)";
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const mapScope = widgetId?.trim() ? widgetId : "global";
@@ -1075,7 +1076,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     for (const path of connectionPaths) {
       if (path.points.length === 0) continue;
       context.lineWidth = path.selected ? 3.4 : 1.6;
-      context.strokeStyle = relationshipColorsEnabled ? path.stroke : accent;
+      const shouldShowRelationshipColors = relationshipColorsEnabled || selectedNodeIDs.size > 0;
+      context.strokeStyle = shouldShowRelationshipColors ? path.stroke : accent;
       context.globalAlpha = path.alpha;
       context.beginPath();
       context.moveTo(path.points[0].x, path.points[0].y);
@@ -1096,7 +1098,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       context.setLineDash([]);
     }
     context.globalAlpha = 1;
-  }, [WORLD_H, WORLD_W, accent, connectionPaths, relationshipColorsEnabled, draftPath]);
+  }, [WORLD_H, WORLD_W, accent, connectionPaths, relationshipColorsEnabled, draftPath, selectedNodeIDs]);
 
   useEffect(() => {
     if (!editingNodeTitleNodeID || !editingNodeTitleElementRef.current) return;
@@ -1290,13 +1292,13 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   width: size.w,
                   height: size.h,
                   borderRadius: 8,
-                  border: `1px solid ${isSelected ? accent : "#505050"}`,
+                  border: `1px solid ${isSelected ? SELECTION_CYAN : "#505050"}`,
                   background: isSelected ? "#ffffff" : "rgba(252,252,252,0.93)",
-                  outline: isSelected ? `2px solid ${accent}` : "none",
+                  outline: isSelected ? `2px solid ${SELECTION_CYAN}` : "none",
                   outlineOffset: isSelected ? 1 : 0,
                   display: "grid",
                   gridTemplateRows: "1fr",
-                  boxShadow: isSelected ? "0 0 0 3px rgba(111,231,238,0.32), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
+                  boxShadow: isSelected ? "0 0 0 3px rgba(0,233,255,0.35), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
                   userSelect: "none",
                   cursor: editingNodeTitleNodeID === node.node_id ? "text" : (dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab"),
                   zIndex: isPrimary ? 5 : 4,
@@ -1441,7 +1443,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   )}
                 </div>
                 {isSelected && (
-                  <div style={{ position: "absolute", top: 6, right: 6, width: 12, height: 12, borderRadius: 999, background: accent, opacity: 0.85 }} />
+                  <div style={{ position: "absolute", top: 6, right: 6, width: 12, height: 12, borderRadius: 999, background: SELECTION_CYAN, opacity: 0.92 }} />
                 )}
 
                 {([

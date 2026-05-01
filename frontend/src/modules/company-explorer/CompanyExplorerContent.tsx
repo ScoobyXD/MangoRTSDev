@@ -288,7 +288,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 paddingLeft: 10 + row.depth * 16,
                 fontSize: 12,
                 cursor: "pointer",
-                background: isSelected ? "rgba(0, 170, 190, 0.15)" : "transparent",
+                background: isSelected ? "rgba(0, 233, 255, 0.28)" : "transparent",
                 borderBottom: "1px solid rgba(3,25,30,0.06)",
               }}
             >

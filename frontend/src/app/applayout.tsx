@@ -114,7 +114,6 @@ function coerceFrame(value: unknown): FrameDataModel | null {
     kind: normalizedKind,
     parentId: typeof parentId === "string" && parentId.trim() ? parentId : undefined,
     theme: isColorway(theme) ? theme : theme === "white" ? "light" : theme === "black" ? "dark" : theme === "orange" ? "light" : "teal",
-    glass: glass === true,
     x: Math.max(0, snapToHalfStep(x)),
     y: Math.max(0, snapToHalfStep(y)),
     w: Math.max(MIN_W, Math.round(w)),
@@ -452,7 +451,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         top,
         width: frame.w * stepX,
         height: frame.h * stepY,
-        background: isGlass ? glassSurface : frame.color,
+        background: frame.color,
         boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
@@ -466,9 +465,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
           : nested
             ? "0 3px 16px rgba(0,0,0,0.18)"
             : undefined,
-        backdropFilter: isGlass ? "blur(10px)" : undefined,
-        WebkitBackdropFilter: isGlass ? "blur(10px)" : undefined,
-        border: isGlass ? "1px solid rgba(255,255,255,0.45)" : "none",
+        border: "none",
       }}
       onClick={(e) => e.stopPropagation()}
       onMouseDownCapture={(e) => {
