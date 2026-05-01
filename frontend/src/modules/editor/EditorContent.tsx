@@ -26,6 +26,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const pendingTitleCaretRangeRef = useRef<Range | null>(null);
   const editorDocRef = useRef<HTMLDivElement | null>(null);
   const documentDraftRef = useRef("");
+  const persistedDocumentRef = useRef("");
   const lastSelectionRevisionRef = useRef(0);
 
   const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
@@ -39,6 +40,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   const saveDocument = useCallback(async (nextText: string) => {
     if (!linkedNodeID) return;
+    // Avoid creating projection/history rows when nothing changed.
+    if (nextText === persistedDocumentRef.current) return;
+    // For brand new editor surfaces, skip empty writes so selecting a node
+    // does not create blank records by default.
+    if (!documentInformationID && nextText.trim().length === 0) return;
     const stableInformationID = documentInformationID
       || (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
@@ -55,6 +61,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         }),
       });
       setDocumentInformationID(stableInformationID);
+      persistedDocumentRef.current = nextText;
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_save_document");
@@ -212,6 +219,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setLinkedNodeMetadataRows([]);
       setLinkedNodeHistoryRows([]);
       documentDraftRef.current = "";
+      persistedDocumentRef.current = "";
       setDocumentInformationID("");
       if (editorDocRef.current) editorDocRef.current.textContent = "";
       return;
@@ -239,9 +247,10 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           ...details.information.slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`),
         ];
         setLinkedNodeHistoryRows(historyRows);
-        const first = projections[0];
+        const first = projections.find((item) => item.information.trim().length > 0) ?? projections[0];
         const initialDocument = first?.information ?? "";
         documentDraftRef.current = initialDocument;
+        persistedDocumentRef.current = initialDocument;
         setDocumentInformationID(first?.information_id ?? "");
         if (editorDocRef.current && editorDocRef.current.textContent !== initialDocument) editorDocRef.current.textContent = initialDocument;
       } catch (cause) {
