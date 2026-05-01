@@ -16,7 +16,7 @@ type ExplorerTreeNode = {
 };
 
 // Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
-export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
+export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -256,15 +256,24 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [companyID, scope, selectedNodeID, selectedTreeID, selectedTree, linkRevision]);
 
+  const isDarkTheme = theme === "dark";
+  const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
+  const surfaceText = isDarkTheme ? "#f4f7fa" : "#0f1f23";
+  const ruleColor = isDarkTheme ? "rgba(255,255,255,0.16)" : "rgba(3,25,30,0.14)";
+  const rowRuleColor = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(3,25,30,0.06)";
+  const selectedRowBackground = isDarkTheme ? "rgba(0,233,255,0.2)" : "rgba(0, 233, 255, 0.28)";
+  const treeGuideColor = isDarkTheme ? "rgba(185,222,230,0.3)" : "rgba(15,56,66,0.22)";
+  const folderToggleColor = isDarkTheme ? "#95c7d1" : "#326872";
+
   return (
-    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(240px, 1fr)", background: "#ffffff", color: "#0f1f23", overflow: "hidden", minWidth: 0 }}>
+    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(240px, 1fr)", background: surfaceBackground, color: surfaceText, overflow: "hidden", minWidth: 0 }}>
       <div
         className="company-explorer-scroll"
         ref={treeViewportRef}
         onScroll={(event) => setTreeScrollTop((event.currentTarget as HTMLDivElement).scrollTop)}
         style={{ overflow: "auto", minWidth: 0, ["--company-explorer-scroll-accent" as string]: accent }}
       >
-        <div style={{ padding: "9px 10px", borderBottom: "1px solid rgba(3,25,30,0.14)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Company Explorer</div>
+        <div style={{ padding: "9px 10px", borderBottom: `1px solid ${ruleColor}`, fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Company Explorer</div>
         <div style={{ height: virtualizedTree.topSpacer }} />
         {virtualizedTree.rows.map((row) => {
           const isFolder = row.kind === "folder";
@@ -288,8 +297,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 paddingLeft: 10 + row.depth * 16,
                 fontSize: 12,
                 cursor: "pointer",
-                background: isSelected ? "rgba(0, 233, 255, 0.28)" : "transparent",
-                borderBottom: "1px solid rgba(3,25,30,0.06)",
+                background: isSelected ? selectedRowBackground : "transparent",
+                borderBottom: `1px solid ${rowRuleColor}`,
               }}
             >
               {row.depth > 0 && (
@@ -299,7 +308,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                     left: 10 + row.depth * 16 - 8,
                     top: 0,
                     bottom: 0,
-                    borderLeft: "1px solid rgba(15,56,66,0.22)",
+                    borderLeft: `1px solid ${treeGuideColor}`,
                   }}
                 />
               )}
@@ -314,7 +323,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                       return next;
                     });
                   }}
-                  style={{ border: "none", background: "transparent", width: 18, cursor: "pointer", color: "#326872", fontWeight: 700 }}
+                  style={{ border: "none", background: "transparent", width: 18, cursor: "pointer", color: folderToggleColor, fontWeight: 700 }}
                 >
                   {isOpen ? "▾" : "▸"}
                 </button>
