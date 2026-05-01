@@ -23,6 +23,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const editingTitleRef = useRef<HTMLSpanElement | null>(null);
   const editingTitleDraftRef = useRef("");
+  const pendingTitleCaretRangeRef = useRef<Range | null>(null);
   const editorDocRef = useRef<HTMLDivElement | null>(null);
   const documentDraftRef = useRef("");
   const lastSelectionRevisionRef = useRef(0);
@@ -116,11 +117,16 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     element.focus();
     const selection = window.getSelection();
     if (!selection) return;
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    range.collapse(false);
+    const range = pendingTitleCaretRangeRef.current;
+    const isRangeInsideTitle = Boolean(range && element.contains(range.commonAncestorContainer));
+    const nextRange = isRangeInsideTitle && range ? range : document.createRange();
+    if (!isRangeInsideTitle || !range) {
+      nextRange.selectNodeContents(element);
+      nextRange.collapse(false);
+    }
     selection.removeAllRanges();
-    selection.addRange(range);
+    selection.addRange(nextRange);
+    pendingTitleCaretRangeRef.current = null;
   }, [isEditingTitle]);
 
   useEffect(() => {
@@ -281,10 +287,29 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                   ref={editingTitleRef}
                   contentEditable={isEditingTitle}
                   suppressContentEditableWarning
-                  onClick={() => {
+                  onMouseDown={(event) => {
                     if (!isEditingTitle) {
+                      const selection = window.getSelection();
+                      pendingTitleCaretRangeRef.current = null;
+                      const documentWithCaret = document as Document & {
+                        caretRangeFromPoint?: (x: number, y: number) => Range | null;
+                        caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+                      };
+                      if (selection && typeof documentWithCaret.caretRangeFromPoint === "function") {
+                        const range = documentWithCaret.caretRangeFromPoint(event.clientX, event.clientY);
+                        if (range) pendingTitleCaretRangeRef.current = range.cloneRange();
+                      } else if (selection && typeof documentWithCaret.caretPositionFromPoint === "function") {
+                        const position = documentWithCaret.caretPositionFromPoint(event.clientX, event.clientY);
+                        if (position?.offsetNode) {
+                          const range = document.createRange();
+                          range.setStart(position.offsetNode, position.offset);
+                          range.collapse(true);
+                          pendingTitleCaretRangeRef.current = range;
+                        }
+                      }
                       editingTitleDraftRef.current = linkedNodeTitle || "new node";
                       setIsEditingTitle(true);
+                      event.preventDefault();
                     }
                   }}
                   onInput={(event) => {
@@ -309,7 +334,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                       setIsEditingTitle(false);
                     }
                   }}
-                  style={{ outline: "none" }}
+                  style={{ outline: "none", cursor: "text" }}
                 >
                   {linkedNodeTitle || "\u00A0"}
                 </span>
