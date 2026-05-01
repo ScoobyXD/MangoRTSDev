@@ -9,7 +9,13 @@ import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
-export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "teal" }) => {
+export const NodeMapContent: React.FC<{
+  accent: string;
+  widgetId?: string;
+  hideTopControls?: boolean;
+  theme?: "teal" | "light" | "dark";
+  relationshipRoleLabels?: { parent: string; peer: string; child: string };
+}> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "teal", relationshipRoleLabels = { parent: "Parent", peer: "Peer", child: "Child" } }) => {
   const SELECTION_CYAN = "rgb(0, 233, 255)";
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
@@ -1694,9 +1700,9 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
               }}
             >
               {([
-                ["Parent", "parent"],
-                ["Peer", "peer"],
-                ["Child", "child"],
+                [relationshipRoleLabels.parent, "parent"],
+                [relationshipRoleLabels.peer, "peer"],
+                [relationshipRoleLabels.child, "child"],
               ] as const).map(([label, key], index) => (
                 <label
                   key={key}

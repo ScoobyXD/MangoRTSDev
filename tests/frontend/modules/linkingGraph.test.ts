@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph, sanitizeFrameLinks, sanitizeFrameRegistry } from "../../../frontend/src/modules/linkingGraph.js";
+import { resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph, resolveLinkedMapOrLogicMapFrameFromGraph, sanitizeFrameLinks, sanitizeFrameRegistry } from "../../../frontend/src/modules/linkingGraph.js";
 
 test("sanitizeFrameLinks canonicalizes and deduplicates undirected edges", () => {
   const result = sanitizeFrameLinks([
@@ -37,4 +37,18 @@ test("resolveDirectLinkedTargets returns direct neighbors only", () => {
   ]);
   const targets = resolveDirectLinkedTargets({ sourceFrameID: "editor-1", edges }).sort();
   assert.deepEqual(targets, ["explorer-1", "map-1"]);
+});
+
+test("resolveLinkedMapOrLogicMapFrameFromGraph falls back to logic-map when node-map is absent", () => {
+  const registry = sanitizeFrameRegistry({
+    "editor-1": { kind: "editor" },
+    "logic-map-1": { kind: "logic-map" },
+  });
+  const edges = sanitizeFrameLinks([{ a: "editor-1", b: "logic-map-1", mode: "context" }]);
+  const linkedMap = resolveLinkedMapOrLogicMapFrameFromGraph({
+    startFrameID: "editor-1",
+    edges,
+    registry,
+  });
+  assert.equal(linkedMap, "logic-map-1");
 });
