@@ -40,31 +40,19 @@ const UI_THEME = {
 };
 
 
-// Default Node Ops view layout (Explorer + Node Map + Editor triad).
-const createDefaultNodeViewFrames = (): FrameDataModel[] => ([
-  { id: "default-node-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 11, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
-  { id: "default-node-map", theme: "teal", kind: "nodes-map", x: 12, y: 1, w: 20, h: 30, title: "Node Map", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "default-node-editor", theme: "orange", kind: "editor", x: 32, y: 1, w: 11, h: 30, title: "Editor", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
-]);
 
-// Default Company Explorer-centric view layout preset.
-const createDefaultCompanyExplorerViewFrames = (): FrameDataModel[] => ([
-  { id: "default-company-explorer", theme: "white", kind: "company-explorer", x: 1, y: 1, w: 12, h: 30, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
-  { id: "default-company-details", theme: "teal", kind: "nodes-map", x: 13, y: 1, w: 18, h: 30, title: "Node Map", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "default-company-editor", theme: "orange", kind: "editor", x: 31, y: 1, w: 12, h: 30, title: "Editor", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
-]);
 
-const INITIAL_WIDGETS: FrameDataModel[] = [
-  { id: "w-revenue", theme: "teal", kind: "revenue", x: 2, y: 1, w: 12, h: 9, title: "Revenue", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-users", theme: "orange", kind: "users", x: 14, y: 1, w: 14, h: 9, title: "Active Users", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
-  { id: "w-alerts", theme: "orange", kind: "alerts", x: 30, y: 1, w: 12, h: 14, title: "Alerts", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
-  { id: "w-tasks", theme: "teal", kind: "tasks", x: 2, y: 10, w: 10, h: 10, title: "Tasks", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-chart", theme: "white", kind: "chart", x: 12, y: 10, w: 16, h: 12, title: "Analytics", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
-  { id: "w-orders", theme: "orange", kind: "orders", x: 2, y: 20, w: 10, h: 10, title: "Recent Orders", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
-  { id: "w-notifications", theme: "orange", kind: "notifications", x: 12, y: 22, w: 12, h: 10, title: "Notifications", color: COLORWAYS.orange.color, accent: COLORWAYS.orange.accent },
-  { id: "w-map", theme: "teal", kind: "map", x: 28, y: 15, w: 14, h: 17, title: "Map View", color: COLORWAYS.teal.color, accent: COLORWAYS.teal.accent },
-  { id: "w-nodes", theme: "white", kind: "nodes-map", x: 24, y: 22, w: 18, h: 10, title: "Node Map", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
-];
+
+const createMangoNodeViewFrames = (): FrameDataModel[] => {
+  const rootId = "mango-node-map";
+  return [
+    { id: rootId, theme: "white", kind: "nodes-map", x: 1, y: 1, w: 42, h: 30, title: "Node Map", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+    { id: "mango-company-explorer", parentId: rootId, theme: "white", kind: "company-explorer", x: 1, y: 1, w: 7, h: 27, title: "Company Explorer", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+    { id: "mango-editor", parentId: rootId, theme: "white", kind: "editor", x: 34, y: 1, w: 7, h: 27, title: "Editor", color: COLORWAYS.white.color, accent: COLORWAYS.white.accent },
+  ];
+};
+
+const INITIAL_WIDGETS: FrameDataModel[] = createMangoNodeViewFrames();
 
 interface ViewTab {
   id: string;
@@ -178,7 +166,7 @@ function persistFrameLinks(next: FrameLinkEdge[]) {
 
 // Load saved dashboard views/tabs with legacy widget compatibility fallback.
 function loadViews(): { tabs: ViewTab[]; activeId: string } {
-  const fallback = { tabs: [{ id: "view-default", name: "Main View", frames: INITIAL_WIDGETS }], activeId: "view-default" };
+  const fallback = { tabs: [{ id: "view-default", name: "Mango Node View", frames: INITIAL_WIDGETS }], activeId: "view-default" };
   try {
     const raw = localStorage.getItem(VIEWS_KEY);
     if (!raw) return fallback;
@@ -951,17 +939,10 @@ const App: React.FC = () => {
     });
   }, [tabs.length, activeTabId]);
 
-  const openDefaultNodeView = useCallback((tabID: string) => {
-    const framesForView = createDefaultNodeViewFrames();
-    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, frames: framesForView } : tab)));
-    setFrameLinks((previous) => mergeLinkPlan(previous, computeLinkPlan(framesForView)));
-    setActiveTabId(tabID);
-    setEditMode(true);
-  }, []);
 
-  const openDefaultCompanyExplorerView = useCallback((tabID: string) => {
-    const framesForView = createDefaultCompanyExplorerViewFrames();
-    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, frames: framesForView } : tab)));
+  const openMangoNodeView = useCallback((tabID: string) => {
+    const framesForView = createMangoNodeViewFrames();
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Mango Node View", frames: framesForView } : tab)));
     setFrameLinks((previous) => mergeLinkPlan(previous, computeLinkPlan(framesForView)));
     setActiveTabId(tabID);
     setEditMode(true);
@@ -1309,8 +1290,7 @@ const App: React.FC = () => {
         <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
-          <button style={menuBtnBase} onClick={() => { openDefaultNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Default Node View</button>
-          <button style={menuBtnBase} onClick={() => { openDefaultCompanyExplorerView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Default Company Explorer View</button>
+          <button style={menuBtnBase} onClick={() => { openMangoNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Mango Node View</button>
           <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>
         </FrameRightClickMenu>
       )}
