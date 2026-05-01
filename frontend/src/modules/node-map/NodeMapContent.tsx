@@ -569,12 +569,13 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       });
 
       const origin = nodePositions[sourceNodeID] ?? { x: 120, y: 120 };
-      const gap = 170;
+      const horizontalGap = NODE_W + MINI_GRID * 3;
+      const verticalGap = NODE_H + MINI_GRID * 3;
       const shift =
-        direction === "left" ? { x: -gap, y: 0 }
-          : direction === "right" ? { x: gap, y: 0 }
-            : direction === "top" ? { x: 0, y: -130 }
-              : { x: 0, y: 130 };
+        direction === "left" ? { x: -horizontalGap, y: 0 }
+          : direction === "right" ? { x: horizontalGap, y: 0 }
+            : direction === "top" ? { x: 0, y: -verticalGap }
+              : { x: 0, y: verticalGap };
 
       setNodePositions((previous) => ({
         ...previous,
@@ -1401,8 +1402,14 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                       style={{
                         whiteSpace: "normal",
                         overflowWrap: "anywhere",
+                        wordBreak: "break-word",
+                        overflow: "hidden",
                         width: "100%",
                         maxWidth: "100%",
+                        textOverflow: "ellipsis",
+                        display: "-webkit-box",
+                        WebkitLineClamp: 3,
+                        WebkitBoxOrient: "vertical",
                         cursor: "text",
                         textAlign: "center",
                         fontSize: 20,
@@ -1416,7 +1423,21 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                     </div>
                   ) : (
                     <div
-                      style={{ whiteSpace: "normal", overflowWrap: "anywhere", fontSize: 20, fontWeight: 800, lineHeight: 1.2, fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif" }}
+                      style={{
+                        whiteSpace: "normal",
+                        overflowWrap: "anywhere",
+                        wordBreak: "break-word",
+                        overflow: "hidden",
+                        maxWidth: "100%",
+                        textOverflow: "ellipsis",
+                        display: "-webkit-box",
+                        WebkitLineClamp: 3,
+                        WebkitBoxOrient: "vertical",
+                        fontSize: 20,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+                      }}
                     >
                       {getNodeTitle(node)}
                     </div>
