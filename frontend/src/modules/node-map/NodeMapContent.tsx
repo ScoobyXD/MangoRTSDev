@@ -94,6 +94,25 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const panelSurface = isDarkTheme ? "rgba(19,24,31,0.96)" : "rgba(255,255,255,0.95)";
   const panelSubtleSurface = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.8)";
   const panelText = isDarkTheme ? "#f3f7fb" : "#111111";
+  const panelMutedText = isDarkTheme ? "rgba(243,247,251,0.72)" : "#2e2e2e";
+  const panelDangerText = isDarkTheme ? "#ff6f98" : "#a20026";
+  const dialogButtonBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "#ffffff";
+  const dialogPrimaryButtonText = isDarkTheme ? panelText : "#111111";
+  const dialogCancelButtonText = isDarkTheme ? "#ff8aab" : "#8b123f";
+  const contextMenuButtonStyle: React.CSSProperties = {
+    border: "none",
+    background: "transparent",
+    color: panelText,
+    cursor: "pointer",
+    fontSize: 11,
+    fontWeight: 700,
+    padding: "6px 8px",
+    textAlign: "left",
+  };
+  const contextMenuDangerButtonStyle: React.CSSProperties = {
+    ...contextMenuButtonStyle,
+    color: panelDangerText,
+  };
 
   // Keep relationship projection derivation centralized so callers can reuse the exact same
   // filtering logic without triggering additional network calls.
@@ -1122,7 +1141,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   }, [editingNodeTitleNodeID]);
 
   return (
-    <div style={{ fontSize: 11, height: "100%" }}>
+    <div style={{ fontSize: 11, height: "100%", color: panelText }}>
       <div
         ref={viewportRef}
         style={{
@@ -1745,7 +1764,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
             }}
             onPointerDown={(event) => event.stopPropagation()}
           >
-            <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", textAlign: "left" }} onClick={() => {
+            <button style={contextMenuButtonStyle} onClick={() => {
               const current = nodes.find((node) => node.node_id === nodeContextMenu.nodeID);
               editingNodeTitleDraftRef.current = current ? getNodeTitle(current) : "new node";
               setEditingNodeTitleNodeID(nodeContextMenu.nodeID);
@@ -1753,7 +1772,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
             }}>
               Rename node
             </button>
-            <button style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", color: "#a20026", textAlign: "left" }} onClick={() => { const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID]; setConfirmDelete({ nodeIDs: ids, relationshipIDs: [] }); setNodeContextMenu(null); }}>
+            <button style={contextMenuDangerButtonStyle} onClick={() => { const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID]; setConfirmDelete({ nodeIDs: ids, relationshipIDs: [] }); setNodeContextMenu(null); }}>
               Delete node
             </button>
           </div>
@@ -1778,7 +1797,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
             onPointerDown={(event) => event.stopPropagation()}
           >
             <button
-              style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "6px 8px", color: "#a20026", textAlign: "left" }}
+              style={contextMenuDangerButtonStyle}
               onClick={() => {
                 const relationshipIDs = selectedRelationshipIDs.has(relationshipContextMenu.relationshipID)
                   ? Array.from(selectedRelationshipIDs)
@@ -1835,12 +1854,12 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
 
         {confirmDelete && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-            <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: panelSurface, padding: 12, display: "grid", gap: 10 }}>
+            <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: panelSurface, color: panelText, padding: 12, display: "grid", gap: 10 }}>
               <div style={{ fontSize: 12, fontWeight: 700 }}>
                 Are you sure you want to delete {confirmDelete.nodeIDs.length} node{confirmDelete.nodeIDs.length === 1 ? "" : "s"}
                 {confirmDelete.relationshipIDs.length > 0 ? ` and ${confirmDelete.relationshipIDs.length} relationship line${confirmDelete.relationshipIDs.length === 1 ? "" : "s"}` : ""}?
               </div>
-              <div style={{ fontSize: 11, lineHeight: 1.35, color: "#2e2e2e" }}>
+              <div style={{ fontSize: 11, lineHeight: 1.35, color: panelMutedText }}>
                 This removes the selected node data immediately. Use Undo (Ctrl/Cmd + Z) if this was accidental.
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -1848,8 +1867,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   if (confirmDelete.relationshipIDs.length > 0) void deleteRelationships(confirmDelete.relationshipIDs);
                   if (confirmDelete.nodeIDs.length > 0) void deleteNodes(confirmDelete.nodeIDs);
                   setConfirmDelete(null);
-                }} style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}>Yes</button>
-                <button onClick={() => setConfirmDelete(null)} style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
+                }} style={{ border: "1px solid rgba(0,233,255,0.45)", background: dialogButtonBackground, color: dialogPrimaryButtonText, cursor: "pointer", fontWeight: 700 }}>Yes</button>
+                <button onClick={() => setConfirmDelete(null)} style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: dialogCancelButtonText, background: dialogButtonBackground, cursor: "pointer", fontWeight: 700 }}>No</button>
               </div>
             </div>
           </div>
