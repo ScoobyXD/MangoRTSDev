@@ -272,7 +272,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             })}
           </div>
           
-          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 20, borderBottom: "1px solid rgba(3,25,30,0.14)", transform: "translateY(8px)", pointerEvents: "none", zIndex: 1 }} />
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 21, borderBottom: "1px solid rgba(3,25,30,0.14)", transform: "translateY(8px)", pointerEvents: "none", zIndex: 1 }} />
           {activeTab === "editor" && (
             <div style={{ display: "grid", gap: 8 }}>
               <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.12em", color: accent, cursor: "text" }}>
