@@ -1,0 +1,258 @@
+import {
+  LogicGateRecord,
+  LogicGateRelationship,
+  NodeRecord,
+  NodeRelationship,
+  toLogicGateCanvasRecord,
+  toLogicGateCanvasRelationship,
+} from "./shared";
+
+export type LogicGateRelationshipGraphSnapshot = {
+  nodes: NodeRecord[];
+  relationships: NodeRelationship[];
+  logic_gates?: LogicGateRecord[];
+  logic_gate_relationships?: LogicGateRelationship[];
+  generated_at?: string;
+};
+
+type Subscriber = () => void;
+type CacheEntry = {
+  snapshot: LogicGateRelationshipGraphSnapshot;
+  subscribers: Set<Subscriber>;
+  loading: boolean;
+  source?: EventSource;
+  etag?: string;
+};
+
+type WorkspaceStreamEnvelope = {
+  company_id: string;
+  type: string;
+  ts: string;
+  data?: Record<string, unknown>;
+};
+
+const EMPTY_SNAPSHOT: LogicGateRelationshipGraphSnapshot = { nodes: [], relationships: [] };
+const logicGateRelationshipGraphCache = new Map<string, CacheEntry>();
+
+function getEntry(key: string): CacheEntry {
+  const existing = logicGateRelationshipGraphCache.get(key);
+  if (existing) return existing;
+  const created: CacheEntry = { snapshot: EMPTY_SNAPSHOT, subscribers: new Set(), loading: false };
+  logicGateRelationshipGraphCache.set(key, created);
+  return created;
+}
+
+function notify(entry: CacheEntry): void {
+  for (const subscriber of entry.subscribers) subscriber();
+}
+
+function isNonLogicGateGraphWorkspaceEvent(eventType: string): boolean {
+  return eventType === "logic_gate_information_created";
+}
+
+export function upsertLogicGateRelationshipGraphNode(apiBase: string, companyID: string, logicGate: NodeRecord): void {
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  const currentNodes = entry.snapshot.nodes ?? [];
+  const exists = currentNodes.some((item) => item.node_id === logicGate.node_id);
+  entry.snapshot = {
+    nodes: exists ? currentNodes.map((item) => (item.node_id === logicGate.node_id ? logicGate : item)) : [...currentNodes, logicGate],
+    relationships: entry.snapshot.relationships ?? [],
+    generated_at: new Date().toISOString(),
+  };
+  notify(entry);
+}
+
+export function removeLogicGateRelationshipGraphNode(apiBase: string, companyID: string, logicGateID: string): void {
+  if (!logicGateID) return;
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  const currentNodes = entry.snapshot.nodes ?? [];
+  const currentRelationships = entry.snapshot.relationships ?? [];
+  const nextNodes = currentNodes.filter((item) => item.node_id !== logicGateID);
+  const nextRelationships = currentRelationships.filter((item) => item.node_id_a !== logicGateID && item.node_id_b !== logicGateID);
+  if (nextNodes.length === currentNodes.length && nextRelationships.length === currentRelationships.length) return;
+  entry.snapshot = {
+    nodes: nextNodes,
+    relationships: nextRelationships,
+    generated_at: new Date().toISOString(),
+  };
+  notify(entry);
+}
+
+function asLogicGateRecord(candidate: unknown): NodeRecord | null {
+  if (!candidate || typeof candidate !== "object") return null;
+  const value = candidate as Partial<LogicGateRecord>;
+  if (typeof value.company_id !== "string" || typeof value.logic_gate_id !== "string" || typeof value.header !== "string") return null;
+  return toLogicGateCanvasRecord({
+    company_id: value.company_id,
+    logic_gate_id: value.logic_gate_id,
+    header: value.header,
+    created_timestamp: typeof value.created_timestamp === "string" ? value.created_timestamp : new Date().toISOString(),
+  });
+}
+
+function asLogicGateRelationship(candidate: unknown): NodeRelationship | null {
+  if (!candidate || typeof candidate !== "object") return null;
+  const value = candidate as Partial<LogicGateRelationship>;
+  if (
+    typeof value.company_id !== "string" ||
+    typeof value.logic_gate_relationship_id !== "string" ||
+    typeof value.logic_gate_id_a !== "string" ||
+    typeof value.logic_gate_id_b !== "string" ||
+    typeof value.a_position !== "string" ||
+    typeof value.b_position !== "string"
+  ) return null;
+  return toLogicGateCanvasRelationship({
+    company_id: value.company_id,
+    logic_gate_relationship_id: value.logic_gate_relationship_id,
+    logic_gate_id_a: value.logic_gate_id_a,
+    logic_gate_id_b: value.logic_gate_id_b,
+    a_position: value.a_position as LogicGateRelationship["a_position"],
+    b_position: value.b_position as LogicGateRelationship["b_position"],
+    created_timestamp: typeof value.created_timestamp === "string" ? value.created_timestamp : new Date().toISOString(),
+  });
+}
+
+function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: WorkspaceStreamEnvelope): boolean {
+  const currentNodes = entry.snapshot.nodes ?? [];
+  const currentRelationships = entry.snapshot.relationships ?? [];
+  const data = envelope.data ?? {};
+
+  if (envelope.type === "logic_gate_created") {
+    const logicGate = asLogicGateRecord(data.logic_gate);
+    if (!logicGate) return false;
+    const exists = currentNodes.some((item) => item.node_id === logicGate.node_id);
+    entry.snapshot = {
+      nodes: exists ? currentNodes.map((item) => (item.node_id === logicGate.node_id ? logicGate : item)) : [...currentNodes, logicGate],
+      relationships: currentRelationships,
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+  if (envelope.type === "logic_gate_updated") {
+    const logicGate = asLogicGateRecord(data.logic_gate);
+    if (!logicGate) return false;
+    const exists = currentNodes.some((item) => item.node_id === logicGate.node_id);
+    if (!exists) return false;
+    entry.snapshot = {
+      nodes: currentNodes.map((item) => (item.node_id === logicGate.node_id ? logicGate : item)),
+      relationships: currentRelationships,
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+  if (envelope.type === "logic_gate_deleted") {
+    const logicGateID = typeof data.logic_gate_id === "string" ? data.logic_gate_id : "";
+    if (!logicGateID) return false;
+    entry.snapshot = {
+      nodes: currentNodes.filter((item) => item.node_id !== logicGateID),
+      relationships: currentRelationships.filter((item) => item.node_id_a !== logicGateID && item.node_id_b !== logicGateID),
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+  if (envelope.type === "logic_gate_relationship_created") {
+    const relationship = asLogicGateRelationship(data.logic_gate_relationship);
+    if (!relationship) return false;
+    const exists = currentRelationships.some((item) => item.node_relationship_id === relationship.node_relationship_id);
+    entry.snapshot = {
+      nodes: currentNodes,
+      relationships: exists
+        ? currentRelationships.map((item) => (item.node_relationship_id === relationship.node_relationship_id ? relationship : item))
+        : [...currentRelationships, relationship],
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+  if (envelope.type === "logic_gate_relationship_deleted") {
+    const relationshipID = typeof data.logic_gate_relationship_id === "string" ? data.logic_gate_relationship_id : "";
+    if (!relationshipID) return false;
+    entry.snapshot = {
+      nodes: currentNodes,
+      relationships: currentRelationships.filter((item) => item.node_relationship_id !== relationshipID),
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+  return false;
+}
+
+export async function refreshLogicGateRelationshipGraphSnapshot(apiBase: string, companyID: string): Promise<void> {
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  if (entry.loading) return;
+  entry.loading = true;
+  try {
+    const response = await fetch(`${apiBase}/v1/workspace/snapshot?company_id=${encodeURIComponent(companyID)}`, {
+      cache: "no-store",
+      headers: entry.etag ? { "If-None-Match": entry.etag } : undefined,
+    });
+    if (response.status === 304) return;
+    if (!response.ok) return;
+    const payload = (await response.json()) as LogicGateRelationshipGraphSnapshot;
+    const nextEtag = response.headers.get("ETag");
+    if (nextEtag && entry.etag === nextEtag) return;
+    if (nextEtag) entry.etag = nextEtag;
+    entry.snapshot = {
+      nodes: (payload.logic_gates ?? []).map(toLogicGateCanvasRecord),
+      relationships: (payload.logic_gate_relationships ?? []).map(toLogicGateCanvasRelationship),
+      logic_gates: payload.logic_gates ?? [],
+      logic_gate_relationships: payload.logic_gate_relationships ?? [],
+      generated_at: payload.generated_at,
+    };
+    notify(entry);
+  } finally {
+    entry.loading = false;
+  }
+}
+
+function ensureStream(apiBase: string, companyID: string): void {
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  if (entry.source) return;
+  const source = new EventSource(`${apiBase}/v1/workspace/stream?company_id=${encodeURIComponent(companyID)}`);
+  source.addEventListener("workspace", (event) => {
+    const payload = (event as MessageEvent).data;
+    if (typeof payload !== "string" || payload.length === 0) {
+      void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+      return;
+    }
+    try {
+      const envelope = JSON.parse(payload) as WorkspaceStreamEnvelope;
+      if (envelope.company_id !== companyID) return;
+      if (isNonLogicGateGraphWorkspaceEvent(envelope.type)) return;
+      if (!envelope.type.startsWith("logic_gate_")) return;
+      const applied = applyLogicGateRelationshipGraphDelta(entry, envelope);
+      if (applied) notify(entry);
+      else void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+    } catch {
+      void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+    }
+  });
+  source.onerror = () => {
+    // Browser EventSource reconnects by itself; keep this source reference stable.
+  };
+  entry.source = source;
+}
+
+export function subscribeLogicGateRelationshipGraph(apiBase: string, companyID: string, subscriber: Subscriber): () => void {
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  entry.subscribers.add(subscriber);
+  if (entry.snapshot.nodes.length === 0 && entry.snapshot.relationships.length === 0) {
+    void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+  }
+  ensureStream(apiBase, companyID);
+  return () => {
+    const current = logicGateRelationshipGraphCache.get(key);
+    if (!current) return;
+    current.subscribers.delete(subscriber);
+  };
+}
+
+export function getLogicGateRelationshipGraphSnapshot(apiBase: string, companyID: string): LogicGateRelationshipGraphSnapshot {
+  const key = `${apiBase}:${companyID}`;
+  return getEntry(key).snapshot;
+}
+

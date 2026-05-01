@@ -1,0 +1,111 @@
+// Logic-gate relationship projection tests (Input/Output + anchors + color role mapping).
+// @ts-nocheck
+import test from "node:test";
+import assert from "node:assert/strict";
+import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, inferRelationshipAnchor, isLegalRelationshipSidePair, projectRelationshipVisual, relationshipRoleFromSide, selectedRoleForRelationship } from "../../../../frontend/src/modules/logic-gate-map/relationshipProjection.js";
+import { NodeRelationship } from "../../../../frontend/src/modules/logic-gate-map/shared.js";
+
+function relationship(overrides: Partial<NodeRelationship>): NodeRelationship {
+  return {
+    company_id: "11111111-1111-1111-1111-111111111111",
+    logic_gate_relationship_id: "logic-rel-1",
+    logic_gate_id_a: "logic-a",
+    logic_gate_id_b: "logic-b",
+    node_relationship_id: "logic-rel-1",
+    node_id_a: "logic-a",
+    node_id_b: "logic-b",
+    a_position: "Output",
+    b_position: "Input",
+    created_timestamp: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+test("maps logic-gate sides to input and output ports", () => {
+  assert.equal(relationshipRoleFromSide("left"), "Input");
+  assert.equal(relationshipRoleFromSide("top"), "Input");
+  assert.equal(relationshipRoleFromSide("right"), "Output");
+  assert.equal(relationshipRoleFromSide("bottom"), "Output");
+});
+
+test("plus-link relationships always connect input to output", () => {
+  assert.deepEqual(buildLinkedNodePayloadFromSourceSide("left"), {
+    a_position: "Input",
+    b_position: "Output",
+    anchor: { from: "left", to: "right" },
+  });
+  assert.deepEqual(buildLinkedNodePayloadFromSourceSide("right"), {
+    a_position: "Output",
+    b_position: "Input",
+    anchor: { from: "right", to: "left" },
+  });
+});
+
+test("existing-gate attach flow rejects same-role side pairs", () => {
+  assert.equal(isLegalRelationshipSidePair("left", "right"), true);
+  assert.equal(isLegalRelationshipSidePair("right", "left"), true);
+  assert.equal(isLegalRelationshipSidePair("top", "bottom"), true);
+  assert.equal(isLegalRelationshipSidePair("bottom", "top"), true);
+  assert.equal(isLegalRelationshipSidePair("left", "top"), false);
+  assert.equal(isLegalRelationshipSidePair("right", "bottom"), false);
+});
+
+test("uses source-side input/output semantics for existing-gate writes", () => {
+  assert.deepEqual(buildExistingNodeRelationshipPayload("top", "bottom"), {
+    a_position: "Input",
+    b_position: "Output",
+    anchor: { from: "top", to: "bottom" },
+  });
+  assert.deepEqual(buildExistingNodeRelationshipPayload("bottom", "top"), {
+    a_position: "Output",
+    b_position: "Input",
+    anchor: { from: "bottom", to: "top" },
+  });
+});
+
+test("resolves selected role from the opposite side of a logic-gate relationship", () => {
+  const rel = relationship({ a_position: "Output", b_position: "Input" });
+  assert.equal(selectedRoleForRelationship(rel, "logic-a"), "Input");
+  assert.equal(selectedRoleForRelationship(rel, "logic-b"), "Output");
+  assert.equal(selectedRoleForRelationship(rel, "other"), null);
+});
+
+test("infers deterministic anchors for input/output relationships", () => {
+  assert.deepEqual(inferRelationshipAnchor(relationship({ a_position: "Input", b_position: "Output" }), {}), { from: "left", to: "right" });
+  assert.deepEqual(inferRelationshipAnchor(relationship({ a_position: "Output", b_position: "Input" }), {}), { from: "right", to: "left" });
+});
+
+test("projects visual relationship metadata with input/output colors", () => {
+  const rel = relationship({ a_position: "Output", b_position: "Input" });
+  const projected = projectRelationshipVisual(rel, {
+    activeNodeID: "logic-a",
+    relationshipColorsEnabled: true,
+    relationshipRoleColors: { input: "#00f", output: "#f80" },
+    accent: "#0ff",
+    nodePositions: {
+      "logic-a": { x: 100, y: 100 },
+      "logic-b": { x: 240, y: 100 },
+    },
+  });
+
+  assert.deepEqual(
+    {
+      sourceNodeID: projected.sourceNodeID,
+      targetNodeID: projected.targetNodeID,
+      sourceAnchor: projected.sourceAnchor,
+      targetAnchor: projected.targetAnchor,
+      selectedRole: projected.selectedRole,
+      strokeColor: projected.strokeColor,
+    },
+    {
+      sourceNodeID: "logic-a",
+      targetNodeID: "logic-b",
+      sourceAnchor: "right",
+      targetAnchor: "left",
+      selectedRole: "Input",
+      strokeColor: "#00f",
+    },
+  );
+  assert.equal(projected.alpha > 0, true);
+});
+

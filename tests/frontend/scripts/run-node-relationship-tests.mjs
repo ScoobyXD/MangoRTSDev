@@ -10,6 +10,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/app/frameLinking.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/linkingGraph.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipProjection.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/logic-gate-map/relationshipProjection.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipSelection.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/NodeMapControls.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipDeleteSummary.test.js"),
@@ -47,5 +48,8 @@ writeFileSync(packageFile, '{"type":"module"}\n', "utf8");
 
 for (const testFile of testFiles) {
   console.log(`\n=== Frontend feature tests: ${testFile} ===`);
-  run(`"${process.execPath}" --test "${testFile}"`);
+  // Running the compiled test module directly avoids Node's worker-spawn path, which is
+  // blocked in some Windows sandboxes. `node:test` still reports TAP and exits non-zero
+  // on failures, so this keeps the same pass/fail contract.
+  run(`"${process.execPath}" "${testFile}"`);
 }

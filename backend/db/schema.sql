@@ -105,6 +105,11 @@ create table if not exists logic_gate_relationships (
   a_position logic_gate_relationship_position not null,
   b_position logic_gate_relationship_position not null,
   created_timestamp timestamptz not null,
+  constraint logic_gate_relationships_position_pair_chk check (
+    (a_position = 'Input' and b_position = 'Output')
+    or (a_position = 'Output' and b_position = 'Input')
+  ),
+  constraint logic_gate_relationships_not_self_chk check (logic_gate_id_a <> logic_gate_id_b),
   primary key (company_id, logic_gate_relationship_id),
   foreign key (company_id, logic_gate_id_a) references logic_gates (company_id, logic_gate_id),
   foreign key (company_id, logic_gate_id_b) references logic_gates (company_id, logic_gate_id)
@@ -137,6 +142,9 @@ create table if not exists operations (
 
 create index if not exists idx_node_information_node on node_information(company_id, node_id);
 create index if not exists idx_node_projection_table_node_updated on node_projection_table(company_id, node_id, updated_timestamp desc);
+create index if not exists idx_logic_gate_information_logic_gate on logic_gate_information(company_id, logic_gate_id);
+create index if not exists idx_logic_gate_relationships_a on logic_gate_relationships(company_id, logic_gate_id_a);
+create index if not exists idx_logic_gate_relationships_b on logic_gate_relationships(company_id, logic_gate_id_b);
 create index if not exists idx_operations_node on operations(company_id, node_id);
 create index if not exists idx_operations_logic_gate on operations(company_id, logic_gate_id);
 

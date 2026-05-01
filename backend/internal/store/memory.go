@@ -24,6 +24,15 @@ type Repository interface {
 	ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error)
 	CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error)
 	CreateLogicGate(companyID, header string) (domain.LogicGate, error)
+	UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error)
+	ListLogicGates(companyID string) ([]domain.LogicGate, error)
+	ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error)
+	DeleteLogicGateRelationship(companyID, relationshipID string) error
+	GetLogicGate(companyID, logicGateID string) (domain.LogicGate, error)
+	DeleteLogicGate(companyID, logicGateID string) error
+	GetLogicGateDetails(companyID, logicGateID string) (domain.LogicGateDetails, error)
+	AddLogicGateInformation(companyID, logicGateID, infoType, information, informationID string) (domain.LogicGateInformation, error)
+	CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error)
 	CreateOperation(in CreateOperationInput) (domain.Operation, error)
 	GetOperation(companyID, operationID string) (domain.Operation, error)
 	AppendWorkspaceContextEvent(event domain.WorkspaceContextEvent) (domain.WorkspaceContextProjection, error)
@@ -47,6 +56,8 @@ type MemoryRepo struct {
 	nodeText           map[string]map[string]domain.NodeProjection
 	nodeRels           map[string][]domain.NodeRelationship
 	logicGates         map[string]domain.LogicGate
+	logicGateInfo      map[string][]domain.LogicGateInformation
+	logicGateRels      map[string][]domain.LogicGateRelationship
 	operations         map[string]domain.Operation
 	contextEvents      map[string][]domain.WorkspaceContextEvent
 	contextProjections map[string]domain.WorkspaceContextProjection
@@ -59,6 +70,8 @@ func NewMemoryRepo() *MemoryRepo {
 		nodeText:           map[string]map[string]domain.NodeProjection{},
 		nodeRels:           map[string][]domain.NodeRelationship{},
 		logicGates:         map[string]domain.LogicGate{},
+		logicGateInfo:      map[string][]domain.LogicGateInformation{},
+		logicGateRels:      map[string][]domain.LogicGateRelationship{},
 		operations:         map[string]domain.Operation{},
 		contextEvents:      map[string][]domain.WorkspaceContextEvent{},
 		contextProjections: map[string]domain.WorkspaceContextProjection{},
@@ -367,6 +380,192 @@ func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate
 	}
 	r.logicGates[key(companyID, item.LogicGateID)] = item
 	return item, nil
+}
+
+func (r *MemoryRepo) UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := key(companyID, logicGateID)
+	item, ok := r.logicGates[k]
+	if !ok {
+		return domain.LogicGate{}, ErrNotFound
+	}
+	item.Header = header
+	r.logicGates[k] = item
+	return item, nil
+}
+
+func (r *MemoryRepo) ListLogicGates(companyID string) ([]domain.LogicGate, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.LogicGate, 0)
+	for _, gate := range r.logicGates {
+		if gate.CompanyID == companyID {
+			items = append(items, gate)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
+	return items, nil
+}
+
+func (r *MemoryRepo) GetLogicGate(companyID, logicGateID string) (domain.LogicGate, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	item, ok := r.logicGates[key(companyID, logicGateID)]
+	if !ok {
+		return domain.LogicGate{}, ErrNotFound
+	}
+	return item, nil
+}
+
+func (r *MemoryRepo) DeleteLogicGate(companyID, logicGateID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	k := key(companyID, logicGateID)
+	if _, ok := r.logicGates[k]; !ok {
+		return ErrNotFound
+	}
+	delete(r.logicGates, k)
+	delete(r.logicGateInfo, k)
+
+	filtered := make([]domain.LogicGateRelationship, 0, len(r.logicGateRels[companyID]))
+	for _, rel := range r.logicGateRels[companyID] {
+		if rel.LogicGateIDA == logicGateID || rel.LogicGateIDB == logicGateID {
+			continue
+		}
+		filtered = append(filtered, rel)
+	}
+	r.logicGateRels[companyID] = filtered
+	return nil
+}
+
+func (r *MemoryRepo) ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := append([]domain.LogicGateRelationship{}, r.logicGateRels[companyID]...)
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
+	return items, nil
+}
+
+func (r *MemoryRepo) CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.logicGates[key(companyID, logicGateIDA)]; !ok {
+		return domain.LogicGateRelationship{}, ErrNotFound
+	}
+	if _, ok := r.logicGates[key(companyID, logicGateIDB)]; !ok {
+		return domain.LogicGateRelationship{}, ErrNotFound
+	}
+
+	item := domain.LogicGateRelationship{
+		CompanyID:               companyID,
+		LogicGateRelationshipID: newUUIDv7String(),
+		LogicGateIDA:            logicGateIDA,
+		LogicGateIDB:            logicGateIDB,
+		APosition:               aPosition,
+		BPosition:               bPosition,
+		CreatedTimestamp:        time.Now().UTC(),
+	}
+	r.logicGateRels[companyID] = append(r.logicGateRels[companyID], item)
+	return item, nil
+}
+
+func (r *MemoryRepo) DeleteLogicGateRelationship(companyID, relationshipID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items := r.logicGateRels[companyID]
+	filtered := make([]domain.LogicGateRelationship, 0, len(items))
+	deleted := false
+	for _, item := range items {
+		if item.LogicGateRelationshipID == relationshipID {
+			deleted = true
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	if !deleted {
+		return ErrNotFound
+	}
+	r.logicGateRels[companyID] = filtered
+	return nil
+}
+
+func (r *MemoryRepo) AddLogicGateInformation(companyID, logicGateID, infoType, information, informationID string) (domain.LogicGateInformation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
+		return domain.LogicGateInformation{}, ErrNotFound
+	}
+	now := time.Now().UTC()
+	if informationID == "" {
+		informationID = newUUIDv7String()
+	}
+	item := domain.LogicGateInformation{
+		CompanyID:        companyID,
+		InformationID:    informationID,
+		LogicGateID:      logicGateID,
+		Type:             infoType,
+		Information:      information,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	k := key(companyID, logicGateID)
+	for index, existing := range r.logicGateInfo[k] {
+		if existing.InformationID != informationID {
+			continue
+		}
+		// Logic-gate information has no projection table yet, so a repeated information_id
+		// is treated as an idempotent latest-value update instead of a duplicate row.
+		item.CreatedTimestamp = existing.CreatedTimestamp
+		r.logicGateInfo[k][index] = item
+		return item, nil
+	}
+	r.logicGateInfo[k] = append(r.logicGateInfo[k], item)
+	sort.Slice(r.logicGateInfo[k], func(i, j int) bool {
+		return r.logicGateInfo[k][i].CreatedTimestamp.Before(r.logicGateInfo[k][j].CreatedTimestamp)
+	})
+	return item, nil
+}
+
+func (r *MemoryRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.LogicGateDetails, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	logicGate, ok := r.logicGates[key(companyID, logicGateID)]
+	if !ok {
+		return domain.LogicGateDetails{}, ErrNotFound
+	}
+
+	info := append([]domain.LogicGateInformation{}, r.logicGateInfo[key(companyID, logicGateID)]...)
+	sort.Slice(info, func(i, j int) bool {
+		return info[i].CreatedTimestamp.Before(info[j].CreatedTimestamp)
+	})
+
+	relationships := make([]domain.LogicGateRelationship, 0)
+	for _, rel := range r.logicGateRels[companyID] {
+		if rel.LogicGateIDA == logicGateID || rel.LogicGateIDB == logicGateID {
+			relationships = append(relationships, rel)
+		}
+	}
+	sort.Slice(relationships, func(i, j int) bool {
+		return relationships[i].CreatedTimestamp.Before(relationships[j].CreatedTimestamp)
+	})
+
+	return domain.LogicGateDetails{
+		LogicGate:     logicGate,
+		Information:   info,
+		Relationships: relationships,
+	}, nil
 }
 
 func (r *MemoryRepo) CreateOperation(in CreateOperationInput) (domain.Operation, error) {

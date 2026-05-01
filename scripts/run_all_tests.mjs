@@ -4,13 +4,15 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
+const defaultGoCache = resolve(repoRoot, "backend", "go-build-cache");
 
 function run(step, command, cwd) {
   console.log(`\n=== ${step} ===`);
   execSync(command, {
     cwd,
     stdio: "inherit",
-    env: process.env,
+    // Keep Go's build cache in the repo on restricted Windows sandboxes; the path is gitignored.
+    env: { ...process.env, GOCACHE: process.env.GOCACHE ?? defaultGoCache },
   });
 }
 

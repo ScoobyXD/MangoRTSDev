@@ -303,6 +303,19 @@ Target behavior:
 - Editor geometry remains local/per-user and is not sent on hot information save/read paths.
 - Cross-module details reads are served from shared cache entries whenever possible.
 
+### Logic Gate Map Hot-Path Implementation Note (2026-05-01)
+
+Logic Gate Map now follows the same hot-path shape as Node Map:
+- bulk snapshot hydration includes `logic_gates` and `logic_gate_relationships`,
+- UI create/update/delete paths call headless APIs instead of UI-only local state,
+- the frontend applies optimistic graph-cache updates and listens for SSE deltas,
+- relationships are strictly `Input`/`Output` only,
+- Editor and Company Explorer consume logic-gate context through separate event/storage keys.
+
+Junior engineer note:
+- Keep node graph and logic-gate graph context separate. They look similar in the UI, but they use different database tables and different relationship roles.
+- Do not add polling loops or per-gate detail fetches to render the canvas. Use the bulk snapshot/cache path first.
+
 ---
 
 ## Implementation Checklist (LLM/Engineer Tracking)

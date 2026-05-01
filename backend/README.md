@@ -140,7 +140,15 @@ These guards enforce:
 - `POST /v1/nodes`
 - `GET /v1/nodes/{node_id}?company_id={uuid}`
 - `POST /v1/nodes/{node_id}/information`
+- `GET /v1/logic-gates?company_id={uuid}`
 - `POST /v1/logic-gates`
+- `GET /v1/logic-gates/{logic_gate_id}?company_id={uuid}`
+- `PUT /v1/logic-gates/{logic_gate_id}`
+- `DELETE /v1/logic-gates/{logic_gate_id}?company_id={uuid}`
+- `POST /v1/logic-gates/{logic_gate_id}/information`
+- `GET /v1/logic-gate-relationships?company_id={uuid}`
+- `POST /v1/logic-gate-relationships`
+- `DELETE /v1/logic-gate-relationships/{logic_gate_relationship_id}?company_id={uuid}`
 - `POST /v1/operations`
 - `GET /v1/operations/{operation_id}?company_id={uuid}`
 
@@ -151,7 +159,23 @@ Create node:
 ```bash
 curl -X POST http://localhost:8080/v1/nodes \
   -H 'content-type: application/json' \
-  -d '{"company_id":"11111111-1111-1111-1111-111111111111","header":"Customer onboarding"}'
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","title":"Customer onboarding"}'
+```
+
+Create logic gate:
+
+```bash
+curl -X POST http://localhost:8080/v1/logic-gates \
+  -H 'content-type: application/json' \
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","header":"Validate intake"}'
+```
+
+Create logic gate relationship:
+
+```bash
+curl -X POST http://localhost:8080/v1/logic-gate-relationships \
+  -H 'content-type: application/json' \
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","logic_gate_id_a":"<source_gate_id>","logic_gate_id_b":"<target_gate_id>","a_position":"Output","b_position":"Input"}'
 ```
 
 Add node information:

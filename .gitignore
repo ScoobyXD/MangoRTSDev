@@ -5,4 +5,9 @@ frontend/.test-dist/
 frontend/dist/
 frontend/tsconfig.tsbuildinfo
 frontend/node_modules/
+backend/go-build-cache/
+backend/api-dev.log
+backend/api-dev.err.log
+frontend/vite-dev.log
+frontend/vite-dev.err.log
 

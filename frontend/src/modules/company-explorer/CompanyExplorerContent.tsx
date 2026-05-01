@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeRecord, NodeRelationship } from "../node-map/shared";
-import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
+import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, NodeRecord as LogicGateRecord, NodeRelationship as LogicGateRelationship } from "../logic-gate-map/shared";
+import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
+import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
@@ -10,8 +12,9 @@ type ExplorerTreeNode = {
   id: string;
   label: string;
   depth: number;
-  kind: "folder" | "node";
+  kind: "folder" | "node" | "logic_gate";
   nodeID?: string;
+  logicGateID?: string;
   scopeLevel: number;
 };
 
@@ -22,19 +25,25 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const scope = widgetId?.trim() ? widgetId : "global";
 
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
+  const [logicGates, setLogicGates] = useState<LogicGateRecord[]>([]);
   const [selectedTreeID, setSelectedTreeID] = useState("folder-all");
   const [selectedNodeID, setSelectedNodeID] = useState("");
+  const [selectedLogicGateID, setSelectedLogicGateID] = useState("");
   const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
+  const [logicGateRelationships, setLogicGateRelationships] = useState<LogicGateRelationship[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["folder-root", "folder-nodes", "folder-notes", "folder-logic"]));
   const treeViewportRef = useRef<HTMLDivElement | null>(null);
   const [treeScrollTop, setTreeScrollTop] = useState(0);
   const [treeViewportHeight, setTreeViewportHeight] = useState(480);
   const [linkRevision, setLinkRevision] = useState(0);
   const [linkedMapFrameID, setLinkedMapFrameID] = useState("");
+  const [linkedLogicMapFrameID, setLinkedLogicMapFrameID] = useState("");
   const lastMapSelectionRevisionRef = useRef(0);
+  const lastLogicMapSelectionRevisionRef = useRef(0);
   const suppressNextExplorerBroadcastRef = useRef(false);
   const previousBroadcastSelectionRef = useRef({ selectedNodeID: "", selectedTreeID: "" });
   const latestSelectionRef = useRef<ExplorerSelectionState>({ selectedNodeID: "", selectedTreeID: "" });
+  const latestLogicGateSelectionRef = useRef({ selectedLogicGateID: "", selectedTreeID: "" });
   const explorerContextSequenceRef = useRef(0);
 
   const TREE_ROW_HEIGHT = 30;
@@ -64,6 +73,30 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     });
   }, [apiBase, companyID]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+        if (cancelled) return;
+        const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+        setLogicGates(snapshot.nodes ?? []);
+        setLogicGateRelationships(snapshot.relationships ?? []);
+      } catch {
+        // Logic Gate Map has its own graph cache; subscription updates can still hydrate later.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [apiBase, companyID]);
+
+  useEffect(() => {
+    return subscribeLogicGateRelationshipGraph(apiBase, companyID, () => {
+      const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+      setLogicGates(snapshot.nodes ?? []);
+      setLogicGateRelationships(snapshot.relationships ?? []);
+    });
+  }, [apiBase, companyID]);
+
   const unattachedNodeIDs = useMemo(() => {
     const attached = new Set<string>();
     for (const relationship of relationships) {
@@ -88,7 +121,17 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
     rows.push({ id: "folder-logic", label: "Logic Gates", depth: 1, kind: "folder", scopeLevel: 1 });
     if (expanded.has("folder-logic")) {
-      rows.push({ id: "folder-logic-all", label: "All Logic Gates (coming soon)", depth: 2, kind: "folder", scopeLevel: 2 });
+      rows.push({ id: "folder-logic-all", label: `All Logic Gates (${logicGates.length})`, depth: 2, kind: "folder", scopeLevel: 2 });
+      for (const logicGate of logicGates) {
+        rows.push({
+          id: `logic-gate-${logicGate.logic_gate_id}`,
+          label: getLogicGateTitle(logicGate) || logicGate.logic_gate_id,
+          depth: 3,
+          kind: "logic_gate",
+          logicGateID: logicGate.logic_gate_id,
+          scopeLevel: 3,
+        });
+      }
     }
 
     rows.push({ id: "folder-notes", label: "Knowledge Notes", depth: 1, kind: "folder", scopeLevel: 1 });
@@ -97,13 +140,17 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
 
     return rows;
-  }, [expanded, nodes, unattachedNodeIDs]);
+  }, [expanded, nodes, logicGates, unattachedNodeIDs]);
 
   const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID) ?? treeRows[0], [selectedTreeID, treeRows]);
 
   useEffect(() => {
     latestSelectionRef.current = { selectedNodeID, selectedTreeID };
   }, [selectedNodeID, selectedTreeID]);
+
+  useEffect(() => {
+    latestLogicGateSelectionRef.current = { selectedLogicGateID, selectedTreeID };
+  }, [selectedLogicGateID, selectedTreeID]);
 
   useEffect(() => {
     if (!treeViewportRef.current) return;
@@ -141,7 +188,14 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         edges,
         registry,
       });
+      const resolvedLogicMap = resolveLinkedFrameByKindFromGraph({
+        startFrameID: scope,
+        targetKind: "logic-map",
+        edges,
+        registry,
+      });
       setLinkedMapFrameID(resolved);
+      setLinkedLogicMapFrameID(resolvedLogicMap);
     };
     refreshLinkedMap();
     const onStorage = (event: StorageEvent) => {
@@ -177,6 +231,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       if (!shouldApplyMapSelection(current, selectedFromMap)) return;
       suppressNextExplorerBroadcastRef.current = true;
       setSelectedNodeID(selectedFromMap);
+      setSelectedLogicGateID("");
       setSelectedTreeID(`node-${selectedFromMap}`);
       setExpanded((previous) => {
         if (previous.has("folder-root") && previous.has("folder-nodes")) return previous;
@@ -216,6 +271,55 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, [companyID, linkedMapFrameID]);
 
   useEffect(() => {
+    const applyLogicGateMapSelection = (selectedFromMap: string) => {
+      if (!selectedFromMap) return;
+      const nextTreeID = `logic-gate-${selectedFromMap}`;
+      const current = latestLogicGateSelectionRef.current;
+      if (current.selectedLogicGateID === selectedFromMap && current.selectedTreeID === nextTreeID) return;
+      suppressNextExplorerBroadcastRef.current = true;
+      setSelectedLogicGateID(selectedFromMap);
+      setSelectedNodeID("");
+      setSelectedTreeID(nextTreeID);
+      setExpanded((previous) => {
+        if (previous.has("folder-root") && previous.has("folder-logic")) return previous;
+        const next = new Set(previous);
+        next.add("folder-root");
+        next.add("folder-logic");
+        return next;
+      });
+    };
+    const readFromLogicMapState = () => {
+      if (!linkedLogicMapFrameID) return;
+      const mapStateKey = `logic-gate-map-state-v1:${companyID}:${linkedLogicMapFrameID}`;
+      try {
+        const raw = localStorage.getItem(mapStateKey);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedLogicGateID?: string };
+        const selected = typeof parsed.selectedLogicGateID === "string" ? parsed.selectedLogicGateID : parsed.selectedNodeID;
+        if (typeof selected === "string") applyLogicGateMapSelection(selected);
+      } catch {
+        // ignore malformed logic-gate map state payload
+      }
+    };
+    readFromLogicMapState();
+    const onLogicMapSelectionUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; selectedLogicGateID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
+      if (!detail || detail.mapWidgetID !== linkedLogicMapFrameID) return;
+      const revision = readIncomingSequence(detail);
+      if (revision > 0 && !isNewerSequence(lastLogicMapSelectionRevisionRef.current, revision)) return;
+      if (revision > 0 && hasSequenceGap(lastLogicMapSelectionRevisionRef.current, revision)) readFromLogicMapState();
+      if (revision > 0) lastLogicMapSelectionRevisionRef.current = revision;
+      const selected = typeof detail.selectedLogicGateID === "string" ? detail.selectedLogicGateID : detail.selectedNodeID;
+      if (typeof selected !== "string") return;
+      applyLogicGateMapSelection(selected);
+    };
+    window.addEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapSelectionUpdated);
+    return () => {
+      window.removeEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapSelectionUpdated);
+    };
+  }, [companyID, linkedLogicMapFrameID]);
+
+  useEffect(() => {
     const nextSelection = { selectedNodeID, selectedTreeID };
     if (!shouldBroadcastSelection(previousBroadcastSelectionRef.current, nextSelection)) return;
     previousBroadcastSelectionRef.current = nextSelection;
@@ -231,9 +335,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
       explorerContextSequenceRef.current += 1;
       for (const targetID of targetIDs) {
+        if (!targetID) continue;
+        const isLogicGateContext = selectedLogicGateID.trim().length > 0;
         const payload = {
           sourceExplorerID: scope,
           selectedNodeID,
+          selectedLogicGateID,
           selectedTreeID,
           scopeLevel: selectedTree?.scopeLevel ?? 0,
           selectedLabel: selectedTree?.label ?? "",
@@ -246,15 +353,15 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
             user_action_type: "explorer_selection_changed",
           } satisfies ContextMutationEnvelope,
         };
-        if (!targetID) continue;
-        const key = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${targetID}`;
+        const keyPrefix = isLogicGateContext ? LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX : NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX;
+        const key = `${keyPrefix}:${companyID}:${targetID}`;
         localStorage.setItem(key, JSON.stringify(payload));
         emitDashboardEvent(EVENT_EXPLORER_CONTEXT_UPDATED, { key, sourceExplorerID: scope, targetID });
       }
     } catch {
       // ignore local storage failures
     }
-  }, [companyID, scope, selectedNodeID, selectedTreeID, selectedTree, linkRevision]);
+  }, [companyID, scope, selectedNodeID, selectedLogicGateID, selectedTreeID, selectedTree, linkRevision]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
@@ -284,8 +391,18 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
               key={row.id}
               onClick={() => {
                 setSelectedTreeID(row.id);
-                if (row.kind === "node") setSelectedNodeID(row.nodeID ?? "");
-                if (row.kind === "folder" && row.id === "folder-all") setSelectedNodeID("");
+                if (row.kind === "node") {
+                  setSelectedNodeID(row.nodeID ?? "");
+                  setSelectedLogicGateID("");
+                }
+                if (row.kind === "logic_gate") {
+                  setSelectedLogicGateID(row.logicGateID ?? "");
+                  setSelectedNodeID("");
+                }
+                if (row.kind === "folder" && (row.id === "folder-all" || row.id === "folder-logic-all")) {
+                  setSelectedNodeID("");
+                  setSelectedLogicGateID("");
+                }
               }}
               style={{
                 position: "relative",

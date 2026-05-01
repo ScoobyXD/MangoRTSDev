@@ -1,17 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
-import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
+import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LogicGateInformation, getNodeTitle as getLogicGateTitle } from "../logic-gate-map/shared";
+import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
+import { getLogicGateRecordSingleFlight, invalidateLogicGateRecordStoreCaches } from "../logic-gate-map/LogicGateRecordStore";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import type { NodeInformation } from "../node-map/shared";
 
-// Editor module: node-linked document canvas with a single Google-Doc-like editable surface.
+// Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const scope = widgetId?.trim() ? widgetId : "global";
   const [linkedMapWidgetID, setLinkedMapWidgetID] = useState("");
+  const [linkedLogicMapWidgetID, setLinkedLogicMapWidgetID] = useState("");
+  const [linkedEntityKind, setLinkedEntityKind] = useState<"" | "node" | "logic_gate">("");
   const [linkedNodeID, setLinkedNodeID] = useState("");
   const [linkedNodeTitle, setLinkedNodeTitle] = useState("");
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
@@ -28,6 +32,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const documentDraftRef = useRef("");
   const persistedDocumentRef = useRef("");
   const lastSelectionRevisionRef = useRef(0);
+  const lastLogicGateSelectionRevisionRef = useRef(0);
 
   const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const headers = new Headers(init?.headers);
@@ -42,7 +47,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     if (!linkedNodeID) return;
     // Avoid creating projection/history rows when nothing changed.
     if (nextText === persistedDocumentRef.current) return;
-    // For brand new editor surfaces, skip empty writes so selecting a node
+    // For brand new editor surfaces, skip empty writes so selecting an entity
     // does not create blank records by default.
     if (!documentInformationID && nextText.trim().length === 0) return;
     const stableInformationID = documentInformationID
@@ -51,27 +56,42 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         : `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0").slice(0, 12)}`);
     setError("");
     try {
-      await requestJSON<NodeInformation>(`/v1/nodes/${linkedNodeID}/information`, {
-        method: "POST",
-        body: JSON.stringify({
-          company_id: companyID,
-          type: "Text box",
-          information: nextText,
-          information_id: stableInformationID,
-        }),
-      });
+      const informationPayload = {
+        company_id: companyID,
+        type: "Text box",
+        information: nextText,
+        information_id: stableInformationID,
+      };
+      if (linkedEntityKind === "logic_gate") {
+        await requestJSON<LogicGateInformation>(`/v1/logic-gates/${linkedNodeID}/information`, {
+          method: "POST",
+          body: JSON.stringify(informationPayload),
+        });
+      } else {
+        await requestJSON<NodeInformation>(`/v1/nodes/${linkedNodeID}/information`, {
+          method: "POST",
+          body: JSON.stringify(informationPayload),
+        });
+      }
       setDocumentInformationID(stableInformationID);
       persistedDocumentRef.current = nextText;
-      invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+      if (linkedEntityKind === "logic_gate") invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
+      else invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_save_document");
     }
-  }, [apiBase, companyID, documentInformationID, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, documentInformationID, linkedEntityKind, linkedNodeID, requestJSON]);
 
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
     const registry = readFrameRegistryFromStorage();
     return resolveLinkedFrameByKindFromGraph({ startFrameID: scope, targetKind: "map", edges, registry });
+  }, [scope]);
+
+  const readLinkedLogicMapWidgetID = useCallback((): string => {
+    const edges = readFrameLinksFromStorage();
+    const registry = readFrameRegistryFromStorage();
+    return resolveLinkedFrameByKindFromGraph({ startFrameID: scope, targetKind: "logic-map", edges, registry });
   }, [scope]);
 
   const readSelectedNodeFromMap = useCallback((mapWidgetID: string): string => {
@@ -80,6 +100,19 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       const raw = localStorage.getItem(`node-map-state-v1:${companyID}:${mapWidgetID}`);
       if (!raw) return "";
       const parsed = JSON.parse(raw) as { selectedNodeID?: string };
+      return typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "";
+    } catch {
+      return "";
+    }
+  }, [companyID]);
+
+  const readSelectedLogicGateFromMap = useCallback((mapWidgetID: string): string => {
+    if (!mapWidgetID) return "";
+    try {
+      const raw = localStorage.getItem(`logic-gate-map-state-v1:${companyID}:${mapWidgetID}`);
+      if (!raw) return "";
+      const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedLogicGateID?: string };
+      if (typeof parsed.selectedLogicGateID === "string") return parsed.selectedLogicGateID;
       return typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "";
     } catch {
       return "";
@@ -97,21 +130,52 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [companyID, scope]);
 
+  const readSelectedLogicGateFromExplorerContext = useCallback((): string => {
+    try {
+      const raw = localStorage.getItem(`${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
+      if (!raw) return "";
+      const parsed = JSON.parse(raw) as { selectedLogicGateID?: string; selectedNodeID?: string };
+      if (typeof parsed.selectedLogicGateID === "string") return parsed.selectedLogicGateID;
+      return typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "";
+    } catch {
+      return "";
+    }
+  }, [companyID, scope]);
+
+  const applyLinkedNode = useCallback((nodeID: string) => {
+    setLinkedEntityKind(nodeID ? "node" : "");
+    setLinkedNodeID(nodeID);
+  }, []);
+
+  const applyLinkedLogicGate = useCallback((logicGateID: string) => {
+    setLinkedEntityKind(logicGateID ? "logic_gate" : "");
+    setLinkedNodeID(logicGateID);
+  }, []);
+
   const updateNodeTitle = useCallback(async (nextTitle: string) => {
     const value = nextTitle.trim();
     if (!linkedNodeID || !value) return;
     setError("");
     try {
-      const updated = await requestJSON<{ title: string }>(`/v1/nodes/${linkedNodeID}`, {
-        method: "PUT",
-        body: JSON.stringify({ company_id: companyID, title: value }),
-      });
-      setLinkedNodeTitle(updated.title);
-      invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+      if (linkedEntityKind === "logic_gate") {
+        const updated = await requestJSON<{ header: string }>(`/v1/logic-gates/${linkedNodeID}`, {
+          method: "PUT",
+          body: JSON.stringify({ company_id: companyID, header: value }),
+        });
+        setLinkedNodeTitle(updated.header);
+        invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
+      } else {
+        const updated = await requestJSON<{ title: string }>(`/v1/nodes/${linkedNodeID}`, {
+          method: "PUT",
+          body: JSON.stringify({ company_id: companyID, title: value }),
+        });
+        setLinkedNodeTitle(updated.title);
+        invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_update_node");
+      setError(err instanceof Error ? err.message : "failed_to_update_entity");
     }
-  }, [apiBase, companyID, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
 
   useEffect(() => {
     setIsEditingTitle(false);
@@ -145,7 +209,10 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [linkedNodeID]);
 
   useEffect(() => {
-    const refresh = () => setLinkedMapWidgetID(readLinkedMapWidgetID());
+    const refresh = () => {
+      setLinkedMapWidgetID(readLinkedMapWidgetID());
+      setLinkedLogicMapWidgetID(readLinkedLogicMapWidgetID());
+    };
     refresh();
     const onStorage = (event: StorageEvent) => {
       if (event.key && event.key !== FRAME_LINKS_KEY && event.key !== FRAME_REGISTRY_KEY) return;
@@ -158,22 +225,39 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(EVENT_FRAME_LINK_GRAPH_UPDATED, onGraphUpdated);
     };
-  }, [readLinkedMapWidgetID]);
+  }, [readLinkedLogicMapWidgetID, readLinkedMapWidgetID]);
 
   useEffect(() => {
     const refresh = () => {
       const selectedFromMap = readSelectedNodeFromMap(linkedMapWidgetID);
       if (selectedFromMap) {
-        setLinkedNodeID(selectedFromMap);
+        applyLinkedNode(selectedFromMap);
         return;
       }
-      setLinkedNodeID(readSelectedNodeFromExplorerContext());
+      const selectedFromLogicMap = readSelectedLogicGateFromMap(linkedLogicMapWidgetID);
+      if (selectedFromLogicMap) {
+        applyLinkedLogicGate(selectedFromLogicMap);
+        return;
+      }
+      const selectedFromExplorer = readSelectedNodeFromExplorerContext();
+      if (selectedFromExplorer) {
+        applyLinkedNode(selectedFromExplorer);
+        return;
+      }
+      const selectedLogicFromExplorer = readSelectedLogicGateFromExplorerContext();
+      if (selectedLogicFromExplorer) {
+        applyLinkedLogicGate(selectedLogicFromExplorer);
+        return;
+      }
+      applyLinkedNode("");
     };
     refresh();
     const onStorage = (event: StorageEvent) => {
       const mapStateKey = linkedMapWidgetID ? `node-map-state-v1:${companyID}:${linkedMapWidgetID}` : "";
+      const logicMapStateKey = linkedLogicMapWidgetID ? `logic-gate-map-state-v1:${companyID}:${linkedLogicMapWidgetID}` : "";
       const explorerContextKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
-      if (event.key && event.key !== mapStateKey && event.key !== explorerContextKey) return;
+      const logicExplorerContextKey = `${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
+      if (event.key && event.key !== mapStateKey && event.key !== logicMapStateKey && event.key !== explorerContextKey && event.key !== logicExplorerContextKey) return;
       refresh();
     };
     const onMapStateUpdated = (event: Event) => {
@@ -184,7 +268,21 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (revision > 0 && hasSequenceGap(lastSelectionRevisionRef.current, revision)) refresh();
       if (revision > 0) lastSelectionRevisionRef.current = revision;
       if (typeof detail.selectedNodeID === "string") {
-        setLinkedNodeID(detail.selectedNodeID);
+        applyLinkedNode(detail.selectedNodeID);
+        return;
+      }
+      refresh();
+    };
+    const onLogicMapStateUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; selectedLogicGateID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
+      if (!detail || detail.mapWidgetID !== linkedLogicMapWidgetID) return;
+      const revision = readIncomingSequence(detail);
+      if (revision > 0 && !isNewerSequence(lastLogicGateSelectionRevisionRef.current, revision)) return;
+      if (revision > 0 && hasSequenceGap(lastLogicGateSelectionRevisionRef.current, revision)) refresh();
+      if (revision > 0) lastLogicGateSelectionRevisionRef.current = revision;
+      const selected = typeof detail.selectedLogicGateID === "string" ? detail.selectedLogicGateID : detail.selectedNodeID;
+      if (typeof selected === "string") {
+        applyLinkedLogicGate(selected);
         return;
       }
       refresh();
@@ -193,23 +291,31 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       const detail = (event as CustomEvent<{ key?: string; targetID?: string }>).detail;
       if (!detail) return;
       const expectedKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
-      if (detail.key !== expectedKey && detail.targetID !== scope) return;
+      const expectedLogicKey = `${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
+      if (detail.key !== expectedKey && detail.key !== expectedLogicKey && detail.targetID !== scope) return;
       const explorerSelected = readSelectedNodeFromExplorerContext();
       if (explorerSelected) {
-        setLinkedNodeID(explorerSelected);
+        applyLinkedNode(explorerSelected);
+        return;
+      }
+      const logicExplorerSelected = readSelectedLogicGateFromExplorerContext();
+      if (logicExplorerSelected) {
+        applyLinkedLogicGate(logicExplorerSelected);
         return;
       }
       refresh();
     };
     window.addEventListener("storage", onStorage);
     window.addEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapStateUpdated);
+    window.addEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapStateUpdated);
     window.addEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
     return () => {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapStateUpdated);
+      window.removeEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapStateUpdated);
       window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
     };
-  }, [companyID, linkedMapWidgetID, readSelectedNodeFromMap, readSelectedNodeFromExplorerContext, scope]);
+  }, [applyLinkedLogicGate, applyLinkedNode, companyID, linkedLogicMapWidgetID, linkedMapWidgetID, readSelectedLogicGateFromExplorerContext, readSelectedLogicGateFromMap, readSelectedNodeFromExplorerContext, readSelectedNodeFromMap, scope]);
 
   useEffect(() => {
     let cancelled = false;
@@ -227,6 +333,33 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     (async () => {
       try {
         setError("");
+        if (linkedEntityKind === "logic_gate") {
+          const details = await getLogicGateRecordSingleFlight(apiBase, companyID, linkedNodeID);
+          if (cancelled) return;
+          setLinkedNodeTitle(getLogicGateTitle({ header: details.logic_gate.header, title: details.logic_gate.header }));
+          const nonText = details.information.filter((item) => item.type !== "Text box");
+          const textBoxes = details.information.filter((item) => item.type === "Text box");
+          setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
+          setLinkedNodeMetadataRows([
+            { label: "Logic Gate ID", value: details.logic_gate.logic_gate_id },
+            { label: "Created", value: details.logic_gate.created_timestamp },
+            { label: "Relationships", value: String(details.relationships.length) },
+            { label: "Information records", value: String(details.information.length) },
+            { label: "Text boxes", value: String(textBoxes.length) },
+          ]);
+          const historyRows = [
+            details.logic_gate.created_timestamp ? `Logic gate created at ${details.logic_gate.created_timestamp}` : "Logic gate created",
+            ...details.information.slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`),
+          ];
+          setLinkedNodeHistoryRows(historyRows);
+          const first = textBoxes.find((item) => item.information.trim().length > 0) ?? textBoxes[0];
+          const initialDocument = first?.information ?? "";
+          documentDraftRef.current = initialDocument;
+          persistedDocumentRef.current = initialDocument;
+          setDocumentInformationID(first?.information_id ?? "");
+          if (editorDocRef.current && editorDocRef.current.textContent !== initialDocument) editorDocRef.current.textContent = initialDocument;
+          return;
+        }
         const [details, projections] = await Promise.all([
           getNodeRecordSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
@@ -254,11 +387,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         setDocumentInformationID(first?.information_id ?? "");
         if (editorDocRef.current && editorDocRef.current.textContent !== initialDocument) editorDocRef.current.textContent = initialDocument;
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load linked node information");
+        if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load linked information");
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, companyID, linkedNodeID]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID]);
 
   const tabItems = useMemo(() => ([
     { id: "editor", label: "Editor" },
@@ -294,7 +427,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           {activeTab === "editor" && (
             <div style={{ display: "grid", gap: 8 }}>
               <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.12em", color: accent, cursor: "text" }}>
-                <span style={{ textTransform: "uppercase" }}>Node:</span>&nbsp;
+                <span style={{ textTransform: "uppercase" }}>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>&nbsp;
                 <span
                   ref={editingTitleRef}
                   contentEditable={isEditingTitle}
@@ -319,7 +452,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                           pendingTitleCaretRangeRef.current = range;
                         }
                       }
-                      editingTitleDraftRef.current = linkedNodeTitle || "new node";
+                      editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new logic gate" : "new node");
                       setIsEditingTitle(true);
                       event.preventDefault();
                     }

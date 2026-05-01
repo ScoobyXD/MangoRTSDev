@@ -123,8 +123,10 @@ This linking is conceptualized as context sync, not as a new data model.
 
 Implementation update (2026-04-26):
 - Frame-level linking now supports direct Explorer <-> Editor context links (not only Explorer <-> Node Map).
-- Current runtime still resolves Node Map as the active graph context provider via compatibility mapping, while the link graph is designed to extend to future module kinds (e.g. logic-map) without redesigning link storage.
-- Explorer selection context is now broadcast to all directly linked frame targets (including Editor) through explorer-context localStorage/event keys so linked editors can follow selected node content without requiring an explicit map link.
+- Current runtime resolves Node Map and Logic Gate Map graph context providers through the same frame-link graph, so Explorer can drive either node selection or logic-gate selection without a new link storage model.
+- Explorer selection context is now broadcast to all directly linked frame targets (including Editor) through explorer-context localStorage/event keys so linked editors can follow selected node or logic-gate content without requiring an explicit map link.
+- Explorer loads Logic Gate Map graph data from the shared workspace snapshot/cache and shows real logic gates under the Logic Gates tree.
+- Selecting a logic gate broadcasts a logic-gate explorer context key (`logic-gate-map-explorer-context-v1`) so linked Logic Gate Map and Editor frames can follow it.
 
 Latency hardening update (2026-04-26):
 - Explorer target resolution now reads direct neighbors from `frame-module-links-v1` only (legacy explorer->map bridge key no longer required in runtime writes).

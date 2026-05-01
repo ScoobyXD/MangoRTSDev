@@ -40,6 +40,129 @@ func TestIsLegalNodeRelationshipPositionPair(t *testing.T) {
 	}
 }
 
+func TestIsLegalLogicGateRelationshipPositionPair(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		a    string
+		b    string
+		want bool
+	}{
+		{name: "input_output", a: "Input", b: "Output", want: true},
+		{name: "output_input", a: "Output", b: "Input", want: true},
+		{name: "input_input", a: "Input", b: "Input", want: false},
+		{name: "output_output", a: "Output", b: "Output", want: false},
+		{name: "input_peer", a: "Input", b: "Peer", want: false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := isLegalLogicGateRelationshipPositionPair(tc.a, tc.b)
+			if got != tc.want {
+				t.Fatalf("isLegalLogicGateRelationshipPositionPair(%q, %q) = %t, want %t", tc.a, tc.b, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLogicGateCRUDRelationshipAndInformationAPI(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-logic-gate-test"
+
+	createGate := func(header string) string {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{
+			"company_id": companyID,
+			"header":     header,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/logic-gates", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST logic-gates status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+		}
+		var payload struct {
+			LogicGateID string `json:"logic_gate_id"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode created gate: %v", err)
+		}
+		return payload.LogicGateID
+	}
+
+	firstID := createGate("new logic gate")
+	secondID := createGate("second logic gate")
+
+	relationshipBody, _ := json.Marshal(map[string]string{
+		"company_id":      companyID,
+		"logic_gate_id_a": firstID,
+		"logic_gate_id_b": secondID,
+		"a_position":      "Output",
+		"b_position":      "Input",
+	})
+	relationshipReq := httptest.NewRequest(http.MethodPost, "/v1/logic-gate-relationships", bytes.NewReader(relationshipBody))
+	relationshipReq.Header.Set("Content-Type", "application/json")
+	relationshipRec := httptest.NewRecorder()
+	handler.ServeHTTP(relationshipRec, relationshipReq)
+	if relationshipRec.Code != http.StatusCreated {
+		t.Fatalf("POST logic-gate-relationships status = %d, want %d body=%s", relationshipRec.Code, http.StatusCreated, relationshipRec.Body.String())
+	}
+
+	invalidRelationshipBody, _ := json.Marshal(map[string]string{
+		"company_id":      companyID,
+		"logic_gate_id_a": firstID,
+		"logic_gate_id_b": secondID,
+		"a_position":      "Input",
+		"b_position":      "Input",
+	})
+	invalidRelationshipReq := httptest.NewRequest(http.MethodPost, "/v1/logic-gate-relationships", bytes.NewReader(invalidRelationshipBody))
+	invalidRelationshipReq.Header.Set("Content-Type", "application/json")
+	invalidRelationshipRec := httptest.NewRecorder()
+	handler.ServeHTTP(invalidRelationshipRec, invalidRelationshipReq)
+	if invalidRelationshipRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid relationship status = %d, want %d", invalidRelationshipRec.Code, http.StatusBadRequest)
+	}
+
+	infoBody, _ := json.Marshal(map[string]string{
+		"company_id":     companyID,
+		"type":           "Text box",
+		"information":    "logic gate notes",
+		"information_id": "33333333-3333-4333-8333-333333333333",
+	})
+	infoReq := httptest.NewRequest(http.MethodPost, "/v1/logic-gates/"+firstID+"/information", bytes.NewReader(infoBody))
+	infoReq.Header.Set("Content-Type", "application/json")
+	infoRec := httptest.NewRecorder()
+	handler.ServeHTTP(infoRec, infoReq)
+	if infoRec.Code != http.StatusCreated {
+		t.Fatalf("POST logic gate information status = %d, want %d body=%s", infoRec.Code, http.StatusCreated, infoRec.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+firstID+"?company_id="+companyID, nil)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET logic gate details status = %d, want %d body=%s", getRec.Code, http.StatusOK, getRec.Body.String())
+	}
+	var details struct {
+		Information   []any `json:"information"`
+		Relationships []any `json:"relationships"`
+	}
+	if err := json.NewDecoder(getRec.Body).Decode(&details); err != nil {
+		t.Fatalf("decode details: %v", err)
+	}
+	if len(details.Information) != 1 || len(details.Relationships) != 1 {
+		t.Fatalf("details counts = information:%d relationships:%d, want 1/1", len(details.Information), len(details.Relationships))
+	}
+}
+
 func TestUpdateNodeTitleViaPut(t *testing.T) {
 	t.Parallel()
 

@@ -129,6 +129,11 @@ create table if not exists logic_gate_relationships (
   a_position logic_gate_relationship_position not null,
   b_position logic_gate_relationship_position not null,
   created_timestamp timestamptz not null,
+  constraint logic_gate_relationships_position_pair_chk check (
+    (a_position = 'Input' and b_position = 'Output')
+    or (a_position = 'Output' and b_position = 'Input')
+  ),
+  constraint logic_gate_relationships_not_self_chk check (logic_gate_id_a <> logic_gate_id_b),
   primary key (company_id, logic_gate_relationship_id),
   foreign key (company_id, logic_gate_id_a) references logic_gates (company_id, logic_gate_id),
   foreign key (company_id, logic_gate_id_b) references logic_gates (company_id, logic_gate_id)
@@ -211,6 +216,8 @@ create table if not exists operations (
 - A Position (Enum: Input, Output) -> `logic_gate_relationships.a_position`
 - B Position (Enum: Input, Output) -> `logic_gate_relationships.b_position`
 - Created Timestamp (TIMESTAMPTZ) -> `logic_gate_relationships.created_timestamp`
+- Constraint: `logic_gate_relationships_position_pair_chk` allows only Input->Output or Output->Input.
+- Constraint: `logic_gate_relationships_not_self_chk` requires `logic_gate_id_a <> logic_gate_id_b`.
 
 ### Logic Gate Information Schema
 

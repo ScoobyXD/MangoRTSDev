@@ -53,6 +53,32 @@ type LogicGate struct {
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
+type LogicGateRelationship struct {
+	CompanyID               string    `json:"company_id"`
+	LogicGateRelationshipID string    `json:"logic_gate_relationship_id"`
+	LogicGateIDA            string    `json:"logic_gate_id_a"`
+	LogicGateIDB            string    `json:"logic_gate_id_b"`
+	APosition               string    `json:"a_position"`
+	BPosition               string    `json:"b_position"`
+	CreatedTimestamp        time.Time `json:"created_timestamp"`
+}
+
+type LogicGateInformation struct {
+	CompanyID        string    `json:"company_id"`
+	InformationID    string    `json:"information_id"`
+	LogicGateID      string    `json:"logic_gate_id"`
+	Type             string    `json:"type"`
+	Information      string    `json:"information"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type LogicGateDetails struct {
+	LogicGate     LogicGate               `json:"logic_gate"`
+	Information   []LogicGateInformation  `json:"information"`
+	Relationships []LogicGateRelationship `json:"relationships"`
+}
+
 type Operation struct {
 	CompanyID      string     `json:"company_id"`
 	OperationID    string     `json:"operation_id"`

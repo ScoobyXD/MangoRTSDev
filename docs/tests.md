@@ -31,7 +31,9 @@ Purpose:
 
 Primary source files:
 - `frontend/src/modules/node-map/relationshipProjection.ts`
+- `frontend/src/modules/logic-gate-map/relationshipProjection.ts`
 - `frontend/src/modules/node-map/relationshipProjection.test.ts`
+- `tests/frontend/modules/logic-gate-map/relationshipProjection.test.ts`
 
 Run command:
 - From `frontend/`: `npm run test:node-relationships`
@@ -100,6 +102,14 @@ Use this checklist format and keep it complete.
   - selected-node opposite-side role resolution
   - parent/child anchor inference
   - projected visual relationship line metadata output
+- [x] `tests/frontend/modules/logic-gate-map/relationshipProjection.test.ts`
+  - side -> Input/Output mapping
+  - `+` linked-gate Input/Output semantics
+  - existing-gate payload mapping
+  - illegal same-role side-pair rejection
+  - selected-gate opposite-side role resolution
+  - input/output anchor inference
+  - projected visual relationship metadata output
 - [x] `frontend/src/modules/node-map/relationshipSelection.test.ts`
   - line-segment vs multi-select box rectangle intersection detection
   - polyline relationship-path vs multi-select box rectangle intersection detection
@@ -143,6 +153,8 @@ Use this checklist format and keep it complete.
   - node rename contract via `PUT /v1/nodes/{node_id}` persists updated title
   - workspace context event write path persists projection updates (`POST /v1/workspace/context-events` -> `GET /v1/workspace/context-projections`)
   - ordered context delta feed returns persisted event rows after sequence (`GET /v1/workspace/context-deltas?after_sequence=`)
+  - logic gate relationship position-pair legality helper (Input/Output or Output/Input only)
+  - logic gate create/read/information/relationship API flow
 
 ### Integration tests
 - [ ] None committed yet (to be added)

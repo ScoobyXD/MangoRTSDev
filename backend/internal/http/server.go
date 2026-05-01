@@ -42,6 +42,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/workspace/context-projections", s.handleWorkspaceContextProjections)
 	mux.HandleFunc("/v1/workspace/context-deltas", s.handleWorkspaceContextDeltas)
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
+	mux.HandleFunc("/v1/logic-gates/", s.handleLogicGateSubresource)
+	mux.HandleFunc("/v1/logic-gate-relationships", s.handleLogicGateRelationships)
+	mux.HandleFunc("/v1/logic-gate-relationships/", s.handleLogicGateRelationshipByID)
 	mux.HandleFunc("/v1/operations", s.handleOperations)
 	mux.HandleFunc("/v1/operations/", s.handleOperationByID)
 	return mux
@@ -458,10 +461,25 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_node_relationships")
 		return
 	}
+	logicGates, err := s.repo.ListLogicGates(companyID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
+		return
+	}
+	logicGateRelationships, err := s.repo.ListLogicGateRelationships(companyID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships")
+		return
+	}
 	// Keep snapshot payload deterministic for unchanged data so ETag-based 304 responses
 	// actually work. Using a "now" timestamp here makes every response look different and
 	// defeats conditional GETs on this hot path.
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"nodes": nodes, "relationships": relationships})
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+		"nodes":                    nodes,
+		"relationships":            relationships,
+		"logic_gates":              logicGates,
+		"logic_gate_relationships": logicGateRelationships,
+	})
 }
 
 func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
@@ -570,6 +588,21 @@ func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[str
 }
 
 func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		items, err := s.repo.ListLogicGates(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"logic_gates": items})
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -591,7 +624,219 @@ func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_logic_gate")
 		return
 	}
+	s.publishWorkspaceEvent(req.CompanyID, "logic_gate_created", map[string]any{"logic_gate_id": item.LogicGateID, "logic_gate": item})
 	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/v1/logic-gates/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	logicGateID := parts[0]
+
+	if len(parts) == 1 {
+		if r.Method == http.MethodPut {
+			var req struct {
+				CompanyID string `json:"company_id"`
+				Header    string `json:"header"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Header) == "" {
+				writeError(w, http.StatusBadRequest, "company_id_and_header_required")
+				return
+			}
+			item, err := s.repo.UpdateLogicGateHeader(req.CompanyID, logicGateID, strings.TrimSpace(req.Header))
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "logic_gate_not_found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_update_logic_gate")
+				return
+			}
+			s.publishWorkspaceEvent(req.CompanyID, "logic_gate_updated", map[string]any{"logic_gate_id": logicGateID, "logic_gate": item})
+			writeJSON(w, http.StatusOK, item)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+			if companyID == "" {
+				writeError(w, http.StatusBadRequest, "company_id_required")
+				return
+			}
+			if err := s.repo.DeleteLogicGate(companyID, logicGateID); errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "logic_gate_not_found")
+				return
+			} else if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_delete_logic_gate")
+				return
+			}
+			s.publishWorkspaceEvent(companyID, "logic_gate_deleted", map[string]any{"logic_gate_id": logicGateID})
+			writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		details, err := s.repo.GetLogicGateDetails(companyID, logicGateID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "logic_gate_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, details)
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "information" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		var req struct {
+			CompanyID     string `json:"company_id"`
+			Type          string `json:"type"`
+			Information   string `json:"information"`
+			InformationID string `json:"information_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Type) == "" {
+			writeError(w, http.StatusBadRequest, "company_id_and_type_required")
+			return
+		}
+		item, err := s.repo.AddLogicGateInformation(req.CompanyID, logicGateID, req.Type, req.Information, req.InformationID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "logic_gate_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_add_logic_gate_information")
+			return
+		}
+		s.publishWorkspaceEvent(req.CompanyID, "logic_gate_information_created", map[string]any{"logic_gate_id": logicGateID, "information_id": item.InformationID})
+		writeJSON(w, http.StatusCreated, item)
+		return
+	}
+
+	writeError(w, http.StatusNotFound, "not_found")
+}
+
+func (s *Server) handleLogicGateRelationships(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		items, err := s.repo.ListLogicGateRelationships(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"logic_gate_relationships": items})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		CompanyID    string `json:"company_id"`
+		LogicGateIDA string `json:"logic_gate_id_a"`
+		LogicGateIDB string `json:"logic_gate_id_b"`
+		APosition    string `json:"a_position"`
+		BPosition    string `json:"b_position"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.LogicGateIDA) == "" || strings.TrimSpace(req.LogicGateIDB) == "" {
+		writeError(w, http.StatusBadRequest, "company_id_logic_gate_ids_required")
+		return
+	}
+	validPositions := map[string]bool{"Input": true, "Output": true}
+	if !validPositions[req.APosition] || !validPositions[req.BPosition] {
+		writeError(w, http.StatusBadRequest, "invalid_logic_gate_relationship_position")
+		return
+	}
+	if strings.TrimSpace(req.LogicGateIDA) == strings.TrimSpace(req.LogicGateIDB) {
+		writeError(w, http.StatusBadRequest, "self_relationship_not_allowed")
+		return
+	}
+	if !isLegalLogicGateRelationshipPositionPair(req.APosition, req.BPosition) {
+		writeError(w, http.StatusBadRequest, "illegal_logic_gate_relationship_pair")
+		return
+	}
+	item, err := s.repo.CreateLogicGateRelationship(req.CompanyID, req.LogicGateIDA, req.LogicGateIDB, req.APosition, req.BPosition)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "logic_gate_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_create_logic_gate_relationship")
+		return
+	}
+	s.publishWorkspaceEvent(req.CompanyID, "logic_gate_relationship_created", map[string]any{
+		"logic_gate_relationship_id": item.LogicGateRelationshipID,
+		"logic_gate_id_a":            item.LogicGateIDA,
+		"logic_gate_id_b":            item.LogicGateIDB,
+		"logic_gate_relationship":    item,
+	})
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func isLegalLogicGateRelationshipPositionPair(aPosition, bPosition string) bool {
+	return (aPosition == "Input" && bPosition == "Output") ||
+		(aPosition == "Output" && bPosition == "Input")
+}
+
+func (s *Server) handleLogicGateRelationshipByID(w http.ResponseWriter, r *http.Request) {
+	relationshipID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/logic-gate-relationships/"))
+	if relationshipID == "" {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if strings.Contains(relationshipID, "/") {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if r.Method != http.MethodDelete {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	if err := s.repo.DeleteLogicGateRelationship(companyID, relationshipID); errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "logic_gate_relationship_not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_delete_logic_gate_relationship")
+		return
+	}
+	s.publishWorkspaceEvent(companyID, "logic_gate_relationship_deleted", map[string]any{"logic_gate_relationship_id": relationshipID})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) handleOperations(w http.ResponseWriter, r *http.Request) {

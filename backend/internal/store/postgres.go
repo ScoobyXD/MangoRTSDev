@@ -548,6 +548,342 @@ func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGa
 	return item, nil
 }
 
+func (r *PostgresRepo) UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error) {
+	const q = `
+UPDATE logic_gates
+SET header = $3
+WHERE company_id = $1 AND logic_gate_id = $2
+RETURNING company_id, logic_gate_id, header, created_timestamp
+`
+	var item domain.LogicGate
+	if err := r.db.QueryRow(q, companyID, logicGateID, header).Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.LogicGate{}, ErrNotFound
+		}
+		return domain.LogicGate{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) ListLogicGates(companyID string) ([]domain.LogicGate, error) {
+	ctx := context.Background()
+	rows, err := r.db.QueryContext(ctx,
+		`select company_id, logic_gate_id, header, created_timestamp
+		 from logic_gates
+		 where company_id=$1
+		 order by created_timestamp asc`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.LogicGate, 0)
+	for rows.Next() {
+		var item domain.LogicGate
+		if err := rows.Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) GetLogicGate(companyID, logicGateID string) (domain.LogicGate, error) {
+	ctx := context.Background()
+	var item domain.LogicGate
+	err := r.db.QueryRowContext(ctx,
+		`select company_id, logic_gate_id, header, created_timestamp
+		 from logic_gates where company_id=$1 and logic_gate_id=$2`,
+		companyID, logicGateID,
+	).Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.LogicGate{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.LogicGate{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx,
+		`delete from logic_gate_relationships
+		 where company_id=$1 and (logic_gate_id_a=$2 or logic_gate_id_b=$2)`,
+		companyID, logicGateID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from logic_gate_information
+		 where company_id=$1 and logic_gate_id=$2`,
+		companyID, logicGateID,
+	); err != nil {
+		return err
+	}
+
+	deleted, err := tx.ExecContext(ctx,
+		`delete from logic_gates
+		 where company_id=$1 and logic_gate_id=$2`,
+		companyID, logicGateID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := deleted.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
+func (r *PostgresRepo) ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error) {
+	ctx := context.Background()
+	rows, err := r.db.QueryContext(ctx,
+		`select company_id, logic_gate_relationship_id, logic_gate_id_a, logic_gate_id_b, a_position::text, b_position::text, created_timestamp
+		 from logic_gate_relationships
+		 where company_id=$1
+		 order by created_timestamp asc`,
+		companyID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.LogicGateRelationship, 0)
+	for rows.Next() {
+		var item domain.LogicGateRelationship
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.LogicGateRelationshipID,
+			&item.LogicGateIDA,
+			&item.LogicGateIDB,
+			&item.APosition,
+			&item.BPosition,
+			&item.CreatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.LogicGateRelationship{}, err
+	}
+	defer tx.Rollback()
+
+	for _, candidate := range []string{logicGateIDA, logicGateIDB} {
+		var exists bool
+		if err := tx.QueryRowContext(ctx,
+			`select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`,
+			companyID, candidate,
+		).Scan(&exists); err != nil {
+			return domain.LogicGateRelationship{}, err
+		}
+		if !exists {
+			return domain.LogicGateRelationship{}, ErrNotFound
+		}
+	}
+
+	item := domain.LogicGateRelationship{
+		CompanyID:               companyID,
+		LogicGateRelationshipID: newUUIDv7String(),
+		LogicGateIDA:            logicGateIDA,
+		LogicGateIDB:            logicGateIDB,
+		APosition:               aPosition,
+		BPosition:               bPosition,
+	}
+	if err := tx.QueryRowContext(ctx,
+		`insert into logic_gate_relationships
+		 (company_id, logic_gate_relationship_id, logic_gate_id_a, logic_gate_id_b, a_position, b_position, created_timestamp)
+		 values ($1, $2, $3, $4, $5::logic_gate_relationship_position, $6::logic_gate_relationship_position, now())
+		 returning company_id, logic_gate_relationship_id, logic_gate_id_a, logic_gate_id_b, a_position::text, b_position::text, created_timestamp`,
+		item.CompanyID, item.LogicGateRelationshipID, item.LogicGateIDA, item.LogicGateIDB, item.APosition, item.BPosition,
+	).Scan(
+		&item.CompanyID,
+		&item.LogicGateRelationshipID,
+		&item.LogicGateIDA,
+		&item.LogicGateIDB,
+		&item.APosition,
+		&item.BPosition,
+		&item.CreatedTimestamp,
+	); err != nil {
+		return domain.LogicGateRelationship{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return domain.LogicGateRelationship{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) DeleteLogicGateRelationship(companyID, relationshipID string) error {
+	ctx := context.Background()
+	deleted, err := r.db.ExecContext(ctx,
+		`delete from logic_gate_relationships
+		 where company_id=$1 and logic_gate_relationship_id=$2`,
+		companyID, relationshipID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := deleted.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *PostgresRepo) AddLogicGateInformation(companyID, logicGateID, infoType, information, informationID string) (domain.LogicGateInformation, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.LogicGateInformation{}, err
+	}
+	defer tx.Rollback()
+
+	var exists bool
+	if err := tx.QueryRowContext(ctx,
+		`select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`,
+		companyID, logicGateID,
+	).Scan(&exists); err != nil {
+		return domain.LogicGateInformation{}, err
+	}
+	if !exists {
+		return domain.LogicGateInformation{}, ErrNotFound
+	}
+	if informationID == "" {
+		informationID = newUUIDv7String()
+	}
+
+	var item domain.LogicGateInformation
+	if err := tx.QueryRowContext(ctx,
+		`insert into logic_gate_information
+		 (company_id, information_id, logic_gate_id, type, information, created_timestamp, updated_timestamp)
+		 values ($1, $2, $3, $4::information_type, $5, now(), now())
+		 on conflict (company_id, information_id)
+		 do update set
+		   type=excluded.type,
+		   information=excluded.information,
+		   updated_timestamp=now()
+		 returning company_id, information_id, logic_gate_id, type::text, information, created_timestamp, updated_timestamp`,
+		companyID, informationID, logicGateID, infoType, information,
+	).Scan(
+		&item.CompanyID,
+		&item.InformationID,
+		&item.LogicGateID,
+		&item.Type,
+		&item.Information,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	); err != nil {
+		return domain.LogicGateInformation{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return domain.LogicGateInformation{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.LogicGateDetails, error) {
+	logicGate, err := r.GetLogicGate(companyID, logicGateID)
+	if err != nil {
+		return domain.LogicGateDetails{}, err
+	}
+
+	ctx := context.Background()
+	infoRows, err := r.db.QueryContext(ctx,
+		`select company_id, information_id, logic_gate_id, type::text, information, created_timestamp, updated_timestamp
+		 from logic_gate_information
+		 where company_id=$1 and logic_gate_id=$2
+		 order by updated_timestamp asc`,
+		companyID, logicGateID,
+	)
+	if err != nil {
+		return domain.LogicGateDetails{}, err
+	}
+	defer infoRows.Close()
+
+	information := make([]domain.LogicGateInformation, 0)
+	for infoRows.Next() {
+		var item domain.LogicGateInformation
+		if err := infoRows.Scan(
+			&item.CompanyID,
+			&item.InformationID,
+			&item.LogicGateID,
+			&item.Type,
+			&item.Information,
+			&item.CreatedTimestamp,
+			&item.UpdatedTimestamp,
+		); err != nil {
+			return domain.LogicGateDetails{}, err
+		}
+		information = append(information, item)
+	}
+	if err := infoRows.Err(); err != nil {
+		return domain.LogicGateDetails{}, err
+	}
+
+	relRows, err := r.db.QueryContext(ctx,
+		`select company_id, logic_gate_relationship_id, logic_gate_id_a, logic_gate_id_b, a_position::text, b_position::text, created_timestamp
+		 from logic_gate_relationships
+		 where company_id=$1 and (logic_gate_id_a=$2 or logic_gate_id_b=$2)
+		 order by created_timestamp asc`,
+		companyID, logicGateID,
+	)
+	if err != nil {
+		return domain.LogicGateDetails{}, err
+	}
+	defer relRows.Close()
+
+	relationships := make([]domain.LogicGateRelationship, 0)
+	for relRows.Next() {
+		var item domain.LogicGateRelationship
+		if err := relRows.Scan(
+			&item.CompanyID,
+			&item.LogicGateRelationshipID,
+			&item.LogicGateIDA,
+			&item.LogicGateIDB,
+			&item.APosition,
+			&item.BPosition,
+			&item.CreatedTimestamp,
+		); err != nil {
+			return domain.LogicGateDetails{}, err
+		}
+		relationships = append(relationships, item)
+	}
+	if err := relRows.Err(); err != nil {
+		return domain.LogicGateDetails{}, err
+	}
+
+	return domain.LogicGateDetails{
+		LogicGate:     logicGate,
+		Information:   information,
+		Relationships: relationships,
+	}, nil
+}
+
 func (r *PostgresRepo) CreateOperation(in CreateOperationInput) (domain.Operation, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)

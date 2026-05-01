@@ -13,6 +13,7 @@ This note explains how context linking currently works across frames/modules in 
 Shared event names:
 - `mangoos:frame-link-graph-updated`
 - `mangoos:node-map-selection-updated`
+- `mangoos:logic-gate-map-selection-updated`
 - `mangoos:explorer-context-updated`
 
 These are dispatched with `emitDashboardEvent(...)` as typed `CustomEvent`s.
@@ -45,6 +46,18 @@ Priority model currently implemented:
 4. Ignore events whose `mapWidgetID`/target does not match the current linked topology.
 
 This design makes view selection topology-aware (via links), scoped (via frame IDs), and resilient to stale events (via revisions and no-op guards).
+
+## 6.1 Logic Gate Map Linking
+
+Logic Gate Map participates in the same frame-link graph using kind `logic-map`.
+
+- Logic Gate Map writes scoped selection state to `logic-gate-map-state-v1:<companyID>:<mapWidgetID>`.
+- Logic Gate Map emits `mangoos:logic-gate-map-selection-updated`.
+- Company Explorer writes logic-gate context to `logic-gate-map-explorer-context-v1:<companyID>:<targetFrameID>`.
+- Editor prefers direct linked-map selection first, then Explorer fallback context.
+
+Junior engineer note:
+- Node and logic-gate contexts use separate storage keys/events so a node click cannot accidentally overwrite a logic-gate workflow, and vice versa.
 
 
 ## 7) Gaps identified by latency architecture contract

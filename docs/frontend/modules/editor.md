@@ -1,11 +1,13 @@
 # Editor Module
 
 ## Purpose
-The Editor module is the node-linked text workspace for MangoOS. It lets users view and edit structured text boxes that are persisted as `Text box` node information records.
+The Editor module is the linked text workspace for MangoOS. It lets users view and edit structured text boxes that are persisted as `Text box` records for the currently linked node or logic gate.
 
 ## Key Responsibilities
 - Resolve which Node Map frame this editor is linked to through the frame-link graph + frame registry.
+- Resolve which Logic Gate Map frame this editor is linked to through the same frame-link graph + frame registry.
 - Read the currently selected node from linked Node Map local state.
+- Read the currently selected logic gate from linked Logic Gate Map local state.
 - Load selected node details and extract text-box records from node information.
 - Render draggable/resizable text boxes inside the editor canvas.
 - Persist text-box create/move/resize/edit updates back to backend node information APIs.
@@ -18,9 +20,16 @@ The Editor module is the node-linked text workspace for MangoOS. It lets users v
 - **Explorer fallback context source:** editor can read explorer-driven node selection from `node-map-explorer-context-v1:<company_id>:<editor_widget_id>` when no direct map-state context is available.
 - **Backend read path:** `GET /v1/nodes/:node_id?company_id=...`.
 - **Backend write path:** `POST /v1/nodes/:node_id/information` for text-box payloads.
+- **Logic gate write path:** `POST /v1/logic-gates/:logic_gate_id/information` for text-box payloads.
 - **Backend node-title update path:** `PUT /v1/nodes/:node_id` with `{ company_id, title }`.
+- **Backend logic-gate header update path:** `PUT /v1/logic-gates/:logic_gate_id` with `{ company_id, header }`.
 - **Backend projection read path:** `GET /v1/nodes/:node_id/projection?company_id=...` (typed node projection rows for hot editor loads).
-- **Event sync hooks:** `EVENT_FRAME_LINK_GRAPH_UPDATED`, `EVENT_NODE_MAP_SELECTION_UPDATED`, `EVENT_EXPLORER_CONTEXT_UPDATED`, and `storage` events.
+- **Event sync hooks:** `EVENT_FRAME_LINK_GRAPH_UPDATED`, `EVENT_NODE_MAP_SELECTION_UPDATED`, `EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED`, `EVENT_EXPLORER_CONTEXT_UPDATED`, and `storage` events.
+
+## Logic Gate Context Update (2026-05-01)
+- When Editor is linked to a Logic Gate Map, the context header says `Logic Gate:` instead of `Node:`.
+- Logic-gate documents use the same text surface as node documents but persist to `logic_gate_information`.
+- This keeps UI and headless API behavior equivalent: agents can create/edit logic-gate notes without needing the visual editor.
 
 ## Semantic vs layout persistence policy (2026-04-27)
 - Editor information values are persisted server-side and served through typed node projection rows for hot-path loads.

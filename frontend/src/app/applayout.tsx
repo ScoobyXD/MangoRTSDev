@@ -391,7 +391,7 @@ interface FrameCardProps {
 const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nestedChildren, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked, edgeHit }) => {
   const Content = CONTENT_MAP[frame.kind];
   const theme = COLORWAYS[frame.theme ?? "teal"];
-  const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-map" || frame.kind === "editor" || frame.kind === "node-doc";
+  const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-map" || frame.kind === "logic-map" || frame.kind === "editor" || frame.kind === "node-doc";
   const isEdgeToEdgeContentFrame = isNodesFrame || frame.kind === "company-explorer";
   const left = frame.x * stepX;
   const top = frame.y * stepY;

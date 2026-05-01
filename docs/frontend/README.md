@@ -21,6 +21,11 @@ This folder contains architecture, product behavior, and migration documentation
   - API contracts
   - persistence model
   - file ownership for node runtime
+- `docs/frontend/modules/logic-gates.md`
+  - Logic Gate Map behavior
+  - Input/Output relationship semantics
+  - API-first/headless contracts
+  - Editor and Company Explorer linking behavior
 - `docs/frontend/modules/company-explorer.md`
   - Company Explorer standalone behavior
   - 3-pane responsibilities (tree/details/context)
