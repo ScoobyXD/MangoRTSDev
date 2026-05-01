@@ -7,7 +7,7 @@ import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMuta
 import type { NodeInformation } from "../node-map/shared";
 
 // Editor module: node-linked document canvas with a single Google-Doc-like editable surface.
-export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
+export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -256,9 +256,17 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     { id: "metadata", label: "Metadata" },
     { id: "history", label: "History" },
   ] as const), []);
+  const isDarkTheme = theme === "dark";
+  const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
+  const surfaceText = isDarkTheme ? "#f4f7fa" : "#0d1a1e";
+  const tabBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)";
+  const tabSelectedBackground = isDarkTheme ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.98)";
+  const strokeColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(3,25,30,0.22)";
+  const ruleColor = isDarkTheme ? "rgba(255,255,255,0.16)" : "rgba(3,25,30,0.14)";
+  const panelBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 255, 255, 0.8)";
 
   return (
-    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateRows: "auto 1fr", background: "#ffffff", color: "#0d1a1e", overflow: "hidden", userSelect: "text", cursor: "text" }}>
+    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateRows: "auto 1fr", background: surfaceBackground, color: surfaceText, overflow: "hidden", userSelect: "text", cursor: "text" }}>
       <div style={{ position: "relative", minHeight: 0, cursor: "text" }}>
       {linkedNodeID.trim().length > 0 && (
         <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 2 }}>
@@ -266,14 +274,14 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             {tabItems.map((tab) => {
               const selected = activeTab === tab.id;
               return (
-                <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} style={{ border: `1px solid ${selected ? accent : "rgba(3,25,30,0.22)"}`, background: selected ? "rgba(255,255,255,0.98)" : "rgba(255,255,255,0.86)", color: "#0d1a1e", fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 10px", borderRadius: 4, cursor: "pointer" }}>
+                <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} style={{ border: `1px solid ${selected ? accent : strokeColor}`, background: selected ? tabSelectedBackground : tabBackground, color: surfaceText, fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 10px", borderRadius: 4, cursor: "pointer" }}>
                   {tab.label}
                 </button>
               );
             })}
           </div>
           
-          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 21, borderBottom: "1px solid rgba(3,25,30,0.14)", transform: "translateY(8px)", pointerEvents: "none", zIndex: 1 }} />
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 21, borderBottom: `1px solid ${ruleColor}`, transform: "translateY(8px)", pointerEvents: "none", zIndex: 1 }} />
           {activeTab === "editor" && (
             <div style={{ display: "grid", gap: 8 }}>
               <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.12em", color: accent, cursor: "text" }}>
@@ -343,7 +351,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>Metadata</div>
               <div style={{ display: "grid", gap: 4 }}>
                 {linkedNodeMetadataRows.map((row) => (
-                  <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: "rgba(255, 255, 255, 0.8)", border: "1px solid rgba(3,25,30,0.14)", borderRadius: 6, padding: "4px 6px" }}>
+                  <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "4px 6px" }}>
                     <span style={{ opacity: 0.75 }}>{row.label}</span>
                     <strong>{row.value}</strong>
                   </div>
@@ -355,7 +363,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           {activeTab === "history" && linkedNodeHistoryRows.length > 0 && (
             <section style={{ display: "grid", gap: 6, maxWidth: 640 }}>
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>History</div>
-              <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(3,25,30,0.14)", borderRadius: 6, padding: "6px 8px 6px 22px" }}>
+              <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "6px 8px 6px 22px" }}>
                 {linkedNodeHistoryRows.map((row, index) => <li key={`${row}-${index}`}>{row}</li>)}
               </ul>
             </section>
