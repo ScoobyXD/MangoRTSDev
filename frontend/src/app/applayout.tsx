@@ -161,7 +161,7 @@ function persistFrameLinks(next: FrameLinkEdge[]) {
 
 // Load saved dashboard views/tabs with legacy widget compatibility fallback.
 function loadViews(): { tabs: ViewTab[]; activeId: string } {
-  const fallback = { tabs: [{ id: "view-default", name: "Main View", frames: INITIAL_WIDGETS }], activeId: "view-default" };
+  const fallback = { tabs: [{ id: "view-default", name: "Mango Node View", frames: INITIAL_WIDGETS }], activeId: "view-default" };
   try {
     const raw = localStorage.getItem(VIEWS_KEY);
     if (!raw) return fallback;
@@ -943,6 +943,14 @@ const App: React.FC = () => {
   }, [tabs.length, activeTabId]);
 
 
+  const openMangoNodeView = useCallback((tabID: string) => {
+    const framesForView = createMangoNodeViewFrames();
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Mango Node View", frames: framesForView } : tab)));
+    setFrameLinks((previous) => mergeLinkPlan(previous, computeLinkPlan(framesForView)));
+    setActiveTabId(tabID);
+    setEditMode(true);
+  }, []);
+
   const saveCurrentAsTemplate = useCallback((tabID: string) => {
     const source = tabs.find((tab) => tab.id === tabID);
     if (!source) return;
@@ -1285,6 +1293,7 @@ const App: React.FC = () => {
         <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
+          <button style={menuBtnBase} onClick={() => { openMangoNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Mango Node View</button>
           <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>
         </FrameRightClickMenu>
       )}
