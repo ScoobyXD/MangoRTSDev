@@ -117,16 +117,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     element.focus();
     const selection = window.getSelection();
     if (!selection) return;
-    const range = pendingTitleCaretRangeRef.current;
-    const isRangeInsideTitle = Boolean(range && element.contains(range.commonAncestorContainer));
-    const nextRange = isRangeInsideTitle && range ? range : document.createRange();
-    if (!isRangeInsideTitle || !range) {
-      nextRange.selectNodeContents(element);
-      nextRange.collapse(false);
-    }
+    const nextRange = document.createRange();
+    nextRange.selectNodeContents(element);
+    nextRange.collapse(false);
     selection.removeAllRanges();
     selection.addRange(nextRange);
-    pendingTitleCaretRangeRef.current = null;
   }, [isEditingTitle]);
 
   useEffect(() => {
@@ -137,7 +132,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     if (!selection) return;
     const range = document.createRange();
     range.selectNodeContents(element);
-    range.collapse((editorDocRef.current?.textContent ?? "").length > 0);
+    range.collapse(false);
     selection.removeAllRanges();
     selection.addRange(range);
   }, [linkedNodeID]);
@@ -375,6 +370,18 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             contentEditable
             suppressContentEditableWarning
             spellCheck
+            onMouseDown={(event) => {
+              const element = event.currentTarget;
+              element.focus();
+              const selection = window.getSelection();
+              if (!selection) return;
+              const range = document.createRange();
+              range.selectNodeContents(element);
+              range.collapse(false);
+              selection.removeAllRanges();
+              selection.addRange(range);
+              event.preventDefault();
+            }}
             onInput={(event) => { documentDraftRef.current = event.currentTarget.textContent ?? ""; }}
             onBlur={(event) => {
               const nextText = event.currentTarget.textContent ?? "";
