@@ -116,11 +116,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     element.focus();
     const selection = window.getSelection();
     if (!selection) return;
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    range.collapse(false);
+    const nextRange = document.createRange();
+    nextRange.selectNodeContents(element);
+    nextRange.collapse(false);
     selection.removeAllRanges();
-    selection.addRange(range);
+    selection.addRange(nextRange);
   }, [isEditingTitle]);
 
   useEffect(() => {
@@ -131,7 +131,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     if (!selection) return;
     const range = document.createRange();
     range.selectNodeContents(element);
-    range.collapse((editorDocRef.current?.textContent ?? "").length > 0);
+    range.collapse(false);
     selection.removeAllRanges();
     selection.addRange(range);
   }, [linkedNodeID]);
@@ -257,8 +257,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   ] as const), []);
 
   return (
-    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateRows: "auto 1fr", background: "#ffffff", color: "#0d1a1e", overflow: "hidden", userSelect: "text" }}>
-      <div style={{ position: "relative", minHeight: 0 }}>
+    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateRows: "auto 1fr", background: "#ffffff", color: "#0d1a1e", overflow: "hidden", userSelect: "text", cursor: "text" }}>
+      <div style={{ position: "relative", minHeight: 0, cursor: "text" }}>
       {linkedNodeID.trim().length > 0 && (
         <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 2 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, paddingLeft: 106 }}>
@@ -281,10 +281,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                   ref={editingTitleRef}
                   contentEditable={isEditingTitle}
                   suppressContentEditableWarning
-                  onClick={() => {
+                  onMouseDown={(event) => {
                     if (!isEditingTitle) {
                       editingTitleDraftRef.current = linkedNodeTitle || "new node";
                       setIsEditingTitle(true);
+                      event.preventDefault();
                     }
                   }}
                   onInput={(event) => {
@@ -309,7 +310,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                       setIsEditingTitle(false);
                     }
                   }}
-                  style={{ outline: "none" }}
+                  style={{ outline: "none", cursor: "text" }}
                 >
                   {linkedNodeTitle || "\u00A0"}
                 </span>
@@ -344,12 +345,24 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       )}
 
       {linkedNodeID.trim().length > 0 && (
-        <div style={{ position: "absolute", inset: 0, padding: "86px 24px 24px" }}>
+        <div style={{ position: "absolute", inset: 0, padding: "86px 24px 24px", cursor: "text" }}>
           <div
             ref={editorDocRef}
             contentEditable
             suppressContentEditableWarning
             spellCheck
+            onMouseDown={(event) => {
+              const element = event.currentTarget;
+              element.focus();
+              const selection = window.getSelection();
+              if (!selection) return;
+              const range = document.createRange();
+              range.selectNodeContents(element);
+              range.collapse(false);
+              selection.removeAllRanges();
+              selection.addRange(range);
+              event.preventDefault();
+            }}
             onInput={(event) => { documentDraftRef.current = event.currentTarget.textContent ?? ""; }}
             onBlur={(event) => {
               const nextText = event.currentTarget.textContent ?? "";
