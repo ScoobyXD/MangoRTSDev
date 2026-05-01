@@ -5,7 +5,7 @@ import { type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
-import { getNodeRecordSingleFlight, invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
+import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
@@ -252,24 +252,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     setRelationships(projectVisibleRelationships(graphNodes, payload.relationships ?? []));
   };
 
-  // Node details loader used by right-side details panel and info editing actions.
-  const loadDetails = async (nodeID: string) => {
-    if (!nodeID) {
-      setDetails(null);
-      return;
-    }
-    setLoading(true);
-    setError("");
-    try {
-      const payload = await getNodeRecordSingleFlight(apiBase, companyID, nodeID);
-      setDetails(payload);
-    } catch (err) {
-      setDetails(null);
-      setError(err instanceof Error ? err.message : "failed_to_load_node");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
     void loadNodes();
@@ -299,20 +281,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     setRelationshipDraft(null);
   }, [nodes, relationshipDraft]);
 
-  useEffect(() => {
-    // Hot-path guard: selection changes happen frequently while dragging/multi-selecting.
-    // We only need node details reads when the details panel is open for the selected node.
-    if (!selectedNodeID) return;
-    if (detailsPanelNodeID !== selectedNodeID) return;
-    void loadDetails(selectedNodeID);
-  }, [selectedNodeID, detailsPanelNodeID]);
-
-  useEffect(() => {
-    if (!detailsPanelNodeID) return;
-    // Fetch details for whatever node the panel is pinned to; this keeps panel data fresh
-    // without forcing read traffic for every canvas selection event.
-    void loadDetails(detailsPanelNodeID);
-  }, [detailsPanelNodeID]);
 
   useEffect(() => {
     if (!nodeResizeState) return;
@@ -621,7 +589,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
         [relationship.node_relationship_id]: payload.anchor,
       }));
 
-      await loadDetails(sourceNodeID);
       loadGraphRelationshipsFromSnapshot([...nodes, node]);
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
@@ -645,7 +612,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       if (details?.node.node_id === nodeID) {
         setDetails((previous) => (previous ? { ...previous, node: updated } : previous));
       }
-      if (detailsPanelNodeID === nodeID) await loadDetails(nodeID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_node");
     }
@@ -673,8 +639,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       [relationship.node_relationship_id]: payload.anchor,
     }));
     loadGraphRelationshipsFromSnapshot(nodes);
-    await loadDetails(selectedNodeID);
-    if (detailsPanelNodeID && detailsPanelNodeID !== selectedNodeID) await loadDetails(detailsPanelNodeID);
   };
 
   // Delete-node action with selection/context cleanup and snapshot refresh.
@@ -763,8 +727,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       });
 
       loadGraphRelationshipsFromSnapshot(nodes);
-      await loadDetails(selectedNodeID);
-      if (detailsPanelNodeID && detailsPanelNodeID !== selectedNodeID) await loadDetails(detailsPanelNodeID);
 
       if (summary.failed.length > 0) {
         const failure = summary.failed[0];
@@ -787,26 +749,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     }
   };
 
-  const addInformation = async (nodeID: string) => {
-    if (!nodeID || !trimOrEmpty(infoDraft)) return;
-    setError("");
-    try {
-      await requestJSON<NodeInformation>(`/v1/nodes/${nodeID}/information`, {
-        method: "POST",
-        body: JSON.stringify({
-          company_id: companyID,
-          type: infoType,
-          information: trimOrEmpty(infoDraft),
-        }),
-      });
-      invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
-      setInfoDraft("");
-      await loadDetails(nodeID);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_add_node_information");
-    }
-  };
-
   useNodeMapDeleteKeyboardControl({
     canvasActive,
     selectedNodeID,
@@ -815,34 +757,12 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     setConfirmDelete,
   });
 
-  useNodeMapPanelControls({
-    panelDrag,
-    panelResize,
-    panelRect,
-    panelMinWidth: PANEL_MIN_WIDTH,
-    panelMinHeight: PANEL_MIN_HEIGHT,
-    viewportRef,
-    setPanelDrag,
-    setPanelResize,
-    setPanelRect,
-  });
-
-  const detailsPanelNode = useMemo(() => nodes.find((item) => item.node_id === detailsPanelNodeID) ?? null, [nodes, detailsPanelNodeID]);
   const nodeByID = useMemo(() => Object.fromEntries(nodes.map((node) => [node.node_id, node])), [nodes]);
   const activeRoleNodeID = useMemo(() => {
     if (selectedNodeIDs.size === 1) return Array.from(selectedNodeIDs)[0] ?? "";
     return selectedNodeID;
   }, [selectedNodeIDs, selectedNodeID]);
 
-  useEffect(() => {
-    if (!detailsPanelNode || !viewportRef.current) return;
-    const bounds = viewportRef.current.getBoundingClientRect();
-    setPanelRect((previous) => ({
-      ...previous,
-      x: previous.x === 0 ? Math.max(0, bounds.width - previous.width - 12) : clamp(previous.x, 0, Math.max(0, bounds.width - previous.width - 8)),
-      y: clamp(previous.y, 8, Math.max(8, bounds.height - 56)),
-    }));
-  }, [detailsPanelNode]);
 
   const getAnchorPoint = (nodeID: string, side: NodeDirection) => {
     const pos = nodePositions[nodeID];
@@ -1386,7 +1306,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                 }}
                 onDoubleClick={(event) => {
                   event.stopPropagation();
-                  setDetailsPanelNodeID(node.node_id);
+                  // legacy details popup removed
                 }}
                 onContextMenu={(event) => {
                   event.preventDefault();
@@ -1836,119 +1756,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           </div>
         )}
 
-        {!!detailsPanelNode && (
-          <div
-            className="node-details-panel"
-            style={{
-              position: "absolute",
-              top: panelRect.y,
-              left: panelRect.x,
-              width: panelRect.width,
-              height: panelRect.height,
-              boxSizing: "border-box",
-              overflowY: "auto",
-              overflowX: "hidden",
-              zIndex: 35,
-              borderRadius: 16,
-              border: "1px solid rgba(255,255,255,0.35)",
-              backgroundColor: "rgba(157, 224, 227, 0.72)",
-              background: `
-                linear-gradient(
-                  135deg,
-                  rgba(255,255,255,0.18) 0%,
-                  rgba(255,255,255,0.08) 50%,
-                  rgba(255,255,255,0.14) 100%
-                )
-              `,
-              backdropFilter: "blur(30px) saturate(180%)",
-              WebkitBackdropFilter: "blur(30px) saturate(180%)",
-              boxShadow: `
-                0 8px 32px rgba(0,0,0,0.18),
-                inset 0 1px 0 rgba(255,255,255,0.6),
-                inset 0 -1px 0 rgba(255,255,255,0.15)
-              `,
-              padding: 12,
-              display: "grid",
-              gap: 8,
-              fontFamily: "'Space Grotesk', system-ui, sans-serif",
-              color: "#1a1a1a",
-              letterSpacing: "0.01em",
-            }}
-          >
-            <div
-              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, cursor: "move" }}
-              onPointerDown={(event) => {
-                event.stopPropagation();
-                setPanelDrag({ pointerID: event.pointerId, startX: event.clientX, startY: event.clientY, originX: panelRect.x, originY: panelRect.y });
-              }}
-            >
-              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.14em" }}>{getNodeTitle(detailsPanelNode)}</div>
-              <button onClick={() => setDetailsPanelNodeID("")} style={{ border: "1px solid rgba(0,0,0,0.15)", background: "rgba(255,255,255,0.4)", borderRadius: 6, cursor: "pointer", width: 22, height: 22, fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, lineHeight: 1, padding: 0 }}>✕</button>
-            </div>
-            <div style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 10, fontWeight: 500, opacity: 0.6, letterSpacing: "0.02em" }}>ID: {detailsPanelNode.node_id}</div>
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", gap: 6, alignItems: "center", minWidth: 0 }}>
-              <input value={infoDraft} onChange={(e) => setInfoDraft(e.target.value)} placeholder="Add node information" style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 13, fontWeight: 400, padding: "6px 10px", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 6, background: "rgba(255,255,255,0.45)", outline: "none", minWidth: 0, width: "100%" }} />
-              <select value={infoType} onChange={(e) => setInfoType(e.target.value as (typeof INFO_TYPES)[number])} style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, fontWeight: 500, padding: "6px 8px", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 6, background: "rgba(255,255,255,0.45)", cursor: "pointer", maxWidth: "100%" }}>
-                {INFO_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
-              </select>
-              <button onClick={() => { void addInformation(detailsPanelNode.node_id); }} style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, fontWeight: 600, padding: "6px 10px", border: "1px solid rgba(0,0,0,0.15)", borderRadius: 6, background: "rgba(255,255,255,0.55)", cursor: "pointer", letterSpacing: "0.02em", whiteSpace: "nowrap" }}>Info</button>
-            </div>
-            <button onClick={() => { void deleteNode(detailsPanelNode.node_id); }} style={{ justifySelf: "start", fontFamily: "'Space Grotesk', sans-serif", fontSize: 12, fontWeight: 600, padding: "6px 12px", border: "1px solid rgba(180,0,30,0.25)", borderRadius: 6, background: "rgba(255,255,255,0.45)", color: "#b00020", cursor: "pointer", letterSpacing: "0.02em" }}>Delete node</button>
-            {loading && <div style={{ ...divider, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>Syncing with API...</div>}
-            {error && <div style={{ ...divider, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: "#b00020" }}>Error: {error}</div>}
-            <div>
-              <div style={{ ...divider, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.18em", opacity: 0.7, marginBottom: 4 }}>[ relationships ]</div>
-              <div style={{ display: "grid", gap: 2, maxHeight: 110, overflow: "auto" }}>
-                {(details?.node.node_id === detailsPanelNode.node_id ? details.relationships : []).length === 0
-                  ? <div style={{ ...divider, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, opacity: 0.55 }}>No relationships</div>
-                  : (details?.relationships ?? []).map((rel) => (
-                    <div key={rel.node_relationship_id} style={{ ...divider, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", columnGap: 8 }}>
-                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {rel.node_id_a.slice(0, 6)}({rel.a_position}) → {rel.node_id_b.slice(0, 6)}({rel.b_position})
-                      </div>
-                      <button
-                        onClick={() => { void deleteRelationships([rel.node_relationship_id]); }}
-                        style={{ border: "1px solid rgba(180,0,30,0.25)", background: "rgba(255,255,255,0.55)", color: "#b00020", borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: "pointer", padding: "2px 6px" }}
-                      >
-                        Snip
-                      </button>
-                    </div>
-                  ))}
-              </div>
-            </div>
-            <div>
-              <div style={{ ...divider, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.18em", opacity: 0.7, marginBottom: 4 }}>[ information ]</div>
-              <div style={{ display: "grid", gap: 2, maxHeight: 130, overflow: "auto" }}>
-                {(details?.node.node_id === detailsPanelNode.node_id ? details.information : []).length === 0
-                  ? <div style={{ ...divider, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, opacity: 0.55 }}>No information</div>
-                  : (details?.information ?? []).map((info) => (
-                    <div key={info.information_id} style={{ ...divider, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, fontWeight: 500, whiteSpace: "normal", overflowWrap: "anywhere" }}>
-                      {info.type}: {info.information}
-                    </div>
-                  ))}
-              </div>
-            </div>
-            {panelResizeHandles.map((handle) => (
-              <div
-                key={handle.key}
-                style={{ position: "absolute", ...handle.style, cursor: handle.cursor, zIndex: 2 }}
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  setPanelResize({
-                    pointerID: event.pointerId,
-                    startX: event.clientX,
-                    startY: event.clientY,
-                    originX: panelRect.x,
-                    originY: panelRect.y,
-                    originW: panelRect.width,
-                    originH: panelRect.height,
-                    edges: handle.edges,
-                  });
-                }}
-              />
-            ))}
-          </div>
-        )}
+
 
         {selectedNodeIDs.size > 1 && !selectionBox.active && (
           <div
