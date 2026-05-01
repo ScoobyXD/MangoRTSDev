@@ -325,6 +325,12 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_id_and_type_required")
 			return
 		}
+		if strings.TrimSpace(req.Information) == "" {
+			// UI clients and future headless agents share this endpoint. Guarding here keeps
+			// blank editor blurs from creating hot-path history/projection noise in Postgres.
+			writeError(w, http.StatusBadRequest, "information_required")
+			return
+		}
 
 		item, err := s.repo.AddNodeInformation(req.CompanyID, nodeID, req.Type, req.Information, req.InformationID)
 		if errors.Is(err, store.ErrNotFound) {
@@ -720,6 +726,12 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		}
 		if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Type) == "" {
 			writeError(w, http.StatusBadRequest, "company_id_and_type_required")
+			return
+		}
+		if strings.TrimSpace(req.Information) == "" {
+			// Keep the API contract strict: empty text boxes should not become durable
+			// logic_gate_information rows, no matter whether the caller is UI or an agent.
+			writeError(w, http.StatusBadRequest, "information_required")
 			return
 		}
 		item, err := s.repo.AddLogicGateInformation(req.CompanyID, logicGateID, req.Type, req.Information, req.InformationID)

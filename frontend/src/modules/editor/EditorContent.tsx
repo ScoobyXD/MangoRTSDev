@@ -47,9 +47,15 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     if (!linkedNodeID) return;
     // Avoid creating projection/history rows when nothing changed.
     if (nextText === persistedDocumentRef.current) return;
-    // For brand new editor surfaces, skip empty writes so selecting an entity
-    // does not create blank records by default.
-    if (!documentInformationID && nextText.trim().length === 0) return;
+    if (nextText.trim().length === 0) {
+      // Blank editor content is UI state only. Never persist it, because one empty
+      // row per accidental blur becomes expensive noise at company/agent scale.
+      documentDraftRef.current = persistedDocumentRef.current;
+      if (editorDocRef.current && editorDocRef.current.textContent !== persistedDocumentRef.current) {
+        editorDocRef.current.textContent = persistedDocumentRef.current;
+      }
+      return;
+    }
     const stableInformationID = documentInformationID
       || (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
@@ -339,20 +345,21 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           setLinkedNodeTitle(getLogicGateTitle({ header: details.logic_gate.header, title: details.logic_gate.header }));
           const nonText = details.information.filter((item) => item.type !== "Text box");
           const textBoxes = details.information.filter((item) => item.type === "Text box");
+          const nonBlankTextBoxes = textBoxes.filter((item) => item.information.trim().length > 0);
           setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
           setLinkedNodeMetadataRows([
             { label: "Logic Gate ID", value: details.logic_gate.logic_gate_id },
             { label: "Created", value: details.logic_gate.created_timestamp },
             { label: "Relationships", value: String(details.relationships.length) },
             { label: "Information records", value: String(details.information.length) },
-            { label: "Text boxes", value: String(textBoxes.length) },
+            { label: "Text boxes", value: String(nonBlankTextBoxes.length) },
           ]);
           const historyRows = [
             details.logic_gate.created_timestamp ? `Logic gate created at ${details.logic_gate.created_timestamp}` : "Logic gate created",
             ...details.information.slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`),
           ];
           setLinkedNodeHistoryRows(historyRows);
-          const first = textBoxes.find((item) => item.information.trim().length > 0) ?? textBoxes[0];
+          const first = nonBlankTextBoxes[0];
           const initialDocument = first?.information ?? "";
           documentDraftRef.current = initialDocument;
           persistedDocumentRef.current = initialDocument;

@@ -93,6 +93,7 @@ create table if not exists node_information (
   information text not null,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
+  constraint node_information_nonblank_chk check (btrim(information) <> ''),
   primary key (company_id, information_id),
   foreign key (company_id, node_id) references nodes (company_id, node_id)
 );
@@ -105,6 +106,7 @@ create table if not exists node_projection_table (
   information text not null,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
+  constraint node_projection_table_nonblank_chk check (btrim(information) <> ''),
   primary key (company_id, node_id, information_id),
   foreign key (company_id, node_id) references nodes (company_id, node_id)
 );
@@ -147,6 +149,7 @@ create table if not exists logic_gate_information (
   information text not null,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
+  constraint logic_gate_information_nonblank_chk check (btrim(information) <> ''),
   primary key (company_id, information_id),
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
 );
@@ -199,6 +202,7 @@ create table if not exists operations (
 - Information (Text) -> `node_information.information`
 - Created Timestamp (TIMESTAMPTZ) -> `node_information.created_timestamp`
 - Updated Timestamp (TIMESTAMPTZ) -> `node_information.updated_timestamp`
+- Constraint: `node_information_nonblank_chk` rejects whitespace-only information.
 
 ### Logic Gate Schema
 
@@ -228,6 +232,7 @@ create table if not exists operations (
 - Information (Text) -> `logic_gate_information.information`
 - Created Timestamp (TIMESTAMPTZ) -> `logic_gate_information.created_timestamp`
 - Updated Timestamp (TIMESTAMPTZ) -> `logic_gate_information.updated_timestamp`
+- Constraint: `logic_gate_information_nonblank_chk` rejects whitespace-only information.
 
 ### Operation
 

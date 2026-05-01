@@ -163,6 +163,63 @@ func TestLogicGateCRUDRelationshipAndInformationAPI(t *testing.T) {
 	}
 }
 
+func TestInformationAPIsRejectBlankInformation(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-no-blank-information-test"
+
+	node, err := repo.CreateNode(companyID, "node with editor")
+	if err != nil {
+		t.Fatalf("CreateNode() error = %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "logic gate with editor")
+	if err != nil {
+		t.Fatalf("CreateLogicGate() error = %v", err)
+	}
+
+	postBlank := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{
+			"company_id":     companyID,
+			"type":           "Text box",
+			"information":    " \n\t ",
+			"information_id": "44444444-4444-4444-8444-444444444444",
+		})
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	nodeRec := postBlank("/v1/nodes/" + node.NodeID + "/information")
+	if nodeRec.Code != http.StatusBadRequest {
+		t.Fatalf("blank node information status = %d, want %d body=%s", nodeRec.Code, http.StatusBadRequest, nodeRec.Body.String())
+	}
+	logicGateRec := postBlank("/v1/logic-gates/" + logicGate.LogicGateID + "/information")
+	if logicGateRec.Code != http.StatusBadRequest {
+		t.Fatalf("blank logic gate information status = %d, want %d body=%s", logicGateRec.Code, http.StatusBadRequest, logicGateRec.Body.String())
+	}
+
+	nodeDetails, err := repo.GetNodeDetails(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetNodeDetails() error = %v", err)
+	}
+	if len(nodeDetails.Information) != 0 {
+		t.Fatalf("blank node information was stored; got %d rows", len(nodeDetails.Information))
+	}
+	logicGateDetails, err := repo.GetLogicGateDetails(companyID, logicGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("GetLogicGateDetails() error = %v", err)
+	}
+	if len(logicGateDetails.Information) != 0 {
+		t.Fatalf("blank logic gate information was stored; got %d rows", len(logicGateDetails.Information))
+	}
+}
+
 func TestUpdateNodeTitleViaPut(t *testing.T) {
 	t.Parallel()
 

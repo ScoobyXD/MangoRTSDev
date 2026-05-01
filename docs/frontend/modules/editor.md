@@ -29,6 +29,7 @@ The Editor module is the linked text workspace for MangoOS. It lets users view a
 ## Logic Gate Context Update (2026-05-01)
 - When Editor is linked to a Logic Gate Map, the context header says `Logic Gate:` instead of `Node:`.
 - Logic-gate documents use the same text surface as node documents but persist to `logic_gate_information`.
+- Blank/whitespace-only editor contents are never sent as information writes; old blank logic-gate text rows are ignored when choosing the document to display.
 - This keeps UI and headless API behavior equivalent: agents can create/edit logic-gate notes without needing the visual editor.
 
 ## Semantic vs layout persistence policy (2026-04-27)

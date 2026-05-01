@@ -134,6 +134,15 @@ These guards enforce:
 - only Parent<->Child or Peer<->Peer relationship position pairs
 - no self-relationships (`node_id_a <> node_id_b`)
 
+For existing databases that were created before blank-information guards were added, run:
+
+```powershell
+psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260501_nonblank_information_guards.sql
+```
+
+These guards reject new whitespace-only `node_information`, `node_projection_table`, and
+`logic_gate_information` rows while leaving any old accidental blank rows untouched.
+
 ## API endpoints (MVP canonical set)
 
 - `GET /healthz`

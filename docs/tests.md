@@ -155,6 +155,7 @@ Use this checklist format and keep it complete.
   - ordered context delta feed returns persisted event rows after sequence (`GET /v1/workspace/context-deltas?after_sequence=`)
   - logic gate relationship position-pair legality helper (Input/Output or Output/Input only)
   - logic gate create/read/information/relationship API flow
+  - node and logic-gate information APIs reject blank/whitespace-only `information` so empty editor blurs do not persist rows
 
 ### Integration tests
 - [ ] None committed yet (to be added)

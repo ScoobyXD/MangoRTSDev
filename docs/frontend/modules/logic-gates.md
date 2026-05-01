@@ -25,6 +25,7 @@ Endpoints used:
 - `DELETE /v1/logic-gates/:logic_gate_id?company_id=...`
 - `POST /v1/logic-gates/:logic_gate_id/information`
   - payload: `{ company_id, type, information, information_id? }`
+  - `information` must contain non-whitespace text; blank editor blurs are rejected by the API and DB guard.
 - `GET /v1/logic-gate-relationships?company_id=...`
 - `POST /v1/logic-gate-relationships`
   - payload: `{ company_id, logic_gate_id_a, logic_gate_id_b, a_position, b_position }`
@@ -77,4 +78,3 @@ Primary files:
 - `frontend/src/modules/logic-gate-map/relationshipProjection.ts`
 - `frontend/src/modules/logic-gate-map/shared.ts`
 - `frontend/src/modules/logic-gate-map/LogicGateRecordStore.ts`
-
