@@ -73,6 +73,16 @@ type LogicGateInformation struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
+type LogicGateProjection struct {
+	CompanyID        string    `json:"company_id"`
+	LogicGateID      string    `json:"logic_gate_id"`
+	Type             string    `json:"type"`
+	Information      string    `json:"information"`
+	InformationID    string    `json:"information_id"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
 type LogicGateDetails struct {
 	LogicGate     LogicGate               `json:"logic_gate"`
 	Information   []LogicGateInformation  `json:"information"`

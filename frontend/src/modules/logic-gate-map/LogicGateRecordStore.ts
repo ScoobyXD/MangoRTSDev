@@ -1,7 +1,26 @@
 import { LogicGateDetails } from "./shared";
 
+export type LogicGateProjectionItem = {
+  company_id: string;
+  logic_gate_id: string;
+  information_id: string;
+  type: string;
+  information: string;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
+type LogicGateProjectionResponse = {
+  company_id: string;
+  logic_gate_id: string;
+  items: LogicGateProjectionItem[];
+};
+
 const detailsCache = new Map<string, LogicGateDetails>();
 const detailsInflight = new Map<string, Promise<LogicGateDetails>>();
+
+const projectionCache = new Map<string, LogicGateProjectionItem[]>();
+const projectionInflight = new Map<string, Promise<LogicGateProjectionItem[]>>();
 
 function key(apiBase: string, companyID: string, logicGateID: string): string {
   return `${apiBase}:${companyID}:${logicGateID}`;
@@ -17,7 +36,9 @@ async function requestJSON<T>(apiBase: string, path: string, init?: RequestInit)
 }
 
 export function invalidateLogicGateRecordStoreCaches(apiBase: string, companyID: string, logicGateID: string): void {
-  detailsCache.delete(key(apiBase, companyID, logicGateID));
+  const cacheKey = key(apiBase, companyID, logicGateID);
+  detailsCache.delete(cacheKey);
+  projectionCache.delete(cacheKey);
 }
 
 export async function getLogicGateRecordSingleFlight(apiBase: string, companyID: string, logicGateID: string): Promise<LogicGateDetails> {
@@ -37,6 +58,27 @@ export async function getLogicGateRecordSingleFlight(apiBase: string, companyID:
       throw error;
     });
   detailsInflight.set(cacheKey, promise);
+  return promise;
+}
+
+export async function getLogicGateInformationProjectionSingleFlight(apiBase: string, companyID: string, logicGateID: string): Promise<LogicGateProjectionItem[]> {
+  const cacheKey = key(apiBase, companyID, logicGateID);
+  const cached = projectionCache.get(cacheKey);
+  if (cached) return cached;
+  const inflight = projectionInflight.get(cacheKey);
+  if (inflight) return inflight;
+  const promise = requestJSON<LogicGateProjectionResponse>(apiBase, `/v1/logic-gates/${logicGateID}/projection?company_id=${encodeURIComponent(companyID)}`)
+    .then((payload) => {
+      const items = payload.items ?? [];
+      projectionCache.set(cacheKey, items);
+      projectionInflight.delete(cacheKey);
+      return items;
+    })
+    .catch((error) => {
+      projectionInflight.delete(cacheKey);
+      throw error;
+    });
+  projectionInflight.set(cacheKey, promise);
   return promise;
 }
 

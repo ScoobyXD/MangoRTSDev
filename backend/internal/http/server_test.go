@@ -163,6 +163,73 @@ func TestLogicGateCRUDRelationshipAndInformationAPI(t *testing.T) {
 	}
 }
 
+func TestLogicGateInformationProjectionAPIKeepsLatestValueAndHistory(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-logic-gate-projection-test"
+
+	logicGate, err := repo.CreateLogicGate(companyID, "logic gate with projected notes")
+	if err != nil {
+		t.Fatalf("CreateLogicGate() error = %v", err)
+	}
+
+	postInformation := func(value string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{
+			"company_id":     companyID,
+			"type":           "Text box",
+			"information":    value,
+			"information_id": "66666666-6666-4666-8666-666666666666",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/logic-gates/"+logicGate.LogicGateID+"/information", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST logic-gate information status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+		}
+	}
+
+	postInformation("first logic gate note")
+	postInformation("second logic gate note")
+
+	projectionReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+logicGate.LogicGateID+"/projection?company_id="+companyID, nil)
+	projectionRec := httptest.NewRecorder()
+	handler.ServeHTTP(projectionRec, projectionReq)
+	if projectionRec.Code != http.StatusOK {
+		t.Fatalf("GET logic-gate projection status = %d, want %d body=%s", projectionRec.Code, http.StatusOK, projectionRec.Body.String())
+	}
+	var projectionPayload struct {
+		Items []struct {
+			InformationID string `json:"information_id"`
+			Information   string `json:"information"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(projectionRec.Body).Decode(&projectionPayload); err != nil {
+		t.Fatalf("decode projection: %v", err)
+	}
+	if len(projectionPayload.Items) != 1 {
+		t.Fatalf("projection item count = %d, want 1", len(projectionPayload.Items))
+	}
+	if projectionPayload.Items[0].InformationID != "66666666-6666-4666-8666-666666666666" {
+		t.Fatalf("projection information_id = %q, want stable key", projectionPayload.Items[0].InformationID)
+	}
+	if projectionPayload.Items[0].Information != "second logic gate note" {
+		t.Fatalf("projection information = %q, want latest value", projectionPayload.Items[0].Information)
+	}
+
+	details, err := repo.GetLogicGateDetails(companyID, logicGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("GetLogicGateDetails() error = %v", err)
+	}
+	if len(details.Information) != 2 {
+		t.Fatalf("logic gate history row count = %d, want 2", len(details.Information))
+	}
+}
+
 func TestInformationAPIsRejectBlankInformation(t *testing.T) {
 	t.Parallel()
 

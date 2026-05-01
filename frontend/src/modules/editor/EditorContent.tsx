@@ -4,7 +4,7 @@ import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LogicGateInformation, getNo
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
-import { getLogicGateRecordSingleFlight, invalidateLogicGateRecordStoreCaches } from "../logic-gate-map/LogicGateRecordStore";
+import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches } from "../logic-gate-map/LogicGateRecordStore";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import type { NodeInformation } from "../node-map/shared";
 
@@ -340,11 +340,14 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       try {
         setError("");
         if (linkedEntityKind === "logic_gate") {
-          const details = await getLogicGateRecordSingleFlight(apiBase, companyID, linkedNodeID);
+          const [details, projections] = await Promise.all([
+            getLogicGateRecordSingleFlight(apiBase, companyID, linkedNodeID),
+            getLogicGateInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
+          ]);
           if (cancelled) return;
           setLinkedNodeTitle(getLogicGateTitle({ header: details.logic_gate.header, title: details.logic_gate.header }));
           const nonText = details.information.filter((item) => item.type !== "Text box");
-          const textBoxes = details.information.filter((item) => item.type === "Text box");
+          const textBoxes = projections.filter((item) => item.type === "Text box");
           const nonBlankTextBoxes = textBoxes.filter((item) => item.information.trim().length > 0);
           setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
           setLinkedNodeMetadataRows([
@@ -352,14 +355,14 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             { label: "Created", value: details.logic_gate.created_timestamp },
             { label: "Relationships", value: String(details.relationships.length) },
             { label: "Information records", value: String(details.information.length) },
-            { label: "Text boxes", value: String(nonBlankTextBoxes.length) },
+            { label: "Text boxes", value: String(projections.length) },
           ]);
           const historyRows = [
             details.logic_gate.created_timestamp ? `Logic gate created at ${details.logic_gate.created_timestamp}` : "Logic gate created",
             ...details.information.slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`),
           ];
           setLinkedNodeHistoryRows(historyRows);
-          const first = nonBlankTextBoxes[0];
+          const first = nonBlankTextBoxes[0] ?? projections[0];
           const initialDocument = first?.information ?? "";
           documentDraftRef.current = initialDocument;
           persistedDocumentRef.current = initialDocument;
