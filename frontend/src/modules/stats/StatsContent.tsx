@@ -5,7 +5,7 @@ import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, classifyFrameKind, readFrameLinksF
 import { getNodeRecordSingleFlight } from "../node-map/NodeRecordStore";
 
 // Generic Stats module: displays metric cards for the nearest linked context source.
-export const StatsContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }> = ({ accent, widgetId }) => {
+export const StatsContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -132,13 +132,19 @@ export const StatsContent: React.FC<{ accent: string; widgetId?: string; hideTop
   }, [apiBase, companyID, linkedSourceKind, selectedContextID]);
 
   const title = useMemo(() => selectedContextID ? `Stats for ${selectedContextID.slice(0, 8)}` : "Stats", [selectedContextID]);
+  const isDarkTheme = theme === "dark";
+  const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
+  const surfaceText = isDarkTheme ? "#f4f7fa" : "#0f1f23";
+  const ruleColor = isDarkTheme ? "rgba(255,255,255,0.16)" : "rgba(3,25,30,0.14)";
+  const panelBorder = isDarkTheme ? "rgba(255,255,255,0.2)" : "rgba(4,31,38,0.16)";
+  const panelBackground = isDarkTheme ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.65)";
 
   return (
-    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateRows: "auto 1fr", background: "#ffffff", color: "#0f1f23" }}>
-      <div style={{ padding: "12px 10px 11px", borderBottom: "1px solid rgba(3,25,30,0.14)", fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}></div>
+    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateRows: "auto 1fr", background: surfaceBackground, color: surfaceText }}>
+      <div style={{ padding: "12px 10px 11px", borderBottom: `1px solid ${ruleColor}`, fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>{title}</div>
       <div style={{ overflow: "auto", padding: 12, display: "grid", gap: 8, alignContent: "start" }}>
         {statsRows.map((row) => (
-          <div key={row.label} style={{ border: "1px solid rgba(4,31,38,0.16)", borderRadius: 8, padding: "7px 8px", display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+          <div key={row.label} style={{ border: `1px solid ${panelBorder}`, background: panelBackground, borderRadius: 8, padding: "7px 8px", display: "flex", justifyContent: "space-between", fontSize: 12 }}>
             <span style={{ opacity: 0.82 }}>{row.label}</span>
             <strong>{row.value}</strong>
           </div>
