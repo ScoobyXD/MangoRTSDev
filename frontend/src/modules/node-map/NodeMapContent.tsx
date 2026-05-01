@@ -1626,6 +1626,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                 fontWeight: 700,
                 padding: "7px 8px",
                 textAlign: "left",
+                color: panelText,
                 borderRadius: 0,
               }}
               onClick={() => {

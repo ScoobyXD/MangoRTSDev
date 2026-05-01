@@ -13,27 +13,26 @@ export function relationshipRoleFromSide(side: NodeDirection): LogicGateRelation
   return side === "left" || side === "top" ? "Input" : "Output";
 }
 
-function oppositeRole(role: LogicGateRelationshipRole): LogicGateRelationshipRole {
-  return role === "Input" ? "Output" : "Input";
-}
-
 export function buildLinkedNodePayloadFromSourceSide(side: NodeDirection): RelationshipWritePayload {
   const sourceRole = relationshipRoleFromSide(side);
+  const targetSide = side === "left" ? "right" : side === "right" ? "left" : side === "top" ? "bottom" : "top";
+  const targetRole = relationshipRoleFromSide(targetSide);
   return {
-    a_position: sourceRole,
-    b_position: oppositeRole(sourceRole),
+    a_position: targetRole,
+    b_position: sourceRole,
     anchor: {
       from: side,
-      to: side === "left" ? "right" : side === "right" ? "left" : side === "top" ? "bottom" : "top",
+      to: targetSide,
     },
   };
 }
 
 export function buildExistingNodeRelationshipPayload(sourceSide: NodeDirection, targetSide: NodeDirection): RelationshipWritePayload {
   const sourceRole = relationshipRoleFromSide(sourceSide);
+  const targetRole = relationshipRoleFromSide(targetSide);
   return {
-    a_position: sourceRole,
-    b_position: oppositeRole(sourceRole),
+    a_position: targetRole,
+    b_position: sourceRole,
     anchor: { from: sourceSide, to: targetSide },
   };
 }
@@ -67,10 +66,10 @@ export function inferRelationshipAnchor(
 ): RelationshipAnchor {
   if (rememberedAnchor) return rememberedAnchor;
   if (relationship.a_position === "Input" && relationship.b_position === "Output") {
-    return { from: "left", to: "right" };
+    return { from: "right", to: "left" };
   }
   if (relationship.a_position === "Output" && relationship.b_position === "Input") {
-    return { from: "right", to: "left" };
+    return { from: "left", to: "right" };
   }
 
   const source = nodePositions[relationship.node_id_a];
