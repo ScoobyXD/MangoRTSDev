@@ -140,8 +140,15 @@ For existing databases that were created before blank-information guards were ad
 psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260501_nonblank_information_guards.sql
 ```
 
-These guards reject new whitespace-only `node_information`, `node_projection_table`, and
-`logic_gate_information` rows while leaving any old accidental blank rows untouched.
+These guards reject new whitespace-only `node_information`, `node_projection_table`,
+`logic_gate_information`, and `logic_gate_projection_table` rows while leaving any old
+accidental blank rows untouched.
+
+For existing databases that were created before logic-gate information projections were added, run:
+
+```powershell
+psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260501_logic_gate_projection_table.sql
+```
 
 ## API endpoints (MVP canonical set)
 
@@ -149,12 +156,14 @@ These guards reject new whitespace-only `node_information`, `node_projection_tab
 - `POST /v1/nodes`
 - `GET /v1/nodes/{node_id}?company_id={uuid}`
 - `POST /v1/nodes/{node_id}/information`
+- `GET /v1/nodes/{node_id}/projection?company_id={uuid}`
 - `GET /v1/logic-gates?company_id={uuid}`
 - `POST /v1/logic-gates`
 - `GET /v1/logic-gates/{logic_gate_id}?company_id={uuid}`
 - `PUT /v1/logic-gates/{logic_gate_id}`
 - `DELETE /v1/logic-gates/{logic_gate_id}?company_id={uuid}`
 - `POST /v1/logic-gates/{logic_gate_id}/information`
+- `GET /v1/logic-gates/{logic_gate_id}/projection?company_id={uuid}`
 - `GET /v1/logic-gate-relationships?company_id={uuid}`
 - `POST /v1/logic-gate-relationships`
 - `DELETE /v1/logic-gate-relationships/{logic_gate_relationship_id}?company_id={uuid}`
@@ -193,6 +202,20 @@ Add node information:
 curl -X POST http://localhost:8080/v1/nodes/<node_id>/information \
   -H 'content-type: application/json' \
   -d '{"company_id":"11111111-1111-1111-1111-111111111111","type":"Status","information":"Waiting on legal"}'
+```
+
+Add or update logic gate text information with a stable projection key:
+
+```bash
+curl -X POST http://localhost:8080/v1/logic-gates/<logic_gate_id>/information \
+  -H 'content-type: application/json' \
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","type":"Text box","information":"Validate required fields","information_id":"<stable_textbox_uuid>"}'
+```
+
+Read latest projected logic gate information:
+
+```bash
+curl "http://localhost:8080/v1/logic-gates/<logic_gate_id>/projection?company_id=11111111-1111-1111-1111-111111111111"
 ```
 
 Create operation:

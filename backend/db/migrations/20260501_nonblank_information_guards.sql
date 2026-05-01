@@ -40,3 +40,17 @@ begin
       check (btrim(information) <> '') not valid;
   end if;
 end $$;
+
+do $$
+begin
+  if to_regclass('logic_gate_projection_table') is not null
+     and not exists (
+       select 1 from pg_constraint
+       where conname = 'logic_gate_projection_table_nonblank_chk'
+         and conrelid = to_regclass('logic_gate_projection_table')
+     ) then
+    alter table logic_gate_projection_table
+      add constraint logic_gate_projection_table_nonblank_chk
+      check (btrim(information) <> '') not valid;
+  end if;
+end $$;

@@ -9,6 +9,7 @@ The Editor module is the linked text workspace for MangoOS. It lets users view a
 - Read the currently selected node from linked Node Map local state.
 - Read the currently selected logic gate from linked Logic Gate Map local state.
 - Load selected node details and extract text-box records from node information.
+- Load selected node/logic-gate projection rows for latest text-box values.
 - Render draggable/resizable text boxes inside the editor canvas.
 - Persist text-box create/move/resize/edit updates back to backend node information APIs.
 - Surface node context from the same selected node (metadata summary, history timeline, and non-text info preview).
@@ -24,16 +25,18 @@ The Editor module is the linked text workspace for MangoOS. It lets users view a
 - **Backend node-title update path:** `PUT /v1/nodes/:node_id` with `{ company_id, title }`.
 - **Backend logic-gate header update path:** `PUT /v1/logic-gates/:logic_gate_id` with `{ company_id, header }`.
 - **Backend projection read path:** `GET /v1/nodes/:node_id/projection?company_id=...` (typed node projection rows for hot editor loads).
+- **Backend logic-gate projection read path:** `GET /v1/logic-gates/:logic_gate_id/projection?company_id=...` (typed latest logic-gate information rows).
 - **Event sync hooks:** `EVENT_FRAME_LINK_GRAPH_UPDATED`, `EVENT_NODE_MAP_SELECTION_UPDATED`, `EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED`, `EVENT_EXPLORER_CONTEXT_UPDATED`, and `storage` events.
 
 ## Logic Gate Context Update (2026-05-01)
 - When Editor is linked to a Logic Gate Map, the context header says `Logic Gate:` instead of `Node:`.
-- Logic-gate documents use the same text surface as node documents but persist to `logic_gate_information`.
+- Logic-gate documents use the same text surface as node documents. Saves append history to `logic_gate_information` and upsert latest values into `logic_gate_projection_table`.
+- Editor loads latest logic-gate document text from `GET /v1/logic-gates/:logic_gate_id/projection`, matching the node projection path.
 - Blank/whitespace-only editor contents are never sent as information writes; old blank logic-gate text rows are ignored when choosing the document to display.
 - This keeps UI and headless API behavior equivalent: agents can create/edit logic-gate notes without needing the visual editor.
 
 ## Semantic vs layout persistence policy (2026-04-27)
-- Editor information values are persisted server-side and served through typed node projection rows for hot-path loads.
+- Editor information values are persisted server-side and served through typed node/logic-gate projection rows for hot-path loads.
 - Editor box geometry (`x/y/w/h`) is local/per-user layout state and is intentionally not part of hot server payloads.
 - This removes hot-path JSON geometry reconstruction work while preserving fast local layout interaction.
 
@@ -52,6 +55,7 @@ The Editor module is the linked text workspace for MangoOS. It lets users view a
 - Every newly created editor textbox now gets a stable client-generated UUID `information_id` immediately (before first network save).
 - Blur saves and follow-up saves continue using that same textbox identity key.
 - The API still appends history rows to `node_information`, but projection identity now remains stable in `node_projection_table`.
+- Logic-gate text boxes follow the same contract with `logic_gate_information` history rows and `logic_gate_projection_table` latest rows.
 - This prevents textbox duplication after refresh caused by projection-key drift during rapid save/blur sequences.
 
 ## Blank-title inline-edit continuity fix (2026-04-29)

@@ -130,6 +130,48 @@ create table if not exists logic_gate_information (
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
 );
 
+create table if not exists logic_gate_projection_table (
+  company_id uuid not null,
+  logic_gate_id uuid not null,
+  information_id uuid not null,
+  type information_type not null,
+  information text not null,
+  created_timestamp timestamptz not null,
+  updated_timestamp timestamptz not null,
+  constraint logic_gate_projection_table_nonblank_chk check (btrim(information) <> ''),
+  primary key (company_id, logic_gate_id, information_id),
+  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
+);
+
+-- Existing deployments may already have current-value logic_gate_information rows.
+-- Seed the projection table once so the new hot read path can serve those rows too.
+insert into logic_gate_projection_table (
+  company_id,
+  logic_gate_id,
+  information_id,
+  type,
+  information,
+  created_timestamp,
+  updated_timestamp
+)
+select distinct on (company_id, logic_gate_id, information_id)
+  company_id,
+  logic_gate_id,
+  information_id,
+  type,
+  information,
+  created_timestamp,
+  updated_timestamp
+from logic_gate_information
+where btrim(information) <> ''
+order by company_id, logic_gate_id, information_id, updated_timestamp desc
+on conflict (company_id, logic_gate_id, information_id)
+do update set
+  type = excluded.type,
+  information = excluded.information,
+  updated_timestamp = excluded.updated_timestamp
+where logic_gate_projection_table.updated_timestamp <= excluded.updated_timestamp;
+
 create table if not exists operations (
   company_id uuid not null,
   operation_id uuid not null,
@@ -146,6 +188,7 @@ create table if not exists operations (
 create index if not exists idx_node_information_node on node_information(company_id, node_id);
 create index if not exists idx_node_projection_table_node_updated on node_projection_table(company_id, node_id, updated_timestamp desc);
 create index if not exists idx_logic_gate_information_logic_gate on logic_gate_information(company_id, logic_gate_id);
+create index if not exists idx_logic_gate_projection_table_logic_gate_updated on logic_gate_projection_table(company_id, logic_gate_id, updated_timestamp desc);
 create index if not exists idx_logic_gate_relationships_a on logic_gate_relationships(company_id, logic_gate_id_a);
 create index if not exists idx_logic_gate_relationships_b on logic_gate_relationships(company_id, logic_gate_id_b);
 create index if not exists idx_operations_node on operations(company_id, node_id);

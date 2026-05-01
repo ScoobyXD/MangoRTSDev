@@ -709,6 +709,33 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if len(parts) == 2 && parts[1] == "projection" {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		items, err := s.repo.ListLogicGateProjections(companyID, logicGateID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "logic_gate_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_projection")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+			"company_id":    companyID,
+			"logic_gate_id": logicGateID,
+			"items":         items,
+		})
+		return
+	}
+
 	if len(parts) == 2 && parts[1] == "information" {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

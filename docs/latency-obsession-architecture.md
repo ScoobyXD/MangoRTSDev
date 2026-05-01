@@ -285,11 +285,11 @@ To keep hot-path interactions deterministic under high concurrency, MangoOS uses
 
 ### Semantic vs UI layout policy (Editor + Node Map)
 
-- **Node information values** (text/value content attached to nodes) are server-side and projection-backed for hot reads.
+- **Node and logic gate information values** (text/value content attached to work graph entities) are server-side and projection-backed for hot reads.
 - **UI layout geometry** (editor box coordinates, pan/zoom, per-user layout preferences) is local/per-user by default and must not sit on the hot server path.
 - Optional shared layout templates are allowed as an explicit non-hot-path feature.
 - **Editor textbox projection identity** must be stable (`information_id`) across all saves for the same textbox so projection reads do not fork into duplicate boxes.
-- **Node delete path** must clear both canonical history rows and projection rows before deleting the node record to keep FK checks deterministic and low-latency.
+- **Node and logic gate delete paths** must clear both canonical history rows and projection rows before deleting the owning record to keep FK checks deterministic and low-latency.
 
 ### Current -> target behavior clarification (Editor latency fix)
 
@@ -310,6 +310,7 @@ Logic Gate Map now follows the same hot-path shape as Node Map:
 - UI create/update/delete paths call headless APIs instead of UI-only local state,
 - the frontend applies optimistic graph-cache updates and listens for SSE deltas,
 - relationships are strictly `Input`/`Output` only,
+- Editor logic-gate information loads from `logic_gate_projection_table` through `GET /v1/logic-gates/:id/projection`,
 - Editor and Company Explorer consume logic-gate context through separate event/storage keys.
 
 Junior engineer note:
@@ -348,14 +349,14 @@ Blockers:
 
 ### Event Log + Projection Hard Requirements
 - ⛔ Canonical `events` table contract finalized (columns, sequence scope, idempotency, producer identity format)
-- ⛔ Projection/read-model tables defined for hot module reads (Node/Explorer/Editor/Logic Gate)
+- 🟡 Projection/read-model tables defined for hot module reads (node and logic-gate editor projections exist; full graph/explorer projections still pending)
 - ⛔ Projection updater contract defined (ordered delta emission + sequence handling)
 - ⛔ Scoped reconciliation protocol implemented for sequence gaps/drift
 - ⛔ Hot API reads audited to confirm projection-backed access (no raw event scans on hot paths)
 
 Blockers:
 - Event envelope naming/format and sequence ownership scope not yet locked in schema docs.
-- No projection table DDL/index package exists yet for event-derived hot reads.
+- Dedicated graph/explorer projection DDL and index packages are still pending beyond the current node, logic-gate, and workspace-context projections.
 - No enforced SLO for stream lag/reconciliation lag in CI gates.
 
 ### Workspace Data Plane

@@ -154,9 +154,11 @@ This architecture provides exactly that:
   - `nodes`
   - `node_relationships`
   - `node_information`
+  - `node_projection_table`
   - `logic_gates`
   - `logic_gate_relationships`
   - `logic_gate_information`
+  - `logic_gate_projection_table`
   - `operations`
 - Tenant isolation is still required via `company_id` on every table path.
 

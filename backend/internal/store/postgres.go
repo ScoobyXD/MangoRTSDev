@@ -629,6 +629,14 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	); err != nil {
 		return err
 	}
+	// Projection rows reference logic gates directly, so remove them before the gate.
+	if _, err := tx.ExecContext(ctx,
+		`delete from logic_gate_projection_table
+		 where company_id=$1 and logic_gate_id=$2`,
+		companyID, logicGateID,
+	); err != nil {
+		return err
+	}
 
 	deleted, err := tx.ExecContext(ctx,
 		`delete from logic_gates
@@ -772,22 +780,20 @@ func (r *PostgresRepo) AddLogicGateInformation(companyID, logicGateID, infoType,
 	if !exists {
 		return domain.LogicGateInformation{}, ErrNotFound
 	}
-	if informationID == "" {
-		informationID = newUUIDv7String()
-	}
 
-	var item domain.LogicGateInformation
+	item := domain.LogicGateInformation{
+		CompanyID:     companyID,
+		InformationID: newUUIDv7String(),
+		LogicGateID:   logicGateID,
+		Type:          infoType,
+		Information:   information,
+	}
 	if err := tx.QueryRowContext(ctx,
 		`insert into logic_gate_information
 		 (company_id, information_id, logic_gate_id, type, information, created_timestamp, updated_timestamp)
 		 values ($1, $2, $3, $4::information_type, $5, now(), now())
-		 on conflict (company_id, information_id)
-		 do update set
-		   type=excluded.type,
-		   information=excluded.information,
-		   updated_timestamp=now()
 		 returning company_id, information_id, logic_gate_id, type::text, information, created_timestamp, updated_timestamp`,
-		companyID, informationID, logicGateID, infoType, information,
+		item.CompanyID, item.InformationID, item.LogicGateID, item.Type, item.Information,
 	).Scan(
 		&item.CompanyID,
 		&item.InformationID,
@@ -800,10 +806,77 @@ func (r *PostgresRepo) AddLogicGateInformation(companyID, logicGateID, infoType,
 		return domain.LogicGateInformation{}, err
 	}
 
+	// History is append-only above. This read model keeps the latest value per
+	// stable information_id for the editor and headless agents on hot read paths.
+	projectionID := informationID
+	if projectionID == "" {
+		projectionID = item.InformationID
+	}
+	if _, err := tx.ExecContext(ctx,
+		`insert into logic_gate_projection_table
+		 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
+		 values ($1, $2, $3, $4::information_type, $5, now(), now())
+		 on conflict (company_id, logic_gate_id, information_id)
+		 do update set
+		   type=excluded.type,
+		   information=excluded.information,
+		   updated_timestamp=now()`,
+		item.CompanyID, item.LogicGateID, projectionID, item.Type, item.Information,
+	); err != nil {
+		return domain.LogicGateInformation{}, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return domain.LogicGateInformation{}, err
 	}
 	return item, nil
+}
+
+func (r *PostgresRepo) ListLogicGateProjections(companyID, logicGateID string) ([]domain.LogicGateProjection, error) {
+	ctx := context.Background()
+	var exists bool
+	if err := r.db.QueryRowContext(ctx,
+		`select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`,
+		companyID, logicGateID,
+	).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`select company_id, logic_gate_id, information_id, type::text, information, created_timestamp, updated_timestamp
+		 from logic_gate_projection_table
+		 where company_id=$1 and logic_gate_id=$2
+		 order by updated_timestamp asc`,
+		companyID, logicGateID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.LogicGateProjection, 0)
+	for rows.Next() {
+		var item domain.LogicGateProjection
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.LogicGateID,
+			&item.InformationID,
+			&item.Type,
+			&item.Information,
+			&item.CreatedTimestamp,
+			&item.UpdatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func (r *PostgresRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.LogicGateDetails, error) {
@@ -817,7 +890,7 @@ func (r *PostgresRepo) GetLogicGateDetails(companyID, logicGateID string) (domai
 		`select company_id, information_id, logic_gate_id, type::text, information, created_timestamp, updated_timestamp
 		 from logic_gate_information
 		 where company_id=$1 and logic_gate_id=$2
-		 order by updated_timestamp asc`,
+		 order by created_timestamp asc`,
 		companyID, logicGateID,
 	)
 	if err != nil {

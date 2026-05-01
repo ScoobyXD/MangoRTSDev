@@ -154,6 +154,19 @@ create table if not exists logic_gate_information (
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
 );
 
+create table if not exists logic_gate_projection_table (
+  company_id uuid not null,
+  logic_gate_id uuid not null,
+  information_id uuid not null,
+  type information_type not null,
+  information text not null,
+  created_timestamp timestamptz not null,
+  updated_timestamp timestamptz not null,
+  constraint logic_gate_projection_table_nonblank_chk check (btrim(information) <> ''),
+  primary key (company_id, logic_gate_id, information_id),
+  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
+);
+
 -- ==========================================================
 -- OPERATION
 -- ==========================================================
@@ -233,6 +246,20 @@ create table if not exists operations (
 - Created Timestamp (TIMESTAMPTZ) -> `logic_gate_information.created_timestamp`
 - Updated Timestamp (TIMESTAMPTZ) -> `logic_gate_information.updated_timestamp`
 - Constraint: `logic_gate_information_nonblank_chk` rejects whitespace-only information.
+
+### Logic Gate Projection Schema
+
+- Company ID (UUIDv7) (FK) -> `logic_gate_projection_table.company_id`
+- Logic Gate ID (UUIDv7) (FK) -> `logic_gate_projection_table.logic_gate_id`
+- Information ID (UUIDv7) -> `logic_gate_projection_table.information_id`
+- Type (Enum: text box, checklist, status, due date, employee name, pdf, png, mov, hyperlink) -> `logic_gate_projection_table.type`
+- Information (Text) -> `logic_gate_projection_table.information`
+- Created Timestamp (TIMESTAMPTZ) -> `logic_gate_projection_table.created_timestamp`
+- Updated Timestamp (TIMESTAMPTZ) -> `logic_gate_projection_table.updated_timestamp`
+- Constraint: `logic_gate_projection_table_nonblank_chk` rejects whitespace-only information.
+- Primary key: `(company_id, logic_gate_id, information_id)` keeps one latest row per stable text-box/info identity.
+
+`logic_gate_information` is the durable history table. `logic_gate_projection_table` is the hot read model for current values used by UI clients and headless agents.
 
 ### Operation
 
