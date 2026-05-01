@@ -184,7 +184,7 @@ Create logic gate relationship:
 ```bash
 curl -X POST http://localhost:8080/v1/logic-gate-relationships \
   -H 'content-type: application/json' \
-  -d '{"company_id":"11111111-1111-1111-1111-111111111111","logic_gate_id_a":"<source_gate_id>","logic_gate_id_b":"<target_gate_id>","a_position":"Output","b_position":"Input"}'
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","logic_gate_id_a":"<source_gate_id>","logic_gate_id_b":"<target_gate_id>","a_position":"Input","b_position":"Output"}'
 ```
 
 Add node information:

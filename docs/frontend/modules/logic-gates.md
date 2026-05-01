@@ -51,8 +51,8 @@ Side convention:
 Junior engineer note:
 - The source gate is always written as `logic_gate_id_a`.
 - The target gate is always written as `logic_gate_id_b`.
-- `a_position` is decided from the source side.
-- `b_position` is the opposite role.
+- `a_position` is decided from the target side.
+- `b_position` is decided from the source side.
 
 ## Hot Path Behavior
 Logic Gate Map follows the latency architecture rules:

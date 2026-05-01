@@ -1638,6 +1638,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
                 fontWeight: 700,
                 padding: "7px 8px",
                 textAlign: "left",
+                color: panelText,
                 borderRadius: 0,
               }}
               onClick={() => {

@@ -30,13 +30,13 @@ test("maps logic-gate sides to input and output ports", () => {
 
 test("plus-link relationships always connect input to output", () => {
   assert.deepEqual(buildLinkedNodePayloadFromSourceSide("left"), {
-    a_position: "Input",
-    b_position: "Output",
+    a_position: "Output",
+    b_position: "Input",
     anchor: { from: "left", to: "right" },
   });
   assert.deepEqual(buildLinkedNodePayloadFromSourceSide("right"), {
-    a_position: "Output",
-    b_position: "Input",
+    a_position: "Input",
+    b_position: "Output",
     anchor: { from: "right", to: "left" },
   });
 });
@@ -50,33 +50,33 @@ test("existing-gate attach flow rejects same-role side pairs", () => {
   assert.equal(isLegalRelationshipSidePair("right", "bottom"), false);
 });
 
-test("uses source-side input/output semantics for existing-gate writes", () => {
+test("uses target/source input-output semantics for existing-gate writes", () => {
   assert.deepEqual(buildExistingNodeRelationshipPayload("top", "bottom"), {
-    a_position: "Input",
-    b_position: "Output",
+    a_position: "Output",
+    b_position: "Input",
     anchor: { from: "top", to: "bottom" },
   });
   assert.deepEqual(buildExistingNodeRelationshipPayload("bottom", "top"), {
-    a_position: "Output",
-    b_position: "Input",
+    a_position: "Input",
+    b_position: "Output",
     anchor: { from: "bottom", to: "top" },
   });
 });
 
 test("resolves selected role from the opposite side of a logic-gate relationship", () => {
-  const rel = relationship({ a_position: "Output", b_position: "Input" });
-  assert.equal(selectedRoleForRelationship(rel, "logic-a"), "Input");
-  assert.equal(selectedRoleForRelationship(rel, "logic-b"), "Output");
+  const rel = relationship({ a_position: "Input", b_position: "Output" });
+  assert.equal(selectedRoleForRelationship(rel, "logic-a"), "Output");
+  assert.equal(selectedRoleForRelationship(rel, "logic-b"), "Input");
   assert.equal(selectedRoleForRelationship(rel, "other"), null);
 });
 
 test("infers deterministic anchors for input/output relationships", () => {
-  assert.deepEqual(inferRelationshipAnchor(relationship({ a_position: "Input", b_position: "Output" }), {}), { from: "left", to: "right" });
-  assert.deepEqual(inferRelationshipAnchor(relationship({ a_position: "Output", b_position: "Input" }), {}), { from: "right", to: "left" });
+  assert.deepEqual(inferRelationshipAnchor(relationship({ a_position: "Input", b_position: "Output" }), {}), { from: "right", to: "left" });
+  assert.deepEqual(inferRelationshipAnchor(relationship({ a_position: "Output", b_position: "Input" }), {}), { from: "left", to: "right" });
 });
 
 test("projects visual relationship metadata with input/output colors", () => {
-  const rel = relationship({ a_position: "Output", b_position: "Input" });
+  const rel = relationship({ a_position: "Input", b_position: "Output" });
   const projected = projectRelationshipVisual(rel, {
     activeNodeID: "logic-a",
     relationshipColorsEnabled: true,
@@ -102,8 +102,8 @@ test("projects visual relationship metadata with input/output colors", () => {
       targetNodeID: "logic-b",
       sourceAnchor: "right",
       targetAnchor: "left",
-      selectedRole: "Input",
-      strokeColor: "#00f",
+      selectedRole: "Output",
+      strokeColor: "#f80",
     },
   );
   assert.equal(projected.alpha > 0, true);
