@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
-import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
+import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedMapOrLogicMapFrameFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import type { NodeInformation } from "../node-map/shared";
@@ -64,7 +64,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
     const registry = readFrameRegistryFromStorage();
-    return resolveLinkedFrameByKindFromGraph({ startFrameID: scope, targetKind: "map", edges, registry });
+    return resolveLinkedMapOrLogicMapFrameFromGraph({ startFrameID: scope, edges, registry });
   }, [scope]);
 
   const readSelectedNodeFromMap = useCallback((mapWidgetID: string): string => {
