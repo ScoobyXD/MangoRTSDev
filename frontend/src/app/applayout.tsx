@@ -397,6 +397,11 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
   const Content = CONTENT_MAP[frame.kind];
   const theme = COLORWAYS[frame.theme ?? "teal"];
   const isGlass = frame.glass === true;
+  const glassSurface = frame.theme === "dark"
+    ? "rgba(16, 18, 20, 0.56)"
+    : frame.theme === "light"
+      ? "rgba(255, 255, 255, 0.44)"
+      : "rgba(0, 233, 255, 0.34)";
   const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-map" || frame.kind === "editor" || frame.kind === "node-doc";
   const isEdgeToEdgeContentFrame = isNodesFrame || frame.kind === "company-explorer";
   const left = frame.x * stepX;
@@ -447,7 +452,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         top,
         width: frame.w * stepX,
         height: frame.h * stepY,
-        background: isGlass ? "rgba(255,255,255,0.16)" : frame.color,
+        background: isGlass ? glassSurface : frame.color,
         boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
@@ -463,7 +468,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
             : undefined,
         backdropFilter: isGlass ? "blur(10px)" : undefined,
         WebkitBackdropFilter: isGlass ? "blur(10px)" : undefined,
-        border: isGlass ? "1px solid rgba(255,255,255,0.35)" : "none",
+        border: isGlass ? "1px solid rgba(255,255,255,0.45)" : "none",
       }}
       onClick={(e) => e.stopPropagation()}
       onMouseDownCapture={(e) => {
@@ -513,7 +518,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
           padding: "6px 8px",
           borderRight: "none",
           borderBottom: "none",
-          background: isGlass ? "rgba(255,255,255,0.12)" : frame.color,
+          background: isGlass ? "rgba(255,255,255,0.16)" : frame.color,
           cursor: isDragging ? "grabbing" : "grab",
           fontFamily: "'IBM Plex Mono', monospace",
         }}
@@ -531,7 +536,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
             </svg>
           )}
       </div>
-      <div style={{ flex: 1, minHeight: 0, padding: isEdgeToEdgeContentFrame ? 0 : "8px 10px", overflow: frame.kind === "company-explorer" ? "hidden" : "auto", fontFamily: "'IBM Plex Mono', monospace" }}>
+      <div style={{ flex: 1, minHeight: 0, padding: isEdgeToEdgeContentFrame ? 0 : "8px 10px", overflow: frame.kind === "company-explorer" ? "hidden" : "auto", fontFamily: "'IBM Plex Mono', monospace", opacity: isGlass ? 0.78 : 1 }}>
         <div style={{ width: `${100 / contentScale}%`, height: `${100 / contentScale}%`, transform: `scale(${contentScale})`, transformOrigin: "top left" }}>
           {Content ? <Content accent={frame.accent} widgetId={frame.id} hideTopControls={isNodesFrame} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: frame.accent }}>{frame.title}</span></div>}
         </div>
