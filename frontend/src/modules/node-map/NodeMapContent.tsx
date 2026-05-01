@@ -601,12 +601,12 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       });
 
       const origin = nodePositions[sourceNodeID] ?? { x: 120, y: 120 };
-      const gap = 170;
+      const gap = 230;
       const shift =
         direction === "left" ? { x: -gap, y: 0 }
           : direction === "right" ? { x: gap, y: 0 }
-            : direction === "top" ? { x: 0, y: -130 }
-              : { x: 0, y: 130 };
+            : direction === "top" ? { x: 0, y: -170 }
+              : { x: 0, y: 170 };
 
       setNodePositions((previous) => ({
         ...previous,
@@ -1483,6 +1483,11 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                         overflowWrap: "anywhere",
                         width: "100%",
                         maxWidth: "100%",
+                        maxHeight: "100%",
+                        overflow: "hidden",
+                        display: "-webkit-box",
+                        WebkitLineClamp: 3,
+                        WebkitBoxOrient: "vertical",
                         cursor: "text",
                         textAlign: "center",
                         fontSize: 20,
@@ -1496,7 +1501,20 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                     </div>
                   ) : (
                     <div
-                      style={{ whiteSpace: "normal", overflowWrap: "anywhere", fontSize: 20, fontWeight: 800, lineHeight: 1.2, fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif" }}
+                      style={{
+                        whiteSpace: "normal",
+                        overflowWrap: "anywhere",
+                        maxWidth: "100%",
+                        maxHeight: "100%",
+                        overflow: "hidden",
+                        display: "-webkit-box",
+                        WebkitLineClamp: 3,
+                        WebkitBoxOrient: "vertical",
+                        fontSize: 20,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+                      }}
                     >
                       {getNodeTitle(node)}
                     </div>

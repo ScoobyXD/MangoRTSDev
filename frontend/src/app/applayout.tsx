@@ -1018,6 +1018,13 @@ const App: React.FC = () => {
         const maxRows = parent ? parent.h : gridRows;
         const edgeInset = parent ? CHILD_EDGE_GAP : 0;
         if (d.mode === "drag") {
+          if (parent) {
+            return {
+              ...w,
+              x: d.origX + dCols,
+              y: d.origY + dRows,
+            };
+          }
           const maxX = Math.max(0, maxCols - w.w);
           const maxY = Math.max(0, maxRows - w.h);
           return {
@@ -1065,9 +1072,24 @@ const App: React.FC = () => {
               : { ...w, x: d.origX, y: d.origY, w: d.origW, h: d.origH };
           });
 
-          if (d.mode !== "drag" || d.parentId) return next;
+          if (d.mode !== "drag") return next;
           const moved = next.find((frame) => frame.id === d.id);
           if (!moved) return next;
+          if (d.parentId) {
+            const parent = next.find((frame) => frame.id === d.parentId);
+            if (!parent) return next;
+            const outsideParent =
+              moved.x < 0 ||
+              moved.y < 0 ||
+              moved.x + moved.w > parent.w ||
+              moved.y + moved.h > parent.h;
+            if (!outsideParent) return next;
+            return next.map((frame) =>
+              frame.id === moved.id
+                ? { ...frame, parentId: undefined, x: clamp(moved.x + parent.x, 0, gridCols - moved.w), y: clamp(moved.y + parent.y, 0, gridRows - moved.h) }
+                : frame
+            );
+          }
           const host = next
             .filter((frame) => !frame.parentId && frame.id !== moved.id)
             .find((frame) => framesOverlap(frame, moved));
@@ -1174,6 +1196,7 @@ const App: React.FC = () => {
         {editMode && draggingId && (() => {
           const activeFrame = frames.find((w) => w.id === draggingId);
           if (!activeFrame) return null;
+          if (activeFrame.parentId) return null;
           return <PlacementSplash frame={activeFrame} frames={frames} cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} />;
         })()}
         {rootFrames.map((w) => (
