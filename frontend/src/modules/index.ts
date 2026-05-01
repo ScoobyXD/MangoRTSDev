@@ -9,7 +9,7 @@ export interface ModuleTemplate {
   label: string;
   defaultW: number;
   defaultH: number;
-  render: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }>;
+  render: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }>;
 }
 
 // Master module library used by add-module flow and module-picker context menu.
@@ -21,7 +21,7 @@ export const MODULE_LIBRARY: ModuleTemplate[] = [
 ];
 
 // Fast lookup map consumed by frame rendering paths in AppLayout.
-export const MODULE_CONTENT_MAP: Record<string, React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean }>> = Object.fromEntries(
+export const MODULE_CONTENT_MAP: Record<string, React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }>> = Object.fromEntries(
   MODULE_LIBRARY.map((module) => [module.kind, module.render])
 );
 
