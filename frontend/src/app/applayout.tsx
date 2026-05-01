@@ -1173,7 +1173,7 @@ const App: React.FC = () => {
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
         {editMode && draggingId && (() => {
           const activeFrame = frames.find((w) => w.id === draggingId);
-          if (!activeFrame) return null;
+          if (!activeFrame || activeFrame.parentId) return null;
           return <PlacementSplash frame={activeFrame} frames={frames} cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} />;
         })()}
         {rootFrames.map((w) => (
