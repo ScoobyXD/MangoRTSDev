@@ -102,6 +102,14 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID) ?? treeRows[0], [selectedTreeID, treeRows]);
 
   useEffect(() => {
+    if (treeRows.length === 0) return;
+    if (selectedTree) return;
+    const fallback = treeRows[0];
+    setSelectedTreeID(fallback.id);
+    if (fallback.kind === "node") setSelectedNodeID(fallback.nodeID ?? "");
+  }, [selectedTree, treeRows]);
+
+  useEffect(() => {
     latestSelectionRef.current = { selectedNodeID, selectedTreeID };
   }, [selectedNodeID, selectedTreeID]);
 
@@ -256,11 +264,50 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [companyID, scope, selectedNodeID, selectedTreeID, selectedTree, linkRevision]);
 
+  useEffect(() => {
+    const viewport = treeViewportRef.current;
+    if (!viewport) return;
+    const selectedIndex = treeRows.findIndex((row) => row.id === selectedTreeID);
+    if (selectedIndex < 0) return;
+    const rowTop = selectedIndex * TREE_ROW_HEIGHT;
+    const rowBottom = rowTop + TREE_ROW_HEIGHT;
+    const viewportTop = viewport.scrollTop;
+    const viewportBottom = viewportTop + viewport.clientHeight;
+    if (rowTop < viewportTop) viewport.scrollTop = rowTop;
+    else if (rowBottom > viewportBottom) viewport.scrollTop = rowBottom - viewport.clientHeight;
+  }, [selectedTreeID, treeRows]);
+
+  const moveSelectionBy = (delta: number) => {
+    if (treeRows.length === 0) return;
+    const currentIndex = treeRows.findIndex((row) => row.id === selectedTreeID);
+    const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+    const nextIndex = Math.min(treeRows.length - 1, Math.max(0, baseIndex + delta));
+    const nextRow = treeRows[nextIndex];
+    setSelectedTreeID(nextRow.id);
+    if (nextRow.kind === "node") setSelectedNodeID(nextRow.nodeID ?? "");
+    else if (nextRow.id === "folder-all") setSelectedNodeID("");
+  };
+
+  const focusTreeViewport = () => {
+    treeViewportRef.current?.focus();
+  };
+
   return (
     <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(240px, 1fr)", background: "#ffffff", color: "#0f1f23", overflow: "hidden", minWidth: 0 }}>
       <div
         className="company-explorer-scroll"
         ref={treeViewportRef}
+        tabIndex={0}
+        onMouseDown={focusTreeViewport}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            moveSelectionBy(1);
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            moveSelectionBy(-1);
+          }
+        }}
         onScroll={(event) => setTreeScrollTop((event.currentTarget as HTMLDivElement).scrollTop)}
         style={{ overflow: "auto", minWidth: 0, ["--company-explorer-scroll-accent" as string]: accent }}
       >
@@ -273,6 +320,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           return (
             <div
               key={row.id}
+              onMouseDown={focusTreeViewport}
               onClick={() => {
                 setSelectedTreeID(row.id);
                 if (row.kind === "node") setSelectedNodeID(row.nodeID ?? "");
@@ -305,8 +353,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
               )}
               {isFolder ? (
                 <button
+                  tabIndex={-1}
                   onClick={(event) => {
                     event.stopPropagation();
+                    focusTreeViewport();
                     setExpanded((previous) => {
                       const next = new Set(previous);
                       if (next.has(row.id)) next.delete(row.id);
