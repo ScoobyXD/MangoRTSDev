@@ -1411,3 +1411,296 @@ func (r *PostgresRepo) GetOperation(companyID, operationID string) (domain.Opera
 	}
 	return item, nil
 }
+
+func scanKanbanColumn(row interface {
+	Scan(dest ...any) error
+}) (domain.KanbanColumn, error) {
+	var item domain.KanbanColumn
+	err := row.Scan(
+		&item.CompanyID,
+		&item.BoardID,
+		&item.ColumnID,
+		&item.Title,
+		&item.Position,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	)
+	return item, err
+}
+
+func scanKanbanCard(row interface {
+	Scan(dest ...any) error
+}) (domain.KanbanCard, error) {
+	var item domain.KanbanCard
+	err := row.Scan(
+		&item.CompanyID,
+		&item.BoardID,
+		&item.CardID,
+		&item.ColumnID,
+		&item.ItemType,
+		&item.ItemID,
+		&item.TitleSnapshot,
+		&item.Position,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	)
+	return item, err
+}
+
+func (r *PostgresRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
+	ctx := context.Background()
+	rows, err := r.db.QueryContext(ctx, `
+select company_id, board_id, column_id, title, position, created_timestamp, updated_timestamp
+from kanban_columns
+where company_id=$1 and board_id=$2
+order by position asc, created_timestamp asc`, companyID, boardID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.KanbanColumn, 0)
+	for rows.Next() {
+		item, err := scanKanbanColumn(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) CreateKanbanColumn(companyID, boardID, title string, position int) (domain.KanbanColumn, error) {
+	ctx := context.Background()
+	if position <= 0 {
+		if err := r.db.QueryRowContext(ctx, `
+select coalesce(max(position), 0) + 1000
+from kanban_columns
+where company_id=$1 and board_id=$2`, companyID, boardID).Scan(&position); err != nil {
+			return domain.KanbanColumn{}, err
+		}
+	}
+	return scanKanbanColumn(r.db.QueryRowContext(ctx, `
+insert into kanban_columns (company_id, board_id, column_id, title, position, created_timestamp, updated_timestamp)
+values ($1, $2, $3, $4, $5, now(), now())
+returning company_id, board_id, column_id, title, position, created_timestamp, updated_timestamp`,
+		companyID, boardID, newUUIDv7String(), title, position,
+	))
+}
+
+func (r *PostgresRepo) UpdateKanbanColumnTitle(companyID, boardID, columnID, title string) (domain.KanbanColumn, error) {
+	item, err := scanKanbanColumn(r.db.QueryRow(`
+update kanban_columns
+set title=$4, updated_timestamp=now()
+where company_id=$1 and board_id=$2 and column_id=$3
+returning company_id, board_id, column_id, title, position, created_timestamp, updated_timestamp`,
+		companyID, boardID, columnID, title,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.KanbanColumn{}, ErrNotFound
+	}
+	return item, err
+}
+
+func (r *PostgresRepo) DeleteKanbanColumn(companyID, boardID, columnID string) error {
+	result, err := r.db.Exec(`
+delete from kanban_columns
+where company_id=$1 and board_id=$2 and column_id=$3`,
+		companyID, boardID, columnID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *PostgresRepo) ListKanbanCards(companyID, boardID, columnID string, afterPosition int, limit int) ([]domain.KanbanCard, error) {
+	ctx := context.Background()
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	rows, err := r.db.QueryContext(ctx, `
+select company_id, board_id, card_id, column_id, item_type,
+       coalesce(node_id::text, logic_gate_id::text) as item_id,
+       title_snapshot, position, created_timestamp, updated_timestamp
+from kanban_cards
+where company_id=$1 and board_id=$2
+  and ($3 = '' or column_id::text = $3)
+  and ($4 <= 0 or position > $4)
+order by column_id, position asc, created_timestamp asc
+limit $5`, companyID, boardID, columnID, afterPosition, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.KanbanCard, 0)
+	for rows.Next() {
+		item, err := scanKanbanCard(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) UpsertKanbanCard(companyID, boardID, columnID, itemType, itemID, titleSnapshot string, position int) (domain.KanbanCard, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.KanbanCard{}, err
+	}
+	defer tx.Rollback()
+
+	var columnExists bool
+	if err := tx.QueryRowContext(ctx, `
+select exists(select 1 from kanban_columns where company_id=$1 and board_id=$2 and column_id=$3)`,
+		companyID, boardID, columnID).Scan(&columnExists); err != nil {
+		return domain.KanbanCard{}, err
+	}
+	if !columnExists {
+		return domain.KanbanCard{}, ErrNotFound
+	}
+
+	if itemType != "node" && itemType != "logic_gate" {
+		return domain.KanbanCard{}, ErrNotFound
+	}
+	existsQuery := `select exists(select 1 from nodes where company_id=$1 and node_id=$2)`
+	if itemType == "logic_gate" {
+		existsQuery = `select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`
+	}
+	var itemExists bool
+	if err := tx.QueryRowContext(ctx, existsQuery, companyID, itemID).Scan(&itemExists); err != nil {
+		return domain.KanbanCard{}, err
+	}
+	if !itemExists {
+		return domain.KanbanCard{}, ErrNotFound
+	}
+
+	if position <= 0 {
+		if err := tx.QueryRowContext(ctx, `
+select coalesce(max(position), 0) + 1000
+from kanban_cards
+where company_id=$1 and board_id=$2 and column_id=$3`, companyID, boardID, columnID).Scan(&position); err != nil {
+			return domain.KanbanCard{}, err
+		}
+	}
+
+	var item domain.KanbanCard
+	updateQuery := `
+update kanban_cards
+set column_id=$4, title_snapshot=$5, position=$6, updated_timestamp=now()
+where company_id=$1 and board_id=$2 and item_type=$3 and node_id=$7
+returning company_id, board_id, card_id, column_id, item_type,
+          coalesce(node_id::text, logic_gate_id::text), title_snapshot, position, created_timestamp, updated_timestamp`
+	updateArgs := []any{companyID, boardID, itemType, columnID, titleSnapshot, position, itemID}
+	if itemType == "logic_gate" {
+		updateQuery = `
+update kanban_cards
+set column_id=$4, title_snapshot=$5, position=$6, updated_timestamp=now()
+where company_id=$1 and board_id=$2 and item_type=$3 and logic_gate_id=$7
+returning company_id, board_id, card_id, column_id, item_type,
+          coalesce(node_id::text, logic_gate_id::text), title_snapshot, position, created_timestamp, updated_timestamp`
+	}
+	item, err = scanKanbanCard(tx.QueryRowContext(ctx, updateQuery, updateArgs...))
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return domain.KanbanCard{}, err
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		var nodeID any
+		var logicGateID any
+		if itemType == "node" {
+			nodeID = itemID
+		} else {
+			logicGateID = itemID
+		}
+		item, err = scanKanbanCard(tx.QueryRowContext(ctx, `
+insert into kanban_cards (
+  company_id, board_id, card_id, column_id, item_type, node_id, logic_gate_id, title_snapshot, position, created_timestamp, updated_timestamp
+) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,now(),now())
+returning company_id, board_id, card_id, column_id, item_type,
+          coalesce(node_id::text, logic_gate_id::text), title_snapshot, position, created_timestamp, updated_timestamp`,
+			companyID, boardID, newUUIDv7String(), columnID, itemType, nodeID, logicGateID, titleSnapshot, position,
+		))
+		if err != nil {
+			return domain.KanbanCard{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.KanbanCard{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) MoveKanbanCard(companyID, boardID, cardID, columnID string, position int) (domain.KanbanCard, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.KanbanCard{}, err
+	}
+	defer tx.Rollback()
+
+	var columnExists bool
+	if err := tx.QueryRowContext(ctx, `
+select exists(select 1 from kanban_columns where company_id=$1 and board_id=$2 and column_id=$3)`,
+		companyID, boardID, columnID).Scan(&columnExists); err != nil {
+		return domain.KanbanCard{}, err
+	}
+	if !columnExists {
+		return domain.KanbanCard{}, ErrNotFound
+	}
+	if position <= 0 {
+		if err := tx.QueryRowContext(ctx, `
+select coalesce(max(position), 0) + 1000
+from kanban_cards
+where company_id=$1 and board_id=$2 and column_id=$3`, companyID, boardID, columnID).Scan(&position); err != nil {
+			return domain.KanbanCard{}, err
+		}
+	}
+
+	item, err := scanKanbanCard(tx.QueryRowContext(ctx, `
+update kanban_cards
+set column_id=$4, position=$5, updated_timestamp=now()
+where company_id=$1 and board_id=$2 and card_id=$3
+returning company_id, board_id, card_id, column_id, item_type,
+          coalesce(node_id::text, logic_gate_id::text), title_snapshot, position, created_timestamp, updated_timestamp`,
+		companyID, boardID, cardID, columnID, position,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.KanbanCard{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.KanbanCard{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.KanbanCard{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) DeleteKanbanCard(companyID, boardID, cardID string) error {
+	result, err := r.db.Exec(`
+delete from kanban_cards
+where company_id=$1 and board_id=$2 and card_id=$3`,
+		companyID, boardID, cardID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

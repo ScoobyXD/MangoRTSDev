@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
-import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
+import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph, type LinkableKind } from "../linkingGraph";
 import { getNodeRecordSingleFlight } from "../node-map/NodeRecordStore";
 
 // Generic Stats module: displays metric cards for the nearest linked context source.
@@ -10,7 +10,7 @@ export const StatsContent: React.FC<{ accent: string; widgetId?: string; hideTop
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const scope = widgetId?.trim() ? widgetId : "global";
   const [linkedMapWidgetID, setLinkedMapWidgetID] = useState("");
-  const [linkedSourceKind, setLinkedSourceKind] = useState<"map" | "editor" | "explorer" | "logic-map" | "">("");
+  const [linkedSourceKind, setLinkedSourceKind] = useState<LinkableKind | "">("");
   const [selectedContextID, setSelectedContextID] = useState("");
   const [error, setError] = useState("");
   const [statsRows, setStatsRows] = useState<Array<{ label: string; value: string }>>([]);

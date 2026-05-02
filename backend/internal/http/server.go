@@ -50,6 +50,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/logic-gate-relationships/", s.handleLogicGateRelationshipByID)
 	mux.HandleFunc("/v1/operations", s.handleOperations)
 	mux.HandleFunc("/v1/operations/", s.handleOperationByID)
+	mux.HandleFunc("/v1/kanban/columns", s.handleKanbanColumns)
+	mux.HandleFunc("/v1/kanban/columns/", s.handleKanbanColumnByID)
+	mux.HandleFunc("/v1/kanban/cards", s.handleKanbanCards)
+	mux.HandleFunc("/v1/kanban/cards/", s.handleKanbanCardByID)
 	return mux
 }
 
@@ -1173,6 +1177,288 @@ func (s *Server) handleOperationByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, item)
+}
+
+func parsePositiveLimit(raw string, fallback int, maximum int) (int, bool) {
+	value := fallback
+	if strings.TrimSpace(raw) != "" {
+		parsed, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || parsed <= 0 {
+			return 0, false
+		}
+		value = parsed
+	}
+	if value > maximum {
+		value = maximum
+	}
+	return value, true
+}
+
+func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
+		if companyID == "" || boardID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
+			return
+		}
+		items, err := s.repo.ListKanbanColumns(companyID, boardID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_columns")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"columns": items})
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		CompanyID string `json:"company_id"`
+		BoardID   string `json:"board_id"`
+		Title     string `json:"title"`
+		Position  int    `json:"position"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	req.CompanyID = strings.TrimSpace(req.CompanyID)
+	req.BoardID = strings.TrimSpace(req.BoardID)
+	req.Title = strings.TrimSpace(req.Title)
+	if req.CompanyID == "" || req.BoardID == "" || req.Title == "" {
+		writeError(w, http.StatusBadRequest, "company_id_board_id_and_title_required")
+		return
+	}
+	item, err := s.repo.CreateKanbanColumn(req.CompanyID, req.BoardID, req.Title, req.Position)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_create_kanban_column")
+		return
+	}
+	s.publishWorkspaceEvent(req.CompanyID, "kanban_column_created", map[string]any{
+		"board_id":  req.BoardID,
+		"column_id": item.ColumnID,
+		"column":    item,
+	})
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) {
+	columnID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/kanban/columns/"))
+	if columnID == "" || strings.Contains(columnID, "/") {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if r.Method == http.MethodPut {
+		var req struct {
+			CompanyID string `json:"company_id"`
+			BoardID   string `json:"board_id"`
+			Title     string `json:"title"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		req.CompanyID = strings.TrimSpace(req.CompanyID)
+		req.BoardID = strings.TrimSpace(req.BoardID)
+		req.Title = strings.TrimSpace(req.Title)
+		if req.CompanyID == "" || req.BoardID == "" || req.Title == "" {
+			writeError(w, http.StatusBadRequest, "company_id_board_id_and_title_required")
+			return
+		}
+		item, err := s.repo.UpdateKanbanColumnTitle(req.CompanyID, req.BoardID, columnID, req.Title)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "kanban_column_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_update_kanban_column")
+			return
+		}
+		s.publishWorkspaceEvent(req.CompanyID, "kanban_column_updated", map[string]any{
+			"board_id":  req.BoardID,
+			"column_id": columnID,
+			"column":    item,
+		})
+		writeJSON(w, http.StatusOK, item)
+		return
+	}
+	if r.Method == http.MethodDelete {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
+		if companyID == "" || boardID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
+			return
+		}
+		err := s.repo.DeleteKanbanColumn(companyID, boardID, columnID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "kanban_column_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_delete_kanban_column")
+			return
+		}
+		s.publishWorkspaceEvent(companyID, "kanban_column_deleted", map[string]any{
+			"board_id":  boardID,
+			"column_id": columnID,
+		})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+		return
+	}
+	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+}
+
+func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
+		columnID := strings.TrimSpace(r.URL.Query().Get("column_id"))
+		limit, ok := parsePositiveLimit(r.URL.Query().Get("limit"), 200, 500)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "invalid_limit")
+			return
+		}
+		afterPosition := 0
+		if raw := strings.TrimSpace(r.URL.Query().Get("after_position")); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 0 {
+				writeError(w, http.StatusBadRequest, "invalid_after_position")
+				return
+			}
+			afterPosition = parsed
+		}
+		if companyID == "" || boardID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
+			return
+		}
+		items, err := s.repo.ListKanbanCards(companyID, boardID, columnID, afterPosition, limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_cards")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"cards": items})
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		CompanyID     string `json:"company_id"`
+		BoardID       string `json:"board_id"`
+		ColumnID      string `json:"column_id"`
+		ItemType      string `json:"item_type"`
+		ItemID        string `json:"item_id"`
+		TitleSnapshot string `json:"title_snapshot"`
+		Position      int    `json:"position"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	req.CompanyID = strings.TrimSpace(req.CompanyID)
+	req.BoardID = strings.TrimSpace(req.BoardID)
+	req.ColumnID = strings.TrimSpace(req.ColumnID)
+	req.ItemType = strings.TrimSpace(req.ItemType)
+	req.ItemID = strings.TrimSpace(req.ItemID)
+	req.TitleSnapshot = strings.TrimSpace(req.TitleSnapshot)
+	if req.CompanyID == "" || req.BoardID == "" || req.ColumnID == "" || req.ItemID == "" {
+		writeError(w, http.StatusBadRequest, "company_board_column_and_item_required")
+		return
+	}
+	if req.ItemType != "node" && req.ItemType != "logic_gate" {
+		writeError(w, http.StatusBadRequest, "invalid_kanban_item_type")
+		return
+	}
+	if req.TitleSnapshot == "" {
+		req.TitleSnapshot = req.ItemID
+	}
+	item, err := s.repo.UpsertKanbanCard(req.CompanyID, req.BoardID, req.ColumnID, req.ItemType, req.ItemID, req.TitleSnapshot, req.Position)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "kanban_column_or_item_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_upsert_kanban_card")
+		return
+	}
+	s.publishWorkspaceEvent(req.CompanyID, "kanban_card_upserted", map[string]any{
+		"board_id": req.BoardID,
+		"card_id":  item.CardID,
+		"card":     item,
+	})
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
+	cardID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/kanban/cards/"))
+	if cardID == "" || strings.Contains(cardID, "/") {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if r.Method == http.MethodPut {
+		var req struct {
+			CompanyID string `json:"company_id"`
+			BoardID   string `json:"board_id"`
+			ColumnID  string `json:"column_id"`
+			Position  int    `json:"position"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		req.CompanyID = strings.TrimSpace(req.CompanyID)
+		req.BoardID = strings.TrimSpace(req.BoardID)
+		req.ColumnID = strings.TrimSpace(req.ColumnID)
+		if req.CompanyID == "" || req.BoardID == "" || req.ColumnID == "" {
+			writeError(w, http.StatusBadRequest, "company_board_and_column_required")
+			return
+		}
+		item, err := s.repo.MoveKanbanCard(req.CompanyID, req.BoardID, cardID, req.ColumnID, req.Position)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "kanban_card_or_column_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_move_kanban_card")
+			return
+		}
+		s.publishWorkspaceEvent(req.CompanyID, "kanban_card_moved", map[string]any{
+			"board_id": req.BoardID,
+			"card_id":  cardID,
+			"card":     item,
+		})
+		writeJSON(w, http.StatusOK, item)
+		return
+	}
+	if r.Method == http.MethodDelete {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
+		if companyID == "" || boardID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
+			return
+		}
+		err := s.repo.DeleteKanbanCard(companyID, boardID, cardID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "kanban_card_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_delete_kanban_card")
+			return
+		}
+		s.publishWorkspaceEvent(companyID, "kanban_card_deleted", map[string]any{
+			"board_id": boardID,
+			"card_id":  cardID,
+		})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+		return
+	}
+	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

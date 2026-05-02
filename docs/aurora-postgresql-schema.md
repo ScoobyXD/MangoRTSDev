@@ -214,6 +214,45 @@ create table if not exists workspace_folder_items (
   primary key (company_id, item_type, item_id),
   foreign key (company_id, folder_id) references workspace_folders (company_id, folder_id) on delete cascade
 );
+
+-- ==========================================================
+-- KANBAN
+-- ==========================================================
+
+create table if not exists kanban_columns (
+  company_id uuid not null,
+  board_id text not null,
+  column_id uuid not null,
+  title text not null,
+  position integer not null,
+  created_timestamp timestamptz not null,
+  updated_timestamp timestamptz not null,
+  constraint kanban_columns_title_nonblank_chk check (btrim(title) <> ''),
+  primary key (company_id, board_id, column_id)
+);
+
+create table if not exists kanban_cards (
+  company_id uuid not null,
+  board_id text not null,
+  card_id uuid not null,
+  column_id uuid not null,
+  item_type text not null,
+  node_id uuid,
+  logic_gate_id uuid,
+  title_snapshot text not null,
+  position integer not null,
+  created_timestamp timestamptz not null,
+  updated_timestamp timestamptz not null,
+  constraint kanban_cards_item_type_chk check (item_type in ('node', 'logic_gate')),
+  constraint kanban_cards_one_item_chk check (
+    (item_type = 'node' and node_id is not null and logic_gate_id is null)
+    or (item_type = 'logic_gate' and logic_gate_id is not null and node_id is null)
+  ),
+  primary key (company_id, board_id, card_id),
+  foreign key (company_id, board_id, column_id) references kanban_columns (company_id, board_id, column_id) on delete cascade,
+  foreign key (company_id, node_id) references nodes (company_id, node_id),
+  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
+);
 ```
 
 ## Field-by-field mapping from your sheet
@@ -301,3 +340,28 @@ create table if not exists workspace_folder_items (
 - Status (Enum: In Progress, Success, Failed) -> `operations.status`
 - Start Timestamp (TIMESTAMPTZ) -> `operations.start_timestamp`
 - End Timestamp (TIMESTAMPTZ) -> `operations.end_timestamp`
+
+### Kanban Columns
+
+- Company ID (UUIDv7) -> `kanban_columns.company_id`
+- Board ID (Text) -> `kanban_columns.board_id`
+- Column ID (UUIDv7) -> `kanban_columns.column_id`
+- Title (Text) -> `kanban_columns.title`
+- Position (Integer) -> `kanban_columns.position`
+- Created Timestamp (TIMESTAMPTZ) -> `kanban_columns.created_timestamp`
+- Updated Timestamp (TIMESTAMPTZ) -> `kanban_columns.updated_timestamp`
+
+### Kanban Cards
+
+- Company ID (UUIDv7) -> `kanban_cards.company_id`
+- Board ID (Text) -> `kanban_cards.board_id`
+- Card ID (UUIDv7) -> `kanban_cards.card_id`
+- Column ID (UUIDv7) -> `kanban_cards.column_id`
+- Item Type (Text: node, logic_gate) -> `kanban_cards.item_type`
+- Node ID (UUIDv7, nullable) -> `kanban_cards.node_id`
+- Logic Gate ID (UUIDv7, nullable) -> `kanban_cards.logic_gate_id`
+- Title Snapshot (Text) -> `kanban_cards.title_snapshot`
+- Position (Integer) -> `kanban_cards.position`
+- Created Timestamp (TIMESTAMPTZ) -> `kanban_cards.created_timestamp`
+- Updated Timestamp (TIMESTAMPTZ) -> `kanban_cards.updated_timestamp`
+- Constraint: `kanban_cards_one_item_chk` keeps each card linked to exactly one node or logic gate.

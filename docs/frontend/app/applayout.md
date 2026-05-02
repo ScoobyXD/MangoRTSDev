@@ -67,7 +67,7 @@ The app layout keeps compatibility for persisted payloads:
 ## Frame linking + canvas menu updates (2026-04-26)
 
 - Frame linking now uses a generic graph-style context-link model (`frame-module-links-v1`) instead of a Node-Map-only pairing model.
-- Context-menu linking can directly connect Company Explorer and Editor to each other, and is intentionally structured for future module kinds such as logic-map.
+- Context-menu linking can directly connect Company Explorer and Editor to each other, and now includes additional module kinds such as Logic Gate Map and Kanban.
 - Existing module contracts are preserved by deriving legacy editor/explorer -> map link keys from the link graph (compatibility bridge for current module internals).
 - Right-clicking empty canvas now includes `Create new frame`, which spawns a frame at the clicked grid location.
 - Selected frames now use a common web-app convention: blue focus outline + focus ring shadow for stronger visibility.

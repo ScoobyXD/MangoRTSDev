@@ -151,6 +151,11 @@ Folder runtime update (2026-05-01):
 - Selecting an individual node or logic gate inside a folder keeps that folder scope in the broadcast, so linked maps can select the item without expanding back to the whole company.
 - Relationships are displayed only when both endpoints are inside the active folder scope. Cross-folder relationships stay persisted but are hidden in that scoped map view.
 
+Kanban drag update (2026-05-01):
+- Node and Logic Gate rows are draggable.
+- Drag payloads use `application/x-mango-explorer-entity` with `{ itemType, itemID, label }`.
+- Kanban consumes the payload through its API-first board contract so the same operation can be performed by headless agents.
+
 ---
 
 ## 6) Data/backend stance

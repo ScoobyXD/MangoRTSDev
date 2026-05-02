@@ -8,6 +8,7 @@ import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksF
 import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { type WorkspaceFolder, type WorkspaceFolderItem, type WorkspaceFolderKind } from "../folders/workspaceFolders";
+import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload } from "../kanban/shared";
 
 type ExplorerTreeNode = {
   id: string;
@@ -699,9 +700,17 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 selectTreeRow(row);
                 setDraggingTreeID(row.id);
                 setDragPayload(rowDragPayload);
-                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.effectAllowed = row.kind === "folder" ? "move" : "copyMove";
                 const serialized = JSON.stringify(rowDragPayload);
                 event.dataTransfer.setData(EXPLORER_DRAG_MIME, serialized);
+                if ((row.kind === "node" || row.kind === "logic_gate") && rowDragPayload.itemID && rowDragPayload.itemType) {
+                  const kanbanPayload = serializeExplorerEntityDragPayload({
+                    itemType: rowDragPayload.itemType,
+                    itemID: rowDragPayload.itemID,
+                    label: row.label,
+                  });
+                  event.dataTransfer.setData(EXPLORER_ENTITY_DRAG_MIME, kanbanPayload);
+                }
                 event.dataTransfer.setData("text/plain", row.label);
               }}
               onDragEnd={() => {
