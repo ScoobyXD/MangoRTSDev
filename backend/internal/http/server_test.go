@@ -311,6 +311,7 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 			"company_id": companyID,
 			"board_id":   boardID,
 			"title":      title,
+			"width_px":   280,
 		})
 		req := httptest.NewRequest(http.MethodPost, "/v1/kanban/columns", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -342,6 +343,30 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	handler.ServeHTTP(renameRec, renameReq)
 	if renameRec.Code != http.StatusOK {
 		t.Fatalf("PUT kanban column status = %d, want %d body=%s", renameRec.Code, http.StatusOK, renameRec.Body.String())
+	}
+	layoutBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"board_id":   boardID,
+		"position":   777,
+		"width_px":   340,
+	})
+	layoutReq := httptest.NewRequest(http.MethodPut, "/v1/kanban/columns/"+todoColumnID, bytes.NewReader(layoutBody))
+	layoutReq.Header.Set("Content-Type", "application/json")
+	layoutRec := httptest.NewRecorder()
+	handler.ServeHTTP(layoutRec, layoutReq)
+	if layoutRec.Code != http.StatusOK {
+		t.Fatalf("PUT kanban column layout status = %d, want %d body=%s", layoutRec.Code, http.StatusOK, layoutRec.Body.String())
+	}
+	var layoutPayload struct {
+		Title    string `json:"title"`
+		Position int    `json:"position"`
+		WidthPx  int    `json:"width_px"`
+	}
+	if err := json.NewDecoder(layoutRec.Body).Decode(&layoutPayload); err != nil {
+		t.Fatalf("decode layout column: %v", err)
+	}
+	if layoutPayload.Title != "Ready" || layoutPayload.Position != 777 || layoutPayload.WidthPx != 340 {
+		t.Fatalf("column layout = %+v, want title preserved with position/width update", layoutPayload)
 	}
 
 	addCardBody, _ := json.Marshal(map[string]any{
@@ -454,6 +479,14 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	}
 	if len(pagedPayload.Cards) != 1 || pagedPayload.Cards[0].ItemType != "logic_gate" {
 		t.Fatalf("paged cards = %+v, want only logic gate after position 1000", pagedPayload.Cards)
+	}
+
+	deleteColumnID := createColumn("Temporary")
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/kanban/columns/"+deleteColumnID+"?company_id="+companyID+"&board_id="+boardID, nil)
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("DELETE kanban column status = %d, want %d body=%s", deleteRec.Code, http.StatusOK, deleteRec.Body.String())
 	}
 }
 

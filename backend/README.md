@@ -244,7 +244,7 @@ Create a Kanban column and place a node card:
 ```bash
 curl -X POST http://localhost:8080/v1/kanban/columns \
   -H 'content-type: application/json' \
-  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","title":"Ready"}'
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","title":"Ready","width_px":260}'
 
 curl -X POST http://localhost:8080/v1/kanban/cards \
   -H 'content-type: application/json' \

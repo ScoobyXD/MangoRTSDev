@@ -151,6 +151,7 @@ Use this checklist format and keep it complete.
   - sanitizes Company Explorer drag payloads for node and logic-gate Kanban drops
   - computes append positions within the target column only
   - groups and sorts board cards by stable per-column position
+  - computes bounded Kanban column reorder and resize values
   - locks the Kanban visual contract for preserving column title casing and clearing frame chrome
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
@@ -163,6 +164,8 @@ Use this checklist format and keep it complete.
   - logic gate create/read/information/relationship API flow
   - node and logic-gate information APIs reject blank/whitespace-only `information` so empty editor blurs do not persist rows
   - Kanban column create/rename and node/logic-gate card API flow
+  - Kanban column layout update flow for durable reorder/resize state
+  - Kanban column delete API flow
   - Kanban card upsert moves an existing board card instead of duplicating it
   - Kanban card reads honor `after_position` pagination for bounded hot-path reads
 

@@ -190,8 +190,10 @@ create table if not exists kanban_columns (
   column_id uuid not null,
   title text not null,
   position integer not null,
+  width_px integer not null default 260,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
+  constraint kanban_columns_width_px_chk check (width_px between 180 and 520),
   constraint kanban_columns_title_nonblank_chk check (btrim(title) <> ''),
   primary key (company_id, board_id, column_id)
 );
@@ -313,6 +315,7 @@ create table if not exists kanban_cards (
 - Column ID (UUIDv7) -> `kanban_columns.column_id`
 - Title (Text) -> `kanban_columns.title`
 - Position (Integer) -> `kanban_columns.position`
+- Width PX (Integer) -> `kanban_columns.width_px`
 - Created Timestamp (TIMESTAMPTZ) -> `kanban_columns.created_timestamp`
 - Updated Timestamp (TIMESTAMPTZ) -> `kanban_columns.updated_timestamp`
 

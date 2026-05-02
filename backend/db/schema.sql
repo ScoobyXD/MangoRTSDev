@@ -191,9 +191,11 @@ create table if not exists kanban_columns (
   column_id uuid not null,
   title text not null,
   position integer not null,
+  width_px integer not null default 260,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   constraint kanban_columns_title_nonblank_chk check (btrim(title) <> ''),
+  constraint kanban_columns_width_px_chk check (width_px between 180 and 520),
   primary key (company_id, board_id, column_id)
 );
 

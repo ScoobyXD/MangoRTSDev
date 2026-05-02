@@ -1006,6 +1006,7 @@ func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
 		BoardID   string `json:"board_id"`
 		Title     string `json:"title"`
 		Position  int    `json:"position"`
+		WidthPx   int    `json:"width_px"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
@@ -1018,7 +1019,7 @@ func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_board_id_and_title_required")
 		return
 	}
-	item, err := s.repo.CreateKanbanColumn(req.CompanyID, req.BoardID, req.Title, req.Position)
+	item, err := s.repo.CreateKanbanColumn(req.CompanyID, req.BoardID, req.Title, req.Position, req.WidthPx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_kanban_column")
 		return
@@ -1042,6 +1043,8 @@ func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) 
 			CompanyID string `json:"company_id"`
 			BoardID   string `json:"board_id"`
 			Title     string `json:"title"`
+			Position  int    `json:"position"`
+			WidthPx   int    `json:"width_px"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
@@ -1050,11 +1053,11 @@ func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) 
 		req.CompanyID = strings.TrimSpace(req.CompanyID)
 		req.BoardID = strings.TrimSpace(req.BoardID)
 		req.Title = strings.TrimSpace(req.Title)
-		if req.CompanyID == "" || req.BoardID == "" || req.Title == "" {
-			writeError(w, http.StatusBadRequest, "company_id_board_id_and_title_required")
+		if req.CompanyID == "" || req.BoardID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
 			return
 		}
-		item, err := s.repo.UpdateKanbanColumnTitle(req.CompanyID, req.BoardID, columnID, req.Title)
+		item, err := s.repo.UpdateKanbanColumn(req.CompanyID, req.BoardID, columnID, req.Title, req.Position, req.WidthPx)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "kanban_column_not_found")
 			return
