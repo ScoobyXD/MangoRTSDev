@@ -38,3 +38,38 @@ button, input {
   height: 0;
   display: none;
 }
+
+/* Editor document scrollbar: slim, edge-aligned, and driven by the frame theme. */
+.editor-document-scroll {
+  --editor-document-scroll-accent: rgb(0, 233, 255);
+  --editor-document-scroll-track: transparent;
+  scrollbar-width: thin;
+  scrollbar-color: var(--editor-document-scroll-accent) transparent;
+}
+
+.editor-document-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.editor-document-scroll::-webkit-scrollbar-track {
+  background: var(--editor-document-scroll-track);
+  border-radius: 999px;
+  margin: 0 0 24px;
+}
+
+.editor-document-scroll::-webkit-scrollbar-thumb {
+  min-height: 40px;
+  background: var(--editor-document-scroll-accent);
+  background-clip: content-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+
+.editor-document-scroll::-webkit-scrollbar-thumb:hover {
+  border-width: 1px;
+}
+
+.editor-document-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
