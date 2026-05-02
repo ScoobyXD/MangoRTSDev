@@ -8,6 +8,11 @@ interface KeyboardActions {
   redo: () => void;
 }
 
+function hasNativeTextSelection(): boolean {
+  const selection = window.getSelection();
+  return Boolean(selection && !selection.isCollapsed && selection.toString().length > 0);
+}
+
 // Global keyboard command router for frame editing workflows (delete/copy/paste/undo/redo).
 export function useKeyboardShortcuts(actions: KeyboardActions) {
   useEffect(() => {
@@ -29,6 +34,7 @@ export function useKeyboardShortcuts(actions: KeyboardActions) {
       if (!mod) return;
       const key = e.key.toLowerCase();
       if (key === "c") {
+        if (hasNativeTextSelection()) return;
         e.preventDefault();
         actions.copySelection();
       } else if (key === "v") {
