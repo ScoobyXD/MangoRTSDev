@@ -229,7 +229,7 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
     return true;
   }
 
-  if (envelope.type === "workspace_folder_created") {
+  if (envelope.type === "workspace_folder_created" || envelope.type === "workspace_folder_moved") {
     const folder = data.folder as WorkspaceFolder | undefined;
     if (!folder || typeof folder.folder_id !== "string") return false;
     const currentFolders = previous.folders ?? [];

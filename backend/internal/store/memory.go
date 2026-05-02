@@ -9,7 +9,10 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound = errors.New("not found")
+	ErrInvalid  = errors.New("invalid")
+)
 
 type Repository interface {
 	CreateNode(companyID, title string) (domain.Node, error)
@@ -36,6 +39,7 @@ type Repository interface {
 	CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error)
 	CreateWorkspaceFolder(companyID, parentFolderID, folderKind, name string) (domain.WorkspaceFolder, error)
 	ListWorkspaceFolders(companyID, folderKind string) ([]domain.WorkspaceFolder, error)
+	MoveWorkspaceFolder(companyID, folderID, parentFolderID string) (domain.WorkspaceFolder, error)
 	DeleteWorkspaceFolder(companyID, folderID string) error
 	AssignWorkspaceFolderItem(companyID, folderID, itemType, itemID string) (domain.WorkspaceFolderItem, error)
 	ListWorkspaceFolderItems(companyID, folderID, itemType string) ([]domain.WorkspaceFolderItem, error)
@@ -660,6 +664,53 @@ func (r *MemoryRepo) ListWorkspaceFolders(companyID, folderKind string) ([]domai
 		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
 	})
 	return items, nil
+}
+
+func (r *MemoryRepo) MoveWorkspaceFolder(companyID, folderID, parentFolderID string) (domain.WorkspaceFolder, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	item, ok := r.folders[key(companyID, folderID)]
+	if !ok {
+		return domain.WorkspaceFolder{}, ErrNotFound
+	}
+	if parentFolderID == folderID {
+		return domain.WorkspaceFolder{}, ErrInvalid
+	}
+
+	var parent *string
+	if parentFolderID != "" {
+		parentFolder, ok := r.folders[key(companyID, parentFolderID)]
+		if !ok || parentFolder.FolderKind != item.FolderKind {
+			return domain.WorkspaceFolder{}, ErrNotFound
+		}
+		// A folder cannot be moved under one of its descendants; that would
+		// create a cycle and make folder-scope queries loop forever.
+		toCheck := map[string]bool{folderID: true}
+		changed := true
+		for changed {
+			changed = false
+			for _, folder := range r.folders {
+				if folder.CompanyID != companyID || folder.ParentFolderID == nil {
+					continue
+				}
+				if toCheck[*folder.ParentFolderID] && !toCheck[folder.FolderID] {
+					toCheck[folder.FolderID] = true
+					changed = true
+				}
+			}
+		}
+		if toCheck[parentFolderID] {
+			return domain.WorkspaceFolder{}, ErrInvalid
+		}
+		parentValue := parentFolderID
+		parent = &parentValue
+	}
+
+	item.ParentFolderID = parent
+	item.UpdatedTimestamp = time.Now().UTC()
+	r.folders[key(companyID, item.FolderID)] = item
+	return item, nil
 }
 
 func (r *MemoryRepo) DeleteWorkspaceFolder(companyID, folderID string) error {

@@ -1073,6 +1073,102 @@ func (r *PostgresRepo) ListWorkspaceFolders(companyID, folderKind string) ([]dom
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) MoveWorkspaceFolder(companyID, folderID, parentFolderID string) (domain.WorkspaceFolder, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.WorkspaceFolder{}, err
+	}
+	defer tx.Rollback()
+
+	var folderKind string
+	if err := tx.QueryRowContext(ctx,
+		`select folder_kind
+		 from workspace_folders
+		 where company_id=$1 and folder_id=$2
+		 for update`,
+		companyID, folderID,
+	).Scan(&folderKind); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.WorkspaceFolder{}, ErrNotFound
+		}
+		return domain.WorkspaceFolder{}, err
+	}
+	if parentFolderID == folderID {
+		return domain.WorkspaceFolder{}, ErrInvalid
+	}
+
+	var parent any
+	if parentFolderID != "" {
+		var parentKind string
+		if err := tx.QueryRowContext(ctx,
+			`select folder_kind
+			 from workspace_folders
+			 where company_id=$1 and folder_id=$2`,
+			companyID, parentFolderID,
+		).Scan(&parentKind); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return domain.WorkspaceFolder{}, ErrNotFound
+			}
+			return domain.WorkspaceFolder{}, err
+		}
+		if parentKind != folderKind {
+			return domain.WorkspaceFolder{}, ErrNotFound
+		}
+
+		var createsCycle bool
+		if err := tx.QueryRowContext(ctx,
+			`with recursive descendants as (
+			   select folder_id
+			   from workspace_folders
+			   where company_id=$1 and folder_id=$2
+			   union all
+			   select child.folder_id
+			   from workspace_folders child
+			   join descendants parent on child.company_id=$1 and child.parent_folder_id=parent.folder_id
+			 )
+			 select exists(select 1 from descendants where folder_id=$3)`,
+			companyID, folderID, parentFolderID,
+		).Scan(&createsCycle); err != nil {
+			return domain.WorkspaceFolder{}, err
+		}
+		if createsCycle {
+			return domain.WorkspaceFolder{}, ErrInvalid
+		}
+		parent = parentFolderID
+	}
+
+	var item domain.WorkspaceFolder
+	var parentOut sql.NullString
+	if err := tx.QueryRowContext(ctx,
+		`update workspace_folders
+		 set parent_folder_id=$3, updated_timestamp=now()
+		 where company_id=$1 and folder_id=$2
+		 returning company_id, folder_id, parent_folder_id, folder_kind, name, created_timestamp, updated_timestamp`,
+		companyID, folderID, parent,
+	).Scan(
+		&item.CompanyID,
+		&item.FolderID,
+		&parentOut,
+		&item.FolderKind,
+		&item.Name,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.WorkspaceFolder{}, ErrNotFound
+		}
+		return domain.WorkspaceFolder{}, err
+	}
+	if parentOut.Valid {
+		item.ParentFolderID = &parentOut.String
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.WorkspaceFolder{}, err
+	}
+	return item, nil
+}
+
 func (r *PostgresRepo) DeleteWorkspaceFolder(companyID, folderID string) error {
 	ctx := context.Background()
 	deleted, err := r.db.ExecContext(ctx,

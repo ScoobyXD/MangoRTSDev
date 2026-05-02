@@ -329,6 +329,40 @@ func TestWorkspaceFolderAPIsSupportNestedFoldersAndMembership(t *testing.T) {
 
 	parentID := createFolder("Customers", "")
 	childID := createFolder("Onboarding", parentID)
+	siblingID := createFolder("Escalations", parentID)
+
+	moveBody, _ := json.Marshal(map[string]string{
+		"company_id":       companyID,
+		"parent_folder_id": siblingID,
+	})
+	moveReq := httptest.NewRequest(http.MethodPut, "/v1/workspace/folders/"+childID, bytes.NewReader(moveBody))
+	moveReq.Header.Set("Content-Type", "application/json")
+	moveRec := httptest.NewRecorder()
+	handler.ServeHTTP(moveRec, moveReq)
+	if moveRec.Code != http.StatusOK {
+		t.Fatalf("PUT workspace folder status = %d, want %d body=%s", moveRec.Code, http.StatusOK, moveRec.Body.String())
+	}
+	var movedFolder struct {
+		ParentFolderID *string `json:"parent_folder_id"`
+	}
+	if err := json.NewDecoder(moveRec.Body).Decode(&movedFolder); err != nil {
+		t.Fatalf("decode moved folder: %v", err)
+	}
+	if movedFolder.ParentFolderID == nil || *movedFolder.ParentFolderID != siblingID {
+		t.Fatalf("moved folder parent = %v, want %s", movedFolder.ParentFolderID, siblingID)
+	}
+
+	cycleBody, _ := json.Marshal(map[string]string{
+		"company_id":       companyID,
+		"parent_folder_id": childID,
+	})
+	cycleReq := httptest.NewRequest(http.MethodPut, "/v1/workspace/folders/"+siblingID, bytes.NewReader(cycleBody))
+	cycleReq.Header.Set("Content-Type", "application/json")
+	cycleRec := httptest.NewRecorder()
+	handler.ServeHTTP(cycleRec, cycleReq)
+	if cycleRec.Code != http.StatusBadRequest {
+		t.Fatalf("cyclic PUT workspace folder status = %d, want %d body=%s", cycleRec.Code, http.StatusBadRequest, cycleRec.Body.String())
+	}
 
 	assignBody, _ := json.Marshal(map[string]string{
 		"company_id": companyID,
@@ -383,17 +417,17 @@ func TestWorkspaceFolderAPIsSupportNestedFoldersAndMembership(t *testing.T) {
 	if err := json.NewDecoder(snapshotRec.Body).Decode(&snapshot); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
-	if len(snapshot.Folders) != 2 || len(snapshot.FolderItems) != 1 {
-		t.Fatalf("snapshot folder counts = folders:%d items:%d, want 2/1", len(snapshot.Folders), len(snapshot.FolderItems))
+	if len(snapshot.Folders) != 3 || len(snapshot.FolderItems) != 1 {
+		t.Fatalf("snapshot folder counts = folders:%d items:%d, want 3/1", len(snapshot.Folders), len(snapshot.FolderItems))
 	}
 	foundChild := false
 	for _, folder := range snapshot.Folders {
-		if folder.FolderID == childID && folder.ParentFolderID != nil && *folder.ParentFolderID == parentID {
+		if folder.FolderID == childID && folder.ParentFolderID != nil && *folder.ParentFolderID == siblingID {
 			foundChild = true
 		}
 	}
 	if !foundChild {
-		t.Fatalf("snapshot did not preserve nested child folder parent")
+		t.Fatalf("snapshot did not preserve moved child folder parent")
 	}
 }
 

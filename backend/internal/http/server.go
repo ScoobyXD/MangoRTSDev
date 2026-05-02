@@ -222,24 +222,59 @@ func (s *Server) handleWorkspaceFolderByID(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	if r.Method != http.MethodDelete {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+
+	if r.Method == http.MethodPut {
+		var req struct {
+			CompanyID      string `json:"company_id"`
+			ParentFolderID string `json:"parent_folder_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		req.CompanyID = strings.TrimSpace(req.CompanyID)
+		req.ParentFolderID = strings.TrimSpace(req.ParentFolderID)
+		if req.CompanyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		item, err := s.repo.MoveWorkspaceFolder(req.CompanyID, folderID, req.ParentFolderID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "workspace_folder_not_found")
+			return
+		}
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_workspace_folder_move")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_move_workspace_folder")
+			return
+		}
+		s.publishWorkspaceEvent(req.CompanyID, "workspace_folder_moved", map[string]any{"folder_id": item.FolderID, "folder": item})
+		writeJSON(w, http.StatusOK, item)
 		return
 	}
-	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-	if companyID == "" {
-		writeError(w, http.StatusBadRequest, "company_id_required")
+
+	if r.Method == http.MethodDelete {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if err := s.repo.DeleteWorkspaceFolder(companyID, folderID); errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "workspace_folder_not_found")
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_delete_workspace_folder")
+			return
+		}
+		s.publishWorkspaceEvent(companyID, "workspace_folder_deleted", map[string]any{"folder_id": folderID})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}
-	if err := s.repo.DeleteWorkspaceFolder(companyID, folderID); errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "workspace_folder_not_found")
-		return
-	} else if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_delete_workspace_folder")
-		return
-	}
-	s.publishWorkspaceEvent(companyID, "workspace_folder_deleted", map[string]any{"folder_id": folderID})
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+
+	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 }
 
 func (s *Server) handleWorkspaceFolderItems(w http.ResponseWriter, r *http.Request) {

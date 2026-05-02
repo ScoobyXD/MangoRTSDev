@@ -143,8 +143,12 @@ Folder runtime update (2026-05-01):
 - Explorer folders are now durable backend rows, not local-only UI state.
 - `workspace_folders` stores nested folders separately for `node` and `logic_gate` trees.
 - `workspace_folder_items` stores one placement per node or logic gate, matching file-explorer move semantics.
+- Folder rows use folder icons, node rows use document icons, and logic-gate rows use process icons.
+- The Explorer tree no longer renders separate `All Nodes` or `All Logic Gates` child folders; the top-level `Nodes` and `Logic Gates` rows are the broad-scope selectors.
+- Folder creation is an inline row action, while node, logic-gate, and folder moves use drag-and-drop onto compatible folders.
 - Selecting a node folder broadcasts `selectedFolderID`/`selectedFolderKind=node`; linked Node Map filters its cached graph to nodes placed in that folder or any descendant folder.
 - Selecting a logic-gate folder broadcasts `selectedFolderID`/`selectedFolderKind=logic_gate`; linked Logic Gate Map applies the same folder-scope rule for gates.
+- Selecting an individual node or logic gate inside a folder keeps that folder scope in the broadcast, so linked maps can select the item without expanding back to the whole company.
 - Relationships are displayed only when both endpoints are inside the active folder scope. Cross-folder relationships stay persisted but are hidden in that scoped map view.
 
 ---
@@ -162,10 +166,12 @@ Implementation principle:
 
 Headless API surface:
 - `GET/POST /v1/workspace/folders`
+- `PUT /v1/workspace/folders/{folder_id}`
 - `DELETE /v1/workspace/folders/{folder_id}`
 - `GET/POST/DELETE /v1/workspace/folder-items`
 
 This keeps source-of-truth entity IDs and persistence semantics intact while making Explorer organization durable.
+Folder move writes reject self/descendant parents so the folder tree remains safe for recursive scope filtering.
 
 ---
 

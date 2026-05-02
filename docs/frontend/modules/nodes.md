@@ -257,6 +257,7 @@ The projection object is **derived in memory** during render. It is not persiste
 - Node relationship graph streaming/delta handling in `NodeRelationshipGraph.ts` uses a single `NodeRelationshipGraphStreamEnvelope` contract type for event application.
 - Relationship-create writes between existing nodes are executed through one internal helper path (`commitRelationshipBetweenNodes`) to avoid duplicate declaration/runtime drift in the canvas module.
 - Folder scope is applied in memory from `folders` + `folder_items` in the workspace snapshot. When Company Explorer selects a node folder, Node Map renders nodes placed in that folder or descendant folders and only relationships whose endpoints are both visible.
+- When Company Explorer selects an individual node inside a folder, Node Map keeps the folder scope active and selects that node instead of expanding back to the all-node graph.
 - New nodes created while a folder scope is active are placed into that folder through `POST /v1/workspace/folder-items`, so UI-created nodes and agent-created nodes share the same API-backed placement model.
 
 ---

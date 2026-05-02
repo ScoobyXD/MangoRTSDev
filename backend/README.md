@@ -175,6 +175,7 @@ psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME 
 - `DELETE /v1/logic-gate-relationships/{logic_gate_relationship_id}?company_id={uuid}`
 - `GET /v1/workspace/folders?company_id={uuid}&folder_kind=node|logic_gate`
 - `POST /v1/workspace/folders`
+- `PUT /v1/workspace/folders/{folder_id}`
 - `DELETE /v1/workspace/folders/{folder_id}?company_id={uuid}`
 - `GET /v1/workspace/folder-items?company_id={uuid}&folder_id={uuid}&item_type=node|logic_gate`
 - `POST /v1/workspace/folder-items`
@@ -240,10 +241,15 @@ curl -X POST http://localhost:8080/v1/workspace/folders \
 curl -X POST http://localhost:8080/v1/workspace/folder-items \
   -H 'content-type: application/json' \
   -d '{"company_id":"11111111-1111-1111-1111-111111111111","folder_id":"<folder_id>","item_type":"node","item_id":"<node_id>"}'
+
+curl -X PUT http://localhost:8080/v1/workspace/folders/<child_folder_id> \
+  -H 'content-type: application/json' \
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","parent_folder_id":"<parent_folder_id>"}'
 ```
 
 Folder rows are API-backed so headless agents can create the same explorer structure as the UI.
 `workspace_folder_items` keeps one placement per node or logic gate, matching file-explorer move semantics.
+Folder moves reject self/descendant parents to keep the hierarchy acyclic.
 
 Create operation:
 

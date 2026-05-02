@@ -32,6 +32,8 @@ Endpoints used:
 - `DELETE /v1/logic-gate-relationships/:logic_gate_relationship_id?company_id=...`
 - `GET/POST /v1/workspace/folders`
   - `folder_kind` must be `logic_gate` for Logic Gate Map organization.
+- `PUT /v1/workspace/folders/:folder_id`
+  - moves a logic-gate folder under another compatible folder or back to the Logic Gates root.
 - `GET/POST/DELETE /v1/workspace/folder-items`
   - `item_type` must be `logic_gate` when moving gates into explorer folders.
 
@@ -70,6 +72,7 @@ Logic Gate Map follows the latency architecture rules:
 - visible gate rendering uses the same viewport culling strategy as Node Map,
 - layout geometry stays local to the browser and does not enter the hot backend path.
 - Company Explorer folder selection filters the cached snapshot in memory. A selected folder includes descendant folders, and relationship lines render only when both gates are inside that active scope.
+- Selecting an individual gate from inside a Company Explorer folder keeps that folder scope active while selecting the gate.
 - New logic gates created while a folder scope is active are assigned to that folder through the folder-items API.
 
 ## Linking Behavior

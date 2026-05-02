@@ -493,14 +493,20 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       try {
         const raw = localStorage.getItem(explorerKey);
         if (!raw) return;
-        const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedLogicGateID?: string; selectedFolderID?: string; selectedFolderKind?: string; selectedLabel?: string; ts?: number };
+        const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedLogicGateID?: string; selectedFolderID?: string; selectedFolderKind?: string; selectedFolderLabel?: string; selectedLabel?: string; ts?: number };
         if (typeof parsed.ts !== "number" || parsed.ts <= explorerContextRef.current) return;
         explorerContextRef.current = parsed.ts;
         if (parsed.selectedFolderKind === "logic_gate") {
           setActiveFolderID(typeof parsed.selectedFolderID === "string" ? parsed.selectedFolderID : "");
-          setActiveFolderLabel(typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : "");
-          setSelectedNodeID("");
-          setSelectedNodeIDs(new Set());
+          setActiveFolderLabel(typeof parsed.selectedFolderLabel === "string" ? parsed.selectedFolderLabel : (typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : ""));
+          const selected = parsed.selectedLogicGateID || parsed.selectedNodeID || "";
+          if (selected && allNodes.some((node) => node.node_id === selected)) {
+            setSelectedNodeID(selected);
+            setSelectedNodeIDs(new Set([selected]));
+          } else {
+            setSelectedNodeID("");
+            setSelectedNodeIDs(new Set());
+          }
           return;
         }
         const selectedLogicGateID = parsed.selectedLogicGateID || parsed.selectedNodeID || "";

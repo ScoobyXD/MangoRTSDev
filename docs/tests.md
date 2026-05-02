@@ -162,7 +162,7 @@ Use this checklist format and keep it complete.
   - logic gate relationship position-pair legality helper (Input/Output or Output/Input only)
   - logic gate create/read/information/relationship API flow
   - node and logic-gate information APIs reject blank/whitespace-only `information` so empty editor blurs do not persist rows
-  - workspace folder APIs create nested folders, assign node placements, and include folder data in workspace snapshots
+  - workspace folder APIs create nested folders, move folders, reject cyclic folder moves, assign node placements, and include folder data in workspace snapshots
 
 ### Integration tests
 - [ ] None committed yet (to be added)
