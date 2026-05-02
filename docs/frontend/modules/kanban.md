@@ -9,6 +9,12 @@ Users can:
 - drag nodes and logic gates from Company Explorer into a column,
 - drag cards between columns.
 
+## Visual Rules
+- The board surface stays white in the light theme.
+- The board uses a black outline and subtle shadow so it is distinguishable from a white frame/background.
+- Column titles preserve user-entered casing; the UI must not force uppercase display.
+- The module reserves top clearance for the frame title plate and linked-module hexagon so the column toolbar does not bleed into frame chrome.
+
 ## Linkable Frame Behavior
 Kanban is a linkable frame kind (`kanban`).
 
