@@ -107,6 +107,49 @@ export function snapToGrid(value: number): number {
   return Math.round(value / MINI_GRID) * MINI_GRID;
 }
 
+export function reconcileNodeMapPositions<T extends { node_id: string }>(input: {
+  previous: Record<string, NodePosition>;
+  nodes: T[];
+  canvasWidth: number;
+  worldWidth: number;
+  worldHeight: number;
+  nodeWidth: number;
+  nodeHeight: number;
+}): Record<string, NodePosition> {
+  if (input.nodes.length === 0) return input.previous;
+
+  let next = input.previous;
+  const ensureWritable = () => {
+    if (next === input.previous) next = { ...input.previous };
+  };
+
+  for (const [index, node] of input.nodes.entries()) {
+    const existing = input.previous[node.node_id];
+    if (existing) {
+      const clamped = {
+        x: clamp(snapToGrid(existing.x), 0, input.worldWidth - input.nodeWidth),
+        y: clamp(snapToGrid(existing.y), 0, input.worldHeight - input.nodeHeight),
+      };
+      if (clamped.x !== existing.x || clamped.y !== existing.y) {
+        ensureWritable();
+        next[node.node_id] = clamped;
+      }
+      continue;
+    }
+
+    const perRow = Math.max(1, Math.floor(input.canvasWidth / (input.nodeWidth + 40)));
+    const x = snapToGrid((index % perRow) * (input.nodeWidth + 26) + 100);
+    const y = snapToGrid(Math.floor(index / perRow) * (input.nodeHeight + 26) + 120);
+    ensureWritable();
+    next[node.node_id] = {
+      x: clamp(x, 0, input.worldWidth - input.nodeWidth),
+      y: clamp(y, 0, input.worldHeight - input.nodeHeight),
+    };
+  }
+
+  return next;
+}
+
 type KeydownTargetLike = {
   isContentEditable?: boolean;
   closest?: (selector: string) => KeydownTargetLike | null;

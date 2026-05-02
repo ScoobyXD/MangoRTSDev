@@ -30,6 +30,7 @@
     "../modules/node-map/relationshipSelection.test.ts",
     "../../../frontend/src/modules/node-map/NodeMapControls.ts",
     "../modules/node-map/NodeMapControls.test.ts",
+    "../modules/node-map/nodeMapLayout.test.ts",
     "../../../frontend/src/modules/node-map/relationshipDeleteSummary.ts",
     "../modules/node-map/relationshipDeleteSummary.test.ts",
     "../../../frontend/src/modules/company-explorer/explorerSync.ts",

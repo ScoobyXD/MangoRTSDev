@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, getNodeTitle, snapToGrid, trimOrEmpty } from "./shared";
+import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, getNodeTitle, reconcileNodeMapPositions, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "./NodeRelationshipGraph";
@@ -15,6 +15,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const mapScope = widgetId?.trim() ? widgetId : "global";
   const mapStateKey = `node-map-state-v1:${companyID}:${mapScope}`;
+  const fallbackMapStateKey = `node-map-state-v1:${companyID}:last-opened-map`;
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const relationshipCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -131,7 +132,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   };
 
   useEffect(() => {
-    const cached = SESSION_NODE_MAP_STATE.get(mapStateKey);
+    const cached = SESSION_NODE_MAP_STATE.get(mapStateKey) ?? SESSION_NODE_MAP_STATE.get(fallbackMapStateKey);
     if (cached) {
       setZoom(clamp(cached.zoom, 0.45, 2.7));
       setPan(cached.pan);
@@ -152,7 +153,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       return;
     }
     try {
-      const raw = localStorage.getItem(mapStateKey);
+      const raw = localStorage.getItem(mapStateKey) ?? localStorage.getItem(fallbackMapStateKey);
       if (!raw) {
         setRestoredViewport(true);
         return;
@@ -205,7 +206,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     } finally {
       setRestoredViewport(true);
     }
-  }, [mapStateKey]);
+  }, [fallbackMapStateKey, mapStateKey]);
 
   // Shared API request helper for node CRUD, details, and relationship operations.
   const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
@@ -380,13 +381,16 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           relationshipRoleColors,
         };
         SESSION_NODE_MAP_STATE.set(mapStateKey, nextState);
-        localStorage.setItem(mapStateKey, JSON.stringify(nextState));
+        SESSION_NODE_MAP_STATE.set(fallbackMapStateKey, nextState);
+        const serializedState = JSON.stringify(nextState);
+        localStorage.setItem(mapStateKey, serializedState);
+        localStorage.setItem(fallbackMapStateKey, serializedState);
       } catch {
         // ignore local storage quota/security errors
       }
     }, 120);
     return () => window.clearTimeout(timeout);
-  }, [mapStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions, relationshipColorsEnabled, relationshipRoleColors]);
+  }, [fallbackMapStateKey, mapStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions, relationshipColorsEnabled, relationshipRoleColors]);
 
   useEffect(() => {
     if (!restoredViewport) return;
@@ -409,23 +413,15 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
 
   useEffect(() => {
     setNodePositions((previous) => {
-      if (nodes.length === 0) return previous;
-      const next: Record<string, NodePosition> = {};
-      for (const [index, node] of nodes.entries()) {
-        const existing = previous[node.node_id];
-        if (existing) {
-          next[node.node_id] = {
-            x: clamp(snapToGrid(existing.x), 0, WORLD_W - NODE_W),
-            y: clamp(snapToGrid(existing.y), 0, WORLD_H - NODE_H),
-          };
-          continue;
-        }
-        const perRow = Math.max(1, Math.floor(canvasSize.width / (NODE_W + 40)));
-        const x = snapToGrid((index % perRow) * (NODE_W + 26) + 100);
-        const y = snapToGrid(Math.floor(index / perRow) * (NODE_H + 26) + 120);
-        next[node.node_id] = { x: clamp(x, 0, WORLD_W - NODE_W), y: clamp(y, 0, WORLD_H - NODE_H) };
-      }
-      return next;
+      return reconcileNodeMapPositions({
+        previous,
+        nodes,
+        canvasWidth: canvasSize.width,
+        worldWidth: WORLD_W,
+        worldHeight: WORLD_H,
+        nodeWidth: NODE_W,
+        nodeHeight: NODE_H,
+      });
     });
   }, [nodes, canvasSize.width]);
 
