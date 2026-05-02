@@ -7,6 +7,7 @@ import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGrap
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
+import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload } from "../kanban/shared";
 
 type ExplorerTreeNode = {
   id: string;
@@ -389,6 +390,20 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           return (
             <div
               key={row.id}
+              draggable={row.kind === "node" || row.kind === "logic_gate"}
+              onDragStart={(event) => {
+                if (row.kind !== "node" && row.kind !== "logic_gate") return;
+                const itemID = row.kind === "logic_gate" ? row.logicGateID : row.nodeID;
+                if (!itemID) return;
+                const payload = serializeExplorerEntityDragPayload({
+                  itemType: row.kind === "logic_gate" ? "logic_gate" : "node",
+                  itemID,
+                  label: row.label,
+                });
+                event.dataTransfer.effectAllowed = "copy";
+                event.dataTransfer.setData(EXPLORER_ENTITY_DRAG_MIME, payload);
+                event.dataTransfer.setData("text/plain", row.label);
+              }}
               onClick={() => {
                 setSelectedTreeID(row.id);
                 if (row.kind === "node") {

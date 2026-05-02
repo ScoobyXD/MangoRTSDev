@@ -169,6 +169,14 @@ psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME 
 - `DELETE /v1/logic-gate-relationships/{logic_gate_relationship_id}?company_id={uuid}`
 - `POST /v1/operations`
 - `GET /v1/operations/{operation_id}?company_id={uuid}`
+- `GET /v1/kanban/columns?company_id={uuid}&board_id={board_id}`
+- `POST /v1/kanban/columns`
+- `PUT /v1/kanban/columns/{column_id}`
+- `DELETE /v1/kanban/columns/{column_id}?company_id={uuid}&board_id={board_id}`
+- `GET /v1/kanban/cards?company_id={uuid}&board_id={board_id}&column_id={column_id}&after_position=0&limit=200`
+- `POST /v1/kanban/cards`
+- `PUT /v1/kanban/cards/{card_id}`
+- `DELETE /v1/kanban/cards/{card_id}?company_id={uuid}&board_id={board_id}`
 
 ### Request examples
 
@@ -229,6 +237,18 @@ curl -X POST http://localhost:8080/v1/operations \
     "status":"In Progress",
     "start_timestamp":"2026-04-18T00:00:00Z"
   }'
+```
+
+Create a Kanban column and place a node card:
+
+```bash
+curl -X POST http://localhost:8080/v1/kanban/columns \
+  -H 'content-type: application/json' \
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","title":"Ready"}'
+
+curl -X POST http://localhost:8080/v1/kanban/cards \
+  -H 'content-type: application/json' \
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","column_id":"<column_id>","item_type":"node","item_id":"<node_id>","title_snapshot":"Customer onboarding"}'
 ```
 
 

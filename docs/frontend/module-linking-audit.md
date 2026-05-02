@@ -5,7 +5,7 @@ This note explains how context linking currently works across frames/modules in 
 ## 1) Link graph model
 
 - Frame-to-frame links are stored as undirected `FrameLinkEdge` records (`a`, `b`, `mode`) in localStorage key `frame-module-links-v1`.
-- Frame kinds are normalized with `classifyFrameKind` (`map`, `editor`, `explorer`, `logic-map`).
+- Frame kinds are normalized with `classifyFrameKind` (`map`, `editor`, `explorer`, `logic-map`, `kanban`).
 - When a module needs "its linked map", it runs a BFS over the frame link graph (`resolveLinkedFrameByKindFromGraph`) and picks the first reachable frame of kind `map`.
 
 ## 2) Broadcast channels
@@ -58,6 +58,15 @@ Logic Gate Map participates in the same frame-link graph using kind `logic-map`.
 
 Junior engineer note:
 - Node and logic-gate contexts use separate storage keys/events so a node click cannot accidentally overwrite a logic-gate workflow, and vice versa.
+
+## 6.2 Kanban Linking
+
+Kanban participates in the same frame-link graph using kind `kanban`.
+
+- Company Explorer rows are draggable as node/logic-gate payloads.
+- Kanban consumes those payloads and writes durable cards through `/v1/kanban/cards`.
+- Linked Explorer selection is read from the existing Explorer context keys and highlights a matching Kanban card.
+- Parent/Child Frame auto-linking works without extra Kanban-specific storage because child frame groups already run through the generic link plan.
 
 
 ## 7) Gaps identified by latency architecture contract

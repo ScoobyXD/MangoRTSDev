@@ -139,6 +139,11 @@ Selection sync hardening update (2026-04-29):
 - Map-originated selection echoes are treated as no-op when Explorer already holds the same selected node/tree, which prevents "every other click" suppression churn.
 - This keeps anti-loop behavior while protecting hot-path click reliability for linked Explorer<->Node Map flows.
 
+Kanban drag update (2026-05-01):
+- Node and Logic Gate rows are draggable.
+- Drag payloads use `application/x-mango-explorer-entity` with `{ itemType, itemID, label }`.
+- Kanban consumes the payload through its API-first board contract so the same operation can be performed by headless agents.
+
 ---
 
 ## 6) Data/backend stance

@@ -129,13 +129,13 @@ Use this checklist format and keep it complete.
   - non-editable canvas targets continue through normal canvas key handling
 - [x] `frontend/src/app/frameLinking.test.ts`
   - context-menu link label fallback (`No other module selected`) when only one module is in active pool
-  - graph-based pairwise link-plan generation for multi-module selection pools
+  - graph-based pairwise link-plan generation for multi-module selection pools, including Kanban
   - legacy editor/explorer -> Node Map compatibility derivation through indirect link graph paths
   - context-frame pool fallback when no explicit selection set exists
   - delink behavior removes all graph edges touching selected/context modules
 - [x] `frontend/src/modules/linkingGraph.test.ts`
   - frame-link edge sanitization canonicalizes and deduplicates undirected graph edges
-  - linked target resolution by kind supports traversal through intermediary graph hops
+  - linked target resolution by kind supports traversal through intermediary graph hops, including Kanban
   - direct-neighbor resolution returns adjacency-only targets for explorer fanout
 - [x] `tests/frontend/modules/company-explorer/explorerSync.test.ts`
 - [x] `tests/frontend/modules/contextSyncContract.test.ts`
@@ -147,6 +147,10 @@ Use this checklist format and keep it complete.
   - ignores map-originated no-op selection echoes so suppression latches do not eat subsequent Explorer clicks
   - applies map selections only when Explorer semantic selection actually changes
   - scopes Explorer broadcast emission to semantic selection changes (node/tree)
+- [x] `tests/frontend/modules/kanban/shared.test.ts`
+  - sanitizes Company Explorer drag payloads for node and logic-gate Kanban drops
+  - computes append positions within the target column only
+  - groups and sorts board cards by stable per-column position
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
   - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)
@@ -157,6 +161,9 @@ Use this checklist format and keep it complete.
   - logic gate relationship position-pair legality helper (Input/Output or Output/Input only)
   - logic gate create/read/information/relationship API flow
   - node and logic-gate information APIs reject blank/whitespace-only `information` so empty editor blurs do not persist rows
+  - Kanban column create/rename and node/logic-gate card API flow
+  - Kanban card upsert moves an existing board card instead of duplicating it
+  - Kanban card reads honor `after_position` pagination for bounded hot-path reads
 
 ### Integration tests
 - [ ] None committed yet (to be added)

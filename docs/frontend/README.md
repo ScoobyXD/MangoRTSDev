@@ -31,6 +31,11 @@ This folder contains architecture, product behavior, and migration documentation
   - 3-pane responsibilities (tree/details/context)
   - default view menu requirements
   - linked Node workspace behavior
+- `docs/frontend/modules/kanban.md`
+  - Kanban board behavior
+  - Explorer drag payload contract
+  - headless Kanban API contract
+  - linkable frame behavior
 
 ### Migration history
 - `docs/frontend/migration/FRAME_MODULE_MIGRATION_HANDOFF.md`

@@ -99,6 +99,29 @@ type Operation struct {
 	EndTimestamp   *time.Time `json:"end_timestamp,omitempty"`
 }
 
+type KanbanColumn struct {
+	CompanyID        string    `json:"company_id"`
+	BoardID          string    `json:"board_id"`
+	ColumnID         string    `json:"column_id"`
+	Title            string    `json:"title"`
+	Position         int       `json:"position"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type KanbanCard struct {
+	CompanyID        string    `json:"company_id"`
+	BoardID          string    `json:"board_id"`
+	CardID           string    `json:"card_id"`
+	ColumnID         string    `json:"column_id"`
+	ItemType         string    `json:"item_type"`
+	ItemID           string    `json:"item_id"`
+	TitleSnapshot    string    `json:"title_snapshot"`
+	Position         int       `json:"position"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
 type WorkspaceContextEvent struct {
 	CompanyID      string    `json:"company_id"`
 	WorkspaceID    string    `json:"workspace_id"`

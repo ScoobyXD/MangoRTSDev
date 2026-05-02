@@ -16,10 +16,12 @@ test("resolveLinkedFrameByKindFromGraph walks through intermediary frames", () =
     "editor-1": { kind: "editor" },
     "explorer-1": { kind: "company-explorer" },
     "map-1": { kind: "nodes-map" },
+    "kanban-1": { kind: "kanban" },
   });
   const edges = sanitizeFrameLinks([
     { a: "editor-1", b: "explorer-1", mode: "context" },
     { a: "explorer-1", b: "map-1", mode: "context" },
+    { a: "map-1", b: "kanban-1", mode: "context" },
   ]);
   const linkedMap = resolveLinkedFrameByKindFromGraph({
     startFrameID: "editor-1",
@@ -28,6 +30,13 @@ test("resolveLinkedFrameByKindFromGraph walks through intermediary frames", () =
     registry,
   });
   assert.equal(linkedMap, "map-1");
+  const linkedKanban = resolveLinkedFrameByKindFromGraph({
+    startFrameID: "editor-1",
+    targetKind: "kanban",
+    edges,
+    registry,
+  });
+  assert.equal(linkedKanban, "kanban-1");
 });
 
 test("resolveDirectLinkedTargets returns direct neighbors only", () => {

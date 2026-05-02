@@ -36,6 +36,14 @@ type Repository interface {
 	CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error)
 	CreateOperation(in CreateOperationInput) (domain.Operation, error)
 	GetOperation(companyID, operationID string) (domain.Operation, error)
+	ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error)
+	CreateKanbanColumn(companyID, boardID, title string, position int) (domain.KanbanColumn, error)
+	UpdateKanbanColumnTitle(companyID, boardID, columnID, title string) (domain.KanbanColumn, error)
+	DeleteKanbanColumn(companyID, boardID, columnID string) error
+	ListKanbanCards(companyID, boardID, columnID string, afterPosition int, limit int) ([]domain.KanbanCard, error)
+	UpsertKanbanCard(companyID, boardID, columnID, itemType, itemID, titleSnapshot string, position int) (domain.KanbanCard, error)
+	MoveKanbanCard(companyID, boardID, cardID, columnID string, position int) (domain.KanbanCard, error)
+	DeleteKanbanCard(companyID, boardID, cardID string) error
 	AppendWorkspaceContextEvent(event domain.WorkspaceContextEvent) (domain.WorkspaceContextProjection, error)
 	GetWorkspaceContextProjection(companyID, workspaceID, contextID string) (domain.WorkspaceContextProjection, error)
 	ListWorkspaceContextEventsAfterSequence(companyID, workspaceID, contextID string, afterSequence int64, limit int) ([]domain.WorkspaceContextEvent, error)
@@ -61,6 +69,8 @@ type MemoryRepo struct {
 	logicGateText      map[string]map[string]domain.LogicGateProjection
 	logicGateRels      map[string][]domain.LogicGateRelationship
 	operations         map[string]domain.Operation
+	kanbanColumns      map[string][]domain.KanbanColumn
+	kanbanCards        map[string][]domain.KanbanCard
 	contextEvents      map[string][]domain.WorkspaceContextEvent
 	contextProjections map[string]domain.WorkspaceContextProjection
 }
@@ -76,6 +86,8 @@ func NewMemoryRepo() *MemoryRepo {
 		logicGateText:      map[string]map[string]domain.LogicGateProjection{},
 		logicGateRels:      map[string][]domain.LogicGateRelationship{},
 		operations:         map[string]domain.Operation{},
+		kanbanColumns:      map[string][]domain.KanbanColumn{},
+		kanbanCards:        map[string][]domain.KanbanCard{},
 		contextEvents:      map[string][]domain.WorkspaceContextEvent{},
 		contextProjections: map[string]domain.WorkspaceContextProjection{},
 	}
@@ -283,6 +295,263 @@ func (r *MemoryRepo) DeleteNodeRelationship(companyID, relationshipID string) er
 
 func workspaceContextKey(companyID, workspaceID, contextID string) string {
 	return companyID + ":" + workspaceID + ":" + contextID
+}
+
+func boardKey(companyID, boardID string) string {
+	return companyID + ":" + boardID
+}
+
+func sortKanbanColumns(items []domain.KanbanColumn) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Position == items[j].Position {
+			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		}
+		return items[i].Position < items[j].Position
+	})
+}
+
+func sortKanbanCards(items []domain.KanbanCard) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Position == items[j].Position {
+			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		}
+		return items[i].Position < items[j].Position
+	})
+}
+
+func nextKanbanColumnPosition(columns []domain.KanbanColumn) int {
+	next := 1000
+	for _, column := range columns {
+		if column.Position >= next {
+			next = column.Position + 1000
+		}
+	}
+	return next
+}
+
+func nextKanbanCardPosition(cards []domain.KanbanCard, columnID string) int {
+	next := 1000
+	for _, card := range cards {
+		if card.ColumnID != columnID {
+			continue
+		}
+		if card.Position >= next {
+			next = card.Position + 1000
+		}
+	}
+	return next
+}
+
+func isKanbanItemType(itemType string) bool {
+	return itemType == "node" || itemType == "logic_gate"
+}
+
+func (r *MemoryRepo) kanbanColumnExistsLocked(companyID, boardID, columnID string) bool {
+	for _, column := range r.kanbanColumns[boardKey(companyID, boardID)] {
+		if column.ColumnID == columnID {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *MemoryRepo) kanbanItemExistsLocked(companyID, itemType, itemID string) bool {
+	if itemType == "node" {
+		_, ok := r.nodes[key(companyID, itemID)]
+		return ok
+	}
+	if itemType == "logic_gate" {
+		_, ok := r.logicGates[key(companyID, itemID)]
+		return ok
+	}
+	return false
+}
+
+func (r *MemoryRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := append([]domain.KanbanColumn{}, r.kanbanColumns[boardKey(companyID, boardID)]...)
+	sortKanbanColumns(items)
+	return items, nil
+}
+
+func (r *MemoryRepo) CreateKanbanColumn(companyID, boardID, title string, position int) (domain.KanbanColumn, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := boardKey(companyID, boardID)
+	if position <= 0 {
+		position = nextKanbanColumnPosition(r.kanbanColumns[k])
+	}
+	now := time.Now().UTC()
+	item := domain.KanbanColumn{
+		CompanyID:        companyID,
+		BoardID:          boardID,
+		ColumnID:         newUUIDv7String(),
+		Title:            title,
+		Position:         position,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	r.kanbanColumns[k] = append(r.kanbanColumns[k], item)
+	return item, nil
+}
+
+func (r *MemoryRepo) UpdateKanbanColumnTitle(companyID, boardID, columnID, title string) (domain.KanbanColumn, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := boardKey(companyID, boardID)
+	for index, column := range r.kanbanColumns[k] {
+		if column.ColumnID != columnID {
+			continue
+		}
+		column.Title = title
+		column.UpdatedTimestamp = time.Now().UTC()
+		r.kanbanColumns[k][index] = column
+		return column, nil
+	}
+	return domain.KanbanColumn{}, ErrNotFound
+}
+
+func (r *MemoryRepo) DeleteKanbanColumn(companyID, boardID, columnID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := boardKey(companyID, boardID)
+	columns := r.kanbanColumns[k]
+	nextColumns := make([]domain.KanbanColumn, 0, len(columns))
+	deleted := false
+	for _, column := range columns {
+		if column.ColumnID == columnID {
+			deleted = true
+			continue
+		}
+		nextColumns = append(nextColumns, column)
+	}
+	if !deleted {
+		return ErrNotFound
+	}
+	r.kanbanColumns[k] = nextColumns
+
+	cards := r.kanbanCards[k]
+	nextCards := make([]domain.KanbanCard, 0, len(cards))
+	for _, card := range cards {
+		if card.ColumnID == columnID {
+			continue
+		}
+		nextCards = append(nextCards, card)
+	}
+	r.kanbanCards[k] = nextCards
+	return nil
+}
+
+func (r *MemoryRepo) ListKanbanCards(companyID, boardID, columnID string, afterPosition int, limit int) ([]domain.KanbanCard, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	source := r.kanbanCards[boardKey(companyID, boardID)]
+	items := make([]domain.KanbanCard, 0, min(limit, len(source)))
+	for _, card := range source {
+		if columnID != "" && card.ColumnID != columnID {
+			continue
+		}
+		if afterPosition > 0 && card.Position <= afterPosition {
+			continue
+		}
+		items = append(items, card)
+	}
+	sortKanbanCards(items)
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
+func (r *MemoryRepo) UpsertKanbanCard(companyID, boardID, columnID, itemType, itemID, titleSnapshot string, position int) (domain.KanbanCard, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.kanbanColumnExistsLocked(companyID, boardID, columnID) || !r.kanbanItemExistsLocked(companyID, itemType, itemID) {
+		return domain.KanbanCard{}, ErrNotFound
+	}
+	if !isKanbanItemType(itemType) {
+		return domain.KanbanCard{}, ErrNotFound
+	}
+	k := boardKey(companyID, boardID)
+	if position <= 0 {
+		position = nextKanbanCardPosition(r.kanbanCards[k], columnID)
+	}
+	now := time.Now().UTC()
+	for index, card := range r.kanbanCards[k] {
+		if card.ItemType != itemType || card.ItemID != itemID {
+			continue
+		}
+		// A drop is a command, not append-only history. Moving the existing card keeps
+		// repeated UI drops and retrying agents idempotent.
+		card.ColumnID = columnID
+		card.TitleSnapshot = titleSnapshot
+		card.Position = position
+		card.UpdatedTimestamp = now
+		r.kanbanCards[k][index] = card
+		return card, nil
+	}
+	card := domain.KanbanCard{
+		CompanyID:        companyID,
+		BoardID:          boardID,
+		CardID:           newUUIDv7String(),
+		ColumnID:         columnID,
+		ItemType:         itemType,
+		ItemID:           itemID,
+		TitleSnapshot:    titleSnapshot,
+		Position:         position,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	r.kanbanCards[k] = append(r.kanbanCards[k], card)
+	return card, nil
+}
+
+func (r *MemoryRepo) MoveKanbanCard(companyID, boardID, cardID, columnID string, position int) (domain.KanbanCard, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.kanbanColumnExistsLocked(companyID, boardID, columnID) {
+		return domain.KanbanCard{}, ErrNotFound
+	}
+	k := boardKey(companyID, boardID)
+	if position <= 0 {
+		position = nextKanbanCardPosition(r.kanbanCards[k], columnID)
+	}
+	for index, card := range r.kanbanCards[k] {
+		if card.CardID != cardID {
+			continue
+		}
+		card.ColumnID = columnID
+		card.Position = position
+		card.UpdatedTimestamp = time.Now().UTC()
+		r.kanbanCards[k][index] = card
+		return card, nil
+	}
+	return domain.KanbanCard{}, ErrNotFound
+}
+
+func (r *MemoryRepo) DeleteKanbanCard(companyID, boardID, cardID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := boardKey(companyID, boardID)
+	cards := r.kanbanCards[k]
+	next := make([]domain.KanbanCard, 0, len(cards))
+	deleted := false
+	for _, card := range cards {
+		if card.CardID == cardID {
+			deleted = true
+			continue
+		}
+		next = append(next, card)
+	}
+	if !deleted {
+		return ErrNotFound
+	}
+	r.kanbanCards[k] = next
+	return nil
 }
 
 func (r *MemoryRepo) AppendWorkspaceContextEvent(event domain.WorkspaceContextEvent) (domain.WorkspaceContextProjection, error) {

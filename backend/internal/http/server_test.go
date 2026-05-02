@@ -287,6 +287,176 @@ func TestInformationAPIsRejectBlankInformation(t *testing.T) {
 	}
 }
 
+func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "11111111-1111-4111-8111-111111111111"
+	boardID := "frame-kanban-api-test"
+
+	node, err := repo.CreateNode(companyID, "customer onboarding")
+	if err != nil {
+		t.Fatalf("CreateNode() error = %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "approval gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate() error = %v", err)
+	}
+
+	createColumn := func(title string) string {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{
+			"company_id": companyID,
+			"board_id":   boardID,
+			"title":      title,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/kanban/columns", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST kanban columns status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+		}
+		var payload struct {
+			ColumnID string `json:"column_id"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode column: %v", err)
+		}
+		return payload.ColumnID
+	}
+
+	todoColumnID := createColumn("Todo")
+	doneColumnID := createColumn("Done")
+
+	renameBody, _ := json.Marshal(map[string]string{
+		"company_id": companyID,
+		"board_id":   boardID,
+		"title":      "Ready",
+	})
+	renameReq := httptest.NewRequest(http.MethodPut, "/v1/kanban/columns/"+todoColumnID, bytes.NewReader(renameBody))
+	renameReq.Header.Set("Content-Type", "application/json")
+	renameRec := httptest.NewRecorder()
+	handler.ServeHTTP(renameRec, renameReq)
+	if renameRec.Code != http.StatusOK {
+		t.Fatalf("PUT kanban column status = %d, want %d body=%s", renameRec.Code, http.StatusOK, renameRec.Body.String())
+	}
+
+	addCardBody, _ := json.Marshal(map[string]any{
+		"company_id":     companyID,
+		"board_id":       boardID,
+		"column_id":      todoColumnID,
+		"item_type":      "node",
+		"item_id":        node.NodeID,
+		"title_snapshot": node.Title,
+		"position":       1000,
+	})
+	addCardReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/cards", bytes.NewReader(addCardBody))
+	addCardReq.Header.Set("Content-Type", "application/json")
+	addCardRec := httptest.NewRecorder()
+	handler.ServeHTTP(addCardRec, addCardReq)
+	if addCardRec.Code != http.StatusCreated {
+		t.Fatalf("POST kanban card status = %d, want %d body=%s", addCardRec.Code, http.StatusCreated, addCardRec.Body.String())
+	}
+	var createdCard struct {
+		CardID   string `json:"card_id"`
+		ColumnID string `json:"column_id"`
+	}
+	if err := json.NewDecoder(addCardRec.Body).Decode(&createdCard); err != nil {
+		t.Fatalf("decode created card: %v", err)
+	}
+	if createdCard.ColumnID != todoColumnID {
+		t.Fatalf("created card column = %q, want %q", createdCard.ColumnID, todoColumnID)
+	}
+
+	upsertCardBody, _ := json.Marshal(map[string]any{
+		"company_id":     companyID,
+		"board_id":       boardID,
+		"column_id":      doneColumnID,
+		"item_type":      "node",
+		"item_id":        node.NodeID,
+		"title_snapshot": "customer onboarding renamed",
+		"position":       1000,
+	})
+	upsertCardReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/cards", bytes.NewReader(upsertCardBody))
+	upsertCardReq.Header.Set("Content-Type", "application/json")
+	upsertCardRec := httptest.NewRecorder()
+	handler.ServeHTTP(upsertCardRec, upsertCardReq)
+	if upsertCardRec.Code != http.StatusCreated {
+		t.Fatalf("POST kanban card upsert status = %d, want %d body=%s", upsertCardRec.Code, http.StatusCreated, upsertCardRec.Body.String())
+	}
+	var upsertedCard struct {
+		CardID        string `json:"card_id"`
+		ColumnID      string `json:"column_id"`
+		TitleSnapshot string `json:"title_snapshot"`
+	}
+	if err := json.NewDecoder(upsertCardRec.Body).Decode(&upsertedCard); err != nil {
+		t.Fatalf("decode upserted card: %v", err)
+	}
+	if upsertedCard.CardID != createdCard.CardID {
+		t.Fatalf("upsert card id = %q, want existing %q", upsertedCard.CardID, createdCard.CardID)
+	}
+	if upsertedCard.ColumnID != doneColumnID || upsertedCard.TitleSnapshot != "customer onboarding renamed" {
+		t.Fatalf("upserted card = %+v, want moved/renamed", upsertedCard)
+	}
+
+	addGateCardBody, _ := json.Marshal(map[string]any{
+		"company_id":     companyID,
+		"board_id":       boardID,
+		"column_id":      doneColumnID,
+		"item_type":      "logic_gate",
+		"item_id":        logicGate.LogicGateID,
+		"title_snapshot": logicGate.Header,
+	})
+	addGateCardReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/cards", bytes.NewReader(addGateCardBody))
+	addGateCardReq.Header.Set("Content-Type", "application/json")
+	addGateCardRec := httptest.NewRecorder()
+	handler.ServeHTTP(addGateCardRec, addGateCardReq)
+	if addGateCardRec.Code != http.StatusCreated {
+		t.Fatalf("POST logic-gate kanban card status = %d, want %d body=%s", addGateCardRec.Code, http.StatusCreated, addGateCardRec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/cards?company_id="+companyID+"&board_id="+boardID+"&column_id="+doneColumnID+"&limit=50", nil)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET kanban cards status = %d, want %d body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	var listPayload struct {
+		Cards []struct {
+			ItemType string `json:"item_type"`
+			ItemID   string `json:"item_id"`
+		} `json:"cards"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode cards: %v", err)
+	}
+	if len(listPayload.Cards) != 2 {
+		t.Fatalf("kanban card count = %d, want 2", len(listPayload.Cards))
+	}
+
+	pagedReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/cards?company_id="+companyID+"&board_id="+boardID+"&column_id="+doneColumnID+"&after_position=1000&limit=50", nil)
+	pagedRec := httptest.NewRecorder()
+	handler.ServeHTTP(pagedRec, pagedReq)
+	if pagedRec.Code != http.StatusOK {
+		t.Fatalf("GET paged kanban cards status = %d, want %d body=%s", pagedRec.Code, http.StatusOK, pagedRec.Body.String())
+	}
+	var pagedPayload struct {
+		Cards []struct {
+			ItemType string `json:"item_type"`
+			ItemID   string `json:"item_id"`
+		} `json:"cards"`
+	}
+	if err := json.NewDecoder(pagedRec.Body).Decode(&pagedPayload); err != nil {
+		t.Fatalf("decode paged cards: %v", err)
+	}
+	if len(pagedPayload.Cards) != 1 || pagedPayload.Cards[0].ItemType != "logic_gate" {
+		t.Fatalf("paged cards = %+v, want only logic gate after position 1000", pagedPayload.Cards)
+	}
+}
+
 func TestUpdateNodeTitleViaPut(t *testing.T) {
 	t.Parallel()
 
