@@ -28,10 +28,30 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const editingTitleRef = useRef<HTMLSpanElement | null>(null);
   const editingTitleDraftRef = useRef("");
   const editorDocRef = useRef<HTMLDivElement | null>(null);
+  const editorScrollRef = useRef<HTMLDivElement | null>(null);
   const documentDraftRef = useRef("");
   const persistedDocumentRef = useRef("");
   const lastSelectionRevisionRef = useRef(0);
   const lastLogicGateSelectionRevisionRef = useRef(0);
+
+  const placeEditorCaretAtDocumentEnd = useCallback((scrollToEnd = false) => {
+    window.requestAnimationFrame(() => {
+      const element = editorDocRef.current;
+      if (!element) return;
+      element.focus({ preventScroll: true });
+      const selection = window.getSelection();
+      if (selection) {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      if (scrollToEnd && editorScrollRef.current) {
+        editorScrollRef.current.scrollTop = editorScrollRef.current.scrollHeight;
+      }
+    });
+  }, []);
 
   const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const headers = new Headers(init?.headers);
@@ -53,6 +73,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (editorDocRef.current && editorDocRef.current.textContent !== persistedDocumentRef.current) {
         editorDocRef.current.textContent = persistedDocumentRef.current;
       }
+      placeEditorCaretAtDocumentEnd(true);
       return;
     }
     const stableInformationID = documentInformationID
@@ -85,7 +106,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_save_document");
     }
-  }, [apiBase, companyID, documentInformationID, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, documentInformationID, linkedEntityKind, linkedNodeID, placeEditorCaretAtDocumentEnd, requestJSON]);
 
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
@@ -201,17 +222,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [isEditingTitle]);
 
   useEffect(() => {
-    if (!editorDocRef.current) return;
-    const element = editorDocRef.current;
-    element.focus();
-    const selection = window.getSelection();
-    if (!selection) return;
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    range.collapse(false);
-    selection.removeAllRanges();
-    selection.addRange(range);
-  }, [linkedNodeID]);
+    if (!linkedNodeID) return;
+    placeEditorCaretAtDocumentEnd(true);
+  }, [linkedNodeID, placeEditorCaretAtDocumentEnd]);
 
   useEffect(() => {
     const refresh = () => {
@@ -333,6 +346,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       persistedDocumentRef.current = "";
       setDocumentInformationID("");
       if (editorDocRef.current) editorDocRef.current.textContent = "";
+      if (editorScrollRef.current) editorScrollRef.current.scrollTop = 0;
       return;
     }
     (async () => {
@@ -367,6 +381,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           persistedDocumentRef.current = initialDocument;
           setDocumentInformationID(first?.information_id ?? "");
           if (editorDocRef.current && editorDocRef.current.textContent !== initialDocument) editorDocRef.current.textContent = initialDocument;
+          placeEditorCaretAtDocumentEnd(true);
           return;
         }
         const [details, projections] = await Promise.all([
@@ -395,12 +410,13 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         persistedDocumentRef.current = initialDocument;
         setDocumentInformationID(first?.information_id ?? "");
         if (editorDocRef.current && editorDocRef.current.textContent !== initialDocument) editorDocRef.current.textContent = initialDocument;
+        placeEditorCaretAtDocumentEnd(true);
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load linked information");
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, placeEditorCaretAtDocumentEnd]);
 
   const tabItems = useMemo(() => ([
     { id: "editor", label: "Editor" },
@@ -415,6 +431,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const strokeColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(3,25,30,0.22)";
   const ruleColor = isDarkTheme ? "rgba(255,255,255,0.16)" : "rgba(3,25,30,0.14)";
   const panelBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 255, 255, 0.8)";
+  const scrollbarAccent = theme === "light" ? "rgb(0, 233, 255)" : accent;
+  const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)";
 
   return (
     <div
@@ -509,7 +527,24 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       )}
 
       {linkedNodeID.trim().length > 0 && (
-        <div style={{ position: "absolute", inset: 0, padding: "86px 24px 24px", cursor: "text" }}>
+        <div
+          ref={editorScrollRef}
+          className="editor-document-scroll"
+          style={{
+            position: "absolute",
+            top: 86,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            padding: "0 12px 24px 24px",
+            cursor: "text",
+            overflowY: "auto",
+            overflowX: "hidden",
+            scrollbarGutter: "stable",
+            ["--editor-document-scroll-accent" as string]: scrollbarAccent,
+            ["--editor-document-scroll-track" as string]: scrollbarTrack,
+          }}
+        >
           <div
             ref={editorDocRef}
             contentEditable
@@ -527,7 +562,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                 event.currentTarget.blur();
               }
             }}
-            style={{ minHeight: "100%", outline: "none", fontSize: 15, lineHeight: 1.55, fontFamily: "'Manrope', 'Helvetica Neue', sans-serif", whiteSpace: "pre-wrap", caretColor: accent, cursor: "text" }}
+            style={{ minHeight: "100%", paddingRight: 12, outline: "none", fontSize: 15, lineHeight: 1.55, fontFamily: "'Manrope', 'Helvetica Neue', sans-serif", whiteSpace: "pre-wrap", caretColor: accent, cursor: "text" }}
           />
         </div>
       )}
