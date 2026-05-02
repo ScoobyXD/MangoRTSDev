@@ -6,6 +6,8 @@ import { createKanbanColumn, listKanbanCards, listKanbanColumns, moveKanbanCard,
 import {
   EXPLORER_ENTITY_DRAG_MIME,
   KANBAN_CARD_DRAG_MIME,
+  KANBAN_COLUMN_TITLE_TEXT_TRANSFORM,
+  KANBAN_MODULE_TOP_CLEARANCE_PX,
   groupCardsByColumn,
   nextCardPosition,
   parseExplorerEntityDragPayload,
@@ -54,7 +56,11 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const text = isDark ? "#f6f8fb" : "#102226";
   const subtext = isDark ? "#b8c4cc" : "#52666c";
   const line = isDark ? "rgba(255,255,255,0.16)" : "rgba(8, 52, 58, 0.16)";
-  const laneBackground = isDark ? "#1a2229" : "#f5f8f8";
+  const boardBorder = isDark ? "rgba(255,255,255,0.26)" : "#111111";
+  const boardShadow = isDark ? "0 12px 26px rgba(0,0,0,0.28)" : "0 12px 24px rgba(16,24,40,0.14)";
+  const laneBackground = isDark ? "#1a2229" : "#ffffff";
+  const laneBorder = isDark ? "rgba(255,255,255,0.18)" : "rgba(17,17,17,0.78)";
+  const laneShadow = isDark ? "none" : "0 4px 12px rgba(16,24,40,0.08)";
   const cardBackground = isDark ? "#101418" : "#ffffff";
 
   const cardsByColumn = useMemo(() => groupCardsByColumn(cards), [cards]);
@@ -184,8 +190,9 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     <div
       onMouseDown={(event) => event.stopPropagation()}
       onTouchStart={(event) => event.stopPropagation()}
-      style={{ width: "100%", height: "100%", display: "grid", gridTemplateRows: "44px 1fr", background: surface, color: text, overflow: "hidden" }}
+      style={{ position: "relative", width: "100%", height: "100%", display: "grid", gridTemplateRows: "44px minmax(0, 1fr)", paddingTop: KANBAN_MODULE_TOP_CLEARANCE_PX, background: surface, color: text, overflow: "hidden" }}
     >
+      <div style={{ position: "absolute", top: KANBAN_MODULE_TOP_CLEARANCE_PX - 1, left: 0, right: 0, borderBottom: `1px solid ${line}`, pointerEvents: "none" }} />
       <form onSubmit={addColumn} style={{ display: "grid", gridTemplateColumns: "1fr 34px", alignItems: "center", gap: 8, padding: "7px 10px", borderBottom: `1px solid ${line}` }}>
         <input
           value={newColumnTitle}
@@ -196,62 +203,66 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         <button title="Add column" type="submit" style={{ width: 34, height: 28, border: `1px solid ${accent}`, background: "transparent", color: accent, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>+</button>
       </form>
 
-      <div style={{ minHeight: 0, overflow: "auto", padding: 10 }}>
-        {error && <div style={{ marginBottom: 8, color: "#c62828", fontSize: 11, fontWeight: 700 }}>{error}</div>}
-        {loading && <div style={{ color: subtext, fontSize: 12 }}>Loading board...</div>}
-        {!loading && columns.length === 0 && <div style={{ color: subtext, fontSize: 12 }}>Add a column to start.</div>}
-        <div style={{ display: "grid", gridAutoFlow: "column", gridAutoColumns: "minmax(210px, 260px)", alignItems: "stretch", gap: 10, minHeight: "100%" }}>
-          {columns.map((column) => {
-            const columnCards = cardsByColumn.get(column.column_id) ?? [];
-            return (
-              <section
-                key={column.column_id}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => onDropColumn(event, column.column_id)}
-                style={{ minHeight: 220, background: laneBackground, border: `1px solid ${line}`, display: "grid", gridTemplateRows: "38px 1fr" }}
-              >
-                <input
-                  value={column.title}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setColumns((previous) => previous.map((item) => (item.column_id === column.column_id ? { ...item, title: value } : item)));
-                  }}
-                  onBlur={(event) => commitColumnTitle(column.column_id, event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") event.currentTarget.blur();
-                  }}
-                  style={{ height: 38, width: "100%", minWidth: 0, border: "none", borderBottom: `1px solid ${line}`, background: "transparent", color: text, fontSize: 12, fontWeight: 800, padding: "0 9px", outline: "none", textTransform: "uppercase" }}
-                />
-                <div style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 8, padding: 8 }}>
-                  {columnCards.map((card) => {
-                    const highlighted = highlightedEntity?.itemType === card.item_type && highlightedEntity.itemID === card.item_id;
-                    return (
-                      <article
-                        key={card.card_id}
-                        draggable
-                        onDragStart={(event) => {
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData(KANBAN_CARD_DRAG_MIME, JSON.stringify({ cardID: card.card_id, sourceColumnID: card.column_id }));
-                        }}
-                        style={{
-                          border: `1px solid ${highlighted ? accent : line}`,
-                          background: cardBackground,
-                          color: text,
-                          padding: "8px 9px",
-                          minHeight: 58,
-                          cursor: "grab",
-                          boxShadow: highlighted ? `0 0 0 1px ${accent} inset` : undefined,
-                        }}
-                      >
-                        <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.title_snapshot}</div>
-                        <div style={{ marginTop: 8, color: subtext, fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>{card.item_type === "logic_gate" ? "Logic Gate" : "Node"}</div>
-                      </article>
-                    );
-                  })}
-                </div>
-              </section>
-            );
-          })}
+      <div style={{ minHeight: 0, overflow: "auto", padding: "12px 12px 14px" }}>
+        <div style={{ display: "inline-block", minWidth: "100%", minHeight: "100%", background: surface, border: `1px solid ${boardBorder}`, boxShadow: boardShadow, padding: 10 }}>
+          {error && <div style={{ marginBottom: 8, color: "#c62828", fontSize: 11, fontWeight: 700 }}>{error}</div>}
+          {loading && <div style={{ color: subtext, fontSize: 12 }}>Loading board...</div>}
+          {!loading && columns.length === 0 && <div style={{ color: subtext, fontSize: 12 }}>Add a column to start.</div>}
+          <div style={{ display: "grid", gridAutoFlow: "column", gridAutoColumns: "minmax(210px, 260px)", alignItems: "stretch", gap: 10, minHeight: "100%" }}>
+            {columns.map((column) => {
+              const columnCards = cardsByColumn.get(column.column_id) ?? [];
+              return (
+                <section
+                  key={column.column_id}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => onDropColumn(event, column.column_id)}
+                  style={{ minHeight: 220, background: laneBackground, border: `1px solid ${laneBorder}`, boxShadow: laneShadow, display: "grid", gridTemplateRows: "38px 1fr" }}
+                >
+                  <input
+                    value={column.title}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setColumns((previous) => previous.map((item) => (item.column_id === column.column_id ? { ...item, title: value } : item)));
+                    }}
+                    onBlur={(event) => commitColumnTitle(column.column_id, event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                    }}
+                    // Column titles are user-authored board data. Preserve casing here so
+                    // the UI does not silently change meaning or naming conventions.
+                    style={{ height: 38, width: "100%", minWidth: 0, border: "none", borderBottom: `1px solid ${line}`, background: "transparent", color: text, fontSize: 12, fontWeight: 800, padding: "0 9px", outline: "none", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM }}
+                  />
+                  <div style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 8, padding: 8 }}>
+                    {columnCards.map((card) => {
+                      const highlighted = highlightedEntity?.itemType === card.item_type && highlightedEntity.itemID === card.item_id;
+                      return (
+                        <article
+                          key={card.card_id}
+                          draggable
+                          onDragStart={(event) => {
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData(KANBAN_CARD_DRAG_MIME, JSON.stringify({ cardID: card.card_id, sourceColumnID: card.column_id }));
+                          }}
+                          style={{
+                            border: `1px solid ${highlighted ? accent : line}`,
+                            background: cardBackground,
+                            color: text,
+                            padding: "8px 9px",
+                            minHeight: 58,
+                            cursor: "grab",
+                            boxShadow: highlighted ? `0 0 0 1px ${accent} inset` : undefined,
+                          }}
+                        >
+                          <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.title_snapshot}</div>
+                          <div style={{ marginTop: 8, color: subtext, fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>{card.item_type === "logic_gate" ? "Logic Gate" : "Node"}</div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>

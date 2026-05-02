@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { groupCardsByColumn, nextCardPosition, parseExplorerEntityDragPayload, sanitizeExplorerEntityDragPayload } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_MODULE_TOP_CLEARANCE_PX, groupCardsByColumn, nextCardPosition, parseExplorerEntityDragPayload, sanitizeExplorerEntityDragPayload } from "../../../../frontend/src/modules/kanban/shared.js";
 
 test("sanitizes explorer drag payloads for node and logic gate drops", () => {
   assert.deepEqual(sanitizeExplorerEntityDragPayload({ itemType: "node", itemID: "node-1", label: " Alpha " }), {
@@ -54,4 +54,9 @@ test("groupCardsByColumn sorts each column by stable board position", () => {
     },
   ]);
   assert.deepEqual((grouped.get("todo") ?? []).map((card) => card.card_id), ["early", "late"]);
+});
+
+test("kanban visual contract preserves column title casing and frame-header clearance", () => {
+  assert.equal(KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, "none");
+  assert.ok(KANBAN_MODULE_TOP_CLEARANCE_PX >= 34);
 });

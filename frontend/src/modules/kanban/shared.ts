@@ -1,5 +1,7 @@
 export const EXPLORER_ENTITY_DRAG_MIME = "application/x-mango-explorer-entity";
 export const KANBAN_CARD_DRAG_MIME = "application/x-mango-kanban-card";
+export const KANBAN_COLUMN_TITLE_TEXT_TRANSFORM = "none";
+export const KANBAN_MODULE_TOP_CLEARANCE_PX = 38;
 
 export type KanbanItemType = "node" | "logic_gate";
 

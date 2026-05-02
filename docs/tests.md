@@ -156,6 +156,7 @@ Use this checklist format and keep it complete.
   - sanitizes Company Explorer drag payloads for node and logic-gate Kanban drops
   - computes append positions within the target column only
   - groups and sorts board cards by stable per-column position
+  - locks the Kanban visual contract for preserving column title casing and clearing frame chrome
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
   - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)
