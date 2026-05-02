@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
 
@@ -38,12 +37,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/node-relationships/", s.handleNodeRelationshipByID)
 	mux.HandleFunc("/v1/workspace/snapshot", s.handleWorkspaceSnapshot)
 	mux.HandleFunc("/v1/workspace/stream", s.handleWorkspaceStream)
-	mux.HandleFunc("/v1/workspace/context-events", s.handleWorkspaceContextEvents)
-	mux.HandleFunc("/v1/workspace/context-projections", s.handleWorkspaceContextProjections)
-	mux.HandleFunc("/v1/workspace/context-deltas", s.handleWorkspaceContextDeltas)
-	mux.HandleFunc("/v1/workspace/folders", s.handleWorkspaceFolders)
-	mux.HandleFunc("/v1/workspace/folders/", s.handleWorkspaceFolderByID)
-	mux.HandleFunc("/v1/workspace/folder-items", s.handleWorkspaceFolderItems)
+	mux.HandleFunc("/v1/company-explorer/folders", s.handleCompanyExplorerFolders)
+	mux.HandleFunc("/v1/company-explorer/folders/", s.handleCompanyExplorerFolderByID)
+	mux.HandleFunc("/v1/company-explorer/folder-items", s.handleCompanyExplorerFolderItems)
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
 	mux.HandleFunc("/v1/logic-gates/", s.handleLogicGateSubresource)
 	mux.HandleFunc("/v1/logic-gate-relationships", s.handleLogicGateRelationships)
@@ -57,114 +53,7 @@ func (s *Server) Routes() http.Handler {
 	return mux
 }
 
-func (s *Server) handleWorkspaceContextEvents(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-	var req struct {
-		CompanyID      string          `json:"company_id"`
-		WorkspaceID    string          `json:"workspace_id"`
-		ContextID      string          `json:"context_id"`
-		SourceModuleID string          `json:"source_module_id"`
-		Sequence       int64           `json:"sequence"`
-		UserActionType string          `json:"user_action_type"`
-		Payload        json.RawMessage `json:"payload"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
-		return
-	}
-	if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.WorkspaceID) == "" || strings.TrimSpace(req.ContextID) == "" || strings.TrimSpace(req.SourceModuleID) == "" || req.Sequence <= 0 || strings.TrimSpace(req.UserActionType) == "" {
-		writeError(w, http.StatusBadRequest, "company_workspace_context_source_sequence_user_action_type_required")
-		return
-	}
-	payloadJSON := "{}"
-	if len(req.Payload) > 0 {
-		payloadJSON = string(req.Payload)
-	}
-	projection, err := s.repo.AppendWorkspaceContextEvent(domain.WorkspaceContextEvent{
-		CompanyID:      req.CompanyID,
-		WorkspaceID:    req.WorkspaceID,
-		ContextID:      req.ContextID,
-		SourceModuleID: req.SourceModuleID,
-		Sequence:       req.Sequence,
-		UserActionType: req.UserActionType,
-		PayloadJSON:    payloadJSON,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_append_workspace_context_event")
-		return
-	}
-	s.publishWorkspaceEvent(req.CompanyID, "workspace_context_projection_updated", map[string]any{
-		"workspace_id":     req.WorkspaceID,
-		"context_id":       req.ContextID,
-		"sequence":         projection.LastSequence,
-		"user_action_type": req.UserActionType,
-	})
-	writeJSON(w, http.StatusCreated, projection)
-}
-
-func (s *Server) handleWorkspaceContextProjections(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
-	contextID := strings.TrimSpace(r.URL.Query().Get("context_id"))
-	if companyID == "" || workspaceID == "" || contextID == "" {
-		writeError(w, http.StatusBadRequest, "company_workspace_context_required")
-		return
-	}
-	item, err := s.repo.GetWorkspaceContextProjection(companyID, workspaceID, contextID)
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "workspace_context_projection_not_found")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_get_workspace_context_projection")
-		return
-	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, item)
-}
-
-func (s *Server) handleWorkspaceContextDeltas(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
-	contextID := strings.TrimSpace(r.URL.Query().Get("context_id"))
-	if companyID == "" || workspaceID == "" || contextID == "" {
-		writeError(w, http.StatusBadRequest, "company_workspace_context_required")
-		return
-	}
-	var afterSequence int64
-	if raw := strings.TrimSpace(r.URL.Query().Get("after_sequence")); raw != "" {
-		parsed, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || parsed < 0 {
-			writeError(w, http.StatusBadRequest, "invalid_after_sequence")
-			return
-		}
-		afterSequence = parsed
-	}
-	events, err := s.repo.ListWorkspaceContextEventsAfterSequence(companyID, workspaceID, contextID, afterSequence, 250)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_workspace_context_deltas")
-		return
-	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
-		"company_id":     companyID,
-		"workspace_id":   workspaceID,
-		"context_id":     contextID,
-		"after_sequence": afterSequence,
-		"events":         events,
-	})
-}
-
-func (s *Server) handleWorkspaceFolders(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		folderKind := strings.TrimSpace(r.URL.Query().Get("folder_kind"))
@@ -172,13 +61,13 @@ func (s *Server) handleWorkspaceFolders(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		if folderKind != "" && !isValidWorkspaceFolderKind(folderKind) {
+		if folderKind != "" && !isValidCompanyExplorerFolderKind(folderKind) {
 			writeError(w, http.StatusBadRequest, "invalid_folder_kind")
 			return
 		}
-		items, err := s.repo.ListWorkspaceFolders(companyID, folderKind)
+		items, err := s.repo.ListCompanyExplorerFolders(companyID, folderKind)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_list_workspace_folders")
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
 		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"folders": items})
@@ -203,25 +92,25 @@ func (s *Server) handleWorkspaceFolders(w http.ResponseWriter, r *http.Request) 
 	req.ParentFolderID = strings.TrimSpace(req.ParentFolderID)
 	req.FolderKind = strings.TrimSpace(req.FolderKind)
 	req.Name = strings.TrimSpace(req.Name)
-	if req.CompanyID == "" || req.Name == "" || !isValidWorkspaceFolderKind(req.FolderKind) {
+	if req.CompanyID == "" || req.Name == "" || !isValidCompanyExplorerFolderKind(req.FolderKind) {
 		writeError(w, http.StatusBadRequest, "company_id_folder_kind_name_required")
 		return
 	}
-	item, err := s.repo.CreateWorkspaceFolder(req.CompanyID, req.ParentFolderID, req.FolderKind, req.Name)
+	item, err := s.repo.CreateCompanyExplorerFolder(req.CompanyID, req.ParentFolderID, req.FolderKind, req.Name)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "parent_folder_not_found")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_create_workspace_folder")
+		writeError(w, http.StatusInternalServerError, "failed_to_create_company_explorer_folder")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "workspace_folder_created", map[string]any{"folder_id": item.FolderID, "folder": item})
+	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_created", map[string]any{"folder_id": item.FolderID, "folder": item})
 	writeJSON(w, http.StatusCreated, item)
 }
 
-func (s *Server) handleWorkspaceFolderByID(w http.ResponseWriter, r *http.Request) {
-	folderID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/workspace/folders/"))
+func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.Request) {
+	folderID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/company-explorer/folders/"))
 	if folderID == "" || strings.Contains(folderID, "/") {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
@@ -242,20 +131,20 @@ func (s *Server) handleWorkspaceFolderByID(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		item, err := s.repo.MoveWorkspaceFolder(req.CompanyID, folderID, req.ParentFolderID)
+		item, err := s.repo.MoveCompanyExplorerFolder(req.CompanyID, folderID, req.ParentFolderID)
 		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "workspace_folder_not_found")
+			writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
 			return
 		}
 		if errors.Is(err, store.ErrInvalid) {
-			writeError(w, http.StatusBadRequest, "invalid_workspace_folder_move")
+			writeError(w, http.StatusBadRequest, "invalid_company_explorer_folder_move")
 			return
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_move_workspace_folder")
+			writeError(w, http.StatusInternalServerError, "failed_to_move_company_explorer_folder")
 			return
 		}
-		s.publishWorkspaceEvent(req.CompanyID, "workspace_folder_moved", map[string]any{"folder_id": item.FolderID, "folder": item})
+		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_moved", map[string]any{"folder_id": item.FolderID, "folder": item})
 		writeJSON(w, http.StatusOK, item)
 		return
 	}
@@ -266,14 +155,14 @@ func (s *Server) handleWorkspaceFolderByID(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		if err := s.repo.DeleteWorkspaceFolder(companyID, folderID); errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "workspace_folder_not_found")
+		if err := s.repo.DeleteCompanyExplorerFolder(companyID, folderID); errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
 			return
 		} else if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_delete_workspace_folder")
+			writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_folder")
 			return
 		}
-		s.publishWorkspaceEvent(companyID, "workspace_folder_deleted", map[string]any{"folder_id": folderID})
+		s.publishWorkspaceEvent(companyID, "company_explorer_folder_deleted", map[string]any{"folder_id": folderID})
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}
@@ -281,7 +170,7 @@ func (s *Server) handleWorkspaceFolderByID(w http.ResponseWriter, r *http.Reques
 	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 }
 
-func (s *Server) handleWorkspaceFolderItems(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
@@ -290,13 +179,13 @@ func (s *Server) handleWorkspaceFolderItems(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		if itemType != "" && !isValidWorkspaceFolderKind(itemType) {
+		if itemType != "" && !isValidCompanyExplorerFolderKind(itemType) {
 			writeError(w, http.StatusBadRequest, "invalid_item_type")
 			return
 		}
-		items, err := s.repo.ListWorkspaceFolderItems(companyID, folderID, itemType)
+		items, err := s.repo.ListCompanyExplorerFolderItems(companyID, folderID, itemType)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_list_workspace_folder_items")
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 			return
 		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"folder_items": items})
@@ -318,20 +207,20 @@ func (s *Server) handleWorkspaceFolderItems(w http.ResponseWriter, r *http.Reque
 		req.FolderID = strings.TrimSpace(req.FolderID)
 		req.ItemType = strings.TrimSpace(req.ItemType)
 		req.ItemID = strings.TrimSpace(req.ItemID)
-		if req.CompanyID == "" || req.FolderID == "" || req.ItemID == "" || !isValidWorkspaceFolderKind(req.ItemType) {
+		if req.CompanyID == "" || req.FolderID == "" || req.ItemID == "" || !isValidCompanyExplorerFolderKind(req.ItemType) {
 			writeError(w, http.StatusBadRequest, "company_folder_item_required")
 			return
 		}
-		item, err := s.repo.AssignWorkspaceFolderItem(req.CompanyID, req.FolderID, req.ItemType, req.ItemID)
+		item, err := s.repo.AssignCompanyExplorerFolderItem(req.CompanyID, req.FolderID, req.ItemType, req.ItemID)
 		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "workspace_folder_or_item_not_found")
+			writeError(w, http.StatusNotFound, "company_explorer_folder_or_item_not_found")
 			return
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_assign_workspace_folder_item")
+			writeError(w, http.StatusInternalServerError, "failed_to_assign_company_explorer_folder_item")
 			return
 		}
-		s.publishWorkspaceEvent(req.CompanyID, "workspace_folder_item_assigned", map[string]any{"folder_item": item})
+		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_item": item})
 		writeJSON(w, http.StatusOK, item)
 		return
 	}
@@ -340,18 +229,18 @@ func (s *Server) handleWorkspaceFolderItems(w http.ResponseWriter, r *http.Reque
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		itemType := strings.TrimSpace(r.URL.Query().Get("item_type"))
 		itemID := strings.TrimSpace(r.URL.Query().Get("item_id"))
-		if companyID == "" || itemID == "" || !isValidWorkspaceFolderKind(itemType) {
+		if companyID == "" || itemID == "" || !isValidCompanyExplorerFolderKind(itemType) {
 			writeError(w, http.StatusBadRequest, "company_item_required")
 			return
 		}
-		if err := s.repo.RemoveWorkspaceFolderItem(companyID, itemType, itemID); errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "workspace_folder_item_not_found")
+		if err := s.repo.RemoveCompanyExplorerFolderItem(companyID, itemType, itemID); errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "company_explorer_folder_item_not_found")
 			return
 		} else if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_remove_workspace_folder_item")
+			writeError(w, http.StatusInternalServerError, "failed_to_remove_company_explorer_folder_item")
 			return
 		}
-		s.publishWorkspaceEvent(companyID, "workspace_folder_item_removed", map[string]any{"item_type": itemType, "item_id": itemID})
+		s.publishWorkspaceEvent(companyID, "company_explorer_folder_item_removed", map[string]any{"item_type": itemType, "item_id": itemID})
 		writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 		return
 	}
@@ -359,7 +248,7 @@ func (s *Server) handleWorkspaceFolderItems(w http.ResponseWriter, r *http.Reque
 	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 }
 
-func isValidWorkspaceFolderKind(value string) bool {
+func isValidCompanyExplorerFolderKind(value string) bool {
 	return value == "node" || value == "logic_gate"
 }
 
@@ -683,14 +572,14 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships")
 		return
 	}
-	folders, err := s.repo.ListWorkspaceFolders(companyID, "")
+	folders, err := s.repo.ListCompanyExplorerFolders(companyID, "")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_workspace_folders")
+		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 		return
 	}
-	folderItems, err := s.repo.ListWorkspaceFolderItems(companyID, "", "")
+	folderItems, err := s.repo.ListCompanyExplorerFolderItems(companyID, "", "")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_workspace_folder_items")
+		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 		return
 	}
 	// Keep snapshot payload deterministic for unchanged data so ETag-based 304 responses

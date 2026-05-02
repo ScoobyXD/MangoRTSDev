@@ -1,32 +1,32 @@
 import type { NodeRelationship as LogicGateCanvasRelationship, NodeRecord as LogicGateCanvasRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord, NodeRelationship } from "../node-map/shared.js";
 
-export type WorkspaceFolderKind = "node" | "logic_gate";
+export type CompanyExplorerFolderKind = "node" | "logic_gate";
 
-export type WorkspaceFolder = {
+export type CompanyExplorerFolder = {
   company_id: string;
   folder_id: string;
   parent_folder_id?: string;
-  folder_kind: WorkspaceFolderKind;
+  folder_kind: CompanyExplorerFolderKind;
   name: string;
   created_timestamp: string;
   updated_timestamp: string;
 };
 
-export type WorkspaceFolderItem = {
+export type CompanyExplorerFolderItem = {
   company_id: string;
   folder_id: string;
-  item_type: WorkspaceFolderKind;
+  item_type: CompanyExplorerFolderKind;
   item_id: string;
   created_timestamp: string;
   updated_timestamp: string;
 };
 
-export function isWorkspaceFolderKind(value: unknown): value is WorkspaceFolderKind {
+export function isCompanyExplorerFolderKind(value: unknown): value is CompanyExplorerFolderKind {
   return value === "node" || value === "logic_gate";
 }
 
-export function getFolderSubtreeIDs(folders: WorkspaceFolder[], rootFolderID: string): Set<string> {
+export function getFolderSubtreeIDs(folders: CompanyExplorerFolder[], rootFolderID: string): Set<string> {
   const ids = new Set<string>();
   if (!rootFolderID) return ids;
   ids.add(rootFolderID);
@@ -44,10 +44,10 @@ export function getFolderSubtreeIDs(folders: WorkspaceFolder[], rootFolderID: st
 }
 
 export function getScopedItemIDs(args: {
-  folders: WorkspaceFolder[];
-  folderItems: WorkspaceFolderItem[];
+  folders: CompanyExplorerFolder[];
+  folderItems: CompanyExplorerFolderItem[];
   folderID: string;
-  itemType: WorkspaceFolderKind;
+  itemType: CompanyExplorerFolderKind;
 }): Set<string> {
   const { folders, folderItems, folderID, itemType } = args;
   if (!folderID) {
@@ -64,8 +64,8 @@ export function getScopedItemIDs(args: {
 export function filterNodeGraphToFolderScope(args: {
   nodes: NodeRecord[];
   relationships: NodeRelationship[];
-  folders: WorkspaceFolder[];
-  folderItems: WorkspaceFolderItem[];
+  folders: CompanyExplorerFolder[];
+  folderItems: CompanyExplorerFolderItem[];
   folderID: string;
 }): { nodes: NodeRecord[]; relationships: NodeRelationship[] } {
   const { nodes, relationships, folders, folderItems, folderID } = args;
@@ -82,8 +82,8 @@ export function filterNodeGraphToFolderScope(args: {
 export function filterLogicGateGraphToFolderScope(args: {
   nodes: LogicGateCanvasRecord[];
   relationships: LogicGateCanvasRelationship[];
-  folders: WorkspaceFolder[];
-  folderItems: WorkspaceFolderItem[];
+  folders: CompanyExplorerFolder[];
+  folderItems: CompanyExplorerFolderItem[];
   folderID: string;
 }): { nodes: LogicGateCanvasRecord[]; relationships: LogicGateCanvasRelationship[] } {
   const { nodes, relationships, folders, folderItems, folderID } = args;

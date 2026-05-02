@@ -234,7 +234,7 @@ create index if not exists idx_kanban_cards_column_position on kanban_cards(comp
 create unique index if not exists idx_kanban_cards_unique_node on kanban_cards(company_id, board_id, node_id) where node_id is not null;
 create unique index if not exists idx_kanban_cards_unique_logic_gate on kanban_cards(company_id, board_id, logic_gate_id) where logic_gate_id is not null;
 
-create table if not exists workspace_folders (
+create table if not exists company_explorer_folders (
   company_id uuid not null,
   folder_id uuid not null,
   parent_folder_id uuid,
@@ -242,56 +242,27 @@ create table if not exists workspace_folders (
   name text not null,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
-  constraint workspace_folders_kind_chk check (folder_kind in ('node', 'logic_gate')),
-  constraint workspace_folders_name_nonblank_chk check (btrim(name) <> ''),
-  constraint workspace_folders_parent_not_self_chk check (parent_folder_id is null or parent_folder_id <> folder_id),
+  constraint company_explorer_folders_kind_chk check (folder_kind in ('node', 'logic_gate')),
+  constraint company_explorer_folders_name_nonblank_chk check (btrim(name) <> ''),
+  constraint company_explorer_folders_parent_not_self_chk check (parent_folder_id is null or parent_folder_id <> folder_id),
   primary key (company_id, folder_id),
-  foreign key (company_id, parent_folder_id) references workspace_folders (company_id, folder_id) on delete cascade
+  foreign key (company_id, parent_folder_id) references company_explorer_folders (company_id, folder_id) on delete cascade
 );
 
-create index if not exists idx_workspace_folders_parent_kind
-  on workspace_folders(company_id, folder_kind, parent_folder_id, created_timestamp);
+create index if not exists idx_company_explorer_folders_parent_kind
+  on company_explorer_folders(company_id, folder_kind, parent_folder_id, created_timestamp);
 
-create table if not exists workspace_folder_items (
+create table if not exists company_explorer_folder_items (
   company_id uuid not null,
   folder_id uuid not null,
   item_type text not null,
   item_id uuid not null,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
-  constraint workspace_folder_items_type_chk check (item_type in ('node', 'logic_gate')),
+  constraint company_explorer_folder_items_type_chk check (item_type in ('node', 'logic_gate')),
   primary key (company_id, item_type, item_id),
-  foreign key (company_id, folder_id) references workspace_folders (company_id, folder_id) on delete cascade
+  foreign key (company_id, folder_id) references company_explorer_folders (company_id, folder_id) on delete cascade
 );
 
-create index if not exists idx_workspace_folder_items_folder_type
-  on workspace_folder_items(company_id, folder_id, item_type, created_timestamp);
-
-create table if not exists workspace_context_events (
-  company_id uuid not null,
-  workspace_id uuid not null,
-  context_id text not null,
-  source_module_id text not null,
-  sequence bigint not null,
-  user_action_type text not null,
-  payload_json jsonb not null default '{}'::jsonb,
-  created_timestamp timestamptz not null default now(),
-  primary key (company_id, workspace_id, context_id, sequence)
-);
-
-create index if not exists idx_workspace_context_events_company_workspace_context_sequence
-  on workspace_context_events (company_id, workspace_id, context_id, sequence desc);
-
-create table if not exists workspace_context_projections (
-  company_id uuid not null,
-  workspace_id uuid not null,
-  context_id text not null,
-  last_sequence bigint not null,
-  last_event_timestamp timestamptz not null,
-  last_payload_json jsonb not null default '{}'::jsonb,
-  updated_timestamp timestamptz not null default now(),
-  primary key (company_id, workspace_id, context_id)
-);
-
-create index if not exists idx_workspace_context_projections_company_workspace_context
-  on workspace_context_projections (company_id, workspace_id, context_id);
+create index if not exists idx_company_explorer_folder_items_folder_type
+  on company_explorer_folder_items(company_id, folder_id, item_type, created_timestamp);

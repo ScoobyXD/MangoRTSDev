@@ -2,12 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, getNodeTitle, reconcileNodeMapPositions, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { type ContextMutationEnvelope } from "../contextSyncContract";
-import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertWorkspaceFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
+import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
 import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
-import { filterNodeGraphToFolderScope, type WorkspaceFolder, type WorkspaceFolderItem } from "../folders/workspaceFolders";
+import { filterNodeGraphToFolderScope, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
 export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "teal" }) => {
@@ -34,8 +34,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const [allNodes, setAllNodes] = useState<NodeRecord[]>([]);
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
-  const [folders, setFolders] = useState<WorkspaceFolder[]>([]);
-  const [folderItems, setFolderItems] = useState<WorkspaceFolderItem[]>([]);
+  const [folders, setFolders] = useState<CompanyExplorerFolder[]>([]);
+  const [folderItems, setFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [activeFolderID, setActiveFolderID] = useState("");
   const [activeFolderLabel, setActiveFolderLabel] = useState("");
   const [relationshipAnchors, setRelationshipAnchors] = useState<Record<string, RelationshipAnchor>>({});
@@ -131,8 +131,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const applyFolderScope = (
     snapshotNodes: NodeRecord[],
     snapshotRelationships: NodeRelationship[],
-    snapshotFolders: WorkspaceFolder[],
-    snapshotFolderItems: WorkspaceFolderItem[],
+    snapshotFolders: CompanyExplorerFolder[],
+    snapshotFolderItems: CompanyExplorerFolderItem[],
     folderID = activeFolderID,
   ) => {
     const scoped = filterNodeGraphToFolderScope({
@@ -609,13 +609,13 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       // get immediate convergence without issuing a snapshot GET.
       upsertNodeRelationshipGraphNode(apiBase, companyID, node);
       if (activeFolderID) {
-        const folderItem = await requestJSON<WorkspaceFolderItem>("/v1/workspace/folder-items", {
+        const folderItem = await requestJSON<CompanyExplorerFolderItem>("/v1/company-explorer/folder-items", {
           method: "POST",
           body: JSON.stringify({ company_id: companyID, folder_id: activeFolderID, item_type: "node", item_id: node.node_id }),
         });
         // Folder placement is a separate API row so agents can move items headlessly.
         // Updating the graph cache here keeps filtered folder maps responsive.
-        upsertWorkspaceFolderItemInNodeRelationshipGraph(apiBase, companyID, folderItem);
+        upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, folderItem);
       }
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));

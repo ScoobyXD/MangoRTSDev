@@ -287,7 +287,7 @@ func TestInformationAPIsRejectBlankInformation(t *testing.T) {
 	}
 }
 
-func TestWorkspaceFolderAPIsSupportNestedFoldersAndMembership(t *testing.T) {
+func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -308,12 +308,12 @@ func TestWorkspaceFolderAPIsSupportNestedFoldersAndMembership(t *testing.T) {
 			"folder_kind":      "node",
 			"name":             name,
 		})
-		req := httptest.NewRequest(http.MethodPost, "/v1/workspace/folders", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusCreated {
-			t.Fatalf("POST workspace folders status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+			t.Fatalf("POST company explorer folders status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
 		}
 		var payload struct {
 			FolderID string `json:"folder_id"`
@@ -335,12 +335,12 @@ func TestWorkspaceFolderAPIsSupportNestedFoldersAndMembership(t *testing.T) {
 		"company_id":       companyID,
 		"parent_folder_id": siblingID,
 	})
-	moveReq := httptest.NewRequest(http.MethodPut, "/v1/workspace/folders/"+childID, bytes.NewReader(moveBody))
+	moveReq := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/folders/"+childID, bytes.NewReader(moveBody))
 	moveReq.Header.Set("Content-Type", "application/json")
 	moveRec := httptest.NewRecorder()
 	handler.ServeHTTP(moveRec, moveReq)
 	if moveRec.Code != http.StatusOK {
-		t.Fatalf("PUT workspace folder status = %d, want %d body=%s", moveRec.Code, http.StatusOK, moveRec.Body.String())
+		t.Fatalf("PUT company explorer folder status = %d, want %d body=%s", moveRec.Code, http.StatusOK, moveRec.Body.String())
 	}
 	var movedFolder struct {
 		ParentFolderID *string `json:"parent_folder_id"`
@@ -356,12 +356,12 @@ func TestWorkspaceFolderAPIsSupportNestedFoldersAndMembership(t *testing.T) {
 		"company_id":       companyID,
 		"parent_folder_id": childID,
 	})
-	cycleReq := httptest.NewRequest(http.MethodPut, "/v1/workspace/folders/"+siblingID, bytes.NewReader(cycleBody))
+	cycleReq := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/folders/"+siblingID, bytes.NewReader(cycleBody))
 	cycleReq.Header.Set("Content-Type", "application/json")
 	cycleRec := httptest.NewRecorder()
 	handler.ServeHTTP(cycleRec, cycleReq)
 	if cycleRec.Code != http.StatusBadRequest {
-		t.Fatalf("cyclic PUT workspace folder status = %d, want %d body=%s", cycleRec.Code, http.StatusBadRequest, cycleRec.Body.String())
+		t.Fatalf("cyclic PUT company explorer folder status = %d, want %d body=%s", cycleRec.Code, http.StatusBadRequest, cycleRec.Body.String())
 	}
 
 	assignBody, _ := json.Marshal(map[string]string{
@@ -370,19 +370,19 @@ func TestWorkspaceFolderAPIsSupportNestedFoldersAndMembership(t *testing.T) {
 		"item_type":  "node",
 		"item_id":    node.NodeID,
 	})
-	assignReq := httptest.NewRequest(http.MethodPost, "/v1/workspace/folder-items", bytes.NewReader(assignBody))
+	assignReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items", bytes.NewReader(assignBody))
 	assignReq.Header.Set("Content-Type", "application/json")
 	assignRec := httptest.NewRecorder()
 	handler.ServeHTTP(assignRec, assignReq)
 	if assignRec.Code != http.StatusOK {
-		t.Fatalf("POST workspace folder-items status = %d, want %d body=%s", assignRec.Code, http.StatusOK, assignRec.Body.String())
+		t.Fatalf("POST company explorer folder-items status = %d, want %d body=%s", assignRec.Code, http.StatusOK, assignRec.Body.String())
 	}
 
-	itemsReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/folder-items?company_id="+companyID+"&folder_id="+childID+"&item_type=node", nil)
+	itemsReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folder-items?company_id="+companyID+"&folder_id="+childID+"&item_type=node", nil)
 	itemsRec := httptest.NewRecorder()
 	handler.ServeHTTP(itemsRec, itemsReq)
 	if itemsRec.Code != http.StatusOK {
-		t.Fatalf("GET workspace folder-items status = %d, want %d body=%s", itemsRec.Code, http.StatusOK, itemsRec.Body.String())
+		t.Fatalf("GET company explorer folder-items status = %d, want %d body=%s", itemsRec.Code, http.StatusOK, itemsRec.Body.String())
 	}
 	var itemsPayload struct {
 		Items []struct {
@@ -666,44 +666,5 @@ func TestWorkspaceSnapshotReturnsNotModifiedWhenDataUnchanged(t *testing.T) {
 
 	if secondRec.Code != http.StatusNotModified {
 		t.Fatalf("second snapshot status = %d, want %d", secondRec.Code, http.StatusNotModified)
-	}
-}
-
-func TestWorkspaceContextEventWriteAndProjectionRead(t *testing.T) {
-	t.Parallel()
-	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
-	handler := server.Routes()
-	body, _ := json.Marshal(map[string]any{
-		"company_id":       "11111111-1111-1111-1111-111111111111",
-		"workspace_id":     "22222222-2222-2222-2222-222222222222",
-		"context_id":       "active_node_selection",
-		"source_module_id": "node-map-frame-1",
-		"sequence":         1,
-		"user_action_type": "node_selection_changed",
-		"payload": map[string]any{
-			"selected_node_id": "abc",
-		},
-	})
-	writeReq := httptest.NewRequest(http.MethodPost, "/v1/workspace/context-events", bytes.NewReader(body))
-	writeReq.Header.Set("Content-Type", "application/json")
-	writeRec := httptest.NewRecorder()
-	handler.ServeHTTP(writeRec, writeReq)
-	if writeRec.Code != http.StatusCreated {
-		t.Fatalf("POST context-events status = %d, want %d", writeRec.Code, http.StatusCreated)
-	}
-
-	readReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/context-projections?company_id=11111111-1111-1111-1111-111111111111&workspace_id=22222222-2222-2222-2222-222222222222&context_id=active_node_selection", nil)
-	readRec := httptest.NewRecorder()
-	handler.ServeHTTP(readRec, readReq)
-	if readRec.Code != http.StatusOK {
-		t.Fatalf("GET context-projections status = %d, want %d", readRec.Code, http.StatusOK)
-	}
-
-	deltaReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/context-deltas?company_id=11111111-1111-1111-1111-111111111111&workspace_id=22222222-2222-2222-2222-222222222222&context_id=active_node_selection&after_sequence=0", nil)
-	deltaRec := httptest.NewRecorder()
-	handler.ServeHTTP(deltaRec, deltaReq)
-	if deltaRec.Code != http.StatusOK {
-		t.Fatalf("GET context-deltas status = %d, want %d", deltaRec.Code, http.StatusOK)
 	}
 }

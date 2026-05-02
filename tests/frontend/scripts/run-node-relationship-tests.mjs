@@ -16,7 +16,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/nodeMapLayout.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipDeleteSummary.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/explorerSync.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/folders/workspaceFolders.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/folders/companyExplorerFolders.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/contextSyncContract.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/shared.test.js"),
 ];
@@ -40,7 +40,7 @@ for (const testFile of testFiles) {
   contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/NodeMapControls"', '"../../../../frontend/src/modules/node-map/NodeMapControls.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/shared"', '"../../../../frontend/src/modules/node-map/shared.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/logic-gate-map/shared"', '"../../../../frontend/src/modules/logic-gate-map/shared.js"');
-  contents = contents.replaceAll('"../../../../frontend/src/modules/folders/workspaceFolders"', '"../../../../frontend/src/modules/folders/workspaceFolders.js"');
+  contents = contents.replaceAll('"../../../../frontend/src/modules/folders/companyExplorerFolders"', '"../../../../frontend/src/modules/folders/companyExplorerFolders.js"');
   contents = contents.replaceAll('"../../../frontend/src/modules/linkingGraph"', '"../../../frontend/src/modules/linkingGraph.js"');
   contents = contents.replaceAll('"../../../frontend/src/app/frameLinking"', '"../../../frontend/src/app/frameLinking.js"');
   contents = contents.replaceAll('"../../../frontend/src/types"', '"../../../frontend/src/types.js"');

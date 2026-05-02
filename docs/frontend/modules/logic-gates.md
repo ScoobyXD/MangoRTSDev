@@ -30,11 +30,11 @@ Endpoints used:
 - `POST /v1/logic-gate-relationships`
   - payload: `{ company_id, logic_gate_id_a, logic_gate_id_b, a_position, b_position }`
 - `DELETE /v1/logic-gate-relationships/:logic_gate_relationship_id?company_id=...`
-- `GET/POST /v1/workspace/folders`
+- `GET/POST /v1/company-explorer/folders`
   - `folder_kind` must be `logic_gate` for Logic Gate Map organization.
-- `PUT /v1/workspace/folders/:folder_id`
+- `PUT /v1/company-explorer/folders/:folder_id`
   - moves a logic-gate folder under another compatible folder or back to the Logic Gates root.
-- `GET/POST/DELETE /v1/workspace/folder-items`
+- `GET/POST/DELETE /v1/company-explorer/folder-items`
   - `item_type` must be `logic_gate` when moving gates into explorer folders.
 
 ## Relationship Semantics

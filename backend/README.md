@@ -150,10 +150,16 @@ For existing databases that were created before logic-gate information projectio
 psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260501_logic_gate_projection_table.sql
 ```
 
-For existing databases that were created before workspace folders were added, run:
+For existing databases that were created before Company Explorer folders were added, run:
 
 ```powershell
-psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260501_workspace_folders.sql
+psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260501_company_explorer_folders.sql
+```
+
+For existing databases that still have the abandoned workspace-context tables or old workspace-named folder tables, run:
+
+```powershell
+psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260502_company_explorer_cleanup.sql
 ```
 
 ## API endpoints (MVP canonical set)
@@ -173,13 +179,13 @@ psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME 
 - `GET /v1/logic-gate-relationships?company_id={uuid}`
 - `POST /v1/logic-gate-relationships`
 - `DELETE /v1/logic-gate-relationships/{logic_gate_relationship_id}?company_id={uuid}`
-- `GET /v1/workspace/folders?company_id={uuid}&folder_kind=node|logic_gate`
-- `POST /v1/workspace/folders`
-- `PUT /v1/workspace/folders/{folder_id}`
-- `DELETE /v1/workspace/folders/{folder_id}?company_id={uuid}`
-- `GET /v1/workspace/folder-items?company_id={uuid}&folder_id={uuid}&item_type=node|logic_gate`
-- `POST /v1/workspace/folder-items`
-- `DELETE /v1/workspace/folder-items?company_id={uuid}&item_type=node|logic_gate&item_id={uuid}`
+- `GET /v1/company-explorer/folders?company_id={uuid}&folder_kind=node|logic_gate`
+- `POST /v1/company-explorer/folders`
+- `PUT /v1/company-explorer/folders/{folder_id}`
+- `DELETE /v1/company-explorer/folders/{folder_id}?company_id={uuid}`
+- `GET /v1/company-explorer/folder-items?company_id={uuid}&folder_id={uuid}&item_type=node|logic_gate`
+- `POST /v1/company-explorer/folder-items`
+- `DELETE /v1/company-explorer/folder-items?company_id={uuid}&item_type=node|logic_gate&item_id={uuid}`
 - `POST /v1/operations`
 - `GET /v1/operations/{operation_id}?company_id={uuid}`
 - `GET /v1/kanban/columns?company_id={uuid}&board_id={board_id}`
@@ -242,21 +248,21 @@ curl "http://localhost:8080/v1/logic-gates/<logic_gate_id>/projection?company_id
 Create a folder and move a node into it:
 
 ```bash
-curl -X POST http://localhost:8080/v1/workspace/folders \
+curl -X POST http://localhost:8080/v1/company-explorer/folders \
   -H 'content-type: application/json' \
   -d '{"company_id":"11111111-1111-1111-1111-111111111111","folder_kind":"node","name":"Customer onboarding"}'
 
-curl -X POST http://localhost:8080/v1/workspace/folder-items \
+curl -X POST http://localhost:8080/v1/company-explorer/folder-items \
   -H 'content-type: application/json' \
   -d '{"company_id":"11111111-1111-1111-1111-111111111111","folder_id":"<folder_id>","item_type":"node","item_id":"<node_id>"}'
 
-curl -X PUT http://localhost:8080/v1/workspace/folders/<child_folder_id> \
+curl -X PUT http://localhost:8080/v1/company-explorer/folders/<child_folder_id> \
   -H 'content-type: application/json' \
   -d '{"company_id":"11111111-1111-1111-1111-111111111111","parent_folder_id":"<parent_folder_id>"}'
 ```
 
 Folder rows are API-backed so headless agents can create the same explorer structure as the UI.
-`workspace_folder_items` keeps one placement per node or logic gate, matching file-explorer move semantics.
+`company_explorer_folder_items` keeps one placement per node or logic gate, matching file-explorer move semantics.
 Folder moves reject self/descendant parents to keep the hierarchy acyclic.
 
 Create operation:
@@ -284,22 +290,3 @@ curl -X POST http://localhost:8080/v1/kanban/cards \
   -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","column_id":"<column_id>","item_type":"node","item_id":"<node_id>","title_snapshot":"Customer onboarding"}'
 ```
 
-
-### Workspace context event/projection contract
-
-For cross-module context synchronization, backend now supports:
-
-- `POST /v1/workspace/context-events` for append-only context mutation writes
-- `GET /v1/workspace/context-projections` for latest read projection by `company_id`, `workspace_id`, `context_id`
-- `GET /v1/workspace/context-deltas` for ordered event deltas after a provided sequence
-
-Required event fields:
-- `company_id`
-- `workspace_id`
-- `context_id`
-- `source_module_id`
-- `sequence`
-- `user_action_type`
-
-Schema SQL (includes workspace context tables):
-- `backend/db/schema.sql`

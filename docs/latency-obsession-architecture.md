@@ -88,7 +88,7 @@ These are the currently implemented mechanisms that keep the client workspace ca
 To scale linked workflows across Node Map, Company Explorer, Editor, Logic Gates, Operations, Messages/Email, and KPI surfaces, MangoOS adopts this synchronization contract.
 
 1. **Single semantic context plane (L2 canonical context store).**
-   - All cross-module context lives in one normalized workspace context store.
+   - No backend workspace-context persistence is currently implemented; any future shared context plane needs an explicit runtime owner before schema is reintroduced.
    - Modules must not treat ad hoc localStorage keys as cross-module source-of-truth.
    - LocalStorage may exist only as a bounded persistence transport/cache layer, never authority.
 
@@ -356,7 +356,7 @@ Blockers:
 
 Blockers:
 - Event envelope naming/format and sequence ownership scope not yet locked in schema docs.
-- Dedicated graph/explorer projection DDL and index packages are still pending beyond the current node, logic-gate, and workspace-context projections.
+- Dedicated graph/explorer projection DDL and index packages are still pending beyond the current node and logic-gate projections.
 - No enforced SLO for stream lag/reconciliation lag in CI gates.
 
 ### Workspace Data Plane
@@ -510,36 +510,31 @@ Any such change must include:
 - Moves runtime behavior from best-effort revision guards toward explicit contract semantics required for hot-path scale.
 
 
-### 2026-04-29 — Implemented solution: backend workspace context event log + projection path
+### 2026-05-02 — Cleanup: removed backend workspace context event log + projection path
 
 **Problem before this change (explicit):**
 - Cross-module event envelope work existed in frontend, but backend lacked a canonical event write path and projection read path for context sync.
 
-**Implemented solution (explicit):**
-- Added backend API write endpoint: `POST /v1/workspace/context-events` (append event + upsert projection with monotonic sequence guard).
-- Added backend API read endpoint: `GET /v1/workspace/context-projections` (read authority for latest context projection per workspace/context).
-- Added repository support for both in-memory and PostgreSQL implementations.
-- Added SQL migration for `workspace_context_events` and `workspace_context_projections` tables with `company_id`-leading keys and supporting indexes.
-- Added server tests that validate event-write -> projection-read flow.
+**Cleanup outcome (explicit):**
+- Removed in 2026-05 cleanup: the backend context-event/context-projection path was not used by the active runtime.
+- The canonical schema no longer includes workspace context persistence tables.
+- A cleanup migration drops the old context event/projection tables for existing databases.
 
 **Latency-architecture alignment outcome:**
-- Establishes concrete event-write + projection-read split on backend contract surface.
-- Creates an incremental path toward full ordered delta + reconcile + observability gates.
+- Keeps the schema aligned with behavior that actually exists.
+- Future backend sync persistence should be reintroduced only with active end-to-end consumers.
 
 
-### 2026-04-29 — Implemented solution: persisted workspace projection delta feed endpoint
+### 2026-05-02 — Cleanup: removed persisted workspace projection delta feed endpoint
 
 **Problem before this change (explicit):**
 - Projection updates emitted stream notifications, but there was no dedicated API to fetch persisted ordered deltas by sequence window.
 
-**Implemented solution (explicit):**
-- Added `GET /v1/workspace/context-deltas` with required scope params (`company_id`, `workspace_id`, `context_id`) and optional `after_sequence`.
-- Repository implementations now support listing context events after a sequence boundary for both in-memory and PostgreSQL stores.
-- Added handler-level coverage validating write -> projection read -> delta read flow.
+**Cleanup outcome (explicit):**
+- Removed in 2026-05 cleanup along with the unused backend context event/projection path.
 
 **Latency-architecture alignment outcome:**
-- Enables deterministic replay/recovery windows from persisted event history without full snapshot churn.
-- Completes the backend delta-feed surface needed for projection-driven consumers.
+- Replay/recovery for a backend context plane is no longer implemented.
 
 ### 2026-04-29 — Implemented solution: status checkpoint for cross-module sync program
 
@@ -550,21 +545,22 @@ Any such change must include:
 - Added this status checkpoint to capture current implementation progress against the agreed six-point cross-module sync delivery list.
 
 **Current progress (explicit):**
-1. **Canonical backend event write path** — implemented (`POST /v1/workspace/context-events`).
-2. **Projection read authority** — implemented (`workspace_context_projections` + `GET /v1/workspace/context-projections`).
-3. **Persisted sequence contract** — implemented (event `sequence` persisted and monotonic projection upsert guard).
-4. **Persisted delta feed endpoint** — implemented (`GET /v1/workspace/context-deltas?after_sequence=`).
-5. **Gap-driven scoped reconciliation endpoint contract** — partially complete (sequence/projection/delta primitives exist, but no explicit reconcile endpoint contract yet).
+1. **Canonical backend event write path** — not implemented.
+2. **Projection read authority** — not implemented.
+3. **Persisted sequence contract** — not implemented.
+4. **Persisted delta feed endpoint** — not implemented.
+5. **Gap-driven scoped reconciliation endpoint contract** — not implemented.
 6. **Observability + SLO merge gates (lag/gap/reconcile)** — not implemented yet.
 
 **What is left to do (explicit):**
-- Define and implement a first-class reconcile API contract (scoped request/response, watermark semantics, bounded retries, and fallback behavior).
+- Define whether a backend sync plane is actually needed before adding event/projection tables again.
+- If needed, define and implement a first-class reconcile API contract (scoped request/response, watermark semantics, bounded retries, and fallback behavior).
 - Add production-grade metrics and dashboards for stream lag, sequence-gap rate, and reconciliation rate.
 - Enforce CI/CD merge gates that block hot-path regressions when SLO thresholds are violated.
 
 **Latency-architecture alignment outcome:**
-- Mango now has a concrete event-write + projection-read + persisted-delta foundation.
-- Remaining work is concentrated on operational hardening and explicit reconcile contract finalization.
+- Mango currently relies on local sequence envelopes plus workspace snapshot/SSE graph synchronization.
+- Backend event/projection persistence should stay out until it has clear runtime ownership.
 
 ### 2026-04-26 — Frontend module-link latency hardening + full graph migration
 

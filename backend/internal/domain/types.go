@@ -89,7 +89,7 @@ type LogicGateDetails struct {
 	Relationships []LogicGateRelationship `json:"relationships"`
 }
 
-type WorkspaceFolder struct {
+type CompanyExplorerFolder struct {
 	CompanyID        string    `json:"company_id"`
 	FolderID         string    `json:"folder_id"`
 	ParentFolderID   *string   `json:"parent_folder_id,omitempty"`
@@ -99,7 +99,7 @@ type WorkspaceFolder struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
-type WorkspaceFolderItem struct {
+type CompanyExplorerFolderItem struct {
 	CompanyID        string    `json:"company_id"`
 	FolderID         string    `json:"folder_id"`
 	ItemType         string    `json:"item_type"`
@@ -138,26 +138,5 @@ type KanbanCard struct {
 	TitleSnapshot    string    `json:"title_snapshot"`
 	Position         int       `json:"position"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
-}
-
-type WorkspaceContextEvent struct {
-	CompanyID      string    `json:"company_id"`
-	WorkspaceID    string    `json:"workspace_id"`
-	ContextID      string    `json:"context_id"`
-	SourceModuleID string    `json:"source_module_id"`
-	Sequence       int64     `json:"sequence"`
-	UserActionType string    `json:"user_action_type"`
-	PayloadJSON    string    `json:"payload_json"`
-	CreatedAt      time.Time `json:"created_timestamp"`
-}
-
-type WorkspaceContextProjection struct {
-	CompanyID        string    `json:"company_id"`
-	WorkspaceID      string    `json:"workspace_id"`
-	ContextID        string    `json:"context_id"`
-	LastSequence     int64     `json:"last_sequence"`
-	LastEventAt      time.Time `json:"last_event_timestamp"`
-	LastPayloadJSON  string    `json:"last_payload_json"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }

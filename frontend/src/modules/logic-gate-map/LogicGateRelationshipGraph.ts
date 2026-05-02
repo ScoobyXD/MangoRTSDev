@@ -1,7 +1,7 @@
 import type {
-  WorkspaceFolder,
-  WorkspaceFolderItem,
-} from "../folders/workspaceFolders";
+  CompanyExplorerFolder,
+  CompanyExplorerFolderItem,
+} from "../folders/companyExplorerFolders";
 import {
   LogicGateRecord,
   LogicGateRelationship,
@@ -16,8 +16,8 @@ export type LogicGateRelationshipGraphSnapshot = {
   relationships: NodeRelationship[];
   logic_gates?: LogicGateRecord[];
   logic_gate_relationships?: LogicGateRelationship[];
-  folders?: WorkspaceFolder[];
-  folder_items?: WorkspaceFolderItem[];
+  folders?: CompanyExplorerFolder[];
+  folder_items?: CompanyExplorerFolderItem[];
   generated_at?: string;
 };
 
@@ -90,7 +90,7 @@ export function removeLogicGateRelationshipGraphNode(apiBase: string, companyID:
   notify(entry);
 }
 
-export function upsertWorkspaceFolderItemInLogicGateRelationshipGraph(apiBase: string, companyID: string, item: WorkspaceFolderItem): void {
+export function upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase: string, companyID: string, item: CompanyExplorerFolderItem): void {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
   const current = entry.snapshot.folder_items ?? [];
@@ -105,7 +105,7 @@ export function upsertWorkspaceFolderItemInLogicGateRelationshipGraph(apiBase: s
   notify(entry);
 }
 
-export function upsertWorkspaceFolderInLogicGateRelationshipGraph(apiBase: string, companyID: string, folder: WorkspaceFolder): void {
+export function upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase: string, companyID: string, folder: CompanyExplorerFolder): void {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
   const current = entry.snapshot.folders ?? [];
@@ -223,8 +223,8 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
     };
     return true;
   }
-  if (envelope.type === "workspace_folder_created" || envelope.type === "workspace_folder_moved") {
-    const folder = data.folder as WorkspaceFolder | undefined;
+  if (envelope.type === "company_explorer_folder_created" || envelope.type === "company_explorer_folder_moved") {
+    const folder = data.folder as CompanyExplorerFolder | undefined;
     if (!folder || typeof folder.folder_id !== "string") return false;
     const currentFolders = entry.snapshot.folders ?? [];
     entry.snapshot = {
@@ -236,8 +236,8 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
     };
     return true;
   }
-  if (envelope.type === "workspace_folder_item_assigned") {
-    const folderItem = data.folder_item as WorkspaceFolderItem | undefined;
+  if (envelope.type === "company_explorer_folder_item_assigned") {
+    const folderItem = data.folder_item as CompanyExplorerFolderItem | undefined;
     if (!folderItem || typeof folderItem.item_id !== "string" || typeof folderItem.item_type !== "string") return false;
     const currentItems = entry.snapshot.folder_items ?? [];
     entry.snapshot = {
@@ -249,7 +249,7 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
     };
     return true;
   }
-  if (envelope.type === "workspace_folder_item_removed") {
+  if (envelope.type === "company_explorer_folder_item_removed") {
     const itemType = typeof data.item_type === "string" ? data.item_type : "";
     const itemID = typeof data.item_id === "string" ? data.item_id : "";
     if (!itemType || !itemID) return false;
@@ -309,7 +309,7 @@ function ensureStream(apiBase: string, companyID: string): void {
       const envelope = JSON.parse(payload) as WorkspaceStreamEnvelope;
       if (envelope.company_id !== companyID) return;
       if (isNonLogicGateGraphWorkspaceEvent(envelope.type)) return;
-      if (!envelope.type.startsWith("logic_gate_") && !envelope.type.startsWith("workspace_folder_")) return;
+      if (!envelope.type.startsWith("logic_gate_") && !envelope.type.startsWith("company_explorer_folder_")) return;
       const applied = applyLogicGateRelationshipGraphDelta(entry, envelope);
       if (applied) notify(entry);
       else void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);

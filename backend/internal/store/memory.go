@@ -37,13 +37,13 @@ type Repository interface {
 	AddLogicGateInformation(companyID, logicGateID, infoType, information, informationID string) (domain.LogicGateInformation, error)
 	ListLogicGateProjections(companyID, logicGateID string) ([]domain.LogicGateProjection, error)
 	CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error)
-	CreateWorkspaceFolder(companyID, parentFolderID, folderKind, name string) (domain.WorkspaceFolder, error)
-	ListWorkspaceFolders(companyID, folderKind string) ([]domain.WorkspaceFolder, error)
-	MoveWorkspaceFolder(companyID, folderID, parentFolderID string) (domain.WorkspaceFolder, error)
-	DeleteWorkspaceFolder(companyID, folderID string) error
-	AssignWorkspaceFolderItem(companyID, folderID, itemType, itemID string) (domain.WorkspaceFolderItem, error)
-	ListWorkspaceFolderItems(companyID, folderID, itemType string) ([]domain.WorkspaceFolderItem, error)
-	RemoveWorkspaceFolderItem(companyID, itemType, itemID string) error
+	CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error)
+	ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error)
+	MoveCompanyExplorerFolder(companyID, folderID, parentFolderID string) (domain.CompanyExplorerFolder, error)
+	DeleteCompanyExplorerFolder(companyID, folderID string) error
+	AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string) (domain.CompanyExplorerFolderItem, error)
+	ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error)
+	RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error
 	CreateOperation(in CreateOperationInput) (domain.Operation, error)
 	GetOperation(companyID, operationID string) (domain.Operation, error)
 	ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error)
@@ -54,9 +54,6 @@ type Repository interface {
 	UpsertKanbanCard(companyID, boardID, columnID, itemType, itemID, titleSnapshot string, position int) (domain.KanbanCard, error)
 	MoveKanbanCard(companyID, boardID, cardID, columnID string, position int) (domain.KanbanCard, error)
 	DeleteKanbanCard(companyID, boardID, cardID string) error
-	AppendWorkspaceContextEvent(event domain.WorkspaceContextEvent) (domain.WorkspaceContextProjection, error)
-	GetWorkspaceContextProjection(companyID, workspaceID, contextID string) (domain.WorkspaceContextProjection, error)
-	ListWorkspaceContextEventsAfterSequence(companyID, workspaceID, contextID string, afterSequence int64, limit int) ([]domain.WorkspaceContextEvent, error)
 }
 
 type CreateOperationInput struct {
@@ -69,41 +66,37 @@ type CreateOperationInput struct {
 }
 
 type MemoryRepo struct {
-	mu                 sync.RWMutex
-	nodes              map[string]domain.Node
-	nodeInfo           map[string][]domain.NodeInformation
-	nodeText           map[string]map[string]domain.NodeProjection
-	nodeRels           map[string][]domain.NodeRelationship
-	logicGates         map[string]domain.LogicGate
-	logicGateInfo      map[string][]domain.LogicGateInformation
-	logicGateText      map[string]map[string]domain.LogicGateProjection
-	logicGateRels      map[string][]domain.LogicGateRelationship
-	folders            map[string]domain.WorkspaceFolder
-	folderItems        map[string]domain.WorkspaceFolderItem
-	operations         map[string]domain.Operation
-	kanbanColumns      map[string][]domain.KanbanColumn
-	kanbanCards        map[string][]domain.KanbanCard
-	contextEvents      map[string][]domain.WorkspaceContextEvent
-	contextProjections map[string]domain.WorkspaceContextProjection
+	mu            sync.RWMutex
+	nodes         map[string]domain.Node
+	nodeInfo      map[string][]domain.NodeInformation
+	nodeText      map[string]map[string]domain.NodeProjection
+	nodeRels      map[string][]domain.NodeRelationship
+	logicGates    map[string]domain.LogicGate
+	logicGateInfo map[string][]domain.LogicGateInformation
+	logicGateText map[string]map[string]domain.LogicGateProjection
+	logicGateRels map[string][]domain.LogicGateRelationship
+	folders       map[string]domain.CompanyExplorerFolder
+	folderItems   map[string]domain.CompanyExplorerFolderItem
+	operations    map[string]domain.Operation
+	kanbanColumns map[string][]domain.KanbanColumn
+	kanbanCards   map[string][]domain.KanbanCard
 }
 
 func NewMemoryRepo() *MemoryRepo {
 	return &MemoryRepo{
-		nodes:              map[string]domain.Node{},
-		nodeInfo:           map[string][]domain.NodeInformation{},
-		nodeText:           map[string]map[string]domain.NodeProjection{},
-		nodeRels:           map[string][]domain.NodeRelationship{},
-		logicGates:         map[string]domain.LogicGate{},
-		logicGateInfo:      map[string][]domain.LogicGateInformation{},
-		logicGateText:      map[string]map[string]domain.LogicGateProjection{},
-		logicGateRels:      map[string][]domain.LogicGateRelationship{},
-		folders:            map[string]domain.WorkspaceFolder{},
-		folderItems:        map[string]domain.WorkspaceFolderItem{},
-		operations:         map[string]domain.Operation{},
-		kanbanColumns:      map[string][]domain.KanbanColumn{},
-		kanbanCards:        map[string][]domain.KanbanCard{},
-		contextEvents:      map[string][]domain.WorkspaceContextEvent{},
-		contextProjections: map[string]domain.WorkspaceContextProjection{},
+		nodes:         map[string]domain.Node{},
+		nodeInfo:      map[string][]domain.NodeInformation{},
+		nodeText:      map[string]map[string]domain.NodeProjection{},
+		nodeRels:      map[string][]domain.NodeRelationship{},
+		logicGates:    map[string]domain.LogicGate{},
+		logicGateInfo: map[string][]domain.LogicGateInformation{},
+		logicGateText: map[string]map[string]domain.LogicGateProjection{},
+		logicGateRels: map[string][]domain.LogicGateRelationship{},
+		folders:       map[string]domain.CompanyExplorerFolder{},
+		folderItems:   map[string]domain.CompanyExplorerFolderItem{},
+		operations:    map[string]domain.Operation{},
+		kanbanColumns: map[string][]domain.KanbanColumn{},
+		kanbanCards:   map[string][]domain.KanbanCard{},
 	}
 }
 
@@ -310,10 +303,6 @@ func (r *MemoryRepo) DeleteNodeRelationship(companyID, relationshipID string) er
 	}
 	r.nodeRels[companyID] = filtered
 	return nil
-}
-
-func workspaceContextKey(companyID, workspaceID, contextID string) string {
-	return companyID + ":" + workspaceID + ":" + contextID
 }
 
 func boardKey(companyID, boardID string) string {
@@ -571,61 +560,6 @@ func (r *MemoryRepo) DeleteKanbanCard(companyID, boardID, cardID string) error {
 	}
 	r.kanbanCards[k] = next
 	return nil
-}
-
-func (r *MemoryRepo) AppendWorkspaceContextEvent(event domain.WorkspaceContextEvent) (domain.WorkspaceContextProjection, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	now := time.Now().UTC()
-	event.CreatedAt = now
-	k := workspaceContextKey(event.CompanyID, event.WorkspaceID, event.ContextID)
-	r.contextEvents[k] = append(r.contextEvents[k], event)
-	current := r.contextProjections[k]
-	if event.Sequence >= current.LastSequence {
-		current.CompanyID = event.CompanyID
-		current.WorkspaceID = event.WorkspaceID
-		current.ContextID = event.ContextID
-		current.LastSequence = event.Sequence
-		current.LastEventAt = event.CreatedAt
-		current.LastPayloadJSON = event.PayloadJSON
-		current.UpdatedTimestamp = now
-		r.contextProjections[k] = current
-	}
-	return r.contextProjections[k], nil
-}
-
-func (r *MemoryRepo) GetWorkspaceContextProjection(companyID, workspaceID, contextID string) (domain.WorkspaceContextProjection, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	item, ok := r.contextProjections[workspaceContextKey(companyID, workspaceID, contextID)]
-	if !ok {
-		return domain.WorkspaceContextProjection{}, ErrNotFound
-	}
-	return item, nil
-}
-
-func (r *MemoryRepo) ListWorkspaceContextEventsAfterSequence(companyID, workspaceID, contextID string, afterSequence int64, limit int) ([]domain.WorkspaceContextEvent, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	k := workspaceContextKey(companyID, workspaceID, contextID)
-	source := r.contextEvents[k]
-	if len(source) == 0 {
-		return []domain.WorkspaceContextEvent{}, nil
-	}
-	if limit <= 0 {
-		limit = 250
-	}
-	out := make([]domain.WorkspaceContextEvent, 0, min(limit, len(source)))
-	for _, item := range source {
-		if item.Sequence <= afterSequence {
-			continue
-		}
-		out = append(out, item)
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out, nil
 }
 
 func (r *MemoryRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error) {
@@ -887,7 +821,7 @@ func (r *MemoryRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.
 	}, nil
 }
 
-func (r *MemoryRepo) CreateWorkspaceFolder(companyID, parentFolderID, folderKind, name string) (domain.WorkspaceFolder, error) {
+func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -895,14 +829,14 @@ func (r *MemoryRepo) CreateWorkspaceFolder(companyID, parentFolderID, folderKind
 	if parentFolderID != "" {
 		parentFolder, ok := r.folders[key(companyID, parentFolderID)]
 		if !ok || parentFolder.FolderKind != folderKind {
-			return domain.WorkspaceFolder{}, ErrNotFound
+			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		parentValue := parentFolderID
 		parent = &parentValue
 	}
 
 	now := time.Now().UTC()
-	item := domain.WorkspaceFolder{
+	item := domain.CompanyExplorerFolder{
 		CompanyID:        companyID,
 		FolderID:         newUUIDv7String(),
 		ParentFolderID:   parent,
@@ -915,11 +849,11 @@ func (r *MemoryRepo) CreateWorkspaceFolder(companyID, parentFolderID, folderKind
 	return item, nil
 }
 
-func (r *MemoryRepo) ListWorkspaceFolders(companyID, folderKind string) ([]domain.WorkspaceFolder, error) {
+func (r *MemoryRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items := make([]domain.WorkspaceFolder, 0)
+	items := make([]domain.CompanyExplorerFolder, 0)
 	for _, folder := range r.folders {
 		if folder.CompanyID != companyID {
 			continue
@@ -935,23 +869,23 @@ func (r *MemoryRepo) ListWorkspaceFolders(companyID, folderKind string) ([]domai
 	return items, nil
 }
 
-func (r *MemoryRepo) MoveWorkspaceFolder(companyID, folderID, parentFolderID string) (domain.WorkspaceFolder, error) {
+func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID, parentFolderID string) (domain.CompanyExplorerFolder, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	item, ok := r.folders[key(companyID, folderID)]
 	if !ok {
-		return domain.WorkspaceFolder{}, ErrNotFound
+		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
 	if parentFolderID == folderID {
-		return domain.WorkspaceFolder{}, ErrInvalid
+		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
 
 	var parent *string
 	if parentFolderID != "" {
 		parentFolder, ok := r.folders[key(companyID, parentFolderID)]
 		if !ok || parentFolder.FolderKind != item.FolderKind {
-			return domain.WorkspaceFolder{}, ErrNotFound
+			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		// A folder cannot be moved under one of its descendants; that would
 		// create a cycle and make folder-scope queries loop forever.
@@ -970,7 +904,7 @@ func (r *MemoryRepo) MoveWorkspaceFolder(companyID, folderID, parentFolderID str
 			}
 		}
 		if toCheck[parentFolderID] {
-			return domain.WorkspaceFolder{}, ErrInvalid
+			return domain.CompanyExplorerFolder{}, ErrInvalid
 		}
 		parentValue := parentFolderID
 		parent = &parentValue
@@ -982,7 +916,7 @@ func (r *MemoryRepo) MoveWorkspaceFolder(companyID, folderID, parentFolderID str
 	return item, nil
 }
 
-func (r *MemoryRepo) DeleteWorkspaceFolder(companyID, folderID string) error {
+func (r *MemoryRepo) DeleteCompanyExplorerFolder(companyID, folderID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -1018,24 +952,24 @@ func (r *MemoryRepo) DeleteWorkspaceFolder(companyID, folderID string) error {
 	return nil
 }
 
-func (r *MemoryRepo) AssignWorkspaceFolderItem(companyID, folderID, itemType, itemID string) (domain.WorkspaceFolderItem, error) {
+func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string) (domain.CompanyExplorerFolderItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	folder, ok := r.folders[key(companyID, folderID)]
 	if !ok || folder.FolderKind != itemType {
-		return domain.WorkspaceFolderItem{}, ErrNotFound
+		return domain.CompanyExplorerFolderItem{}, ErrNotFound
 	}
 	if itemType == "node" {
 		if _, ok := r.nodes[key(companyID, itemID)]; !ok {
-			return domain.WorkspaceFolderItem{}, ErrNotFound
+			return domain.CompanyExplorerFolderItem{}, ErrNotFound
 		}
 	} else if itemType == "logic_gate" {
 		if _, ok := r.logicGates[key(companyID, itemID)]; !ok {
-			return domain.WorkspaceFolderItem{}, ErrNotFound
+			return domain.CompanyExplorerFolderItem{}, ErrNotFound
 		}
 	} else {
-		return domain.WorkspaceFolderItem{}, ErrNotFound
+		return domain.CompanyExplorerFolderItem{}, ErrNotFound
 	}
 
 	now := time.Now().UTC()
@@ -1044,7 +978,7 @@ func (r *MemoryRepo) AssignWorkspaceFolderItem(companyID, folderID, itemType, it
 	if existing, ok := r.folderItems[k]; ok {
 		created = existing.CreatedTimestamp
 	}
-	item := domain.WorkspaceFolderItem{
+	item := domain.CompanyExplorerFolderItem{
 		CompanyID:        companyID,
 		FolderID:         folderID,
 		ItemType:         itemType,
@@ -1056,11 +990,11 @@ func (r *MemoryRepo) AssignWorkspaceFolderItem(companyID, folderID, itemType, it
 	return item, nil
 }
 
-func (r *MemoryRepo) ListWorkspaceFolderItems(companyID, folderID, itemType string) ([]domain.WorkspaceFolderItem, error) {
+func (r *MemoryRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items := make([]domain.WorkspaceFolderItem, 0)
+	items := make([]domain.CompanyExplorerFolderItem, 0)
 	for _, item := range r.folderItems {
 		if item.CompanyID != companyID {
 			continue
@@ -1079,7 +1013,7 @@ func (r *MemoryRepo) ListWorkspaceFolderItems(companyID, folderID, itemType stri
 	return items, nil
 }
 
-func (r *MemoryRepo) RemoveWorkspaceFolderItem(companyID, itemType, itemID string) error {
+func (r *MemoryRepo) RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

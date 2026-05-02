@@ -2,12 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeRecord, NodeRelationship } from "../node-map/shared";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, NodeRecord as LogicGateRecord, NodeRelationship as LogicGateRelationship } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
-import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertWorkspaceFolderInNodeRelationshipGraph, upsertWorkspaceFolderItemInNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
-import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertWorkspaceFolderInLogicGateRelationshipGraph, upsertWorkspaceFolderItemInLogicGateRelationshipGraph } from "../logic-gate-map/LogicGateRelationshipGraph";
+import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
+import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
-import { type WorkspaceFolder, type WorkspaceFolderItem, type WorkspaceFolderKind } from "../folders/workspaceFolders";
+import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
 import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload } from "../kanban/shared";
 
 type ExplorerTreeNode = {
@@ -18,7 +18,7 @@ type ExplorerTreeNode = {
   nodeID?: string;
   logicGateID?: string;
   folderID?: string;
-  folderKind?: WorkspaceFolderKind;
+  folderKind?: CompanyExplorerFolderKind;
   folderLabel?: string;
   scopeLevel: number;
 };
@@ -26,9 +26,9 @@ type ExplorerTreeNode = {
 type ExplorerDragPayload = {
   kind: "folder" | "node" | "logic_gate";
   folderID?: string;
-  folderKind?: WorkspaceFolderKind;
+  folderKind?: CompanyExplorerFolderKind;
   itemID?: string;
-  itemType?: WorkspaceFolderKind;
+  itemType?: CompanyExplorerFolderKind;
 };
 
 const EXPLORER_DRAG_MIME = "application/x-mangoos-company-explorer-row";
@@ -93,8 +93,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [logicGates, setLogicGates] = useState<LogicGateRecord[]>([]);
-  const [folders, setFolders] = useState<WorkspaceFolder[]>([]);
-  const [folderItems, setFolderItems] = useState<WorkspaceFolderItem[]>([]);
+  const [folders, setFolders] = useState<CompanyExplorerFolder[]>([]);
+  const [folderItems, setFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [selectedTreeID, setSelectedTreeID] = useState("folder-nodes");
   const [selectedNodeID, setSelectedNodeID] = useState("");
   const [selectedLogicGateID, setSelectedLogicGateID] = useState("");
@@ -200,7 +200,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     const logicGateByID = new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
     const assignedNodes = new Set(folderItems.filter((item) => item.item_type === "node").map((item) => item.item_id));
     const assignedLogicGates = new Set(folderItems.filter((item) => item.item_type === "logic_gate").map((item) => item.item_id));
-    const foldersByParent = new Map<string, WorkspaceFolder[]>();
+    const foldersByParent = new Map<string, CompanyExplorerFolder[]>();
     for (const folder of folders) {
       const key = `${folder.folder_kind}:${folder.parent_folder_id ?? ""}`;
       const bucket = foldersByParent.get(key) ?? [];
@@ -210,7 +210,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     for (const bucket of foldersByParent.values()) {
       bucket.sort((a, b) => a.name.localeCompare(b.name) || a.created_timestamp.localeCompare(b.created_timestamp));
     }
-    const itemsByFolder = new Map<string, WorkspaceFolderItem[]>();
+    const itemsByFolder = new Map<string, CompanyExplorerFolderItem[]>();
     for (const item of folderItems) {
       const key = `${item.item_type}:${item.folder_id}`;
       const bucket = itemsByFolder.get(key) ?? [];
@@ -218,7 +218,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       itemsByFolder.set(key, bucket);
     }
 
-    const pushFolderBranch = (folderKind: WorkspaceFolderKind, parentFolderID: string, depth: number) => {
+    const pushFolderBranch = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number) => {
       const childFolders = foldersByParent.get(`${folderKind}:${parentFolderID}`) ?? [];
       for (const folder of childFolders) {
         const directItems = itemsByFolder.get(`${folderKind}:${folder.folder_id}`) ?? [];
@@ -362,10 +362,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return response.json() as Promise<T>;
   }, [apiBase]);
 
-  const createFolder = useCallback(async (folderKind: WorkspaceFolderKind, parentFolderID: string) => {
+  const createFolder = useCallback(async (folderKind: CompanyExplorerFolderKind, parentFolderID: string) => {
     setError("");
     try {
-      const folder = await requestJSON<WorkspaceFolder>("/v1/workspace/folders", {
+      const folder = await requestJSON<CompanyExplorerFolder>("/v1/company-explorer/folders", {
         method: "POST",
         body: JSON.stringify({
           company_id: companyID,
@@ -381,18 +381,18 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         next.add(`workspace-folder-${folder.folder_id}`);
         return next;
       });
-      if (folder.folder_kind === "logic_gate") upsertWorkspaceFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
-      else upsertWorkspaceFolderInNodeRelationshipGraph(apiBase, companyID, folder);
+      if (folder.folder_kind === "logic_gate") upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
+      else upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_folder");
     }
   }, [apiBase, companyID, requestJSON]);
 
-  const assignItemToFolder = useCallback(async (targetFolderID: string, itemType: WorkspaceFolderKind, itemID: string) => {
+  const assignItemToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerFolderKind, itemID: string) => {
     if (!targetFolderID || !itemID) return;
     setError("");
     try {
-      const item = await requestJSON<WorkspaceFolderItem>("/v1/workspace/folder-items", {
+      const item = await requestJSON<CompanyExplorerFolderItem>("/v1/company-explorer/folder-items", {
         method: "POST",
         body: JSON.stringify({
           company_id: companyID,
@@ -407,8 +407,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           ? previous.map((row) => (row.item_type === item.item_type && row.item_id === item.item_id ? item : row))
           : [...previous, item];
       });
-      if (item.item_type === "logic_gate") upsertWorkspaceFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
-      else upsertWorkspaceFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
+      if (item.item_type === "logic_gate") upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
+      else upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
       setExpanded((previous) => {
         const next = new Set(previous);
         next.add(`workspace-folder-${targetFolderID}`);
@@ -423,7 +423,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     if (!folderID || folderID === parentFolderID) return;
     setError("");
     try {
-      const folder = await requestJSON<WorkspaceFolder>(`/v1/workspace/folders/${folderID}`, {
+      const folder = await requestJSON<CompanyExplorerFolder>(`/v1/company-explorer/folders/${folderID}`, {
         method: "PUT",
         body: JSON.stringify({
           company_id: companyID,
@@ -437,8 +437,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         next.add(`workspace-folder-${folder.folder_id}`);
         return next;
       });
-      if (folder.folder_kind === "logic_gate") upsertWorkspaceFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
-      else upsertWorkspaceFolderInNodeRelationshipGraph(apiBase, companyID, folder);
+      if (folder.folder_kind === "logic_gate") upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
+      else upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_move_folder");
     }

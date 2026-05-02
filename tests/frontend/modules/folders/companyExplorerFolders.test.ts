@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { filterLogicGateGraphToFolderScope, filterNodeGraphToFolderScope, getFolderSubtreeIDs } from "../../../../frontend/src/modules/folders/workspaceFolders.js";
+import { filterLogicGateGraphToFolderScope, filterNodeGraphToFolderScope, getFolderSubtreeIDs } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
 
 const folders = [
   { company_id: "c", folder_id: "folder-parent", folder_kind: "node" as const, name: "Parent", created_timestamp: "1", updated_timestamp: "1" },

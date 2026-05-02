@@ -138,7 +138,7 @@ Use this checklist format and keep it complete.
   - linked target resolution by kind supports traversal through intermediary graph hops, including Kanban
   - direct-neighbor resolution returns adjacency-only targets for explorer fanout
 - [x] `tests/frontend/modules/company-explorer/explorerSync.test.ts`
-- [x] `tests/frontend/modules/folders/workspaceFolders.test.ts`
+- [x] `tests/frontend/modules/folders/companyExplorerFolders.test.ts`
   - nested folder subtree expansion for map scope
   - node folder filtering keeps only folder/descendant contents
   - relationship filtering keeps only relationships whose endpoints are both in scope
@@ -162,12 +162,10 @@ Use this checklist format and keep it complete.
   - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)
   - node creation contract uses canonical `title` payload semantics only (legacy `header` fallback removed)
   - node rename contract via `PUT /v1/nodes/{node_id}` persists updated title
-  - workspace context event write path persists projection updates (`POST /v1/workspace/context-events` -> `GET /v1/workspace/context-projections`)
-  - ordered context delta feed returns persisted event rows after sequence (`GET /v1/workspace/context-deltas?after_sequence=`)
   - logic gate relationship position-pair legality helper (Input/Output or Output/Input only)
   - logic gate create/read/information/relationship API flow
   - node and logic-gate information APIs reject blank/whitespace-only `information` so empty editor blurs do not persist rows
-  - workspace folder APIs create nested folders, move folders, reject cyclic folder moves, assign node placements, and include folder data in workspace snapshots
+  - Company Explorer folder APIs create nested folders, move folders, reject cyclic folder moves, assign node placements, and include folder data in workspace snapshots
   - Kanban column create/rename and node/logic-gate card API flow
   - Kanban card upsert moves an existing board card instead of duplicating it
   - Kanban card reads honor `after_position` pagination for bounded hot-path reads
