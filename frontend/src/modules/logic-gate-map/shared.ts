@@ -1,4 +1,4 @@
-import type { NodeDirection, NodePosition, RelationshipAnchor } from "../node-map/shared.js";
+import type { NodeDirection, NodePosition, PersistedMapPosition, RelationshipAnchor } from "../node-map/shared.js";
 import {
   INFO_TYPES,
   MINI_GRID,
@@ -10,7 +10,9 @@ import {
   PANEL_MIN_WIDTH,
   clamp,
   divider,
+  changedPersistedMapPositions,
   oppositeSide,
+  persistedMapPositionsToNodePositions,
   panelResizeHandles,
   reconcileNodeMapPositions,
   shouldIgnoreCanvasKeydownTarget,
@@ -29,7 +31,9 @@ export {
   PANEL_MIN_WIDTH,
   clamp,
   divider,
+  changedPersistedMapPositions,
   oppositeSide,
+  persistedMapPositionsToNodePositions,
   panelResizeHandles,
   reconcileNodeMapPositions,
   shouldIgnoreCanvasKeydownTarget,
@@ -37,7 +41,7 @@ export {
   trimOrEmpty,
 };
 
-export type { NodeDirection, NodePosition, RelationshipAnchor };
+export type { NodeDirection, NodePosition, PersistedMapPosition, RelationshipAnchor };
 
 export const LOGIC_GATE_MAP_STATE_KEY_PREFIX = "logic-gate-map-state-v1";
 export const LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX = "logic-gate-map-explorer-context-v1";
@@ -121,6 +125,8 @@ export type NodeMapState = {
   zoom: number;
   pan: { x: number; y: number };
   selectedNodeID: string;
+  // Legacy cache slot. New browser-cache writes keep this empty because shared
+  // map geometry is owned by the map-layout API/database, not localStorage.
   nodePositions: Record<string, NodePosition>;
   relationshipColorsEnabled?: boolean;
   relationshipRoleColors?: { input: string; output: string };

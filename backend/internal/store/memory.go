@@ -44,6 +44,10 @@ type Repository interface {
 	AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string) (domain.CompanyExplorerFolderItem, error)
 	ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error)
 	RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error
+	ListNodeMapPositions(companyID string) ([]domain.NodeMapPosition, error)
+	UpsertNodeMapPositions(companyID string, positions []domain.NodeMapPosition) ([]domain.NodeMapPosition, error)
+	ListLogicGateMapPositions(companyID string) ([]domain.LogicGateMapPosition, error)
+	UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error)
 	CreateOperation(in CreateOperationInput) (domain.Operation, error)
 	GetOperation(companyID, operationID string) (domain.Operation, error)
 	ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error)
@@ -66,37 +70,41 @@ type CreateOperationInput struct {
 }
 
 type MemoryRepo struct {
-	mu            sync.RWMutex
-	nodes         map[string]domain.Node
-	nodeInfo      map[string][]domain.NodeInformation
-	nodeText      map[string]map[string]domain.NodeProjection
-	nodeRels      map[string][]domain.NodeRelationship
-	logicGates    map[string]domain.LogicGate
-	logicGateInfo map[string][]domain.LogicGateInformation
-	logicGateText map[string]map[string]domain.LogicGateProjection
-	logicGateRels map[string][]domain.LogicGateRelationship
-	folders       map[string]domain.CompanyExplorerFolder
-	folderItems   map[string]domain.CompanyExplorerFolderItem
-	operations    map[string]domain.Operation
-	kanbanColumns map[string][]domain.KanbanColumn
-	kanbanCards   map[string][]domain.KanbanCard
+	mu                sync.RWMutex
+	nodes             map[string]domain.Node
+	nodeInfo          map[string][]domain.NodeInformation
+	nodeText          map[string]map[string]domain.NodeProjection
+	nodeRels          map[string][]domain.NodeRelationship
+	logicGates        map[string]domain.LogicGate
+	logicGateInfo     map[string][]domain.LogicGateInformation
+	logicGateText     map[string]map[string]domain.LogicGateProjection
+	logicGateRels     map[string][]domain.LogicGateRelationship
+	folders           map[string]domain.CompanyExplorerFolder
+	folderItems       map[string]domain.CompanyExplorerFolderItem
+	nodeMapPositions  map[string]domain.NodeMapPosition
+	logicMapPositions map[string]domain.LogicGateMapPosition
+	operations        map[string]domain.Operation
+	kanbanColumns     map[string][]domain.KanbanColumn
+	kanbanCards       map[string][]domain.KanbanCard
 }
 
 func NewMemoryRepo() *MemoryRepo {
 	return &MemoryRepo{
-		nodes:         map[string]domain.Node{},
-		nodeInfo:      map[string][]domain.NodeInformation{},
-		nodeText:      map[string]map[string]domain.NodeProjection{},
-		nodeRels:      map[string][]domain.NodeRelationship{},
-		logicGates:    map[string]domain.LogicGate{},
-		logicGateInfo: map[string][]domain.LogicGateInformation{},
-		logicGateText: map[string]map[string]domain.LogicGateProjection{},
-		logicGateRels: map[string][]domain.LogicGateRelationship{},
-		folders:       map[string]domain.CompanyExplorerFolder{},
-		folderItems:   map[string]domain.CompanyExplorerFolderItem{},
-		operations:    map[string]domain.Operation{},
-		kanbanColumns: map[string][]domain.KanbanColumn{},
-		kanbanCards:   map[string][]domain.KanbanCard{},
+		nodes:             map[string]domain.Node{},
+		nodeInfo:          map[string][]domain.NodeInformation{},
+		nodeText:          map[string]map[string]domain.NodeProjection{},
+		nodeRels:          map[string][]domain.NodeRelationship{},
+		logicGates:        map[string]domain.LogicGate{},
+		logicGateInfo:     map[string][]domain.LogicGateInformation{},
+		logicGateText:     map[string]map[string]domain.LogicGateProjection{},
+		logicGateRels:     map[string][]domain.LogicGateRelationship{},
+		folders:           map[string]domain.CompanyExplorerFolder{},
+		folderItems:       map[string]domain.CompanyExplorerFolderItem{},
+		nodeMapPositions:  map[string]domain.NodeMapPosition{},
+		logicMapPositions: map[string]domain.LogicGateMapPosition{},
+		operations:        map[string]domain.Operation{},
+		kanbanColumns:     map[string][]domain.KanbanColumn{},
+		kanbanCards:       map[string][]domain.KanbanCard{},
 	}
 }
 
@@ -186,6 +194,7 @@ func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
 	delete(r.nodeInfo, k)
 	delete(r.nodeText, k)
 	delete(r.folderItems, folderItemKey(companyID, "node", nodeID))
+	delete(r.nodeMapPositions, k)
 
 	filtered := make([]domain.NodeRelationship, 0, len(r.nodeRels[companyID]))
 	for _, rel := range r.nodeRels[companyID] {
@@ -196,6 +205,43 @@ func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
 	}
 	r.nodeRels[companyID] = filtered
 	return nil
+}
+
+func (r *MemoryRepo) ListNodeMapPositions(companyID string) ([]domain.NodeMapPosition, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := make([]domain.NodeMapPosition, 0)
+	for _, item := range r.nodeMapPositions {
+		if item.CompanyID == companyID {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].NodeID < items[j].NodeID
+	})
+	return items, nil
+}
+
+func (r *MemoryRepo) UpsertNodeMapPositions(companyID string, positions []domain.NodeMapPosition) ([]domain.NodeMapPosition, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now().UTC()
+	out := make([]domain.NodeMapPosition, 0, len(positions))
+	for _, position := range positions {
+		if _, ok := r.nodes[key(companyID, position.NodeID)]; !ok {
+			return nil, ErrNotFound
+		}
+		item := domain.NodeMapPosition{
+			CompanyID:        companyID,
+			NodeID:           position.NodeID,
+			X:                position.X,
+			Y:                position.Y,
+			UpdatedTimestamp: now,
+		}
+		r.nodeMapPositions[key(companyID, item.NodeID)] = item
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 func (r *MemoryRepo) AddNodeInformation(companyID, nodeID, infoType, information, informationID string) (domain.NodeInformation, error) {
@@ -658,6 +704,7 @@ func (r *MemoryRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	delete(r.logicGateInfo, k)
 	delete(r.logicGateText, k)
 	delete(r.folderItems, folderItemKey(companyID, "logic_gate", logicGateID))
+	delete(r.logicMapPositions, k)
 
 	filtered := make([]domain.LogicGateRelationship, 0, len(r.logicGateRels[companyID]))
 	for _, rel := range r.logicGateRels[companyID] {
@@ -668,6 +715,43 @@ func (r *MemoryRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	}
 	r.logicGateRels[companyID] = filtered
 	return nil
+}
+
+func (r *MemoryRepo) ListLogicGateMapPositions(companyID string) ([]domain.LogicGateMapPosition, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := make([]domain.LogicGateMapPosition, 0)
+	for _, item := range r.logicMapPositions {
+		if item.CompanyID == companyID {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].LogicGateID < items[j].LogicGateID
+	})
+	return items, nil
+}
+
+func (r *MemoryRepo) UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now().UTC()
+	out := make([]domain.LogicGateMapPosition, 0, len(positions))
+	for _, position := range positions {
+		if _, ok := r.logicGates[key(companyID, position.LogicGateID)]; !ok {
+			return nil, ErrNotFound
+		}
+		item := domain.LogicGateMapPosition{
+			CompanyID:        companyID,
+			LogicGateID:      position.LogicGateID,
+			X:                position.X,
+			Y:                position.Y,
+			UpdatedTimestamp: now,
+		}
+		r.logicMapPositions[key(companyID, item.LogicGateID)] = item
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 func (r *MemoryRepo) ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error) {

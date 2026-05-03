@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LOGIC_GATE_MAP_STATE_KEY_PREFIX, LogicGateRecord, LogicGateRelationship, MINI_GRID, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, getNodeTitle, reconcileNodeMapPositions, snapToGrid, toLogicGateCanvasRecord, toLogicGateCanvasRelationship, trimOrEmpty } from "./shared";
+import { INFO_TYPES, LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LOGIC_GATE_MAP_STATE_KEY_PREFIX, LogicGateRecord, LogicGateRelationship, MINI_GRID, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, toLogicGateCanvasRecord, toLogicGateCanvasRelationship, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { type ContextMutationEnvelope } from "../contextSyncContract";
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "./LogicGateRelationshipGraph";
@@ -90,6 +90,8 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const selectionBoxRef = useRef(selectionBox);
   const restoredSelectionRef = useRef<string>("");
   const explorerContextRef = useRef<number>(0);
+  const layoutPersistenceReadyRef = useRef(false);
+  const lastPersistedNodePositionsRef = useRef<Record<string, NodePosition>>({});
   const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(false);
   const [relationshipRoleColors, setRelationshipRoleColors] = useState({ input: "#0095ff", output: "#ff8a00" });
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
@@ -164,6 +166,21 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     selectionBoxRef.current = nextSelectionBox;
     setSelectionPointerID(started.pointerID);
     setSelectionBox(nextSelectionBox);
+  };
+
+  const applyServerMapPositions = (positions: Parameters<typeof persistedMapPositionsToNodePositions>[0]["positions"]) => {
+    const serverPositions = persistedMapPositionsToNodePositions({
+      positions,
+      worldWidth: WORLD_W,
+      worldHeight: WORLD_H,
+      nodeWidth: NODE_W,
+      nodeHeight: NODE_H,
+    });
+    lastPersistedNodePositionsRef.current = { ...lastPersistedNodePositionsRef.current, ...serverPositions };
+    if (Object.keys(serverPositions).length > 0) {
+      setNodePositions((previous) => ({ ...previous, ...serverPositions }));
+    }
+    layoutPersistenceReadyRef.current = true;
   };
 
   useEffect(() => {
@@ -281,6 +298,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       await refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
       const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
       const nextNodes = applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? []);
+      applyServerMapPositions(snapshot.logic_gate_map_positions ?? []);
 
       const hasSelection = selectedNodeID && nextNodes.some((item) => item.node_id === selectedNodeID);
       if (hasSelection) return;
@@ -323,6 +341,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     return subscribeLogicGateRelationshipGraph(apiBase, companyID, () => {
       const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
       applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? []);
+      applyServerMapPositions(snapshot.logic_gate_map_positions ?? []);
     });
   }, [apiBase, companyID, activeFolderID]);
 
@@ -420,7 +439,9 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           zoom,
           pan,
           selectedNodeID,
-          nodePositions,
+          // Positions can be huge and are shared by every user/agent. Keep the
+          // browser cache small; the database-backed map-layout API owns geometry.
+          nodePositions: {},
           relationshipColorsEnabled,
           relationshipRoleColors,
         };
@@ -434,7 +455,51 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       }
     }, 120);
     return () => window.clearTimeout(timeout);
-  }, [fallbackMapStateKey, mapStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions, relationshipColorsEnabled, relationshipRoleColors]);
+  }, [fallbackMapStateKey, mapStateKey, restoredViewport, zoom, pan, selectedNodeID, relationshipColorsEnabled, relationshipRoleColors]);
+
+  useEffect(() => {
+    if (!restoredViewport || !layoutPersistenceReadyRef.current) return;
+    const timeout = window.setTimeout(() => {
+      const changed = changedPersistedMapPositions({
+        previous: lastPersistedNodePositionsRef.current,
+        current: nodePositions,
+        entityIDs: new Set(nodes.map((node) => node.node_id)),
+      });
+      if (changed.length === 0) return;
+
+      const persist = async () => {
+        try {
+          for (let index = 0; index < changed.length; index += 500) {
+            const chunk = changed.slice(index, index + 500);
+            const payload = await requestJSON<{ positions: Array<{ logic_gate_id?: string; entity_id?: string; x: number; y: number }> }>("/v1/map-layout", {
+              method: "PUT",
+              body: JSON.stringify({
+                company_id: companyID,
+                map_type: "logic_gate",
+                positions: chunk,
+              }),
+            });
+            const savedPositions = persistedMapPositionsToNodePositions({
+              positions: payload.positions,
+              worldWidth: WORLD_W,
+              worldHeight: WORLD_H,
+              nodeWidth: NODE_W,
+              nodeHeight: NODE_H,
+            });
+            lastPersistedNodePositionsRef.current = { ...lastPersistedNodePositionsRef.current, ...savedPositions };
+          }
+        } catch {
+          // Keep local interaction responsive if the layout write is temporarily unavailable.
+          // The next drag/resize or snapshot refresh gets another chance to converge.
+        }
+      };
+
+      // Logic-gate layout is a shared projection. Keep pointer movement local and
+      // let the database write converge shortly after the interaction settles.
+      void persist();
+    }, 350);
+    return () => window.clearTimeout(timeout);
+  }, [companyID, nodePositions, nodes, restoredViewport]);
 
   useEffect(() => {
     if (!restoredViewport) return;
@@ -777,6 +842,9 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         delete next[nodeID];
         return next;
       });
+      const persisted = { ...lastPersistedNodePositionsRef.current };
+      delete persisted[nodeID];
+      lastPersistedNodePositionsRef.current = persisted;
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_delete_logic_gate");
     }
@@ -802,6 +870,9 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         for (const id of unique) delete next[id];
         return next;
       });
+      const persisted = { ...lastPersistedNodePositionsRef.current };
+      for (const id of unique) delete persisted[id];
+      lastPersistedNodePositionsRef.current = persisted;
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_delete_logic_gate");
     }

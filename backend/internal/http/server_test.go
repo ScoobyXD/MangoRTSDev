@@ -668,3 +668,99 @@ func TestWorkspaceSnapshotReturnsNotModifiedWhenDataUnchanged(t *testing.T) {
 		t.Fatalf("second snapshot status = %d, want %d", secondRec.Code, http.StatusNotModified)
 	}
 }
+
+func TestMapLayoutPositionAPIAndWorkspaceSnapshot(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-map-layout-test"
+
+	node, err := repo.CreateNode(companyID, "layout node")
+	if err != nil {
+		t.Fatalf("CreateNode() error = %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "layout gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate() error = %v", err)
+	}
+
+	writeNodeBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"map_type":   "node",
+		"positions": []map[string]any{{
+			"entity_id": node.NodeID,
+			"x":         240,
+			"y":         360,
+		}},
+	})
+	writeNodeReq := httptest.NewRequest(http.MethodPut, "/v1/map-layout", bytes.NewReader(writeNodeBody))
+	writeNodeReq.Header.Set("Content-Type", "application/json")
+	writeNodeRec := httptest.NewRecorder()
+	handler.ServeHTTP(writeNodeRec, writeNodeReq)
+	if writeNodeRec.Code != http.StatusOK {
+		t.Fatalf("PUT node map layout status = %d, want %d body=%s", writeNodeRec.Code, http.StatusOK, writeNodeRec.Body.String())
+	}
+
+	writeLogicBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"map_type":   "logic_gate",
+		"positions": []map[string]any{{
+			"entity_id": logicGate.LogicGateID,
+			"x":         480,
+			"y":         120,
+		}},
+	})
+	writeLogicReq := httptest.NewRequest(http.MethodPut, "/v1/map-layout", bytes.NewReader(writeLogicBody))
+	writeLogicReq.Header.Set("Content-Type", "application/json")
+	writeLogicRec := httptest.NewRecorder()
+	handler.ServeHTTP(writeLogicRec, writeLogicReq)
+	if writeLogicRec.Code != http.StatusOK {
+		t.Fatalf("PUT logic gate map layout status = %d, want %d body=%s", writeLogicRec.Code, http.StatusOK, writeLogicRec.Body.String())
+	}
+
+	readReq := httptest.NewRequest(http.MethodGet, "/v1/map-layout?company_id="+companyID+"&map_type=node", nil)
+	readRec := httptest.NewRecorder()
+	handler.ServeHTTP(readRec, readReq)
+	if readRec.Code != http.StatusOK {
+		t.Fatalf("GET node map layout status = %d, want %d body=%s", readRec.Code, http.StatusOK, readRec.Body.String())
+	}
+	var readPayload struct {
+		Positions []struct {
+			NodeID string  `json:"node_id"`
+			X      float64 `json:"x"`
+			Y      float64 `json:"y"`
+		} `json:"positions"`
+	}
+	if err := json.NewDecoder(readRec.Body).Decode(&readPayload); err != nil {
+		t.Fatalf("decode node map layout: %v", err)
+	}
+	if len(readPayload.Positions) != 1 || readPayload.Positions[0].NodeID != node.NodeID || readPayload.Positions[0].X != 240 || readPayload.Positions[0].Y != 360 {
+		t.Fatalf("node map positions = %+v, want saved node position", readPayload.Positions)
+	}
+
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID, nil)
+	snapshotRec := httptest.NewRecorder()
+	handler.ServeHTTP(snapshotRec, snapshotReq)
+	if snapshotRec.Code != http.StatusOK {
+		t.Fatalf("workspace snapshot status = %d, want %d body=%s", snapshotRec.Code, http.StatusOK, snapshotRec.Body.String())
+	}
+	var snapshot struct {
+		NodeMapPositions []struct {
+			NodeID string `json:"node_id"`
+		} `json:"node_map_positions"`
+		LogicGateMapPositions []struct {
+			LogicGateID string `json:"logic_gate_id"`
+		} `json:"logic_gate_map_positions"`
+	}
+	if err := json.NewDecoder(snapshotRec.Body).Decode(&snapshot); err != nil {
+		t.Fatalf("decode workspace snapshot: %v", err)
+	}
+	if len(snapshot.NodeMapPositions) != 1 || snapshot.NodeMapPositions[0].NodeID != node.NodeID {
+		t.Fatalf("snapshot node_map_positions = %+v, want saved node position", snapshot.NodeMapPositions)
+	}
+	if len(snapshot.LogicGateMapPositions) != 1 || snapshot.LogicGateMapPositions[0].LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("snapshot logic_gate_map_positions = %+v, want saved logic gate position", snapshot.LogicGateMapPositions)
+	}
+}

@@ -190,6 +190,14 @@ func (r *PostgresRepo) DeleteNode(companyID, nodeID string) error {
 		return err
 	}
 
+	if _, err := tx.ExecContext(ctx,
+		`delete from node_map_positions
+		 where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
+	); err != nil {
+		return err
+	}
+
 	deletedNode, err := tx.ExecContext(ctx,
 		`delete from nodes
 		 where company_id=$1 and node_id=$2`,
@@ -207,6 +215,63 @@ func (r *PostgresRepo) DeleteNode(companyID, nodeID string) error {
 	}
 
 	return tx.Commit()
+}
+
+func (r *PostgresRepo) ListNodeMapPositions(companyID string) ([]domain.NodeMapPosition, error) {
+	rows, err := r.db.Query(`
+select company_id, node_id, x, y, updated_timestamp
+from node_map_positions
+where company_id=$1
+order by node_id asc`, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.NodeMapPosition, 0)
+	for rows.Next() {
+		var item domain.NodeMapPosition
+		if err := rows.Scan(&item.CompanyID, &item.NodeID, &item.X, &item.Y, &item.UpdatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) UpsertNodeMapPositions(companyID string, positions []domain.NodeMapPosition) ([]domain.NodeMapPosition, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	out := make([]domain.NodeMapPosition, 0, len(positions))
+	for _, position := range positions {
+		var item domain.NodeMapPosition
+		err := tx.QueryRowContext(ctx, `
+insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
+select $1, $2, $3, $4, now()
+where exists (select 1 from nodes where company_id=$1 and node_id=$2)
+on conflict (company_id, node_id) do update
+set x=excluded.x,
+    y=excluded.y,
+    updated_timestamp=now()
+returning company_id, node_id, x, y, updated_timestamp`,
+			companyID, position.NodeID, position.X, position.Y).Scan(
+			&item.CompanyID, &item.NodeID, &item.X, &item.Y, &item.UpdatedTimestamp,
+		)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (r *PostgresRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error) {
@@ -566,6 +631,14 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 		return err
 	}
 
+	if _, err := tx.ExecContext(ctx,
+		`delete from logic_gate_map_positions
+		 where company_id=$1 and logic_gate_id=$2`,
+		companyID, logicGateID,
+	); err != nil {
+		return err
+	}
+
 	deleted, err := tx.ExecContext(ctx,
 		`delete from logic_gates
 		 where company_id=$1 and logic_gate_id=$2`,
@@ -582,6 +655,63 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 		return ErrNotFound
 	}
 	return tx.Commit()
+}
+
+func (r *PostgresRepo) ListLogicGateMapPositions(companyID string) ([]domain.LogicGateMapPosition, error) {
+	rows, err := r.db.Query(`
+select company_id, logic_gate_id, x, y, updated_timestamp
+from logic_gate_map_positions
+where company_id=$1
+order by logic_gate_id asc`, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.LogicGateMapPosition, 0)
+	for rows.Next() {
+		var item domain.LogicGateMapPosition
+		if err := rows.Scan(&item.CompanyID, &item.LogicGateID, &item.X, &item.Y, &item.UpdatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	out := make([]domain.LogicGateMapPosition, 0, len(positions))
+	for _, position := range positions {
+		var item domain.LogicGateMapPosition
+		err := tx.QueryRowContext(ctx, `
+insert into logic_gate_map_positions (company_id, logic_gate_id, x, y, updated_timestamp)
+select $1, $2, $3, $4, now()
+where exists (select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)
+on conflict (company_id, logic_gate_id) do update
+set x=excluded.x,
+    y=excluded.y,
+    updated_timestamp=now()
+returning company_id, logic_gate_id, x, y, updated_timestamp`,
+			companyID, position.LogicGateID, position.X, position.Y).Scan(
+			&item.CompanyID, &item.LogicGateID, &item.X, &item.Y, &item.UpdatedTimestamp,
+		)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (r *PostgresRepo) ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error) {

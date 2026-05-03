@@ -1,12 +1,13 @@
 // Node relationship graph cache/sync plane for Node Map + Company Explorer.
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
-import { NodeRecord, NodeRelationship } from "./shared";
+import { NodeRecord, NodeRelationship, PersistedMapPosition } from "./shared";
 
 export type NodeRelationshipGraphSnapshot = {
   nodes: NodeRecord[];
   relationships: NodeRelationship[];
   folders?: CompanyExplorerFolder[];
   folder_items?: CompanyExplorerFolderItem[];
+  node_map_positions?: PersistedMapPosition[];
   generated_at?: string;
 };
 
@@ -269,6 +270,30 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
     return true;
   }
 
+  if (envelope.type === "node_map_positions_updated") {
+    const positions = Array.isArray(data.positions) ? data.positions : [];
+    const nextByID = new Map((entry.snapshot.node_map_positions ?? []).map((position) => [position.node_id || position.entity_id || "", position]));
+    for (const candidate of positions) {
+      if (!candidate || typeof candidate !== "object") continue;
+      const value = candidate as Partial<PersistedMapPosition>;
+      const id = typeof value.node_id === "string" ? value.node_id : typeof value.entity_id === "string" ? value.entity_id : "";
+      if (!id || typeof value.x !== "number" || typeof value.y !== "number") continue;
+      nextByID.set(id, {
+        entity_id: id,
+        node_id: id,
+        x: value.x,
+        y: value.y,
+        updated_timestamp: typeof value.updated_timestamp === "string" ? value.updated_timestamp : envelope.ts,
+      });
+    }
+    entry.snapshot = {
+      ...entry.snapshot,
+      node_map_positions: Array.from(nextByID.values()).filter((position) => position.node_id || position.entity_id),
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+
   return false;
 }
 
@@ -296,6 +321,7 @@ export async function refreshNodeRelationshipGraphSnapshot(apiBase: string, comp
       relationships: payload.relationships ?? [],
       folders: payload.folders ?? [],
       folder_items: payload.folder_items ?? [],
+      node_map_positions: payload.node_map_positions ?? [],
       generated_at: payload.generated_at,
     };
     notify(entry);

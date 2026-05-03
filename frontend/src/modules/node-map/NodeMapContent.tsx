@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, clamp, divider, getNodeTitle, reconcileNodeMapPositions, snapToGrid, trimOrEmpty } from "./shared";
+import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
@@ -83,6 +83,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const selectionBoxRef = useRef(selectionBox);
   const restoredSelectionRef = useRef<string>("");
   const explorerContextRef = useRef<number>(0);
+  const layoutPersistenceReadyRef = useRef(false);
+  const lastPersistedNodePositionsRef = useRef<Record<string, NodePosition>>({});
   const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(false);
   const [relationshipRoleColors, setRelationshipRoleColors] = useState({ parent: "#ff8a00", peer: "#0095ff", child: "#6f5cff" });
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
@@ -157,6 +159,21 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     selectionBoxRef.current = nextSelectionBox;
     setSelectionPointerID(started.pointerID);
     setSelectionBox(nextSelectionBox);
+  };
+
+  const applyServerMapPositions = (positions: Parameters<typeof persistedMapPositionsToNodePositions>[0]["positions"]) => {
+    const serverPositions = persistedMapPositionsToNodePositions({
+      positions,
+      worldWidth: WORLD_W,
+      worldHeight: WORLD_H,
+      nodeWidth: NODE_W,
+      nodeHeight: NODE_H,
+    });
+    lastPersistedNodePositionsRef.current = { ...lastPersistedNodePositionsRef.current, ...serverPositions };
+    if (Object.keys(serverPositions).length > 0) {
+      setNodePositions((previous) => ({ ...previous, ...serverPositions }));
+    }
+    layoutPersistenceReadyRef.current = true;
   };
 
   useEffect(() => {
@@ -276,6 +293,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
       const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
       const nextNodes = applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? []);
+      applyServerMapPositions(snapshot.node_map_positions ?? []);
 
       const hasSelection = selectedNodeID && nextNodes.some((item) => item.node_id === selectedNodeID);
       if (hasSelection) return;
@@ -318,6 +336,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     return subscribeNodeRelationshipGraph(apiBase, companyID, () => {
       const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
       applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? []);
+      applyServerMapPositions(snapshot.node_map_positions ?? []);
     });
   }, [apiBase, companyID, activeFolderID]);
 
@@ -415,7 +434,9 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           zoom,
           pan,
           selectedNodeID,
-          nodePositions,
+          // Positions can be huge and are shared by every user/agent. Keep the
+          // browser cache small; the database-backed map-layout API owns geometry.
+          nodePositions: {},
           relationshipColorsEnabled,
           relationshipRoleColors,
         };
@@ -429,7 +450,51 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       }
     }, 120);
     return () => window.clearTimeout(timeout);
-  }, [fallbackMapStateKey, mapStateKey, restoredViewport, zoom, pan, selectedNodeID, nodePositions, relationshipColorsEnabled, relationshipRoleColors]);
+  }, [fallbackMapStateKey, mapStateKey, restoredViewport, zoom, pan, selectedNodeID, relationshipColorsEnabled, relationshipRoleColors]);
+
+  useEffect(() => {
+    if (!restoredViewport || !layoutPersistenceReadyRef.current) return;
+    const timeout = window.setTimeout(() => {
+      const changed = changedPersistedMapPositions({
+        previous: lastPersistedNodePositionsRef.current,
+        current: nodePositions,
+        entityIDs: new Set(nodes.map((node) => node.node_id)),
+      });
+      if (changed.length === 0) return;
+
+      const persist = async () => {
+        try {
+          for (let index = 0; index < changed.length; index += 500) {
+            const chunk = changed.slice(index, index + 500);
+            const payload = await requestJSON<{ positions: Array<{ node_id?: string; entity_id?: string; x: number; y: number }> }>("/v1/map-layout", {
+              method: "PUT",
+              body: JSON.stringify({
+                company_id: companyID,
+                map_type: "node",
+                positions: chunk,
+              }),
+            });
+            const savedPositions = persistedMapPositionsToNodePositions({
+              positions: payload.positions,
+              worldWidth: WORLD_W,
+              worldHeight: WORLD_H,
+              nodeWidth: NODE_W,
+              nodeHeight: NODE_H,
+            });
+            lastPersistedNodePositionsRef.current = { ...lastPersistedNodePositionsRef.current, ...savedPositions };
+          }
+        } catch {
+          // Keep local interaction responsive if the layout write is temporarily unavailable.
+          // The next drag/resize or snapshot refresh gets another chance to converge.
+        }
+      };
+
+      // Fire and forget by design: layout is an eventually consistent projection.
+      // Local drag stays instant; the API write catches up after pointer activity settles.
+      void persist();
+    }, 350);
+    return () => window.clearTimeout(timeout);
+  }, [companyID, nodePositions, nodes, restoredViewport]);
 
   useEffect(() => {
     if (!restoredViewport) return;
@@ -757,6 +822,9 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
         delete next[nodeID];
         return next;
       });
+      const persisted = { ...lastPersistedNodePositionsRef.current };
+      delete persisted[nodeID];
+      lastPersistedNodePositionsRef.current = persisted;
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_delete_node");
     }
@@ -782,6 +850,9 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
         for (const id of unique) delete next[id];
         return next;
       });
+      const persisted = { ...lastPersistedNodePositionsRef.current };
+      for (const id of unique) delete persisted[id];
+      lastPersistedNodePositionsRef.current = persisted;
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_delete_node");
     }

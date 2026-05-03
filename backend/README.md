@@ -162,6 +162,14 @@ For existing databases that still have the abandoned workspace-context tables or
 psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260502_company_explorer_cleanup.sql
 ```
 
+For existing databases that were created before shared map layout persistence was added, run:
+
+```powershell
+psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260502_map_layout_positions.sql
+```
+
+These tables store the latest shared Node Map and Logic Gate Map positions by company/entity so UI users and headless agents read and write the same canonical layout.
+
 ## API endpoints (MVP canonical set)
 
 - `GET /healthz`
@@ -186,6 +194,8 @@ psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME 
 - `GET /v1/company-explorer/folder-items?company_id={uuid}&folder_id={uuid}&item_type=node|logic_gate`
 - `POST /v1/company-explorer/folder-items`
 - `DELETE /v1/company-explorer/folder-items?company_id={uuid}&item_type=node|logic_gate&item_id={uuid}`
+- `GET /v1/map-layout?company_id={uuid}&map_type=node|logic_gate`
+- `PUT /v1/map-layout`
 - `POST /v1/operations`
 - `GET /v1/operations/{operation_id}?company_id={uuid}`
 - `GET /v1/kanban/columns?company_id={uuid}&board_id={board_id}`
@@ -290,3 +300,22 @@ curl -X POST http://localhost:8080/v1/kanban/cards \
   -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","column_id":"<column_id>","item_type":"node","item_id":"<node_id>","title_snapshot":"Customer onboarding"}'
 ```
 
+### Shared map layout contract
+
+Node Map and Logic Gate Map geometry is persisted as a read-optimized projection, not as browser-only state.
+
+Read layout:
+
+```bash
+curl "http://localhost:8080/v1/map-layout?company_id=11111111-1111-1111-1111-111111111111&map_type=node"
+```
+
+Write layout:
+
+```bash
+curl -X PUT http://localhost:8080/v1/map-layout \
+  -H 'content-type: application/json' \
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","map_type":"node","positions":[{"entity_id":"<node_id>","x":240,"y":360}]}'
+```
+
+Use `map_type:"logic_gate"` with `entity_id:"<logic_gate_id>"` for Logic Gate Map positions. Writes are intentionally bulk and capped per request so clients can debounce drag interactions and agents can batch operations without forcing full-map rewrites.
