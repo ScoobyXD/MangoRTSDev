@@ -33,6 +33,7 @@
     "../modules/node-map/nodeMapLayout.test.ts",
     "../../../frontend/src/modules/node-map/relationshipDeleteSummary.ts",
     "../modules/node-map/relationshipDeleteSummary.test.ts",
+    "../modules/node-map/editorCanvasKeydownRouting.test.ts",
     "../../../frontend/src/modules/company-explorer/explorerSync.ts",
     "../modules/company-explorer/explorerSync.test.ts",
     "../../../frontend/src/modules/folders/companyExplorerFolders.ts",
@@ -40,9 +41,7 @@
     "../../../frontend/src/modules/contextSyncContract.ts",
     "../modules/contextSyncContract.test.ts",
     "../../../frontend/src/modules/kanban/shared.ts",
-    "../modules/kanban/shared.test.ts",
-    "../../../frontend/src/modules/editor/documentEditing.ts",
-    "../modules/editor/documentEditing.test.ts"
+    "../modules/kanban/shared.test.ts"
   ],
   "exclude": []
 }

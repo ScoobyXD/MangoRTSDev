@@ -7,7 +7,6 @@ import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, in
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches } from "../logic-gate-map/LogicGateRecordStore";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import type { NodeInformation } from "../node-map/shared";
-import { applyDocumentTextareaKey } from "./documentEditing";
 
 type LinkedEntityKind = "node" | "logic_gate";
 
@@ -306,12 +305,20 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const applyLinkedNode = useCallback((nodeID: string) => {
     setLinkedEntityKind(nodeID ? "node" : "");
     setLinkedNodeID(nodeID);
-  }, []);
+    if (nodeID) {
+      setActiveTab("editor");
+      placeEditorCaretAtDocumentEnd(false);
+    }
+  }, [placeEditorCaretAtDocumentEnd]);
 
   const applyLinkedLogicGate = useCallback((logicGateID: string) => {
     setLinkedEntityKind(logicGateID ? "logic_gate" : "");
     setLinkedNodeID(logicGateID);
-  }, []);
+    if (logicGateID) {
+      setActiveTab("editor");
+      placeEditorCaretAtDocumentEnd(false);
+    }
+  }, [placeEditorCaretAtDocumentEnd]);
 
   const updateNodeTitle = useCallback(async (nextTitle: string) => {
     const value = nextTitle.trim();
@@ -571,9 +578,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     <div
       onMouseDown={(event) => event.stopPropagation()}
       onTouchStart={(event) => event.stopPropagation()}
-      style={{ width: "100%", height: "100%", display: "grid", gridTemplateRows: "auto 1fr", background: surfaceBackground, color: surfaceText, overflow: "hidden", userSelect: "text", cursor: "text" }}
+      style={{ width: "100%", height: "100%", position: "relative", background: surfaceBackground, color: surfaceText, overflow: "hidden", userSelect: "text", cursor: "text" }}
     >
-      <div style={{ position: "relative", minHeight: 0, cursor: "text" }}>
+      <div style={{ position: "relative", width: "100%", height: "100%", minHeight: 0, cursor: "text" }}>
       {linkedNodeID.trim().length > 0 && (
         <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 2 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, paddingLeft: 106 }}>
@@ -667,24 +674,20 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           spellCheck
           onChange={(event) => scheduleDocumentSave(event.currentTarget.value)}
           onBlur={(event) => flushPendingDocumentSave(event.currentTarget.value)}
+          onWheel={(event) => event.stopPropagation()}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();
               event.currentTarget.blur();
               return;
             }
-            const edit = applyDocumentTextareaKey({
-              value: event.currentTarget.value,
-              selectionStart: event.currentTarget.selectionStart,
-              selectionEnd: event.currentTarget.selectionEnd,
-              key: event.key,
-              shiftKey: event.shiftKey,
-            });
-            if (!edit) return;
+            if (event.key !== "Tab") return;
+
             event.preventDefault();
-            event.currentTarget.value = edit.value;
-            event.currentTarget.setSelectionRange(edit.selectionStart, edit.selectionEnd);
-            scheduleDocumentSave(edit.value);
+            // Textareas normally use Tab to leave the field. In the editor, Tab
+            // should insert plain whitespace and then save like any typed input.
+            event.currentTarget.setRangeText(" ", event.currentTarget.selectionStart, event.currentTarget.selectionEnd, "end");
+            scheduleDocumentSave(event.currentTarget.value);
           }}
           style={{
             position: "absolute",

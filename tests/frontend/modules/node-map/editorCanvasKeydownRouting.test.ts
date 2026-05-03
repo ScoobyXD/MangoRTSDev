@@ -16,6 +16,16 @@ test("returns true for targets nested inside editable selectors", () => {
   );
 });
 
+test("returns true for textarea editor targets so Tab and Enter stay native to the document", () => {
+  assert.equal(
+    shouldIgnoreCanvasKeydownTarget({
+      isContentEditable: false,
+      closest: (selector: string) => (selector === "[contenteditable='true'], textarea, input" ? { isContentEditable: false } : null),
+    }),
+    true,
+  );
+});
+
 test("returns false for non-editable canvas targets", () => {
   assert.equal(
     shouldIgnoreCanvasKeydownTarget({
