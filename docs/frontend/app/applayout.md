@@ -94,6 +94,12 @@ The app layout keeps compatibility for persisted payloads:
 - This aligns frame deletion safety with existing Node Map delete-confirm behavior, reducing accidental destructive actions on hot interaction paths.
 - Confirmation dialog copy includes Undo guidance (`Ctrl/Cmd + Z`) so recovery remains obvious for rapid workflows.
 
+## Keyboard shortcut routing update (2026-05-03)
+
+- Global dashboard shortcuts now route through `frontend/src/hooks/keyboardShortcutRouting.ts`.
+- Editable text targets (`input`, `textarea`, `select`, `contentEditable`, role textbox, and nested editable descendants) keep native browser shortcut behavior. This means the Editor document owns normal text undo/redo while it has focus.
+- Dashboard undo/redo still uses the existing snapshot stack for frame/tab/layout state when focus is outside editable text. This keeps text editing and frame editing as separate, predictable undo scopes.
+
 ## Header-section selection and drag update (2026-05-03)
 
 - Frame/module surfaces now use two explicit terms:

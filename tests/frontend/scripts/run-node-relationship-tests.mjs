@@ -7,6 +7,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "../../..");
 const frontendRoot = resolve(repoRoot, "frontend");
 const testFiles = [
+  resolve(frontendRoot, ".test-dist/tests/frontend/hooks/keyboardShortcutRouting.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/frameLinking.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/linkingGraph.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipProjection.test.js"),
@@ -54,6 +55,7 @@ for (const testFile of testFiles) {
   contents = contents.replaceAll('"../../../../frontend/src/modules/company-explorer/treePresentation"', '"../../../../frontend/src/modules/company-explorer/treePresentation.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/shared"', '"../../../../frontend/src/modules/kanban/shared.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/plainTextEditing"', '"../../../../frontend/src/modules/editor/plainTextEditing.js"');
+  contents = contents.replaceAll('"../../../frontend/src/hooks/keyboardShortcutRouting"', '"../../../frontend/src/hooks/keyboardShortcutRouting.js"');
   writeFileSync(testFile, contents, "utf8");
 }
 
