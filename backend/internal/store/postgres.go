@@ -1215,6 +1215,36 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID, parentFold
 	return item, nil
 }
 
+func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error) {
+	ctx := context.Background()
+	var item domain.CompanyExplorerFolder
+	var parent sql.NullString
+	if err := r.db.QueryRowContext(ctx,
+		`update company_explorer_folders
+		 set name=$3, updated_timestamp=now()
+		 where company_id=$1 and folder_id=$2
+		 returning company_id, folder_id, parent_folder_id, folder_kind, name, created_timestamp, updated_timestamp`,
+		companyID, folderID, name,
+	).Scan(
+		&item.CompanyID,
+		&item.FolderID,
+		&parent,
+		&item.FolderKind,
+		&item.Name,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.CompanyExplorerFolder{}, ErrNotFound
+		}
+		return domain.CompanyExplorerFolder{}, err
+	}
+	if parent.Valid {
+		item.ParentFolderID = &parent.String
+	}
+	return item, nil
+}
+
 func (r *PostgresRepo) DeleteCompanyExplorerFolder(companyID, folderID string) error {
 	ctx := context.Background()
 	deleted, err := r.db.ExecContext(ctx,

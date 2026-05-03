@@ -189,7 +189,7 @@ These tables store the latest shared Node Map and Logic Gate Map positions by co
 - `DELETE /v1/logic-gate-relationships/{logic_gate_relationship_id}?company_id={uuid}`
 - `GET /v1/company-explorer/folders?company_id={uuid}&folder_kind=node|logic_gate`
 - `POST /v1/company-explorer/folders`
-- `PUT /v1/company-explorer/folders/{folder_id}`
+- `PUT /v1/company-explorer/folders/{folder_id}` (rename with `name`, move with `parent_folder_id`, or both)
 - `DELETE /v1/company-explorer/folders/{folder_id}?company_id={uuid}`
 - `GET /v1/company-explorer/folder-items?company_id={uuid}&folder_id={uuid}&item_type=node|logic_gate`
 - `POST /v1/company-explorer/folder-items`
@@ -270,11 +270,15 @@ curl -X POST http://localhost:8080/v1/company-explorer/folder-items \
 curl -X PUT http://localhost:8080/v1/company-explorer/folders/<child_folder_id> \
   -H 'content-type: application/json' \
   -d '{"company_id":"11111111-1111-1111-1111-111111111111","parent_folder_id":"<parent_folder_id>"}'
+
+curl -X PUT http://localhost:8080/v1/company-explorer/folders/<folder_id> \
+  -H 'content-type: application/json' \
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","name":"Renamed folder"}'
 ```
 
 Folder rows are API-backed so headless agents can create the same explorer structure as the UI.
 `company_explorer_folder_items` keeps one placement per node or logic gate, matching file-explorer move semantics.
-Folder moves reject self/descendant parents to keep the hierarchy acyclic.
+Folder moves reject self/descendant parents to keep the hierarchy acyclic. Folder renames use the same API path so agents do not need UI-specific behavior.
 
 Create operation:
 

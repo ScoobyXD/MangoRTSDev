@@ -135,20 +135,24 @@ Selection sync hardening update (2026-04-29):
 - Map-originated selection echoes are treated as no-op when Explorer already holds the same selected node/tree, which prevents "every other click" suppression churn.
 - This keeps anti-loop behavior while protecting hot-path click reliability for linked Explorer<->Node Map flows.
 
-Folder runtime update (2026-05-01):
+Folder runtime update (2026-05-02):
 - Explorer folders are now durable backend rows, not local-only UI state.
-- `company_explorer_folders` stores nested folders separately for `node` and `logic_gate` trees.
+- `company_explorer_folders` stores nested folders separately for `node` and `logic_gate` trees. A folder can only contain matching node or logic-gate items, which keeps UI behavior and headless API writes aligned.
 - `company_explorer_folder_items` stores one placement per node or logic gate, matching file-explorer move semantics.
-- Logic Gates render above Nodes in the root tree. The old Knowledge/Knowledge Nodes placeholder tree is removed.
+- The tree has one `Company` root row. It is collapsible, and a brand-new company renders no child rows until folders, nodes, or logic gates are created.
+- Direct nodes or logic gates render immediately under their expanded folder, then child folders render below those item rows.
+- The old virtual `Nodes`, `Logic Gates`, `All Nodes`, `All Logic Gates`, Knowledge, and Knowledge Nodes rows are removed from the Explorer tree.
 - Folder rows use fixed yellow icons, node rows use fixed black-and-white document icons, and logic-gate rows use fixed green circuitry AND-gate icons. These icon colors do not follow frame colorways.
 - Explorer row labels do not include live item counts. Count queries belong in bounded API/read models, not in every tree row render.
 - Explorer no longer renders vertical or horizontal hierarchy guide lines; indentation and icons carry the tree structure.
-- The Explorer tree no longer renders separate `All Nodes` or `All Logic Gates` child folders; the top-level `Nodes` and `Logic Gates` rows are the broad-scope selectors.
-- Folder creation is now a Company Explorer context-menu action, not an inline plus button. Right-clicking the tree body opens Explorer actions (`Create folder`, `Create node`, `Create logic gate`), while frame-level actions remain scoped to the frame/module title plate.
-- Right-clicking a concrete folder, node, or logic gate also exposes `Delete`, backed by the existing folder/node/logic-gate DELETE APIs. Virtual root rows such as `Nodes` and `Logic Gates` are not deletable records.
+- Folder creation is now a Company Explorer context-menu action, not an inline plus button. Right-clicking the tree body opens Explorer actions, while frame-level actions remain scoped to the frame/module title plate.
+- When the right-click context has no folder type, the menu exposes typed folder creation (`Create node folder`, `Create logic gate folder`) so empty folders still obey the backend item-type invariant. Right-clicking typed rows uses the compatible single `Create folder` action.
+- Right-clicking a concrete folder, node, or logic gate exposes `Rename` and `Delete`, backed by folder/node/logic-gate APIs.
+- Double-clicking a concrete folder, node, or logic gate starts inline rename with the caret at the end of the current title.
 - Left-clicking elsewhere inside Company Explorer closes the Explorer context menu before applying the new selection.
 - New folders are created inside the right-clicked compatible folder/tree. New nodes and logic gates are created through their canonical APIs and then assigned to the compatible right-clicked folder through `company_explorer_folder_items` when a folder target exists.
 - After any create action, the newly created folder, node, or logic gate becomes the selected highlighted row.
+- Plain click selects one row, Shift-click selects the visible range from the anchor row, and Ctrl/Cmd-click toggles individual rows. This selection state is UI-local until a concrete action consumes it, keeping linked map broadcasts focused on the active row.
 - Node, logic-gate, and folder moves still use drag-and-drop onto compatible folders.
 - Selecting a node folder broadcasts `selectedFolderID`/`selectedFolderKind=node`; linked Node Map filters its cached graph to nodes placed in that folder or any descendant folder.
 - Selecting a logic-gate folder broadcasts `selectedFolderID`/`selectedFolderKind=logic_gate`; linked Logic Gate Map applies the same folder-scope rule for gates.
@@ -175,7 +179,7 @@ Implementation principle:
 
 Headless API surface:
 - `GET/POST /v1/company-explorer/folders`
-- `PUT /v1/company-explorer/folders/{folder_id}`
+- `PUT /v1/company-explorer/folders/{folder_id}` for folder rename and/or move
 - `DELETE /v1/company-explorer/folders/{folder_id}`
 - `GET/POST/DELETE /v1/company-explorer/folder-items`
 

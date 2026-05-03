@@ -4,8 +4,10 @@ import {
   EXPLORER_ROOT_ROW_LABELS,
   EXPLORER_ROOT_ROW_ORDER,
   formatExplorerFolderLabel,
+  resolveExplorerClickSelection,
   resolveExplorerCreationTargets,
   resolveExplorerDeleteTarget,
+  resolveExplorerRenameTarget,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
 
 function run(name: string, fn: () => void): void {
@@ -18,23 +20,26 @@ function run(name: string, fn: () => void): void {
   }
 }
 
-run("root presentation puts logic gates above nodes and excludes knowledge nodes", () => {
-  assert.deepEqual([...EXPLORER_ROOT_ROW_ORDER], ["folder-root", "folder-logic", "folder-nodes"]);
+run("root presentation uses one collapsible company row and excludes virtual category rows", () => {
+  assert.deepEqual([...EXPLORER_ROOT_ROW_ORDER], ["folder-root"]);
   assert.equal((EXPLORER_ROOT_ROW_ORDER as readonly string[]).includes("folder-notes"), false);
-  assert.deepEqual([...EXPLORER_DEFAULT_EXPANDED_ROW_IDS], ["folder-root", "folder-logic", "folder-nodes"]);
+  assert.equal((EXPLORER_ROOT_ROW_ORDER as readonly string[]).includes("folder-logic"), false);
+  assert.equal((EXPLORER_ROOT_ROW_ORDER as readonly string[]).includes("folder-nodes"), false);
+  assert.deepEqual([...EXPLORER_DEFAULT_EXPANDED_ROW_IDS], ["folder-root"]);
 });
 
 run("folder labels do not display counts", () => {
-  assert.equal(EXPLORER_ROOT_ROW_LABELS["folder-logic"], "Logic Gates");
-  assert.equal(EXPLORER_ROOT_ROW_LABELS["folder-nodes"], "Nodes");
+  assert.equal(EXPLORER_ROOT_ROW_LABELS["folder-root"], "Company");
   assert.equal(formatExplorerFolderLabel("Invoices"), "Invoices");
 });
 
 run("context creation targets nested logic gate folders", () => {
   const targets = resolveExplorerCreationTargets({ kind: "folder", folderKind: "logic_gate", folderID: "logic-folder-1" });
   assert.deepEqual(targets, {
-    folderKind: "logic_gate",
-    folderParentID: "logic-folder-1",
+    preferredFolderKind: "logic_gate",
+    preferredFolderParentID: "logic-folder-1",
+    nodeFolderParentID: "",
+    logicGateFolderParentID: "logic-folder-1",
     nodeParentFolderID: "",
     logicGateParentFolderID: "logic-folder-1",
   });
@@ -43,11 +48,20 @@ run("context creation targets nested logic gate folders", () => {
 run("context creation targets node siblings from a node row", () => {
   const targets = resolveExplorerCreationTargets({ kind: "node", folderKind: "node", folderID: "node-folder-1" });
   assert.deepEqual(targets, {
-    folderKind: "node",
-    folderParentID: "node-folder-1",
+    preferredFolderKind: "node",
+    preferredFolderParentID: "node-folder-1",
+    nodeFolderParentID: "node-folder-1",
+    logicGateFolderParentID: "",
     nodeParentFolderID: "node-folder-1",
     logicGateParentFolderID: "",
   });
+});
+
+run("rename targets only resolve for concrete folders and entities", () => {
+  assert.deepEqual(resolveExplorerRenameTarget({ kind: "folder", folderKind: "node", folderID: "folder-1" }), { kind: "folder", id: "folder-1" });
+  assert.deepEqual(resolveExplorerRenameTarget({ kind: "node", nodeID: "node-1" }), { kind: "node", id: "node-1" });
+  assert.deepEqual(resolveExplorerRenameTarget({ kind: "logic_gate", logicGateID: "gate-1" }), { kind: "logic_gate", id: "gate-1" });
+  assert.equal(resolveExplorerRenameTarget({ kind: "folder", folderKind: "node" }), null);
 });
 
 run("delete targets only resolve for concrete folders and entities", () => {
@@ -55,4 +69,52 @@ run("delete targets only resolve for concrete folders and entities", () => {
   assert.deepEqual(resolveExplorerDeleteTarget({ kind: "node", nodeID: "node-1" }), { kind: "node", id: "node-1" });
   assert.deepEqual(resolveExplorerDeleteTarget({ kind: "logic_gate", logicGateID: "gate-1" }), { kind: "logic_gate", id: "gate-1" });
   assert.equal(resolveExplorerDeleteTarget({ kind: "folder", folderKind: "node" }), null);
+});
+
+run("click selection supports plain, shift range, and ctrl toggle behavior", () => {
+  const orderedIDs = ["root", "a", "b", "c", "d"];
+
+  const plain = resolveExplorerClickSelection({
+    orderedIDs,
+    previousSelectedIDs: new Set(["root"]),
+    anchorID: "root",
+    clickedID: "b",
+    shiftKey: false,
+    ctrlKey: false,
+  });
+  assert.deepEqual([...plain.selectedIDs], ["b"]);
+  assert.equal(plain.anchorID, "b");
+
+  const range = resolveExplorerClickSelection({
+    orderedIDs,
+    previousSelectedIDs: plain.selectedIDs,
+    anchorID: plain.anchorID,
+    clickedID: "d",
+    shiftKey: true,
+    ctrlKey: false,
+  });
+  assert.deepEqual([...range.selectedIDs], ["b", "c", "d"]);
+  assert.equal(range.anchorID, "b");
+
+  const toggle = resolveExplorerClickSelection({
+    orderedIDs,
+    previousSelectedIDs: plain.selectedIDs,
+    anchorID: plain.anchorID,
+    clickedID: "d",
+    shiftKey: false,
+    ctrlKey: true,
+  });
+  assert.deepEqual([...toggle.selectedIDs], ["b", "d"]);
+  assert.equal(toggle.anchorID, "d");
+
+  const additiveRange = resolveExplorerClickSelection({
+    orderedIDs,
+    previousSelectedIDs: new Set(["root"]),
+    anchorID: "b",
+    clickedID: "d",
+    shiftKey: true,
+    ctrlKey: true,
+  });
+  assert.deepEqual([...additiveRange.selectedIDs], ["root", "b", "c", "d"]);
+  assert.equal(additiveRange.anchorID, "b");
 });

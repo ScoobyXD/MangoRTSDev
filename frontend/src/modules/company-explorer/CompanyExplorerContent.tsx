@@ -10,7 +10,7 @@ import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMuta
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
 import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload } from "../kanban/shared";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
-import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, formatExplorerFolderLabel, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, type ExplorerCreationTargets } from "./treePresentation";
+import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, formatExplorerFolderLabel, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerCreationTargets } from "./treePresentation";
 
 type ExplorerTreeNode = {
   id: string;
@@ -34,6 +34,7 @@ type ExplorerDragPayload = {
 };
 
 type ExplorerDeleteTarget = NonNullable<ReturnType<typeof resolveExplorerDeleteTarget>>;
+type ExplorerRenameTarget = NonNullable<ReturnType<typeof resolveExplorerRenameTarget>>;
 
 const EXPLORER_DRAG_MIME = "application/x-mangoos-company-explorer-row";
 const TREE_INDENT_PX = 16;
@@ -133,18 +134,33 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [logicGates, setLogicGates] = useState<LogicGateRecord[]>([]);
   const [folders, setFolders] = useState<CompanyExplorerFolder[]>([]);
   const [folderItems, setFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
-  const [selectedTreeID, setSelectedTreeID] = useState("folder-logic");
+  const [selectedTreeID, setSelectedTreeID] = useState("folder-root");
+  const [selectedTreeIDs, setSelectedTreeIDs] = useState<Set<string>>(new Set(["folder-root"]));
+  const [selectionAnchorTreeID, setSelectionAnchorTreeID] = useState("folder-root");
   const [selectedNodeID, setSelectedNodeID] = useState("");
   const [selectedLogicGateID, setSelectedLogicGateID] = useState("");
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set(EXPLORER_DEFAULT_EXPANDED_ROW_IDS));
+  const [renaming, setRenaming] = useState<{ treeID: string; target: ExplorerRenameTarget; value: string } | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const cancelRenameOnBlurRef = useRef(false);
   const treeViewportRef = useRef<HTMLDivElement | null>(null);
   const [treeScrollTop, setTreeScrollTop] = useState(0);
   const [treeViewportHeight, setTreeViewportHeight] = useState(480);
   const [draggingTreeID, setDraggingTreeID] = useState("");
   const [dragOverTreeID, setDragOverTreeID] = useState("");
   const [dragPayload, setDragPayload] = useState<ExplorerDragPayload | null>(null);
-  const [explorerContextMenu, setExplorerContextMenu] = useState<{ x: number; y: number; targets: ExplorerCreationTargets; deleteTarget: ExplorerDeleteTarget | null } | null>(null);
+  const [explorerContextMenu, setExplorerContextMenu] = useState<{
+    x: number;
+    y: number;
+    targets: ExplorerCreationTargets;
+    deleteTarget: ExplorerDeleteTarget | null;
+    renameTarget: ExplorerRenameTarget | null;
+    renameTreeID: string;
+    renameLabel: string;
+    contextKind: CompanyExplorerFolderKind | null;
+    canCreateBothFolderTypes: boolean;
+  } | null>(null);
   const [linkRevision, setLinkRevision] = useState(0);
   const [linkedMapFrameID, setLinkedMapFrameID] = useState("");
   const [linkedLogicMapFrameID, setLinkedLogicMapFrameID] = useState("");
@@ -222,6 +238,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     const rows: ExplorerTreeNode[] = [];
     const nodeByID = new Map(nodes.map((node) => [node.node_id, node]));
     const logicGateByID = new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
+    const folderLabelByID = new Map(folders.map((folder) => [folder.folder_id, folder.name]));
     const assignedNodes = new Set(folderItems.filter((item) => item.item_type === "node").map((item) => item.item_id));
     const assignedLogicGates = new Set(folderItems.filter((item) => item.item_type === "logic_gate").map((item) => item.item_id));
     const foldersByParent = new Map<string, CompanyExplorerFolder[]>();
@@ -243,9 +260,43 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
 
     const pushFolderBranch = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number) => {
+      const directItems = itemsByFolder.get(`${folderKind}:${parentFolderID}`) ?? [];
+      for (const item of directItems) {
+        if (folderKind === "node") {
+          const node = nodeByID.get(item.item_id);
+          if (node) {
+            rows.push({
+              id: `node-${node.node_id}`,
+              label: getNodeTitle(node) || node.node_id,
+              depth,
+              kind: "node",
+              nodeID: node.node_id,
+              folderID: parentFolderID,
+              folderKind,
+              folderLabel: folderLabelByID.get(parentFolderID),
+              scopeLevel: depth,
+            });
+          }
+        } else {
+          const logicGate = logicGateByID.get(item.item_id);
+          if (logicGate) {
+            rows.push({
+              id: `logic-gate-${logicGate.logic_gate_id}`,
+              label: getLogicGateTitle(logicGate) || logicGate.logic_gate_id,
+              depth,
+              kind: "logic_gate",
+              logicGateID: logicGate.logic_gate_id,
+              folderID: parentFolderID,
+              folderKind,
+              folderLabel: folderLabelByID.get(parentFolderID),
+              scopeLevel: depth,
+            });
+          }
+        }
+      }
+
       const childFolders = foldersByParent.get(`${folderKind}:${parentFolderID}`) ?? [];
       for (const folder of childFolders) {
-        const directItems = itemsByFolder.get(`${folderKind}:${folder.folder_id}`) ?? [];
         const rowID = `workspace-folder-${folder.folder_id}`;
         rows.push({
           id: rowID,
@@ -259,75 +310,37 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         });
         if (!expanded.has(rowID)) continue;
         pushFolderBranch(folderKind, folder.folder_id, depth + 1);
-        for (const item of directItems) {
-          if (folderKind === "node") {
-            const node = nodeByID.get(item.item_id);
-            if (node) {
-              rows.push({
-                id: `node-${node.node_id}`,
-                label: getNodeTitle(node) || node.node_id,
-                depth: depth + 1,
-                kind: "node",
-                nodeID: node.node_id,
-                folderID: folder.folder_id,
-                folderKind,
-                folderLabel: folder.name,
-                scopeLevel: depth + 1,
-              });
-            }
-          } else {
-            const logicGate = logicGateByID.get(item.item_id);
-            if (logicGate) {
-              rows.push({
-                id: `logic-gate-${logicGate.logic_gate_id}`,
-                label: getLogicGateTitle(logicGate) || logicGate.logic_gate_id,
-                depth: depth + 1,
-                kind: "logic_gate",
-                logicGateID: logicGate.logic_gate_id,
-                folderID: folder.folder_id,
-                folderKind,
-                folderLabel: folder.name,
-                scopeLevel: depth + 1,
-              });
-            }
-          }
-        }
       }
     };
 
     for (const rootRowID of EXPLORER_ROOT_ROW_ORDER) {
       if (rootRowID === "folder-root") {
         rows.push({ id: "folder-root", label: EXPLORER_ROOT_ROW_LABELS["folder-root"], depth: 0, kind: "folder", scopeLevel: 0 });
-        continue;
-      }
-      if (rootRowID === "folder-logic") {
-        rows.push({ id: "folder-logic", label: EXPLORER_ROOT_ROW_LABELS["folder-logic"], depth: 1, kind: "folder", folderKind: "logic_gate", folderLabel: EXPLORER_ROOT_ROW_LABELS["folder-logic"], scopeLevel: 1 });
-        if (expanded.has("folder-logic")) {
-          pushFolderBranch("logic_gate", "", 2);
-          for (const logicGate of logicGates) {
-            if (!assignedLogicGates.has(logicGate.logic_gate_id)) {
-              rows.push({
-                id: `logic-gate-${logicGate.logic_gate_id}`,
-                label: getLogicGateTitle(logicGate) || logicGate.logic_gate_id,
-                depth: 2,
-                kind: "logic_gate",
-                logicGateID: logicGate.logic_gate_id,
-                scopeLevel: 2,
-              });
-            }
-          }
-        }
-        continue;
-      }
-
-      rows.push({ id: "folder-nodes", label: EXPLORER_ROOT_ROW_LABELS["folder-nodes"], depth: 1, kind: "folder", folderKind: "node", folderLabel: EXPLORER_ROOT_ROW_LABELS["folder-nodes"], scopeLevel: 1 });
-      if (expanded.has("folder-nodes")) {
-        pushFolderBranch("node", "", 2);
-        for (const node of nodes) {
-          if (!assignedNodes.has(node.node_id)) rows.push({ id: `node-${node.node_id}`, label: getNodeTitle(node) || node.node_id, depth: 2, kind: "node", nodeID: node.node_id, scopeLevel: 2 });
-        }
       }
     }
+
+    if (!expanded.has("folder-root")) return rows;
+
+    for (const node of nodes) {
+      if (!assignedNodes.has(node.node_id)) rows.push({ id: `node-${node.node_id}`, label: getNodeTitle(node) || node.node_id, depth: 1, kind: "node", nodeID: node.node_id, scopeLevel: 1 });
+    }
+    for (const logicGate of logicGates) {
+      if (!assignedLogicGates.has(logicGate.logic_gate_id)) {
+        rows.push({
+          id: `logic-gate-${logicGate.logic_gate_id}`,
+          label: getLogicGateTitle(logicGate) || logicGate.logic_gate_id,
+          depth: 1,
+          kind: "logic_gate",
+          logicGateID: logicGate.logic_gate_id,
+          scopeLevel: 1,
+        });
+      }
+    }
+
+    // Actual folders render below direct items. The folder_kind remains a backend
+    // invariant, so node folders and logic-gate folders cannot mix item types.
+    pushFolderBranch("node", "", 1);
+    pushFolderBranch("logic_gate", "", 1);
 
     return rows;
   }, [expanded, nodes, logicGates, folders, folderItems]);
@@ -344,6 +357,13 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   useEffect(() => {
     latestLogicGateSelectionRef.current = { selectedLogicGateID, selectedTreeID };
   }, [selectedLogicGateID, selectedTreeID]);
+
+  useEffect(() => {
+    if (!renaming || !renameInputRef.current) return;
+    const input = renameInputRef.current;
+    input.focus();
+    input.setSelectionRange(renaming.value.length, renaming.value.length);
+  }, [renaming]);
 
   useEffect(() => {
     if (!treeViewportRef.current) return;
@@ -403,13 +423,15 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setFolders((previous) => previous.some((item) => item.folder_id === folder.folder_id) ? previous : [...previous, folder]);
       setExpanded((previous) => {
         const next = new Set(previous);
-        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : (folderKind === "logic_gate" ? "folder-logic" : "folder-nodes"));
+        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
         next.add(`workspace-folder-${folder.folder_id}`);
         return next;
       });
       if (folder.folder_kind === "logic_gate") upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
       else upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
       setSelectedTreeID(`workspace-folder-${folder.folder_id}`);
+      setSelectedTreeIDs(new Set([`workspace-folder-${folder.folder_id}`]));
+      setSelectionAnchorTreeID(`workspace-folder-${folder.folder_id}`);
       setSelectedNodeID("");
       setSelectedLogicGateID("");
     } catch (err) {
@@ -462,10 +484,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       if (parentFolderID) await assignItemToFolder(parentFolderID, "node", node.node_id);
       setExpanded((previous) => {
         const next = new Set(previous);
-        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-nodes");
+        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
         return next;
       });
       setSelectedTreeID(`node-${node.node_id}`);
+      setSelectedTreeIDs(new Set([`node-${node.node_id}`]));
+      setSelectionAnchorTreeID(`node-${node.node_id}`);
       setSelectedNodeID(node.node_id);
       setSelectedLogicGateID("");
     } catch (err) {
@@ -488,10 +512,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       if (parentFolderID) await assignItemToFolder(parentFolderID, "logic_gate", logicGate.logic_gate_id);
       setExpanded((previous) => {
         const next = new Set(previous);
-        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-logic");
+        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
         return next;
       });
       setSelectedTreeID(`logic-gate-${logicGate.logic_gate_id}`);
+      setSelectedTreeIDs(new Set([`logic-gate-${logicGate.logic_gate_id}`]));
+      setSelectionAnchorTreeID(`logic-gate-${logicGate.logic_gate_id}`);
       setSelectedLogicGateID(logicGate.logic_gate_id);
       setSelectedNodeID("");
     } catch (err) {
@@ -514,8 +540,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         removeCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, target.id);
         const parentTreeID = deletedFolder?.parent_folder_id
           ? `workspace-folder-${deletedFolder.parent_folder_id}`
-          : target.folderKind === "logic_gate" ? "folder-logic" : "folder-nodes";
+          : "folder-root";
         setSelectedTreeID(parentTreeID);
+        setSelectedTreeIDs(new Set([parentTreeID]));
+        setSelectionAnchorTreeID(parentTreeID);
         setSelectedNodeID("");
         setSelectedLogicGateID("");
         return;
@@ -526,7 +554,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         setNodes((previous) => previous.filter((node) => node.node_id !== target.id));
         setFolderItems((previous) => previous.filter((item) => item.item_type !== "node" || item.item_id !== target.id));
         removeNodeRelationshipGraphNode(apiBase, companyID, target.id);
-        setSelectedTreeID("folder-nodes");
+        setSelectedTreeID("folder-root");
+        setSelectedTreeIDs(new Set(["folder-root"]));
+        setSelectionAnchorTreeID("folder-root");
         setSelectedNodeID("");
         setSelectedLogicGateID("");
         return;
@@ -536,13 +566,54 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setLogicGates((previous) => previous.filter((logicGate) => logicGate.logic_gate_id !== target.id));
       setFolderItems((previous) => previous.filter((item) => item.item_type !== "logic_gate" || item.item_id !== target.id));
       removeLogicGateRelationshipGraphNode(apiBase, companyID, target.id);
-      setSelectedTreeID("folder-logic");
+      setSelectedTreeID("folder-root");
+      setSelectedTreeIDs(new Set(["folder-root"]));
+      setSelectionAnchorTreeID("folder-root");
       setSelectedNodeID("");
       setSelectedLogicGateID("");
     } catch (err) {
       setError(err instanceof Error ? err.message : `failed_to_delete_${target.kind}`);
     }
   }, [apiBase, companyID, folders, requestJSON]);
+
+  const commitRename = useCallback(async () => {
+    if (!renaming) return;
+    const value = renaming.value.trim();
+    if (!value) {
+      setRenaming(null);
+      return;
+    }
+    setError("");
+    try {
+      if (renaming.target.kind === "folder") {
+        const folder = await requestJSON<CompanyExplorerFolder>(`/v1/company-explorer/folders/${renaming.target.id}`, {
+          method: "PUT",
+          body: JSON.stringify({ company_id: companyID, name: value }),
+        });
+        setFolders((previous) => previous.map((item) => (item.folder_id === folder.folder_id ? folder : item)));
+        if (folder.folder_kind === "logic_gate") upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
+        else upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
+      } else if (renaming.target.kind === "node") {
+        const node = await requestJSON<NodeRecord>(`/v1/nodes/${renaming.target.id}`, {
+          method: "PUT",
+          body: JSON.stringify({ company_id: companyID, title: value }),
+        });
+        setNodes((previous) => previous.map((item) => (item.node_id === node.node_id ? node : item)));
+        upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+      } else {
+        const updated = await requestJSON<LogicGateApiRecord>(`/v1/logic-gates/${renaming.target.id}`, {
+          method: "PUT",
+          body: JSON.stringify({ company_id: companyID, header: value }),
+        });
+        const logicGate = toLogicGateCanvasRecord(updated);
+        setLogicGates((previous) => previous.map((item) => (item.logic_gate_id === logicGate.logic_gate_id ? logicGate : item)));
+        upsertLogicGateRelationshipGraphNode(apiBase, companyID, logicGate);
+      }
+      setRenaming(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `failed_to_rename_${renaming.target.kind}`);
+    }
+  }, [apiBase, companyID, renaming, requestJSON]);
 
   const moveFolder = useCallback(async (folderID: string, parentFolderID: string) => {
     if (!folderID || folderID === parentFolderID) return;
@@ -558,7 +629,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setFolders((previous) => previous.map((item) => (item.folder_id === folder.folder_id ? folder : item)));
       setExpanded((previous) => {
         const next = new Set(previous);
-        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : (folder.folder_kind === "logic_gate" ? "folder-logic" : "folder-nodes"));
+        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
         next.add(`workspace-folder-${folder.folder_id}`);
         return next;
       });
@@ -569,7 +640,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [apiBase, companyID, requestJSON]);
 
-  const selectTreeRow = useCallback((row: ExplorerTreeNode) => {
+  const focusTreeRow = useCallback((row: ExplorerTreeNode) => {
     setSelectedTreeID(row.id);
     if (row.kind === "node") {
       setSelectedNodeID(row.nodeID ?? "");
@@ -585,6 +656,31 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     setSelectedLogicGateID("");
   }, []);
 
+  const selectTreeRow = useCallback((row: ExplorerTreeNode, event?: React.MouseEvent) => {
+    const selected = resolveExplorerClickSelection({
+      orderedIDs: treeRows.map((item) => item.id),
+      previousSelectedIDs: selectedTreeIDs,
+      anchorID: selectionAnchorTreeID,
+      clickedID: row.id,
+      shiftKey: !!event?.shiftKey,
+      ctrlKey: !!event?.ctrlKey || !!event?.metaKey,
+    });
+    setSelectedTreeIDs(selected.selectedIDs);
+    setSelectionAnchorTreeID(selected.anchorID);
+    focusTreeRow(row);
+  }, [focusTreeRow, selectedTreeIDs, selectionAnchorTreeID, treeRows]);
+
+  const startRenamingRow = useCallback((row: ExplorerTreeNode) => {
+    const target = resolveExplorerRenameTarget(row);
+    if (!target) return;
+    setSelectedTreeID(row.id);
+    setSelectedTreeIDs(new Set([row.id]));
+    setSelectionAnchorTreeID(row.id);
+    focusTreeRow(row);
+    cancelRenameOnBlurRef.current = false;
+    setRenaming({ treeID: row.id, target, value: row.label });
+  }, [focusTreeRow]);
+
   const canDropOnRow = useCallback((target: ExplorerTreeNode, payload: ExplorerDragPayload | null) => {
     if (!payload || target.kind !== "folder" || !target.folderKind) return false;
     if (payload.kind === "folder") {
@@ -597,11 +693,17 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     event.preventDefault();
     event.stopPropagation();
     if (row) selectTreeRow(row);
+    const contextKind: CompanyExplorerFolderKind | null = row?.folderKind ?? (row?.kind === "node" ? "node" : row?.kind === "logic_gate" ? "logic_gate" : null);
     setExplorerContextMenu({
       x: event.clientX,
       y: event.clientY,
       targets: resolveExplorerCreationTargets(row ?? null),
       deleteTarget: resolveExplorerDeleteTarget(row ?? null),
+      renameTarget: resolveExplorerRenameTarget(row ?? null),
+      renameTreeID: row?.id ?? "",
+      renameLabel: row?.label ?? "",
+      contextKind,
+      canCreateBothFolderTypes: !contextKind,
     });
   }, [selectTreeRow]);
 
@@ -660,11 +762,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setSelectedNodeID(selectedFromMap);
       setSelectedLogicGateID("");
       setSelectedTreeID(`node-${selectedFromMap}`);
+      setSelectedTreeIDs(new Set([`node-${selectedFromMap}`]));
+      setSelectionAnchorTreeID(`node-${selectedFromMap}`);
       setExpanded((previous) => {
-        if (previous.has("folder-root") && previous.has("folder-nodes")) return previous;
+        if (previous.has("folder-root")) return previous;
         const next = new Set(previous);
         next.add("folder-root");
-        next.add("folder-nodes");
         return next;
       });
     };
@@ -707,11 +810,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setSelectedLogicGateID(selectedFromMap);
       setSelectedNodeID("");
       setSelectedTreeID(nextTreeID);
+      setSelectedTreeIDs(new Set([nextTreeID]));
+      setSelectionAnchorTreeID(nextTreeID);
       setExpanded((previous) => {
-        if (previous.has("folder-root") && previous.has("folder-logic")) return previous;
+        if (previous.has("folder-root")) return previous;
         const next = new Set(previous);
         next.add("folder-root");
-        next.add("folder-logic");
         return next;
       });
     };
@@ -835,15 +939,20 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         {virtualizedTree.rows.map((row) => {
           const isFolder = row.kind === "folder";
           const isOpen = expanded.has(row.id);
-          const isSelected = selectedTreeID === row.id;
+          const isSelected = selectedTreeIDs.has(row.id);
           const rowDragPayload = getExplorerDragPayload(row);
           const isDragging = draggingTreeID === row.id;
           const isDropTarget = dragOverTreeID === row.id;
           return (
             <div
               key={row.id}
-              draggable={!!rowDragPayload}
-              onClick={() => selectTreeRow(row)}
+              draggable={!!rowDragPayload && renaming?.treeID !== row.id}
+              onClick={(event) => selectTreeRow(row, event)}
+              onDoubleClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                startRenamingRow(row);
+              }}
               onContextMenu={(event) => openExplorerContextMenu(event, row)}
               onDragStart={(event) => {
                 if (!rowDragPayload) {
@@ -933,7 +1042,46 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 </button>
               ) : <span style={{ width: TREE_TOGGLE_SLOT_PX, flexShrink: 0 }} />}
               <ExplorerRowIcon kind={row.kind} />
-              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.label}</span>
+              {renaming?.treeID === row.id ? (
+                <input
+                  ref={renameInputRef}
+                  value={renaming.value}
+                  onChange={(event) => setRenaming((current) => (current ? { ...current, value: event.target.value } : current))}
+                  onClick={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void commitRename();
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      cancelRenameOnBlurRef.current = true;
+                      setRenaming(null);
+                    }
+                  }}
+                  onBlur={() => {
+                    if (cancelRenameOnBlurRef.current) {
+                      cancelRenameOnBlurRef.current = false;
+                      return;
+                    }
+                    void commitRename();
+                  }}
+                  style={{
+                    minWidth: 0,
+                    width: "100%",
+                    border: `1px solid ${accent}`,
+                    background: surfaceBackground,
+                    color: surfaceText,
+                    font: "inherit",
+                    fontSize: 12,
+                    padding: "1px 4px",
+                    outline: "none",
+                  }}
+                />
+              ) : (
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.label}</span>
+              )}
             </div>
           );
         })}
@@ -942,33 +1090,79 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
       {explorerContextMenu && (
         <FrameRightClickMenu x={explorerContextMenu.x} y={explorerContextMenu.y} onClose={() => setExplorerContextMenu(null)}>
-          <button
-            style={{ ...explorerMenuButtonStyle, color: "#111111" }}
-            onClick={() => {
-              void createFolder(explorerContextMenu.targets.folderKind, explorerContextMenu.targets.folderParentID);
-              setExplorerContextMenu(null);
-            }}
-          >
-            Create folder
-          </button>
-          <button
-            style={{ ...explorerMenuButtonStyle, color: "#111111" }}
-            onClick={() => {
-              void createNodeAtFolder(explorerContextMenu.targets.nodeParentFolderID);
-              setExplorerContextMenu(null);
-            }}
-          >
-            Create node
-          </button>
-          <button
-            style={{ ...explorerMenuButtonStyle, color: "#111111" }}
-            onClick={() => {
-              void createLogicGateAtFolder(explorerContextMenu.targets.logicGateParentFolderID);
-              setExplorerContextMenu(null);
-            }}
-          >
-            Create logic gate
-          </button>
+          {explorerContextMenu.canCreateBothFolderTypes ? (
+            <>
+              <button
+                style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+                onClick={() => {
+                  void createFolder("node", explorerContextMenu.targets.nodeFolderParentID);
+                  setExplorerContextMenu(null);
+                }}
+              >
+                Create node folder
+              </button>
+              <button
+                style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+                onClick={() => {
+                  void createFolder("logic_gate", explorerContextMenu.targets.logicGateFolderParentID);
+                  setExplorerContextMenu(null);
+                }}
+              >
+                Create logic gate folder
+              </button>
+            </>
+          ) : (
+            <button
+              style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+              onClick={() => {
+                void createFolder(explorerContextMenu.targets.preferredFolderKind, explorerContextMenu.targets.preferredFolderParentID);
+                setExplorerContextMenu(null);
+              }}
+            >
+              Create folder
+            </button>
+          )}
+          {explorerContextMenu.contextKind !== "logic_gate" && (
+            <button
+              style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+              onClick={() => {
+                void createNodeAtFolder(explorerContextMenu.targets.nodeParentFolderID);
+                setExplorerContextMenu(null);
+              }}
+            >
+              Create node
+            </button>
+          )}
+          {explorerContextMenu.contextKind !== "node" && (
+            <button
+              style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+              onClick={() => {
+                void createLogicGateAtFolder(explorerContextMenu.targets.logicGateParentFolderID);
+                setExplorerContextMenu(null);
+              }}
+            >
+              Create logic gate
+            </button>
+          )}
+          {explorerContextMenu.renameTarget && (
+            <button
+              style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+              onClick={() => {
+                const target = explorerContextMenu.renameTarget;
+                const treeID = explorerContextMenu.renameTreeID;
+                const value = explorerContextMenu.renameLabel;
+                setExplorerContextMenu(null);
+                if (!target || !treeID) return;
+                cancelRenameOnBlurRef.current = false;
+                setSelectedTreeID(treeID);
+                setSelectedTreeIDs(new Set([treeID]));
+                setSelectionAnchorTreeID(treeID);
+                setRenaming({ treeID, target, value });
+              }}
+            >
+              Rename
+            </button>
+          )}
           {explorerContextMenu.deleteTarget && (
             <button
               style={{ ...explorerMenuButtonStyle, color: "#c62828" }}
