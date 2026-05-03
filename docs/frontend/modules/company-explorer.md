@@ -146,13 +146,13 @@ Folder runtime update (2026-05-02):
 - Explorer row labels do not include live item counts. Count queries belong in bounded API/read models, not in every tree row render.
 - Explorer no longer renders vertical or horizontal hierarchy guide lines; indentation and icons carry the tree structure.
 - Folder creation is now a Company Explorer context-menu action, not an inline plus button. Right-clicking the tree body opens Explorer actions, while frame-level actions remain scoped to the frame/module title plate.
-- When the right-click context has no folder type, the menu exposes typed folder creation (`Create node folder`, `Create logic gate folder`) so empty folders still obey the backend item-type invariant. Right-clicking typed rows uses the compatible single `Create folder` action.
+- When the right-click context has no folder type, the menu order is `Create node folder`, `Create node`, `Create logic gate folder`, `Create logic gate`. Typed folder creation keeps empty folders aligned with the backend item-type invariant. Right-clicking typed rows uses the compatible single `Create folder` action.
 - Right-clicking a concrete folder, node, or logic gate exposes `Rename` and `Delete`, backed by folder/node/logic-gate APIs.
 - Double-clicking a concrete folder, node, or logic gate starts inline rename with the caret at the end of the current title.
 - Left-clicking elsewhere inside Company Explorer closes the Explorer context menu before applying the new selection.
 - New folders are created inside the right-clicked compatible folder/tree. New nodes and logic gates are created through their canonical APIs and then assigned to the compatible right-clicked folder through `company_explorer_folder_items` when a folder target exists.
 - After any create action, the newly created folder, node, or logic gate becomes the selected highlighted row.
-- Plain click selects one row, Shift-click selects the visible range from the anchor row, and Ctrl/Cmd-click toggles individual rows. This selection state is UI-local until a concrete action consumes it, keeping linked map broadcasts focused on the active row.
+- Plain click selects one row, Shift-click adds the visible range from the anchor row without clearing previous selections, and Ctrl/Cmd-click toggles individual rows. This selection state is UI-local until a concrete action consumes it, keeping linked map broadcasts focused on the active row.
 - Node, logic-gate, and folder moves still use drag-and-drop onto compatible folders.
 - Selecting a node folder broadcasts `selectedFolderID`/`selectedFolderKind=node`; linked Node Map filters its cached graph to nodes placed in that folder or any descendant folder.
 - Selecting a logic-gate folder broadcasts `selectedFolderID`/`selectedFolderKind=logic_gate`; linked Logic Gate Map applies the same folder-scope rule for gates.

@@ -149,7 +149,7 @@ Use this checklist format and keep it complete.
   - verifies right-click creation targets for nested node and logic-gate folder contexts
   - verifies rename actions only resolve for concrete folder/node/logic-gate records
   - verifies delete actions only resolve for concrete folder/node/logic-gate records
-  - verifies plain click, Shift-click range, and Ctrl-click toggle selection behavior
+  - verifies plain click, additive Shift-click range, and Ctrl-click toggle selection behavior
 - [x] `tests/frontend/modules/folders/companyExplorerFolders.test.ts`
   - nested folder subtree expansion for map scope
   - node folder filtering keeps only folder/descendant contents

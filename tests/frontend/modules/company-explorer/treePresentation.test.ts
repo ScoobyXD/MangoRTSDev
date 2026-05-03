@@ -87,13 +87,13 @@ run("click selection supports plain, shift range, and ctrl toggle behavior", () 
 
   const range = resolveExplorerClickSelection({
     orderedIDs,
-    previousSelectedIDs: plain.selectedIDs,
+    previousSelectedIDs: new Set(["root", ...plain.selectedIDs]),
     anchorID: plain.anchorID,
     clickedID: "d",
     shiftKey: true,
     ctrlKey: false,
   });
-  assert.deepEqual([...range.selectedIDs], ["b", "c", "d"]);
+  assert.deepEqual([...range.selectedIDs], ["root", "b", "c", "d"]);
   assert.equal(range.anchorID, "b");
 
   const toggle = resolveExplorerClickSelection({

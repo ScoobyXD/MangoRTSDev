@@ -35,6 +35,7 @@ type ExplorerDragPayload = {
 
 type ExplorerDeleteTarget = NonNullable<ReturnType<typeof resolveExplorerDeleteTarget>>;
 type ExplorerRenameTarget = NonNullable<ReturnType<typeof resolveExplorerRenameTarget>>;
+type ExplorerRenameDraft = { treeID: string; target: ExplorerRenameTarget; value: string };
 
 const EXPLORER_DRAG_MIME = "application/x-mangoos-company-explorer-row";
 const TREE_INDENT_PX = 16;
@@ -141,9 +142,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [selectedLogicGateID, setSelectedLogicGateID] = useState("");
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set(EXPLORER_DEFAULT_EXPANDED_ROW_IDS));
-  const [renaming, setRenaming] = useState<{ treeID: string; target: ExplorerRenameTarget; value: string } | null>(null);
+  const [renaming, setRenaming] = useState<ExplorerRenameDraft | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const cancelRenameOnBlurRef = useRef(false);
+  const renameCommitInFlightRef = useRef(false);
   const treeViewportRef = useRef<HTMLDivElement | null>(null);
   const [treeScrollTop, setTreeScrollTop] = useState(0);
   const [treeViewportHeight, setTreeViewportHeight] = useState(480);
@@ -576,32 +578,34 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [apiBase, companyID, folders, requestJSON]);
 
-  const commitRename = useCallback(async () => {
-    if (!renaming) return;
-    const value = renaming.value.trim();
+  const commitRename = useCallback(async (draft?: ExplorerRenameDraft) => {
+    const activeRename = draft ?? renaming;
+    if (!activeRename || renameCommitInFlightRef.current) return;
+    const value = activeRename.value.trim();
     if (!value) {
       setRenaming(null);
       return;
     }
+    renameCommitInFlightRef.current = true;
     setError("");
     try {
-      if (renaming.target.kind === "folder") {
-        const folder = await requestJSON<CompanyExplorerFolder>(`/v1/company-explorer/folders/${renaming.target.id}`, {
+      if (activeRename.target.kind === "folder") {
+        const folder = await requestJSON<CompanyExplorerFolder>(`/v1/company-explorer/folders/${activeRename.target.id}`, {
           method: "PUT",
           body: JSON.stringify({ company_id: companyID, name: value }),
         });
         setFolders((previous) => previous.map((item) => (item.folder_id === folder.folder_id ? folder : item)));
         if (folder.folder_kind === "logic_gate") upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
         else upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
-      } else if (renaming.target.kind === "node") {
-        const node = await requestJSON<NodeRecord>(`/v1/nodes/${renaming.target.id}`, {
+      } else if (activeRename.target.kind === "node") {
+        const node = await requestJSON<NodeRecord>(`/v1/nodes/${activeRename.target.id}`, {
           method: "PUT",
           body: JSON.stringify({ company_id: companyID, title: value }),
         });
         setNodes((previous) => previous.map((item) => (item.node_id === node.node_id ? node : item)));
         upsertNodeRelationshipGraphNode(apiBase, companyID, node);
       } else {
-        const updated = await requestJSON<LogicGateApiRecord>(`/v1/logic-gates/${renaming.target.id}`, {
+        const updated = await requestJSON<LogicGateApiRecord>(`/v1/logic-gates/${activeRename.target.id}`, {
           method: "PUT",
           body: JSON.stringify({ company_id: companyID, header: value }),
         });
@@ -609,9 +613,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         setLogicGates((previous) => previous.map((item) => (item.logic_gate_id === logicGate.logic_gate_id ? logicGate : item)));
         upsertLogicGateRelationshipGraphNode(apiBase, companyID, logicGate);
       }
-      setRenaming(null);
+      setRenaming((current) => (current?.treeID === activeRename.treeID ? null : current));
     } catch (err) {
-      setError(err instanceof Error ? err.message : `failed_to_rename_${renaming.target.kind}`);
+      setError(err instanceof Error ? err.message : `failed_to_rename_${activeRename.target.kind}`);
+    } finally {
+      renameCommitInFlightRef.current = false;
     }
   }, [apiBase, companyID, renaming, requestJSON]);
 
@@ -1052,20 +1058,22 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
-                      void commitRename();
+                      event.stopPropagation();
+                      if (renaming) void commitRename({ ...renaming, value: event.currentTarget.value });
                     }
                     if (event.key === "Escape") {
                       event.preventDefault();
+                      event.stopPropagation();
                       cancelRenameOnBlurRef.current = true;
                       setRenaming(null);
                     }
                   }}
-                  onBlur={() => {
+                  onBlur={(event) => {
                     if (cancelRenameOnBlurRef.current) {
                       cancelRenameOnBlurRef.current = false;
                       return;
                     }
-                    void commitRename();
+                    if (renaming) void commitRename({ ...renaming, value: event.currentTarget.value });
                   }}
                   style={{
                     minWidth: 0,
@@ -1104,45 +1112,65 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
               <button
                 style={{ ...explorerMenuButtonStyle, color: "#111111" }}
                 onClick={() => {
+                  void createNodeAtFolder(explorerContextMenu.targets.nodeParentFolderID);
+                  setExplorerContextMenu(null);
+                }}
+              >
+                Create node
+              </button>
+              <button
+                style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+                onClick={() => {
                   void createFolder("logic_gate", explorerContextMenu.targets.logicGateFolderParentID);
                   setExplorerContextMenu(null);
                 }}
               >
                 Create logic gate folder
               </button>
+              <button
+                style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+                onClick={() => {
+                  void createLogicGateAtFolder(explorerContextMenu.targets.logicGateParentFolderID);
+                  setExplorerContextMenu(null);
+                }}
+              >
+                Create logic gate
+              </button>
             </>
           ) : (
-            <button
-              style={{ ...explorerMenuButtonStyle, color: "#111111" }}
-              onClick={() => {
-                void createFolder(explorerContextMenu.targets.preferredFolderKind, explorerContextMenu.targets.preferredFolderParentID);
-                setExplorerContextMenu(null);
-              }}
-            >
-              Create folder
-            </button>
-          )}
-          {explorerContextMenu.contextKind !== "logic_gate" && (
-            <button
-              style={{ ...explorerMenuButtonStyle, color: "#111111" }}
-              onClick={() => {
-                void createNodeAtFolder(explorerContextMenu.targets.nodeParentFolderID);
-                setExplorerContextMenu(null);
-              }}
-            >
-              Create node
-            </button>
-          )}
-          {explorerContextMenu.contextKind !== "node" && (
-            <button
-              style={{ ...explorerMenuButtonStyle, color: "#111111" }}
-              onClick={() => {
-                void createLogicGateAtFolder(explorerContextMenu.targets.logicGateParentFolderID);
-                setExplorerContextMenu(null);
-              }}
-            >
-              Create logic gate
-            </button>
+            <>
+              <button
+                style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+                onClick={() => {
+                  void createFolder(explorerContextMenu.targets.preferredFolderKind, explorerContextMenu.targets.preferredFolderParentID);
+                  setExplorerContextMenu(null);
+                }}
+              >
+                Create folder
+              </button>
+              {explorerContextMenu.contextKind !== "logic_gate" && (
+                <button
+                  style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+                  onClick={() => {
+                    void createNodeAtFolder(explorerContextMenu.targets.nodeParentFolderID);
+                    setExplorerContextMenu(null);
+                  }}
+                >
+                  Create node
+                </button>
+              )}
+              {explorerContextMenu.contextKind !== "node" && (
+                <button
+                  style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+                  onClick={() => {
+                    void createLogicGateAtFolder(explorerContextMenu.targets.logicGateParentFolderID);
+                    setExplorerContextMenu(null);
+                  }}
+                >
+                  Create logic gate
+                </button>
+              )}
+            </>
           )}
           {explorerContextMenu.renameTarget && (
             <button

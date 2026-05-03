@@ -88,7 +88,9 @@ export function resolveExplorerClickSelection(input: {
       const start = Math.min(anchorIndex, clickedIndex);
       const end = Math.max(anchorIndex, clickedIndex);
       const range = orderedIDs.slice(start, end + 1);
-      const selectedIDs = ctrlKey ? new Set(previousSelectedIDs) : new Set<string>();
+      // Shift-click is additive in Company Explorer: users often build a
+      // precise set with Ctrl, then add a visible range without losing it.
+      const selectedIDs = new Set(previousSelectedIDs);
       for (const id of range) selectedIDs.add(id);
       return { selectedIDs, anchorID };
     }
