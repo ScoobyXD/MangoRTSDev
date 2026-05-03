@@ -6,14 +6,18 @@ Kanban is a board module for placing `node` and `logic_gate` work items into tit
 Users can:
 - add columns,
 - rename column titles inline,
+- delete columns,
+- drag columns left/right to reorder them,
+- resize columns,
 - drag nodes and logic gates from Company Explorer into a column,
 - drag cards between columns.
 
 ## Visual Rules
 - The board surface stays white in the light theme.
-- The board uses a black outline and subtle shadow so it is distinguishable from a white frame/background.
+- Columns stay directly on the module surface; do not wrap all columns in a second board frame.
+- The right edge always includes a large add-column control.
 - Column titles preserve user-entered casing; the UI must not force uppercase display.
-- The module reserves top clearance for the frame title plate and linked-module hexagon so the column toolbar does not bleed into frame chrome.
+- The module reserves top clearance for the frame title plate and linked-module hexagon so column headers do not bleed into frame chrome.
 
 ## Linkable Frame Behavior
 Kanban is a linkable frame kind (`kanban`).
@@ -50,9 +54,9 @@ Kanban is API-first so future agents can operate boards without rendering React.
 Endpoints:
 - `GET /v1/kanban/columns?company_id=...&board_id=...`
 - `POST /v1/kanban/columns`
-  - `{ company_id, board_id, title, position? }`
+  - `{ company_id, board_id, title, position?, width_px? }`
 - `PUT /v1/kanban/columns/:column_id`
-  - `{ company_id, board_id, title }`
+  - `{ company_id, board_id, title?, position?, width_px? }`
 - `DELETE /v1/kanban/columns/:column_id?company_id=...&board_id=...`
 - `GET /v1/kanban/cards?company_id=...&board_id=...&column_id=...&after_position=0&limit=200`
 - `POST /v1/kanban/cards`
@@ -67,6 +71,7 @@ Endpoints:
 - Reads are scoped by `company_id` and `board_id`.
 - Cards are fetched with an explicit limit; the UI reads a bounded first window.
 - Backend tables have board/column position indexes for fast interactive reads.
+- Column reorder usually writes only the moved column position. Rare position compaction is scoped to visible board columns.
 - Card rows store a title snapshot to avoid requiring a details lookup on every board render.
 - Node and logic gate IDs remain the source of truth; the snapshot is display-only.
 

@@ -32,18 +32,37 @@ export async function listKanbanColumns(apiBase: string, companyID: string, boar
   return payload.columns ?? [];
 }
 
-export async function createKanbanColumn(apiBase: string, companyID: string, boardID: string, title: string): Promise<KanbanColumn> {
+export async function createKanbanColumn(apiBase: string, companyID: string, boardID: string, title: string, position?: number, widthPx?: number): Promise<KanbanColumn> {
   return fetchJSON<KanbanColumn>(apiBase, "/v1/kanban/columns", {
     method: "POST",
-    body: { company_id: companyID, board_id: boardID, title },
+    body: { company_id: companyID, board_id: boardID, title, position, width_px: widthPx },
   });
 }
 
-export async function renameKanbanColumn(apiBase: string, companyID: string, boardID: string, columnID: string, title: string): Promise<KanbanColumn> {
-  return fetchJSON<KanbanColumn>(apiBase, `/v1/kanban/columns/${encodeURIComponent(columnID)}`, {
+export async function updateKanbanColumn(args: {
+  apiBase: string;
+  companyID: string;
+  boardID: string;
+  columnID: string;
+  title?: string;
+  position?: number;
+  widthPx?: number;
+}): Promise<KanbanColumn> {
+  return fetchJSON<KanbanColumn>(args.apiBase, `/v1/kanban/columns/${encodeURIComponent(args.columnID)}`, {
     method: "PUT",
-    body: { company_id: companyID, board_id: boardID, title },
+    body: {
+      company_id: args.companyID,
+      board_id: args.boardID,
+      title: args.title,
+      position: args.position,
+      width_px: args.widthPx,
+    },
   });
+}
+
+export async function deleteKanbanColumn(apiBase: string, companyID: string, boardID: string, columnID: string): Promise<void> {
+  const params = query({ company_id: companyID, board_id: boardID });
+  await fetchJSON<{ status?: string }>(apiBase, `/v1/kanban/columns/${encodeURIComponent(columnID)}?${params}`, { method: "DELETE" });
 }
 
 export async function listKanbanCards(apiBase: string, companyID: string, boardID: string, columnID = "", limit = 200, afterPosition = 0): Promise<KanbanCard[]> {

@@ -1466,6 +1466,7 @@ func scanKanbanColumn(row interface {
 		&item.ColumnID,
 		&item.Title,
 		&item.Position,
+		&item.WidthPx,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
 	)
@@ -1494,7 +1495,7 @@ func scanKanbanCard(row interface {
 func (r *PostgresRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
 	ctx := context.Background()
 	rows, err := r.db.QueryContext(ctx, `
-select company_id, board_id, column_id, title, position, created_timestamp, updated_timestamp
+select company_id, board_id, column_id, title, position, width_px, created_timestamp, updated_timestamp
 from kanban_columns
 where company_id=$1 and board_id=$2
 order by position asc, created_timestamp asc`, companyID, boardID)
@@ -1514,7 +1515,7 @@ order by position asc, created_timestamp asc`, companyID, boardID)
 	return items, rows.Err()
 }
 
-func (r *PostgresRepo) CreateKanbanColumn(companyID, boardID, title string, position int) (domain.KanbanColumn, error) {
+func (r *PostgresRepo) CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int) (domain.KanbanColumn, error) {
 	ctx := context.Background()
 	if position <= 0 {
 		if err := r.db.QueryRowContext(ctx, `
@@ -1524,21 +1525,28 @@ where company_id=$1 and board_id=$2`, companyID, boardID).Scan(&position); err !
 			return domain.KanbanColumn{}, err
 		}
 	}
+	widthPx = normalizeKanbanColumnWidth(widthPx)
 	return scanKanbanColumn(r.db.QueryRowContext(ctx, `
-insert into kanban_columns (company_id, board_id, column_id, title, position, created_timestamp, updated_timestamp)
-values ($1, $2, $3, $4, $5, now(), now())
-returning company_id, board_id, column_id, title, position, created_timestamp, updated_timestamp`,
-		companyID, boardID, newUUIDv7String(), title, position,
+insert into kanban_columns (company_id, board_id, column_id, title, position, width_px, created_timestamp, updated_timestamp)
+values ($1, $2, $3, $4, $5, $6, now(), now())
+returning company_id, board_id, column_id, title, position, width_px, created_timestamp, updated_timestamp`,
+		companyID, boardID, newUUIDv7String(), title, position, widthPx,
 	))
 }
 
-func (r *PostgresRepo) UpdateKanbanColumnTitle(companyID, boardID, columnID, title string) (domain.KanbanColumn, error) {
+func (r *PostgresRepo) UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int) (domain.KanbanColumn, error) {
+	if widthPx > 0 {
+		widthPx = normalizeKanbanColumnWidth(widthPx)
+	}
 	item, err := scanKanbanColumn(r.db.QueryRow(`
 update kanban_columns
-set title=$4, updated_timestamp=now()
+set title=coalesce(nullif($4, ''), title),
+    position=case when $5 > 0 then $5 else position end,
+    width_px=case when $6 > 0 then $6 else width_px end,
+    updated_timestamp=now()
 where company_id=$1 and board_id=$2 and column_id=$3
-returning company_id, board_id, column_id, title, position, created_timestamp, updated_timestamp`,
-		companyID, boardID, columnID, title,
+returning company_id, board_id, column_id, title, position, width_px, created_timestamp, updated_timestamp`,
+		companyID, boardID, columnID, title, position, widthPx,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.KanbanColumn{}, ErrNotFound

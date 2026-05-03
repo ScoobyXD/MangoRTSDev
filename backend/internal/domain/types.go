@@ -140,6 +140,7 @@ type KanbanColumn struct {
 	ColumnID         string    `json:"column_id"`
 	Title            string    `json:"title"`
 	Position         int       `json:"position"`
+	WidthPx          int       `json:"width_px"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }

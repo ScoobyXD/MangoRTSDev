@@ -51,8 +51,8 @@ type Repository interface {
 	CreateOperation(in CreateOperationInput) (domain.Operation, error)
 	GetOperation(companyID, operationID string) (domain.Operation, error)
 	ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error)
-	CreateKanbanColumn(companyID, boardID, title string, position int) (domain.KanbanColumn, error)
-	UpdateKanbanColumnTitle(companyID, boardID, columnID, title string) (domain.KanbanColumn, error)
+	CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int) (domain.KanbanColumn, error)
+	UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int) (domain.KanbanColumn, error)
 	DeleteKanbanColumn(companyID, boardID, columnID string) error
 	ListKanbanCards(companyID, boardID, columnID string, afterPosition int, limit int) ([]domain.KanbanCard, error)
 	UpsertKanbanCard(companyID, boardID, columnID, itemType, itemID, titleSnapshot string, position int) (domain.KanbanCard, error)
@@ -383,6 +383,19 @@ func nextKanbanColumnPosition(columns []domain.KanbanColumn) int {
 	return next
 }
 
+func normalizeKanbanColumnWidth(widthPx int) int {
+	if widthPx <= 0 {
+		return 260
+	}
+	if widthPx < 180 {
+		return 180
+	}
+	if widthPx > 520 {
+		return 520
+	}
+	return widthPx
+}
+
 func nextKanbanCardPosition(cards []domain.KanbanCard, columnID string) int {
 	next := 1000
 	for _, card := range cards {
@@ -429,7 +442,7 @@ func (r *MemoryRepo) ListKanbanColumns(companyID, boardID string) ([]domain.Kanb
 	return items, nil
 }
 
-func (r *MemoryRepo) CreateKanbanColumn(companyID, boardID, title string, position int) (domain.KanbanColumn, error) {
+func (r *MemoryRepo) CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int) (domain.KanbanColumn, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	k := boardKey(companyID, boardID)
@@ -443,6 +456,7 @@ func (r *MemoryRepo) CreateKanbanColumn(companyID, boardID, title string, positi
 		ColumnID:         newUUIDv7String(),
 		Title:            title,
 		Position:         position,
+		WidthPx:          normalizeKanbanColumnWidth(widthPx),
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
@@ -450,7 +464,7 @@ func (r *MemoryRepo) CreateKanbanColumn(companyID, boardID, title string, positi
 	return item, nil
 }
 
-func (r *MemoryRepo) UpdateKanbanColumnTitle(companyID, boardID, columnID, title string) (domain.KanbanColumn, error) {
+func (r *MemoryRepo) UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int) (domain.KanbanColumn, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	k := boardKey(companyID, boardID)
@@ -458,7 +472,15 @@ func (r *MemoryRepo) UpdateKanbanColumnTitle(companyID, boardID, columnID, title
 		if column.ColumnID != columnID {
 			continue
 		}
-		column.Title = title
+		if title != "" {
+			column.Title = title
+		}
+		if position > 0 {
+			column.Position = position
+		}
+		if widthPx > 0 {
+			column.WidthPx = normalizeKanbanColumnWidth(widthPx)
+		}
 		column.UpdatedTimestamp = time.Now().UTC()
 		r.kanbanColumns[k][index] = column
 		return column, nil
