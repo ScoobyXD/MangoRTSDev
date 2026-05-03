@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, clampColumnHeight, clampColumnWidth, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragPayload, sanitizeExplorerEntityDragPayload, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, clampColumnHeight, clampColumnWidth, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, sanitizeExplorerEntityDragPayload, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
 
 function card(overrides: Partial<KanbanCard>): KanbanCard {
   return {
@@ -49,6 +49,18 @@ test("sanitizes explorer drag payloads and keeps board drops node-only", () => {
   assert.equal(sanitizeExplorerEntityDragPayload({ itemType: "file", itemID: "x", label: "x" }), null);
   assert.equal(isKanbanBoardDropItemType("node"), true);
   assert.equal(isKanbanBoardDropItemType("logic_gate"), false);
+  assert.deepEqual(parseExplorerEntityDragItems(JSON.stringify({
+    itemType: "node_batch",
+    nodes: [
+      { nodeID: "node-1", label: "Alpha" },
+      { nodeID: "node-2", label: "Beta" },
+      { nodeID: "node-1", label: "Duplicate" },
+      { nodeID: "  ", label: "Invalid" },
+    ],
+  })), [
+    { nodeID: "node-1", label: "Alpha" },
+    { nodeID: "node-2", label: "Beta" },
+  ]);
 });
 
 test("nextCardPosition appends inside the target column only", () => {
@@ -129,6 +141,17 @@ test("card selection helper supports ranges and additive toggles across columns"
   });
   assert.deepEqual(Array.from(toggledMiddle.selectedCardIDs), ["left-a", "middle-b"]);
   assert.equal(toggledMiddle.anchorCardID, "middle-a");
+
+  const continuousRange = buildKanbanCardSelectionUpdate({
+    columns,
+    cards,
+    selectedCardIDs: toggledMiddle.selectedCardIDs,
+    anchorCardID: toggledMiddle.anchorCardID,
+    clickedCardID: "right-a",
+    shiftKey: true,
+  });
+  assert.deepEqual(Array.from(continuousRange.selectedCardIDs), ["left-a", "middle-a", "middle-b", "right-a"]);
+  assert.equal(continuousRange.anchorCardID, "middle-a");
 });
 
 test("kanban card helpers color node cards without view-query state", () => {

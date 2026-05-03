@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
-import { EVENT_EXPLORER_CONTEXT_UPDATED } from "../node-map/eventbus";
+import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets } from "../linkingGraph";
+import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED } from "../node-map/eventbus";
 import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
 import { createKanbanColumn, deleteKanbanCard, deleteKanbanColumn, listKanbanCards, listKanbanColumns, moveKanbanCard, updateKanbanColumn, upsertKanbanCard } from "./kanbanApi";
 import {
@@ -23,7 +24,7 @@ import {
   normalizeKanbanColumnItemColor,
   nextCardPosition,
   nextColumnPosition,
-  parseExplorerEntityDragPayload,
+  parseExplorerEntityDragItems,
   parseKanbanCardDragPayload,
   parseKanbanColumnDragPayload,
   sortColumns,
@@ -31,6 +32,7 @@ import {
   type KanbanCardDropPlacement,
   type KanbanColumn,
   type KanbanColumnDropPlacement,
+  type ExplorerEntityDragItem,
 } from "./shared";
 
 type HighlightedEntity = { nodeID: string } | null;
@@ -88,6 +90,29 @@ function readLinkedExplorerSelection(companyID: string, scope: string): Highligh
     return null;
   }
   return null;
+}
+
+function publishKanbanSelectionToLinkedExplorers(companyID: string, boardID: string, nodeID: string, nodeTitle: string): void {
+  if (!nodeID) return;
+  try {
+    const edges = readFrameLinksFromStorage();
+    const registry = readFrameRegistryFromStorage();
+    const targetIDs = resolveDirectLinkedTargets({ sourceFrameID: boardID, edges })
+      .filter((targetID) => classifyFrameKind(registry[targetID]?.kind ?? "") === "explorer");
+    for (const targetID of targetIDs) {
+      const key = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${targetID}`;
+      localStorage.setItem(key, JSON.stringify({
+        sourceKanbanID: boardID,
+        selectedNodeID: nodeID,
+        selectedTreeID: `node-${nodeID}`,
+        selectedLabel: nodeTitle,
+        ts: Date.now(),
+      }));
+      emitDashboardEvent(EVENT_EXPLORER_CONTEXT_UPDATED, { key, sourceKanbanID: boardID, targetID });
+    }
+  } catch {
+    // Selection handoff is a UI convenience; card selection must still work if storage is unavailable.
+  }
 }
 
 function dataTransferIncludes(event: React.DragEvent, mime: string): boolean {
@@ -353,6 +378,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [apiBase, boardID, cards, companyID, refreshBoard]);
 
   const selectCard = useCallback((cardID: string, event: React.MouseEvent<HTMLElement>) => {
+    const clickedCard = cards.find((card) => card.card_id === cardID);
     const next = buildKanbanCardSelectionUpdate({
       columns: orderedColumns,
       cards,
@@ -364,7 +390,11 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     });
     setSelectedCardIDs(next.selectedCardIDs);
     setSelectionAnchorCardID(next.anchorCardID);
-  }, [cards, orderedColumns, selectedCardIDs, selectionAnchorCardID]);
+    if (clickedCard) {
+      setHighlightedEntity({ nodeID: clickedCard.node_id });
+      publishKanbanSelectionToLinkedExplorers(companyID, boardID, clickedCard.node_id, clickedCard.node_title);
+    }
+  }, [boardID, cards, companyID, orderedColumns, selectedCardIDs, selectionAnchorCardID]);
 
   const clearCardSelectionFromBlankClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
     if (event.button !== 0 || event.target !== event.currentTarget) return;
@@ -400,12 +430,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (selectedCardIDs.size === 0 || isEditableKeyboardTarget(event.target)) return;
-      if (event.key === "Backspace") {
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-      if (event.key !== "Delete") return;
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
       // The shortcut only asks for confirmation. The API delete happens from
       // the modal Yes button so selection can never remove a card by itself.
       event.preventDefault();
@@ -417,25 +442,44 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [deleteCardConfirmation, requestCardDelete, selectedCardIDs]);
 
-  const addEntityToColumn = useCallback(async (columnID: string, nodeID: string, label: string) => {
-    const position = nextCardPosition(cards, columnID);
+  const addEntitiesToColumn = useCallback(async (columnID: string, items: ExplorerEntityDragItem[]) => {
+    const dedupedItems: ExplorerEntityDragItem[] = [];
+    const seenNodeIDs = new Set<string>();
+    for (const item of items) {
+      const nodeID = item.nodeID.trim();
+      if (!nodeID || seenNodeIDs.has(nodeID)) continue;
+      seenNodeIDs.add(nodeID);
+      dedupedItems.push({ nodeID, label: item.label.trim() || nodeID });
+    }
+    if (dedupedItems.length === 0) return;
+
+    const firstPosition = nextCardPosition(cards, columnID);
     const now = new Date().toISOString();
-    const optimistic: KanbanCard = {
+    const optimisticCards: KanbanCard[] = dedupedItems.map((item, index) => ({
       company_id: companyID,
       board_id: boardID,
-      card_id: `pending-node-${nodeID}`,
+      card_id: `pending-node-${item.nodeID}`,
       column_id: columnID,
-      node_id: nodeID,
-      node_title: label,
+      node_id: item.nodeID,
+      node_title: item.label,
       description_snapshot: "",
-      position,
+      position: firstPosition + index * 1000,
       created_timestamp: now,
       updated_timestamp: now,
-    };
-    setCards((previous) => [...previous.filter((card) => card.node_id !== nodeID), optimistic]);
+    }));
+    setCards((previous) => [...previous.filter((card) => !seenNodeIDs.has(card.node_id)), ...optimisticCards]);
     try {
-      const saved = await upsertKanbanCard({ apiBase, companyID, boardID, columnID, nodeID, nodeTitle: label, position });
-      setCards((previous) => [...previous.filter((card) => card.card_id !== optimistic.card_id && card.node_id !== nodeID), saved]);
+      const savedCards = await Promise.all(dedupedItems.map((item, index) => upsertKanbanCard({
+        apiBase,
+        companyID,
+        boardID,
+        columnID,
+        nodeID: item.nodeID,
+        nodeTitle: item.label,
+        position: firstPosition + index * 1000,
+      })));
+      const optimisticCardIDs = new Set(optimisticCards.map((card) => card.card_id));
+      setCards((previous) => [...previous.filter((card) => !optimisticCardIDs.has(card.card_id) && !seenNodeIDs.has(card.node_id)), ...savedCards]);
     } catch {
       setError("Drop failed");
       refreshBoard();
@@ -456,11 +500,11 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       void reorderCard(cardPayload.cardID, columnID, null);
       return;
     }
-    const explorerPayload = parseExplorerEntityDragPayload(event.dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
-    if (explorerPayload) {
-      void addEntityToColumn(columnID, explorerPayload.nodeID, explorerPayload.label);
+    const explorerItems = parseExplorerEntityDragItems(event.dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
+    if (explorerItems.length > 0) {
+      void addEntitiesToColumn(columnID, explorerItems);
     }
-  }, [addEntityToColumn, reorderCard, reorderColumn]);
+  }, [addEntitiesToColumn, reorderCard, reorderColumn]);
 
   const onDropAtEnd = useCallback((event: React.DragEvent) => {
     const columnPayload = parseKanbanColumnDragPayload(event.dataTransfer.getData(KANBAN_COLUMN_DRAG_MIME));
@@ -493,6 +537,8 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             setSelectedCardIDs(new Set([card.card_id]));
             setSelectionAnchorCardID(card.card_id);
           }
+          setHighlightedEntity({ nodeID: card.node_id });
+          publishKanbanSelectionToLinkedExplorers(companyID, boardID, card.node_id, card.node_title);
           setColumnContextMenu(null);
           setCardContextMenu({ x: event.clientX, y: event.clientY, cardID: card.card_id });
         }}
@@ -792,7 +838,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
               Are you sure you want to delete {deleteCardConfirmation.cardIDs.length} Kanban card{deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"}?
             </div>
             <div style={{ fontSize: 11, lineHeight: 1.35, color: "#2e2e2e" }}>
-              This removes the selected card{deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"} from this board immediately.
+              This only removes the selected Kanban board card{deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"}. The underlying node{deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"} will continue to exist outside this board.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <button

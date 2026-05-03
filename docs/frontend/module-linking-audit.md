@@ -66,6 +66,8 @@ Kanban participates in the same frame-link graph using kind `kanban`.
 - Company Explorer rows are draggable as node/logic-gate payloads.
 - Kanban consumes those payloads and writes durable cards through `/v1/kanban/cards`.
 - Linked Explorer selection is read from the existing Explorer context keys and highlights a matching Kanban card.
+- Kanban card clicks write node context back to directly linked Explorer frames using the same Explorer context key family, allowing the matching Explorer node row to highlight.
+- Company Explorer can export selected node rows as a node-only drag batch; Kanban de-dupes that payload and upserts each node card into the dropped column.
 - Parent/Child Frame auto-linking works without extra Kanban-specific storage because child frame groups already run through the generic link plan.
 
 

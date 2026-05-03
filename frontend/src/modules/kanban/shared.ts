@@ -11,10 +11,18 @@ export const KANBAN_MIN_COLUMN_HEIGHT_PX = 160;
 export const KANBAN_MAX_COLUMN_HEIGHT_PX = 720;
 export const KANBAN_DEFAULT_COLUMN_ITEM_COLOR = "#2f7d62";
 
+export type ExplorerEntityDragItem = {
+  nodeID: string;
+  label: string;
+};
+
 export type ExplorerEntityDragPayload = {
   itemType: "node";
   nodeID: string;
   label: string;
+} | {
+  itemType: "node_batch";
+  nodes: ExplorerEntityDragItem[];
 };
 
 export type KanbanColumn = {
@@ -85,7 +93,25 @@ export function normalizeKanbanColumnItemColor(value: unknown): string {
 
 export function sanitizeExplorerEntityDragPayload(value: unknown): ExplorerEntityDragPayload | null {
   if (!value || typeof value !== "object") return null;
-  const candidate = value as { itemType?: unknown; nodeID?: unknown; itemID?: unknown; label?: unknown };
+  const candidate = value as { itemType?: unknown; nodeID?: unknown; itemID?: unknown; label?: unknown; nodes?: unknown };
+  // Batch payloads come from Explorer multi-select. Sanitize each item so a
+  // malformed row cannot poison the whole drop operation.
+  if (candidate.itemType === "node_batch" && Array.isArray(candidate.nodes)) {
+    const nodes: ExplorerEntityDragItem[] = [];
+    const seen = new Set<string>();
+    for (const item of candidate.nodes) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as { nodeID?: unknown; itemID?: unknown; label?: unknown };
+      const rawNodeID = typeof row.nodeID === "string" ? row.nodeID : row.itemID;
+      if (typeof rawNodeID !== "string" || rawNodeID.trim() === "") continue;
+      const nodeID = rawNodeID.trim();
+      if (seen.has(nodeID)) continue;
+      seen.add(nodeID);
+      const label = typeof row.label === "string" && row.label.trim() ? row.label.trim() : nodeID;
+      nodes.push({ nodeID, label });
+    }
+    return nodes.length > 0 ? { itemType: "node_batch", nodes } : null;
+  }
   if (!isKanbanBoardDropItemType(candidate.itemType)) return null;
   const rawNodeID = typeof candidate.nodeID === "string" ? candidate.nodeID : candidate.itemID;
   if (typeof rawNodeID !== "string" || rawNodeID.trim() === "") return null;
@@ -100,6 +126,16 @@ export function parseExplorerEntityDragPayload(raw: string): ExplorerEntityDragP
   } catch {
     return null;
   }
+}
+
+export function getExplorerEntityDragItems(payload: ExplorerEntityDragPayload | null): ExplorerEntityDragItem[] {
+  if (!payload) return [];
+  if (payload.itemType === "node_batch") return payload.nodes;
+  return [{ nodeID: payload.nodeID, label: payload.label }];
+}
+
+export function parseExplorerEntityDragItems(raw: string): ExplorerEntityDragItem[] {
+  return getExplorerEntityDragItems(parseExplorerEntityDragPayload(raw));
 }
 
 export function serializeExplorerEntityDragPayload(payload: ExplorerEntityDragPayload): string {
@@ -329,16 +365,16 @@ export function buildKanbanCardSelectionUpdate(args: {
     const clickedIndex = orderedIDs.indexOf(args.clickedCardID);
     const [start, end] = anchorIndex <= clickedIndex ? [anchorIndex, clickedIndex] : [clickedIndex, anchorIndex];
     const range = orderedIDs.slice(start, end + 1);
-    const selected = args.additiveKey ? new Set(args.selectedCardIDs) : new Set<string>();
+    const selected = new Set(args.selectedCardIDs);
     for (const cardID of range) selected.add(cardID);
-    return { selectedCardIDs: selected, anchorCardID: args.anchorCardID };
+    return { selectedCardIDs: new Set(orderedIDs.filter((cardID) => selected.has(cardID))), anchorCardID: args.anchorCardID };
   }
 
   if (args.additiveKey) {
     const selected = new Set(args.selectedCardIDs);
     if (selected.has(args.clickedCardID)) selected.delete(args.clickedCardID);
     else selected.add(args.clickedCardID);
-    return { selectedCardIDs: selected, anchorCardID: args.clickedCardID };
+    return { selectedCardIDs: new Set(orderedIDs.filter((cardID) => selected.has(cardID))), anchorCardID: args.clickedCardID };
   }
 
   return { selectedCardIDs: new Set([args.clickedCardID]), anchorCardID: args.clickedCardID };
