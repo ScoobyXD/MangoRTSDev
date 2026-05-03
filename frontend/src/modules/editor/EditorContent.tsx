@@ -28,6 +28,11 @@ type DocumentSaveRequest = {
   text: string;
 };
 
+type LinkedSelection = {
+  id: string;
+  label: string;
+};
+
 const EDITOR_AUTOSAVE_DELAY_MS = 550;
 
 function documentTargetKey(target: DocumentSaveTarget): string {
@@ -61,6 +66,10 @@ const EDITOR_OUTLINE_STYLE_ITEMS: ReadonlyArray<{ id: EditorOutlineStyleID; labe
 const EDITOR_DOCUMENT_FONT_SIZE_PX = 15;
 const EDITOR_DOCUMENT_LINE_HEIGHT = 1.55;
 const EDITOR_DOCUMENT_LINE_HEIGHT_PX = EDITOR_DOCUMENT_FONT_SIZE_PX * EDITOR_DOCUMENT_LINE_HEIGHT;
+
+function shouldReadStoredSelectionForEvent(hasGap: boolean, hasEventSelection: boolean): boolean {
+  return hasGap && !hasEventSelection;
+}
 
 // Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
@@ -441,50 +450,99 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [companyID]);
 
-  const readSelectedNodeFromExplorerContext = useCallback((): string => {
+  const readSelectedNodeFromExplorerContext = useCallback((): LinkedSelection => {
     try {
       const raw = localStorage.getItem(`${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
-      if (!raw) return "";
-      const parsed = JSON.parse(raw) as { selectedNodeID?: string };
-      return typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "";
+      if (!raw) return { id: "", label: "" };
+      const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedLabel?: string };
+      return {
+        id: typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "",
+        label: typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : "",
+      };
     } catch {
-      return "";
+      return { id: "", label: "" };
     }
   }, [companyID, scope]);
 
-  const readSelectedLogicGateFromExplorerContext = useCallback((): string => {
+  const readSelectedLogicGateFromExplorerContext = useCallback((): LinkedSelection => {
     try {
       const raw = localStorage.getItem(`${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
-      if (!raw) return "";
-      const parsed = JSON.parse(raw) as { selectedLogicGateID?: string; selectedNodeID?: string };
-      if (typeof parsed.selectedLogicGateID === "string") return parsed.selectedLogicGateID;
-      return typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "";
+      if (!raw) return { id: "", label: "" };
+      const parsed = JSON.parse(raw) as { selectedLogicGateID?: string; selectedNodeID?: string; selectedLabel?: string };
+      return {
+        id: typeof parsed.selectedLogicGateID === "string" ? parsed.selectedLogicGateID : (typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : ""),
+        label: typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : "",
+      };
     } catch {
-      return "";
+      return { id: "", label: "" };
     }
   }, [companyID, scope]);
 
-  const applyLinkedNode = useCallback((nodeID: string) => {
+  const readNodeLabelFromGraph = useCallback((nodeID: string): string => {
+    if (!nodeID) return "";
+    const node = (getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes ?? []).find((item) => item.node_id === nodeID);
+    return node ? getNodeTitle(node) : "";
+  }, [apiBase, companyID]);
+
+  const readLogicGateLabelFromGraph = useCallback((logicGateID: string): string => {
+    if (!logicGateID) return "";
+    const logicGate = (getLogicGateRelationshipGraphSnapshot(apiBase, companyID).nodes ?? []).find((item) => item.node_id === logicGateID);
+    return logicGate ? getLogicGateTitle(logicGate) : "";
+  }, [apiBase, companyID]);
+
+  const clearVisibleDocumentForSelection = useCallback(() => {
+    setLinkedNodeInfoPreview([]);
+    setLinkedNodeMetadataRows([]);
+    setLinkedNodeHistoryRows([]);
+    documentDraftRef.current = "";
+    persistedDocumentRef.current = "";
+    documentInformationIDRef.current = "";
+    currentDocumentTargetKeyRef.current = "";
+    persistedDocumentTargetKeyRef.current = "";
+    pendingSaveRef.current = null;
+    setDocumentInformationID("");
+    resetEditorTextUndo("", 0, 0);
+    restoringScrollRef.current = false;
+    if (editorTextAreaRef.current) {
+      editorTextAreaRef.current.value = "";
+      editorTextAreaRef.current.scrollTop = 0;
+      editorTextAreaRef.current.setSelectionRange(0, 0);
+    }
+    setDocumentScrollTop(0);
+    scheduleIndentGuideUpdate("");
+  }, [resetEditorTextUndo, scheduleIndentGuideUpdate]);
+
+  const applyLinkedNode = useCallback((nodeID: string, label = "") => {
     const isSameEntity = linkedEntityKind === "node" && linkedNodeID === nodeID;
-    rememberCurrentDocumentScroll();
+    if (!isSameEntity) {
+      rememberCurrentDocumentScroll();
+      flushPendingDocumentSave(editorTextAreaRef.current?.value ?? documentDraftRef.current);
+      clearVisibleDocumentForSelection();
+    }
     setLinkedEntityKind(nodeID ? "node" : "");
     setLinkedNodeID(nodeID);
+    setLinkedNodeTitle(nodeID ? (label || readNodeLabelFromGraph(nodeID)) : "");
     if (nodeID && !isSameEntity) {
       setActiveTab("editor");
       focusEditorDocumentWithoutScrollJump();
     }
-  }, [focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, rememberCurrentDocumentScroll]);
+  }, [clearVisibleDocumentForSelection, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, readNodeLabelFromGraph, rememberCurrentDocumentScroll]);
 
-  const applyLinkedLogicGate = useCallback((logicGateID: string) => {
+  const applyLinkedLogicGate = useCallback((logicGateID: string, label = "") => {
     const isSameEntity = linkedEntityKind === "logic_gate" && linkedNodeID === logicGateID;
-    rememberCurrentDocumentScroll();
+    if (!isSameEntity) {
+      rememberCurrentDocumentScroll();
+      flushPendingDocumentSave(editorTextAreaRef.current?.value ?? documentDraftRef.current);
+      clearVisibleDocumentForSelection();
+    }
     setLinkedEntityKind(logicGateID ? "logic_gate" : "");
     setLinkedNodeID(logicGateID);
+    setLinkedNodeTitle(logicGateID ? (label || readLogicGateLabelFromGraph(logicGateID)) : "");
     if (logicGateID && !isSameEntity) {
       setActiveTab("editor");
       focusEditorDocumentWithoutScrollJump();
     }
-  }, [focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, rememberCurrentDocumentScroll]);
+  }, [clearVisibleDocumentForSelection, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, readLogicGateLabelFromGraph, rememberCurrentDocumentScroll]);
 
   const updateNodeTitle = useCallback(async (nextTitle: string) => {
     const value = nextTitle.trim();
@@ -563,13 +621,13 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         return;
       }
       const selectedFromExplorer = readSelectedNodeFromExplorerContext();
-      if (selectedFromExplorer) {
-        applyLinkedNode(selectedFromExplorer);
+      if (selectedFromExplorer.id) {
+        applyLinkedNode(selectedFromExplorer.id, selectedFromExplorer.label);
         return;
       }
       const selectedLogicFromExplorer = readSelectedLogicGateFromExplorerContext();
-      if (selectedLogicFromExplorer) {
-        applyLinkedLogicGate(selectedLogicFromExplorer);
+      if (selectedLogicFromExplorer.id) {
+        applyLinkedLogicGate(selectedLogicFromExplorer.id, selectedLogicFromExplorer.label);
         return;
       }
       applyLinkedNode("");
@@ -584,15 +642,15 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (event.key && event.key !== mapStateKey && event.key !== logicMapStateKey && event.key !== explorerContextKey && event.key !== logicExplorerContextKey) return;
       if (event.key === logicExplorerContextKey) {
         const logicExplorerSelected = readSelectedLogicGateFromExplorerContext();
-        if (logicExplorerSelected) {
-          applyLinkedLogicGate(logicExplorerSelected);
+        if (logicExplorerSelected.id) {
+          applyLinkedLogicGate(logicExplorerSelected.id, logicExplorerSelected.label);
           return;
         }
       }
       if (event.key === explorerContextKey) {
         const explorerSelected = readSelectedNodeFromExplorerContext();
-        if (explorerSelected) {
-          applyLinkedNode(explorerSelected);
+        if (explorerSelected.id) {
+          applyLinkedNode(explorerSelected.id, explorerSelected.label);
           return;
         }
       }
@@ -603,10 +661,12 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (!detail || detail.mapWidgetID !== linkedMapWidgetID) return;
       const revision = readIncomingSequence(detail);
       if (revision > 0 && !isNewerSequence(lastSelectionRevisionRef.current, revision)) return;
-      if (revision > 0 && hasSequenceGap(lastSelectionRevisionRef.current, revision)) refresh();
+      const eventSelectedNodeID = typeof detail.selectedNodeID === "string" ? detail.selectedNodeID : null;
+      const eventHasSelection = eventSelectedNodeID !== null;
+      if (revision > 0 && shouldReadStoredSelectionForEvent(hasSequenceGap(lastSelectionRevisionRef.current, revision), eventHasSelection)) refresh();
       if (revision > 0) lastSelectionRevisionRef.current = revision;
-      if (typeof detail.selectedNodeID === "string") {
-        applyLinkedNode(detail.selectedNodeID);
+      if (eventSelectedNodeID !== null) {
+        applyLinkedNode(eventSelectedNodeID);
         return;
       }
       refresh();
@@ -617,11 +677,14 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (!detail || detail.mapWidgetID !== logicContextFrameID) return;
       const revision = readIncomingSequence(detail);
       if (revision > 0 && !isNewerSequence(lastLogicGateSelectionRevisionRef.current, revision)) return;
-      if (revision > 0 && hasSequenceGap(lastLogicGateSelectionRevisionRef.current, revision)) refresh();
+      const eventSelectedLogicGateID = typeof detail.selectedLogicGateID === "string"
+        ? detail.selectedLogicGateID
+        : (typeof detail.selectedNodeID === "string" ? detail.selectedNodeID : null);
+      const eventHasSelection = eventSelectedLogicGateID !== null;
+      if (revision > 0 && shouldReadStoredSelectionForEvent(hasSequenceGap(lastLogicGateSelectionRevisionRef.current, revision), eventHasSelection)) refresh();
       if (revision > 0) lastLogicGateSelectionRevisionRef.current = revision;
-      const selected = typeof detail.selectedLogicGateID === "string" ? detail.selectedLogicGateID : detail.selectedNodeID;
-      if (typeof selected === "string") {
-        applyLinkedLogicGate(selected);
+      if (eventSelectedLogicGateID !== null) {
+        applyLinkedLogicGate(eventSelectedLogicGateID);
         return;
       }
       refresh();
@@ -634,26 +697,26 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (detail.key !== expectedKey && detail.key !== expectedLogicKey && detail.targetID !== scope) return;
       if (detail.key === expectedLogicKey) {
         const logicExplorerSelected = readSelectedLogicGateFromExplorerContext();
-        if (logicExplorerSelected) {
-          applyLinkedLogicGate(logicExplorerSelected);
+        if (logicExplorerSelected.id) {
+          applyLinkedLogicGate(logicExplorerSelected.id, logicExplorerSelected.label);
           return;
         }
       }
       if (detail.key === expectedKey) {
         const explorerSelected = readSelectedNodeFromExplorerContext();
-        if (explorerSelected) {
-          applyLinkedNode(explorerSelected);
+        if (explorerSelected.id) {
+          applyLinkedNode(explorerSelected.id, explorerSelected.label);
           return;
         }
       }
       const explorerSelected = readSelectedNodeFromExplorerContext();
-      if (explorerSelected) {
-        applyLinkedNode(explorerSelected);
+      if (explorerSelected.id) {
+        applyLinkedNode(explorerSelected.id, explorerSelected.label);
         return;
       }
       const logicExplorerSelected = readSelectedLogicGateFromExplorerContext();
-      if (logicExplorerSelected) {
-        applyLinkedLogicGate(logicExplorerSelected);
+      if (logicExplorerSelected.id) {
+        applyLinkedLogicGate(logicExplorerSelected.id, logicExplorerSelected.label);
         return;
       }
       refresh();
