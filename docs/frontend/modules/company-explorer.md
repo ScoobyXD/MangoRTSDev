@@ -173,11 +173,10 @@ Folder runtime update (2026-05-02):
 - Row hover shows a visual selection preview only. It does not publish linked-map context or write API state, which keeps accidental mouse movement off the hot synchronization path.
 - Expanded rows, tree scroll position, and root-level order for unplaced rows persist in localStorage per company/frame on the user's own machine. This state is intentionally not propagated through backend or company-wide sync.
 - The Explorer tree owns its vertical overflow and uses the same thin scrollbar treatment as Editor surfaces. The scrollbar is browser-native, appears only when the tree exceeds the frame height, and keeps rendering virtualized for large company trees. Light frames use the Editor light-mode cyan scrollbar color.
-- Selecting a node folder broadcasts `selectedFolderID`/`selectedFolderKind=node`; linked Node Map shows that folder level as direct node cards plus immediate child folder cards.
-- Selecting a logic-gate folder broadcasts `selectedFolderID`/`selectedFolderKind=logic_gate`; linked Logic Gate Map applies the same folder-level projection for gates.
+- Selecting a node folder broadcasts `selectedFolderID`/`selectedFolderKind=node`; linked Node Map filters its cached graph to nodes placed in that folder or any descendant folder.
+- Selecting a logic-gate folder broadcasts `selectedFolderID`/`selectedFolderKind=logic_gate`; linked Logic Gate Map applies the same folder-scope rule for gates.
 - Selecting an individual node or logic gate inside a folder keeps that folder scope in the broadcast, so linked maps can select the item without expanding back to the whole company.
-- Relationships are displayed only when both endpoints are direct visible items at the active map level. Cross-folder relationships stay persisted but are hidden until the relevant folder level is expanded.
-- Map folder cards are derived from the same `company_explorer_folders` and `company_explorer_folder_items` APIs used by Explorer. The map does not introduce a separate folder model, so headless agents can create, move, and organize items through the existing APIs.
+- Relationships are displayed only when both endpoints are inside the active folder scope. Cross-folder relationships stay persisted but are hidden in that scoped map view.
 
 Unified map/linking update (2026-05-03):
 - The module picker now exposes one `Map` module. The map switches between node and logic-gate views from the latest Explorer context: node folders/items show nodes, logic-gate folders/items show logic gates.
