@@ -10,7 +10,8 @@ import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGr
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import type { NodeInformation } from "../node-map/shared";
 import { getEditorDocumentIsolationState, type EditorTabID } from "./editorTabs";
-import { insertEditorTabTextIntoTextArea } from "./plainTextEditing";
+import { classifyEditorInputType, createEditorUndoHistory, recordEditorUndoChange, redoEditorText, resetEditorUndoHistory, snapshotEditorText, snapshotEditorTextArea, undoEditorText, type EditorTextChangeKind, type EditorTextSnapshot } from "./editorUndoHistory";
+import { insertEditorTabText } from "./plainTextEditing";
 
 type LinkedEntityKind = "node" | "logic_gate";
 
@@ -73,6 +74,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const saveInFlightRef = useRef(false);
   const lastSelectionRevisionRef = useRef(0);
   const lastLogicGateSelectionRevisionRef = useRef(0);
+  const editorUndoHistoryRef = useRef(createEditorUndoHistory());
+  const lastEditorTextSnapshotRef = useRef<EditorTextSnapshot>(snapshotEditorText("", 0, 0));
+  const pendingEditorInputKindRef = useRef<EditorTextChangeKind>("unknown");
 
   const placeEditorCaretAtDocumentEnd = useCallback((scrollToEnd = false) => {
     window.requestAnimationFrame(() => {
@@ -228,6 +232,38 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     if (pending) enqueueDocumentSave(pending);
   }, [buildDocumentSaveRequest, enqueueDocumentSave]);
 
+  const resetEditorTextUndo = useCallback((text: string, selectionStart = text.length, selectionEnd = selectionStart) => {
+    resetEditorUndoHistory(editorUndoHistoryRef.current);
+    lastEditorTextSnapshotRef.current = snapshotEditorText(text, selectionStart, selectionEnd);
+    pendingEditorInputKindRef.current = "unknown";
+  }, []);
+
+  const syncEditorTextSelectionSnapshot = useCallback((element: HTMLTextAreaElement) => {
+    const snapshot = lastEditorTextSnapshotRef.current;
+    if (snapshot.value === element.value) lastEditorTextSnapshotRef.current = snapshotEditorTextArea(element);
+  }, []);
+
+  const recordEditorTextChange = useCallback((element: HTMLTextAreaElement, kindOverride?: EditorTextChangeKind) => {
+    const after = snapshotEditorTextArea(element);
+    recordEditorUndoChange(
+      editorUndoHistoryRef.current,
+      lastEditorTextSnapshotRef.current,
+      after,
+      kindOverride ?? pendingEditorInputKindRef.current,
+    );
+    lastEditorTextSnapshotRef.current = after;
+    pendingEditorInputKindRef.current = "unknown";
+    return after;
+  }, []);
+
+  const applyEditorUndoSnapshot = useCallback((element: HTMLTextAreaElement, snapshot: EditorTextSnapshot) => {
+    element.value = snapshot.value;
+    element.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+    lastEditorTextSnapshotRef.current = snapshot;
+    pendingEditorInputKindRef.current = "unknown";
+    scheduleDocumentSave(snapshot.value);
+  }, [scheduleDocumentSave]);
+
   const selectTab = useCallback((tab: EditorTabID) => {
     if (tab === activeTab) return;
     if (activeTab === "editor" && tab !== "editor" && editorTextAreaRef.current) {
@@ -253,8 +289,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     currentDocumentTargetKeyRef.current = targetKey;
     persistedDocumentTargetKeyRef.current = targetKey;
     if (editorTextAreaRef.current && editorTextAreaRef.current.value !== text) editorTextAreaRef.current.value = text;
+    resetEditorTextUndo(text);
     placeEditorCaretAtDocumentEnd(true);
-  }, [placeEditorCaretAtDocumentEnd]);
+  }, [placeEditorCaretAtDocumentEnd, resetEditorTextUndo]);
 
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
@@ -571,6 +608,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       persistedDocumentTargetKeyRef.current = "";
       pendingSaveRef.current = null;
       setDocumentInformationID("");
+      resetEditorTextUndo("", 0, 0);
       if (editorTextAreaRef.current) {
         editorTextAreaRef.current.value = "";
         editorTextAreaRef.current.scrollTop = 0;
@@ -755,10 +793,35 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           aria-hidden={documentIsolation.ariaHidden}
           tabIndex={documentIsolation.tabIndex}
           spellCheck
-          onChange={(event) => scheduleDocumentSave(event.currentTarget.value)}
-          onBlur={(event) => flushPendingDocumentSave(event.currentTarget.value)}
+          onBeforeInput={(event) => {
+            pendingEditorInputKindRef.current = classifyEditorInputType((event.nativeEvent as InputEvent).inputType);
+          }}
+          onPaste={() => { pendingEditorInputKindRef.current = "paste"; }}
+          onDrop={() => { pendingEditorInputKindRef.current = "paste"; }}
+          onChange={(event) => {
+            const snapshot = recordEditorTextChange(event.currentTarget);
+            scheduleDocumentSave(snapshot.value);
+          }}
+          onSelect={(event) => syncEditorTextSelectionSnapshot(event.currentTarget)}
+          onClick={(event) => syncEditorTextSelectionSnapshot(event.currentTarget)}
+          onKeyUp={(event) => syncEditorTextSelectionSnapshot(event.currentTarget)}
+          onBlur={(event) => {
+            syncEditorTextSelectionSnapshot(event.currentTarget);
+            flushPendingDocumentSave(event.currentTarget.value);
+          }}
           onWheel={(event) => event.stopPropagation()}
           onKeyDown={(event) => {
+            const key = event.key.toLowerCase();
+            const mod = event.ctrlKey || event.metaKey;
+            if (mod && !event.altKey && (key === "z" || key === "y")) {
+              const shouldRedo = key === "y" || event.shiftKey;
+              event.preventDefault();
+              const snapshot = shouldRedo
+                ? redoEditorText(editorUndoHistoryRef.current, event.currentTarget.value)
+                : undoEditorText(editorUndoHistoryRef.current, event.currentTarget.value);
+              if (snapshot) applyEditorUndoSnapshot(event.currentTarget, snapshot);
+              return;
+            }
             if (event.key === "Escape") {
               event.preventDefault();
               event.currentTarget.blur();
@@ -767,10 +830,15 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             if (event.key !== "Tab") return;
 
             event.preventDefault();
-            // Textareas normally use Tab to leave the field. In this document
-            // editor it inserts spaces, while preserving native undo when the
-            // browser exposes an undo-aware text insertion command.
-            const edit = insertEditorTabTextIntoTextArea(event.currentTarget);
+            // Textareas normally use Tab to leave the field. Here it is an
+            // isolated editor edit group so one undo removes only this Tab.
+            const before = snapshotEditorTextArea(event.currentTarget);
+            const edit = insertEditorTabText(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
+            event.currentTarget.value = edit.value;
+            event.currentTarget.setSelectionRange(edit.selectionStart, edit.selectionEnd);
+            recordEditorUndoChange(editorUndoHistoryRef.current, before, snapshotEditorTextArea(event.currentTarget), "tab");
+            lastEditorTextSnapshotRef.current = snapshotEditorTextArea(event.currentTarget);
+            pendingEditorInputKindRef.current = "unknown";
             scheduleDocumentSave(edit.value);
           }}
           style={{

@@ -109,7 +109,7 @@ Use this checklist before editing features so existing behavior is not accidenta
 - Ctrl/Cmd + V: paste copied module with small offset.
 - Ctrl/Cmd + Z: undo dashboard frame/layout changes when focus is outside editable text.
 - Ctrl/Cmd + Y or Ctrl/Cmd + Shift + Z: redo dashboard frame/layout changes when focus is outside editable text.
-- Keyboard shortcuts defer to native browser behavior while typing in inputs, textareas, selects, contentEditable, and nested editable surfaces; this lets the Editor textarea use normal text undo/redo.
+- Keyboard shortcuts defer while typing in inputs, textareas, selects, contentEditable, and nested editable surfaces. The Editor textarea handles its own bounded local text undo/redo.
 
 ### 8) Undo/Redo History
 - Snapshot-based undo/redo tracks:
@@ -122,6 +122,7 @@ Use this checklist before editing features so existing behavior is not accidenta
   - tab box color
   - tab text color.
 - Undo stack capped to a fixed length.
+- Editor text undo is a separate in-memory range stack per mounted editor. It is not stored in information or projection tables.
 
 ### 9) Persistence
 - Views/tabs/modules are persisted to local storage (`grid-dashboard-views-v1`).

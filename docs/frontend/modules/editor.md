@@ -45,14 +45,16 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 
 ## Document Editing Reliability Update (2026-05-03)
 - The body editor uses a styled native `textarea`, not raw `contentEditable`, so browser-native caret drawing, insertion point movement, text input, and scrollbars remain reliable inside frame wrappers.
-- While focus is inside the document textarea or inline title editor, `Ctrl/Cmd + Z`, `Ctrl/Cmd + Shift + Z`, and `Ctrl/Cmd + Y` are left to the browser's native text undo/redo stack. Dashboard frame undo only runs when focus is outside editable text.
+- While focus is inside the document textarea, `Ctrl/Cmd + Z`, `Ctrl/Cmd + Shift + Z`, and `Ctrl/Cmd + Y` use the editor's bounded local text undo/redo stack. Dashboard frame undo only runs when focus is outside editable text.
+- Editor undo stores compact changed ranges, not full document snapshots per step. It is capped per mounted editor and reset when a different node or logic-gate document is loaded.
+- Editor undo is UI-local only. It does not add rows, columns, or undo payloads to `node_information`, `logic_gate_information`, or projection tables.
 - Typing schedules a debounced save. Blur, node switch, and unmount flush the latest pending value so edits do not wait for a manual save action.
 - Saves are serialized per editor instance. If a save is in flight, the editor queues only the latest follow-up value, preserving user-perceived order without flooding the API.
 - The editor surface owns the full frame height. This prevents the textarea viewport from collapsing to a thin strip and lets mouse-wheel scrolling behave like a regular text editor.
 - Metadata and History are isolated from the document body. The textarea stays mounted to preserve draft/autosave state, but it is hidden, removed from tab order, and made non-interactive whenever another tab owns the frame.
 - Switching away from the Editor tab flushes the same pending document save path used by blur. This keeps UI tabs and future headless API flows on the same persistence contract instead of adding tab-specific write behavior.
 - Selecting a linked node or logic gate switches back to the Editor tab and focuses the document so the caret starts blinking immediately.
-- Enter is native textarea Enter. Tab inserts five plain spaces through the browser text-insertion path when available, so the Tab edit participates in normal textarea undo. There is no automatic list or outline formatting in this pass.
+- Enter is native textarea Enter. Tab inserts five plain spaces as its own editor undo group. There is no automatic list or outline formatting in this pass.
 - Clearing all text calls the projection delete API. This keeps reload behavior correct while preserving append-only nonblank history for audit and scale.
 - The same APIs work for headless agents: agents can post latest document text with a stable `information_id`, read projections for sub-100ms hot paths, and delete a projection to clear the latest document value.
 
