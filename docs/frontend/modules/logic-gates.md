@@ -80,6 +80,7 @@ Logic Gate Map follows the latency architecture rules:
 - unchanged snapshot responses use ETag/304,
 - visible gate rendering uses the same viewport culling strategy as Node Map,
 - the visual background uses the shared repeated SVG plus-grid, which adapts tile size by zoom without creating per-cell DOM,
+- the major plus layer is aligned to the minor grid axes so scale cues stay readable during pan and zoom,
 - layout geometry is a backend projection in `logic_gate_map_positions`; browser storage keeps only small viewport/selection cache data.
 - Company Explorer folder selection filters the cached snapshot in memory. A selected folder includes descendant folders, and relationship lines render only when both gates are inside that active scope.
 - Selecting an individual gate from inside a Company Explorer folder keeps that folder scope active while selecting the gate.

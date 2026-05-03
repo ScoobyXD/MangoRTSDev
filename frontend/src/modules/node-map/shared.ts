@@ -164,16 +164,19 @@ export function buildPlusGridBackgroundStyle(input: {
   const majorArm = clamp(5.5 / zoom, 2.6, 7.5);
   const minorColor = input.theme === "dark" ? "#bcecf2" : "#425961";
   const majorColor = input.accent || (input.theme === "dark" ? "#72f1ff" : "#007b88");
+  const majorLayerOffset = formatGridNumber((minorStep - majorStep) / 2);
 
   // The browser repeats two tiny SVG tiles instead of us creating thousands of
   // grid DOM nodes. That keeps pan/zoom cheap for very large company maps.
+  // Both SVGs draw their plus at tile center. The larger tile is offset so its
+  // center lands on the same axes as every fourth minor plus, not between them.
   return {
     backgroundColor: input.theme === "dark" ? "rgba(10, 14, 18, 0.68)" : "rgba(247, 251, 252, 0.82)",
     backgroundImage: [
       plusGridSvgDataURL({ size: minorStep, color: minorColor, opacity: input.theme === "dark" ? 0.28 : 0.24, arm: minorArm, strokeWidth }),
       plusGridSvgDataURL({ size: majorStep, color: majorColor, opacity: input.theme === "dark" ? 0.42 : 0.30, arm: majorArm, strokeWidth }),
     ].join(", "),
-    backgroundPosition: "0 0, 0 0",
+    backgroundPosition: `0 0, ${majorLayerOffset}px ${majorLayerOffset}px`,
     backgroundRepeat: "repeat, repeat",
     backgroundSize: `${minorStep}px ${minorStep}px, ${majorStep}px ${majorStep}px`,
   };
