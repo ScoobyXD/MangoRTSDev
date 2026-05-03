@@ -7,7 +7,7 @@ import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceS
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
 import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
-import { filterNodeGraphToFolderScope, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
+import { buildFolderLevelMapProjection, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem, type MapFolderCard } from "../folders/companyExplorerFolders";
 
 type ExplorerSelectionOrigin = {
   sourceExplorerID: string;
@@ -15,6 +15,8 @@ type ExplorerSelectionOrigin = {
   sourceExplorerSelectedTreeID: string;
   selectedEntityID: string;
 };
+
+const folderCardNodeID = (folderID: string) => `folder:${folderID}`;
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
 export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "teal" }) => {
@@ -43,6 +45,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
   const [folders, setFolders] = useState<CompanyExplorerFolder[]>([]);
   const [folderItems, setFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
+  const [folderCards, setFolderCards] = useState<MapFolderCard[]>([]);
+  const [folderPositions, setFolderPositions] = useState<Record<string, NodePosition>>({});
   const [activeFolderID, setActiveFolderID] = useState("");
   const [activeFolderLabel, setActiveFolderLabel] = useState("");
   const [relationshipAnchors, setRelationshipAnchors] = useState<Record<string, RelationshipAnchor>>({});
@@ -137,6 +141,28 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     x: clamp(snapToGrid((canvasSize.width / 2 - pan.x) / zoom - NODE_W / 2), 0, WORLD_W - NODE_W),
     y: clamp(snapToGrid((canvasSize.height / 2 - pan.y) / zoom - NODE_H / 2), 0, WORLD_H - NODE_H),
   }), [WORLD_H, WORLD_W, canvasSize.height, canvasSize.width, pan.x, pan.y, zoom]);
+  const activeFolder = useMemo(() => folders.find((folder) => folder.folder_id === activeFolderID), [activeFolderID, folders]);
+  const activeFolderDisplayLabel = activeFolderLabel || activeFolder?.name || "";
+  const navigateToFolder = (folderID: string) => {
+    const folder = folders.find((candidate) => candidate.folder_id === folderID);
+    if (!folder) return;
+    setActiveFolderID(folder.folder_id);
+    setActiveFolderLabel(folder.name);
+    setSelectedNodeID("");
+    setSelectedNodeIDs(new Set());
+    setSelectedRelationshipIDs(new Set());
+    setRelationshipDraft(null);
+  };
+  const navigateToParentFolder = () => {
+    const parentFolderID = activeFolder?.parent_folder_id ?? "";
+    const parentFolder = parentFolderID ? folders.find((folder) => folder.folder_id === parentFolderID) : null;
+    setActiveFolderID(parentFolderID);
+    setActiveFolderLabel(parentFolder?.name ?? "");
+    setSelectedNodeID("");
+    setSelectedNodeIDs(new Set());
+    setSelectedRelationshipIDs(new Set());
+    setRelationshipDraft(null);
+  };
 
   // Keep relationship projection derivation centralized so callers can reuse the exact same
   // filtering logic without triggering additional network calls.
@@ -152,19 +178,25 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     snapshotFolderItems: CompanyExplorerFolderItem[],
     folderID = activeFolderID,
   ) => {
-    const scoped = filterNodeGraphToFolderScope({
-      nodes: snapshotNodes,
+    // Folder cards are derived from durable Explorer folder rows. We do not
+    // create a second map-only folder model; agents use the same APIs as the UI.
+    const scoped = buildFolderLevelMapProjection({
+      items: snapshotNodes,
       relationships: snapshotRelationships,
       folders: snapshotFolders,
       folderItems: snapshotFolderItems,
       folderID,
+      itemType: "node",
+      getItemID: (node) => node.node_id,
+      getRelationshipItemIDs: (relationship) => [relationship.node_id_a, relationship.node_id_b],
     });
     setAllNodes(snapshotNodes);
     setFolders(snapshotFolders);
     setFolderItems(snapshotFolderItems);
-    setNodes(scoped.nodes);
+    setFolderCards(scoped.childFolders);
+    setNodes(scoped.items);
     setRelationships(scoped.relationships);
-    return scoped.nodes;
+    return scoped.items;
   };
 
   const startNodeMapMultiSelect = (pointerID: number, clientX: number, clientY: number, additive: boolean) => {
@@ -562,6 +594,20 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       });
     });
   }, [nodes, canvasSize.width, visibleInsertionPosition]);
+
+  useEffect(() => {
+    setFolderPositions((previous) => {
+      return reconcileNodeMapPositions({
+        previous,
+        nodes: folderCards.map((folder) => ({ node_id: folderCardNodeID(folder.folder_id) })),
+        canvasWidth: canvasSize.width,
+        worldWidth: WORLD_W,
+        worldHeight: WORLD_H,
+        nodeWidth: NODE_W,
+        nodeHeight: NODE_H,
+      });
+    });
+  }, [folderCards, canvasSize.width]);
 
   useNodeMapDragControls({
     dragState,
@@ -1274,6 +1320,17 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   }, [relationshipDraft, nodePositions, relationshipRoutingGrid]);
 
   const visibleNodes = useMemo(() => nodes.filter((node) => visibleNodeIDSet.has(node.node_id)), [nodes, visibleNodeIDSet]);
+  const visibleFolderCards = useMemo(() => {
+    const minX = (-pan.x) / zoom;
+    const minY = (-pan.y) / zoom;
+    const maxX = minX + canvasSize.width / zoom;
+    const maxY = minY + canvasSize.height / zoom;
+    const pad = 180;
+    return folderCards.filter((folder) => {
+      const position = folderPositions[folderCardNodeID(folder.folder_id)] ?? { x: 120, y: 120 };
+      return position.x + NODE_W >= minX - pad && position.x <= maxX + pad && position.y + NODE_H >= minY - pad && position.y <= maxY + pad;
+    });
+  }, [canvasSize.height, canvasSize.width, folderCards, folderPositions, pan.x, pan.y, zoom]);
 
   useEffect(() => {
     const canvas = relationshipCanvasRef.current;
@@ -1493,6 +1550,108 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
               />
             ))}
           </svg>
+
+          {visibleFolderCards.map((folder) => {
+            const renderID = folderCardNodeID(folder.folder_id);
+            const position = folderPositions[renderID] ?? { x: 120, y: 120 };
+            const folderName = folder.name || "Untitled folder";
+            const nodeCountLabel = `${folder.descendant_item_count} node${folder.descendant_item_count === 1 ? "" : "s"}`;
+            const childFolderLabel = `${folder.child_folder_count} folder${folder.child_folder_count === 1 ? "" : "s"}`;
+
+            return (
+              <div
+                key={renderID}
+                data-folder-card="node"
+                style={{
+                  position: "absolute",
+                  left: position.x,
+                  top: position.y,
+                  width: NODE_W,
+                  height: NODE_H,
+                  borderRadius: 8,
+                  border: `1.5px dashed ${accent}`,
+                  background: isDarkTheme ? "rgba(25,33,39,0.96)" : "rgba(255,255,255,0.96)",
+                  boxShadow: "0 6px 16px rgba(0,0,0,0.16)",
+                  color: nodeCardText,
+                  display: "grid",
+                  gridTemplateRows: "auto 1fr auto",
+                  padding: "7px 9px 8px",
+                  boxSizing: "border-box",
+                  userSelect: "none",
+                  zIndex: 4,
+                }}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  setCanvasActive(true);
+                  setContextMenu(null);
+                  setNodeContextMenu(null);
+                  setRelationshipContextMenu(null);
+                  setRelationshipDraft(null);
+                  setSelectedNodeID("");
+                  setSelectedNodeIDs(new Set());
+                  setSelectedRelationshipIDs(new Set());
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, minWidth: 0 }}>
+                  <span style={{ fontSize: 9, fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace", color: accent, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    FOLDER
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Expand ${folderName}`}
+                    title={`Expand ${folderName}`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      navigateToFolder(folder.folder_id);
+                    }}
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 4,
+                      border: `1px solid ${accent}`,
+                      background: panelSurface,
+                      color: accent,
+                      display: "grid",
+                      placeItems: "center",
+                      fontSize: 14,
+                      fontWeight: 800,
+                      cursor: "pointer",
+                      padding: 0,
+                      lineHeight: 1,
+                      flexShrink: 0,
+                    }}
+                  >
+                    &gt;
+                  </button>
+                </div>
+                <div style={{ minWidth: 0, display: "grid", placeItems: "center", textAlign: "center", padding: "2px 0" }}>
+                  <div
+                    style={{
+                      whiteSpace: "normal",
+                      overflowWrap: "anywhere",
+                      wordBreak: "break-word",
+                      overflow: "hidden",
+                      maxWidth: "100%",
+                      textOverflow: "ellipsis",
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      fontSize: 16,
+                      fontWeight: 800,
+                      lineHeight: 1.12,
+                      fontFamily: "'IBM Plex Mono', monospace",
+                    }}
+                  >
+                    {folderName}
+                  </div>
+                </div>
+                <div style={{ fontSize: 9, fontWeight: 700, color: panelMutedText, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {nodeCountLabel} / {childFolderLabel}
+                </div>
+              </div>
+            );
+          })}
 
           {visibleNodes.map((node) => {
             const position = nodePositions[node.node_id] ?? { x: 120, y: 120 };
@@ -1792,6 +1951,55 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           })}
         </div>
 
+        {activeFolderID && (
+          <div
+            style={{
+              position: "absolute",
+              top: 10,
+              left: 10,
+              zIndex: 30,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              maxWidth: "min(520px, calc(100% - 20px))",
+              border: `1px solid ${accent}`,
+              borderRadius: 8,
+              background: panelSurface,
+              color: panelText,
+              padding: "5px 7px",
+              boxShadow: "0 6px 16px rgba(0,0,0,0.16)",
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 10,
+              fontWeight: 700,
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              title="Go to parent folder"
+              onClick={navigateToParentFolder}
+              style={{
+                border: `1px solid ${accent}`,
+                background: panelSubtleSurface,
+                color: accent,
+                borderRadius: 4,
+                cursor: "pointer",
+                fontSize: 10,
+                fontWeight: 800,
+                padding: "3px 7px",
+              }}
+            >
+              Up
+            </button>
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {activeFolderDisplayLabel || "Folder"}
+            </span>
+            <span style={{ color: panelMutedText, whiteSpace: "nowrap" }}>
+              {nodes.length} node{nodes.length === 1 ? "" : "s"} / {folderCards.length} folder{folderCards.length === 1 ? "" : "s"}
+            </span>
+          </div>
+        )}
+
         {selectionBox.active && (
           <div
             style={{
@@ -2009,7 +2217,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           <div
             style={{
               position: "absolute",
-              top: 10,
+              top: activeFolderID ? 48 : 10,
               left: 10,
               zIndex: 30,
               background: "rgba(0,0,0,0.75)",
