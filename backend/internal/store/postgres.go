@@ -468,6 +468,26 @@ func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.N
 	return items, nil
 }
 
+func (r *PostgresRepo) DeleteNodeProjection(companyID, nodeID, informationID string) error {
+	ctx := context.Background()
+	var exists bool
+	if err := r.db.QueryRowContext(ctx,
+		`select exists(select 1 from nodes where company_id=$1 and node_id=$2)`,
+		companyID, nodeID,
+	).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	_, err := r.db.ExecContext(ctx,
+		`delete from node_projection_table
+		 where company_id=$1 and node_id=$2 and information_id=$3`,
+		companyID, nodeID, informationID,
+	)
+	return err
+}
+
 func (r *PostgresRepo) CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -937,6 +957,26 @@ func (r *PostgresRepo) ListLogicGateProjections(companyID, logicGateID string) (
 		return nil, err
 	}
 	return items, nil
+}
+
+func (r *PostgresRepo) DeleteLogicGateProjection(companyID, logicGateID, informationID string) error {
+	ctx := context.Background()
+	var exists bool
+	if err := r.db.QueryRowContext(ctx,
+		`select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`,
+		companyID, logicGateID,
+	).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	_, err := r.db.ExecContext(ctx,
+		`delete from logic_gate_projection_table
+		 where company_id=$1 and logic_gate_id=$2 and information_id=$3`,
+		companyID, logicGateID, informationID,
+	)
+	return err
 }
 
 func (r *PostgresRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.LogicGateDetails, error) {

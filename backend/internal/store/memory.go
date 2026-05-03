@@ -26,6 +26,7 @@ type Repository interface {
 	GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error)
 	AddNodeInformation(companyID, nodeID, infoType, information, informationID string) (domain.NodeInformation, error)
 	ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error)
+	DeleteNodeProjection(companyID, nodeID, informationID string) error
 	CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error)
 	CreateLogicGate(companyID, header string) (domain.LogicGate, error)
 	UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error)
@@ -37,6 +38,7 @@ type Repository interface {
 	GetLogicGateDetails(companyID, logicGateID string) (domain.LogicGateDetails, error)
 	AddLogicGateInformation(companyID, logicGateID, infoType, information, informationID string) (domain.LogicGateInformation, error)
 	ListLogicGateProjections(companyID, logicGateID string) ([]domain.LogicGateProjection, error)
+	DeleteLogicGateProjection(companyID, logicGateID, informationID string) error
 	CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error)
 	CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error)
 	ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error)
@@ -305,6 +307,16 @@ func (r *MemoryRepo) ListNodeProjections(companyID, nodeID string) ([]domain.Nod
 		return items[i].UpdatedTimestamp.Before(items[j].UpdatedTimestamp)
 	})
 	return items, nil
+}
+
+func (r *MemoryRepo) DeleteNodeProjection(companyID, nodeID, informationID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
+		return ErrNotFound
+	}
+	delete(r.nodeText[key(companyID, nodeID)], informationID)
+	return nil
 }
 
 func (r *MemoryRepo) CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error) {
@@ -934,6 +946,16 @@ func (r *MemoryRepo) ListLogicGateProjections(companyID, logicGateID string) ([]
 		return items[i].UpdatedTimestamp.Before(items[j].UpdatedTimestamp)
 	})
 	return items, nil
+}
+
+func (r *MemoryRepo) DeleteLogicGateProjection(companyID, logicGateID, informationID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
+		return ErrNotFound
+	}
+	delete(r.logicGateText[key(companyID, logicGateID)], informationID)
+	return nil
 }
 
 func (r *MemoryRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.LogicGateDetails, error) {

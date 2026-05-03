@@ -1,17 +1,18 @@
 # Editor Module
 
 ## Purpose
-The Editor module is the linked text workspace for MangoOS. It lets users view and edit structured text boxes that are persisted as `Text box` records for the currently linked node or logic gate.
+The Editor module is the linked document workspace for MangoOS. It gives the selected node or logic gate one full-frame writing surface with native caret behavior, scrolling, and projection-backed persistence.
 
 ## Key Responsibilities
 - Resolve which Node Map frame this editor is linked to through the frame-link graph + frame registry.
 - Resolve which Logic Gate Map frame this editor is linked to through the same frame-link graph + frame registry.
 - Read the currently selected node from linked Node Map local state.
 - Read the currently selected logic gate from linked Logic Gate Map local state.
-- Load selected node details and extract text-box records from node information.
+- Load selected node details and latest `Text box` projection rows.
 - Load selected node/logic-gate projection rows for latest text-box values.
-- Render draggable/resizable text boxes inside the editor canvas.
-- Persist text-box create/move/resize/edit updates back to backend node information APIs.
+- Render a single native document editor surface that supports normal click-to-place caret, blinking insertion point, typing, spacing, tabs, and scroll overflow.
+- Persist document edits back to backend node/logic-gate information APIs with a stable `information_id`.
+- Clear a document by deleting its latest projection row instead of writing blank history rows.
 - Surface node context from the same selected node (metadata summary, history timeline, and non-text info preview).
 - Support generic node title updates directly from editor context header (`PUT /v1/nodes/:node_id`), including inline rename UX.
 
@@ -22,6 +23,8 @@ The Editor module is the linked text workspace for MangoOS. It lets users view a
 - **Backend read path:** `GET /v1/nodes/:node_id?company_id=...`.
 - **Backend write path:** `POST /v1/nodes/:node_id/information` for text-box payloads.
 - **Logic gate write path:** `POST /v1/logic-gates/:logic_gate_id/information` for text-box payloads.
+- **Backend document clear path:** `DELETE /v1/nodes/:node_id/projection/:information_id?company_id=...`.
+- **Backend logic-gate document clear path:** `DELETE /v1/logic-gates/:logic_gate_id/projection/:information_id?company_id=...`.
 - **Backend node-title update path:** `PUT /v1/nodes/:node_id` with `{ company_id, title }`.
 - **Backend logic-gate header update path:** `PUT /v1/logic-gates/:logic_gate_id` with `{ company_id, header }`.
 - **Backend projection read path:** `GET /v1/nodes/:node_id/projection?company_id=...` (typed node projection rows for hot editor loads).
@@ -35,9 +38,17 @@ The Editor module is the linked text workspace for MangoOS. It lets users view a
 - Blank/whitespace-only editor contents are never sent as information writes; old blank logic-gate text rows are ignored when choosing the document to display.
 - This keeps UI and headless API behavior equivalent: agents can create/edit logic-gate notes without needing the visual editor.
 
+## Document Editing Reliability Update (2026-05-03)
+- The body editor uses a styled native `textarea`, not raw `contentEditable`, so browser-native caret drawing, insertion point movement, text input, and scrollbars remain reliable inside frame wrappers.
+- Typing schedules a debounced save. Blur, node switch, and unmount flush the latest pending value so edits do not wait for a manual save action.
+- Saves are serialized per editor instance. If a save is in flight, the editor queues only the latest follow-up value, preserving user-perceived order without flooding the API.
+- Tab indents the current line or selected lines. Ordered-list markers cycle by outline level: `1.`, `A.`, `1A.`. Enter continues list markers, and Enter on an empty list marker exits the list.
+- Clearing all text calls the projection delete API. This keeps reload behavior correct while preserving append-only nonblank history for audit and scale.
+- The same APIs work for headless agents: agents can post latest document text with a stable `information_id`, read projections for sub-100ms hot paths, and delete a projection to clear the latest document value.
+
 ## Semantic vs layout persistence policy (2026-04-27)
 - Editor information values are persisted server-side and served through typed node/logic-gate projection rows for hot-path loads.
-- Editor box geometry (`x/y/w/h`) is local/per-user layout state and is intentionally not part of hot server payloads.
+- The editor no longer persists document geometry. Frame geometry remains dashboard layout state; document text remains semantic data.
 - This removes hot-path JSON geometry reconstruction work while preserving fast local layout interaction.
 
 ## Latency hardening update (2026-04-26)
@@ -67,9 +78,9 @@ The Editor module is the linked text workspace for MangoOS. It lets users view a
 ## UX Notes
 - Node context header content is intentionally offset below the frame title strip to avoid overlap with top-left module chrome.
 - Node title uses single-click inline edit activation in the header (no double-click required), and click handling is isolated so editor-canvas textbox creation does not trigger from title edits.
-- Text boxes support drag and edge/corner resize interactions.
-- Double-clicking the canvas creates a new text box at pointer position.
-- Text value is persisted server-side; box geometry is preserved in local/per-user layout storage.
+- The document surface fills the remaining frame body. Clicking normal text places the caret there; clicking below the written text focuses the editor at the document end, matching native document editor behavior.
+- Long documents scroll inside the editor body with a thin frame-themed scrollbar.
+- Text value is persisted server-side through append-only history plus latest-value projections.
 
 ## Commenting Convention Reminder
 When editing this module, prefer comments that summarize intent and feature responsibilities (what this block controls), not line-by-line implementation mechanics.
