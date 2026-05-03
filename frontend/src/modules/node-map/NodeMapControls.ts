@@ -177,6 +177,33 @@ export function mergeNodeMapMultiSelect(previousSelection: Set<string>, inBoxSel
   return merged;
 }
 
+export function resolveNodeMapPointerSelection(input: {
+  selectedNodeIDs: Set<string>;
+  nodeID: string;
+  additive: boolean;
+}): { selectedNodeIDs: Set<string>; selectedNodeID: string } {
+  if (!input.nodeID) return { selectedNodeIDs: new Set(input.selectedNodeIDs), selectedNodeID: "" };
+  if (!input.additive) return { selectedNodeIDs: new Set([input.nodeID]), selectedNodeID: input.nodeID };
+
+  const next = new Set(input.selectedNodeIDs);
+  if (next.has(input.nodeID)) next.delete(input.nodeID);
+  else next.add(input.nodeID);
+  return { selectedNodeIDs: next, selectedNodeID: next.has(input.nodeID) ? input.nodeID : (Array.from(next)[0] ?? "") };
+}
+
+type DeleteKeyTargetLike = {
+  tagName?: string;
+  isContentEditable?: boolean;
+  closest?: (selector: string) => DeleteKeyTargetLike | null;
+};
+
+export function shouldIgnoreMapDeleteKeyTarget(target: DeleteKeyTargetLike | null | undefined): boolean {
+  if (!target) return false;
+  const tag = target.tagName ?? "";
+  if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return true;
+  return Boolean(target.closest?.("[contenteditable='true'], textarea, input"));
+}
+
 export function useNodeMapMultiSelectControls(input: {
   selectionPointerID: number | null;
   multiSelectBox: NodeMapMultiSelectBox;
@@ -377,10 +404,7 @@ export function useNodeMapDeleteKeyboardControl(input: {
       if (!hasSelection) return;
 
       const target = event.target as HTMLElement | null;
-      if (target && !input.canvasActive) {
-        const tag = target.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
-      }
+      if (shouldIgnoreMapDeleteKeyTarget(target)) return;
       event.preventDefault();
       event.stopPropagation();
       input.setConfirmDelete({ nodeIDs, relationshipIDs });

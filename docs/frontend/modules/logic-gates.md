@@ -1,5 +1,7 @@
 # Logic Gate Map Module
 
+Status update (2026-05-03): new workspaces should use the unified `Map` module instead of adding a separate Logic Gate Map module. The implementation below remains as the logic-gate rendering/persistence path behind that unified map and as a compatibility path for saved `logic-map` frames.
+
 ## Purpose
 Logic Gate Map is the dedicated visual workspace for creating and connecting `logic_gates`.
 
@@ -91,12 +93,13 @@ Junior engineer note:
 - It is a shared UI projection row keyed by `(company_id, logic_gate_id)` so agents and browsers can coordinate on the same layout through APIs.
 
 ## Linking Behavior
-Frame linking uses the existing `frame-module-links-v1` graph and `logic-map` frame kind.
+Frame linking uses the existing `frame-module-links-v1` graph. New frames use the unified `map` kind; legacy saved layouts may still use `logic-map`.
 
 Linked behavior:
 - Logic Gate Map publishes `mangoos:logic-gate-map-selection-updated`.
 - Company Explorer shows real logic gates under the Logic Gates tree and can drive linked Logic Gate Map selection.
 - Editor follows linked Logic Gate Map selection and labels the header `Logic Gate:` instead of `Node:`.
+- When the unified Map receives logic-gate Explorer context, it renders this logic-gate path and writes `logic-gate-map-state-v1:<companyID>:<mapWidgetID>` using the same frame ID.
 
 ## File Ownership
 Primary files:

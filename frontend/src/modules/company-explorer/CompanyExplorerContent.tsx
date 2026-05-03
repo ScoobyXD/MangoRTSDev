@@ -4,7 +4,7 @@ import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGat
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
-import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
+import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
@@ -429,8 +429,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         next.add(`workspace-folder-${folder.folder_id}`);
         return next;
       });
-      if (folder.folder_kind === "logic_gate") upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
-      else upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
+      upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
+      upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
       setSelectedTreeID(`workspace-folder-${folder.folder_id}`);
       setSelectedTreeIDs(new Set([`workspace-folder-${folder.folder_id}`]));
       setSelectionAnchorTreeID(`workspace-folder-${folder.folder_id}`);
@@ -460,8 +460,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           ? previous.map((row) => (row.item_type === item.item_type && row.item_id === item.item_id ? item : row))
           : [...previous, item];
       });
-      if (item.item_type === "logic_gate") upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
-      else upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
+      upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
+      upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
       setExpanded((previous) => {
         const next = new Set(previous);
         next.add(`workspace-folder-${targetFolderID}`);
@@ -595,8 +595,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           body: JSON.stringify({ company_id: companyID, name: value }),
         });
         setFolders((previous) => previous.map((item) => (item.folder_id === folder.folder_id ? folder : item)));
-        if (folder.folder_kind === "logic_gate") upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
-        else upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
+        upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
+        upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
       } else if (activeRename.target.kind === "node") {
         const node = await requestJSON<NodeRecord>(`/v1/nodes/${activeRename.target.id}`, {
           method: "PUT",
@@ -639,8 +639,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         next.add(`workspace-folder-${folder.folder_id}`);
         return next;
       });
-      if (folder.folder_kind === "logic_gate") upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
-      else upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
+      upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
+      upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_move_folder");
     }
@@ -826,8 +826,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       });
     };
     const readFromLogicMapState = () => {
-      if (!linkedLogicMapFrameID) return;
-      const mapStateKey = `logic-gate-map-state-v1:${companyID}:${linkedLogicMapFrameID}`;
+      const logicContextFrameID = linkedLogicMapFrameID || linkedMapFrameID;
+      if (!logicContextFrameID) return;
+      const mapStateKey = `logic-gate-map-state-v1:${companyID}:${logicContextFrameID}`;
       try {
         const raw = localStorage.getItem(mapStateKey);
         if (!raw) return;
@@ -841,7 +842,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     readFromLogicMapState();
     const onLogicMapSelectionUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; selectedLogicGateID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
-      if (!detail || detail.mapWidgetID !== linkedLogicMapFrameID) return;
+      const logicContextFrameID = linkedLogicMapFrameID || linkedMapFrameID;
+      if (!detail || detail.mapWidgetID !== logicContextFrameID) return;
       const revision = readIncomingSequence(detail);
       if (revision > 0 && !isNewerSequence(lastLogicMapSelectionRevisionRef.current, revision)) return;
       if (revision > 0 && hasSequenceGap(lastLogicMapSelectionRevisionRef.current, revision)) readFromLogicMapState();
@@ -854,7 +856,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return () => {
       window.removeEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapSelectionUpdated);
     };
-  }, [companyID, linkedLogicMapFrameID]);
+  }, [companyID, linkedLogicMapFrameID, linkedMapFrameID]);
 
   useEffect(() => {
     const nextSelection = { selectedNodeID, selectedTreeID };
@@ -867,13 +869,13 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
     try {
       const graph = readFrameLinksFromStorage();
-      const targetIDs = new Set(resolveDirectLinkedTargets({ sourceFrameID: scope, edges: graph }));
+      const registry = readFrameRegistryFromStorage();
+      const targetIDs = new Set(resolveConnectedFrameTargets({ sourceFrameID: scope, edges: graph, registry }));
       if (targetIDs.size === 0) return;
 
       explorerContextSequenceRef.current += 1;
       for (const targetID of targetIDs) {
         if (!targetID) continue;
-        const registry = readFrameRegistryFromStorage();
         const targetKind = classifyFrameKind(registry[targetID]?.kind ?? "");
         const isLogicGateContext = selectedLogicGateID.trim().length > 0 || selectedFolderKind === "logic_gate" || (!selectedNodeID && !selectedFolderKind && targetKind === "logic-map");
         const payload = {

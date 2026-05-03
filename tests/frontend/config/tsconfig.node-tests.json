@@ -30,6 +30,7 @@
     "../modules/node-map/relationshipSelection.test.ts",
     "../../../frontend/src/modules/node-map/NodeMapControls.ts",
     "../modules/node-map/NodeMapControls.test.ts",
+    "../modules/node-map/deleteKeyboardRouting.test.ts",
     "../modules/node-map/nodeMapLayout.test.ts",
     "../modules/node-map/mapGridBackground.test.ts",
     "../../../frontend/src/modules/node-map/relationshipDeleteSummary.ts",

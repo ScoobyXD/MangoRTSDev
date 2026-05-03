@@ -23,6 +23,7 @@ function edgeKey(a: string, b: string): string {
 }
 
 export function classifyFrameKind(kind: string): LinkableKind | null {
+  if (kind === "map") return "map";
   if (kind === "nodes" || kind === "nodes-map") return "map";
   if (kind === "editor" || kind === "node-doc") return "editor";
   if (kind === "company-explorer") return "explorer";
@@ -127,4 +128,27 @@ export function resolveDirectLinkedTargets(args: {
     if (edge.b === args.sourceFrameID) targets.add(edge.a);
   }
   return Array.from(targets);
+}
+
+export function resolveConnectedFrameTargets(args: {
+  sourceFrameID: string;
+  edges: FrameLinkEdge[];
+  registry: Record<string, FrameRegistryItem>;
+}): string[] {
+  const frameIDs = new Set(Object.keys(args.registry));
+  if (!frameIDs.has(args.sourceFrameID)) return [];
+  const graph = toAdjacency(args.edges, frameIDs);
+  const visited = new Set<string>([args.sourceFrameID]);
+  const queue: string[] = [args.sourceFrameID];
+  const targets: string[] = [];
+  while (queue.length > 0) {
+    const current = queue.shift() ?? "";
+    for (const neighbor of graph.get(current) ?? []) {
+      if (visited.has(neighbor)) continue;
+      visited.add(neighbor);
+      targets.push(neighbor);
+      queue.push(neighbor);
+    }
+  }
+  return targets;
 }

@@ -121,11 +121,17 @@ Use this checklist format and keep it complete.
   - selects node cards + relationship lines that intersect the multi-select box rectangle
   - additive merge keeps previous selection batch for shift/ctrl multi-select
   - additive behavior is pointer-session driven (does not depend on modifier state at pointer-up)
+  - plain node click collapses a previous multi-select batch to the clicked node
+  - modifier node click still toggles additive membership
+- [x] `tests/frontend/modules/node-map/deleteKeyboardRouting.test.ts`
+  - Delete/Backspace are ignored when focus is in inline title editing, input, or textarea targets
+  - canvas delete still requires an active node or relationship selection
 - [x] `frontend/src/modules/node-map/relationshipDeleteSummary.test.ts`
   - success/failure summarization for batched relationship-line delete requests
   - preserves per-relationship failure reason reporting for visibility
 - [x] `tests/frontend/modules/node-map/nodeMapLayout.test.ts`
   - preserves positions for nodes hidden by scoped Company Explorer views
+  - places new map items near the visible insertion point instead of the world origin
   - converts backend map-layout rows into canvas position records
   - detects changed positions so UI writes only dirty layout rows
 - [x] `tests/frontend/modules/node-map/mapGridBackground.test.ts`
@@ -139,13 +145,16 @@ Use this checklist format and keep it complete.
 - [x] `frontend/src/app/frameLinking.test.ts`
   - context-menu link label fallback (`No other module selected`) when only one module is in active pool
   - graph-based pairwise link-plan generation for multi-module selection pools, including Kanban
+  - unified `map` frames participate in linking as canonical map frames
   - legacy editor/explorer -> Node Map compatibility derivation through indirect link graph paths
   - context-frame pool fallback when no explicit selection set exists
   - delink behavior removes all graph edges touching selected/context modules
 - [x] `frontend/src/modules/linkingGraph.test.ts`
   - frame-link edge sanitization canonicalizes and deduplicates undirected graph edges
+  - unified `map` frame kind resolves as the canonical map target
   - linked target resolution by kind supports traversal through intermediary graph hops, including Kanban
   - direct-neighbor resolution returns adjacency-only targets for explorer fanout
+  - connected-frame target resolution supports transitive Explorer context fanout
 - [x] `tests/frontend/modules/company-explorer/explorerSync.test.ts`
 - [x] `tests/frontend/modules/company-explorer/treePresentation.test.ts`
   - locks Company Explorer root order to the single collapsible Company row

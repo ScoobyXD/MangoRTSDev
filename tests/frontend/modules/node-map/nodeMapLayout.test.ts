@@ -37,6 +37,22 @@ test("reconcileNodeMapPositions adds positions for newly visible nodes without c
   assert.deepEqual(next.new, { x: 276, y: 120 });
 });
 
+test("reconcileNodeMapPositions places newly created map items near the visible insertion point", () => {
+  const next = reconcileNodeMapPositions({
+    previous: { existing: { x: 240, y: 360 } },
+    nodes: [{ node_id: "existing" }, { node_id: "new" }],
+    canvasWidth: 1000,
+    worldWidth: 6400,
+    worldHeight: 4400,
+    nodeWidth: 148,
+    nodeHeight: 96,
+    defaultPosition: { x: 3024, y: 2112 },
+  });
+
+  assert.deepEqual(next.existing, { x: 240, y: 360 });
+  assert.deepEqual(next.new, { x: 3024, y: 2112 });
+});
+
 test("persistedMapPositionsToNodePositions accepts backend node and logic-gate ids", () => {
   const next = persistedMapPositionsToNodePositions({
     positions: [

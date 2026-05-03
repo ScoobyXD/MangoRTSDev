@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { shouldIgnoreMapDeleteKeyTarget } from "../../../../frontend/src/modules/node-map/NodeMapControls.js";
 
 type DeleteRoutingInput = {
   canvasActive: boolean;
@@ -9,18 +10,16 @@ type DeleteRoutingInput = {
 
 const shouldHandleDelete = (input: DeleteRoutingInput) => {
   if (!input.hasSelection) return false;
-  if (!input.target || input.canvasActive) return true;
-  const tag = input.target.tagName ?? "";
-  if (tag === "INPUT" || tag === "TEXTAREA" || input.target.isContentEditable) return false;
+  if (shouldIgnoreMapDeleteKeyTarget(input.target)) return false;
   return true;
 };
 
-test("handles delete when canvas is active even if contentEditable has focus", () => {
+test("ignores delete when inline title editing has focus even if canvas is active", () => {
   assert.equal(shouldHandleDelete({
     canvasActive: true,
     hasSelection: true,
     target: { isContentEditable: true },
-  }), true);
+  }), false);
 });
 
 test("ignores delete for editable target when canvas is not active", () => {

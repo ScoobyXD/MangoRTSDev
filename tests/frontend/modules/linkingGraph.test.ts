@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph, sanitizeFrameLinks, sanitizeFrameRegistry } from "../../../frontend/src/modules/linkingGraph.js";
+import { classifyFrameKind, resolveConnectedFrameTargets, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph, sanitizeFrameLinks, sanitizeFrameRegistry } from "../../../frontend/src/modules/linkingGraph.js";
 
 test("sanitizeFrameLinks canonicalizes and deduplicates undirected edges", () => {
   const result = sanitizeFrameLinks([
@@ -39,6 +39,10 @@ test("resolveLinkedFrameByKindFromGraph walks through intermediary frames", () =
   assert.equal(linkedKanban, "kanban-1");
 });
 
+test("classifyFrameKind treats the unified map module as the map target", () => {
+  assert.equal(classifyFrameKind("map"), "map");
+});
+
 test("resolveDirectLinkedTargets returns direct neighbors only", () => {
   const edges = sanitizeFrameLinks([
     { a: "explorer-1", b: "editor-1", mode: "context" },
@@ -46,4 +50,19 @@ test("resolveDirectLinkedTargets returns direct neighbors only", () => {
   ]);
   const targets = resolveDirectLinkedTargets({ sourceFrameID: "editor-1", edges }).sort();
   assert.deepEqual(targets, ["explorer-1", "map-1"]);
+});
+
+test("resolveConnectedFrameTargets returns transitive context targets", () => {
+  const registry = sanitizeFrameRegistry({
+    "explorer-1": { kind: "company-explorer" },
+    "map-1": { kind: "map" },
+    "editor-1": { kind: "editor" },
+    "isolated-1": { kind: "editor" },
+  });
+  const edges = sanitizeFrameLinks([
+    { a: "explorer-1", b: "map-1", mode: "context" },
+    { a: "map-1", b: "editor-1", mode: "context" },
+  ]);
+  const targets = resolveConnectedFrameTargets({ sourceFrameID: "explorer-1", edges, registry }).sort();
+  assert.deepEqual(targets, ["editor-1", "map-1"]);
 });

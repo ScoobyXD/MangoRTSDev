@@ -15,6 +15,7 @@ export interface LinkPlan {
 }
 
 export function classifyFrameKind(kind: string): LinkableKind | null {
+  if (kind === "map") return "map";
   if (kind === "nodes" || kind === "nodes-map") return "map";
   if (kind === "editor" || kind === "node-doc") return "editor";
   if (kind === "company-explorer") return "explorer";

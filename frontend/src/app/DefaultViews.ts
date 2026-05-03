@@ -6,12 +6,12 @@ export function createDefaultNodeViewFrames(): FrameDataModel[] {
   return [
     {
       id: "w-node-map",
-      kind: "nodes-map",
+      kind: "map",
       x: 1,
       y: 1,
       w: 42,
       h: 30,
-      title: "Default Node View",
+      title: "Default Map View",
       ...WHITE_FRAME,
     },
     {

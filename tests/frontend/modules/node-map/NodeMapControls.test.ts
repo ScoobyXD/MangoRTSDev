@@ -2,7 +2,7 @@
 // @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeNodeMapMultiSelectResult, mergeNodeMapMultiSelect } from "../../../../frontend/src/modules/node-map/NodeMapControls.js";
+import { computeNodeMapMultiSelectResult, mergeNodeMapMultiSelect, resolveNodeMapPointerSelection } from "../../../../frontend/src/modules/node-map/NodeMapControls.js";
 
 const defaultLayout = {
   zoom: 1,
@@ -40,4 +40,24 @@ test("mergeNodeMapMultiSelect keeps previous multi-select batch when additive mo
 test("multi-select additive behavior remains session-based when modifier key changes before pointerup", () => {
   const merged = mergeNodeMapMultiSelect(new Set(["rel-prev"]), new Set(["rel-new"]), true);
   assert.deepEqual(Array.from(merged).sort(), ["rel-new", "rel-prev"]);
+});
+
+test("plain node click collapses an existing multi-select batch to the clicked node", () => {
+  const selection = resolveNodeMapPointerSelection({
+    selectedNodeIDs: new Set(["node-a", "node-b", "node-c"]),
+    nodeID: "node-b",
+    additive: false,
+  });
+  assert.deepEqual(Array.from(selection.selectedNodeIDs), ["node-b"]);
+  assert.equal(selection.selectedNodeID, "node-b");
+});
+
+test("modifier node click still toggles membership for additive selection", () => {
+  const selection = resolveNodeMapPointerSelection({
+    selectedNodeIDs: new Set(["node-a", "node-b"]),
+    nodeID: "node-b",
+    additive: true,
+  });
+  assert.deepEqual(Array.from(selection.selectedNodeIDs), ["node-a"]);
+  assert.equal(selection.selectedNodeID, "node-a");
 });
