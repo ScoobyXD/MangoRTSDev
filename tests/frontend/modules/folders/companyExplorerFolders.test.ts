@@ -67,7 +67,7 @@ test("folder-level map projection shows root folders and unassigned node items o
     ],
     folders,
     folderItems: [
-      { company_id: "c", folder_id: "folder-parent", item_type: "node", item_id: "node-in-folder", created_timestamp: "1", updated_timestamp: "1" },
+      { company_id: "c", folder_id: "folder-parent", item_type: "node", item_id: "node-in-folder", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
     ],
     folderID: "",
     itemType: "node",
@@ -100,9 +100,9 @@ test("folder-level map projection expands one folder level at a time", () => {
     ],
     folders,
     folderItems: [
-      { company_id: "c", folder_id: "folder-parent", item_type: "node", item_id: "node-a", created_timestamp: "1", updated_timestamp: "1" },
-      { company_id: "c", folder_id: "folder-parent", item_type: "node", item_id: "node-b", created_timestamp: "2", updated_timestamp: "2" },
-      { company_id: "c", folder_id: "folder-child", item_type: "node", item_id: "node-child", created_timestamp: "3", updated_timestamp: "3" },
+      { company_id: "c", folder_id: "folder-parent", item_type: "node", item_id: "node-a", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
+      { company_id: "c", folder_id: "folder-parent", item_type: "node", item_id: "node-b", position: 2000, created_timestamp: "2", updated_timestamp: "2" },
+      { company_id: "c", folder_id: "folder-child", item_type: "node", item_id: "node-child", position: 1000, created_timestamp: "3", updated_timestamp: "3" },
     ],
     folderID: "folder-parent",
     itemType: "node",
@@ -132,7 +132,7 @@ test("folder-level map projection works for logic-gate folders", () => {
     ],
     folders,
     folderItems: [
-      { company_id: "c", folder_id: "logic-parent", item_type: "logic_gate", item_id: "gate-in-folder", created_timestamp: "1", updated_timestamp: "1" },
+      { company_id: "c", folder_id: "logic-parent", item_type: "logic_gate", item_id: "gate-in-folder", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
     ],
     folderID: "",
     itemType: "logic_gate",
