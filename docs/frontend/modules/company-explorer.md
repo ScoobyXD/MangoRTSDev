@@ -40,7 +40,7 @@ Each explorer row represents one company "file" entity with a normalized type:
 ### 2.3 Tree UX rules
 
 - Expand/collapse per row with caret semantics.
-- Hierarchy guide-lines rendered as thin vertical/elbow lines (VS Code-style readability).
+- Hierarchy is shown through indentation and fixed entity icons; guide-lines are intentionally not rendered in the tree.
 - Multi-select behavior mirrors existing platform expectations (`Shift`/`Ctrl`).
 - Context menu available per item and per empty area.
 - Keyboard navigation (up/down/left/right/enter) should be supported.
@@ -141,10 +141,14 @@ Folder runtime update (2026-05-01):
 - `company_explorer_folder_items` stores one placement per node or logic gate, matching file-explorer move semantics.
 - Logic Gates render above Nodes in the root tree. The old Knowledge/Knowledge Nodes placeholder tree is removed.
 - Folder rows use fixed yellow icons, node rows use fixed black-and-white document icons, and logic-gate rows use fixed green circuitry AND-gate icons. These icon colors do not follow frame colorways.
-- Explorer rows render thin hierarchy guides from icon columns, including horizontal elbow lines into child icons, so nested folders/items remain visually attributable at scale.
+- Explorer row labels do not include live item counts. Count queries belong in bounded API/read models, not in every tree row render.
+- Explorer no longer renders vertical or horizontal hierarchy guide lines; indentation and icons carry the tree structure.
 - The Explorer tree no longer renders separate `All Nodes` or `All Logic Gates` child folders; the top-level `Nodes` and `Logic Gates` rows are the broad-scope selectors.
 - Folder creation is now a Company Explorer context-menu action, not an inline plus button. Right-clicking the tree body opens Explorer actions (`Create folder`, `Create node`, `Create logic gate`), while frame-level actions remain scoped to the frame/module title plate.
+- Right-clicking a concrete folder, node, or logic gate also exposes `Delete`, backed by the existing folder/node/logic-gate DELETE APIs. Virtual root rows such as `Nodes` and `Logic Gates` are not deletable records.
+- Left-clicking elsewhere inside Company Explorer closes the Explorer context menu before applying the new selection.
 - New folders are created inside the right-clicked compatible folder/tree. New nodes and logic gates are created through their canonical APIs and then assigned to the compatible right-clicked folder through `company_explorer_folder_items` when a folder target exists.
+- After any create action, the newly created folder, node, or logic gate becomes the selected highlighted row.
 - Node, logic-gate, and folder moves still use drag-and-drop onto compatible folders.
 - Selecting a node folder broadcasts `selectedFolderID`/`selectedFolderKind=node`; linked Node Map filters its cached graph to nodes placed in that folder or any descendant folder.
 - Selecting a logic-gate folder broadcasts `selectedFolderID`/`selectedFolderKind=logic_gate`; linked Logic Gate Map applies the same folder-scope rule for gates.
