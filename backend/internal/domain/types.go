@@ -146,14 +146,23 @@ type KanbanColumn struct {
 }
 
 type KanbanCard struct {
-	CompanyID        string    `json:"company_id"`
-	BoardID          string    `json:"board_id"`
-	CardID           string    `json:"card_id"`
-	ColumnID         string    `json:"column_id"`
-	ItemType         string    `json:"item_type"`
-	ItemID           string    `json:"item_id"`
-	TitleSnapshot    string    `json:"title_snapshot"`
-	Position         int       `json:"position"`
-	CreatedTimestamp time.Time `json:"created_timestamp"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+	CompanyID              string    `json:"company_id"`
+	BoardID                string    `json:"board_id"`
+	CardID                 string    `json:"card_id"`
+	ColumnID               string    `json:"column_id"`
+	ItemType               string    `json:"item_type"`
+	ItemID                 string    `json:"item_id"`
+	TitleSnapshot          string    `json:"title_snapshot"`
+	DescriptionSnapshot    string    `json:"description_snapshot"`
+	Position               int       `json:"position"`
+	Status                 string    `json:"status"`
+	WorkType               string    `json:"work_type"`
+	AssignedTo             string    `json:"assigned_to"`
+	AssignedBy             string    `json:"assigned_by"`
+	CreatedBy              string    `json:"created_by"`
+	UpdatedBy              string    `json:"updated_by"`
+	LastActivity           string    `json:"last_activity"`
+	StatusEnteredTimestamp time.Time `json:"status_entered_timestamp"`
+	CreatedTimestamp       time.Time `json:"created_timestamp"`
+	UpdatedTimestamp       time.Time `json:"updated_timestamp"`
 }

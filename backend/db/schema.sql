@@ -228,7 +228,16 @@ create table if not exists kanban_cards (
   node_id uuid,
   logic_gate_id uuid,
   title_snapshot text not null,
+  description_snapshot text not null default '',
   position integer not null,
+  status text not null default '',
+  work_type text not null default '',
+  assigned_to text not null default '',
+  assigned_by text not null default '',
+  created_by text not null default '',
+  updated_by text not null default '',
+  last_activity text not null default '',
+  status_entered_timestamp timestamptz not null default now(),
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   constraint kanban_cards_title_snapshot_nonblank_chk check (btrim(title_snapshot) <> ''),
@@ -255,6 +264,12 @@ create index if not exists idx_operations_node on operations(company_id, node_id
 create index if not exists idx_operations_logic_gate on operations(company_id, logic_gate_id);
 create index if not exists idx_kanban_columns_board_position on kanban_columns(company_id, board_id, position);
 create index if not exists idx_kanban_cards_column_position on kanban_cards(company_id, board_id, column_id, position);
+create index if not exists idx_kanban_cards_status_position on kanban_cards(company_id, board_id, status, position);
+create index if not exists idx_kanban_cards_assigned_to_position on kanban_cards(company_id, board_id, assigned_to, position);
+create index if not exists idx_kanban_cards_work_type_position on kanban_cards(company_id, board_id, work_type, position);
+create index if not exists idx_kanban_cards_item_type_position on kanban_cards(company_id, board_id, item_type, position);
+create index if not exists idx_kanban_cards_status_entered on kanban_cards(company_id, board_id, status_entered_timestamp);
+create index if not exists idx_kanban_cards_title_prefix on kanban_cards(company_id, board_id, lower(title_snapshot) text_pattern_ops);
 create unique index if not exists idx_kanban_cards_unique_node on kanban_cards(company_id, board_id, node_id) where node_id is not null;
 create unique index if not exists idx_kanban_cards_unique_logic_gate on kanban_cards(company_id, board_id, logic_gate_id) where logic_gate_id is not null;
 
