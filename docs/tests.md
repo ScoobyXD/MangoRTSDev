@@ -194,6 +194,17 @@ Use this checklist format and keep it complete.
   - colors node-only cards from their column item color without view-query state
   - computes bounded Kanban column reorder/swap and width/height resize values
   - locks the Kanban visual contract for preserving column title casing and clearing frame chrome
+- [x] `tests/frontend/modules/editor/editorTabs.test.ts`
+  - exposes Editor, Outline Styles, Metadata, and History tabs
+  - walls off the document textarea from pointer and keyboard access outside the Editor tab
+- [x] `tests/frontend/modules/editor/plainTextEditing.test.ts`
+  - keeps Tab as five literal spaces
+  - continues automatic numbered and multilevel outline lines on new Enter presses only
+  - keeps Indent Guides mode as plain newline input
+- [x] `tests/frontend/modules/editor/editorScroll.test.ts`
+  - restores the last scroll viewport for a document target
+  - bounds in-session scroll memory for long editing sessions
+  - ignores empty document keys and invalid scroll positions
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
   - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)

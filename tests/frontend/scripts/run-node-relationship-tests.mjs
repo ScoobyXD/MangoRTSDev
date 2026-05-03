@@ -25,6 +25,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/shared.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTabs.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/plainTextEditing.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorScroll.test.js"),
 ];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
 const tscEntrypoint = resolve(frontendRoot, "node_modules/typescript/bin/tsc");

@@ -49,7 +49,9 @@
     "../../../frontend/src/modules/editor/editorTabs.ts",
     "../modules/editor/editorTabs.test.ts",
     "../../../frontend/src/modules/editor/plainTextEditing.ts",
-    "../modules/editor/plainTextEditing.test.ts"
+    "../modules/editor/plainTextEditing.test.ts",
+    "../../../frontend/src/modules/editor/editorScroll.ts",
+    "../modules/editor/editorScroll.test.ts"
   ],
   "exclude": []
 }

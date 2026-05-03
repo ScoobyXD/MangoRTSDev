@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, type NodeRecord } from "../node-map/shared";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, toLogicGateCanvasRecord, type LogicGateInformation, type LogicGateRecord } from "../logic-gate-map/shared";
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
@@ -9,8 +9,9 @@ import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingle
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import type { NodeInformation } from "../node-map/shared";
-import { getEditorDocumentIsolationState, type EditorTabID } from "./editorTabs";
-import { insertEditorTabText } from "./plainTextEditing";
+import { EDITOR_TAB_ITEMS, getEditorDocumentIsolationState, type EditorTabID } from "./editorTabs";
+import { DEFAULT_EDITOR_OUTLINE_STYLE, EDITOR_TAB_TEXT, insertEditorEnterText, insertEditorTabText, isEditorOutlineStyleID, type EditorOutlineStyleID } from "./plainTextEditing";
+import { createEditorScrollMemory } from "./editorScroll";
 
 type LinkedEntityKind = "node" | "logic_gate";
 
@@ -42,11 +43,26 @@ function generateStableInformationID(): string {
     : `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0").slice(0, 12)}`;
 }
 
+function readStoredOutlineStyle(storageKey: string): EditorOutlineStyleID {
+  try {
+    const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(storageKey);
+    return raw && isEditorOutlineStyleID(raw) ? raw : DEFAULT_EDITOR_OUTLINE_STYLE;
+  } catch {
+    return DEFAULT_EDITOR_OUTLINE_STYLE;
+  }
+}
+
+const EDITOR_OUTLINE_STYLE_ITEMS: ReadonlyArray<{ id: EditorOutlineStyleID; label: string }> = [
+  { id: "automatic-outline-numbering", label: "Automatic Numbering" },
+  { id: "indent-guides", label: "Indent Guides" },
+];
+
 // Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const scope = widgetId?.trim() ? widgetId : "global";
+  const outlineStyleStorageKey = `editor-outline-style-v1:${companyID}:${scope}`;
   const [linkedMapWidgetID, setLinkedMapWidgetID] = useState("");
   const [linkedLogicMapWidgetID, setLinkedLogicMapWidgetID] = useState("");
   const [linkedEntityKind, setLinkedEntityKind] = useState<"" | "node" | "logic_gate">("");
@@ -58,10 +74,14 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [documentInformationID, setDocumentInformationID] = useState("");
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
+  const [outlineStyle, setOutlineStyle] = useState<EditorOutlineStyleID>(() => readStoredOutlineStyle(outlineStyleStorageKey));
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const editingTitleRef = useRef<HTMLSpanElement | null>(null);
   const editingTitleDraftRef = useRef("");
   const editorTextAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const activeTabRef = useRef<EditorTabID>("editor");
+  const restoringScrollRef = useRef(false);
+  const scrollMemoryRef = useRef(createEditorScrollMemory());
   const documentDraftRef = useRef("");
   const persistedDocumentRef = useRef("");
   const documentInformationIDRef = useRef("");
@@ -74,14 +94,42 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const lastSelectionRevisionRef = useRef(0);
   const lastLogicGateSelectionRevisionRef = useRef(0);
 
-  const placeEditorCaretAtDocumentEnd = useCallback((scrollToEnd = false) => {
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(outlineStyleStorageKey, outlineStyle);
+    } catch {
+      // Local persistence is a convenience only. The document API stays usable
+      // for headless agents even if browser storage is blocked.
+    }
+  }, [outlineStyle, outlineStyleStorageKey]);
+
+  const rememberCurrentDocumentScroll = useCallback(() => {
+    const targetKey = currentDocumentTargetKeyRef.current;
+    const element = editorTextAreaRef.current;
+    if (!targetKey || !element) return;
+    scrollMemoryRef.current.remember(targetKey, element.scrollTop);
+  }, []);
+
+  const restoreEditorDocumentScroll = useCallback((targetKey: string) => {
+    window.requestAnimationFrame(() => {
+      const element = editorTextAreaRef.current;
+      if (!element || currentDocumentTargetKeyRef.current !== targetKey) return;
+      element.scrollTop = scrollMemoryRef.current.read(targetKey) ?? 0;
+    });
+  }, []);
+
+  const focusEditorDocumentWithoutScrollJump = useCallback((targetKey = currentDocumentTargetKeyRef.current) => {
     window.requestAnimationFrame(() => {
       const element = editorTextAreaRef.current;
       if (!element) return;
       element.focus({ preventScroll: true });
-      const end = element.value.length;
-      element.setSelectionRange(end, end);
-      if (scrollToEnd) element.scrollTop = element.scrollHeight;
+      if (targetKey && currentDocumentTargetKeyRef.current === targetKey) {
+        element.scrollTop = scrollMemoryRef.current.read(targetKey) ?? element.scrollTop;
+      }
     });
   }, []);
 
@@ -229,20 +277,22 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [buildDocumentSaveRequest, enqueueDocumentSave]);
 
   const selectTab = useCallback((tab: EditorTabID) => {
+    rememberCurrentDocumentScroll();
     if (tab === activeTab) return;
     if (activeTab === "editor" && tab !== "editor" && editorTextAreaRef.current) {
       flushPendingDocumentSave(editorTextAreaRef.current.value);
       editorTextAreaRef.current.blur();
     }
     setActiveTab(tab);
-    if (tab === "editor") placeEditorCaretAtDocumentEnd(false);
-  }, [activeTab, flushPendingDocumentSave, placeEditorCaretAtDocumentEnd]);
+    if (tab === "editor") focusEditorDocumentWithoutScrollJump();
+  }, [activeTab, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, rememberCurrentDocumentScroll]);
 
   useEffect(() => {
     return () => {
+      rememberCurrentDocumentScroll();
       flushPendingDocumentSave(documentDraftRef.current);
     };
-  }, [flushPendingDocumentSave, linkedEntityKind, linkedNodeID]);
+  }, [flushPendingDocumentSave, linkedEntityKind, linkedNodeID, rememberCurrentDocumentScroll]);
 
   const applyLoadedDocument = useCallback((entityKind: LinkedEntityKind, entityID: string, informationID: string, text: string) => {
     documentDraftRef.current = text;
@@ -252,9 +302,17 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const targetKey = informationID ? documentTargetKey({ entityKind, entityID, informationID }) : `${entityKind}:${entityID}:`;
     currentDocumentTargetKeyRef.current = targetKey;
     persistedDocumentTargetKeyRef.current = targetKey;
-    if (editorTextAreaRef.current && editorTextAreaRef.current.value !== text) editorTextAreaRef.current.value = text;
-    placeEditorCaretAtDocumentEnd(true);
-  }, [placeEditorCaretAtDocumentEnd]);
+    restoringScrollRef.current = true;
+    if (editorTextAreaRef.current) {
+      if (editorTextAreaRef.current.value !== text) editorTextAreaRef.current.value = text;
+      editorTextAreaRef.current.scrollTop = scrollMemoryRef.current.read(targetKey) ?? 0;
+    }
+    restoreEditorDocumentScroll(targetKey);
+    window.requestAnimationFrame(() => {
+      restoringScrollRef.current = false;
+    });
+    if (activeTabRef.current === "editor") focusEditorDocumentWithoutScrollJump(targetKey);
+  }, [focusEditorDocumentWithoutScrollJump, restoreEditorDocumentScroll]);
 
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
@@ -317,22 +375,26 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [companyID, scope]);
 
   const applyLinkedNode = useCallback((nodeID: string) => {
+    const isSameEntity = linkedEntityKind === "node" && linkedNodeID === nodeID;
+    rememberCurrentDocumentScroll();
     setLinkedEntityKind(nodeID ? "node" : "");
     setLinkedNodeID(nodeID);
-    if (nodeID) {
+    if (nodeID && !isSameEntity) {
       setActiveTab("editor");
-      placeEditorCaretAtDocumentEnd(false);
+      focusEditorDocumentWithoutScrollJump();
     }
-  }, [placeEditorCaretAtDocumentEnd]);
+  }, [focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, rememberCurrentDocumentScroll]);
 
   const applyLinkedLogicGate = useCallback((logicGateID: string) => {
+    const isSameEntity = linkedEntityKind === "logic_gate" && linkedNodeID === logicGateID;
+    rememberCurrentDocumentScroll();
     setLinkedEntityKind(logicGateID ? "logic_gate" : "");
     setLinkedNodeID(logicGateID);
-    if (logicGateID) {
+    if (logicGateID && !isSameEntity) {
       setActiveTab("editor");
-      placeEditorCaretAtDocumentEnd(false);
+      focusEditorDocumentWithoutScrollJump();
     }
-  }, [placeEditorCaretAtDocumentEnd]);
+  }, [focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, rememberCurrentDocumentScroll]);
 
   const updateNodeTitle = useCallback(async (nextTitle: string) => {
     const value = nextTitle.trim();
@@ -378,11 +440,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     selection.removeAllRanges();
     selection.addRange(nextRange);
   }, [isEditingTitle]);
-
-  useEffect(() => {
-    if (!linkedNodeID) return;
-    placeEditorCaretAtDocumentEnd(true);
-  }, [linkedNodeID, placeEditorCaretAtDocumentEnd]);
 
   useEffect(() => {
     const refresh = () => {
@@ -638,11 +695,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     return () => { cancelled = true; };
   }, [apiBase, applyLoadedDocument, companyID, linkedEntityKind, linkedNodeID]);
 
-  const tabItems = useMemo(() => ([
-    { id: "editor", label: "Editor" },
-    { id: "metadata", label: "Metadata" },
-    { id: "history", label: "History" },
-  ] as const), []);
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
   const surfaceText = isDarkTheme ? "#f4f7fa" : "#0d1a1e";
@@ -653,6 +705,10 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const panelBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 255, 255, 0.8)";
   const scrollbarAccent = theme === "light" ? "rgb(0, 233, 255)" : accent;
   const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)";
+  const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.12)" : "rgba(3,25,30,0.12)";
+  const indentGuideBackground = outlineStyle === "indent-guides"
+    ? `repeating-linear-gradient(to right, transparent 0, transparent calc(${EDITOR_TAB_TEXT.length}ch - 1px), ${indentGuideColor} calc(${EDITOR_TAB_TEXT.length}ch - 1px), ${indentGuideColor} ${EDITOR_TAB_TEXT.length}ch)`
+    : "none";
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
   const hasLinkedDocument = linkedNodeID.trim().length > 0;
 
@@ -664,12 +720,12 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     >
       <div style={{ position: "relative", width: "100%", height: "100%", minHeight: 0, cursor: "text" }}>
         {hasLinkedDocument && (
-          <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 2 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, paddingLeft: 106 }}>
-            {tabItems.map((tab) => {
+          <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 5, pointerEvents: "none" }}>
+          <div style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", gap: 6, paddingLeft: 106, overflowX: "auto", scrollbarWidth: "none", pointerEvents: "auto" }}>
+            {EDITOR_TAB_ITEMS.map((tab) => {
               const selected = activeTab === tab.id;
               return (
-                <button key={tab.id} type="button" onClick={() => selectTab(tab.id)} style={{ border: `1px solid ${selected ? accent : strokeColor}`, background: selected ? tabSelectedBackground : tabBackground, color: surfaceText, fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 10px", borderRadius: 4, cursor: "pointer" }}>
+                <button key={tab.id} type="button" onClick={() => selectTab(tab.id)} style={{ flex: "0 0 auto", whiteSpace: "nowrap", border: `1px solid ${selected ? accent : strokeColor}`, background: selected ? tabSelectedBackground : tabBackground, color: surfaceText, fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 10px", borderRadius: 4, cursor: "pointer" }}>
                   {tab.label}
                 </button>
               );
@@ -678,7 +734,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           
           <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 21, borderBottom: `1px solid ${ruleColor}`, transform: "translateY(8px)", pointerEvents: "none", zIndex: 1 }} />
           {activeTab === "editor" && (
-            <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ display: "grid", gap: 8, pointerEvents: "auto" }}>
               <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.12em", color: accent, cursor: "text" }}>
                 <span style={{ textTransform: "uppercase" }}>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>&nbsp;
                 <span
@@ -723,8 +779,41 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             </div>
           )}
 
+          {activeTab === "outline-styles" && (
+            <section style={{ display: "grid", gap: 8, maxWidth: 620, pointerEvents: "auto" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>Outline Styles</div>
+              <div role="radiogroup" aria-label="Outline styles" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {EDITOR_OUTLINE_STYLE_ITEMS.map((item) => {
+                  const selected = outlineStyle === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => setOutlineStyle(item.id)}
+                      style={{
+                        border: `1px solid ${selected ? accent : strokeColor}`,
+                        background: selected ? tabSelectedBackground : panelBackground,
+                        color: surfaceText,
+                        borderRadius: 4,
+                        cursor: "pointer",
+                        fontSize: 11,
+                        fontWeight: 800,
+                        padding: "6px 8px",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           {activeTab === "metadata" && linkedNodeMetadataRows.length > 0 && (
-            <section style={{ display: "grid", gap: 6, maxWidth: 520 }}>
+            <section style={{ display: "grid", gap: 6, maxWidth: 520, pointerEvents: "auto" }}>
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>Metadata</div>
               <div style={{ display: "grid", gap: 4 }}>
                 {linkedNodeMetadataRows.map((row) => (
@@ -738,7 +827,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           )}
 
           {activeTab === "history" && linkedNodeHistoryRows.length > 0 && (
-            <section style={{ display: "grid", gap: 6, maxWidth: 640 }}>
+            <section style={{ display: "grid", gap: 6, maxWidth: 640, pointerEvents: "auto" }}>
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>History</div>
               <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "6px 8px 6px 22px" }}>
                 {linkedNodeHistoryRows.map((row, index) => <li key={`${row}-${index}`}>{row}</li>)}
@@ -757,12 +846,28 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           tabIndex={documentIsolation.tabIndex}
           spellCheck
           onChange={(event) => scheduleDocumentSave(event.currentTarget.value)}
-          onBlur={(event) => flushPendingDocumentSave(event.currentTarget.value)}
+          onBlur={(event) => {
+            rememberCurrentDocumentScroll();
+            flushPendingDocumentSave(event.currentTarget.value);
+          }}
+          onScroll={(event) => {
+            if (restoringScrollRef.current) return;
+            const targetKey = currentDocumentTargetKeyRef.current;
+            if (targetKey) scrollMemoryRef.current.remember(targetKey, event.currentTarget.scrollTop);
+          }}
           onWheel={(event) => event.stopPropagation()}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();
               event.currentTarget.blur();
+              return;
+            }
+            if (event.key === "Enter" && outlineStyle === "automatic-outline-numbering") {
+              event.preventDefault();
+              const edit = insertEditorEnterText(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd, outlineStyle);
+              event.currentTarget.value = edit.value;
+              event.currentTarget.setSelectionRange(edit.selectionStart, edit.selectionEnd);
+              scheduleDocumentSave(edit.value);
               return;
             }
             if (event.key !== "Tab") return;
@@ -781,8 +886,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             right: 0,
             bottom: 0,
             left: 0,
+            zIndex: 1,
             border: 0,
-            background: "transparent",
+            backgroundColor: "transparent",
+            backgroundImage: indentGuideBackground,
+            backgroundOrigin: "content-box",
             color: surfaceText,
             display: "block",
             visibility: documentIsolation.visibility,

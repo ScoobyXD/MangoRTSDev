@@ -48,16 +48,19 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 - Typing schedules a debounced save. Blur, node switch, and unmount flush the latest pending value so edits do not wait for a manual save action.
 - Saves are serialized per editor instance. If a save is in flight, the editor queues only the latest follow-up value, preserving user-perceived order without flooding the API.
 - The editor surface owns the full frame height. This prevents the textarea viewport from collapsing to a thin strip and lets mouse-wheel scrolling behave like a regular text editor.
-- Metadata and History are isolated from the document body. The textarea stays mounted to preserve draft/autosave state, but it is hidden, removed from tab order, and made non-interactive whenever another tab owns the frame.
+- Metadata, Outline Styles, and History are isolated from the document body. The textarea stays mounted to preserve draft/autosave state, but it is hidden, removed from tab order, and made non-interactive whenever another tab owns the frame.
 - Switching away from the Editor tab flushes the same pending document save path used by blur. This keeps UI tabs and future headless API flows on the same persistence contract instead of adding tab-specific write behavior.
-- Selecting a linked node or logic gate switches back to the Editor tab and focuses the document so the caret starts blinking immediately.
-- Enter is native textarea Enter. Tab inserts five plain spaces; there is no automatic list or outline formatting in this pass.
+- Selecting a new linked node or logic gate switches back to the Editor tab without forcing the document viewport to the bottom.
+- The editor remembers the last scroll offset per open document target in a small bounded in-memory cache. Returning to a node, logic gate, or the Editor tab restores that viewport; unseen documents start at the top.
+- Outline Styles has two input modes: `Automatic Numbering` and `Indent Guides`.
+- `Automatic Numbering` only affects new Enter presses after numbered lines such as `1. ` or `1.2. `. It inserts the next number at the same indentation and does not rewrite existing document text when the mode is selected.
+- `Indent Guides` keeps text input plain and draws lightweight vertical indentation guides behind the textarea. Tab still inserts five literal spaces.
 - Clearing all text calls the projection delete API. This keeps reload behavior correct while preserving append-only nonblank history for audit and scale.
-- The same APIs work for headless agents: agents can post latest document text with a stable `information_id`, read projections for sub-100ms hot paths, and delete a projection to clear the latest document value.
+- The same document APIs work for headless agents: agents can post latest document text with a stable `information_id`, read projections for sub-100ms hot paths, and delete a projection to clear the latest document value. The outline input helpers are pure frontend functions, so future agent-facing command APIs can reuse the same text-edit rules without needing a browser.
 
 ## Approved Editor Feel
-- Keep the editor feeling like this: a simple, fast, native text document surface with immediate caret focus after linked selection, natural typing, native Enter/new-line behavior, vertical mouse-wheel scrolling, and projection-backed autosave.
-- Do not add automatic bullets, numbered-list transforms, outline transforms, or rich-text behavior unless there is a specific future product decision and matching tests. The current plain-text behavior is the desired baseline.
+- Keep the editor feeling like this: a simple, fast, native text document surface with natural typing, preserved document viewport, vertical mouse-wheel scrolling, and projection-backed autosave.
+- Outline behavior must stay input-only. Switching outline modes must never scan and transform the whole existing document.
 - Tab is intentionally five literal spaces. This is UI-only text input behavior; the backend remains the same headless API contract for users and agents.
 
 ## Semantic vs layout persistence policy (2026-04-27)
@@ -94,6 +97,7 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 - Node title uses single-click inline edit activation in the header (no double-click required), and click handling is isolated so editor-canvas textbox creation does not trigger from title edits.
 - The document surface fills the remaining frame body. Clicking normal text places the caret there; clicking below the written text focuses the editor at the document end, matching native document editor behavior.
 - Long documents scroll inside the editor body with a thin frame-themed scrollbar.
+- Long documents restore the user's last in-session scroll position when they return to the same document target.
 - Text value is persisted server-side through append-only history plus latest-value projections.
 
 ## Commenting Convention Reminder
