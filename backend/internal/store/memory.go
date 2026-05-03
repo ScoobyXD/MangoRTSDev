@@ -42,10 +42,10 @@ type Repository interface {
 	CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error)
 	CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error)
 	ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error)
-	MoveCompanyExplorerFolder(companyID, folderID, parentFolderID string) (domain.CompanyExplorerFolder, error)
+	MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error)
 	RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error)
 	DeleteCompanyExplorerFolder(companyID, folderID string) error
-	AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string) (domain.CompanyExplorerFolderItem, error)
+	AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, error)
 	ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error)
 	RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error
 	ListNodeMapPositions(companyID string) ([]domain.NodeMapPosition, error)
@@ -463,6 +463,39 @@ func nextKanbanCardPosition(cards []domain.KanbanCard, columnID string) int {
 		}
 		if card.Position >= next {
 			next = card.Position + 1000
+		}
+	}
+	return next
+}
+
+func companyExplorerParentID(folder domain.CompanyExplorerFolder) string {
+	if folder.ParentFolderID == nil {
+		return ""
+	}
+	return *folder.ParentFolderID
+}
+
+func nextCompanyExplorerFolderPosition(folders map[string]domain.CompanyExplorerFolder, companyID, folderKind, parentFolderID string) int {
+	next := 1000
+	for _, folder := range folders {
+		if folder.CompanyID != companyID || folder.FolderKind != folderKind || companyExplorerParentID(folder) != parentFolderID {
+			continue
+		}
+		if folder.Position >= next {
+			next = folder.Position + 1000
+		}
+	}
+	return next
+}
+
+func nextCompanyExplorerFolderItemPosition(items map[string]domain.CompanyExplorerFolderItem, companyID, folderID, itemType string) int {
+	next := 1000
+	for _, item := range items {
+		if item.CompanyID != companyID || item.FolderID != folderID || item.ItemType != itemType {
+			continue
+		}
+		if item.Position >= next {
+			next = item.Position + 1000
 		}
 	}
 	return next
@@ -1039,6 +1072,7 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 		ParentFolderID:   parent,
 		FolderKind:       folderKind,
 		Name:             name,
+		Position:         nextCompanyExplorerFolderPosition(r.folders, companyID, folderKind, parentFolderID),
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
@@ -1061,12 +1095,15 @@ func (r *MemoryRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([
 		items = append(items, folder)
 	}
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		if items[i].Position == items[j].Position {
+			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		}
+		return items[i].Position < items[j].Position
 	})
 	return items, nil
 }
 
-func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID, parentFolderID string) (domain.CompanyExplorerFolder, error) {
+func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -1074,13 +1111,19 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID, parentFolder
 	if !ok {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
-	if parentFolderID == folderID {
-		return domain.CompanyExplorerFolder{}, ErrInvalid
+	parent := item.ParentFolderID
+	targetParentID := companyExplorerParentID(item)
+	parentChanged := false
+	if parentFolderID != nil {
+		targetParentID = strings.TrimSpace(*parentFolderID)
+		if targetParentID == folderID {
+			return domain.CompanyExplorerFolder{}, ErrInvalid
+		}
+		parentChanged = targetParentID != companyExplorerParentID(item)
+		parent = nil
 	}
-
-	var parent *string
-	if parentFolderID != "" {
-		parentFolder, ok := r.folders[key(companyID, parentFolderID)]
+	if parentFolderID != nil && targetParentID != "" {
+		parentFolder, ok := r.folders[key(companyID, targetParentID)]
 		if !ok || parentFolder.FolderKind != item.FolderKind {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
@@ -1100,14 +1143,22 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID, parentFolder
 				}
 			}
 		}
-		if toCheck[parentFolderID] {
+		if toCheck[targetParentID] {
 			return domain.CompanyExplorerFolder{}, ErrInvalid
 		}
-		parentValue := parentFolderID
+		parentValue := targetParentID
 		parent = &parentValue
+	}
+	if position <= 0 {
+		if parentChanged {
+			position = nextCompanyExplorerFolderPosition(r.folders, companyID, item.FolderKind, targetParentID)
+		} else {
+			position = item.Position
+		}
 	}
 
 	item.ParentFolderID = parent
+	item.Position = position
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
 	return item, nil
@@ -1163,7 +1214,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerFolder(companyID, folderID string) err
 	return nil
 }
 
-func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string) (domain.CompanyExplorerFolderItem, error) {
+func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -1188,12 +1239,19 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemTy
 	created := now
 	if existing, ok := r.folderItems[k]; ok {
 		created = existing.CreatedTimestamp
+		if position <= 0 && existing.FolderID == folderID {
+			position = existing.Position
+		}
+	}
+	if position <= 0 {
+		position = nextCompanyExplorerFolderItemPosition(r.folderItems, companyID, folderID, itemType)
 	}
 	item := domain.CompanyExplorerFolderItem{
 		CompanyID:        companyID,
 		FolderID:         folderID,
 		ItemType:         itemType,
 		ItemID:           itemID,
+		Position:         position,
 		CreatedTimestamp: created,
 		UpdatedTimestamp: now,
 	}
@@ -1219,7 +1277,10 @@ func (r *MemoryRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemTyp
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		if items[i].Position == items[j].Position {
+			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		}
+		return items[i].Position < items[j].Position
 	})
 	return items, nil
 }

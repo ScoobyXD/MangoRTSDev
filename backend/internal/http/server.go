@@ -250,6 +250,7 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 			CompanyID      string  `json:"company_id"`
 			ParentFolderID *string `json:"parent_folder_id"`
 			Name           string  `json:"name"`
+			Position       int     `json:"position"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
@@ -264,9 +265,13 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 		var item domain.CompanyExplorerFolder
 		var err error
 		changed := false
-		if req.ParentFolderID != nil {
-			parentFolderID := strings.TrimSpace(*req.ParentFolderID)
-			item, err = s.repo.MoveCompanyExplorerFolder(req.CompanyID, folderID, parentFolderID)
+		if req.ParentFolderID != nil || req.Position > 0 {
+			var parentFolderID *string
+			if req.ParentFolderID != nil {
+				parent := strings.TrimSpace(*req.ParentFolderID)
+				parentFolderID = &parent
+			}
+			item, err = s.repo.MoveCompanyExplorerFolder(req.CompanyID, folderID, parentFolderID, req.Position)
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
 				return
@@ -351,6 +356,7 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 			FolderID  string `json:"folder_id"`
 			ItemType  string `json:"item_type"`
 			ItemID    string `json:"item_id"`
+			Position  int    `json:"position"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
@@ -364,7 +370,7 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 			writeError(w, http.StatusBadRequest, "company_folder_item_required")
 			return
 		}
-		item, err := s.repo.AssignCompanyExplorerFolderItem(req.CompanyID, req.FolderID, req.ItemType, req.ItemID)
+		item, err := s.repo.AssignCompanyExplorerFolderItem(req.CompanyID, req.FolderID, req.ItemType, req.ItemID, req.Position)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "company_explorer_folder_or_item_not_found")
 			return

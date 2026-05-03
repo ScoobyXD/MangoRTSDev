@@ -1114,25 +1114,39 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 		parent = parentFolderID
 	}
 
+	var position int
+	if err := tx.QueryRowContext(ctx,
+		`select coalesce(max(position), 0) + 1000
+		 from company_explorer_folders
+		 where company_id=$1
+		   and folder_kind=$2
+		   and (($3::uuid is null and parent_folder_id is null) or parent_folder_id=$3::uuid)`,
+		companyID, folderKind, parent,
+	).Scan(&position); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+
 	item := domain.CompanyExplorerFolder{
 		CompanyID:  companyID,
 		FolderID:   newUUIDv7String(),
 		FolderKind: folderKind,
 		Name:       name,
+		Position:   position,
 	}
 	var parentOut sql.NullString
 	if err := tx.QueryRowContext(ctx,
 		`insert into company_explorer_folders
-		 (company_id, folder_id, parent_folder_id, folder_kind, name, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4, $5, now(), now())
-		 returning company_id, folder_id, parent_folder_id, folder_kind, name, created_timestamp, updated_timestamp`,
-		item.CompanyID, item.FolderID, parent, item.FolderKind, item.Name,
+		 (company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp)
+		 values ($1, $2, $3, $4, $5, $6, now(), now())
+		 returning company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp`,
+		item.CompanyID, item.FolderID, parent, item.FolderKind, item.Name, item.Position,
 	).Scan(
 		&item.CompanyID,
 		&item.FolderID,
 		&parentOut,
 		&item.FolderKind,
 		&item.Name,
+		&item.Position,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
 	); err != nil {
@@ -1154,10 +1168,10 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 		kindParam = folderKind
 	}
 	rows, err := r.db.QueryContext(ctx,
-		`select company_id, folder_id, parent_folder_id, folder_kind, name, created_timestamp, updated_timestamp
+		`select company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp
 		 from company_explorer_folders
 		 where company_id=$1 and ($2::text is null or folder_kind=$2)
-		 order by created_timestamp asc`,
+		 order by position asc, created_timestamp asc`,
 		companyID, kindParam,
 	)
 	if err != nil {
@@ -1175,6 +1189,7 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 			&parent,
 			&item.FolderKind,
 			&item.Name,
+			&item.Position,
 			&item.CreatedTimestamp,
 			&item.UpdatedTimestamp,
 		); err != nil {
@@ -1188,7 +1203,7 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 	return items, rows.Err()
 }
 
-func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID, parentFolderID string) (domain.CompanyExplorerFolder, error) {
+func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1197,30 +1212,44 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID, parentFold
 	defer tx.Rollback()
 
 	var folderKind string
+	var currentParent sql.NullString
+	var currentPosition int
 	if err := tx.QueryRowContext(ctx,
-		`select folder_kind
+		`select folder_kind, parent_folder_id, position
 		 from company_explorer_folders
 		 where company_id=$1 and folder_id=$2
 		 for update`,
 		companyID, folderID,
-	).Scan(&folderKind); err != nil {
+	).Scan(&folderKind, &currentParent, &currentPosition); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		return domain.CompanyExplorerFolder{}, err
 	}
-	if parentFolderID == folderID {
-		return domain.CompanyExplorerFolder{}, ErrInvalid
-	}
 
 	var parent any
-	if parentFolderID != "" {
+	targetParentID := ""
+	if currentParent.Valid {
+		targetParentID = currentParent.String
+		parent = currentParent.String
+	}
+	parentChanged := false
+	if parentFolderID != nil {
+		targetParentID = strings.TrimSpace(*parentFolderID)
+		if targetParentID == folderID {
+			return domain.CompanyExplorerFolder{}, ErrInvalid
+		}
+		parentChanged = (!currentParent.Valid && targetParentID != "") || (currentParent.Valid && currentParent.String != targetParentID)
+		parent = nil
+	}
+
+	if parentFolderID != nil && targetParentID != "" {
 		var parentKind string
 		if err := tx.QueryRowContext(ctx,
 			`select folder_kind
 			 from company_explorer_folders
 			 where company_id=$1 and folder_id=$2`,
-			companyID, parentFolderID,
+			companyID, targetParentID,
 		).Scan(&parentKind); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return domain.CompanyExplorerFolder{}, ErrNotFound
@@ -1243,30 +1272,48 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID, parentFold
 			   join descendants parent on child.company_id=$1 and child.parent_folder_id=parent.folder_id
 			 )
 			 select exists(select 1 from descendants where folder_id=$3)`,
-			companyID, folderID, parentFolderID,
+			companyID, folderID, targetParentID,
 		).Scan(&createsCycle); err != nil {
 			return domain.CompanyExplorerFolder{}, err
 		}
 		if createsCycle {
 			return domain.CompanyExplorerFolder{}, ErrInvalid
 		}
-		parent = parentFolderID
+		parent = targetParentID
+	}
+
+	if position <= 0 {
+		if parentChanged {
+			if err := tx.QueryRowContext(ctx,
+				`select coalesce(max(position), 0) + 1000
+				 from company_explorer_folders
+				 where company_id=$1
+				   and folder_kind=$2
+				   and (($3::uuid is null and parent_folder_id is null) or parent_folder_id=$3::uuid)`,
+				companyID, folderKind, parent,
+			).Scan(&position); err != nil {
+				return domain.CompanyExplorerFolder{}, err
+			}
+		} else {
+			position = currentPosition
+		}
 	}
 
 	var item domain.CompanyExplorerFolder
 	var parentOut sql.NullString
 	if err := tx.QueryRowContext(ctx,
 		`update company_explorer_folders
-		 set parent_folder_id=$3, updated_timestamp=now()
+		 set parent_folder_id=$3, position=$4, updated_timestamp=now()
 		 where company_id=$1 and folder_id=$2
-		 returning company_id, folder_id, parent_folder_id, folder_kind, name, created_timestamp, updated_timestamp`,
-		companyID, folderID, parent,
+		 returning company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp`,
+		companyID, folderID, parent, position,
 	).Scan(
 		&item.CompanyID,
 		&item.FolderID,
 		&parentOut,
 		&item.FolderKind,
 		&item.Name,
+		&item.Position,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
 	); err != nil {
@@ -1292,7 +1339,7 @@ func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name str
 		`update company_explorer_folders
 		 set name=$3, updated_timestamp=now()
 		 where company_id=$1 and folder_id=$2
-		 returning company_id, folder_id, parent_folder_id, folder_kind, name, created_timestamp, updated_timestamp`,
+		 returning company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp`,
 		companyID, folderID, name,
 	).Scan(
 		&item.CompanyID,
@@ -1300,6 +1347,7 @@ func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name str
 		&parent,
 		&item.FolderKind,
 		&item.Name,
+		&item.Position,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
 	); err != nil {
@@ -1336,7 +1384,7 @@ func (r *PostgresRepo) DeleteCompanyExplorerFolder(companyID, folderID string) e
 	return nil
 }
 
-func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string) (domain.CompanyExplorerFolderItem, error) {
+func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1376,22 +1424,54 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 		return domain.CompanyExplorerFolderItem{}, ErrNotFound
 	}
 
+	var existingFolderID string
+	var existingPosition int
+	var hasExisting bool
+	if err := tx.QueryRowContext(ctx,
+		`select folder_id, position
+		 from company_explorer_folder_items
+		 where company_id=$1 and item_type=$2 and item_id=$3
+		 for update`,
+		companyID, itemType, itemID,
+	).Scan(&existingFolderID, &existingPosition); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return domain.CompanyExplorerFolderItem{}, err
+		}
+	} else {
+		hasExisting = true
+	}
+	if position <= 0 && hasExisting && existingFolderID == folderID {
+		position = existingPosition
+	}
+	if position <= 0 {
+		if err := tx.QueryRowContext(ctx,
+			`select coalesce(max(position), 0) + 1000
+			 from company_explorer_folder_items
+			 where company_id=$1 and folder_id=$2 and item_type=$3`,
+			companyID, folderID, itemType,
+		).Scan(&position); err != nil {
+			return domain.CompanyExplorerFolderItem{}, err
+		}
+	}
+
 	var item domain.CompanyExplorerFolderItem
 	if err := tx.QueryRowContext(ctx,
 		`insert into company_explorer_folder_items
-		 (company_id, folder_id, item_type, item_id, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4, now(), now())
+		 (company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp)
+		 values ($1, $2, $3, $4, $5, now(), now())
 		 on conflict (company_id, item_type, item_id)
 		 do update set
 		   folder_id=excluded.folder_id,
+		   position=excluded.position,
 		   updated_timestamp=now()
-		 returning company_id, folder_id, item_type, item_id, created_timestamp, updated_timestamp`,
-		companyID, folderID, itemType, itemID,
+		 returning company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp`,
+		companyID, folderID, itemType, itemID, position,
 	).Scan(
 		&item.CompanyID,
 		&item.FolderID,
 		&item.ItemType,
 		&item.ItemID,
+		&item.Position,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
 	); err != nil {
@@ -1414,12 +1494,12 @@ func (r *PostgresRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemT
 		itemTypeParam = itemType
 	}
 	rows, err := r.db.QueryContext(ctx,
-		`select company_id, folder_id, item_type, item_id, created_timestamp, updated_timestamp
+		`select company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp
 		 from company_explorer_folder_items
 		 where company_id=$1
 		   and ($2::uuid is null or folder_id=$2::uuid)
 		   and ($3::text is null or item_type=$3)
-		 order by created_timestamp asc`,
+		 order by position asc, created_timestamp asc`,
 		companyID, folderParam, itemTypeParam,
 	)
 	if err != nil {
@@ -1435,6 +1515,7 @@ func (r *PostgresRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemT
 			&item.FolderID,
 			&item.ItemType,
 			&item.ItemID,
+			&item.Position,
 			&item.CreatedTimestamp,
 			&item.UpdatedTimestamp,
 		); err != nil {

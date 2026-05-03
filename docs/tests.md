@@ -159,6 +159,7 @@ Use this checklist format and keep it complete.
 - [x] `tests/frontend/modules/company-explorer/treePresentation.test.ts`
   - locks Company Explorer root order to the single collapsible Company row
   - resolves Explorer drag drops on child rows to the containing folder
+  - computes sparse Explorer row reorder writes for vertical drag ordering
   - guards against reintroducing virtual Logic Gates, Nodes, or Knowledge Nodes placeholder rows
   - locks root/custom folder labels without live count suffixes
   - verifies right-click creation targets for nested node and logic-gate folder contexts
@@ -202,7 +203,7 @@ Use this checklist format and keep it complete.
   - logic gate relationship position-pair legality helper (Input/Output or Output/Input only)
   - logic gate create/read/information/relationship API flow
   - node and logic-gate information APIs reject blank/whitespace-only `information` so empty editor blurs do not persist rows
-  - Company Explorer folder APIs create nested folders, rename and move folders, reject cyclic folder moves, assign node placements, and include folder data in workspace snapshots
+  - Company Explorer folder APIs create nested folders, rename and move folders, reject cyclic folder moves, assign/reorder node placements, and include folder data in workspace snapshots
   - Kanban column create/rename and node card API flow
   - Kanban rejects logic-gate card creation through the headless card API
   - Kanban card APIs expose node-only card fields and keep the removed query endpoint at 404

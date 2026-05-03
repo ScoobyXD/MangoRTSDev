@@ -162,6 +162,12 @@ For existing databases that still have the abandoned workspace-context tables or
 psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260502_company_explorer_cleanup.sql
 ```
 
+For existing databases that were created before Company Explorer row ordering was added, run:
+
+```powershell
+psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260503_company_explorer_positions.sql
+```
+
 For existing databases that were created before shared map layout persistence was added, run:
 
 ```powershell
@@ -189,7 +195,7 @@ These tables store the latest shared Node Map and Logic Gate Map positions by co
 - `DELETE /v1/logic-gate-relationships/{logic_gate_relationship_id}?company_id={uuid}`
 - `GET /v1/company-explorer/folders?company_id={uuid}&folder_kind=node|logic_gate`
 - `POST /v1/company-explorer/folders`
-- `PUT /v1/company-explorer/folders/{folder_id}` (rename with `name`, move with `parent_folder_id`, or both)
+- `PUT /v1/company-explorer/folders/{folder_id}` (rename with `name`, move with `parent_folder_id`, reorder with `position`, or combine those fields)
 - `DELETE /v1/company-explorer/folders/{folder_id}?company_id={uuid}`
 - `GET /v1/company-explorer/folder-items?company_id={uuid}&folder_id={uuid}&item_type=node|logic_gate`
 - `POST /v1/company-explorer/folder-items`
@@ -270,11 +276,11 @@ curl -X POST http://localhost:8080/v1/company-explorer/folders \
 
 curl -X POST http://localhost:8080/v1/company-explorer/folder-items \
   -H 'content-type: application/json' \
-  -d '{"company_id":"11111111-1111-1111-1111-111111111111","folder_id":"<folder_id>","item_type":"node","item_id":"<node_id>"}'
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","folder_id":"<folder_id>","item_type":"node","item_id":"<node_id>","position":1000}'
 
 curl -X PUT http://localhost:8080/v1/company-explorer/folders/<child_folder_id> \
   -H 'content-type: application/json' \
-  -d '{"company_id":"11111111-1111-1111-1111-111111111111","parent_folder_id":"<parent_folder_id>"}'
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","parent_folder_id":"<parent_folder_id>","position":2000}'
 
 curl -X PUT http://localhost:8080/v1/company-explorer/folders/<folder_id> \
   -H 'content-type: application/json' \
@@ -283,7 +289,7 @@ curl -X PUT http://localhost:8080/v1/company-explorer/folders/<folder_id> \
 
 Folder rows are API-backed so headless agents can create the same explorer structure as the UI.
 `company_explorer_folder_items` keeps one placement per node or logic gate, matching file-explorer move semantics.
-Folder moves reject self/descendant parents to keep the hierarchy acyclic. Folder renames use the same API path so agents do not need UI-specific behavior.
+Folders and folder items carry sparse integer `position` values; agents can reorder with one bounded write in the common case. Folder moves reject self/descendant parents to keep the hierarchy acyclic. Folder renames use the same API path so agents do not need UI-specific behavior.
 
 Create operation:
 

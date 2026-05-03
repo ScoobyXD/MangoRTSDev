@@ -149,8 +149,9 @@ Folder runtime update (2026-05-02):
 - Explorer folders are now durable backend rows, not local-only UI state.
 - `company_explorer_folders` stores nested folders separately for `node` and `logic_gate` trees. A folder can only contain matching node or logic-gate items, which keeps UI behavior and headless API writes aligned.
 - `company_explorer_folder_items` stores one placement per node or logic gate, matching file-explorer move semantics.
+- Folder and folder-item rows carry sparse integer `position` values. Reorder writes usually update one row; compaction is limited to the visible sibling set only when adjacent positions no longer have numeric room.
 - The tree has one `Company` root row. It is collapsible, and a brand-new company renders no child rows until folders, nodes, or logic gates are created.
-- Direct nodes or logic gates render immediately under their expanded folder, then child folders render below those item rows.
+- Direct nodes or logic gates render immediately under their expanded folder. Placed items and child folders share the same sparse ordering inside that folder, so users can vertically reorder folders, nodes, and logic gates together.
 - The old virtual `Nodes`, `Logic Gates`, `All Nodes`, `All Logic Gates`, Knowledge, and Knowledge Nodes rows are removed from the Explorer tree.
 - Folder rows use fixed yellow icons, node rows use fixed black-and-white document icons, and logic-gate rows use fixed green circuitry AND-gate icons. These icon colors do not follow frame colorways.
 - Explorer row labels do not include live item counts. Count queries belong in bounded API/read models, not in every tree row render.
@@ -165,7 +166,11 @@ Folder runtime update (2026-05-02):
 - Plain click selects one row, Shift-click adds the visible range from the anchor row without clearing previous selections, and Ctrl/Cmd-click toggles individual rows. This selection state is UI-local until a concrete action consumes it, keeping linked map broadcasts focused on the active row.
 - Node, logic-gate, and folder moves still use the existing folder APIs (`POST /v1/company-explorer/folder-items` and `PUT /v1/company-explorer/folders/{folder_id}`), so headless agents can perform the same placement changes without a browser.
 - Drag-and-drop now accepts any compatible row inside a folder section. Dropping a folder, node, or logic gate on a child row resolves to that row's containing folder, while dropping directly on a compatible folder still targets that folder.
-- The Explorer tree owns its vertical overflow and uses the same thin scrollbar treatment as Editor surfaces. The scrollbar is browser-native, appears only when the tree exceeds the frame height, and keeps rendering virtualized for large company trees.
+- Dragging over the top or bottom half of a sibling row reorders the dragged folder/item before or after that row, using the same sparse-position pattern as Kanban cards.
+- Drag moves do not auto-expand the moved folder or the target folder; expanded/collapsed state remains a user-controlled local view.
+- The Explorer tree supports keyboard navigation: Up/Down moves selection through visible rows, Right expands a selected folder, and Left collapses a selected folder.
+- Expanded rows, tree scroll position, and root-level order for unplaced rows persist in localStorage per company/frame on the user's own machine. This state is intentionally not propagated through backend or company-wide sync.
+- The Explorer tree owns its vertical overflow and uses the same thin scrollbar treatment as Editor surfaces. The scrollbar is browser-native, appears only when the tree exceeds the frame height, and keeps rendering virtualized for large company trees. Light frames use the Editor light-mode cyan scrollbar color.
 - Selecting a node folder broadcasts `selectedFolderID`/`selectedFolderKind=node`; linked Node Map filters its cached graph to nodes placed in that folder or any descendant folder.
 - Selecting a logic-gate folder broadcasts `selectedFolderID`/`selectedFolderKind=logic_gate`; linked Logic Gate Map applies the same folder-scope rule for gates.
 - Selecting an individual node or logic gate inside a folder keeps that folder scope in the broadcast, so linked maps can select the item without expanding back to the whole company.
@@ -204,12 +209,12 @@ Implementation principle:
 
 Headless API surface:
 - `GET/POST /v1/company-explorer/folders`
-- `PUT /v1/company-explorer/folders/{folder_id}` for folder rename and/or move
+- `PUT /v1/company-explorer/folders/{folder_id}` for folder rename, move, and/or `position` reorder
 - `DELETE /v1/company-explorer/folders/{folder_id}`
 - `GET/POST/DELETE /v1/company-explorer/folder-items`
 
 This keeps source-of-truth entity IDs and persistence semantics intact while making Explorer organization durable.
-Folder move writes reject self/descendant parents so the folder tree remains safe for recursive scope filtering.
+Folder move writes reject self/descendant parents so the folder tree remains safe for recursive scope filtering. `position` is part of the API contract so agents can reorder Explorer rows without relying on browser-only drag state.
 
 ---
 

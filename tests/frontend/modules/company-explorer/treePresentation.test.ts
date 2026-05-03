@@ -3,6 +3,7 @@ import {
   EXPLORER_DEFAULT_EXPANDED_ROW_IDS,
   EXPLORER_ROOT_ROW_LABELS,
   EXPLORER_ROOT_ROW_ORDER,
+  buildExplorerRowReorderPlan,
   formatExplorerFolderLabel,
   resolveExplorerClickSelection,
   resolveExplorerCreationTargets,
@@ -97,6 +98,37 @@ run("drop targets resolve item rows to their containing folder", () => {
     null,
   );
   assert.equal(resolveExplorerDropTarget({ kind: "node", nodeID: "root-node" }, { kind: "node", itemType: "node", itemID: "node-2" }), null);
+});
+
+run("row reorder plan uses sparse single-row position updates", () => {
+  const plan = buildExplorerRowReorderPlan(
+    [
+      { id: "a", position: 1000, createdTimestamp: "1" },
+      { id: "b", position: 2000, createdTimestamp: "2" },
+      { id: "c", position: 3000, createdTimestamp: "3" },
+    ],
+    "a",
+    "c",
+    "after",
+  );
+  assert.deepEqual(plan.updates, [{ rowID: "a", position: 4000 }]);
+  assert.deepEqual(plan.rows.map((row) => row.id), ["b", "c", "a"]);
+
+  const compacted = buildExplorerRowReorderPlan(
+    [
+      { id: "a", position: 1, createdTimestamp: "1" },
+      { id: "b", position: 2, createdTimestamp: "2" },
+      { id: "c", position: 3, createdTimestamp: "3" },
+    ],
+    "c",
+    "a",
+    "before",
+  );
+  assert.deepEqual(compacted.updates, [
+    { rowID: "c", position: 1000 },
+    { rowID: "a", position: 2000 },
+    { rowID: "b", position: 3000 },
+  ]);
 });
 
 run("click selection supports plain, shift range, and ctrl toggle behavior", () => {
