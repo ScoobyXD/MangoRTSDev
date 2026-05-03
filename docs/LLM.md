@@ -222,8 +222,9 @@ Use these names consistently in product notes, code comments, and future impleme
 Interaction convention:
 
 - The header section is the frame/module movement and frame-selection surface.
-- Root frames use the full header section as a drag handle in edit mode.
+- Root frames use the full header section as a drag handle in edit mode and non-edit mode.
 - Child frames use the full header section as a drag handle inside their parent frame.
+- Right-clicking the header section opens the frame/module actions menu: Duplicate, Link modules, Delink modules, color choices, and Delete.
 - The general section should remain reserved for module-local work such as editing text, manipulating Kanban cards, selecting map nodes, and interacting with explorer rows.
 - A selected frame must show a visible frame-border/ring indication so users can tell which module will participate in link, delete, copy, or other frame-level actions.
 
