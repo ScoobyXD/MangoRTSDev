@@ -268,7 +268,16 @@ create table if not exists kanban_cards (
   node_id uuid,
   logic_gate_id uuid,
   title_snapshot text not null,
+  description_snapshot text not null default '',
   position integer not null,
+  status text not null default '',
+  work_type text not null default '',
+  assigned_to text not null default '',
+  assigned_by text not null default '',
+  created_by text not null default '',
+  updated_by text not null default '',
+  last_activity text not null default '',
+  status_entered_timestamp timestamptz not null default now(),
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   constraint kanban_cards_item_type_chk check (item_type in ('node', 'logic_gate')),
@@ -282,6 +291,11 @@ create table if not exists kanban_cards (
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
 );
 ```
+
+Kanban hot-path indexes include `(company_id, board_id, column_id, position)`,
+`status`, `assigned_to`, `work_type`, `item_type`, `status_entered_timestamp`,
+and a lowercased title-prefix index. These are direct columns instead of JSON so
+the first board query path can stay bounded and index-friendly.
 
 ## Field-by-field mapping from your sheet
 
@@ -390,7 +404,16 @@ create table if not exists kanban_cards (
 - Node ID (UUIDv7, nullable) -> `kanban_cards.node_id`
 - Logic Gate ID (UUIDv7, nullable) -> `kanban_cards.logic_gate_id`
 - Title Snapshot (Text) -> `kanban_cards.title_snapshot`
+- Description Snapshot (Text) -> `kanban_cards.description_snapshot`
 - Position (Integer) -> `kanban_cards.position`
+- Status (Text) -> `kanban_cards.status`
+- Work Type (Text) -> `kanban_cards.work_type`
+- Assigned To (Text external user/agent ID) -> `kanban_cards.assigned_to`
+- Assigned By (Text external user/agent ID) -> `kanban_cards.assigned_by`
+- Created By (Text external user/agent ID) -> `kanban_cards.created_by`
+- Updated By (Text external user/agent ID) -> `kanban_cards.updated_by`
+- Last Activity (Text) -> `kanban_cards.last_activity`
+- Status Entered Timestamp (TIMESTAMPTZ) -> `kanban_cards.status_entered_timestamp`
 - Created Timestamp (TIMESTAMPTZ) -> `kanban_cards.created_timestamp`
 - Updated Timestamp (TIMESTAMPTZ) -> `kanban_cards.updated_timestamp`
 - Constraint: `kanban_cards_one_item_chk` keeps each card linked to exactly one node or logic gate.

@@ -1,4 +1,4 @@
-import type { KanbanCard, KanbanColumn, KanbanItemType } from "./shared";
+import type { KanbanCard, KanbanColumn, KanbanFilter, KanbanGroupField, KanbanItemType, KanbanSortSpec, KanbanVisibleAttribute } from "./shared";
 
 type FetchJSONOptions = {
   method?: string;
@@ -71,6 +71,42 @@ export async function listKanbanCards(apiBase: string, companyID: string, boardI
   return payload.cards ?? [];
 }
 
+export type KanbanQueryResponse = {
+  company_id: string;
+  board_id: string;
+  limit: number;
+  group_by: KanbanGroupField[];
+  visible_attributes: KanbanVisibleAttribute[];
+  cards: KanbanCard[];
+  groups: unknown[];
+};
+
+export async function queryKanbanBoard(args: {
+  apiBase: string;
+  companyID: string;
+  boardID: string;
+  filters: KanbanFilter[];
+  sort: KanbanSortSpec[];
+  groupBy: KanbanGroupField[];
+  visibleAttributes: KanbanVisibleAttribute[];
+  collapsedGroupKeys: string[];
+  limit?: number;
+}): Promise<KanbanQueryResponse> {
+  return fetchJSON<KanbanQueryResponse>(args.apiBase, "/v1/kanban/query", {
+    method: "POST",
+    body: {
+      company_id: args.companyID,
+      board_id: args.boardID,
+      filters: args.filters,
+      sort: args.sort,
+      group_by: args.groupBy,
+      visible_attributes: args.visibleAttributes,
+      collapsed_groups: args.collapsedGroupKeys,
+      limit: args.limit ?? 500,
+    },
+  });
+}
+
 export async function upsertKanbanCard(args: {
   apiBase: string;
   companyID: string;
@@ -80,6 +116,13 @@ export async function upsertKanbanCard(args: {
   itemID: string;
   titleSnapshot: string;
   position: number;
+  status?: string;
+  workType?: string;
+  assignedTo?: string;
+  assignedBy?: string;
+  actorID?: string;
+  descriptionSnapshot?: string;
+  lastActivity?: string;
 }): Promise<KanbanCard> {
   return fetchJSON<KanbanCard>(args.apiBase, "/v1/kanban/cards", {
     method: "POST",
@@ -91,6 +134,13 @@ export async function upsertKanbanCard(args: {
       item_id: args.itemID,
       title_snapshot: args.titleSnapshot,
       position: args.position,
+      status: args.status,
+      work_type: args.workType,
+      assigned_to: args.assignedTo,
+      assigned_by: args.assignedBy,
+      actor_id: args.actorID,
+      description_snapshot: args.descriptionSnapshot,
+      last_activity: args.lastActivity,
     },
   });
 }
@@ -102,6 +152,13 @@ export async function moveKanbanCard(args: {
   cardID: string;
   columnID: string;
   position: number;
+  status?: string;
+  workType?: string;
+  assignedTo?: string;
+  assignedBy?: string;
+  actorID?: string;
+  descriptionSnapshot?: string;
+  lastActivity?: string;
 }): Promise<KanbanCard> {
   return fetchJSON<KanbanCard>(args.apiBase, `/v1/kanban/cards/${encodeURIComponent(args.cardID)}`, {
     method: "PUT",
@@ -110,6 +167,13 @@ export async function moveKanbanCard(args: {
       board_id: args.boardID,
       column_id: args.columnID,
       position: args.position,
+      status: args.status,
+      work_type: args.workType,
+      assigned_to: args.assignedTo,
+      assigned_by: args.assignedBy,
+      actor_id: args.actorID,
+      description_snapshot: args.descriptionSnapshot,
+      last_activity: args.lastActivity,
     },
   });
 }

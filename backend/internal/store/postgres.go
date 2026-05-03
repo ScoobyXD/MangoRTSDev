@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 
 	"miraeopus/backend/internal/domain"
 )
@@ -1485,11 +1487,66 @@ func scanKanbanCard(row interface {
 		&item.ItemType,
 		&item.ItemID,
 		&item.TitleSnapshot,
+		&item.DescriptionSnapshot,
 		&item.Position,
+		&item.Status,
+		&item.WorkType,
+		&item.AssignedTo,
+		&item.AssignedBy,
+		&item.CreatedBy,
+		&item.UpdatedBy,
+		&item.LastActivity,
+		&item.StatusEnteredTimestamp,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
 	)
 	return item, err
+}
+
+const kanbanCardSelectColumns = `
+company_id, board_id, card_id, column_id, item_type,
+coalesce(node_id::text, logic_gate_id::text) as item_id,
+title_snapshot, description_snapshot, position, status, work_type,
+assigned_to, assigned_by, created_by, updated_by, last_activity,
+status_entered_timestamp, created_timestamp, updated_timestamp`
+
+func kanbanCardSQLField(field string) (string, bool) {
+	switch field {
+	case "column_id":
+		return "column_id::text", true
+	case "item_type":
+		return "item_type", true
+	case "item_id":
+		return "coalesce(node_id::text, logic_gate_id::text)", true
+	case "title_snapshot":
+		return "title_snapshot", true
+	case "description_snapshot":
+		return "description_snapshot", true
+	case "status":
+		return "status", true
+	case "work_type":
+		return "work_type", true
+	case "assigned_to":
+		return "assigned_to", true
+	case "assigned_by":
+		return "assigned_by", true
+	case "created_by":
+		return "created_by", true
+	case "updated_by":
+		return "updated_by", true
+	case "last_activity":
+		return "last_activity", true
+	case "created_timestamp":
+		return "created_timestamp", true
+	case "updated_timestamp":
+		return "updated_timestamp", true
+	case "status_entered_timestamp":
+		return "status_entered_timestamp", true
+	case "position":
+		return "position", true
+	default:
+		return "", false
+	}
 }
 
 func (r *PostgresRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
@@ -1573,21 +1630,64 @@ where company_id=$1 and board_id=$2 and column_id=$3`,
 	return nil
 }
 
-func (r *PostgresRepo) ListKanbanCards(companyID, boardID, columnID string, afterPosition int, limit int) ([]domain.KanbanCard, error) {
+func (r *PostgresRepo) ListKanbanCards(companyID, boardID string, query KanbanCardQuery) ([]domain.KanbanCard, error) {
 	ctx := context.Background()
-	if limit <= 0 || limit > 500 {
-		limit = 200
+	query = NormalizeKanbanCardQuery(query)
+	where := []string{"company_id=$1", "board_id=$2"}
+	args := []any{companyID, boardID}
+	addArg := func(value any) string {
+		args = append(args, value)
+		return fmt.Sprintf("$%d", len(args))
 	}
-	rows, err := r.db.QueryContext(ctx, `
-select company_id, board_id, card_id, column_id, item_type,
-       coalesce(node_id::text, logic_gate_id::text) as item_id,
-       title_snapshot, position, created_timestamp, updated_timestamp
+	if query.ColumnID != "" {
+		where = append(where, "column_id::text="+addArg(query.ColumnID))
+	}
+	if query.AfterPosition > 0 {
+		where = append(where, "position>"+addArg(query.AfterPosition))
+	}
+	for _, filter := range query.Filters {
+		if !IsKanbanCardFilterSupported(filter) {
+			return nil, ErrInvalid
+		}
+		sqlField, ok := kanbanCardSQLField(filter.Field)
+		if !ok {
+			return nil, ErrInvalid
+		}
+		if filter.Op == "prefix" {
+			where = append(where, "lower("+sqlField+") like "+addArg(strings.ToLower(filter.Value)+"%"))
+			continue
+		}
+		where = append(where, sqlField+"="+addArg(filter.Value))
+	}
+
+	orderBy := []string{"column_id asc", "position asc", "created_timestamp asc", "card_id asc"}
+	if len(query.Sort) > 0 {
+		orderBy = make([]string, 0, len(query.Sort)+3)
+		for _, sortSpec := range query.Sort {
+			if !IsKanbanCardSortField(sortSpec.Field) {
+				return nil, ErrInvalid
+			}
+			sqlField, ok := kanbanCardSQLField(sortSpec.Field)
+			if !ok {
+				return nil, ErrInvalid
+			}
+			direction := "asc"
+			if strings.ToLower(sortSpec.Direction) == "desc" {
+				direction = "desc"
+			}
+			orderBy = append(orderBy, sqlField+" "+direction)
+		}
+		orderBy = append(orderBy, "column_id asc", "position asc", "created_timestamp asc", "card_id asc")
+	}
+
+	limitPlaceholder := addArg(query.Limit)
+	sqlText := fmt.Sprintf(`
+select %s
 from kanban_cards
-where company_id=$1 and board_id=$2
-  and ($3 = '' or column_id::text = $3)
-  and ($4 <= 0 or position > $4)
-order by column_id, position asc, created_timestamp asc
-limit $5`, companyID, boardID, columnID, afterPosition, limit)
+where %s
+order by %s
+limit %s`, kanbanCardSelectColumns, strings.Join(where, " and "), strings.Join(orderBy, ", "), limitPlaceholder)
+	rows, err := r.db.QueryContext(ctx, sqlText, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1604,7 +1704,7 @@ limit $5`, companyID, boardID, columnID, afterPosition, limit)
 	return items, rows.Err()
 }
 
-func (r *PostgresRepo) UpsertKanbanCard(companyID, boardID, columnID, itemType, itemID, titleSnapshot string, position int) (domain.KanbanCard, error) {
+func (r *PostgresRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1612,55 +1712,84 @@ func (r *PostgresRepo) UpsertKanbanCard(companyID, boardID, columnID, itemType, 
 	}
 	defer tx.Rollback()
 
-	var columnExists bool
+	var columnTitle string
 	if err := tx.QueryRowContext(ctx, `
-select exists(select 1 from kanban_columns where company_id=$1 and board_id=$2 and column_id=$3)`,
-		companyID, boardID, columnID).Scan(&columnExists); err != nil {
+select title from kanban_columns where company_id=$1 and board_id=$2 and column_id=$3`,
+		input.CompanyID, input.BoardID, input.ColumnID).Scan(&columnTitle); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.KanbanCard{}, ErrNotFound
+		}
 		return domain.KanbanCard{}, err
 	}
-	if !columnExists {
-		return domain.KanbanCard{}, ErrNotFound
-	}
 
-	if itemType != "node" && itemType != "logic_gate" {
+	if input.ItemType != "node" && input.ItemType != "logic_gate" {
 		return domain.KanbanCard{}, ErrNotFound
 	}
 	existsQuery := `select exists(select 1 from nodes where company_id=$1 and node_id=$2)`
-	if itemType == "logic_gate" {
+	if input.ItemType == "logic_gate" {
 		existsQuery = `select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`
 	}
 	var itemExists bool
-	if err := tx.QueryRowContext(ctx, existsQuery, companyID, itemID).Scan(&itemExists); err != nil {
+	if err := tx.QueryRowContext(ctx, existsQuery, input.CompanyID, input.ItemID).Scan(&itemExists); err != nil {
 		return domain.KanbanCard{}, err
 	}
 	if !itemExists {
 		return domain.KanbanCard{}, ErrNotFound
 	}
 
-	if position <= 0 {
+	if input.Position <= 0 {
 		if err := tx.QueryRowContext(ctx, `
 select coalesce(max(position), 0) + 1000
 from kanban_cards
-where company_id=$1 and board_id=$2 and column_id=$3`, companyID, boardID, columnID).Scan(&position); err != nil {
+where company_id=$1 and board_id=$2 and column_id=$3`, input.CompanyID, input.BoardID, input.ColumnID).Scan(&input.Position); err != nil {
 			return domain.KanbanCard{}, err
 		}
 	}
 
+	status := NormalizeKanbanCardStatus(input.Metadata.Status, columnTitle)
+	insertWorkType := NormalizeKanbanCardWorkType(input.Metadata.WorkType, input.ItemType)
+	updateWorkType := strings.TrimSpace(input.Metadata.WorkType)
+	assignedTo := strings.TrimSpace(input.Metadata.AssignedTo)
+	assignedBy := strings.TrimSpace(input.Metadata.AssignedBy)
+	actorID := strings.TrimSpace(input.Metadata.ActorID)
+	descriptionSnapshot := strings.TrimSpace(input.Metadata.DescriptionSnapshot)
+	lastActivity := NormalizeKanbanLastActivity(input.Metadata.LastActivity, "updated card")
+
 	var item domain.KanbanCard
 	updateQuery := `
 update kanban_cards
-set column_id=$4, title_snapshot=$5, position=$6, updated_timestamp=now()
+set column_id=$4,
+    title_snapshot=$5,
+    position=$6,
+    status=$8,
+    status_entered_timestamp=case when status <> $8 then now() else status_entered_timestamp end,
+    work_type=case when $9 <> '' then $9 else work_type end,
+    assigned_to=case when $10 <> '' then $10 else assigned_to end,
+    assigned_by=case when $11 <> '' then $11 else assigned_by end,
+    description_snapshot=case when $12 <> '' then $12 else description_snapshot end,
+    updated_by=case when $13 <> '' then $13 else updated_by end,
+    last_activity=$14,
+    updated_timestamp=now()
 where company_id=$1 and board_id=$2 and item_type=$3 and node_id=$7
-returning company_id, board_id, card_id, column_id, item_type,
-          coalesce(node_id::text, logic_gate_id::text), title_snapshot, position, created_timestamp, updated_timestamp`
-	updateArgs := []any{companyID, boardID, itemType, columnID, titleSnapshot, position, itemID}
-	if itemType == "logic_gate" {
+returning ` + kanbanCardSelectColumns
+	updateArgs := []any{input.CompanyID, input.BoardID, input.ItemType, input.ColumnID, input.TitleSnapshot, input.Position, input.ItemID, status, updateWorkType, assignedTo, assignedBy, descriptionSnapshot, actorID, lastActivity}
+	if input.ItemType == "logic_gate" {
 		updateQuery = `
 update kanban_cards
-set column_id=$4, title_snapshot=$5, position=$6, updated_timestamp=now()
+set column_id=$4,
+    title_snapshot=$5,
+    position=$6,
+    status=$8,
+    status_entered_timestamp=case when status <> $8 then now() else status_entered_timestamp end,
+    work_type=case when $9 <> '' then $9 else work_type end,
+    assigned_to=case when $10 <> '' then $10 else assigned_to end,
+    assigned_by=case when $11 <> '' then $11 else assigned_by end,
+    description_snapshot=case when $12 <> '' then $12 else description_snapshot end,
+    updated_by=case when $13 <> '' then $13 else updated_by end,
+    last_activity=$14,
+    updated_timestamp=now()
 where company_id=$1 and board_id=$2 and item_type=$3 and logic_gate_id=$7
-returning company_id, board_id, card_id, column_id, item_type,
-          coalesce(node_id::text, logic_gate_id::text), title_snapshot, position, created_timestamp, updated_timestamp`
+returning ` + kanbanCardSelectColumns
 	}
 	item, err = scanKanbanCard(tx.QueryRowContext(ctx, updateQuery, updateArgs...))
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -1669,18 +1798,23 @@ returning company_id, board_id, card_id, column_id, item_type,
 	if errors.Is(err, sql.ErrNoRows) {
 		var nodeID any
 		var logicGateID any
-		if itemType == "node" {
-			nodeID = itemID
+		if input.ItemType == "node" {
+			nodeID = input.ItemID
 		} else {
-			logicGateID = itemID
+			logicGateID = input.ItemID
 		}
+		insertActivity := NormalizeKanbanLastActivity(input.Metadata.LastActivity, "created card")
 		item, err = scanKanbanCard(tx.QueryRowContext(ctx, `
 insert into kanban_cards (
-  company_id, board_id, card_id, column_id, item_type, node_id, logic_gate_id, title_snapshot, position, created_timestamp, updated_timestamp
-) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,now(),now())
-returning company_id, board_id, card_id, column_id, item_type,
-          coalesce(node_id::text, logic_gate_id::text), title_snapshot, position, created_timestamp, updated_timestamp`,
-			companyID, boardID, newUUIDv7String(), columnID, itemType, nodeID, logicGateID, titleSnapshot, position,
+  company_id, board_id, card_id, column_id, item_type, node_id, logic_gate_id,
+  title_snapshot, description_snapshot, position, status, work_type, assigned_to,
+  assigned_by, created_by, updated_by, last_activity, status_entered_timestamp,
+  created_timestamp, updated_timestamp
+) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15,$16,now(),now(),now())
+returning `+kanbanCardSelectColumns,
+			input.CompanyID, input.BoardID, newUUIDv7String(), input.ColumnID, input.ItemType,
+			nodeID, logicGateID, input.TitleSnapshot, descriptionSnapshot, input.Position, status,
+			insertWorkType, assignedTo, assignedBy, actorID, insertActivity,
 		))
 		if err != nil {
 			return domain.KanbanCard{}, err
@@ -1692,7 +1826,7 @@ returning company_id, board_id, card_id, column_id, item_type,
 	return item, nil
 }
 
-func (r *PostgresRepo) MoveKanbanCard(companyID, boardID, cardID, columnID string, position int) (domain.KanbanCard, error) {
+func (r *PostgresRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1700,31 +1834,49 @@ func (r *PostgresRepo) MoveKanbanCard(companyID, boardID, cardID, columnID strin
 	}
 	defer tx.Rollback()
 
-	var columnExists bool
+	var columnTitle string
 	if err := tx.QueryRowContext(ctx, `
-select exists(select 1 from kanban_columns where company_id=$1 and board_id=$2 and column_id=$3)`,
-		companyID, boardID, columnID).Scan(&columnExists); err != nil {
+select title from kanban_columns where company_id=$1 and board_id=$2 and column_id=$3`,
+		input.CompanyID, input.BoardID, input.ColumnID).Scan(&columnTitle); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.KanbanCard{}, ErrNotFound
+		}
 		return domain.KanbanCard{}, err
 	}
-	if !columnExists {
-		return domain.KanbanCard{}, ErrNotFound
-	}
-	if position <= 0 {
+	if input.Position <= 0 {
 		if err := tx.QueryRowContext(ctx, `
 select coalesce(max(position), 0) + 1000
 from kanban_cards
-where company_id=$1 and board_id=$2 and column_id=$3`, companyID, boardID, columnID).Scan(&position); err != nil {
+where company_id=$1 and board_id=$2 and column_id=$3`, input.CompanyID, input.BoardID, input.ColumnID).Scan(&input.Position); err != nil {
 			return domain.KanbanCard{}, err
 		}
 	}
 
+	status := NormalizeKanbanCardStatus(input.Metadata.Status, columnTitle)
+	workType := strings.TrimSpace(input.Metadata.WorkType)
+	assignedTo := strings.TrimSpace(input.Metadata.AssignedTo)
+	assignedBy := strings.TrimSpace(input.Metadata.AssignedBy)
+	actorID := strings.TrimSpace(input.Metadata.ActorID)
+	descriptionSnapshot := strings.TrimSpace(input.Metadata.DescriptionSnapshot)
+	lastActivity := NormalizeKanbanLastActivity(input.Metadata.LastActivity, "moved card")
+
 	item, err := scanKanbanCard(tx.QueryRowContext(ctx, `
 update kanban_cards
-set column_id=$4, position=$5, updated_timestamp=now()
+set column_id=$4,
+    position=$5,
+    status=$6,
+    status_entered_timestamp=case when status <> $6 then now() else status_entered_timestamp end,
+    work_type=case when $7 <> '' then $7 else work_type end,
+    assigned_to=case when $8 <> '' then $8 else assigned_to end,
+    assigned_by=case when $9 <> '' then $9 else assigned_by end,
+    description_snapshot=case when $10 <> '' then $10 else description_snapshot end,
+    updated_by=case when $11 <> '' then $11 else updated_by end,
+    last_activity=$12,
+    updated_timestamp=now()
 where company_id=$1 and board_id=$2 and card_id=$3
-returning company_id, board_id, card_id, column_id, item_type,
-          coalesce(node_id::text, logic_gate_id::text), title_snapshot, position, created_timestamp, updated_timestamp`,
-		companyID, boardID, cardID, columnID, position,
+returning `+kanbanCardSelectColumns,
+		input.CompanyID, input.BoardID, input.CardID, input.ColumnID, input.Position,
+		status, workType, assignedTo, assignedBy, descriptionSnapshot, actorID, lastActivity,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.KanbanCard{}, ErrNotFound

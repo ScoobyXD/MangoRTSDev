@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,9 +55,9 @@ type Repository interface {
 	CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int) (domain.KanbanColumn, error)
 	UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int) (domain.KanbanColumn, error)
 	DeleteKanbanColumn(companyID, boardID, columnID string) error
-	ListKanbanCards(companyID, boardID, columnID string, afterPosition int, limit int) ([]domain.KanbanCard, error)
-	UpsertKanbanCard(companyID, boardID, columnID, itemType, itemID, titleSnapshot string, position int) (domain.KanbanCard, error)
-	MoveKanbanCard(companyID, boardID, cardID, columnID string, position int) (domain.KanbanCard, error)
+	ListKanbanCards(companyID, boardID string, query KanbanCardQuery) ([]domain.KanbanCard, error)
+	UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error)
+	MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error)
 	DeleteKanbanCard(companyID, boardID, cardID string) error
 }
 
@@ -414,12 +415,17 @@ func isKanbanItemType(itemType string) bool {
 }
 
 func (r *MemoryRepo) kanbanColumnExistsLocked(companyID, boardID, columnID string) bool {
+	_, ok := r.kanbanColumnTitleLocked(companyID, boardID, columnID)
+	return ok
+}
+
+func (r *MemoryRepo) kanbanColumnTitleLocked(companyID, boardID, columnID string) (string, bool) {
 	for _, column := range r.kanbanColumns[boardKey(companyID, boardID)] {
 		if column.ColumnID == columnID {
-			return true
+			return column.Title, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func (r *MemoryRepo) kanbanItemExistsLocked(companyID, itemType, itemID string) bool {
@@ -519,90 +525,124 @@ func (r *MemoryRepo) DeleteKanbanColumn(companyID, boardID, columnID string) err
 	return nil
 }
 
-func (r *MemoryRepo) ListKanbanCards(companyID, boardID, columnID string, afterPosition int, limit int) ([]domain.KanbanCard, error) {
+func (r *MemoryRepo) ListKanbanCards(companyID, boardID string, query KanbanCardQuery) ([]domain.KanbanCard, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if limit <= 0 || limit > 500 {
-		limit = 200
-	}
+	query = NormalizeKanbanCardQuery(query)
 	source := r.kanbanCards[boardKey(companyID, boardID)]
-	items := make([]domain.KanbanCard, 0, min(limit, len(source)))
+	items := make([]domain.KanbanCard, 0, min(query.Limit, len(source)))
 	for _, card := range source {
-		if columnID != "" && card.ColumnID != columnID {
+		if query.ColumnID != "" && card.ColumnID != query.ColumnID {
 			continue
 		}
-		if afterPosition > 0 && card.Position <= afterPosition {
+		if query.AfterPosition > 0 && card.Position <= query.AfterPosition {
+			continue
+		}
+		if !KanbanCardMatchesFilters(card, query.Filters) {
 			continue
 		}
 		items = append(items, card)
 	}
-	sortKanbanCards(items)
-	if len(items) > limit {
-		items = items[:limit]
+	SortKanbanCardsForQuery(items, query.Sort)
+	if len(items) > query.Limit {
+		items = items[:query.Limit]
 	}
 	return items, nil
 }
 
-func (r *MemoryRepo) UpsertKanbanCard(companyID, boardID, columnID, itemType, itemID, titleSnapshot string, position int) (domain.KanbanCard, error) {
+func applyKanbanCardMetadata(card *domain.KanbanCard, metadata KanbanCardMetadataInput, columnTitle, itemType, fallbackActivity string, now time.Time) {
+	nextStatus := NormalizeKanbanCardStatus(metadata.Status, columnTitle)
+	if card.Status == "" || card.Status != nextStatus || card.StatusEnteredTimestamp.IsZero() {
+		card.Status = nextStatus
+		card.StatusEnteredTimestamp = now
+	}
+	if workType := NormalizeKanbanCardWorkType(metadata.WorkType, itemType); card.WorkType == "" || metadata.WorkType != "" {
+		card.WorkType = workType
+	}
+	if assignedTo := strings.TrimSpace(metadata.AssignedTo); assignedTo != "" || card.AssignedTo == "" {
+		card.AssignedTo = assignedTo
+	}
+	if assignedBy := strings.TrimSpace(metadata.AssignedBy); assignedBy != "" || card.AssignedBy == "" {
+		card.AssignedBy = assignedBy
+	}
+	if description := strings.TrimSpace(metadata.DescriptionSnapshot); description != "" || card.DescriptionSnapshot == "" {
+		card.DescriptionSnapshot = description
+	}
+	if actorID := strings.TrimSpace(metadata.ActorID); actorID != "" {
+		if card.CreatedBy == "" {
+			card.CreatedBy = actorID
+		}
+		card.UpdatedBy = actorID
+	}
+	card.LastActivity = NormalizeKanbanLastActivity(metadata.LastActivity, fallbackActivity)
+}
+
+func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.kanbanColumnExistsLocked(companyID, boardID, columnID) || !r.kanbanItemExistsLocked(companyID, itemType, itemID) {
+	columnTitle, columnExists := r.kanbanColumnTitleLocked(input.CompanyID, input.BoardID, input.ColumnID)
+	if !columnExists || !r.kanbanItemExistsLocked(input.CompanyID, input.ItemType, input.ItemID) {
 		return domain.KanbanCard{}, ErrNotFound
 	}
-	if !isKanbanItemType(itemType) {
+	if !isKanbanItemType(input.ItemType) {
 		return domain.KanbanCard{}, ErrNotFound
 	}
-	k := boardKey(companyID, boardID)
-	if position <= 0 {
-		position = nextKanbanCardPosition(r.kanbanCards[k], columnID)
+	k := boardKey(input.CompanyID, input.BoardID)
+	if input.Position <= 0 {
+		input.Position = nextKanbanCardPosition(r.kanbanCards[k], input.ColumnID)
 	}
 	now := time.Now().UTC()
 	for index, card := range r.kanbanCards[k] {
-		if card.ItemType != itemType || card.ItemID != itemID {
+		if card.ItemType != input.ItemType || card.ItemID != input.ItemID {
 			continue
 		}
 		// A drop is a command, not append-only history. Moving the existing card keeps
 		// repeated UI drops and retrying agents idempotent.
-		card.ColumnID = columnID
-		card.TitleSnapshot = titleSnapshot
-		card.Position = position
+		card.ColumnID = input.ColumnID
+		card.TitleSnapshot = input.TitleSnapshot
+		card.Position = input.Position
+		applyKanbanCardMetadata(&card, input.Metadata, columnTitle, input.ItemType, "updated card", now)
 		card.UpdatedTimestamp = now
 		r.kanbanCards[k][index] = card
 		return card, nil
 	}
 	card := domain.KanbanCard{
-		CompanyID:        companyID,
-		BoardID:          boardID,
+		CompanyID:        input.CompanyID,
+		BoardID:          input.BoardID,
 		CardID:           newUUIDv7String(),
-		ColumnID:         columnID,
-		ItemType:         itemType,
-		ItemID:           itemID,
-		TitleSnapshot:    titleSnapshot,
-		Position:         position,
+		ColumnID:         input.ColumnID,
+		ItemType:         input.ItemType,
+		ItemID:           input.ItemID,
+		TitleSnapshot:    input.TitleSnapshot,
+		Position:         input.Position,
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
+	applyKanbanCardMetadata(&card, input.Metadata, columnTitle, input.ItemType, "created card", now)
 	r.kanbanCards[k] = append(r.kanbanCards[k], card)
 	return card, nil
 }
 
-func (r *MemoryRepo) MoveKanbanCard(companyID, boardID, cardID, columnID string, position int) (domain.KanbanCard, error) {
+func (r *MemoryRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.kanbanColumnExistsLocked(companyID, boardID, columnID) {
+	columnTitle, columnExists := r.kanbanColumnTitleLocked(input.CompanyID, input.BoardID, input.ColumnID)
+	if !columnExists {
 		return domain.KanbanCard{}, ErrNotFound
 	}
-	k := boardKey(companyID, boardID)
-	if position <= 0 {
-		position = nextKanbanCardPosition(r.kanbanCards[k], columnID)
+	k := boardKey(input.CompanyID, input.BoardID)
+	if input.Position <= 0 {
+		input.Position = nextKanbanCardPosition(r.kanbanCards[k], input.ColumnID)
 	}
 	for index, card := range r.kanbanCards[k] {
-		if card.CardID != cardID {
+		if card.CardID != input.CardID {
 			continue
 		}
-		card.ColumnID = columnID
-		card.Position = position
-		card.UpdatedTimestamp = time.Now().UTC()
+		now := time.Now().UTC()
+		card.ColumnID = input.ColumnID
+		card.Position = input.Position
+		applyKanbanCardMetadata(&card, input.Metadata, columnTitle, card.ItemType, "moved card", now)
+		card.UpdatedTimestamp = now
 		r.kanbanCards[k][index] = card
 		return card, nil
 	}

@@ -202,7 +202,8 @@ These tables store the latest shared Node Map and Logic Gate Map positions by co
 - `POST /v1/kanban/columns`
 - `PUT /v1/kanban/columns/{column_id}`
 - `DELETE /v1/kanban/columns/{column_id}?company_id={uuid}&board_id={board_id}`
-- `GET /v1/kanban/cards?company_id={uuid}&board_id={board_id}&column_id={column_id}&after_position=0&limit=200`
+- `GET /v1/kanban/cards?company_id={uuid}&board_id={board_id}&column_id={column_id}&status=Ready&work_type=Bug&assigned_to=agent-1&title_prefix=Cust&sort=updated_timestamp&sort_dir=desc&after_position=0&limit=200`
+- `POST /v1/kanban/query`
 - `POST /v1/kanban/cards`
 - `PUT /v1/kanban/cards/{card_id}`
 - `DELETE /v1/kanban/cards/{card_id}?company_id={uuid}&board_id={board_id}`
@@ -297,8 +298,27 @@ curl -X POST http://localhost:8080/v1/kanban/columns \
 
 curl -X POST http://localhost:8080/v1/kanban/cards \
   -H 'content-type: application/json' \
-  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","column_id":"<column_id>","item_type":"node","item_id":"<node_id>","title_snapshot":"Customer onboarding"}'
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","column_id":"<column_id>","item_type":"node","item_id":"<node_id>","title_snapshot":"Customer onboarding","work_type":"Customer work","assigned_to":"agent-1","assigned_by":"person-2","actor_id":"agent-1","last_activity":"created card"}'
 ```
+
+Query a board for headless agents and the UI:
+
+```bash
+curl -X POST http://localhost:8080/v1/kanban/query \
+  -H 'content-type: application/json' \
+  -d '{
+    "company_id":"11111111-1111-1111-1111-111111111111",
+    "board_id":"frame-kanban-1",
+    "filters":[{"field":"assigned_to","op":"eq","value":"agent-1"}],
+    "sort":[{"field":"status_entered_timestamp","direction":"desc"}],
+    "group_by":["status","assigned_to","work_type"],
+    "visible_attributes":["assigned_to","work_type","status_age"],
+    "collapsed_groups":["status=Done"],
+    "limit":200
+  }'
+```
+
+Kanban card metadata uses direct columns for the hot fields agents and users query most: `status`, `work_type`, `assigned_to`, `assigned_by`, `created_by`, `updated_by`, `last_activity`, and `status_entered_timestamp`. Keep the hot path bounded with `company_id`, `board_id`, explicit filters, and `limit`; broad free-text search belongs in a separate search projection, not the board render path.
 
 ### Shared map layout contract
 
