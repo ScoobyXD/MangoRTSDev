@@ -8,7 +8,7 @@ import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksF
 import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
-import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../kanban/shared";
+import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../kanban/shared";
 
 type ExplorerTreeNode = {
   id: string;
@@ -813,6 +813,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                     ? { itemType: "node", nodeID: kanbanDragItems[0].nodeID, label: kanbanDragItems[0].label }
                     : { itemType: "node_batch", nodes: kanbanDragItems });
                   event.dataTransfer.setData(EXPLORER_ENTITY_DRAG_MIME, kanbanPayload);
+                  attachStackedDragPreview(
+                    event.dataTransfer,
+                    kanbanDragItems.map((item) => ({ label: item.label, color: rowIconColor })),
+                    KANBAN_DEFAULT_COLUMN_ITEM_COLOR,
+                    "Explorer nodes",
+                  );
                 }
                 event.dataTransfer.setData("text/plain", kanbanDragItems.length > 1 ? `${kanbanDragItems.length} nodes` : row.label);
               }}

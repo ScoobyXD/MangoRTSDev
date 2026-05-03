@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, clampColumnHeight, clampColumnWidth, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, sanitizeExplorerEntityDragPayload, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, clampColumnHeight, clampColumnWidth, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, sanitizeExplorerEntityDragPayload, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
 
 function card(overrides: Partial<KanbanCard>): KanbanCard {
   return {
@@ -176,6 +176,25 @@ test("card reorder helper moves cards vertically with bounded position writes", 
 
   assert.deepEqual(sorted.map((item) => item.card_id), ["beta", "alpha", "gamma"]);
   assert.deepEqual(plan.updates, [{ cardID: "alpha", columnID: "todo", position: 2500 }]);
+});
+
+test("card batch reorder helper moves selected cards together", () => {
+  const cards = [
+    card({ card_id: "todo-a", node_id: "node-a", column_id: "todo", position: 1000 }),
+    card({ card_id: "todo-b", node_id: "node-b", column_id: "todo", position: 2000 }),
+    card({ card_id: "doing-a", node_id: "node-c", column_id: "doing", position: 1000 }),
+    card({ card_id: "doing-b", node_id: "node-d", column_id: "doing", position: 2000 }),
+  ];
+  const payload = parseKanbanCardDragPayload(JSON.stringify({ cardID: "todo-a", cardIDs: ["todo-a", "todo-b"], sourceColumnID: "todo" }));
+  assert.deepEqual(payload?.cardIDs, ["todo-a", "todo-b"]);
+
+  const plan = buildCardBatchReorderPlan(cards, payload?.cardIDs ?? [], "doing", "doing-b", "before");
+  const sorted = groupCardsByColumn(plan.cards).get("doing") ?? [];
+  assert.deepEqual(sorted.map((item) => item.card_id), ["doing-a", "todo-a", "todo-b", "doing-b"]);
+  assert.deepEqual(plan.updates, [
+    { cardID: "todo-a", columnID: "doing", position: 1333 },
+    { cardID: "todo-b", columnID: "doing", position: 1666 },
+  ]);
 });
 
 test("column layout helpers keep reorder and resize writes bounded", () => {

@@ -159,6 +159,7 @@ Kanban drag update (2026-05-01):
 Kanban multi-drag update (2026-05-03):
 - Explorer rows support click, Ctrl/Cmd-click, and continuous Shift-click selection for drag batching.
 - Dragging from any selected node row exports all selected node rows as `{ itemType: "node_batch", nodes: [...] }` on `application/x-mango-explorer-entity`.
+- The browser drag image for a selected node batch shows the batch rows and count so the cursor preview matches the transfer intent.
 - Non-node rows can stay selected for Explorer navigation, but Kanban batch payloads include node rows only.
 - A linked Kanban card click can target this Explorer with `node-map-explorer-context-v1:<companyID>:<explorerFrameID>` so the matching node row highlights.
 

@@ -11,6 +11,11 @@ export const KANBAN_MIN_COLUMN_HEIGHT_PX = 160;
 export const KANBAN_MAX_COLUMN_HEIGHT_PX = 720;
 export const KANBAN_DEFAULT_COLUMN_ITEM_COLOR = "#2f7d62";
 
+export type KanbanDragPreviewItem = {
+  label: string;
+  color?: string;
+};
+
 export type ExplorerEntityDragItem = {
   nodeID: string;
   label: string;
@@ -53,6 +58,7 @@ export type KanbanCard = {
 
 export type KanbanCardDragPayload = {
   cardID: string;
+  cardIDs: string[];
   sourceColumnID: string;
 };
 
@@ -89,6 +95,77 @@ export function isKanbanColumnItemColor(value: unknown): value is string {
 
 export function normalizeKanbanColumnItemColor(value: unknown): string {
   return isKanbanColumnItemColor(value) ? value.trim() : KANBAN_DEFAULT_COLUMN_ITEM_COLOR;
+}
+
+export function hexToRgba(hex: string, alpha: number): string {
+  const clean = hex.trim().replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(clean)) return `rgba(47,125,98,${alpha})`;
+  const value = Number.parseInt(clean, 16);
+  const red = (value >> 16) & 255;
+  const green = (value >> 8) & 255;
+  const blue = value & 255;
+  return `rgba(${red},${green},${blue},${alpha})`;
+}
+
+export function attachStackedDragPreview(dataTransfer: DataTransfer, items: KanbanDragPreviewItem[], accentColor: string, title: string): void {
+  if (typeof document === "undefined" || items.length === 0) return;
+  const visibleItems = items.slice(0, 12);
+  const container = document.createElement("div");
+  container.style.position = "fixed";
+  container.style.top = "-1000px";
+  container.style.left = "-1000px";
+  container.style.width = "230px";
+  container.style.padding = "8px";
+  container.style.border = `1px solid ${accentColor}`;
+  container.style.background = "rgba(10, 14, 18, 0.94)";
+  container.style.color = "#f6f8fb";
+  container.style.boxShadow = `0 10px 26px rgba(0,0,0,0.28), 0 0 18px ${hexToRgba(accentColor, 0.28)}`;
+  container.style.fontFamily = "'IBM Plex Mono', monospace";
+  container.style.pointerEvents = "none";
+  container.style.zIndex = "99999";
+
+  const header = document.createElement("div");
+  header.textContent = `${title} (${items.length})`;
+  header.style.fontSize = "10px";
+  header.style.fontWeight = "800";
+  header.style.letterSpacing = "0.06em";
+  header.style.textTransform = "uppercase";
+  header.style.marginBottom = "6px";
+  header.style.color = accentColor;
+  container.appendChild(header);
+
+  for (const item of visibleItems) {
+    const row = document.createElement("div");
+    row.textContent = item.label;
+    row.style.height = "22px";
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.marginTop = "3px";
+    row.style.padding = "0 7px";
+    row.style.border = "1px solid rgba(255,255,255,0.12)";
+    row.style.borderLeft = `4px solid ${item.color || accentColor}`;
+    row.style.background = "rgba(255,255,255,0.08)";
+    row.style.fontSize = "11px";
+    row.style.fontWeight = "700";
+    row.style.whiteSpace = "nowrap";
+    row.style.overflow = "hidden";
+    row.style.textOverflow = "ellipsis";
+    container.appendChild(row);
+  }
+
+  if (items.length > visibleItems.length) {
+    const more = document.createElement("div");
+    more.textContent = `+ ${items.length - visibleItems.length} more`;
+    more.style.marginTop = "5px";
+    more.style.fontSize = "10px";
+    more.style.fontWeight = "800";
+    more.style.color = "#d7f8ff";
+    container.appendChild(more);
+  }
+
+  document.body.appendChild(container);
+  dataTransfer.setDragImage(container, 18, 18);
+  window.setTimeout(() => container.remove(), 0);
 }
 
 export function sanitizeExplorerEntityDragPayload(value: unknown): ExplorerEntityDragPayload | null {
@@ -144,10 +221,15 @@ export function serializeExplorerEntityDragPayload(payload: ExplorerEntityDragPa
 
 export function parseKanbanCardDragPayload(raw: string): KanbanCardDragPayload | null {
   try {
-    const parsed = JSON.parse(raw) as { cardID?: unknown; sourceColumnID?: unknown };
-    if (typeof parsed.cardID !== "string" || parsed.cardID.trim() === "") return null;
+    const parsed = JSON.parse(raw) as { cardID?: unknown; cardIDs?: unknown; sourceColumnID?: unknown };
+    const cardIDs = Array.isArray(parsed.cardIDs)
+      ? parsed.cardIDs.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
+      : [];
+    if (cardIDs.length === 0 && typeof parsed.cardID === "string" && parsed.cardID.trim()) cardIDs.push(parsed.cardID.trim());
+    const uniqueCardIDs = Array.from(new Set(cardIDs));
+    if (uniqueCardIDs.length === 0) return null;
     if (typeof parsed.sourceColumnID !== "string" || parsed.sourceColumnID.trim() === "") return null;
-    return { cardID: parsed.cardID.trim(), sourceColumnID: parsed.sourceColumnID.trim() };
+    return { cardID: uniqueCardIDs[0], cardIDs: uniqueCardIDs, sourceColumnID: parsed.sourceColumnID.trim() };
   } catch {
     return null;
   }
@@ -317,6 +399,68 @@ export function buildCardReorderPlan(cards: KanbanCard[], draggedCardID: string,
   return {
     cards: cards.map((card) => (card.card_id === dragged.card_id ? updated : card)),
     updates: [{ cardID: dragged.card_id, columnID: targetColumnID, position }],
+  };
+}
+
+export function buildCardBatchReorderPlan(cards: KanbanCard[], draggedCardIDs: string[], targetColumnID: string, targetCardID: string | null = null, placement: KanbanCardDropPlacement = "before"): { cards: KanbanCard[]; updates: KanbanCardPositionUpdate[] } {
+  const orderedDraggedIDs = Array.from(new Set(draggedCardIDs.map((cardID) => cardID.trim()).filter(Boolean)));
+  if (orderedDraggedIDs.length === 0) return { cards, updates: [] };
+  if (targetCardID && orderedDraggedIDs.includes(targetCardID)) return { cards, updates: [] };
+
+  if (orderedDraggedIDs.length === 1) {
+    return buildCardReorderPlan(cards, orderedDraggedIDs[0], targetColumnID, targetCardID, placement);
+  }
+
+  const byCardID = new Map(cards.map((card) => [card.card_id, card]));
+  const draggedCards = orderedDraggedIDs.map((cardID) => byCardID.get(cardID)).filter((card): card is KanbanCard => Boolean(card));
+  if (draggedCards.length === 0) return { cards, updates: [] };
+
+  const draggedIDSet = new Set(draggedCards.map((card) => card.card_id));
+  const remainingCards = cards.filter((card) => !draggedIDSet.has(card.card_id));
+  const targetColumnCards = groupCardsByColumn(remainingCards).get(targetColumnID) ?? [];
+  const targetIndex = targetCardID ? targetColumnCards.findIndex((card) => card.card_id === targetCardID) : targetColumnCards.length;
+  if (targetIndex < 0) return { cards, updates: [] };
+
+  const insertIndex = targetCardID && placement === "after" ? targetIndex + 1 : targetIndex;
+  const movedCards = draggedCards.map((card) => ({ ...card, column_id: targetColumnID }));
+  const reorderedTargetCards = [
+    ...targetColumnCards.slice(0, insertIndex),
+    ...movedCards,
+    ...targetColumnCards.slice(insertIndex),
+  ];
+  const movedCount = movedCards.length;
+  const prev = reorderedTargetCards[insertIndex - 1];
+  const next = reorderedTargetCards[insertIndex + movedCount];
+  const updatedByID = new Map<string, KanbanCard>();
+
+  const applySparsePositions = (positions: number[]): KanbanCardPositionUpdate[] => {
+    return movedCards.map((card, index) => {
+      const updated = { ...card, position: positions[index] };
+      updatedByID.set(card.card_id, updated);
+      return { cardID: card.card_id, columnID: targetColumnID, position: updated.position };
+    });
+  };
+
+  let updates: KanbanCardPositionUpdate[];
+  if (prev && next && next.position - prev.position > movedCount) {
+    const step = Math.floor((next.position - prev.position) / (movedCount + 1));
+    updates = applySparsePositions(movedCards.map((_, index) => prev.position + step * (index + 1)));
+  } else if (prev && !next) {
+    updates = applySparsePositions(movedCards.map((_, index) => prev.position + 1000 * (index + 1)));
+  } else if (!prev && next && next.position > movedCount) {
+    const step = Math.floor(next.position / (movedCount + 1));
+    updates = applySparsePositions(movedCards.map((_, index) => step * (index + 1)));
+  } else {
+    updates = reorderedTargetCards.map((card, index) => {
+      const updated = { ...card, column_id: targetColumnID, position: (index + 1) * 1000 };
+      updatedByID.set(card.card_id, updated);
+      return { cardID: card.card_id, columnID: targetColumnID, position: updated.position };
+    });
+  }
+
+  return {
+    cards: cards.map((card) => updatedByID.get(card.card_id) ?? card),
+    updates,
   };
 }
 
