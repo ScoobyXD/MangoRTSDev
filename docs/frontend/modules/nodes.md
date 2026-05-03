@@ -273,7 +273,9 @@ The projection object is **derived in memory** during render. It is not persiste
 - `loadGraphRelationships(nodes)` reuses workspace snapshot relationship payloads filtered to currently loaded nodes.
 - Node relationship graph streaming/delta handling in `NodeRelationshipGraph.ts` uses a single `NodeRelationshipGraphStreamEnvelope` contract type for event application.
 - Relationship-create writes between existing nodes are executed through one internal helper path (`commitRelationshipBetweenNodes`) to avoid duplicate declaration/runtime drift in the canvas module.
-- Folder scope is applied in memory from `folders` + `folder_items` in the workspace snapshot. When Company Explorer selects a node folder, Node Map renders nodes placed in that folder or descendant folders and only relationships whose endpoints are both visible.
+- Folder-level map scope is applied in memory from `folders` + `folder_items` in the workspace snapshot. At root, Node Map renders unassigned nodes plus top-level node folder cards. Inside a folder, it renders direct child nodes plus immediate child folder cards; clicking a folder card's expand control changes the map scope so that folder's contents occupy the full canvas instead of a mini-preview.
+- Relationship lines render only when both endpoints are direct visible node cards in the current map level. Cross-folder relationships stay persisted and become visible when the relevant folder level is expanded.
+- Folder cards are UI projections over API-backed folder rows, not new storage. Folder hierarchy and item placement remain headless through `POST /v1/company-explorer/folders` and `POST /v1/company-explorer/folder-items`.
 - When Company Explorer selects an individual node inside a folder, Node Map keeps the folder scope active and selects that node instead of expanding back to the all-node graph.
 - New nodes created while a folder scope is active are placed into that folder through `POST /v1/company-explorer/folder-items`, so UI-created nodes and agent-created nodes share the same API-backed placement model.
 

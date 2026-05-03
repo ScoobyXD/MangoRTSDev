@@ -22,6 +22,17 @@ export type CompanyExplorerFolderItem = {
   updated_timestamp: string;
 };
 
+export type MapFolderCard = {
+  company_id: string;
+  folder_id: string;
+  parent_folder_id?: string;
+  folder_kind: CompanyExplorerFolderKind;
+  name: string;
+  direct_item_count: number;
+  child_folder_count: number;
+  descendant_item_count: number;
+};
+
 export function isCompanyExplorerFolderKind(value: unknown): value is CompanyExplorerFolderKind {
   return value === "node" || value === "logic_gate";
 }
@@ -95,6 +106,95 @@ export function filterLogicGateGraphToFolderScope(args: {
     nodes: filteredNodes,
     relationships: relationships.filter((relationship) => visible.has(relationship.node_id_a) && visible.has(relationship.node_id_b)),
   };
+}
+
+export function buildFolderLevelMapProjection<TItem, TRelationship>(args: {
+  items: TItem[];
+  relationships: TRelationship[];
+  folders: CompanyExplorerFolder[];
+  folderItems: CompanyExplorerFolderItem[];
+  folderID: string;
+  itemType: CompanyExplorerFolderKind;
+  getItemID: (item: TItem) => string;
+  getRelationshipItemIDs: (relationship: TRelationship) => [string, string];
+}): { items: TItem[]; relationships: TRelationship[]; childFolders: MapFolderCard[] } {
+  const { items, relationships, folders, folderItems, folderID, itemType, getItemID, getRelationshipItemIDs } = args;
+  const parentFolderID = folderID || "";
+  const typedFolders = folders.filter((folder) => folder.folder_kind === itemType);
+  const typedFolderIDs = new Set(typedFolders.map((folder) => folder.folder_id));
+  const placementByItemID = new Map<string, CompanyExplorerFolderItem>();
+  const directItemCountByFolderID = new Map<string, number>();
+  const childFolderCountByFolderID = new Map<string, number>();
+  const parentByFolderID = new Map<string, string>();
+  const descendantItemCountByFolderID = new Map<string, number>();
+
+  for (const folder of typedFolders) {
+    const parentID = folder.parent_folder_id ?? "";
+    parentByFolderID.set(folder.folder_id, parentID);
+    childFolderCountByFolderID.set(parentID, (childFolderCountByFolderID.get(parentID) ?? 0) + 1);
+    descendantItemCountByFolderID.set(folder.folder_id, 0);
+  }
+
+  for (const item of folderItems) {
+    if (item.item_type !== itemType) continue;
+    placementByItemID.set(item.item_id, item);
+    if (!typedFolderIDs.has(item.folder_id)) continue;
+    directItemCountByFolderID.set(item.folder_id, (directItemCountByFolderID.get(item.folder_id) ?? 0) + 1);
+    descendantItemCountByFolderID.set(item.folder_id, (descendantItemCountByFolderID.get(item.folder_id) ?? 0) + 1);
+  }
+
+  // Fold item counts from leaves toward roots in one pass over the folder tree.
+  // This gives folder cards useful counts without recursively scanning every
+  // folder for every render, which matters once workspaces become very large.
+  const remainingChildrenByFolderID = new Map<string, number>();
+  const queue: string[] = [];
+  for (const folder of typedFolders) {
+    const childCount = childFolderCountByFolderID.get(folder.folder_id) ?? 0;
+    remainingChildrenByFolderID.set(folder.folder_id, childCount);
+    if (childCount === 0) queue.push(folder.folder_id);
+  }
+  for (let index = 0; index < queue.length; index += 1) {
+    const folderIDForCount = queue[index];
+    const parentID = parentByFolderID.get(folderIDForCount) ?? "";
+    if (!parentID || !typedFolderIDs.has(parentID)) continue;
+    descendantItemCountByFolderID.set(parentID, (descendantItemCountByFolderID.get(parentID) ?? 0) + (descendantItemCountByFolderID.get(folderIDForCount) ?? 0));
+    const remaining = (remainingChildrenByFolderID.get(parentID) ?? 1) - 1;
+    remainingChildrenByFolderID.set(parentID, remaining);
+    if (remaining === 0) queue.push(parentID);
+  }
+
+  const directItemIDs = new Set<string>();
+  for (const item of items) {
+    const itemID = getItemID(item);
+    if (!itemID) continue;
+    const placement = placementByItemID.get(itemID);
+    if (parentFolderID) {
+      if (placement?.folder_id === parentFolderID) directItemIDs.add(itemID);
+      continue;
+    }
+    if (!placement || !typedFolderIDs.has(placement.folder_id)) directItemIDs.add(itemID);
+  }
+
+  const visibleItems = items.filter((item) => directItemIDs.has(getItemID(item)));
+  const visibleRelationships = relationships.filter((relationship) => {
+    const [a, b] = getRelationshipItemIDs(relationship);
+    return directItemIDs.has(a) && directItemIDs.has(b);
+  });
+  const childFolders = typedFolders
+    .filter((folder) => (folder.parent_folder_id ?? "") === parentFolderID)
+    .sort((a, b) => a.name.localeCompare(b.name) || a.created_timestamp.localeCompare(b.created_timestamp))
+    .map((folder) => ({
+      company_id: folder.company_id,
+      folder_id: folder.folder_id,
+      parent_folder_id: folder.parent_folder_id,
+      folder_kind: folder.folder_kind,
+      name: folder.name,
+      direct_item_count: directItemCountByFolderID.get(folder.folder_id) ?? 0,
+      child_folder_count: childFolderCountByFolderID.get(folder.folder_id) ?? 0,
+      descendant_item_count: descendantItemCountByFolderID.get(folder.folder_id) ?? 0,
+    }));
+
+  return { items: visibleItems, relationships: visibleRelationships, childFolders };
 }
 
 export function resolveScopedMapSelectionFallback(args: {
