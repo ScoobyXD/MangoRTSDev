@@ -160,8 +160,8 @@ Use this checklist format and keep it complete.
   - sanitizes Company Explorer drag payloads for node and logic-gate Kanban drops
   - computes append positions within the target column only
   - groups and sorts board cards by stable per-column position
-  - filters, sorts, groups, colors, and status-age formats enriched Kanban card metadata
-  - computes bounded Kanban column reorder and resize values
+  - colors cards and formats status age without view-query state
+  - computes bounded Kanban column reorder and width/height resize values
   - locks the Kanban visual contract for preserving column title casing and clearing frame chrome
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
@@ -174,8 +174,8 @@ Use this checklist format and keep it complete.
   - node and logic-gate information APIs reject blank/whitespace-only `information` so empty editor blurs do not persist rows
   - Company Explorer folder APIs create nested folders, move folders, reject cyclic folder moves, assign node placements, and include folder data in workspace snapshots
   - Kanban column create/rename and node/logic-gate card API flow
-  - Kanban query API filters, sorts, groups, and updates hot metadata fields for headless agents
-  - Kanban column layout update flow for durable reorder/resize state
+  - Kanban card APIs update hot metadata fields for headless agents and keep the removed query endpoint at 404
+  - Kanban column layout update flow for durable reorder/width/height resize state
   - Kanban column delete API flow
   - Kanban card upsert moves an existing board card instead of duplicating it
   - Kanban card reads honor `after_position` pagination for bounded hot-path reads

@@ -6,6 +6,9 @@ export const KANBAN_MODULE_TOP_CLEARANCE_PX = 38;
 export const KANBAN_DEFAULT_COLUMN_WIDTH_PX = 260;
 export const KANBAN_MIN_COLUMN_WIDTH_PX = 180;
 export const KANBAN_MAX_COLUMN_WIDTH_PX = 520;
+export const KANBAN_DEFAULT_COLUMN_HEIGHT_PX = 240;
+export const KANBAN_MIN_COLUMN_HEIGHT_PX = 160;
+export const KANBAN_MAX_COLUMN_HEIGHT_PX = 720;
 
 export type KanbanItemType = "node" | "logic_gate";
 
@@ -22,6 +25,7 @@ export type KanbanColumn = {
   title: string;
   position: number;
   width_px: number;
+  height_px: number;
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -62,107 +66,18 @@ export type KanbanColumnPositionUpdate = {
   position: number;
 };
 
-export type KanbanGroupField =
-  | "column_id"
-  | "status"
-  | "item_type"
-  | "work_type"
-  | "assigned_to"
-  | "assigned_by"
-  | "created_by"
-  | "updated_by";
+export type KanbanColumnDropPlacement = "before" | "after";
 
-export type KanbanSortField =
-  | "position"
-  | "title_snapshot"
-  | "status"
-  | "work_type"
-  | "assigned_to"
-  | "item_type"
-  | "created_timestamp"
-  | "updated_timestamp"
-  | "status_entered_timestamp";
+export type KanbanCardSummaryAttribute = "item_type" | "status_age" | "assigned_to" | "work_type";
 
-export type KanbanVisibleAttribute =
-  | "item_type"
-  | "status"
-  | "status_age"
-  | "work_type"
-  | "assigned_to"
-  | "assigned_by"
-  | "updated_by"
-  | "last_activity";
+export const KANBAN_CARD_SUMMARY_ATTRIBUTES: KanbanCardSummaryAttribute[] = ["item_type", "status_age", "assigned_to", "work_type"];
 
-export type KanbanFilter = {
-  field: "title_snapshot" | "status" | "work_type" | "assigned_to" | "assigned_by" | "item_type";
-  op: "eq" | "prefix";
-  value: string;
-};
-
-export type KanbanSortSpec = {
-  field: KanbanSortField;
-  direction: "asc" | "desc";
-};
-
-export type KanbanViewSpec = {
-  filters: KanbanFilter[];
-  sort: KanbanSortSpec[];
-  groupBy: KanbanGroupField[];
-  collapsedGroupKeys: Set<string>;
-};
-
-export type KanbanCardGroup = {
-  key: string;
-  field: KanbanGroupField;
-  value: string;
-  label: string;
-  count: number;
-  collapsed: boolean;
-  groups: KanbanCardGroup[];
-  cards: KanbanCard[];
-};
-
-export const KANBAN_GROUP_FIELD_LABELS: Record<KanbanGroupField, string> = {
-  column_id: "Status column",
-  status: "Status",
+export const KANBAN_CARD_SUMMARY_ATTRIBUTE_LABELS: Record<KanbanCardSummaryAttribute, string> = {
   item_type: "Item type",
-  work_type: "Work type",
-  assigned_to: "Assigned to",
-  assigned_by: "Assigned by",
-  created_by: "Created by",
-  updated_by: "Updated by",
-};
-
-export const KANBAN_SORT_FIELD_LABELS: Record<KanbanSortField, string> = {
-  position: "Board position",
-  title_snapshot: "Title",
-  status: "Status",
-  work_type: "Work type",
-  assigned_to: "Assigned to",
-  item_type: "Item type",
-  created_timestamp: "Created",
-  updated_timestamp: "Updated",
-  status_entered_timestamp: "Status age",
-};
-
-export const KANBAN_VISIBLE_ATTRIBUTE_LABELS: Record<KanbanVisibleAttribute, string> = {
-  item_type: "Item type",
-  status: "Status",
   status_age: "Status age",
-  work_type: "Work type",
   assigned_to: "Assigned to",
-  assigned_by: "Assigned by",
-  updated_by: "Updated by",
-  last_activity: "Last activity",
+  work_type: "Work type",
 };
-
-export const KANBAN_GROUP_FIELDS = Object.keys(KANBAN_GROUP_FIELD_LABELS) as KanbanGroupField[];
-export const KANBAN_VISIBLE_ATTRIBUTES = Object.keys(KANBAN_VISIBLE_ATTRIBUTE_LABELS) as KanbanVisibleAttribute[];
-export const KANBAN_SORT_FIELDS = Object.keys(KANBAN_SORT_FIELD_LABELS) as KanbanSortField[];
-
-export const KANBAN_DEFAULT_VISIBLE_ATTRIBUTES: KanbanVisibleAttribute[] = ["item_type", "status_age", "assigned_to", "work_type"];
-export const KANBAN_DEFAULT_GROUP_BY: KanbanGroupField[] = ["column_id"];
-export const KANBAN_DEFAULT_SORT: KanbanSortSpec[] = [{ field: "position", direction: "asc" }];
 
 export function isKanbanItemType(value: unknown): value is KanbanItemType {
   return value === "node" || value === "logic_gate";
@@ -230,8 +145,17 @@ export function clampColumnWidth(widthPx: number): number {
   return Math.max(KANBAN_MIN_COLUMN_WIDTH_PX, Math.min(KANBAN_MAX_COLUMN_WIDTH_PX, Math.round(widthPx)));
 }
 
+export function clampColumnHeight(heightPx: number): number {
+  if (!Number.isFinite(heightPx)) return KANBAN_DEFAULT_COLUMN_HEIGHT_PX;
+  return Math.max(KANBAN_MIN_COLUMN_HEIGHT_PX, Math.min(KANBAN_MAX_COLUMN_HEIGHT_PX, Math.round(heightPx)));
+}
+
 export function getColumnWidth(column: Pick<KanbanColumn, "width_px">): number {
   return clampColumnWidth(column.width_px || KANBAN_DEFAULT_COLUMN_WIDTH_PX);
+}
+
+export function getColumnHeight(column: Pick<KanbanColumn, "height_px">): number {
+  return clampColumnHeight(column.height_px || KANBAN_DEFAULT_COLUMN_HEIGHT_PX);
 }
 
 export function sortColumns(columns: KanbanColumn[]): KanbanColumn[] {
@@ -250,13 +174,23 @@ function buildCompactedColumnUpdates(columns: KanbanColumn[]): KanbanColumnPosit
   return columns.map((column, index) => ({ columnID: column.column_id, position: (index + 1) * 1000 }));
 }
 
-export function buildColumnReorderPlan(columns: KanbanColumn[], draggedColumnID: string, targetColumnID: string | null): { columns: KanbanColumn[]; updates: KanbanColumnPositionUpdate[] } {
+function resolveColumnDropTarget(columns: KanbanColumn[], draggedColumnID: string, targetColumnID: string | null, placement: KanbanColumnDropPlacement): string | null {
+  if (targetColumnID === draggedColumnID) return draggedColumnID;
+  if (!targetColumnID || placement === "before") return targetColumnID;
+  const withoutDragged = sortColumns(columns).filter((column) => column.column_id !== draggedColumnID);
+  const targetIndex = withoutDragged.findIndex((column) => column.column_id === targetColumnID);
+  if (targetIndex < 0 || targetIndex === withoutDragged.length - 1) return null;
+  return withoutDragged[targetIndex + 1].column_id;
+}
+
+export function buildColumnReorderPlan(columns: KanbanColumn[], draggedColumnID: string, targetColumnID: string | null, placement: KanbanColumnDropPlacement = "before"): { columns: KanbanColumn[]; updates: KanbanColumnPositionUpdate[] } {
   const sorted = sortColumns(columns);
   const dragged = sorted.find((column) => column.column_id === draggedColumnID);
-  if (!dragged || dragged.column_id === targetColumnID) return { columns: sorted, updates: [] };
+  const resolvedTargetID = resolveColumnDropTarget(sorted, draggedColumnID, targetColumnID, placement);
+  if (!dragged || dragged.column_id === resolvedTargetID) return { columns: sorted, updates: [] };
 
   const withoutDragged = sorted.filter((column) => column.column_id !== draggedColumnID);
-  const targetIndex = targetColumnID ? withoutDragged.findIndex((column) => column.column_id === targetColumnID) : withoutDragged.length;
+  const targetIndex = resolvedTargetID ? withoutDragged.findIndex((column) => column.column_id === resolvedTargetID) : withoutDragged.length;
   if (targetIndex < 0) return { columns: sorted, updates: [] };
 
   const reordered = [
@@ -307,93 +241,6 @@ export function groupCardsByColumn(cards: KanbanCard[]): Map<string, KanbanCard[
   return grouped;
 }
 
-export function getKanbanCardFieldValue(card: KanbanCard, field: KanbanGroupField | KanbanSortField | KanbanFilter["field"] | KanbanVisibleAttribute, columnTitleByID: Map<string, string> = new Map()): string {
-  if (field === "column_id") return card.column_id;
-  if (field === "position") return String(card.position);
-  if (field === "created_timestamp") return card.created_timestamp;
-  if (field === "updated_timestamp") return card.updated_timestamp;
-  if (field === "status_entered_timestamp") return card.status_entered_timestamp;
-  if (field === "title_snapshot") return card.title_snapshot;
-  if (field === "status_age") return "";
-  const value = card[field as keyof KanbanCard];
-  if (typeof value === "string" && value.trim()) return value;
-  if (field === "status") return columnTitleByID.get(card.column_id) ?? "Unspecified";
-  return "";
-}
-
-export function getKanbanGroupLabel(field: KanbanGroupField, value: string, columnTitleByID: Map<string, string> = new Map()): string {
-  if (field === "column_id") return columnTitleByID.get(value) ?? "Missing column";
-  if (!value.trim()) return field === "assigned_to" || field === "assigned_by" ? "Unassigned" : "Unspecified";
-  if (field === "item_type") return value === "logic_gate" ? "Logic Gate" : "Node";
-  return value;
-}
-
-export function matchesKanbanFilters(card: KanbanCard, filters: KanbanFilter[], columnTitleByID: Map<string, string> = new Map()): boolean {
-  for (const filter of filters) {
-    const target = getKanbanCardFieldValue(card, filter.field, columnTitleByID).trim().toLowerCase();
-    const value = filter.value.trim().toLowerCase();
-    if (!value) continue;
-    if (filter.op === "prefix") {
-      if (!target.startsWith(value)) return false;
-      continue;
-    }
-    if (target !== value) return false;
-  }
-  return true;
-}
-
-function compareKanbanCards(a: KanbanCard, b: KanbanCard, sort: KanbanSortSpec, columnTitleByID: Map<string, string>): number {
-  if (sort.field === "position") return a.position - b.position;
-  if (sort.field === "created_timestamp" || sort.field === "updated_timestamp" || sort.field === "status_entered_timestamp") {
-    return Date.parse(getKanbanCardFieldValue(a, sort.field, columnTitleByID)) - Date.parse(getKanbanCardFieldValue(b, sort.field, columnTitleByID));
-  }
-  return getKanbanCardFieldValue(a, sort.field, columnTitleByID).localeCompare(getKanbanCardFieldValue(b, sort.field, columnTitleByID), undefined, { sensitivity: "base" });
-}
-
-export function filterAndSortKanbanCards(cards: KanbanCard[], spec: Pick<KanbanViewSpec, "filters" | "sort">, columnTitleByID: Map<string, string> = new Map()): KanbanCard[] {
-  const sortSpecs = spec.sort.length ? spec.sort : KANBAN_DEFAULT_SORT;
-  return cards
-    .filter((card) => matchesKanbanFilters(card, spec.filters, columnTitleByID))
-    .sort((a, b) => {
-      for (const sortSpec of sortSpecs) {
-        const compared = compareKanbanCards(a, b, sortSpec, columnTitleByID);
-        if (compared !== 0) return sortSpec.direction === "desc" ? -compared : compared;
-      }
-      return a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp);
-    });
-}
-
-export function buildKanbanCardGroups(cards: KanbanCard[], groupBy: KanbanGroupField[], collapsedGroupKeys: Set<string>, columnTitleByID: Map<string, string> = new Map(), prefix = ""): KanbanCardGroup[] {
-  if (groupBy.length === 0) return [];
-  const field = groupBy[0];
-  const buckets = new Map<string, KanbanCard[]>();
-  for (const card of cards) {
-    const value = getKanbanCardFieldValue(card, field, columnTitleByID);
-    const bucket = buckets.get(value) ?? [];
-    bucket.push(card);
-    buckets.set(value, bucket);
-  }
-
-  // Grouping is pure and deterministic so UI and future headless agents can reuse
-  // the same query spec and get the same shape without reading React state.
-  return Array.from(buckets.entries())
-    .sort(([a], [b]) => getKanbanGroupLabel(field, a, columnTitleByID).localeCompare(getKanbanGroupLabel(field, b, columnTitleByID), undefined, { sensitivity: "base" }))
-    .map(([value, bucket]) => {
-      const key = prefix ? `${prefix}|${field}=${value}` : `${field}=${value}`;
-      const collapsed = collapsedGroupKeys.has(key);
-      return {
-        key,
-        field,
-        value,
-        label: getKanbanGroupLabel(field, value, columnTitleByID),
-        count: bucket.length,
-        collapsed,
-        groups: collapsed ? [] : buildKanbanCardGroups(bucket, groupBy.slice(1), collapsedGroupKeys, columnTitleByID, key),
-        cards: collapsed || groupBy.length > 1 ? [] : bucket,
-      };
-    });
-}
-
 export function formatKanbanStatusAge(card: Pick<KanbanCard, "status_entered_timestamp">, nowMs = Date.now()): string {
   const startedMs = Date.parse(card.status_entered_timestamp);
   if (!Number.isFinite(startedMs)) return "unknown";
@@ -404,9 +251,20 @@ export function formatKanbanStatusAge(card: Pick<KanbanCard, "status_entered_tim
   return `${Math.floor(elapsedHours / 24)}d`;
 }
 
-export function getKanbanConditionalColor(card: KanbanCard, field: KanbanGroupField, columnTitleByID: Map<string, string> = new Map()): string {
+export function getKanbanItemTypeLabel(itemType: KanbanItemType): string {
+  return itemType === "logic_gate" ? "Logic Gate" : "Node";
+}
+
+export function getKanbanCardSummaryAttributeValue(card: KanbanCard, attribute: KanbanCardSummaryAttribute): string {
+  if (attribute === "item_type") return getKanbanItemTypeLabel(card.item_type);
+  if (attribute === "status_age") return formatKanbanStatusAge(card);
+  if (attribute === "assigned_to") return card.assigned_to.trim();
+  return card.work_type.trim();
+}
+
+export function getKanbanConditionalColor(card: KanbanCard): string {
   const palette = ["#2f7d62", "#245c9f", "#9a5b16", "#8f3d56", "#4f6f1f", "#66752c", "#7d4ea3", "#0f766e"];
-  const value = getKanbanCardFieldValue(card, field, columnTitleByID) || "empty";
+  const value = card.status.trim() || card.column_id || "empty";
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {
     hash = (hash * 31 + value.charCodeAt(index)) >>> 0;

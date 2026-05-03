@@ -1469,6 +1469,7 @@ func scanKanbanColumn(row interface {
 		&item.Title,
 		&item.Position,
 		&item.WidthPx,
+		&item.HeightPx,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
 	)
@@ -1510,49 +1511,10 @@ title_snapshot, description_snapshot, position, status, work_type,
 assigned_to, assigned_by, created_by, updated_by, last_activity,
 status_entered_timestamp, created_timestamp, updated_timestamp`
 
-func kanbanCardSQLField(field string) (string, bool) {
-	switch field {
-	case "column_id":
-		return "column_id::text", true
-	case "item_type":
-		return "item_type", true
-	case "item_id":
-		return "coalesce(node_id::text, logic_gate_id::text)", true
-	case "title_snapshot":
-		return "title_snapshot", true
-	case "description_snapshot":
-		return "description_snapshot", true
-	case "status":
-		return "status", true
-	case "work_type":
-		return "work_type", true
-	case "assigned_to":
-		return "assigned_to", true
-	case "assigned_by":
-		return "assigned_by", true
-	case "created_by":
-		return "created_by", true
-	case "updated_by":
-		return "updated_by", true
-	case "last_activity":
-		return "last_activity", true
-	case "created_timestamp":
-		return "created_timestamp", true
-	case "updated_timestamp":
-		return "updated_timestamp", true
-	case "status_entered_timestamp":
-		return "status_entered_timestamp", true
-	case "position":
-		return "position", true
-	default:
-		return "", false
-	}
-}
-
 func (r *PostgresRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
 	ctx := context.Background()
 	rows, err := r.db.QueryContext(ctx, `
-select company_id, board_id, column_id, title, position, width_px, created_timestamp, updated_timestamp
+select company_id, board_id, column_id, title, position, width_px, height_px, created_timestamp, updated_timestamp
 from kanban_columns
 where company_id=$1 and board_id=$2
 order by position asc, created_timestamp asc`, companyID, boardID)
@@ -1572,7 +1534,7 @@ order by position asc, created_timestamp asc`, companyID, boardID)
 	return items, rows.Err()
 }
 
-func (r *PostgresRepo) CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int) (domain.KanbanColumn, error) {
+func (r *PostgresRepo) CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int, heightPx int) (domain.KanbanColumn, error) {
 	ctx := context.Background()
 	if position <= 0 {
 		if err := r.db.QueryRowContext(ctx, `
@@ -1583,27 +1545,32 @@ where company_id=$1 and board_id=$2`, companyID, boardID).Scan(&position); err !
 		}
 	}
 	widthPx = normalizeKanbanColumnWidth(widthPx)
+	heightPx = normalizeKanbanColumnHeight(heightPx)
 	return scanKanbanColumn(r.db.QueryRowContext(ctx, `
-insert into kanban_columns (company_id, board_id, column_id, title, position, width_px, created_timestamp, updated_timestamp)
-values ($1, $2, $3, $4, $5, $6, now(), now())
-returning company_id, board_id, column_id, title, position, width_px, created_timestamp, updated_timestamp`,
-		companyID, boardID, newUUIDv7String(), title, position, widthPx,
+insert into kanban_columns (company_id, board_id, column_id, title, position, width_px, height_px, created_timestamp, updated_timestamp)
+values ($1, $2, $3, $4, $5, $6, $7, now(), now())
+returning company_id, board_id, column_id, title, position, width_px, height_px, created_timestamp, updated_timestamp`,
+		companyID, boardID, newUUIDv7String(), title, position, widthPx, heightPx,
 	))
 }
 
-func (r *PostgresRepo) UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int) (domain.KanbanColumn, error) {
+func (r *PostgresRepo) UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int) (domain.KanbanColumn, error) {
 	if widthPx > 0 {
 		widthPx = normalizeKanbanColumnWidth(widthPx)
+	}
+	if heightPx > 0 {
+		heightPx = normalizeKanbanColumnHeight(heightPx)
 	}
 	item, err := scanKanbanColumn(r.db.QueryRow(`
 update kanban_columns
 set title=coalesce(nullif($4, ''), title),
     position=case when $5 > 0 then $5 else position end,
     width_px=case when $6 > 0 then $6 else width_px end,
+    height_px=case when $7 > 0 then $7 else height_px end,
     updated_timestamp=now()
 where company_id=$1 and board_id=$2 and column_id=$3
-returning company_id, board_id, column_id, title, position, width_px, created_timestamp, updated_timestamp`,
-		companyID, boardID, columnID, title, position, widthPx,
+returning company_id, board_id, column_id, title, position, width_px, height_px, created_timestamp, updated_timestamp`,
+		companyID, boardID, columnID, title, position, widthPx, heightPx,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.KanbanColumn{}, ErrNotFound
@@ -1645,41 +1612,7 @@ func (r *PostgresRepo) ListKanbanCards(companyID, boardID string, query KanbanCa
 	if query.AfterPosition > 0 {
 		where = append(where, "position>"+addArg(query.AfterPosition))
 	}
-	for _, filter := range query.Filters {
-		if !IsKanbanCardFilterSupported(filter) {
-			return nil, ErrInvalid
-		}
-		sqlField, ok := kanbanCardSQLField(filter.Field)
-		if !ok {
-			return nil, ErrInvalid
-		}
-		if filter.Op == "prefix" {
-			where = append(where, "lower("+sqlField+") like "+addArg(strings.ToLower(filter.Value)+"%"))
-			continue
-		}
-		where = append(where, sqlField+"="+addArg(filter.Value))
-	}
-
 	orderBy := []string{"column_id asc", "position asc", "created_timestamp asc", "card_id asc"}
-	if len(query.Sort) > 0 {
-		orderBy = make([]string, 0, len(query.Sort)+3)
-		for _, sortSpec := range query.Sort {
-			if !IsKanbanCardSortField(sortSpec.Field) {
-				return nil, ErrInvalid
-			}
-			sqlField, ok := kanbanCardSQLField(sortSpec.Field)
-			if !ok {
-				return nil, ErrInvalid
-			}
-			direction := "asc"
-			if strings.ToLower(sortSpec.Direction) == "desc" {
-				direction = "desc"
-			}
-			orderBy = append(orderBy, sqlField+" "+direction)
-		}
-		orderBy = append(orderBy, "column_id asc", "position asc", "created_timestamp asc", "card_id asc")
-	}
-
 	limitPlaceholder := addArg(query.Limit)
 	sqlText := fmt.Sprintf(`
 select %s

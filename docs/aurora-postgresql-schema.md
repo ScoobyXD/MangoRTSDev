@@ -252,9 +252,11 @@ create table if not exists kanban_columns (
   title text not null,
   position integer not null,
   width_px integer not null default 260,
+  height_px integer not null default 240,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   constraint kanban_columns_width_px_chk check (width_px between 180 and 520),
+  constraint kanban_columns_height_px_chk check (height_px between 160 and 720),
   constraint kanban_columns_title_nonblank_chk check (btrim(title) <> ''),
   primary key (company_id, board_id, column_id)
 );
@@ -292,10 +294,9 @@ create table if not exists kanban_cards (
 );
 ```
 
-Kanban hot-path indexes include `(company_id, board_id, column_id, position)`,
-`status`, `assigned_to`, `work_type`, `item_type`, `status_entered_timestamp`,
-and a lowercased title-prefix index. These are direct columns instead of JSON so
-the first board query path can stay bounded and index-friendly.
+Kanban hot-path indexes include `(company_id, board_id, position)` for columns
+and `(company_id, board_id, column_id, position)` for bounded card windows.
+The previous grouped/filter query indexes were removed with the query surface.
 
 ## Field-by-field mapping from your sheet
 
@@ -391,6 +392,7 @@ the first board query path can stay bounded and index-friendly.
 - Title (Text) -> `kanban_columns.title`
 - Position (Integer) -> `kanban_columns.position`
 - Width PX (Integer) -> `kanban_columns.width_px`
+- Height PX (Integer) -> `kanban_columns.height_px`
 - Created Timestamp (TIMESTAMPTZ) -> `kanban_columns.created_timestamp`
 - Updated Timestamp (TIMESTAMPTZ) -> `kanban_columns.updated_timestamp`
 

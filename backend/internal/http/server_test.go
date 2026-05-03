@@ -456,6 +456,7 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 			"board_id":   boardID,
 			"title":      title,
 			"width_px":   280,
+			"height_px":  240,
 		})
 		req := httptest.NewRequest(http.MethodPost, "/v1/kanban/columns", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -493,6 +494,7 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 		"board_id":   boardID,
 		"position":   777,
 		"width_px":   340,
+		"height_px":  220,
 	})
 	layoutReq := httptest.NewRequest(http.MethodPut, "/v1/kanban/columns/"+todoColumnID, bytes.NewReader(layoutBody))
 	layoutReq.Header.Set("Content-Type", "application/json")
@@ -505,12 +507,13 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 		Title    string `json:"title"`
 		Position int    `json:"position"`
 		WidthPx  int    `json:"width_px"`
+		HeightPx int    `json:"height_px"`
 	}
 	if err := json.NewDecoder(layoutRec.Body).Decode(&layoutPayload); err != nil {
 		t.Fatalf("decode layout column: %v", err)
 	}
-	if layoutPayload.Title != "Ready" || layoutPayload.Position != 777 || layoutPayload.WidthPx != 340 {
-		t.Fatalf("column layout = %+v, want title preserved with position/width update", layoutPayload)
+	if layoutPayload.Title != "Ready" || layoutPayload.Position != 777 || layoutPayload.WidthPx != 340 || layoutPayload.HeightPx != 220 {
+		t.Fatalf("column layout = %+v, want title preserved with position/width/height update", layoutPayload)
 	}
 
 	addCardBody, _ := json.Marshal(map[string]any{
@@ -606,6 +609,13 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 		t.Fatalf("kanban card count = %d, want 2", len(listPayload.Cards))
 	}
 
+	filterReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/cards?company_id="+companyID+"&board_id="+boardID+"&status=Done&limit=50", nil)
+	filterRec := httptest.NewRecorder()
+	handler.ServeHTTP(filterRec, filterReq)
+	if filterRec.Code != http.StatusBadRequest {
+		t.Fatalf("GET kanban cards with removed filter status = %d, want %d body=%s", filterRec.Code, http.StatusBadRequest, filterRec.Body.String())
+	}
+
 	pagedReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/cards?company_id="+companyID+"&board_id="+boardID+"&column_id="+doneColumnID+"&after_position=1000&limit=50", nil)
 	pagedRec := httptest.NewRecorder()
 	handler.ServeHTTP(pagedRec, pagedReq)
@@ -634,7 +644,7 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	}
 }
 
-func TestKanbanQueryAPIUsesHotMetadataFields(t *testing.T) {
+func TestKanbanCardAPIUsesHotMetadataFieldsAndRemovesQueryEndpoint(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -714,44 +724,32 @@ func TestKanbanQueryAPIUsesHotMetadataFields(t *testing.T) {
 	cardAID := postCard(nodeA.NodeID, "Alpha task", "Feature", "agent-1")
 	postCard(nodeB.NodeID, "Beta task", "Bug", "person-1")
 
-	queryBody, _ := json.Marshal(map[string]any{
-		"company_id":         companyID,
-		"board_id":           boardID,
-		"filters":            []map[string]string{{"field": "assigned_to", "op": "eq", "value": "agent-1"}},
-		"sort":               []map[string]string{{"field": "title_snapshot", "direction": "asc"}},
-		"group_by":           []string{"assigned_to", "work_type"},
-		"visible_attributes": []string{"assigned_to", "work_type", "status_age"},
-		"limit":              50,
-	})
-	queryReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/query", bytes.NewReader(queryBody))
-	queryReq.Header.Set("Content-Type", "application/json")
-	queryRec := httptest.NewRecorder()
-	handler.ServeHTTP(queryRec, queryReq)
-	if queryRec.Code != http.StatusOK {
-		t.Fatalf("POST kanban query status = %d body=%s", queryRec.Code, queryRec.Body.String())
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/cards?company_id="+companyID+"&board_id="+boardID+"&column_id="+readyColumnID+"&limit=50", nil)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET kanban cards status = %d body=%s", listRec.Code, listRec.Body.String())
 	}
-	var queryPayload struct {
+	var listPayload struct {
 		Cards []struct {
 			CardID     string `json:"card_id"`
 			AssignedTo string `json:"assigned_to"`
 			WorkType   string `json:"work_type"`
 		} `json:"cards"`
-		Groups []struct {
-			Value  string `json:"value"`
-			Count  int    `json:"count"`
-			Groups []struct {
-				Value string `json:"value"`
-			} `json:"groups"`
-		} `json:"groups"`
 	}
-	if err := json.NewDecoder(queryRec.Body).Decode(&queryPayload); err != nil {
-		t.Fatalf("decode query payload: %v", err)
+	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode list payload: %v", err)
 	}
-	if len(queryPayload.Cards) != 1 || queryPayload.Cards[0].AssignedTo != "agent-1" || queryPayload.Cards[0].WorkType != "Feature" {
-		t.Fatalf("query cards = %+v, want one agent feature", queryPayload.Cards)
+	if len(listPayload.Cards) != 2 || listPayload.Cards[0].AssignedTo != "agent-1" || listPayload.Cards[0].WorkType != "Feature" {
+		t.Fatalf("list cards = %+v, want ordered cards with hot metadata fields", listPayload.Cards)
 	}
-	if len(queryPayload.Groups) != 1 || queryPayload.Groups[0].Value != "agent-1" || queryPayload.Groups[0].Count != 1 || len(queryPayload.Groups[0].Groups) != 1 {
-		t.Fatalf("query groups = %+v, want assigned_to/work_type group", queryPayload.Groups)
+
+	queryReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/query", bytes.NewReader([]byte(`{}`)))
+	queryReq.Header.Set("Content-Type", "application/json")
+	queryRec := httptest.NewRecorder()
+	handler.ServeHTTP(queryRec, queryReq)
+	if queryRec.Code != http.StatusNotFound {
+		t.Fatalf("POST kanban query status = %d, want removed route 404 body=%s", queryRec.Code, queryRec.Body.String())
 	}
 
 	moveBody, _ := json.Marshal(map[string]any{

@@ -52,8 +52,8 @@ type Repository interface {
 	CreateOperation(in CreateOperationInput) (domain.Operation, error)
 	GetOperation(companyID, operationID string) (domain.Operation, error)
 	ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error)
-	CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int) (domain.KanbanColumn, error)
-	UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int) (domain.KanbanColumn, error)
+	CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int, heightPx int) (domain.KanbanColumn, error)
+	UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int) (domain.KanbanColumn, error)
 	DeleteKanbanColumn(companyID, boardID, columnID string) error
 	ListKanbanCards(companyID, boardID string, query KanbanCardQuery) ([]domain.KanbanCard, error)
 	UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error)
@@ -397,6 +397,19 @@ func normalizeKanbanColumnWidth(widthPx int) int {
 	return widthPx
 }
 
+func normalizeKanbanColumnHeight(heightPx int) int {
+	if heightPx <= 0 {
+		return 240
+	}
+	if heightPx < 160 {
+		return 160
+	}
+	if heightPx > 720 {
+		return 720
+	}
+	return heightPx
+}
+
 func nextKanbanCardPosition(cards []domain.KanbanCard, columnID string) int {
 	next := 1000
 	for _, card := range cards {
@@ -448,7 +461,7 @@ func (r *MemoryRepo) ListKanbanColumns(companyID, boardID string) ([]domain.Kanb
 	return items, nil
 }
 
-func (r *MemoryRepo) CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int) (domain.KanbanColumn, error) {
+func (r *MemoryRepo) CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int, heightPx int) (domain.KanbanColumn, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	k := boardKey(companyID, boardID)
@@ -463,6 +476,7 @@ func (r *MemoryRepo) CreateKanbanColumn(companyID, boardID, title string, positi
 		Title:            title,
 		Position:         position,
 		WidthPx:          normalizeKanbanColumnWidth(widthPx),
+		HeightPx:         normalizeKanbanColumnHeight(heightPx),
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
@@ -470,7 +484,7 @@ func (r *MemoryRepo) CreateKanbanColumn(companyID, boardID, title string, positi
 	return item, nil
 }
 
-func (r *MemoryRepo) UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int) (domain.KanbanColumn, error) {
+func (r *MemoryRepo) UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int) (domain.KanbanColumn, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	k := boardKey(companyID, boardID)
@@ -486,6 +500,9 @@ func (r *MemoryRepo) UpdateKanbanColumn(companyID, boardID, columnID, title stri
 		}
 		if widthPx > 0 {
 			column.WidthPx = normalizeKanbanColumnWidth(widthPx)
+		}
+		if heightPx > 0 {
+			column.HeightPx = normalizeKanbanColumnHeight(heightPx)
 		}
 		column.UpdatedTimestamp = time.Now().UTC()
 		r.kanbanColumns[k][index] = column
@@ -538,12 +555,20 @@ func (r *MemoryRepo) ListKanbanCards(companyID, boardID string, query KanbanCard
 		if query.AfterPosition > 0 && card.Position <= query.AfterPosition {
 			continue
 		}
-		if !KanbanCardMatchesFilters(card, query.Filters) {
-			continue
-		}
 		items = append(items, card)
 	}
-	SortKanbanCardsForQuery(items, query.Sort)
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].ColumnID != items[j].ColumnID {
+			return items[i].ColumnID < items[j].ColumnID
+		}
+		if items[i].Position != items[j].Position {
+			return items[i].Position < items[j].Position
+		}
+		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		}
+		return items[i].CardID < items[j].CardID
+	})
 	if len(items) > query.Limit {
 		items = items[:query.Limit]
 	}

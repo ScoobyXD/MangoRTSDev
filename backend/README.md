@@ -202,8 +202,7 @@ These tables store the latest shared Node Map and Logic Gate Map positions by co
 - `POST /v1/kanban/columns`
 - `PUT /v1/kanban/columns/{column_id}`
 - `DELETE /v1/kanban/columns/{column_id}?company_id={uuid}&board_id={board_id}`
-- `GET /v1/kanban/cards?company_id={uuid}&board_id={board_id}&column_id={column_id}&status=Ready&work_type=Bug&assigned_to=agent-1&title_prefix=Cust&sort=updated_timestamp&sort_dir=desc&after_position=0&limit=200`
-- `POST /v1/kanban/query`
+- `GET /v1/kanban/cards?company_id={uuid}&board_id={board_id}&column_id={column_id}&after_position=0&limit=200`
 - `POST /v1/kanban/cards`
 - `PUT /v1/kanban/cards/{card_id}`
 - `DELETE /v1/kanban/cards/{card_id}?company_id={uuid}&board_id={board_id}`
@@ -294,31 +293,20 @@ Create a Kanban column and place a node card:
 ```bash
 curl -X POST http://localhost:8080/v1/kanban/columns \
   -H 'content-type: application/json' \
-  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","title":"Ready","width_px":260}'
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","title":"Ready","width_px":260,"height_px":240}'
 
 curl -X POST http://localhost:8080/v1/kanban/cards \
   -H 'content-type: application/json' \
   -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","column_id":"<column_id>","item_type":"node","item_id":"<node_id>","title_snapshot":"Customer onboarding","work_type":"Customer work","assigned_to":"agent-1","assigned_by":"person-2","actor_id":"agent-1","last_activity":"created card"}'
 ```
 
-Query a board for headless agents and the UI:
+Read a bounded card window for headless agents and the UI:
 
 ```bash
-curl -X POST http://localhost:8080/v1/kanban/query \
-  -H 'content-type: application/json' \
-  -d '{
-    "company_id":"11111111-1111-1111-1111-111111111111",
-    "board_id":"frame-kanban-1",
-    "filters":[{"field":"assigned_to","op":"eq","value":"agent-1"}],
-    "sort":[{"field":"status_entered_timestamp","direction":"desc"}],
-    "group_by":["status","assigned_to","work_type"],
-    "visible_attributes":["assigned_to","work_type","status_age"],
-    "collapsed_groups":["status=Done"],
-    "limit":200
-  }'
+curl "http://localhost:8080/v1/kanban/cards?company_id=11111111-1111-1111-1111-111111111111&board_id=frame-kanban-1&column_id=<column_id>&after_position=0&limit=200"
 ```
 
-Kanban card metadata uses direct columns for the hot fields agents and users query most: `status`, `work_type`, `assigned_to`, `assigned_by`, `created_by`, `updated_by`, `last_activity`, and `status_entered_timestamp`. Keep the hot path bounded with `company_id`, `board_id`, explicit filters, and `limit`; broad free-text search belongs in a separate search projection, not the board render path.
+Kanban card metadata still uses direct columns for current activity context: `status`, `work_type`, `assigned_to`, `assigned_by`, `created_by`, `updated_by`, `last_activity`, and `status_entered_timestamp`. Keep the hot path bounded with `company_id`, `board_id`, optional `column_id`, `after_position`, and `limit`. The previous grouped/filter query endpoint was removed so filtering can be rebuilt deliberately one capability at a time.
 
 ### Shared map layout contract
 
