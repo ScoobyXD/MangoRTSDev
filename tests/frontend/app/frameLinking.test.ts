@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, deriveLegacyMapLinks, mergeLinkPlan } from "../../../frontend/src/app/frameLinking.js";
+import { buildLinkModulesLabel, buildLinkPool, classifyFrameKind, computeLinkPlan, delinkForPool, deriveLegacyMapLinks, mergeLinkPlan } from "../../../frontend/src/app/frameLinking.js";
 import type { FrameDataModel } from "../../../frontend/src/types.js";
 
 const map: FrameDataModel = { id: "map-1", kind: "nodes-map", title: "Node Map", x: 0, y: 0, w: 8, h: 8, color: "#fff", accent: "#111" };
@@ -25,6 +25,10 @@ test("computeLinkPlan builds pairwise context links for selected pool", () => {
       { a: "explorer-1", b: "kanban-1", mode: "context" },
     ],
   });
+});
+
+test("unified map frame participates in frame linking as a map", () => {
+  assert.equal(classifyFrameKind("map"), "map");
 });
 
 test("buildLinkPool falls back to context frame when no multi-select exists", () => {

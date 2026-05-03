@@ -31,6 +31,11 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 - **Backend logic-gate projection read path:** `GET /v1/logic-gates/:logic_gate_id/projection?company_id=...` (typed latest logic-gate information rows).
 - **Event sync hooks:** `EVENT_FRAME_LINK_GRAPH_UPDATED`, `EVENT_NODE_MAP_SELECTION_UPDATED`, `EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED`, `EVENT_EXPLORER_CONTEXT_UPDATED`, and `storage` events.
 
+## Unified Map + Rename Sync Update (2026-05-03)
+- The Editor can follow the single `map` module for both node and logic-gate context. For logic-gate selection it reads `logic-gate-map-state-v1:<company_id>:<map_widget_id>` from the same linked map frame when no legacy `logic-map` frame exists.
+- The Editor subscribes to the node and logic-gate graph caches while an entity is selected. If Map or Company Explorer renames that entity, the Editor title updates from the cache immediately.
+- Editor-origin title edits still write through canonical APIs first, then patch the shared graph cache so Map and Company Explorer update without waiting for SSE or a full snapshot refresh.
+
 ## Logic Gate Context Update (2026-05-01)
 - When Editor is linked to a Logic Gate Map, the context header says `Logic Gate:` instead of `Node:`.
 - Logic-gate documents use the same text surface as node documents. Saves append history to `logic_gate_information` and upsert latest values into `logic_gate_projection_table`.

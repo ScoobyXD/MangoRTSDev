@@ -190,10 +190,12 @@ export function reconcileNodeMapPositions<T extends { node_id: string }>(input: 
   worldHeight: number;
   nodeWidth: number;
   nodeHeight: number;
+  defaultPosition?: NodePosition;
 }): Record<string, NodePosition> {
   if (input.nodes.length === 0) return input.previous;
 
   let next = input.previous;
+  let missingIndex = 0;
   const ensureWritable = () => {
     if (next === input.previous) next = { ...input.previous };
   };
@@ -213,8 +215,12 @@ export function reconcileNodeMapPositions<T extends { node_id: string }>(input: 
     }
 
     const perRow = Math.max(1, Math.floor(input.canvasWidth / (input.nodeWidth + 40)));
-    const x = snapToGrid((index % perRow) * (input.nodeWidth + 26) + 100);
-    const y = snapToGrid(Math.floor(index / perRow) * (input.nodeHeight + 26) + 120);
+    const baseX = input.defaultPosition ? input.defaultPosition.x : 100;
+    const baseY = input.defaultPosition ? input.defaultPosition.y : 120;
+    const placementIndex = input.defaultPosition ? missingIndex : index;
+    const x = snapToGrid((placementIndex % perRow) * (input.nodeWidth + 26) + baseX);
+    const y = snapToGrid(Math.floor(placementIndex / perRow) * (input.nodeHeight + 26) + baseY);
+    missingIndex += 1;
     ensureWritable();
     next[node.node_id] = {
       x: clamp(x, 0, input.worldWidth - input.nodeWidth),

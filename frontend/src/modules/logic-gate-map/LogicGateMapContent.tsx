@@ -6,7 +6,7 @@ import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGrap
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, canStartRelationshipFromSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "../node-map/relationshipDeleteSummary";
 import { invalidateLogicGateRecordStoreCaches } from "./LogicGateRecordStore";
-import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
+import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
 import { filterLogicGateGraphToFolderScope, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 
 // Logic Gate Map module: node-map canvas behavior with logic-gate persistence and Input/Output edges.
@@ -133,6 +133,10 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     () => buildPlusGridBackgroundStyle({ zoom, accent, theme: isDarkTheme ? "dark" : "light" }),
     [accent, isDarkTheme, zoom],
   );
+  const visibleInsertionPosition = useMemo(() => ({
+    x: clamp(snapToGrid((canvasSize.width / 2 - pan.x) / zoom - NODE_W / 2), 0, WORLD_W - NODE_W),
+    y: clamp(snapToGrid((canvasSize.height / 2 - pan.y) / zoom - NODE_H / 2), 0, WORLD_H - NODE_H),
+  }), [WORLD_H, WORLD_W, canvasSize.height, canvasSize.width, pan.x, pan.y, zoom]);
 
   // Keep relationship projection derivation centralized so callers can reuse the exact same
   // filtering logic without triggering additional network calls.
@@ -535,9 +539,10 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         worldHeight: WORLD_H,
         nodeWidth: NODE_W,
         nodeHeight: NODE_H,
+        defaultPosition: visibleInsertionPosition,
       });
     });
-  }, [nodes, canvasSize.width]);
+  }, [nodes, canvasSize.width, visibleInsertionPosition]);
 
   useNodeMapDragControls({
     dragState,
@@ -1355,6 +1360,8 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           }
 
           if (relationshipDraft) setRelationshipDraft(null);
+          setSelectedNodeID("");
+          setSelectedNodeIDs(new Set());
           setPanState({
             pointerID: event.pointerId,
             startMouseX: event.clientX,
@@ -1513,11 +1520,9 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
                   event.stopPropagation();
                   if (event.ctrlKey || event.shiftKey) {
                     event.preventDefault();
-                    const next = new Set(selectedNodeIDs);
-                    if (next.has(node.node_id)) next.delete(node.node_id);
-                    else next.add(node.node_id);
-                    setSelectedNodeIDs(next);
-                    setSelectedNodeID(next.has(node.node_id) ? node.node_id : (Array.from(next)[0] ?? ""));
+                    const nextSelection = resolveNodeMapPointerSelection({ selectedNodeIDs, nodeID: node.node_id, additive: true });
+                    setSelectedNodeIDs(nextSelection.selectedNodeIDs);
+                    setSelectedNodeID(nextSelection.selectedNodeID);
                     return;
                   }
                   setContextMenu(null);
@@ -1526,9 +1531,10 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
                   setSelectedRelationshipIDs(new Set());
                   const bounds = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
 
-                  const nextIDs = selectedNodeIDs.has(node.node_id) ? Array.from(selectedNodeIDs) : [node.node_id];
+                  const nextSelection = resolveNodeMapPointerSelection({ selectedNodeIDs, nodeID: node.node_id, additive: false });
+                  const nextIDs = Array.from(nextSelection.selectedNodeIDs);
                   setSelectedNodeID(node.node_id);
-                  setSelectedNodeIDs(new Set(nextIDs));
+                  setSelectedNodeIDs(nextSelection.selectedNodeIDs);
 
                   const offsets: Record<string, { x: number; y: number }> = {};
                   for (const id of nextIDs) {

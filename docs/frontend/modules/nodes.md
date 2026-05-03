@@ -2,7 +2,7 @@
 
 This document captures the full behavior and implementation details currently present in the **Nodes** family of modules loaded inside dashboard **frames** (UI containers):
 
-- **Node Map** (`nodes-map`, legacy `nodes`)
+- **Map** (`map`) for new workspaces; legacy `nodes-map` and `nodes` frames still load the node-map path for saved layouts.
 - **Node Doc** (`node-doc`)
 
 Implementation is now organized under:
@@ -10,6 +10,7 @@ Implementation is now organized under:
 - `frontend/src/modules/node-map/NodeMapContent.tsx`
 - `frontend/src/modules/node-map/NodeMapControls.ts` (Node Map keyboard/mouse/pointer control hooks + multi-select/line-hit helpers)
 - `frontend/src/modules/node-map/shared.ts` (shared types/constants/helpers)
+- `frontend/src/modules/map/MapContent.tsx` (unified map entry point that switches between node and logic-gate views from Explorer context)
 
 ---
 

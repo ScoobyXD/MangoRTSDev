@@ -159,6 +159,12 @@ Folder runtime update (2026-05-02):
 - Selecting an individual node or logic gate inside a folder keeps that folder scope in the broadcast, so linked maps can select the item without expanding back to the whole company.
 - Relationships are displayed only when both endpoints are inside the active folder scope. Cross-folder relationships stay persisted but are hidden in that scoped map view.
 
+Unified map/linking update (2026-05-03):
+- The module picker now exposes one `Map` module. The map switches between node and logic-gate views from the latest Explorer context: node folders/items show nodes, logic-gate folders/items show logic gates.
+- Legacy `nodes-map` and `logic-map` frame kinds still load for existing saved layouts, but new workspaces should use `map`.
+- Explorer context is broadcast to every connected frame in the link graph, not just directly linked neighbors. If Explorer is linked to Map and Map is linked to Editor, Explorer context reaches the Editor as well.
+- Folder, node, and logic-gate rename responses patch the shared graph caches immediately so Explorer, Map, and Editor converge without waiting for a full workspace snapshot refresh.
+
 Kanban drag update (2026-05-01):
 - Node and Logic Gate rows are draggable.
 - Drag payloads use `application/x-mango-explorer-entity` with `{ itemType: "node", nodeID, label }`.

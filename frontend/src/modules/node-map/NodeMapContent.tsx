@@ -6,7 +6,7 @@ import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot,
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
 import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
-import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
+import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
 import { filterNodeGraphToFolderScope, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
@@ -126,6 +126,10 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     () => buildPlusGridBackgroundStyle({ zoom, accent, theme: isDarkTheme ? "dark" : "light" }),
     [accent, isDarkTheme, zoom],
   );
+  const visibleInsertionPosition = useMemo(() => ({
+    x: clamp(snapToGrid((canvasSize.width / 2 - pan.x) / zoom - NODE_W / 2), 0, WORLD_W - NODE_W),
+    y: clamp(snapToGrid((canvasSize.height / 2 - pan.y) / zoom - NODE_H / 2), 0, WORLD_H - NODE_H),
+  }), [WORLD_H, WORLD_W, canvasSize.height, canvasSize.width, pan.x, pan.y, zoom]);
 
   // Keep relationship projection derivation centralized so callers can reuse the exact same
   // filtering logic without triggering additional network calls.
@@ -529,9 +533,10 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
         worldHeight: WORLD_H,
         nodeWidth: NODE_W,
         nodeHeight: NODE_H,
+        defaultPosition: visibleInsertionPosition,
       });
     });
-  }, [nodes, canvasSize.width]);
+  }, [nodes, canvasSize.width, visibleInsertionPosition]);
 
   useNodeMapDragControls({
     dragState,
@@ -1335,6 +1340,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           }
 
           if (relationshipDraft) setRelationshipDraft(null);
+          setSelectedNodeID("");
+          setSelectedNodeIDs(new Set());
           setPanState({
             pointerID: event.pointerId,
             startMouseX: event.clientX,
@@ -1493,11 +1500,9 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   event.stopPropagation();
                   if (event.ctrlKey || event.shiftKey) {
                     event.preventDefault();
-                    const next = new Set(selectedNodeIDs);
-                    if (next.has(node.node_id)) next.delete(node.node_id);
-                    else next.add(node.node_id);
-                    setSelectedNodeIDs(next);
-                    setSelectedNodeID(next.has(node.node_id) ? node.node_id : (Array.from(next)[0] ?? ""));
+                    const nextSelection = resolveNodeMapPointerSelection({ selectedNodeIDs, nodeID: node.node_id, additive: true });
+                    setSelectedNodeIDs(nextSelection.selectedNodeIDs);
+                    setSelectedNodeID(nextSelection.selectedNodeID);
                     return;
                   }
                   setContextMenu(null);
@@ -1506,9 +1511,10 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   setSelectedRelationshipIDs(new Set());
                   const bounds = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
 
-                  const nextIDs = selectedNodeIDs.has(node.node_id) ? Array.from(selectedNodeIDs) : [node.node_id];
+                  const nextSelection = resolveNodeMapPointerSelection({ selectedNodeIDs, nodeID: node.node_id, additive: false });
+                  const nextIDs = Array.from(nextSelection.selectedNodeIDs);
                   setSelectedNodeID(node.node_id);
-                  setSelectedNodeIDs(new Set(nextIDs));
+                  setSelectedNodeIDs(nextSelection.selectedNodeIDs);
 
                   const offsets: Record<string, { x: number; y: number }> = {};
                   for (const id of nextIDs) {

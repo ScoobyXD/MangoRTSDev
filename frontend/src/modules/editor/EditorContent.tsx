@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
-import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LogicGateInformation, getNodeTitle as getLogicGateTitle } from "../logic-gate-map/shared";
+import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, type NodeRecord } from "../node-map/shared";
+import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, toLogicGateCanvasRecord, type LogicGateInformation, type LogicGateRecord } from "../logic-gate-map/shared";
 import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
+import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches } from "../logic-gate-map/LogicGateRecordStore";
+import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import type { NodeInformation } from "../node-map/shared";
 import { insertEditorTabText } from "./plainTextEditing";
@@ -327,19 +329,21 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     setError("");
     try {
       if (linkedEntityKind === "logic_gate") {
-        const updated = await requestJSON<{ header: string }>(`/v1/logic-gates/${linkedNodeID}`, {
+        const updated = await requestJSON<LogicGateRecord>(`/v1/logic-gates/${linkedNodeID}`, {
           method: "PUT",
           body: JSON.stringify({ company_id: companyID, header: value }),
         });
         setLinkedNodeTitle(updated.header);
         invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
+        upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(updated));
       } else {
-        const updated = await requestJSON<{ title: string }>(`/v1/nodes/${linkedNodeID}`, {
+        const updated = await requestJSON<NodeRecord>(`/v1/nodes/${linkedNodeID}`, {
           method: "PUT",
           body: JSON.stringify({ company_id: companyID, title: value }),
         });
         setLinkedNodeTitle(updated.title);
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+        upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_entity");
@@ -395,7 +399,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         applyLinkedNode(selectedFromMap);
         return;
       }
-      const selectedFromLogicMap = readSelectedLogicGateFromMap(linkedLogicMapWidgetID);
+      const selectedFromLogicMap = readSelectedLogicGateFromMap(linkedLogicMapWidgetID || linkedMapWidgetID);
       if (selectedFromLogicMap) {
         applyLinkedLogicGate(selectedFromLogicMap);
         return;
@@ -415,10 +419,25 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     refresh();
     const onStorage = (event: StorageEvent) => {
       const mapStateKey = linkedMapWidgetID ? `node-map-state-v1:${companyID}:${linkedMapWidgetID}` : "";
-      const logicMapStateKey = linkedLogicMapWidgetID ? `logic-gate-map-state-v1:${companyID}:${linkedLogicMapWidgetID}` : "";
+      const logicContextFrameID = linkedLogicMapWidgetID || linkedMapWidgetID;
+      const logicMapStateKey = logicContextFrameID ? `logic-gate-map-state-v1:${companyID}:${logicContextFrameID}` : "";
       const explorerContextKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
       const logicExplorerContextKey = `${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
       if (event.key && event.key !== mapStateKey && event.key !== logicMapStateKey && event.key !== explorerContextKey && event.key !== logicExplorerContextKey) return;
+      if (event.key === logicExplorerContextKey) {
+        const logicExplorerSelected = readSelectedLogicGateFromExplorerContext();
+        if (logicExplorerSelected) {
+          applyLinkedLogicGate(logicExplorerSelected);
+          return;
+        }
+      }
+      if (event.key === explorerContextKey) {
+        const explorerSelected = readSelectedNodeFromExplorerContext();
+        if (explorerSelected) {
+          applyLinkedNode(explorerSelected);
+          return;
+        }
+      }
       refresh();
     };
     const onMapStateUpdated = (event: Event) => {
@@ -436,7 +455,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     };
     const onLogicMapStateUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; selectedLogicGateID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
-      if (!detail || detail.mapWidgetID !== linkedLogicMapWidgetID) return;
+      const logicContextFrameID = linkedLogicMapWidgetID || linkedMapWidgetID;
+      if (!detail || detail.mapWidgetID !== logicContextFrameID) return;
       const revision = readIncomingSequence(detail);
       if (revision > 0 && !isNewerSequence(lastLogicGateSelectionRevisionRef.current, revision)) return;
       if (revision > 0 && hasSequenceGap(lastLogicGateSelectionRevisionRef.current, revision)) refresh();
@@ -454,6 +474,20 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       const expectedKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
       const expectedLogicKey = `${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
       if (detail.key !== expectedKey && detail.key !== expectedLogicKey && detail.targetID !== scope) return;
+      if (detail.key === expectedLogicKey) {
+        const logicExplorerSelected = readSelectedLogicGateFromExplorerContext();
+        if (logicExplorerSelected) {
+          applyLinkedLogicGate(logicExplorerSelected);
+          return;
+        }
+      }
+      if (detail.key === expectedKey) {
+        const explorerSelected = readSelectedNodeFromExplorerContext();
+        if (explorerSelected) {
+          applyLinkedNode(explorerSelected);
+          return;
+        }
+      }
       const explorerSelected = readSelectedNodeFromExplorerContext();
       if (explorerSelected) {
         applyLinkedNode(explorerSelected);
@@ -477,6 +511,40 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
     };
   }, [applyLinkedLogicGate, applyLinkedNode, companyID, linkedLogicMapWidgetID, linkedMapWidgetID, readSelectedLogicGateFromExplorerContext, readSelectedLogicGateFromMap, readSelectedNodeFromExplorerContext, readSelectedNodeFromMap, scope]);
+
+  useEffect(() => {
+    if (!linkedNodeID || linkedEntityKind !== "node") return;
+    const syncTitleFromGraph = () => {
+      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+      const node = (snapshot.nodes ?? []).find((item) => item.node_id === linkedNodeID);
+      if (!node) return;
+      const nextTitle = getNodeTitle(node);
+      setLinkedNodeTitle((current) => {
+        if (current === nextTitle) return current;
+        invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+        return nextTitle;
+      });
+    };
+    syncTitleFromGraph();
+    return subscribeNodeRelationshipGraph(apiBase, companyID, syncTitleFromGraph);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID]);
+
+  useEffect(() => {
+    if (!linkedNodeID || linkedEntityKind !== "logic_gate") return;
+    const syncTitleFromGraph = () => {
+      const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+      const logicGate = (snapshot.nodes ?? []).find((item) => item.node_id === linkedNodeID);
+      if (!logicGate) return;
+      const nextTitle = getLogicGateTitle(logicGate);
+      setLinkedNodeTitle((current) => {
+        if (current === nextTitle) return current;
+        invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
+        return nextTitle;
+      });
+    };
+    syncTitleFromGraph();
+    return subscribeLogicGateRelationshipGraph(apiBase, companyID, syncTitleFromGraph);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID]);
 
   useEffect(() => {
     let cancelled = false;

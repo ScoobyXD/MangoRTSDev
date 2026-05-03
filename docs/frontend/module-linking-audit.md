@@ -5,7 +5,7 @@ This note explains how context linking currently works across frames/modules in 
 ## 1) Link graph model
 
 - Frame-to-frame links are stored as undirected `FrameLinkEdge` records (`a`, `b`, `mode`) in localStorage key `frame-module-links-v1`.
-- Frame kinds are normalized with `classifyFrameKind` (`map`, `editor`, `explorer`, `logic-map`, `kanban`).
+- Frame kinds are normalized with `classifyFrameKind` (`map`, `editor`, `explorer`, legacy `logic-map`, `kanban`).
 - When a module needs "its linked map", it runs a BFS over the frame link graph (`resolveLinkedFrameByKindFromGraph`) and picks the first reachable frame of kind `map`.
 
 ## 2) Broadcast channels
@@ -31,6 +31,7 @@ These are dispatched with `emitDashboardEvent(...)` as typed `CustomEvent`s.
 - Explorer writes payload into per-target localStorage keys: `node-map-explorer-context-v1:<companyID>:<targetFrameID>`.
 - Explorer emits `EVENT_EXPLORER_CONTEXT_UPDATED` with target metadata.
 - Editor listens for this and uses explorer context as fallback when map selection is absent.
+- Explorer broadcasts to every connected frame in the link graph. This makes `A -> B -> C` behave as one linked context group without requiring a direct `A -> C` edge.
 
 ## 5) Echo-loop prevention
 
@@ -49,12 +50,13 @@ This design makes view selection topology-aware (via links), scoped (via frame I
 
 ## 6.1 Logic Gate Map Linking
 
-Logic Gate Map participates in the same frame-link graph using kind `logic-map`.
+Logic Gate Map participates through the unified `map` kind for new frames. Legacy saved frames using `logic-map` still resolve as logic-gate maps.
 
 - Logic Gate Map writes scoped selection state to `logic-gate-map-state-v1:<companyID>:<mapWidgetID>`.
 - Logic Gate Map emits `mangoos:logic-gate-map-selection-updated`.
 - Company Explorer writes logic-gate context to `logic-gate-map-explorer-context-v1:<companyID>:<targetFrameID>`.
 - Editor prefers direct linked-map selection first, then Explorer fallback context.
+- The unified Map chooses node vs logic-gate rendering from the newest Explorer context key for its frame.
 
 Junior engineer note:
 - Node and logic-gate contexts use separate storage keys/events so a node click cannot accidentally overwrite a logic-gate workflow, and vice versa.
