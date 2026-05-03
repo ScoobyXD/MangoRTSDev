@@ -293,7 +293,7 @@ Create a Kanban column and place a node card:
 ```bash
 curl -X POST http://localhost:8080/v1/kanban/columns \
   -H 'content-type: application/json' \
-  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","title":"Ready","width_px":260,"height_px":240}'
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","title":"Ready","width_px":260,"height_px":240,"item_color":"#245c9f"}'
 
 curl -X POST http://localhost:8080/v1/kanban/cards \
   -H 'content-type: application/json' \
@@ -307,6 +307,8 @@ curl "http://localhost:8080/v1/kanban/cards?company_id=11111111-1111-1111-1111-1
 ```
 
 Kanban card metadata still uses direct columns for current activity context: `status`, `work_type`, `assigned_to`, `assigned_by`, `created_by`, `updated_by`, `last_activity`, and `status_entered_timestamp`. Keep the hot path bounded with `company_id`, `board_id`, optional `column_id`, `after_position`, and `limit`. The previous grouped/filter query endpoint was removed so filtering can be rebuilt deliberately one capability at a time.
+
+Kanban cards are node-only through the API. Logic gates should stay in Logic Gate Map and Company Explorer workflows, not Kanban boards.
 
 ### Shared map layout contract
 

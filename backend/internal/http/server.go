@@ -1298,6 +1298,7 @@ func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
 		Position  int    `json:"position"`
 		WidthPx   int    `json:"width_px"`
 		HeightPx  int    `json:"height_px"`
+		ItemColor string `json:"item_color"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
@@ -1310,7 +1311,7 @@ func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_board_id_and_title_required")
 		return
 	}
-	item, err := s.repo.CreateKanbanColumn(req.CompanyID, req.BoardID, req.Title, req.Position, req.WidthPx, req.HeightPx)
+	item, err := s.repo.CreateKanbanColumn(req.CompanyID, req.BoardID, req.Title, req.Position, req.WidthPx, req.HeightPx, req.ItemColor)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_kanban_column")
 		return
@@ -1337,6 +1338,7 @@ func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) 
 			Position  int    `json:"position"`
 			WidthPx   int    `json:"width_px"`
 			HeightPx  int    `json:"height_px"`
+			ItemColor string `json:"item_color"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
@@ -1349,7 +1351,7 @@ func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
 			return
 		}
-		item, err := s.repo.UpdateKanbanColumn(req.CompanyID, req.BoardID, columnID, req.Title, req.Position, req.WidthPx, req.HeightPx)
+		item, err := s.repo.UpdateKanbanColumn(req.CompanyID, req.BoardID, columnID, req.Title, req.Position, req.WidthPx, req.HeightPx, req.ItemColor)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "kanban_column_not_found")
 			return
@@ -1446,7 +1448,7 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_board_column_and_item_required")
 		return
 	}
-	if req.ItemType != "node" && req.ItemType != "logic_gate" {
+	if req.ItemType != "node" {
 		writeError(w, http.StatusBadRequest, "invalid_kanban_item_type")
 		return
 	}
@@ -1463,6 +1465,10 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 		Position:      req.Position,
 		Metadata:      req.kanbanCardMetadataRequest.toStore(),
 	})
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_kanban_item_type")
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "kanban_column_or_item_not_found")
 		return

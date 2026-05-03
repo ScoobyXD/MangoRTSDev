@@ -457,6 +457,7 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 			"title":      title,
 			"width_px":   280,
 			"height_px":  240,
+			"item_color": "#245c9f",
 		})
 		req := httptest.NewRequest(http.MethodPost, "/v1/kanban/columns", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -495,6 +496,7 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 		"position":   777,
 		"width_px":   340,
 		"height_px":  220,
+		"item_color": "#123abc",
 	})
 	layoutReq := httptest.NewRequest(http.MethodPut, "/v1/kanban/columns/"+todoColumnID, bytes.NewReader(layoutBody))
 	layoutReq.Header.Set("Content-Type", "application/json")
@@ -508,12 +510,13 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 		Position int    `json:"position"`
 		WidthPx  int    `json:"width_px"`
 		HeightPx int    `json:"height_px"`
+		Color    string `json:"item_color"`
 	}
 	if err := json.NewDecoder(layoutRec.Body).Decode(&layoutPayload); err != nil {
 		t.Fatalf("decode layout column: %v", err)
 	}
-	if layoutPayload.Title != "Ready" || layoutPayload.Position != 777 || layoutPayload.WidthPx != 340 || layoutPayload.HeightPx != 220 {
-		t.Fatalf("column layout = %+v, want title preserved with position/width/height update", layoutPayload)
+	if layoutPayload.Title != "Ready" || layoutPayload.Position != 777 || layoutPayload.WidthPx != 340 || layoutPayload.HeightPx != 220 || layoutPayload.Color != "#123abc" {
+		t.Fatalf("column layout = %+v, want title preserved with position/width/height/color update", layoutPayload)
 	}
 
 	addCardBody, _ := json.Marshal(map[string]any{
@@ -586,8 +589,8 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	addGateCardReq.Header.Set("Content-Type", "application/json")
 	addGateCardRec := httptest.NewRecorder()
 	handler.ServeHTTP(addGateCardRec, addGateCardReq)
-	if addGateCardRec.Code != http.StatusCreated {
-		t.Fatalf("POST logic-gate kanban card status = %d, want %d body=%s", addGateCardRec.Code, http.StatusCreated, addGateCardRec.Body.String())
+	if addGateCardRec.Code != http.StatusBadRequest {
+		t.Fatalf("POST logic-gate kanban card status = %d, want %d body=%s", addGateCardRec.Code, http.StatusBadRequest, addGateCardRec.Body.String())
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/cards?company_id="+companyID+"&board_id="+boardID+"&column_id="+doneColumnID+"&limit=50", nil)
@@ -605,8 +608,8 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
 		t.Fatalf("decode cards: %v", err)
 	}
-	if len(listPayload.Cards) != 2 {
-		t.Fatalf("kanban card count = %d, want 2", len(listPayload.Cards))
+	if len(listPayload.Cards) != 1 {
+		t.Fatalf("kanban card count = %d, want 1 node card", len(listPayload.Cards))
 	}
 
 	filterReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/cards?company_id="+companyID+"&board_id="+boardID+"&status=Done&limit=50", nil)
@@ -631,8 +634,8 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	if err := json.NewDecoder(pagedRec.Body).Decode(&pagedPayload); err != nil {
 		t.Fatalf("decode paged cards: %v", err)
 	}
-	if len(pagedPayload.Cards) != 1 || pagedPayload.Cards[0].ItemType != "logic_gate" {
-		t.Fatalf("paged cards = %+v, want only logic gate after position 1000", pagedPayload.Cards)
+	if len(pagedPayload.Cards) != 0 {
+		t.Fatalf("paged cards = %+v, want none after position 1000", pagedPayload.Cards)
 	}
 
 	deleteColumnID := createColumn("Temporary")

@@ -1470,6 +1470,7 @@ func scanKanbanColumn(row interface {
 		&item.Position,
 		&item.WidthPx,
 		&item.HeightPx,
+		&item.ItemColor,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
 	)
@@ -1514,7 +1515,7 @@ status_entered_timestamp, created_timestamp, updated_timestamp`
 func (r *PostgresRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
 	ctx := context.Background()
 	rows, err := r.db.QueryContext(ctx, `
-select company_id, board_id, column_id, title, position, width_px, height_px, created_timestamp, updated_timestamp
+select company_id, board_id, column_id, title, position, width_px, height_px, item_color, created_timestamp, updated_timestamp
 from kanban_columns
 where company_id=$1 and board_id=$2
 order by position asc, created_timestamp asc`, companyID, boardID)
@@ -1534,7 +1535,7 @@ order by position asc, created_timestamp asc`, companyID, boardID)
 	return items, rows.Err()
 }
 
-func (r *PostgresRepo) CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int, heightPx int) (domain.KanbanColumn, error) {
+func (r *PostgresRepo) CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int, heightPx int, itemColor string) (domain.KanbanColumn, error) {
 	ctx := context.Background()
 	if position <= 0 {
 		if err := r.db.QueryRowContext(ctx, `
@@ -1546,20 +1547,24 @@ where company_id=$1 and board_id=$2`, companyID, boardID).Scan(&position); err !
 	}
 	widthPx = normalizeKanbanColumnWidth(widthPx)
 	heightPx = normalizeKanbanColumnHeight(heightPx)
+	itemColor = normalizeKanbanColumnItemColor(itemColor)
 	return scanKanbanColumn(r.db.QueryRowContext(ctx, `
-insert into kanban_columns (company_id, board_id, column_id, title, position, width_px, height_px, created_timestamp, updated_timestamp)
-values ($1, $2, $3, $4, $5, $6, $7, now(), now())
-returning company_id, board_id, column_id, title, position, width_px, height_px, created_timestamp, updated_timestamp`,
-		companyID, boardID, newUUIDv7String(), title, position, widthPx, heightPx,
+insert into kanban_columns (company_id, board_id, column_id, title, position, width_px, height_px, item_color, created_timestamp, updated_timestamp)
+values ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
+returning company_id, board_id, column_id, title, position, width_px, height_px, item_color, created_timestamp, updated_timestamp`,
+		companyID, boardID, newUUIDv7String(), title, position, widthPx, heightPx, itemColor,
 	))
 }
 
-func (r *PostgresRepo) UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int) (domain.KanbanColumn, error) {
+func (r *PostgresRepo) UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int, itemColor string) (domain.KanbanColumn, error) {
 	if widthPx > 0 {
 		widthPx = normalizeKanbanColumnWidth(widthPx)
 	}
 	if heightPx > 0 {
 		heightPx = normalizeKanbanColumnHeight(heightPx)
+	}
+	if strings.TrimSpace(itemColor) != "" {
+		itemColor = normalizeKanbanColumnItemColor(itemColor)
 	}
 	item, err := scanKanbanColumn(r.db.QueryRow(`
 update kanban_columns
@@ -1567,10 +1572,11 @@ set title=coalesce(nullif($4, ''), title),
     position=case when $5 > 0 then $5 else position end,
     width_px=case when $6 > 0 then $6 else width_px end,
     height_px=case when $7 > 0 then $7 else height_px end,
+    item_color=coalesce(nullif($8, ''), item_color),
     updated_timestamp=now()
 where company_id=$1 and board_id=$2 and column_id=$3
-returning company_id, board_id, column_id, title, position, width_px, height_px, created_timestamp, updated_timestamp`,
-		companyID, boardID, columnID, title, position, widthPx, heightPx,
+returning company_id, board_id, column_id, title, position, width_px, height_px, item_color, created_timestamp, updated_timestamp`,
+		companyID, boardID, columnID, title, position, widthPx, heightPx, itemColor,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.KanbanColumn{}, ErrNotFound
@@ -1644,6 +1650,10 @@ func (r *PostgresRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.K
 		return domain.KanbanCard{}, err
 	}
 	defer tx.Rollback()
+
+	if input.ItemType != "node" {
+		return domain.KanbanCard{}, ErrInvalid
+	}
 
 	var columnTitle string
 	if err := tx.QueryRowContext(ctx, `

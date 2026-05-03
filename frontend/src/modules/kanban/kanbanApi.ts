@@ -32,10 +32,10 @@ export async function listKanbanColumns(apiBase: string, companyID: string, boar
   return payload.columns ?? [];
 }
 
-export async function createKanbanColumn(apiBase: string, companyID: string, boardID: string, title: string, position?: number, widthPx?: number, heightPx?: number): Promise<KanbanColumn> {
+export async function createKanbanColumn(apiBase: string, companyID: string, boardID: string, title: string, position?: number, widthPx?: number, heightPx?: number, itemColor?: string): Promise<KanbanColumn> {
   return fetchJSON<KanbanColumn>(apiBase, "/v1/kanban/columns", {
     method: "POST",
-    body: { company_id: companyID, board_id: boardID, title, position, width_px: widthPx, height_px: heightPx },
+    body: { company_id: companyID, board_id: boardID, title, position, width_px: widthPx, height_px: heightPx, item_color: itemColor },
   });
 }
 
@@ -48,6 +48,7 @@ export async function updateKanbanColumn(args: {
   position?: number;
   widthPx?: number;
   heightPx?: number;
+  itemColor?: string;
 }): Promise<KanbanColumn> {
   return fetchJSON<KanbanColumn>(args.apiBase, `/v1/kanban/columns/${encodeURIComponent(args.columnID)}`, {
     method: "PUT",
@@ -58,6 +59,7 @@ export async function updateKanbanColumn(args: {
       position: args.position,
       width_px: args.widthPx,
       height_px: args.heightPx,
+      item_color: args.itemColor,
     },
   });
 }

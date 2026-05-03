@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { EVENT_EXPLORER_CONTEXT_UPDATED } from "../node-map/eventbus";
 import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../logic-gate-map/shared";
@@ -22,6 +23,8 @@ import {
   getKanbanCardSummaryAttributeValue,
   getKanbanConditionalColor,
   groupCardsByColumn,
+  isKanbanBoardDropItemType,
+  normalizeKanbanColumnItemColor,
   nextCardPosition,
   nextColumnPosition,
   parseExplorerEntityDragPayload,
@@ -45,6 +48,28 @@ type ColumnResizeState = {
   startHeight: number;
   currentWidth: number;
   currentHeight: number;
+};
+
+const contextMenuButtonStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  width: "100%",
+  padding: "9px 16px",
+  fontSize: 12,
+  fontWeight: 600,
+  letterSpacing: "0.04em",
+  fontFamily: "'IBM Plex Mono', monospace",
+  background: "none",
+  border: "none",
+  color: "#333",
+  cursor: "pointer",
+  textAlign: "left",
+};
+
+const contextMenuHoverHandlers = {
+  onMouseEnter: (event: React.MouseEvent) => { (event.currentTarget as HTMLElement).style.background = "#f5f5f5"; },
+  onMouseLeave: (event: React.MouseEvent) => { (event.currentTarget as HTMLElement).style.background = "none"; },
 };
 
 function readLinkedExplorerSelection(companyID: string, scope: string): HighlightedEntity {
@@ -91,6 +116,8 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [dragOverColumn, setDragOverColumn] = useState<{ columnID: string; placement: KanbanColumnDropPlacement } | null>(null);
   const [expandedCardIDs, setExpandedCardIDs] = useState<Set<string>>(() => new Set());
   const [addColumnHover, setAddColumnHover] = useState(false);
+  const [columnContextMenu, setColumnContextMenu] = useState<{ x: number; y: number; columnID: string } | null>(null);
+  const [deleteColumnConfirmation, setDeleteColumnConfirmation] = useState<{ columnID: string; title: string } | null>(null);
   const resizeRef = useRef<ColumnResizeState | null>(null);
 
   const isDark = theme === "dark";
@@ -105,6 +132,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
   const columnTitleByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, column.title])), [orderedColumns]);
+  const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, normalizeKanbanColumnItemColor(column.item_color)])), [orderedColumns]);
   const cardsByColumn = useMemo(() => groupCardsByColumn(cards), [cards]);
 
   const refreshBoard = useCallback(async () => {
@@ -199,6 +227,13 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [apiBase, boardID, cards, columns, companyID]);
 
+  const requestColumnDelete = useCallback((columnID: string) => {
+    const column = columns.find((item) => item.column_id === columnID);
+    if (!column) return;
+    setColumnContextMenu(null);
+    setDeleteColumnConfirmation({ columnID, title: column.title });
+  }, [columns]);
+
   const reorderColumn = useCallback(async (draggedColumnID: string, targetColumnID: string | null, placement: KanbanColumnDropPlacement = "before") => {
     const plan = buildColumnReorderPlan(columns, draggedColumnID, targetColumnID, placement);
     if (plan.updates.length === 0) {
@@ -233,6 +268,19 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setColumns((previous) => previous.map((column) => (column.column_id === updated.column_id ? updated : column)));
     } catch {
       setError("Column resize failed");
+      refreshBoard();
+    }
+  }, [apiBase, boardID, companyID, refreshBoard]);
+
+  const persistColumnItemColor = useCallback(async (columnID: string, itemColor: string) => {
+    const cleanColor = normalizeKanbanColumnItemColor(itemColor);
+    setColumns((previous) => previous.map((column) => (column.column_id === columnID ? { ...column, item_color: cleanColor } : column)));
+    setError("");
+    try {
+      const updated = await updateKanbanColumn({ apiBase, companyID, boardID, columnID, itemColor: cleanColor });
+      setColumns((previous) => previous.map((column) => (column.column_id === updated.column_id ? updated : column)));
+    } catch {
+      setError("Column color update failed");
       refreshBoard();
     }
   }, [apiBase, boardID, companyID, refreshBoard]);
@@ -284,6 +332,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [apiBase, boardID, cards, columnTitleByID, companyID, refreshBoard]);
 
   const addEntityToColumn = useCallback(async (columnID: string, itemType: KanbanItemType, itemID: string, label: string) => {
+    if (!isKanbanBoardDropItemType(itemType)) {
+      setError("Only nodes can be added to the Kanban board");
+      return;
+    }
     const position = nextCardPosition(cards, columnID);
     const now = new Date().toISOString();
     const optimistic: KanbanCard = {
@@ -319,6 +371,11 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
     const cardPayload = parseKanbanCardDragPayload(event.dataTransfer.getData(KANBAN_CARD_DRAG_MIME));
     if (cardPayload) {
+      const draggedCard = cards.find((card) => card.card_id === cardPayload.cardID);
+      if (draggedCard && !isKanbanBoardDropItemType(draggedCard.item_type)) {
+        setError("Only nodes can be moved on the Kanban board");
+        return;
+      }
       if (cardPayload.sourceColumnID !== columnID) void moveCardToColumn(cardPayload.cardID, columnID);
       return;
     }
@@ -326,7 +383,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     if (explorerPayload) {
       void addEntityToColumn(columnID, explorerPayload.itemType, explorerPayload.itemID, explorerPayload.label);
     }
-  }, [addEntityToColumn, moveCardToColumn, reorderColumn]);
+  }, [addEntityToColumn, cards, moveCardToColumn, reorderColumn]);
 
   const onDropAtEnd = useCallback((event: React.DragEvent) => {
     const columnPayload = parseKanbanColumnDragPayload(event.dataTransfer.getData(KANBAN_COLUMN_DRAG_MIME));
@@ -351,7 +408,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const highlighted = highlightedEntity?.itemType === card.item_type && highlightedEntity.itemID === card.item_id;
     const expanded = expandedCardIDs.has(card.card_id);
     const description = (card.description_snapshot ?? "").trim();
-    const color = getKanbanConditionalColor(card);
+    const color = getKanbanConditionalColor(card, columnColorByID);
     const attributes = KANBAN_CARD_SUMMARY_ATTRIBUTES
       .map((attribute) => ({ attribute, value: getKanbanCardSummaryAttributeValue(card, attribute) }))
       .filter((item) => item.value.trim());
@@ -375,7 +432,14 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           boxShadow: highlighted ? `0 0 0 1px ${accent} inset` : undefined,
         }}
       >
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 22px", gap: 6, alignItems: "start" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "16px minmax(0, 1fr) 22px", gap: 6, alignItems: "start" }}>
+          <span
+            aria-hidden="true"
+            title="Node"
+            style={{ width: 14, height: 14, marginTop: 1, border: `1.5px solid ${color}`, borderRadius: 4, display: "grid", placeItems: "center" }}
+          >
+            <span style={{ width: 5, height: 5, borderRadius: 999, background: color, display: "block" }} />
+          </span>
           <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.title_snapshot}</div>
           <button
             type="button"
@@ -404,6 +468,8 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     );
   };
 
+  const contextColumn = columnContextMenu ? columns.find((column) => column.column_id === columnContextMenu.columnID) : null;
+
   return (
     <div
       onMouseDown={(event) => event.stopPropagation()}
@@ -426,6 +492,11 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             return (
               <section
                 key={column.column_id}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setColumnContextMenu({ x: event.clientX, y: event.clientY, columnID: column.column_id });
+                }}
                 onDragOver={(event) => {
                   event.preventDefault();
                   if (dataTransferIncludes(event, KANBAN_COLUMN_DRAG_MIME) && draggingColumnID !== column.column_id) {
@@ -445,6 +516,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
                   display: "grid",
                   gridTemplateRows: "42px minmax(0, 1fr)",
                   opacity: draggingColumnID === column.column_id ? 0.72 : 1,
+                  cursor: "default",
                 }}
               >
                 <div
@@ -459,14 +531,15 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
                     setDraggingColumnID("");
                     setDragOverColumn(null);
                   }}
-                  style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${line}`, cursor: editingColumnID === column.column_id ? "default" : "grab" }}
+                  style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${line}`, cursor: "default" }}
                 >
-                  <span aria-hidden="true" style={{ color: subtext, fontSize: 15, lineHeight: 1, textAlign: "center" }}>::</span>
+                  <span aria-hidden="true" style={{ color: subtext, fontSize: 15, lineHeight: 1, textAlign: "center", cursor: editingColumnID === column.column_id ? "default" : "grab" }}>::</span>
                   {editingColumnID === column.column_id ? (
                     <input
                       value={column.title}
                       autoFocus
                       draggable={false}
+                      onFocus={(event) => event.currentTarget.select()}
                       onMouseDown={(event) => event.stopPropagation()}
                       onChange={(event) => {
                         const value = event.target.value;
@@ -487,8 +560,8 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
                   ) : (
                     <div
                       title={column.title}
-                      onDoubleClick={() => setEditingColumnID(column.column_id)}
-                      style={{ minWidth: 0, color: text, fontSize: 12, fontWeight: 800, padding: "0 5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM }}
+                      onClick={() => setEditingColumnID(column.column_id)}
+                      style={{ minWidth: 0, color: text, fontSize: 12, fontWeight: 800, padding: "0 5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, cursor: "text" }}
                     >
                       {column.title}
                     </div>
@@ -497,7 +570,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
                     title="Delete column"
                     type="button"
                     onMouseDown={(event) => event.stopPropagation()}
-                    onClick={() => void removeColumn(column.column_id)}
+                    onClick={() => requestColumnDelete(column.column_id)}
                     style={{ width: 28, height: 28, border: "none", background: "transparent", color: subtext, cursor: "pointer", fontSize: 20, lineHeight: 1 }}
                   >
                     x
@@ -577,6 +650,69 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           </button>
         </div>
       </div>
+      {contextColumn && columnContextMenu && (
+        <FrameRightClickMenu x={columnContextMenu.x} y={columnContextMenu.y} onClose={() => setColumnContextMenu(null)}>
+          <button
+            type="button"
+            style={contextMenuButtonStyle}
+            onClick={() => {
+              setEditingColumnID(contextColumn.column_id);
+              setColumnContextMenu(null);
+            }}
+            {...contextMenuHoverHandlers}
+          >
+            Rename column
+          </button>
+          <button
+            type="button"
+            style={{ ...contextMenuButtonStyle, color: "#c62828" }}
+            onClick={() => requestColumnDelete(contextColumn.column_id)}
+            {...contextMenuHoverHandlers}
+          >
+            Delete column
+          </button>
+          <label style={{ ...contextMenuButtonStyle, cursor: "default", justifyContent: "space-between" }}>
+            <span>Item color</span>
+            <input
+              type="color"
+              value={normalizeKanbanColumnItemColor(contextColumn.item_color)}
+              onChange={(event) => void persistColumnItemColor(contextColumn.column_id, event.target.value)}
+              style={{ width: 34, height: 24, border: "1px solid #d0d0d0", background: "#fff", cursor: "pointer", padding: 0 }}
+            />
+          </label>
+        </FrameRightClickMenu>
+      )}
+      {deleteColumnConfirmation && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
+          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#111111" }}>
+              Are you sure you want to delete this Kanban column?
+            </div>
+            <div style={{ fontSize: 11, lineHeight: 1.35, color: "#2e2e2e" }}>
+              This removes "{deleteColumnConfirmation.title}" and all cards in that column immediately.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  void removeColumn(deleteColumnConfirmation.columnID);
+                  setDeleteColumnConfirmation(null);
+                }}
+                style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}
+              >
+                Yes
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeleteColumnConfirmation(null)}
+                style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#fff", cursor: "pointer", fontWeight: 700 }}
+              >
+                No
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

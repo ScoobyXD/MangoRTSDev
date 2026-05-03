@@ -213,11 +213,13 @@ create table if not exists kanban_columns (
   position integer not null,
   width_px integer not null default 260,
   height_px integer not null default 240,
+  item_color text not null default '#2f7d62',
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   constraint kanban_columns_title_nonblank_chk check (btrim(title) <> ''),
   constraint kanban_columns_width_px_chk check (width_px between 180 and 520),
   constraint kanban_columns_height_px_chk check (height_px between 160 and 720),
+  constraint kanban_columns_item_color_chk check (item_color ~ '^#[0-9A-Fa-f]{6}$'),
   primary key (company_id, board_id, column_id)
 );
 

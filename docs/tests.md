@@ -157,10 +157,11 @@ Use this checklist format and keep it complete.
   - applies map selections only when Explorer semantic selection actually changes
   - scopes Explorer broadcast emission to semantic selection changes (node/tree)
 - [x] `tests/frontend/modules/kanban/shared.test.ts`
-  - sanitizes Company Explorer drag payloads for node and logic-gate Kanban drops
+  - sanitizes Company Explorer drag payloads for Kanban drops
+  - keeps Kanban board drops node-only while still parsing legacy drag payloads
   - computes append positions within the target column only
   - groups and sorts board cards by stable per-column position
-  - colors cards and formats status age without view-query state
+  - colors cards from their column item color and formats status age without view-query state
   - computes bounded Kanban column reorder and width/height resize values
   - locks the Kanban visual contract for preserving column title casing and clearing frame chrome
 - [x] `backend/internal/http/server_test.go`
@@ -173,9 +174,10 @@ Use this checklist format and keep it complete.
   - logic gate create/read/information/relationship API flow
   - node and logic-gate information APIs reject blank/whitespace-only `information` so empty editor blurs do not persist rows
   - Company Explorer folder APIs create nested folders, move folders, reject cyclic folder moves, assign node placements, and include folder data in workspace snapshots
-  - Kanban column create/rename and node/logic-gate card API flow
+  - Kanban column create/rename and node card API flow
+  - Kanban rejects logic-gate card creation through the headless card API
   - Kanban card APIs update hot metadata fields for headless agents and keep the removed query endpoint at 404
-  - Kanban column layout update flow for durable reorder/width/height resize state
+  - Kanban column layout update flow for durable reorder/width/height/color state
   - Kanban column delete API flow
   - Kanban card upsert moves an existing board card instead of duplicating it
   - Kanban card reads honor `after_position` pagination for bounded hot-path reads
