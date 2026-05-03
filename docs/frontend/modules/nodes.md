@@ -103,6 +103,7 @@ writes scale with user action size instead of full company map size.
 - Grid-snap applied to node movement and placement via `snapToGrid(...)`.
 - The visual background uses a repeated SVG plus-sign tile, not one DOM node per cell.
 - `adaptivePlusGridWorldStep(...)` coarsens the plus grid when zoomed out and adds detail when zoomed in so the canvas stays readable without creating millions of rendered grid elements.
+- The larger plus-sign layer is offset onto the same horizontal/vertical axes as the smaller plus signs, so major marks reinforce the grid instead of sitting in the middle of four minor marks.
 
 ### Node card sizing
 

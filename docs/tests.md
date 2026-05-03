@@ -131,6 +131,7 @@ Use this checklist format and keep it complete.
 - [x] `tests/frontend/modules/node-map/mapGridBackground.test.ts`
   - adaptive plus-grid spacing stays readable across zoom levels
   - map backgrounds use repeated SVG tiles instead of per-cell DOM nodes
+  - major plus marks align with the same horizontal/vertical axes as minor plus marks
   - zoomed-out backgrounds coarsen tile size for lower render churn
 - [x] `tests/frontend/modules/node-map/editorCanvasKeydownRouting.test.ts`
   - editor canvas key-routing guard ignores key events from contentEditable/input/textarea surfaces
