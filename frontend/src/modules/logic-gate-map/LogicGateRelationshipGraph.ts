@@ -64,6 +64,7 @@ export function upsertLogicGateRelationshipGraphNode(apiBase: string, companyID:
   const currentNodes = entry.snapshot.nodes ?? [];
   const exists = currentNodes.some((item) => item.node_id === logicGate.node_id);
   entry.snapshot = {
+    ...entry.snapshot,
     nodes: exists ? currentNodes.map((item) => (item.node_id === logicGate.node_id ? logicGate : item)) : [...currentNodes, logicGate],
     relationships: entry.snapshot.relationships ?? [],
     folders: entry.snapshot.folders ?? [],
@@ -83,10 +84,12 @@ export function removeLogicGateRelationshipGraphNode(apiBase: string, companyID:
   const nextRelationships = currentRelationships.filter((item) => item.node_id_a !== logicGateID && item.node_id_b !== logicGateID);
   if (nextNodes.length === currentNodes.length && nextRelationships.length === currentRelationships.length) return;
   entry.snapshot = {
+    ...entry.snapshot,
     nodes: nextNodes,
     relationships: nextRelationships,
     folders: entry.snapshot.folders ?? [],
     folder_items: (entry.snapshot.folder_items ?? []).filter((item) => item.item_type !== "logic_gate" || item.item_id !== logicGateID),
+    logic_gate_map_positions: (entry.snapshot.logic_gate_map_positions ?? []).filter((position) => (position.logic_gate_id || position.entity_id) !== logicGateID),
     generated_at: new Date().toISOString(),
   };
   notify(entry);
@@ -187,6 +190,7 @@ function asLogicGateRelationship(candidate: unknown): NodeRelationship | null {
 }
 
 function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: WorkspaceStreamEnvelope): boolean {
+  const previous = entry.snapshot;
   const currentNodes = entry.snapshot.nodes ?? [];
   const currentRelationships = entry.snapshot.relationships ?? [];
   const data = envelope.data ?? {};
@@ -196,10 +200,11 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
     if (!logicGate) return false;
     const exists = currentNodes.some((item) => item.node_id === logicGate.node_id);
     entry.snapshot = {
+      ...previous,
       nodes: exists ? currentNodes.map((item) => (item.node_id === logicGate.node_id ? logicGate : item)) : [...currentNodes, logicGate],
       relationships: currentRelationships,
-      folders: entry.snapshot.folders ?? [],
-      folder_items: entry.snapshot.folder_items ?? [],
+      folders: previous.folders ?? [],
+      folder_items: previous.folder_items ?? [],
       generated_at: envelope.ts,
     };
     return true;
@@ -210,10 +215,11 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
     const exists = currentNodes.some((item) => item.node_id === logicGate.node_id);
     if (!exists) return false;
     entry.snapshot = {
+      ...previous,
       nodes: currentNodes.map((item) => (item.node_id === logicGate.node_id ? logicGate : item)),
       relationships: currentRelationships,
-      folders: entry.snapshot.folders ?? [],
-      folder_items: entry.snapshot.folder_items ?? [],
+      folders: previous.folders ?? [],
+      folder_items: previous.folder_items ?? [],
       generated_at: envelope.ts,
     };
     return true;
@@ -222,10 +228,12 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
     const logicGateID = typeof data.logic_gate_id === "string" ? data.logic_gate_id : "";
     if (!logicGateID) return false;
     entry.snapshot = {
+      ...previous,
       nodes: currentNodes.filter((item) => item.node_id !== logicGateID),
       relationships: currentRelationships.filter((item) => item.node_id_a !== logicGateID && item.node_id_b !== logicGateID),
-      folders: entry.snapshot.folders ?? [],
-      folder_items: (entry.snapshot.folder_items ?? []).filter((item) => item.item_type !== "logic_gate" || item.item_id !== logicGateID),
+      folders: previous.folders ?? [],
+      folder_items: (previous.folder_items ?? []).filter((item) => item.item_type !== "logic_gate" || item.item_id !== logicGateID),
+      logic_gate_map_positions: (previous.logic_gate_map_positions ?? []).filter((position) => (position.logic_gate_id || position.entity_id) !== logicGateID),
       generated_at: envelope.ts,
     };
     return true;
@@ -235,12 +243,13 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
     if (!relationship) return false;
     const exists = currentRelationships.some((item) => item.node_relationship_id === relationship.node_relationship_id);
     entry.snapshot = {
+      ...previous,
       nodes: currentNodes,
       relationships: exists
         ? currentRelationships.map((item) => (item.node_relationship_id === relationship.node_relationship_id ? relationship : item))
         : [...currentRelationships, relationship],
-      folders: entry.snapshot.folders ?? [],
-      folder_items: entry.snapshot.folder_items ?? [],
+      folders: previous.folders ?? [],
+      folder_items: previous.folder_items ?? [],
       generated_at: envelope.ts,
     };
     return true;
@@ -249,10 +258,11 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
     const relationshipID = typeof data.logic_gate_relationship_id === "string" ? data.logic_gate_relationship_id : "";
     if (!relationshipID) return false;
     entry.snapshot = {
+      ...previous,
       nodes: currentNodes,
       relationships: currentRelationships.filter((item) => item.node_relationship_id !== relationshipID),
-      folders: entry.snapshot.folders ?? [],
-      folder_items: entry.snapshot.folder_items ?? [],
+      folders: previous.folders ?? [],
+      folder_items: previous.folder_items ?? [],
       generated_at: envelope.ts,
     };
     return true;

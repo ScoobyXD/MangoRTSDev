@@ -59,6 +59,7 @@ export function upsertNodeRelationshipGraphNode(apiBase: string, companyID: stri
   const currentNodes = entry.snapshot.nodes ?? [];
   const exists = currentNodes.some((item) => item.node_id === node.node_id);
   entry.snapshot = {
+    ...entry.snapshot,
     nodes: exists ? currentNodes.map((item) => (item.node_id === node.node_id ? node : item)) : [...currentNodes, node],
     relationships: entry.snapshot.relationships ?? [],
     folders: entry.snapshot.folders ?? [],
@@ -80,10 +81,12 @@ export function removeNodeRelationshipGraphNode(apiBase: string, companyID: stri
   const nextFolderItems = (entry.snapshot.folder_items ?? []).filter((item) => item.item_type !== "node" || item.item_id !== nodeID);
   if (nextNodes.length === currentNodes.length && nextRelationships.length === (entry.snapshot.relationships ?? []).length) return;
   entry.snapshot = {
+    ...entry.snapshot,
     nodes: nextNodes,
     relationships: nextRelationships,
     folders: entry.snapshot.folders ?? [],
     folder_items: nextFolderItems,
+    node_map_positions: (entry.snapshot.node_map_positions ?? []).filter((position) => (position.node_id || position.entity_id) !== nodeID),
     generated_at: new Date().toISOString(),
   };
   notify(entry);
@@ -197,6 +200,7 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
     if (!node) return false;
     const exists = currentNodes.some((item) => item.node_id === node.node_id);
     entry.snapshot = {
+      ...previous,
       nodes: exists ? currentNodes.map((item) => (item.node_id === node.node_id ? node : item)) : [...currentNodes, node],
       relationships: currentRelationships,
       folders: previous.folders ?? [],
@@ -211,6 +215,7 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
     const exists = currentNodes.some((item) => item.node_id === node.node_id);
     if (!exists) return false;
     entry.snapshot = {
+      ...previous,
       nodes: currentNodes.map((item) => (item.node_id === node.node_id ? node : item)),
       relationships: currentRelationships,
       folders: previous.folders ?? [],
@@ -224,10 +229,12 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
     const nodeID = typeof data.node_id === "string" ? data.node_id : "";
     if (!nodeID) return false;
     entry.snapshot = {
+      ...previous,
       nodes: currentNodes.filter((item) => item.node_id !== nodeID),
       relationships: currentRelationships.filter((item) => item.node_id_a !== nodeID && item.node_id_b !== nodeID),
       folders: previous.folders ?? [],
       folder_items: (previous.folder_items ?? []).filter((item) => item.item_type !== "node" || item.item_id !== nodeID),
+      node_map_positions: (previous.node_map_positions ?? []).filter((position) => (position.node_id || position.entity_id) !== nodeID),
       generated_at: envelope.ts,
     };
     return true;
@@ -238,6 +245,7 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
     if (!relationship) return false;
     const exists = currentRelationships.some((item) => item.node_relationship_id === relationship.node_relationship_id);
     entry.snapshot = {
+      ...previous,
       nodes: currentNodes,
       relationships: exists
         ? currentRelationships.map((item) => (item.node_relationship_id === relationship.node_relationship_id ? relationship : item))
@@ -253,6 +261,7 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
     const relationshipID = typeof data.node_relationship_id === "string" ? data.node_relationship_id : "";
     if (!relationshipID) return false;
     entry.snapshot = {
+      ...previous,
       nodes: currentNodes,
       relationships: currentRelationships.filter((item) => item.node_relationship_id !== relationshipID),
       folders: previous.folders ?? [],

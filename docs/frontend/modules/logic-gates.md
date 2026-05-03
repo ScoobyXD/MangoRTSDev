@@ -102,6 +102,9 @@ Linked behavior:
 - When the unified Map receives logic-gate Explorer context, it renders this logic-gate path and writes `logic-gate-map-state-v1:<companyID>:<mapWidgetID>` using the same frame ID.
 - Linked Company Explorer treats `selectedLogicGateID`/`selectedNodeID` in the selection event as fresher than debounced `logic-gate-map-state-v1:*` storage. Storage is used only when a gap-recovery event lacks an entity payload, which keeps Explorer selection stable after Explorer-driven map updates.
 - Logic Gate Map tags Explorer-caused selection events with `sourceExplorerID`; the originating Explorer ignores those self-echoes, while real map clicks and other explorers still propagate. Empty Explorer context clears logic-gate folder scope and selection instead of preserving a previous child gate.
+- Logic Gate Map suppresses cached selection emission while a newer Explorer context is pending, so unified Map mode switches do not echo an old gate before the Explorer click is applied.
+- Logic-gate graph cache deltas must preserve `logic_gate_map_positions`; only deleting a gate should remove its own position. Bulk remount placement uses the stable grid bootstrap rather than the viewport insertion point.
+- Delete key and gate context-menu delete resolve the full current multi-selection. Right-clicking a selected gate must not collapse selection before the menu opens.
 
 ## File Ownership
 Primary files:

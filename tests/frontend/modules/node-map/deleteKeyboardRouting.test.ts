@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { shouldIgnoreMapDeleteKeyTarget } from "../../../../frontend/src/modules/node-map/NodeMapControls.js";
+import { resolveNodeMapDeleteSelection, shouldIgnoreMapDeleteKeyTarget } from "../../../../frontend/src/modules/node-map/NodeMapControls.js";
 
 type DeleteRoutingInput = {
   canvasActive: boolean;
@@ -36,4 +36,26 @@ test("ignores delete when nothing is selected", () => {
     hasSelection: false,
     target: null,
   }), false);
+});
+
+test("delete routing prefers the full multi-node selection over the primary node", () => {
+  assert.deepEqual(resolveNodeMapDeleteSelection({
+    selectedNodeID: "node-a",
+    selectedNodeIDs: new Set(["node-a", "node-b", "node-c"]),
+    selectedRelationshipIDs: new Set(),
+  }), {
+    nodeIDs: ["node-a", "node-b", "node-c"],
+    relationshipIDs: [],
+  });
+});
+
+test("delete routing falls back to primary node when no multi-selection exists", () => {
+  assert.deepEqual(resolveNodeMapDeleteSelection({
+    selectedNodeID: "node-a",
+    selectedNodeIDs: new Set(),
+    selectedRelationshipIDs: new Set(["rel-1"]),
+  }), {
+    nodeIDs: ["node-a"],
+    relationshipIDs: ["rel-1"],
+  });
 });

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
-import { hasExplicitExplorerSelectionContext, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
+import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
@@ -513,6 +513,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
 
   useEffect(() => {
     if (!restoredViewport) return;
+    const explorerKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${mapScope}`;
+    if (hasPendingContextStorageUpdate(localStorage.getItem(explorerKey), explorerContextRef.current)) return;
     const contextID = `active_node_selection:${companyID}:${mapScope}`;
     const sequence = nextLocalContextSequence(contextID);
     const explorerOrigin = explorerSelectionOriginRef.current;
@@ -537,7 +539,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     if (explorerOrigin && explorerOrigin.selectedEntityID !== selectedNodeID) {
       explorerSelectionOriginRef.current = null;
     }
-  }, [mapScope, restoredViewport, selectedNodeID]);
+  }, [companyID, mapScope, restoredViewport, selectedNodeID]);
 
   useEffect(() => {
     setNodePositions((previous) => {
@@ -1537,6 +1539,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   });
                 }}
                 onPointerDown={(event) => {
+                  if (event.button !== 0) return;
                   event.stopPropagation();
                   if (event.ctrlKey || event.shiftKey) {
                     event.preventDefault();

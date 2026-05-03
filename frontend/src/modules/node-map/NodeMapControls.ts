@@ -1,4 +1,4 @@
-import { Dispatch, MutableRefObject, SetStateAction, useEffect } from "react";
+import { Dispatch, MutableRefObject, SetStateAction, useEffect, useRef } from "react";
 import { NodeDirection, NodePosition, NodeRecord, PanelEdge, clamp, snapToGrid } from "./shared.js";
 
 export type NodeMapScreenPoint = { x: number; y: number };
@@ -204,6 +204,16 @@ export function shouldIgnoreMapDeleteKeyTarget(target: DeleteKeyTargetLike | nul
   return Boolean(target.closest?.("[contenteditable='true'], textarea, input"));
 }
 
+export function resolveNodeMapDeleteSelection(input: {
+  selectedNodeID: string;
+  selectedNodeIDs: Set<string>;
+  selectedRelationshipIDs: Set<string>;
+}): { nodeIDs: string[]; relationshipIDs: string[] } {
+  const relationshipIDs = Array.from(input.selectedRelationshipIDs);
+  const nodeIDs = input.selectedNodeIDs.size > 0 ? Array.from(input.selectedNodeIDs) : (input.selectedNodeID ? [input.selectedNodeID] : []);
+  return { nodeIDs, relationshipIDs };
+}
+
 export function useNodeMapMultiSelectControls(input: {
   selectionPointerID: number | null;
   multiSelectBox: NodeMapMultiSelectBox;
@@ -395,11 +405,14 @@ export function useNodeMapDeleteKeyboardControl(input: {
   selectedRelationshipIDs: Set<string>;
   setConfirmDelete: Dispatch<SetStateAction<{ nodeIDs: string[]; relationshipIDs: string[] } | null>>;
 }) {
+  const latestInputRef = useRef(input);
+  latestInputRef.current = input;
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Delete" && event.key !== "Backspace") return;
-      const relationshipIDs = Array.from(input.selectedRelationshipIDs);
-      const nodeIDs = input.selectedNodeIDs.size > 0 ? Array.from(input.selectedNodeIDs) : (input.selectedNodeID ? [input.selectedNodeID] : []);
+      const current = latestInputRef.current;
+      const { nodeIDs, relationshipIDs } = resolveNodeMapDeleteSelection(current);
       const hasSelection = relationshipIDs.length > 0 || nodeIDs.length > 0;
       if (!hasSelection) return;
 
@@ -407,12 +420,12 @@ export function useNodeMapDeleteKeyboardControl(input: {
       if (shouldIgnoreMapDeleteKeyTarget(target)) return;
       event.preventDefault();
       event.stopPropagation();
-      input.setConfirmDelete({ nodeIDs, relationshipIDs });
+      current.setConfirmDelete({ nodeIDs, relationshipIDs });
     };
 
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [input]);
+  }, []);
 }
 
 export function useNodeMapPanelControls(input: {
