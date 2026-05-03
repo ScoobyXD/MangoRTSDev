@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardReorderPlan, buildColumnReorderPlan, clampColumnHeight, clampColumnWidth, getKanbanConditionalColor, groupCardsByColumn, isKanbanBoardDropItemType, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragPayload, sanitizeExplorerEntityDragPayload, type KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, clampColumnHeight, clampColumnWidth, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragPayload, sanitizeExplorerEntityDragPayload, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
 
 function card(overrides: Partial<KanbanCard>): KanbanCard {
   return {
@@ -12,6 +12,22 @@ function card(overrides: Partial<KanbanCard>): KanbanCard {
     node_title: "card",
     description_snapshot: "",
     position: 1000,
+    created_timestamp: "2026-05-01T00:00:00.000Z",
+    updated_timestamp: "2026-05-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function column(overrides: Partial<KanbanColumn>): KanbanColumn {
+  return {
+    company_id: "c",
+    board_id: "b",
+    column_id: "todo",
+    title: "Column",
+    position: 1000,
+    width_px: 260,
+    height_px: 240,
+    item_color: "#2f7d62",
     created_timestamp: "2026-05-01T00:00:00.000Z",
     updated_timestamp: "2026-05-01T00:00:00.000Z",
     ...overrides,
@@ -65,6 +81,54 @@ test("groupCardsByColumn sorts each column by stable board position", () => {
     }),
   ]);
   assert.deepEqual((grouped.get("todo") ?? []).map((card) => card.card_id), ["early", "late"]);
+});
+
+test("card selection helper supports ranges and additive toggles across columns", () => {
+  const columns = [
+    column({ column_id: "left", title: "Left", position: 1000 }),
+    column({ column_id: "middle", title: "Middle", position: 2000 }),
+    column({ column_id: "right", title: "Right", position: 3000 }),
+  ];
+  const cards = [
+    card({ card_id: "left-a", column_id: "left", node_id: "node-a", position: 1000 }),
+    card({ card_id: "middle-a", column_id: "middle", node_id: "node-b", position: 1000 }),
+    card({ card_id: "middle-b", column_id: "middle", node_id: "node-c", position: 2000 }),
+    card({ card_id: "right-a", column_id: "right", node_id: "node-d", position: 1000 }),
+  ];
+
+  assert.deepEqual(getOrderedKanbanCardIDs(columns, cards), ["left-a", "middle-a", "middle-b", "right-a"]);
+
+  const selectedFirst = buildKanbanCardSelectionUpdate({
+    columns,
+    cards,
+    selectedCardIDs: new Set(),
+    anchorCardID: "",
+    clickedCardID: "left-a",
+  });
+  assert.deepEqual(Array.from(selectedFirst.selectedCardIDs), ["left-a"]);
+  assert.equal(selectedFirst.anchorCardID, "left-a");
+
+  const selectedRange = buildKanbanCardSelectionUpdate({
+    columns,
+    cards,
+    selectedCardIDs: selectedFirst.selectedCardIDs,
+    anchorCardID: selectedFirst.anchorCardID,
+    clickedCardID: "middle-b",
+    shiftKey: true,
+  });
+  assert.deepEqual(Array.from(selectedRange.selectedCardIDs), ["left-a", "middle-a", "middle-b"]);
+  assert.equal(selectedRange.anchorCardID, "left-a");
+
+  const toggledMiddle = buildKanbanCardSelectionUpdate({
+    columns,
+    cards,
+    selectedCardIDs: selectedRange.selectedCardIDs,
+    anchorCardID: selectedRange.anchorCardID,
+    clickedCardID: "middle-a",
+    additiveKey: true,
+  });
+  assert.deepEqual(Array.from(toggledMiddle.selectedCardIDs), ["left-a", "middle-b"]);
+  assert.equal(toggledMiddle.anchorCardID, "middle-a");
 });
 
 test("kanban card helpers color node cards without view-query state", () => {

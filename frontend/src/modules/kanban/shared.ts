@@ -63,6 +63,11 @@ export type KanbanCardPositionUpdate = {
   position: number;
 };
 
+export type KanbanCardSelectionUpdate = {
+  selectedCardIDs: Set<string>;
+  anchorCardID: string;
+};
+
 export type KanbanColumnDropPlacement = "before" | "after" | "swap";
 export type KanbanCardDropPlacement = "before" | "after";
 
@@ -290,6 +295,53 @@ export function groupCardsByColumn(cards: KanbanCard[]): Map<string, KanbanCard[
     list.sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp));
   }
   return grouped;
+}
+
+export function getOrderedKanbanCardIDs(columns: KanbanColumn[], cards: KanbanCard[]): string[] {
+  const grouped = groupCardsByColumn(cards);
+  const ordered: string[] = [];
+  for (const column of sortColumns(columns)) {
+    for (const card of grouped.get(column.column_id) ?? []) {
+      ordered.push(card.card_id);
+    }
+  }
+  return ordered;
+}
+
+// Match the visual board order instead of DOM order so Shift selection works the
+// same way for UI users and headless callers that reuse this helper in tests.
+export function buildKanbanCardSelectionUpdate(args: {
+  columns: KanbanColumn[];
+  cards: KanbanCard[];
+  selectedCardIDs: Set<string>;
+  anchorCardID: string;
+  clickedCardID: string;
+  shiftKey?: boolean;
+  additiveKey?: boolean;
+}): KanbanCardSelectionUpdate {
+  const orderedIDs = getOrderedKanbanCardIDs(args.columns, args.cards);
+  if (!orderedIDs.includes(args.clickedCardID)) {
+    return { selectedCardIDs: new Set(args.selectedCardIDs), anchorCardID: args.anchorCardID };
+  }
+
+  if (args.shiftKey && args.anchorCardID && orderedIDs.includes(args.anchorCardID)) {
+    const anchorIndex = orderedIDs.indexOf(args.anchorCardID);
+    const clickedIndex = orderedIDs.indexOf(args.clickedCardID);
+    const [start, end] = anchorIndex <= clickedIndex ? [anchorIndex, clickedIndex] : [clickedIndex, anchorIndex];
+    const range = orderedIDs.slice(start, end + 1);
+    const selected = args.additiveKey ? new Set(args.selectedCardIDs) : new Set<string>();
+    for (const cardID of range) selected.add(cardID);
+    return { selectedCardIDs: selected, anchorCardID: args.anchorCardID };
+  }
+
+  if (args.additiveKey) {
+    const selected = new Set(args.selectedCardIDs);
+    if (selected.has(args.clickedCardID)) selected.delete(args.clickedCardID);
+    else selected.add(args.clickedCardID);
+    return { selectedCardIDs: selected, anchorCardID: args.clickedCardID };
+  }
+
+  return { selectedCardIDs: new Set([args.clickedCardID]), anchorCardID: args.clickedCardID };
 }
 
 export function getKanbanConditionalColor(card: KanbanCard, columnColorByID: Map<string, string> = new Map()): string {

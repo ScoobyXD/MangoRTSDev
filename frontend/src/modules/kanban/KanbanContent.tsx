@@ -12,6 +12,7 @@ import {
   KANBAN_DEFAULT_COLUMN_WIDTH_PX,
   KANBAN_MODULE_TOP_CLEARANCE_PX,
   buildCardReorderPlan,
+  buildKanbanCardSelectionUpdate,
   buildColumnReorderPlan,
   clampColumnHeight,
   clampColumnWidth,
@@ -117,11 +118,13 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [draggingColumnID, setDraggingColumnID] = useState("");
   const [dragOverColumnID, setDragOverColumnID] = useState("");
   const [dragOverCard, setDragOverCard] = useState<{ cardID: string; placement: KanbanCardDropPlacement } | null>(null);
-  const [selectedCardID, setSelectedCardID] = useState("");
+  const [selectedCardIDs, setSelectedCardIDs] = useState<Set<string>>(() => new Set());
+  const [selectionAnchorCardID, setSelectionAnchorCardID] = useState("");
   const [addColumnHover, setAddColumnHover] = useState(false);
   const [columnContextMenu, setColumnContextMenu] = useState<{ x: number; y: number; columnID: string } | null>(null);
   const [cardContextMenu, setCardContextMenu] = useState<{ x: number; y: number; cardID: string } | null>(null);
   const [deleteColumnConfirmation, setDeleteColumnConfirmation] = useState<{ columnID: string; title: string } | null>(null);
+  const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
   const resizeRef = useRef<ColumnResizeState | null>(null);
 
   const isDark = theme === "dark";
@@ -137,6 +140,11 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
   const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, normalizeKanbanColumnItemColor(column.item_color)])), [orderedColumns]);
   const cardsByColumn = useMemo(() => groupCardsByColumn(cards), [cards]);
+
+  const clearCardSelection = useCallback(() => {
+    setSelectedCardIDs(new Set());
+    setSelectionAnchorCardID("");
+  }, []);
 
   const refreshBoard = useCallback(async () => {
     setLoading(true);
@@ -344,14 +352,45 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [apiBase, boardID, cards, companyID, refreshBoard]);
 
-  const removeCard = useCallback(async (cardID: string) => {
+  const selectCard = useCallback((cardID: string, event: React.MouseEvent<HTMLElement>) => {
+    const next = buildKanbanCardSelectionUpdate({
+      columns: orderedColumns,
+      cards,
+      selectedCardIDs,
+      anchorCardID: selectionAnchorCardID,
+      clickedCardID: cardID,
+      shiftKey: event.shiftKey,
+      additiveKey: event.ctrlKey || event.metaKey,
+    });
+    setSelectedCardIDs(next.selectedCardIDs);
+    setSelectionAnchorCardID(next.anchorCardID);
+  }, [cards, orderedColumns, selectedCardIDs, selectionAnchorCardID]);
+
+  const clearCardSelectionFromBlankClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    if (event.button !== 0 || event.target !== event.currentTarget) return;
+    clearCardSelection();
+  }, [clearCardSelection]);
+
+  const requestCardDelete = useCallback((cardIDs: string[]) => {
+    const existingCardIDs = new Set(cards.map((card) => card.card_id));
+    const uniqueCardIDs = Array.from(new Set(cardIDs)).filter((cardID) => existingCardIDs.has(cardID));
+    if (uniqueCardIDs.length === 0) return;
+    setCardContextMenu(null);
+    setColumnContextMenu(null);
+    setDeleteCardConfirmation({ cardIDs: uniqueCardIDs });
+  }, [cards]);
+
+  const removeCards = useCallback(async (cardIDs: string[]) => {
+    const ids = new Set(cardIDs);
+    if (ids.size === 0) return;
     const previousCards = cards;
-    setCards((current) => current.filter((card) => card.card_id !== cardID));
-    setSelectedCardID((current) => (current === cardID ? "" : current));
+    setCards((current) => current.filter((card) => !ids.has(card.card_id)));
+    setSelectedCardIDs((current) => new Set(Array.from(current).filter((cardID) => !ids.has(cardID))));
+    setSelectionAnchorCardID((current) => (ids.has(current) ? "" : current));
     setCardContextMenu(null);
     setError("");
     try {
-      await deleteKanbanCard(apiBase, companyID, boardID, cardID);
+      await Promise.all(Array.from(ids, (cardID) => deleteKanbanCard(apiBase, companyID, boardID, cardID)));
     } catch {
       setError("Card delete failed");
       setCards(previousCards);
@@ -360,14 +399,23 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.key !== "Delete" && event.key !== "Backspace") || !selectedCardID) return;
-      if (isEditableKeyboardTarget(event.target)) return;
+      if (selectedCardIDs.size === 0 || isEditableKeyboardTarget(event.target)) return;
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (event.key !== "Delete") return;
+      // The shortcut only asks for confirmation. The API delete happens from
+      // the modal Yes button so selection can never remove a card by itself.
       event.preventDefault();
-      void removeCard(selectedCardID);
+      event.stopPropagation();
+      if (deleteCardConfirmation) return;
+      requestCardDelete(Array.from(selectedCardIDs));
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [removeCard, selectedCardID]);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [deleteCardConfirmation, requestCardDelete, selectedCardIDs]);
 
   const addEntityToColumn = useCallback(async (columnID: string, nodeID: string, label: string) => {
     const position = nextCardPosition(cards, columnID);
@@ -423,7 +471,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   const renderCard = (card: KanbanCard): React.ReactNode => {
     const highlighted = highlightedEntity?.nodeID === card.node_id;
-    const selected = selectedCardID === card.card_id;
+    const selected = selectedCardIDs.has(card.card_id);
     const dragBefore = dragOverCard?.cardID === card.card_id && dragOverCard.placement === "before";
     const dragAfter = dragOverCard?.cardID === card.card_id && dragOverCard.placement === "after";
     const description = (card.description_snapshot ?? "").trim();
@@ -433,20 +481,27 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         key={card.card_id}
         draggable
         tabIndex={0}
+        onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
-          setSelectedCardID(card.card_id);
+          selectCard(card.card_id, event);
         }}
         onContextMenu={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          setSelectedCardID(card.card_id);
+          if (!selectedCardIDs.has(card.card_id)) {
+            setSelectedCardIDs(new Set([card.card_id]));
+            setSelectionAnchorCardID(card.card_id);
+          }
           setColumnContextMenu(null);
           setCardContextMenu({ x: event.clientX, y: event.clientY, cardID: card.card_id });
         }}
         onDragStart={(event) => {
           event.stopPropagation();
-          setSelectedCardID(card.card_id);
+          if (!selectedCardIDs.has(card.card_id)) {
+            setSelectedCardIDs(new Set([card.card_id]));
+            setSelectionAnchorCardID(card.card_id);
+          }
           setCardContextMenu(null);
           setColumnContextMenu(null);
           event.dataTransfer.effectAllowed = "move";
@@ -523,7 +578,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             return (
               <section
                 key={column.column_id}
-                onMouseDown={() => setSelectedCardID("")}
+                onMouseDown={clearCardSelectionFromBlankClick}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
@@ -609,7 +664,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
                     x
                   </button>
                 </div>
-                <div style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 8, padding: 8 }}>
+                <div
+                  onMouseDown={clearCardSelectionFromBlankClick}
+                  style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 8, padding: 8 }}
+                >
                   {columnCards.map((card) => renderCard(card))}
                 </div>
                 <div
@@ -720,12 +778,43 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           <button
             type="button"
             style={{ ...contextMenuButtonStyle, color: "#c62828" }}
-            onClick={() => void removeCard(contextCard.card_id)}
+            onClick={() => requestCardDelete(selectedCardIDs.has(contextCard.card_id) ? Array.from(selectedCardIDs) : [contextCard.card_id])}
             {...contextMenuHoverHandlers}
           >
             Delete card
           </button>
         </FrameRightClickMenu>
+      )}
+      {deleteCardConfirmation && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
+          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#111111" }}>
+              Are you sure you want to delete {deleteCardConfirmation.cardIDs.length} Kanban card{deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"}?
+            </div>
+            <div style={{ fontSize: 11, lineHeight: 1.35, color: "#2e2e2e" }}>
+              This removes the selected card{deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"} from this board immediately.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  void removeCards(deleteCardConfirmation.cardIDs);
+                  setDeleteCardConfirmation(null);
+                }}
+                style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}
+              >
+                Yes
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeleteCardConfirmation(null)}
+                style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#fff", cursor: "pointer", fontWeight: 700 }}
+              >
+                No
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {deleteColumnConfirmation && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
