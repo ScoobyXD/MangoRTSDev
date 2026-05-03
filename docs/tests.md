@@ -145,7 +145,9 @@ Use this checklist format and keep it complete.
 - [x] `tests/frontend/modules/company-explorer/treePresentation.test.ts`
   - locks Company Explorer root order as Company -> Logic Gates -> Nodes
   - guards against reintroducing the Knowledge Nodes placeholder row
+  - locks root/custom folder labels without live count suffixes
   - verifies right-click creation targets for nested node and logic-gate folder contexts
+  - verifies delete actions only resolve for concrete folder/node/logic-gate records
 - [x] `tests/frontend/modules/folders/companyExplorerFolders.test.ts`
   - nested folder subtree expansion for map scope
   - node folder filtering keeps only folder/descendant contents

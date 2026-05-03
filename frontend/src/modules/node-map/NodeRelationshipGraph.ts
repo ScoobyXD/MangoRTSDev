@@ -117,6 +117,38 @@ export function upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase: stri
   notify(entry);
 }
 
+export function removeCompanyExplorerFolderInNodeRelationshipGraph(apiBase: string, companyID: string, folderID: string): void {
+  if (!folderID) return;
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  const folders = entry.snapshot.folders ?? [];
+  const deletedFolderIDs = collectDeletedFolderIDs(folders, folderID);
+  if (deletedFolderIDs.size === 0) return;
+  entry.snapshot = {
+    ...entry.snapshot,
+    folders: folders.filter((folder) => !deletedFolderIDs.has(folder.folder_id)),
+    folder_items: (entry.snapshot.folder_items ?? []).filter((item) => !deletedFolderIDs.has(item.folder_id)),
+    generated_at: new Date().toISOString(),
+  };
+  notify(entry);
+}
+
+function collectDeletedFolderIDs(folders: CompanyExplorerFolder[], rootFolderID: string): Set<string> {
+  const deleted = new Set<string>();
+  if (!rootFolderID || !folders.some((folder) => folder.folder_id === rootFolderID)) return deleted;
+  deleted.add(rootFolderID);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of folders) {
+      if (!folder.parent_folder_id || !deleted.has(folder.parent_folder_id) || deleted.has(folder.folder_id)) continue;
+      deleted.add(folder.folder_id);
+      changed = true;
+    }
+  }
+  return deleted;
+}
+
 // Runtime payload guard for SSE delta events -> NodeRecord contract.
 function asNodeRecord(candidate: unknown): NodeRecord | null {
   if (!candidate || typeof candidate !== "object") return null;
@@ -239,6 +271,20 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
       folders: currentFolders.some((item) => item.folder_id === folder.folder_id)
         ? currentFolders.map((item) => (item.folder_id === folder.folder_id ? folder : item))
         : [...currentFolders, folder],
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
+
+  if (envelope.type === "company_explorer_folder_deleted") {
+    const folderID = typeof data.folder_id === "string" ? data.folder_id : "";
+    const deletedFolderIDs = collectDeletedFolderIDs(previous.folders ?? [], folderID);
+    if (deletedFolderIDs.size === 0 && folderID) deletedFolderIDs.add(folderID);
+    if (deletedFolderIDs.size === 0) return false;
+    entry.snapshot = {
+      ...previous,
+      folders: (previous.folders ?? []).filter((folder) => !deletedFolderIDs.has(folder.folder_id)),
+      folder_items: (previous.folder_items ?? []).filter((item) => !deletedFolderIDs.has(item.folder_id)),
       generated_at: envelope.ts,
     };
     return true;

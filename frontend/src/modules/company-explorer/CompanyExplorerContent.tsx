@@ -2,15 +2,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeRecord } from "../node-map/shared";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, LogicGateRecord as LogicGateApiRecord, NodeRecord as LogicGateRecord, toLogicGateCanvasRecord } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
-import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
-import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
+import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
+import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
 import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload } from "../kanban/shared";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
-import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_ORDER, resolveExplorerCreationTargets, type ExplorerCreationTargets } from "./treePresentation";
+import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, formatExplorerFolderLabel, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, type ExplorerCreationTargets } from "./treePresentation";
 
 type ExplorerTreeNode = {
   id: string;
@@ -33,20 +33,12 @@ type ExplorerDragPayload = {
   itemType?: CompanyExplorerFolderKind;
 };
 
+type ExplorerDeleteTarget = NonNullable<ReturnType<typeof resolveExplorerDeleteTarget>>;
+
 const EXPLORER_DRAG_MIME = "application/x-mangoos-company-explorer-row";
 const TREE_INDENT_PX = 16;
 const TREE_BASE_LEFT_PX = 10;
 const TREE_TOGGLE_SLOT_PX = 18;
-const TREE_ROW_GAP_PX = 6;
-const TREE_ICON_SIZE_PX = 15;
-
-function getExplorerIconLeft(depth: number): number {
-  return TREE_BASE_LEFT_PX + depth * TREE_INDENT_PX + TREE_TOGGLE_SLOT_PX + TREE_ROW_GAP_PX;
-}
-
-function getExplorerIconCenter(depth: number): number {
-  return getExplorerIconLeft(depth) + TREE_ICON_SIZE_PX / 2;
-}
 
 function getExplorerDragPayload(row: ExplorerTreeNode): ExplorerDragPayload | null {
   if (row.kind === "folder" && row.folderID && row.folderKind) {
@@ -72,6 +64,22 @@ function readExplorerDragPayload(dataTransfer: DataTransfer): ExplorerDragPayloa
     // Drag payloads can come from outside the app; ignore anything we do not own.
   }
   return null;
+}
+
+function collectFolderSubtreeIDs(folders: CompanyExplorerFolder[], rootFolderID: string): Set<string> {
+  const deleted = new Set<string>();
+  if (!rootFolderID || !folders.some((folder) => folder.folder_id === rootFolderID)) return deleted;
+  deleted.add(rootFolderID);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of folders) {
+      if (!folder.parent_folder_id || !deleted.has(folder.parent_folder_id) || deleted.has(folder.folder_id)) continue;
+      deleted.add(folder.folder_id);
+      changed = true;
+    }
+  }
+  return deleted;
 }
 
 const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"] }> = ({ kind }) => {
@@ -136,7 +144,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [draggingTreeID, setDraggingTreeID] = useState("");
   const [dragOverTreeID, setDragOverTreeID] = useState("");
   const [dragPayload, setDragPayload] = useState<ExplorerDragPayload | null>(null);
-  const [explorerContextMenu, setExplorerContextMenu] = useState<{ x: number; y: number; targets: ExplorerCreationTargets } | null>(null);
+  const [explorerContextMenu, setExplorerContextMenu] = useState<{ x: number; y: number; targets: ExplorerCreationTargets; deleteTarget: ExplorerDeleteTarget | null } | null>(null);
   const [linkRevision, setLinkRevision] = useState(0);
   const [linkedMapFrameID, setLinkedMapFrameID] = useState("");
   const [linkedLogicMapFrameID, setLinkedLogicMapFrameID] = useState("");
@@ -241,7 +249,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         const rowID = `workspace-folder-${folder.folder_id}`;
         rows.push({
           id: rowID,
-          label: directItems.length > 0 ? `${folder.name} (${directItems.length})` : folder.name,
+          label: formatExplorerFolderLabel(folder.name),
           depth,
           kind: "folder",
           folderID: folder.folder_id,
@@ -289,11 +297,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
     for (const rootRowID of EXPLORER_ROOT_ROW_ORDER) {
       if (rootRowID === "folder-root") {
-        rows.push({ id: "folder-root", label: "Company", depth: 0, kind: "folder", scopeLevel: 0 });
+        rows.push({ id: "folder-root", label: EXPLORER_ROOT_ROW_LABELS["folder-root"], depth: 0, kind: "folder", scopeLevel: 0 });
         continue;
       }
       if (rootRowID === "folder-logic") {
-        rows.push({ id: "folder-logic", label: `Logic Gates (${logicGates.length})`, depth: 1, kind: "folder", folderKind: "logic_gate", folderLabel: "Logic Gates", scopeLevel: 1 });
+        rows.push({ id: "folder-logic", label: EXPLORER_ROOT_ROW_LABELS["folder-logic"], depth: 1, kind: "folder", folderKind: "logic_gate", folderLabel: EXPLORER_ROOT_ROW_LABELS["folder-logic"], scopeLevel: 1 });
         if (expanded.has("folder-logic")) {
           pushFolderBranch("logic_gate", "", 2);
           for (const logicGate of logicGates) {
@@ -312,7 +320,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         continue;
       }
 
-      rows.push({ id: "folder-nodes", label: `Nodes (${nodes.length})`, depth: 1, kind: "folder", folderKind: "node", folderLabel: "Nodes", scopeLevel: 1 });
+      rows.push({ id: "folder-nodes", label: EXPLORER_ROOT_ROW_LABELS["folder-nodes"], depth: 1, kind: "folder", folderKind: "node", folderLabel: EXPLORER_ROOT_ROW_LABELS["folder-nodes"], scopeLevel: 1 });
       if (expanded.has("folder-nodes")) {
         pushFolderBranch("node", "", 2);
         for (const node of nodes) {
@@ -401,6 +409,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       });
       if (folder.folder_kind === "logic_gate") upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
       else upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
+      setSelectedTreeID(`workspace-folder-${folder.folder_id}`);
+      setSelectedNodeID("");
+      setSelectedLogicGateID("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_folder");
     }
@@ -488,6 +499,51 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [apiBase, assignItemToFolder, companyID, requestJSON]);
 
+  // Delete through canonical REST APIs first, then patch local/shared caches so
+  // Explorer and linked maps converge immediately without a full snapshot GET.
+  const deleteExplorerTarget = useCallback(async (target: ExplorerDeleteTarget) => {
+    setError("");
+    try {
+      if (target.kind === "folder") {
+        const deletedFolder = folders.find((folder) => folder.folder_id === target.id);
+        await requestJSON<{ status: string }>(`/v1/company-explorer/folders/${target.id}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+        const deletedFolderIDs = collectFolderSubtreeIDs(folders, target.id);
+        setFolders((previous) => previous.filter((folder) => !deletedFolderIDs.has(folder.folder_id)));
+        setFolderItems((previous) => previous.filter((item) => !deletedFolderIDs.has(item.folder_id)));
+        removeCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, target.id);
+        removeCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, target.id);
+        const parentTreeID = deletedFolder?.parent_folder_id
+          ? `workspace-folder-${deletedFolder.parent_folder_id}`
+          : target.folderKind === "logic_gate" ? "folder-logic" : "folder-nodes";
+        setSelectedTreeID(parentTreeID);
+        setSelectedNodeID("");
+        setSelectedLogicGateID("");
+        return;
+      }
+
+      if (target.kind === "node") {
+        await requestJSON<{ status: string }>(`/v1/nodes/${target.id}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+        setNodes((previous) => previous.filter((node) => node.node_id !== target.id));
+        setFolderItems((previous) => previous.filter((item) => item.item_type !== "node" || item.item_id !== target.id));
+        removeNodeRelationshipGraphNode(apiBase, companyID, target.id);
+        setSelectedTreeID("folder-nodes");
+        setSelectedNodeID("");
+        setSelectedLogicGateID("");
+        return;
+      }
+
+      await requestJSON<{ status: string }>(`/v1/logic-gates/${target.id}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+      setLogicGates((previous) => previous.filter((logicGate) => logicGate.logic_gate_id !== target.id));
+      setFolderItems((previous) => previous.filter((item) => item.item_type !== "logic_gate" || item.item_id !== target.id));
+      removeLogicGateRelationshipGraphNode(apiBase, companyID, target.id);
+      setSelectedTreeID("folder-logic");
+      setSelectedNodeID("");
+      setSelectedLogicGateID("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `failed_to_delete_${target.kind}`);
+    }
+  }, [apiBase, companyID, folders, requestJSON]);
+
   const moveFolder = useCallback(async (folderID: string, parentFolderID: string) => {
     if (!folderID || folderID === parentFolderID) return;
     setError("");
@@ -540,14 +596,14 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const openExplorerContextMenu = useCallback((event: React.MouseEvent, row?: ExplorerTreeNode | null) => {
     event.preventDefault();
     event.stopPropagation();
-    const targetRow = row ?? selectedTree ?? null;
     if (row) selectTreeRow(row);
     setExplorerContextMenu({
       x: event.clientX,
       y: event.clientY,
-      targets: resolveExplorerCreationTargets(targetRow),
+      targets: resolveExplorerCreationTargets(row ?? null),
+      deleteTarget: resolveExplorerDeleteTarget(row ?? null),
     });
-  }, [selectTreeRow, selectedTree]);
+  }, [selectTreeRow]);
 
   useEffect(() => {
     const refreshLinkedMap = () => {
@@ -746,7 +802,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const rowRuleColor = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(3,25,30,0.06)";
   const selectedRowBackground = isDarkTheme ? "rgba(0,233,255,0.2)" : "rgba(0, 233, 255, 0.28)";
   const dropRowBackground = isDarkTheme ? "rgba(109, 240, 211, 0.18)" : "rgba(30, 160, 120, 0.16)";
-  const treeGuideColor = isDarkTheme ? "rgba(185,222,230,0.3)" : "rgba(15,56,66,0.22)";
   const folderToggleColor = isDarkTheme ? "#95c7d1" : "#326872";
   const explorerMenuButtonStyle: React.CSSProperties = {
     display: "flex",
@@ -768,6 +823,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         className="company-explorer-scroll"
         ref={treeViewportRef}
         onScroll={(event) => setTreeScrollTop((event.currentTarget as HTMLDivElement).scrollTop)}
+        onMouseDownCapture={(event) => {
+          if (event.button === 0) setExplorerContextMenu(null);
+        }}
         onContextMenu={(event) => openExplorerContextMenu(event)}
         style={{ overflow: "auto", minWidth: 0, ["--company-explorer-scroll-accent" as string]: accent }}
       >
@@ -856,43 +914,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 borderBottom: `1px solid ${rowRuleColor}`,
               }}
             >
-              {Array.from({ length: row.depth }).map((_, level) => (
-                <div
-                  key={level}
-                  style={{
-                    position: "absolute",
-                    left: getExplorerIconCenter(level),
-                    top: 0,
-                    bottom: 0,
-                    borderLeft: `1px solid ${treeGuideColor}`,
-                    pointerEvents: "none",
-                  }}
-                />
-              ))}
-              {row.depth > 0 && (
-                <div
-                  style={{
-                    position: "absolute",
-                    left: getExplorerIconCenter(row.depth - 1),
-                    top: "50%",
-                    width: Math.max(0, getExplorerIconLeft(row.depth) - getExplorerIconCenter(row.depth - 1)),
-                    borderTop: `1px solid ${treeGuideColor}`,
-                    pointerEvents: "none",
-                  }}
-                />
-              )}
-              {isFolder && isOpen && (
-                <div
-                  style={{
-                    position: "absolute",
-                    left: getExplorerIconCenter(row.depth),
-                    top: "50%",
-                    bottom: 0,
-                    borderLeft: `1px solid ${treeGuideColor}`,
-                    pointerEvents: "none",
-                  }}
-                />
-              )}
               {isFolder ? (
                 <button
                   draggable={false}
@@ -948,6 +969,18 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           >
             Create logic gate
           </button>
+          {explorerContextMenu.deleteTarget && (
+            <button
+              style={{ ...explorerMenuButtonStyle, color: "#c62828" }}
+              onClick={() => {
+                const target = explorerContextMenu.deleteTarget;
+                setExplorerContextMenu(null);
+                if (target) void deleteExplorerTarget(target);
+              }}
+            >
+              Delete
+            </button>
+          )}
         </FrameRightClickMenu>
       )}
 
