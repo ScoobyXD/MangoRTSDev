@@ -174,6 +174,7 @@ Use this checklist format and keep it complete.
   - duplicate event idempotency guard for repeated delivery
   - explicit sequence gap detection used to trigger scoped reconciliation
   - envelope-first sequence parsing with legacy `revision` fallback for migration safety
+  - local context sequences remain monotonic across unified Map renderer remounts
   - inline comments describe intent-vs-projection behavior in junior-friendly terms
   - ignores map-originated no-op selection echoes so suppression latches do not eat subsequent Explorer clicks
   - applies map selections only when Explorer semantic selection actually changes

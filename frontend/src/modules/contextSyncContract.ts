@@ -8,6 +8,24 @@ export type ContextMutationEnvelope = {
 
 export type LegacyRevisionDetail = { revision?: number };
 
+const localContextSequences = new Map<string, number>();
+
+/**
+ * Returns a local monotonic sequence for one context stream.
+ *
+ * Junior engineer note:
+ * React components can unmount/remount when the unified Map switches between
+ * node and logic-gate renderers. This helper keeps event ordering attached to
+ * the context ID instead of a component instance, so consumers do not reject
+ * valid post-remount selections as stale.
+ */
+export function nextLocalContextSequence(contextID: string, now = Date.now()): number {
+  const previous = localContextSequences.get(contextID) ?? 0;
+  const next = Math.max(previous + 1, now);
+  localContextSequences.set(contextID, next);
+  return next;
+}
+
 /**
  * Returns true only when this event is newer than what we already applied.
  */
