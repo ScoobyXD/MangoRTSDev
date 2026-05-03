@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export interface FrameRightClickMenuProps {
   children: React.ReactNode;
@@ -34,7 +35,7 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
     };
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div
       ref={menuRef}
       style={{
@@ -51,7 +52,8 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
       }}
     >
       {children}
-    </div>
+    </div>,
+    document.body,
   );
 };
 

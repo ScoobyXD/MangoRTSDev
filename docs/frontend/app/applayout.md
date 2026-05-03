@@ -63,6 +63,7 @@ The app layout keeps compatibility for persisted payloads:
 - Frame right-click menu `Link modules` label now shows `No other module selected` when only one module is active in selection/context.
 - Link planning now supports Editor + Company Explorer linking when both already share exactly one existing Node Map link target (fallback map inference).
 - Right-click menu now includes `Delink modules`, which removes link mappings touching selected/context modules (including reverse links when a Node Map is selected).
+- Frame actions such as Duplicate, Detach Child Frame, Delink modules, colorway, and Delete are now only opened from the compact frame/module header plate. Module body right-clicks are reserved for module-specific menus such as Company Explorer creation actions.
 
 ## Frame linking + canvas menu updates (2026-04-26)
 

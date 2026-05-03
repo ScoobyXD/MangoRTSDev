@@ -12,7 +12,6 @@ It is intended to be the master browsing experience for:
 
 - nodes,
 - logic gates,
-- note-like nodes (nodes used as notes and not attached to work),
 - and related company artifacts.
 
 The UI intent is explicitly "tree explorer first" (similar mental model to DBeaver/IDE explorers), with hierarchical affordances and connector guide-lines for nested rows.
@@ -37,9 +36,6 @@ Each explorer row represents one company "file" entity with a normalized type:
 
 - `node`
 - `logic_gate`
-- `note_node`
-
-Where `note_node` means a node that is used as note-taking and not attached/converted into work.
 
 ### 2.3 Tree UX rules
 
@@ -143,9 +139,13 @@ Folder runtime update (2026-05-01):
 - Explorer folders are now durable backend rows, not local-only UI state.
 - `company_explorer_folders` stores nested folders separately for `node` and `logic_gate` trees.
 - `company_explorer_folder_items` stores one placement per node or logic gate, matching file-explorer move semantics.
-- Folder rows use folder icons, node rows use document icons, and logic-gate rows use process icons.
+- Logic Gates render above Nodes in the root tree. The old Knowledge/Knowledge Nodes placeholder tree is removed.
+- Folder rows use fixed yellow icons, node rows use fixed black-and-white document icons, and logic-gate rows use fixed green circuitry AND-gate icons. These icon colors do not follow frame colorways.
+- Explorer rows render thin hierarchy guides from icon columns, including horizontal elbow lines into child icons, so nested folders/items remain visually attributable at scale.
 - The Explorer tree no longer renders separate `All Nodes` or `All Logic Gates` child folders; the top-level `Nodes` and `Logic Gates` rows are the broad-scope selectors.
-- Folder creation is an inline row action, while node, logic-gate, and folder moves use drag-and-drop onto compatible folders.
+- Folder creation is now a Company Explorer context-menu action, not an inline plus button. Right-clicking the tree body opens Explorer actions (`Create folder`, `Create node`, `Create logic gate`), while frame-level actions remain scoped to the frame/module title plate.
+- New folders are created inside the right-clicked compatible folder/tree. New nodes and logic gates are created through their canonical APIs and then assigned to the compatible right-clicked folder through `company_explorer_folder_items` when a folder target exists.
+- Node, logic-gate, and folder moves still use drag-and-drop onto compatible folders.
 - Selecting a node folder broadcasts `selectedFolderID`/`selectedFolderKind=node`; linked Node Map filters its cached graph to nodes placed in that folder or any descendant folder.
 - Selecting a logic-gate folder broadcasts `selectedFolderID`/`selectedFolderKind=logic_gate`; linked Logic Gate Map applies the same folder-scope rule for gates.
 - Selecting an individual node or logic gate inside a folder keeps that folder scope in the broadcast, so linked maps can select the item without expanding back to the whole company.

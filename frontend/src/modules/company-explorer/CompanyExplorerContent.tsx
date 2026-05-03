@@ -1,14 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeRecord, NodeRelationship } from "../node-map/shared";
-import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, NodeRecord as LogicGateRecord, NodeRelationship as LogicGateRelationship } from "../logic-gate-map/shared";
+import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeRecord } from "../node-map/shared";
+import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, LogicGateRecord as LogicGateApiRecord, NodeRecord as LogicGateRecord, toLogicGateCanvasRecord } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
-import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
-import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "../logic-gate-map/LogicGateRelationshipGraph";
+import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
+import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
 import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload } from "../kanban/shared";
+import FrameRightClickMenu from "../../app/framerightclickmenu";
+import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_ORDER, resolveExplorerCreationTargets, type ExplorerCreationTargets } from "./treePresentation";
 
 type ExplorerTreeNode = {
   id: string;
@@ -32,6 +34,19 @@ type ExplorerDragPayload = {
 };
 
 const EXPLORER_DRAG_MIME = "application/x-mangoos-company-explorer-row";
+const TREE_INDENT_PX = 16;
+const TREE_BASE_LEFT_PX = 10;
+const TREE_TOGGLE_SLOT_PX = 18;
+const TREE_ROW_GAP_PX = 6;
+const TREE_ICON_SIZE_PX = 15;
+
+function getExplorerIconLeft(depth: number): number {
+  return TREE_BASE_LEFT_PX + depth * TREE_INDENT_PX + TREE_TOGGLE_SLOT_PX + TREE_ROW_GAP_PX;
+}
+
+function getExplorerIconCenter(depth: number): number {
+  return getExplorerIconLeft(depth) + TREE_ICON_SIZE_PX / 2;
+}
 
 function getExplorerDragPayload(row: ExplorerTreeNode): ExplorerDragPayload | null {
   if (row.kind === "folder" && row.folderID && row.folderKind) {
@@ -59,31 +74,46 @@ function readExplorerDragPayload(dataTransfer: DataTransfer): ExplorerDragPayloa
   return null;
 }
 
-const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"]; color: string }> = ({ kind, color }) => {
+const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"] }> = ({ kind }) => {
   if (kind === "folder") {
     return (
       <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
-        <path d="M1.5 4.25h5l1.1 1.4h6.9v6.6a1.25 1.25 0 0 1-1.25 1.25H2.75A1.25 1.25 0 0 1 1.5 12.25z" fill="none" stroke={color} strokeWidth="1.4" />
-        <path d="M1.5 5.65V3.75A1.25 1.25 0 0 1 2.75 2.5h3.2l1.25 1.75" fill="none" stroke={color} strokeWidth="1.4" />
+        <path d="M1.4 4.3h4.8l1.1 1.35h7.1v6.35a1.45 1.45 0 0 1-1.45 1.45H2.85A1.45 1.45 0 0 1 1.4 12z" fill="#f6c944" stroke="#9d7412" strokeWidth="1.15" strokeLinejoin="round" />
+        <path d="M1.4 5.65V3.9c0-.8.65-1.45 1.45-1.45h3.1L7.2 4.3" fill="#ffd85a" stroke="#9d7412" strokeWidth="1.15" strokeLinejoin="round" />
       </svg>
     );
   }
   if (kind === "node") {
     return (
       <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
-        <path d="M4 1.75h5.25L12 4.5v9.75H4z" fill="none" stroke={color} strokeWidth="1.35" />
-        <path d="M9.25 1.75V4.5H12M5.75 7.25h4.5M5.75 9.5h4.5M5.75 11.75h3" fill="none" stroke={color} strokeWidth="1.15" />
+        <path d="M3.7 1.7h5.45l3.15 3.15v9.45H3.7z" fill="#ffffff" stroke="#101010" strokeWidth="1.2" strokeLinejoin="round" />
+        <path d="M9.15 1.7v3.15h3.15M5.55 7.25h4.9M5.55 9.55h4.9M5.55 11.85h3.25" fill="none" stroke="#101010" strokeWidth="1" strokeLinecap="round" />
       </svg>
     );
   }
   return (
     <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
-      <rect x="2" y="2" width="5" height="4" rx="0.8" fill="none" stroke={color} strokeWidth="1.25" />
-      <rect x="9" y="10" width="5" height="4" rx="0.8" fill="none" stroke={color} strokeWidth="1.25" />
-      <path d="M7 4h2.5a2 2 0 0 1 2 2v4M7.75 8.75 11.5 10l1.25-3.75" fill="none" stroke={color} strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M1.4 5.25h3.05M1.4 10.75h3.05M11.7 8h2.9" fill="none" stroke="#0c8f47" strokeWidth="1.25" strokeLinecap="round" />
+      <path d="M4.35 3.55h3.35c2.45 0 4.45 1.95 4.45 4.45s-2 4.45-4.45 4.45H4.35z" fill="#e8fff1" stroke="#0c8f47" strokeWidth="1.25" strokeLinejoin="round" />
+      <circle cx="4.35" cy="5.25" r="0.85" fill="#16b85f" />
+      <circle cx="4.35" cy="10.75" r="0.85" fill="#16b85f" />
+      <circle cx="12.15" cy="8" r="0.85" fill="#16b85f" />
     </svg>
   );
 };
+
+const ExplorerDisclosureIcon: React.FC<{ open: boolean; color: string }> = ({ open, color }) => (
+  <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style={{ display: "block" }}>
+    <path
+      d={open ? "M3.25 4.55 6 7.3l2.75-2.75" : "M4.55 3.25 7.3 6 4.55 8.75"}
+      fill="none"
+      stroke={color}
+      strokeWidth="1.55"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 
 // Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
 export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
@@ -95,19 +125,18 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [logicGates, setLogicGates] = useState<LogicGateRecord[]>([]);
   const [folders, setFolders] = useState<CompanyExplorerFolder[]>([]);
   const [folderItems, setFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
-  const [selectedTreeID, setSelectedTreeID] = useState("folder-nodes");
+  const [selectedTreeID, setSelectedTreeID] = useState("folder-logic");
   const [selectedNodeID, setSelectedNodeID] = useState("");
   const [selectedLogicGateID, setSelectedLogicGateID] = useState("");
   const [error, setError] = useState("");
-  const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
-  const [logicGateRelationships, setLogicGateRelationships] = useState<LogicGateRelationship[]>([]);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(["folder-root", "folder-nodes", "folder-notes", "folder-logic"]));
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(EXPLORER_DEFAULT_EXPANDED_ROW_IDS));
   const treeViewportRef = useRef<HTMLDivElement | null>(null);
   const [treeScrollTop, setTreeScrollTop] = useState(0);
   const [treeViewportHeight, setTreeViewportHeight] = useState(480);
   const [draggingTreeID, setDraggingTreeID] = useState("");
   const [dragOverTreeID, setDragOverTreeID] = useState("");
   const [dragPayload, setDragPayload] = useState<ExplorerDragPayload | null>(null);
+  const [explorerContextMenu, setExplorerContextMenu] = useState<{ x: number; y: number; targets: ExplorerCreationTargets } | null>(null);
   const [linkRevision, setLinkRevision] = useState(0);
   const [linkedMapFrameID, setLinkedMapFrameID] = useState("");
   const [linkedLogicMapFrameID, setLinkedLogicMapFrameID] = useState("");
@@ -130,7 +159,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         if (cancelled) return;
         const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
         setNodes(snapshot.nodes ?? []);
-        setRelationships(snapshot.relationships ?? []);
         setFolders(snapshot.folders ?? []);
         setFolderItems(snapshot.folder_items ?? []);
       } catch {
@@ -144,7 +172,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return subscribeNodeRelationshipGraph(apiBase, companyID, () => {
       const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
       setNodes(snapshot.nodes ?? []);
-      setRelationships(snapshot.relationships ?? []);
       setFolders(snapshot.folders ?? []);
       setFolderItems(snapshot.folder_items ?? []);
     });
@@ -158,7 +185,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         if (cancelled) return;
         const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
         setLogicGates(snapshot.nodes ?? []);
-        setLogicGateRelationships(snapshot.relationships ?? []);
         if ((snapshot.folders ?? []).length > 0 || (snapshot.folder_items ?? []).length > 0) {
           setFolders(snapshot.folders ?? []);
           setFolderItems(snapshot.folder_items ?? []);
@@ -174,22 +200,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return subscribeLogicGateRelationshipGraph(apiBase, companyID, () => {
       const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
       setLogicGates(snapshot.nodes ?? []);
-      setLogicGateRelationships(snapshot.relationships ?? []);
       if ((snapshot.folders ?? []).length > 0 || (snapshot.folder_items ?? []).length > 0) {
         setFolders(snapshot.folders ?? []);
         setFolderItems(snapshot.folder_items ?? []);
       }
     });
   }, [apiBase, companyID]);
-
-  const unattachedNodeIDs = useMemo(() => {
-    const attached = new Set<string>();
-    for (const relationship of relationships) {
-      attached.add(relationship.node_id_a);
-      attached.add(relationship.node_id_b);
-    }
-    return new Set(nodes.filter((node) => !attached.has(node.node_id)).map((node) => node.node_id));
-  }, [nodes, relationships]);
 
   // Build a file-explorer tree from durable folder rows plus one placement row per item.
   // Folder selection is recursive for map scope, but the tree shows immediate children
@@ -271,40 +287,42 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       }
     };
 
-    rows.push({ id: "folder-root", label: "Company", depth: 0, kind: "folder", scopeLevel: 0 });
-
-    rows.push({ id: "folder-nodes", label: `Nodes (${nodes.length})`, depth: 1, kind: "folder", folderKind: "node", folderLabel: "Nodes", scopeLevel: 1 });
-    if (expanded.has("folder-nodes")) {
-      pushFolderBranch("node", "", 2);
-      for (const node of nodes) {
-        if (!assignedNodes.has(node.node_id)) rows.push({ id: `node-${node.node_id}`, label: getNodeTitle(node) || node.node_id, depth: 2, kind: "node", nodeID: node.node_id, scopeLevel: 2 });
+    for (const rootRowID of EXPLORER_ROOT_ROW_ORDER) {
+      if (rootRowID === "folder-root") {
+        rows.push({ id: "folder-root", label: "Company", depth: 0, kind: "folder", scopeLevel: 0 });
+        continue;
       }
-    }
+      if (rootRowID === "folder-logic") {
+        rows.push({ id: "folder-logic", label: `Logic Gates (${logicGates.length})`, depth: 1, kind: "folder", folderKind: "logic_gate", folderLabel: "Logic Gates", scopeLevel: 1 });
+        if (expanded.has("folder-logic")) {
+          pushFolderBranch("logic_gate", "", 2);
+          for (const logicGate of logicGates) {
+            if (!assignedLogicGates.has(logicGate.logic_gate_id)) {
+              rows.push({
+                id: `logic-gate-${logicGate.logic_gate_id}`,
+                label: getLogicGateTitle(logicGate) || logicGate.logic_gate_id,
+                depth: 2,
+                kind: "logic_gate",
+                logicGateID: logicGate.logic_gate_id,
+                scopeLevel: 2,
+              });
+            }
+          }
+        }
+        continue;
+      }
 
-    rows.push({ id: "folder-logic", label: `Logic Gates (${logicGates.length})`, depth: 1, kind: "folder", folderKind: "logic_gate", folderLabel: "Logic Gates", scopeLevel: 1 });
-    if (expanded.has("folder-logic")) {
-      pushFolderBranch("logic_gate", "", 2);
-      for (const logicGate of logicGates) {
-        if (!assignedLogicGates.has(logicGate.logic_gate_id)) {
-          rows.push({
-            id: `logic-gate-${logicGate.logic_gate_id}`,
-            label: getLogicGateTitle(logicGate) || logicGate.logic_gate_id,
-            depth: 2,
-            kind: "logic_gate",
-            logicGateID: logicGate.logic_gate_id,
-            scopeLevel: 2,
-          });
+      rows.push({ id: "folder-nodes", label: `Nodes (${nodes.length})`, depth: 1, kind: "folder", folderKind: "node", folderLabel: "Nodes", scopeLevel: 1 });
+      if (expanded.has("folder-nodes")) {
+        pushFolderBranch("node", "", 2);
+        for (const node of nodes) {
+          if (!assignedNodes.has(node.node_id)) rows.push({ id: `node-${node.node_id}`, label: getNodeTitle(node) || node.node_id, depth: 2, kind: "node", nodeID: node.node_id, scopeLevel: 2 });
         }
       }
     }
 
-    rows.push({ id: "folder-notes", label: "Knowledge Notes", depth: 1, kind: "folder", scopeLevel: 1 });
-    if (expanded.has("folder-notes")) {
-      rows.push({ id: "folder-notes-unattached", label: `Unattached Notes (${unattachedNodeIDs.size})`, depth: 2, kind: "folder", scopeLevel: 2 });
-    }
-
     return rows;
-  }, [expanded, nodes, logicGates, folders, folderItems, unattachedNodeIDs]);
+  }, [expanded, nodes, logicGates, folders, folderItems]);
 
   const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID) ?? treeRows[0], [selectedTreeID, treeRows]);
   const selectedFolderKind = selectedTree?.folderKind;
@@ -419,6 +437,57 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [apiBase, companyID, requestJSON]);
 
+  const createNodeAtFolder = useCallback(async (parentFolderID: string) => {
+    setError("");
+    try {
+      const node = await requestJSON<NodeRecord>("/v1/nodes", {
+        method: "POST",
+        body: JSON.stringify({ company_id: companyID, title: "new node" }),
+      });
+      // Create is API-first, then we patch the shared graph cache so Explorer,
+      // Node Map, and future headless agents converge without a snapshot refetch.
+      setNodes((previous) => previous.some((item) => item.node_id === node.node_id) ? previous : [...previous, node]);
+      upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+      if (parentFolderID) await assignItemToFolder(parentFolderID, "node", node.node_id);
+      setExpanded((previous) => {
+        const next = new Set(previous);
+        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-nodes");
+        return next;
+      });
+      setSelectedTreeID(`node-${node.node_id}`);
+      setSelectedNodeID(node.node_id);
+      setSelectedLogicGateID("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_create_node");
+    }
+  }, [apiBase, assignItemToFolder, companyID, requestJSON]);
+
+  const createLogicGateAtFolder = useCallback(async (parentFolderID: string) => {
+    setError("");
+    try {
+      const created = await requestJSON<LogicGateApiRecord>("/v1/logic-gates", {
+        method: "POST",
+        body: JSON.stringify({ company_id: companyID, header: "new logic gate" }),
+      });
+      const logicGate = toLogicGateCanvasRecord(created);
+      // Same hot-path pattern as nodes: the REST write is canonical, and the
+      // local cache patch keeps linked modules responsive under large workspaces.
+      setLogicGates((previous) => previous.some((item) => item.logic_gate_id === logicGate.logic_gate_id) ? previous : [...previous, logicGate]);
+      upsertLogicGateRelationshipGraphNode(apiBase, companyID, logicGate);
+      if (parentFolderID) await assignItemToFolder(parentFolderID, "logic_gate", logicGate.logic_gate_id);
+      setExpanded((previous) => {
+        const next = new Set(previous);
+        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-logic");
+        return next;
+      });
+      setSelectedTreeID(`logic-gate-${logicGate.logic_gate_id}`);
+      setSelectedLogicGateID(logicGate.logic_gate_id);
+      setSelectedNodeID("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_create_logic_gate");
+    }
+  }, [apiBase, assignItemToFolder, companyID, requestJSON]);
+
   const moveFolder = useCallback(async (folderID: string, parentFolderID: string) => {
     if (!folderID || folderID === parentFolderID) return;
     setError("");
@@ -467,6 +536,18 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
     return !!target.folderID && payload.itemType === target.folderKind;
   }, []);
+
+  const openExplorerContextMenu = useCallback((event: React.MouseEvent, row?: ExplorerTreeNode | null) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const targetRow = row ?? selectedTree ?? null;
+    if (row) selectTreeRow(row);
+    setExplorerContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      targets: resolveExplorerCreationTargets(targetRow),
+    });
+  }, [selectTreeRow, selectedTree]);
 
   useEffect(() => {
     const refreshLinkedMap = () => {
@@ -667,7 +748,19 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const dropRowBackground = isDarkTheme ? "rgba(109, 240, 211, 0.18)" : "rgba(30, 160, 120, 0.16)";
   const treeGuideColor = isDarkTheme ? "rgba(185,222,230,0.3)" : "rgba(15,56,66,0.22)";
   const folderToggleColor = isDarkTheme ? "#95c7d1" : "#326872";
-  const rowIconColor = isDarkTheme ? "#b8d9e1" : "#315f68";
+  const explorerMenuButtonStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    width: "100%",
+    padding: "9px 14px",
+    border: "none",
+    background: "transparent",
+    cursor: "pointer",
+    fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: 12,
+    fontWeight: 700,
+    textAlign: "left",
+  };
 
   return (
     <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(240px, 1fr)", background: surfaceBackground, color: surfaceText, overflow: "hidden", minWidth: 0 }}>
@@ -675,6 +768,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         className="company-explorer-scroll"
         ref={treeViewportRef}
         onScroll={(event) => setTreeScrollTop((event.currentTarget as HTMLDivElement).scrollTop)}
+        onContextMenu={(event) => openExplorerContextMenu(event)}
         style={{ overflow: "auto", minWidth: 0, ["--company-explorer-scroll-accent" as string]: accent }}
       >
         <div style={{ padding: "9px 10px", borderBottom: `1px solid ${ruleColor}`, fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Company Explorer</div>
@@ -692,6 +786,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
               key={row.id}
               draggable={!!rowDragPayload}
               onClick={() => selectTreeRow(row)}
+              onContextMenu={(event) => openExplorerContextMenu(event, row)}
               onDragStart={(event) => {
                 if (!rowDragPayload) {
                   event.preventDefault();
@@ -753,7 +848,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 gap: 6,
                 minHeight: TREE_ROW_HEIGHT,
                 padding: "4px 8px",
-                paddingLeft: 10 + row.depth * 16,
+                paddingLeft: TREE_BASE_LEFT_PX + row.depth * TREE_INDENT_PX,
                 fontSize: 12,
                 cursor: rowDragPayload ? "grab" : "pointer",
                 opacity: isDragging ? 0.55 : 1,
@@ -761,14 +856,40 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 borderBottom: `1px solid ${rowRuleColor}`,
               }}
             >
+              {Array.from({ length: row.depth }).map((_, level) => (
+                <div
+                  key={level}
+                  style={{
+                    position: "absolute",
+                    left: getExplorerIconCenter(level),
+                    top: 0,
+                    bottom: 0,
+                    borderLeft: `1px solid ${treeGuideColor}`,
+                    pointerEvents: "none",
+                  }}
+                />
+              ))}
               {row.depth > 0 && (
                 <div
                   style={{
                     position: "absolute",
-                    left: 10 + row.depth * 16 - 8,
-                    top: 0,
+                    left: getExplorerIconCenter(row.depth - 1),
+                    top: "50%",
+                    width: Math.max(0, getExplorerIconLeft(row.depth) - getExplorerIconCenter(row.depth - 1)),
+                    borderTop: `1px solid ${treeGuideColor}`,
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
+              {isFolder && isOpen && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: getExplorerIconCenter(row.depth),
+                    top: "50%",
                     bottom: 0,
                     borderLeft: `1px solid ${treeGuideColor}`,
+                    pointerEvents: "none",
                   }}
                 />
               )}
@@ -785,48 +906,50 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                       return next;
                     });
                   }}
-                  style={{ border: "none", background: "transparent", width: 18, cursor: "pointer", color: folderToggleColor, fontWeight: 700 }}
+                  style={{ border: "none", background: "transparent", width: TREE_TOGGLE_SLOT_PX, height: 20, cursor: "pointer", color: folderToggleColor, display: "grid", placeItems: "center", padding: 0, flexShrink: 0 }}
                 >
-                  {isOpen ? "v" : ">"}
+                  <ExplorerDisclosureIcon open={isOpen} color={folderToggleColor} />
                 </button>
-              ) : <span style={{ width: 18 }} />}
-              <ExplorerRowIcon kind={row.kind} color={row.kind === "folder" ? folderToggleColor : rowIconColor} />
+              ) : <span style={{ width: TREE_TOGGLE_SLOT_PX, flexShrink: 0 }} />}
+              <ExplorerRowIcon kind={row.kind} />
               <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.label}</span>
-              {isFolder && row.folderKind && (
-                <button
-                  title={`New ${row.folderKind === "logic_gate" ? "logic gate" : "node"} folder`}
-                  aria-label={`New ${row.folderKind === "logic_gate" ? "logic gate" : "node"} folder`}
-                  draggable={false}
-                  onMouseDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (row.folderKind) void createFolder(row.folderKind, row.folderID ?? "");
-                  }}
-                  style={{
-                    marginLeft: "auto",
-                    width: 20,
-                    height: 20,
-                    border: `1px solid ${rowRuleColor}`,
-                    borderRadius: 4,
-                    background: "transparent",
-                    color: surfaceText,
-                    cursor: "pointer",
-                    display: "grid",
-                    placeItems: "center",
-                    fontSize: 14,
-                    lineHeight: 1,
-                    padding: 0,
-                    flexShrink: 0,
-                  }}
-                >
-                  +
-                </button>
-              )}
             </div>
           );
         })}
         <div style={{ height: virtualizedTree.bottomSpacer }} />
       </div>
+
+      {explorerContextMenu && (
+        <FrameRightClickMenu x={explorerContextMenu.x} y={explorerContextMenu.y} onClose={() => setExplorerContextMenu(null)}>
+          <button
+            style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+            onClick={() => {
+              void createFolder(explorerContextMenu.targets.folderKind, explorerContextMenu.targets.folderParentID);
+              setExplorerContextMenu(null);
+            }}
+          >
+            Create folder
+          </button>
+          <button
+            style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+            onClick={() => {
+              void createNodeAtFolder(explorerContextMenu.targets.nodeParentFolderID);
+              setExplorerContextMenu(null);
+            }}
+          >
+            Create node
+          </button>
+          <button
+            style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+            onClick={() => {
+              void createLogicGateAtFolder(explorerContextMenu.targets.logicGateParentFolderID);
+              setExplorerContextMenu(null);
+            }}
+          >
+            Create logic gate
+          </button>
+        </FrameRightClickMenu>
+      )}
 
     </div>
   );

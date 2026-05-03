@@ -483,16 +483,16 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         if (!editMode && !target.closest('[data-header-drag-handle="true"]')) return;
         onDragStart(e, frame.id);
       }}
-      onContextMenu={(e) => {
-        const target = e.target as HTMLElement;
-        if (!nested && target.closest('[data-child-frame="true"]')) return;
-        e.preventDefault();
-        e.stopPropagation();
-        onContextMenu(e, frame.id);
-      }}
     >
       <div
         data-header-drag-handle="true"
+        onContextMenu={(e) => {
+          const target = e.target as HTMLElement;
+          if (!nested && target.closest('[data-child-frame="true"]')) return;
+          e.preventDefault();
+          e.stopPropagation();
+          onContextMenu(e, frame.id);
+        }}
         style={{
           position: "absolute",
           // Pin the compact header plate to frame edges so the tag looks flush (no dead corner gaps).
@@ -523,7 +523,10 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
             </svg>
           )}
       </div>
-      <div style={{ flex: 1, minHeight: 0, padding: isEdgeToEdgeContentFrame ? 0 : "8px 10px", overflow: frame.kind === "company-explorer" || frame.kind === "kanban" ? "hidden" : "auto", fontFamily: "'IBM Plex Mono', monospace" }}>
+      <div
+        onContextMenu={(e) => e.stopPropagation()}
+        style={{ flex: 1, minHeight: 0, padding: isEdgeToEdgeContentFrame ? 0 : "8px 10px", overflow: frame.kind === "company-explorer" || frame.kind === "kanban" ? "hidden" : "auto", fontFamily: "'IBM Plex Mono', monospace" }}
+      >
         <div style={{ width: `${100 / contentScale}%`, height: `${100 / contentScale}%`, transform: `scale(${contentScale})`, transformOrigin: "top left" }}>
           {Content ? <Content accent={frame.accent} widgetId={frame.id} hideTopControls={isNodesFrame} theme={frame.theme} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: frame.accent }}>{frame.title}</span></div>}
         </div>
