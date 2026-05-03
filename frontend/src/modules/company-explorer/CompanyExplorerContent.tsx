@@ -10,7 +10,7 @@ import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMuta
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
 import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../kanban/shared";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
-import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, buildExplorerRowReorderPlan, formatExplorerFolderLabel, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerDropTarget, resolveExplorerRenameTarget, type ExplorerCreationTargets, type ExplorerDropPayload, type ExplorerRowDropPlacement } from "./treePresentation";
+import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, buildExplorerRowReorderPlan, formatExplorerFolderLabel, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerDropTarget, resolveExplorerKeyboardNavigation, resolveExplorerRenameTarget, resolveExplorerRootDropTarget, shouldAcceptMapSelectionAfterExplorerSelection, type ExplorerCreationTargets, type ExplorerDropPayload, type ExplorerRowDropPlacement, type ExplorerSelectionDomain } from "./treePresentation";
 
 type ExplorerTreeNode = {
   id: string;
@@ -100,6 +100,18 @@ function getExplorerRowContainerID(row: ExplorerTreeNode): string | null {
 function getExplorerRowOrderKind(row: ExplorerTreeNode): CompanyExplorerFolderKind | null {
   if (row.kind === "folder") return row.folderKind ?? null;
   return row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : null;
+}
+
+function getExplorerSelectionDomain(row?: ExplorerTreeNode | null): ExplorerSelectionDomain {
+  if (!row) return "root";
+  if (row.kind === "node") return "node";
+  if (row.kind === "logic_gate") return "logic_gate";
+  return row.folderKind ?? "root";
+}
+
+function isExplorerTextInputTarget(target: EventTarget | null): boolean {
+  const element = target instanceof HTMLElement ? target : null;
+  return Boolean(element?.closest("input, textarea, [contenteditable='true']"));
 }
 
 function getExplorerDropIntent(event: React.DragEvent<HTMLElement>): ExplorerRowDropPlacement | "inside" {
@@ -212,6 +224,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const cancelRenameOnBlurRef = useRef(false);
   const renameCommitInFlightRef = useRef(false);
   const treeViewportRef = useRef<HTMLDivElement | null>(null);
+  const treeKeyboardActiveRef = useRef(false);
   const [treeScrollTop, setTreeScrollTop] = useState(() => readScrollTopFromStorage(scrollStorageKey));
   const [treeViewportHeight, setTreeViewportHeight] = useState(480);
   const [rootRowOrder, setRootRowOrder] = useState<Record<string, number>>(() => readRootRowOrderFromStorage(rootOrderStorageKey));
@@ -239,6 +252,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const previousBroadcastSelectionRef = useRef({ selectedNodeID: "", selectedTreeID: "" });
   const latestSelectionRef = useRef<ExplorerSelectionState>({ selectedNodeID: "", selectedTreeID: "" });
   const latestLogicGateSelectionRef = useRef({ selectedLogicGateID: "", selectedTreeID: "" });
+  const latestExplorerDomainRef = useRef<ExplorerSelectionDomain>("root");
+  const lastLocalExplorerSelectionRef = useRef<{ domain: ExplorerSelectionDomain; changedAt: number }>({ domain: "root", changedAt: 0 });
   const explorerContextSequenceRef = useRef(0);
 
   const TREE_ROW_HEIGHT = 30;
@@ -462,6 +477,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, [selectedLogicGateID, selectedTreeID]);
 
   useEffect(() => {
+    latestExplorerDomainRef.current = getExplorerSelectionDomain(selectedTree);
+  }, [selectedTree]);
+
+  useEffect(() => {
     if (!renaming || !renameInputRef.current) return;
     const input = renameInputRef.current;
     input.focus();
@@ -561,6 +580,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       });
       upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
       upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
+      lastLocalExplorerSelectionRef.current = { domain: folderKind, changedAt: Date.now() };
       setSelectedTreeID(`workspace-folder-${folder.folder_id}`);
       setSelectedTreeIDs(new Set([`workspace-folder-${folder.folder_id}`]));
       setSelectionAnchorTreeID(`workspace-folder-${folder.folder_id}`);
@@ -622,6 +642,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
         return next;
       });
+      lastLocalExplorerSelectionRef.current = { domain: "node", changedAt: Date.now() };
       setSelectedTreeID(`node-${node.node_id}`);
       setSelectedTreeIDs(new Set([`node-${node.node_id}`]));
       setSelectionAnchorTreeID(`node-${node.node_id}`);
@@ -650,6 +671,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
         return next;
       });
+      lastLocalExplorerSelectionRef.current = { domain: "logic_gate", changedAt: Date.now() };
       setSelectedTreeID(`logic-gate-${logicGate.logic_gate_id}`);
       setSelectedTreeIDs(new Set([`logic-gate-${logicGate.logic_gate_id}`]));
       setSelectionAnchorTreeID(`logic-gate-${logicGate.logic_gate_id}`);
@@ -676,6 +698,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         const parentTreeID = deletedFolder?.parent_folder_id
           ? `workspace-folder-${deletedFolder.parent_folder_id}`
           : "folder-root";
+        lastLocalExplorerSelectionRef.current = { domain: parentTreeID === "folder-root" ? "root" : target.folderKind, changedAt: Date.now() };
         setSelectedTreeID(parentTreeID);
         setSelectedTreeIDs(new Set([parentTreeID]));
         setSelectionAnchorTreeID(parentTreeID);
@@ -689,6 +712,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         setNodes((previous) => previous.filter((node) => node.node_id !== target.id));
         setFolderItems((previous) => previous.filter((item) => item.item_type !== "node" || item.item_id !== target.id));
         removeNodeRelationshipGraphNode(apiBase, companyID, target.id);
+        lastLocalExplorerSelectionRef.current = { domain: "root", changedAt: Date.now() };
         setSelectedTreeID("folder-root");
         setSelectedTreeIDs(new Set(["folder-root"]));
         setSelectionAnchorTreeID("folder-root");
@@ -701,6 +725,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setLogicGates((previous) => previous.filter((logicGate) => logicGate.logic_gate_id !== target.id));
       setFolderItems((previous) => previous.filter((item) => item.item_type !== "logic_gate" || item.item_id !== target.id));
       removeLogicGateRelationshipGraphNode(apiBase, companyID, target.id);
+      lastLocalExplorerSelectionRef.current = { domain: "root", changedAt: Date.now() };
       setSelectedTreeID("folder-root");
       setSelectedTreeIDs(new Set(["folder-root"]));
       setSelectionAnchorTreeID("folder-root");
@@ -780,7 +805,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [apiBase, companyID, requestJSON]);
 
-  const focusTreeRow = useCallback((row: ExplorerTreeNode) => {
+  const focusTreeRow = useCallback((row: ExplorerTreeNode, options: { localIntent?: boolean } = {}) => {
+    if (options.localIntent !== false) {
+      lastLocalExplorerSelectionRef.current = { domain: getExplorerSelectionDomain(row), changedAt: Date.now() };
+    }
     setSelectedTreeID(row.id);
     if (row.kind === "node") {
       setSelectedNodeID(row.nodeID ?? "");
@@ -797,6 +825,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, []);
 
   const selectSingleTreeRow = useCallback((row: ExplorerTreeNode) => {
+    treeKeyboardActiveRef.current = true;
+    treeViewportRef.current?.focus({ preventScroll: true });
     setSelectedTreeID(row.id);
     setSelectedTreeIDs(new Set([row.id]));
     setSelectionAnchorTreeID(row.id);
@@ -805,6 +835,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   const selectTreeRow = useCallback((row: ExplorerTreeNode, event?: React.MouseEvent) => {
     const orderedIDs = treeRows.map((item) => item.id);
+    treeKeyboardActiveRef.current = true;
+    treeViewportRef.current?.focus({ preventScroll: true });
     const selected = resolveExplorerClickSelection({
       orderedIDs,
       previousSelectedIDs: selectedTreeIDs,
@@ -849,36 +881,48 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     setTreeScrollTop(nextScrollTop);
   }, [treeRows, treeViewportHeight]);
 
-  const handleTreeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-    const target = event.target as HTMLElement;
-    if (target.closest("input, textarea, [contenteditable='true']")) return;
-    if (!["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft"].includes(event.key)) return;
+  const handleTreeKeyCommand = useCallback((event: React.KeyboardEvent<HTMLDivElement> | KeyboardEvent) => {
+    if (isExplorerTextInputTarget(event.target)) return;
+    const result = resolveExplorerKeyboardNavigation({
+      rows: treeRows.map((row) => ({ id: row.id, kind: row.kind })),
+      selectedTreeID,
+      expandedIDs: expanded,
+      key: event.key,
+    });
+    if (!result.handled) return;
 
-    const currentIndex = Math.max(0, treeRows.findIndex((row) => row.id === selectedTreeID));
-    const current = treeRows[currentIndex];
-    if (!current) return;
-
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const nextIndex = event.key === "ArrowDown"
-        ? Math.min(treeRows.length - 1, currentIndex + 1)
-        : Math.max(0, currentIndex - 1);
-      const next = treeRows[nextIndex];
+    event.preventDefault();
+    if (result.expandedIDs) setExpanded(result.expandedIDs);
+    if (result.selectedTreeID) {
+      const next = treeRows.find((row) => row.id === result.selectedTreeID);
       if (!next) return;
       selectSingleTreeRow(next);
       scrollTreeRowIntoView(next.id);
-      return;
     }
+  }, [expanded, scrollTreeRowIntoView, selectSingleTreeRow, selectedTreeID, treeRows]);
 
-    if (current.kind !== "folder") return;
-    event.preventDefault();
-    setExpanded((previous) => {
-      const next = new Set(previous);
-      if (event.key === "ArrowRight") next.add(current.id);
-      if (event.key === "ArrowLeft") next.delete(current.id);
-      return next;
-    });
-  }, [scrollTreeRowIntoView, selectSingleTreeRow, selectedTreeID, treeRows]);
+  const handleTreeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    handleTreeKeyCommand(event);
+  }, [handleTreeKeyCommand]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!treeKeyboardActiveRef.current || event.defaultPrevented) return;
+      handleTreeKeyCommand(event);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleTreeKeyCommand]);
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && treeViewportRef.current?.contains(target)) return;
+      treeKeyboardActiveRef.current = false;
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onPointerDown, true);
+  }, []);
 
   const getReorderRowsForTarget = useCallback((source: ExplorerTreeNode, target: ExplorerTreeNode): ExplorerTreeNode[] => {
     const sourceContainer = getExplorerRowContainerID(source);
@@ -1006,8 +1050,16 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, []);
 
   useEffect(() => {
-    const applyMapSelection = (selectedFromMap: string) => {
+    const applyMapSelection = (selectedFromMap: string, changedAt?: number) => {
       const current = latestSelectionRef.current;
+      const localSelection = lastLocalExplorerSelectionRef.current;
+      if (!shouldAcceptMapSelectionAfterExplorerSelection({
+        incomingDomain: "node",
+        currentDomain: latestExplorerDomainRef.current,
+        localSelectionChangedAt: localSelection.changedAt,
+        incomingChangedAt: changedAt,
+        now: Date.now(),
+      })) return;
       if (!shouldApplyMapSelection(current, selectedFromMap)) return;
       suppressNextExplorerBroadcastRef.current = true;
       setSelectedNodeID(selectedFromMap);
@@ -1037,7 +1089,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     };
     readFromMapState();
     const onMapSelectionUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number; sourceExplorerID?: string; envelope?: ContextMutationEnvelope }>).detail;
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number; changedAt?: number; sourceExplorerID?: string; envelope?: ContextMutationEnvelope }>).detail;
       if (!detail || detail.mapWidgetID !== linkedMapFrameID) return;
       const revision = readIncomingSequence(detail);
       if (revision > 0 && !isNewerSequence(lastMapSelectionRevisionRef.current, revision)) return;
@@ -1050,7 +1102,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       if (revision > 0 && shouldReadMapStateForSelectionEvent(hasSequenceGap(lastMapSelectionRevisionRef.current, revision), eventHasSelection)) readFromMapState();
       if (revision > 0) lastMapSelectionRevisionRef.current = revision;
       if (!eventHasSelection) return;
-      applyMapSelection(eventSelectedNodeID);
+      applyMapSelection(eventSelectedNodeID, detail.changedAt);
     };
     window.addEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapSelectionUpdated);
     return () => {
@@ -1059,8 +1111,16 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, [companyID, linkedMapFrameID]);
 
   useEffect(() => {
-    const applyLogicGateMapSelection = (selectedFromMap: string) => {
+    const applyLogicGateMapSelection = (selectedFromMap: string, changedAt?: number) => {
       if (!selectedFromMap) return;
+      const localSelection = lastLocalExplorerSelectionRef.current;
+      if (!shouldAcceptMapSelectionAfterExplorerSelection({
+        incomingDomain: "logic_gate",
+        currentDomain: latestExplorerDomainRef.current,
+        localSelectionChangedAt: localSelection.changedAt,
+        incomingChangedAt: changedAt,
+        now: Date.now(),
+      })) return;
       const nextTreeID = `logic-gate-${selectedFromMap}`;
       const current = latestLogicGateSelectionRef.current;
       if (current.selectedLogicGateID === selectedFromMap && current.selectedTreeID === nextTreeID) return;
@@ -1093,7 +1153,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     };
     readFromLogicMapState();
     const onLogicMapSelectionUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; selectedLogicGateID?: string; revision?: number; sourceExplorerID?: string; envelope?: ContextMutationEnvelope }>).detail;
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; selectedLogicGateID?: string; revision?: number; changedAt?: number; sourceExplorerID?: string; envelope?: ContextMutationEnvelope }>).detail;
       const logicContextFrameID = linkedLogicMapFrameID || linkedMapFrameID;
       if (!detail || detail.mapWidgetID !== logicContextFrameID) return;
       const revision = readIncomingSequence(detail);
@@ -1107,7 +1167,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       if (revision > 0 && shouldReadMapStateForSelectionEvent(hasSequenceGap(lastLogicMapSelectionRevisionRef.current, revision), eventHasSelection)) readFromLogicMapState();
       if (revision > 0) lastLogicMapSelectionRevisionRef.current = revision;
       if (!eventHasSelection) return;
-      applyLogicGateMapSelection(selected);
+      applyLogicGateMapSelection(selected, detail.changedAt);
     };
     window.addEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapSelectionUpdated);
     return () => {
@@ -1247,7 +1307,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         tabIndex={0}
         onKeyDown={handleTreeKeyDown}
         onScroll={(event) => setTreeScrollTop((event.currentTarget as HTMLDivElement).scrollTop)}
+        onMouseEnter={() => {
+          treeKeyboardActiveRef.current = true;
+        }}
         onMouseDownCapture={(event) => {
+          treeKeyboardActiveRef.current = true;
           treeViewportRef.current?.focus({ preventScroll: true });
           if (event.button === 0) setExplorerContextMenu(null);
         }}
@@ -1267,13 +1331,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           return (
             <div
               key={row.id}
+              className="company-explorer-row"
               draggable={!!rowDragPayload && renaming?.treeID !== row.id}
               onClick={(event) => selectTreeRow(row, event)}
-              onDoubleClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                startRenamingRow(row);
-              }}
               onContextMenu={(event) => openExplorerContextMenu(event, row)}
               onDragStart={(event) => {
                 if (!rowDragPayload) {
@@ -1318,7 +1378,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                   setDragOverPlacement(placement);
                   return;
                 }
-                const dropTarget = resolveExplorerDropTarget(row, payload);
+                const dropTarget = resolveExplorerDropTarget(row, payload) ?? resolveExplorerRootDropTarget(row, payload);
                 if (!dropTarget) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
@@ -1333,7 +1393,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 const payload = dragPayload ?? readExplorerDragPayload(event.dataTransfer);
                 const sourceRow = treeRows.find((item) => item.id === draggingTreeID);
                 const placement = dragOverPlacement ?? getExplorerDropIntent(event);
-                const dropTarget = resolveExplorerDropTarget(row, payload);
+                const dropTarget = resolveExplorerDropTarget(row, payload) ?? resolveExplorerRootDropTarget(row, payload);
                 setDragOverTreeID("");
                 setDragOverPlacement(null);
                 if (placement !== "inside" && sourceRow && sourceRow.id !== row.id && getReorderRowsForTarget(sourceRow, row).length > 0) {
@@ -1362,7 +1422,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 fontSize: 12,
                 cursor: "default",
                 opacity: isDragging ? 0.55 : 1,
-                background: isDropTarget ? dropRowBackground : (isSelected ? selectedRowBackground : "transparent"),
+                ["--company-explorer-hover-bg" as string]: isDarkTheme ? "rgba(255,255,255,0.07)" : "rgba(0, 233, 255, 0.13)",
+                background: isDropTarget ? dropRowBackground : (isSelected ? selectedRowBackground : undefined),
                 borderBottom: `1px solid ${rowRuleColor}`,
                 boxShadow: isDropTarget && dragOverPlacement
                   ? (dragOverPlacement === "before" ? `inset 0 2px 0 ${accent}` : `inset 0 -2px 0 ${accent}`)
@@ -1373,6 +1434,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 <button
                   draggable={false}
                   onMouseDown={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
                   onClick={(event) => {
                     event.stopPropagation();
                     setExpanded((previous) => {
@@ -1428,7 +1490,16 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                   }}
                 />
               ) : (
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.label}</span>
+                <span
+                  onDoubleClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    startRenamingRow(row);
+                  }}
+                  style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "text" }}
+                >
+                  {row.label}
+                </span>
               )}
             </div>
           );

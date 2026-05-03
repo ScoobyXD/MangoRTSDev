@@ -60,6 +60,11 @@ button, input, textarea {
   background: transparent;
 }
 
+/* Hover is visual-only; real selection stays click/key/API driven. */
+.company-explorer-row:hover {
+  background: var(--company-explorer-hover-bg, rgba(0, 233, 255, 0.13));
+}
+
 /* Editor document scrollbar: slim, edge-aligned, and driven by the frame theme. */
 .editor-document-scroll {
   --editor-document-scroll-accent: rgb(0, 233, 255);

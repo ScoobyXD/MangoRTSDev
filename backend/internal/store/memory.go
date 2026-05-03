@@ -488,6 +488,24 @@ func nextCompanyExplorerFolderPosition(folders map[string]domain.CompanyExplorer
 	return next
 }
 
+// Folder rows and item rows share one visible sibling list. New API-created
+// rows append after both tables so the UI does not regroup folders after items.
+func nextCompanyExplorerRowPosition(folders map[string]domain.CompanyExplorerFolder, items map[string]domain.CompanyExplorerFolderItem, companyID, folderKind, parentFolderID string) int {
+	next := nextCompanyExplorerFolderPosition(folders, companyID, folderKind, parentFolderID)
+	if parentFolderID == "" {
+		return next
+	}
+	for _, item := range items {
+		if item.CompanyID != companyID || item.FolderID != parentFolderID || item.ItemType != folderKind {
+			continue
+		}
+		if item.Position >= next {
+			next = item.Position + 1000
+		}
+	}
+	return next
+}
+
 func nextCompanyExplorerFolderItemPosition(items map[string]domain.CompanyExplorerFolderItem, companyID, folderID, itemType string) int {
 	next := 1000
 	for _, item := range items {
@@ -496,6 +514,19 @@ func nextCompanyExplorerFolderItemPosition(items map[string]domain.CompanyExplor
 		}
 		if item.Position >= next {
 			next = item.Position + 1000
+		}
+	}
+	return next
+}
+
+func nextCompanyExplorerFolderChildPosition(folders map[string]domain.CompanyExplorerFolder, items map[string]domain.CompanyExplorerFolderItem, companyID, folderID, itemType string) int {
+	next := nextCompanyExplorerFolderItemPosition(items, companyID, folderID, itemType)
+	for _, folder := range folders {
+		if folder.CompanyID != companyID || folder.FolderKind != itemType || companyExplorerParentID(folder) != folderID {
+			continue
+		}
+		if folder.Position >= next {
+			next = folder.Position + 1000
 		}
 	}
 	return next
@@ -1072,7 +1103,7 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 		ParentFolderID:   parent,
 		FolderKind:       folderKind,
 		Name:             name,
-		Position:         nextCompanyExplorerFolderPosition(r.folders, companyID, folderKind, parentFolderID),
+		Position:         nextCompanyExplorerRowPosition(r.folders, r.folderItems, companyID, folderKind, parentFolderID),
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
@@ -1151,7 +1182,7 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 	}
 	if position <= 0 {
 		if parentChanged {
-			position = nextCompanyExplorerFolderPosition(r.folders, companyID, item.FolderKind, targetParentID)
+			position = nextCompanyExplorerRowPosition(r.folders, r.folderItems, companyID, item.FolderKind, targetParentID)
 		} else {
 			position = item.Position
 		}
@@ -1244,7 +1275,7 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemTy
 		}
 	}
 	if position <= 0 {
-		position = nextCompanyExplorerFolderItemPosition(r.folderItems, companyID, folderID, itemType)
+		position = nextCompanyExplorerFolderChildPosition(r.folders, r.folderItems, companyID, folderID, itemType)
 	}
 	item := domain.CompanyExplorerFolderItem{
 		CompanyID:        companyID,

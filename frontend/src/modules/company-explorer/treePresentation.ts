@@ -37,6 +37,19 @@ export type ExplorerOrderUpdate = {
   position: number;
 };
 
+export type ExplorerKeyboardRow = {
+  id: string;
+  kind: ExplorerTreeEntityKind;
+};
+
+export type ExplorerKeyboardNavigationResult = {
+  handled: boolean;
+  selectedTreeID?: string;
+  expandedIDs?: Set<string>;
+};
+
+export type ExplorerSelectionDomain = "node" | "logic_gate" | "folder" | "root";
+
 export type ExplorerCreationTargets = {
   preferredFolderKind: CompanyExplorerFolderKind;
   preferredFolderParentID: string;
@@ -152,6 +165,11 @@ export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | n
   return null;
 }
 
+export function resolveExplorerRootDropTarget(row?: ExplorerCreationContextRow | null, payload?: ExplorerDropPayload | null): ExplorerDropTarget | null {
+  if (!row || row.kind !== "folder" || row.folderID || !payload || payload.kind !== "folder" || !payload.folderID || !payload.folderKind) return null;
+  return { folderID: "", folderKind: payload.folderKind, treeID: "folder-root" };
+}
+
 export function resolveExplorerRenameTarget(row?: ExplorerCreationContextRow | null):
   | { kind: "folder"; id: string }
   | { kind: "node"; id: string }
@@ -198,4 +216,51 @@ export function resolveExplorerClickSelection(input: {
   }
 
   return { selectedIDs: new Set([clickedID]), anchorID: clickedID };
+}
+
+export function resolveExplorerKeyboardNavigation(input: {
+  rows: ExplorerKeyboardRow[];
+  selectedTreeID: string;
+  expandedIDs: Set<string>;
+  key: string;
+}): ExplorerKeyboardNavigationResult {
+  const { rows, selectedTreeID, expandedIDs, key } = input;
+  if (!["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft"].includes(key)) return { handled: false };
+
+  const currentIndex = Math.max(0, rows.findIndex((row) => row.id === selectedTreeID));
+  const current = rows[currentIndex];
+  if (!current) return { handled: false };
+
+  if (key === "ArrowDown" || key === "ArrowUp") {
+    const nextIndex = key === "ArrowDown"
+      ? Math.min(rows.length - 1, currentIndex + 1)
+      : Math.max(0, currentIndex - 1);
+    return { handled: true, selectedTreeID: rows[nextIndex]?.id ?? current.id };
+  }
+
+  if (current.kind !== "folder") return { handled: false };
+  const nextExpanded = new Set(expandedIDs);
+  if (key === "ArrowRight") nextExpanded.add(current.id);
+  if (key === "ArrowLeft") nextExpanded.delete(current.id);
+  return { handled: true, expandedIDs: nextExpanded };
+}
+
+export function shouldAcceptMapSelectionAfterExplorerSelection(input: {
+  incomingDomain: "node" | "logic_gate";
+  currentDomain: ExplorerSelectionDomain;
+  localSelectionChangedAt: number;
+  incomingChangedAt?: number;
+  now: number;
+  staleWindowMs?: number;
+}): boolean {
+  const staleWindowMs = input.staleWindowMs ?? 750;
+  if (input.currentDomain === input.incomingDomain || input.currentDomain === "folder" || input.currentDomain === "root") return true;
+  if (input.localSelectionChangedAt <= 0) return true;
+
+  // Map selection events are asynchronous. If Explorer just crossed between
+  // node and logic-gate domains, older map events are echoes, not new intent.
+  if (typeof input.incomingChangedAt === "number" && input.incomingChangedAt > 0) {
+    return input.incomingChangedAt > input.localSelectionChangedAt;
+  }
+  return input.now - input.localSelectionChangedAt > staleWindowMs;
 }

@@ -361,6 +361,10 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateNode(second) error = %v", err)
 	}
+	thirdNode, err := repo.CreateNode(companyID, "Third foldered node")
+	if err != nil {
+		t.Fatalf("CreateNode(third) error = %v", err)
+	}
 
 	createFolder := func(name, parentFolderID string) string {
 		t.Helper()
@@ -473,12 +477,56 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	if secondAssignRec.Code != http.StatusOK {
 		t.Fatalf("POST second company explorer folder-items status = %d, want %d body=%s", secondAssignRec.Code, http.StatusOK, secondAssignRec.Body.String())
 	}
+	mixedFolderBody, _ := json.Marshal(map[string]string{
+		"company_id":       companyID,
+		"parent_folder_id": childID,
+		"folder_kind":      "node",
+		"name":             "Mixed sibling folder",
+	})
+	mixedFolderReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(mixedFolderBody))
+	mixedFolderReq.Header.Set("Content-Type", "application/json")
+	mixedFolderRec := httptest.NewRecorder()
+	handler.ServeHTTP(mixedFolderRec, mixedFolderReq)
+	if mixedFolderRec.Code != http.StatusCreated {
+		t.Fatalf("POST mixed sibling folder status = %d, want %d body=%s", mixedFolderRec.Code, http.StatusCreated, mixedFolderRec.Body.String())
+	}
+	var mixedFolder struct {
+		Position int `json:"position"`
+	}
+	if err := json.NewDecoder(mixedFolderRec.Body).Decode(&mixedFolder); err != nil {
+		t.Fatalf("decode mixed sibling folder: %v", err)
+	}
+	if mixedFolder.Position != 3000 {
+		t.Fatalf("mixed sibling folder position = %d, want 3000 after two item rows", mixedFolder.Position)
+	}
+	thirdAssignBody, _ := json.Marshal(map[string]string{
+		"company_id": companyID,
+		"folder_id":  childID,
+		"item_type":  "node",
+		"item_id":    thirdNode.NodeID,
+	})
+	thirdAssignReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items", bytes.NewReader(thirdAssignBody))
+	thirdAssignReq.Header.Set("Content-Type", "application/json")
+	thirdAssignRec := httptest.NewRecorder()
+	handler.ServeHTTP(thirdAssignRec, thirdAssignReq)
+	if thirdAssignRec.Code != http.StatusOK {
+		t.Fatalf("POST third company explorer folder-items status = %d, want %d body=%s", thirdAssignRec.Code, http.StatusOK, thirdAssignRec.Body.String())
+	}
+	var thirdAssigned struct {
+		Position int `json:"position"`
+	}
+	if err := json.NewDecoder(thirdAssignRec.Body).Decode(&thirdAssigned); err != nil {
+		t.Fatalf("decode third folder item: %v", err)
+	}
+	if thirdAssigned.Position != 4000 {
+		t.Fatalf("third folder item position = %d, want 4000 after folder sibling", thirdAssigned.Position)
+	}
 	reorderBody, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
 		"folder_id":  childID,
 		"item_type":  "node",
 		"item_id":    node.NodeID,
-		"position":   3000,
+		"position":   5000,
 	})
 	reorderReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items", bytes.NewReader(reorderBody))
 	reorderReq.Header.Set("Content-Type", "application/json")
@@ -505,7 +553,7 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	if err := json.NewDecoder(itemsRec.Body).Decode(&itemsPayload); err != nil {
 		t.Fatalf("decode folder items: %v", err)
 	}
-	if len(itemsPayload.Items) != 2 || itemsPayload.Items[0].ItemID != secondNode.NodeID || itemsPayload.Items[1].ItemID != node.NodeID || itemsPayload.Items[1].Position != 3000 {
+	if len(itemsPayload.Items) != 3 || itemsPayload.Items[0].ItemID != secondNode.NodeID || itemsPayload.Items[1].ItemID != thirdNode.NodeID || itemsPayload.Items[1].Position != 4000 || itemsPayload.Items[2].ItemID != node.NodeID || itemsPayload.Items[2].Position != 5000 {
 		t.Fatalf("folder item payload = %+v, want reordered nodes in child folder", itemsPayload.Items)
 	}
 
@@ -528,8 +576,8 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	if err := json.NewDecoder(snapshotRec.Body).Decode(&snapshot); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
-	if len(snapshot.Folders) != 3 || len(snapshot.FolderItems) != 2 {
-		t.Fatalf("snapshot folder counts = folders:%d items:%d, want 3/2", len(snapshot.Folders), len(snapshot.FolderItems))
+	if len(snapshot.Folders) != 4 || len(snapshot.FolderItems) != 3 {
+		t.Fatalf("snapshot folder counts = folders:%d items:%d, want 4/3", len(snapshot.Folders), len(snapshot.FolderItems))
 	}
 	foundChild := false
 	for _, folder := range snapshot.Folders {
