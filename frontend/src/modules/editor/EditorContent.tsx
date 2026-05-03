@@ -7,6 +7,7 @@ import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, in
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches } from "../logic-gate-map/LogicGateRecordStore";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import type { NodeInformation } from "../node-map/shared";
+import { insertEditorTabText } from "./plainTextEditing";
 
 type LinkedEntityKind = "node" | "logic_gate";
 
@@ -685,9 +686,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
             event.preventDefault();
             // Textareas normally use Tab to leave the field. In the editor, Tab
-            // should insert plain whitespace and then save like any typed input.
-            event.currentTarget.setRangeText(" ", event.currentTarget.selectionStart, event.currentTarget.selectionEnd, "end");
-            scheduleDocumentSave(event.currentTarget.value);
+            // should insert five plain spaces and then save like any typed input.
+            const edit = insertEditorTabText(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
+            event.currentTarget.value = edit.value;
+            event.currentTarget.setSelectionRange(edit.selectionStart, edit.selectionEnd);
+            scheduleDocumentSave(edit.value);
           }}
           style={{
             position: "absolute",
