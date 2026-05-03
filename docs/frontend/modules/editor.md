@@ -42,7 +42,9 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 - The body editor uses a styled native `textarea`, not raw `contentEditable`, so browser-native caret drawing, insertion point movement, text input, and scrollbars remain reliable inside frame wrappers.
 - Typing schedules a debounced save. Blur, node switch, and unmount flush the latest pending value so edits do not wait for a manual save action.
 - Saves are serialized per editor instance. If a save is in flight, the editor queues only the latest follow-up value, preserving user-perceived order without flooding the API.
-- Tab indents the current line or selected lines. Ordered-list markers cycle by outline level: `1.`, `A.`, `1A.`. Enter continues list markers, and Enter on an empty list marker exits the list.
+- The editor surface owns the full frame height. This prevents the textarea viewport from collapsing to a thin strip and lets mouse-wheel scrolling behave like a regular text editor.
+- Selecting a linked node or logic gate switches back to the Editor tab and focuses the document so the caret starts blinking immediately.
+- Enter is native textarea Enter. Tab inserts one plain space; there is no automatic list or outline formatting in this pass.
 - Clearing all text calls the projection delete API. This keeps reload behavior correct while preserving append-only nonblank history for audit and scale.
 - The same APIs work for headless agents: agents can post latest document text with a stable `information_id`, read projections for sub-100ms hot paths, and delete a projection to clear the latest document value.
 
