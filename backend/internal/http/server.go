@@ -1224,28 +1224,6 @@ func parsePositiveLimit(raw string, fallback int, maximum int) (int, bool) {
 	return value, true
 }
 
-type kanbanCardMetadataRequest struct {
-	Status              string `json:"status"`
-	WorkType            string `json:"work_type"`
-	AssignedTo          string `json:"assigned_to"`
-	AssignedBy          string `json:"assigned_by"`
-	ActorID             string `json:"actor_id"`
-	DescriptionSnapshot string `json:"description_snapshot"`
-	LastActivity        string `json:"last_activity"`
-}
-
-func (req kanbanCardMetadataRequest) toStore() store.KanbanCardMetadataInput {
-	return store.KanbanCardMetadataInput{
-		Status:              strings.TrimSpace(req.Status),
-		WorkType:            strings.TrimSpace(req.WorkType),
-		AssignedTo:          strings.TrimSpace(req.AssignedTo),
-		AssignedBy:          strings.TrimSpace(req.AssignedBy),
-		ActorID:             strings.TrimSpace(req.ActorID),
-		DescriptionSnapshot: strings.TrimSpace(req.DescriptionSnapshot),
-		LastActivity:        strings.TrimSpace(req.LastActivity),
-	}
-}
-
 func parseKanbanCardQueryParams(r *http.Request) (store.KanbanCardQuery, bool, string) {
 	limit, ok := parsePositiveLimit(r.URL.Query().Get("limit"), 200, store.KanbanMaxCardsLimit)
 	if !ok {
@@ -1255,8 +1233,8 @@ func parseKanbanCardQueryParams(r *http.Request) (store.KanbanCardQuery, bool, s
 		ColumnID: strings.TrimSpace(r.URL.Query().Get("column_id")),
 		Limit:    limit,
 	}
-	for _, unsupported := range []string{"item_type", "status", "work_type", "assigned_to", "assigned_by", "title_prefix", "sort", "sort_dir"} {
-		if r.URL.Query().Has(unsupported) {
+	for key := range r.URL.Query() {
+		if key != "company_id" && key != "board_id" && key != "column_id" && key != "limit" && key != "after_position" {
 			return store.KanbanCardQuery{}, false, "unsupported_kanban_card_query_param"
 		}
 	}
@@ -1425,14 +1403,13 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		CompanyID     string `json:"company_id"`
-		BoardID       string `json:"board_id"`
-		ColumnID      string `json:"column_id"`
-		ItemType      string `json:"item_type"`
-		ItemID        string `json:"item_id"`
-		TitleSnapshot string `json:"title_snapshot"`
-		Position      int    `json:"position"`
-		kanbanCardMetadataRequest
+		CompanyID           string `json:"company_id"`
+		BoardID             string `json:"board_id"`
+		ColumnID            string `json:"column_id"`
+		NodeID              string `json:"node_id"`
+		NodeTitle           string `json:"node_title"`
+		DescriptionSnapshot string `json:"description_snapshot"`
+		Position            int    `json:"position"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
@@ -1441,36 +1418,31 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 	req.CompanyID = strings.TrimSpace(req.CompanyID)
 	req.BoardID = strings.TrimSpace(req.BoardID)
 	req.ColumnID = strings.TrimSpace(req.ColumnID)
-	req.ItemType = strings.TrimSpace(req.ItemType)
-	req.ItemID = strings.TrimSpace(req.ItemID)
-	req.TitleSnapshot = strings.TrimSpace(req.TitleSnapshot)
-	if req.CompanyID == "" || req.BoardID == "" || req.ColumnID == "" || req.ItemID == "" {
-		writeError(w, http.StatusBadRequest, "company_board_column_and_item_required")
+	req.NodeID = strings.TrimSpace(req.NodeID)
+	req.NodeTitle = strings.TrimSpace(req.NodeTitle)
+	req.DescriptionSnapshot = strings.TrimSpace(req.DescriptionSnapshot)
+	if req.CompanyID == "" || req.BoardID == "" || req.ColumnID == "" || req.NodeID == "" {
+		writeError(w, http.StatusBadRequest, "company_board_column_and_node_required")
 		return
 	}
-	if req.ItemType != "node" {
-		writeError(w, http.StatusBadRequest, "invalid_kanban_item_type")
-		return
-	}
-	if req.TitleSnapshot == "" {
-		req.TitleSnapshot = req.ItemID
+	if req.NodeTitle == "" {
+		req.NodeTitle = req.NodeID
 	}
 	item, err := s.repo.UpsertKanbanCard(store.KanbanCardMutationInput{
-		CompanyID:     req.CompanyID,
-		BoardID:       req.BoardID,
-		ColumnID:      req.ColumnID,
-		ItemType:      req.ItemType,
-		ItemID:        req.ItemID,
-		TitleSnapshot: req.TitleSnapshot,
-		Position:      req.Position,
-		Metadata:      req.kanbanCardMetadataRequest.toStore(),
+		CompanyID:           req.CompanyID,
+		BoardID:             req.BoardID,
+		ColumnID:            req.ColumnID,
+		NodeID:              req.NodeID,
+		NodeTitle:           req.NodeTitle,
+		DescriptionSnapshot: req.DescriptionSnapshot,
+		Position:            req.Position,
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_kanban_item_type")
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "kanban_column_or_item_not_found")
+		writeError(w, http.StatusNotFound, "kanban_column_or_node_not_found")
 		return
 	}
 	if err != nil {
@@ -1497,7 +1469,6 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			BoardID   string `json:"board_id"`
 			ColumnID  string `json:"column_id"`
 			Position  int    `json:"position"`
-			kanbanCardMetadataRequest
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
@@ -1516,7 +1487,6 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			CardID:    cardID,
 			ColumnID:  req.ColumnID,
 			Position:  req.Position,
-			Metadata:  req.kanbanCardMetadataRequest.toStore(),
 		})
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "kanban_card_or_column_not_found")

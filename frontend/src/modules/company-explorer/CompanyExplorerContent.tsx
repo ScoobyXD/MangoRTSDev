@@ -706,7 +706,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 if (row.kind === "node" && rowDragPayload.itemID && rowDragPayload.itemType === "node") {
                   const kanbanPayload = serializeExplorerEntityDragPayload({
                     itemType: rowDragPayload.itemType,
-                    itemID: rowDragPayload.itemID,
+                    nodeID: rowDragPayload.itemID,
                     label: row.label,
                   });
                   event.dataTransfer.setData(EXPLORER_ENTITY_DRAG_MIME, kanbanPayload);

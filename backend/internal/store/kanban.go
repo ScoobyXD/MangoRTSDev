@@ -12,25 +12,14 @@ type KanbanCardQuery struct {
 	Limit         int
 }
 
-type KanbanCardMetadataInput struct {
-	Status              string
-	WorkType            string
-	AssignedTo          string
-	AssignedBy          string
-	ActorID             string
-	DescriptionSnapshot string
-	LastActivity        string
-}
-
 type KanbanCardMutationInput struct {
-	CompanyID     string
-	BoardID       string
-	ColumnID      string
-	ItemType      string
-	ItemID        string
-	TitleSnapshot string
-	Position      int
-	Metadata      KanbanCardMetadataInput
+	CompanyID           string
+	BoardID             string
+	ColumnID            string
+	NodeID              string
+	NodeTitle           string
+	DescriptionSnapshot string
+	Position            int
 }
 
 type KanbanCardMoveInput struct {
@@ -39,7 +28,6 @@ type KanbanCardMoveInput struct {
 	CardID    string
 	ColumnID  string
 	Position  int
-	Metadata  KanbanCardMetadataInput
 }
 
 func NormalizeKanbanCardQuery(query KanbanCardQuery) KanbanCardQuery {
@@ -51,35 +39,4 @@ func NormalizeKanbanCardQuery(query KanbanCardQuery) KanbanCardQuery {
 		query.Limit = 200
 	}
 	return query
-}
-
-func NormalizeKanbanCardStatus(inputStatus, columnTitle string) string {
-	status := strings.TrimSpace(inputStatus)
-	if status != "" {
-		return status
-	}
-	status = strings.TrimSpace(columnTitle)
-	if status != "" {
-		return status
-	}
-	return "Unspecified"
-}
-
-func NormalizeKanbanCardWorkType(inputWorkType, itemType string) string {
-	workType := strings.TrimSpace(inputWorkType)
-	if workType != "" {
-		return workType
-	}
-	if itemType == "logic_gate" {
-		return "Logic Gate"
-	}
-	return "Node"
-}
-
-func NormalizeKanbanLastActivity(inputActivity, fallback string) string {
-	activity := strings.TrimSpace(inputActivity)
-	if activity != "" {
-		return activity
-	}
-	return fallback
 }

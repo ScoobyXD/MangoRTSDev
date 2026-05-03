@@ -520,13 +520,12 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	}
 
 	addCardBody, _ := json.Marshal(map[string]any{
-		"company_id":     companyID,
-		"board_id":       boardID,
-		"column_id":      todoColumnID,
-		"item_type":      "node",
-		"item_id":        node.NodeID,
-		"title_snapshot": node.Title,
-		"position":       1000,
+		"company_id": companyID,
+		"board_id":   boardID,
+		"column_id":  todoColumnID,
+		"node_id":    node.NodeID,
+		"node_title": node.Title,
+		"position":   1000,
 	})
 	addCardReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/cards", bytes.NewReader(addCardBody))
 	addCardReq.Header.Set("Content-Type", "application/json")
@@ -547,13 +546,12 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	}
 
 	upsertCardBody, _ := json.Marshal(map[string]any{
-		"company_id":     companyID,
-		"board_id":       boardID,
-		"column_id":      doneColumnID,
-		"item_type":      "node",
-		"item_id":        node.NodeID,
-		"title_snapshot": "customer onboarding renamed",
-		"position":       1000,
+		"company_id": companyID,
+		"board_id":   boardID,
+		"column_id":  doneColumnID,
+		"node_id":    node.NodeID,
+		"node_title": "customer onboarding renamed",
+		"position":   1000,
 	})
 	upsertCardReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/cards", bytes.NewReader(upsertCardBody))
 	upsertCardReq.Header.Set("Content-Type", "application/json")
@@ -563,9 +561,9 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 		t.Fatalf("POST kanban card upsert status = %d, want %d body=%s", upsertCardRec.Code, http.StatusCreated, upsertCardRec.Body.String())
 	}
 	var upsertedCard struct {
-		CardID        string `json:"card_id"`
-		ColumnID      string `json:"column_id"`
-		TitleSnapshot string `json:"title_snapshot"`
+		CardID    string `json:"card_id"`
+		ColumnID  string `json:"column_id"`
+		NodeTitle string `json:"node_title"`
 	}
 	if err := json.NewDecoder(upsertCardRec.Body).Decode(&upsertedCard); err != nil {
 		t.Fatalf("decode upserted card: %v", err)
@@ -573,24 +571,23 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	if upsertedCard.CardID != createdCard.CardID {
 		t.Fatalf("upsert card id = %q, want existing %q", upsertedCard.CardID, createdCard.CardID)
 	}
-	if upsertedCard.ColumnID != doneColumnID || upsertedCard.TitleSnapshot != "customer onboarding renamed" {
+	if upsertedCard.ColumnID != doneColumnID || upsertedCard.NodeTitle != "customer onboarding renamed" {
 		t.Fatalf("upserted card = %+v, want moved/renamed", upsertedCard)
 	}
 
 	addGateCardBody, _ := json.Marshal(map[string]any{
-		"company_id":     companyID,
-		"board_id":       boardID,
-		"column_id":      doneColumnID,
-		"item_type":      "logic_gate",
-		"item_id":        logicGate.LogicGateID,
-		"title_snapshot": logicGate.Header,
+		"company_id": companyID,
+		"board_id":   boardID,
+		"column_id":  doneColumnID,
+		"node_id":    logicGate.LogicGateID,
+		"node_title": logicGate.Header,
 	})
 	addGateCardReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/cards", bytes.NewReader(addGateCardBody))
 	addGateCardReq.Header.Set("Content-Type", "application/json")
 	addGateCardRec := httptest.NewRecorder()
 	handler.ServeHTTP(addGateCardRec, addGateCardReq)
-	if addGateCardRec.Code != http.StatusBadRequest {
-		t.Fatalf("POST logic-gate kanban card status = %d, want %d body=%s", addGateCardRec.Code, http.StatusBadRequest, addGateCardRec.Body.String())
+	if addGateCardRec.Code != http.StatusNotFound {
+		t.Fatalf("POST logic-gate kanban card status = %d, want %d body=%s", addGateCardRec.Code, http.StatusNotFound, addGateCardRec.Body.String())
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/cards?company_id="+companyID+"&board_id="+boardID+"&column_id="+doneColumnID+"&limit=50", nil)
@@ -601,8 +598,8 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	}
 	var listPayload struct {
 		Cards []struct {
-			ItemType string `json:"item_type"`
-			ItemID   string `json:"item_id"`
+			NodeID    string `json:"node_id"`
+			NodeTitle string `json:"node_title"`
 		} `json:"cards"`
 	}
 	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
@@ -627,8 +624,7 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	}
 	var pagedPayload struct {
 		Cards []struct {
-			ItemType string `json:"item_type"`
-			ItemID   string `json:"item_id"`
+			NodeID string `json:"node_id"`
 		} `json:"cards"`
 	}
 	if err := json.NewDecoder(pagedRec.Body).Decode(&pagedPayload); err != nil {
@@ -647,7 +643,7 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	}
 }
 
-func TestKanbanCardAPIUsesHotMetadataFieldsAndRemovesQueryEndpoint(t *testing.T) {
+func TestKanbanCardAPIUsesNodeOnlyCardsAndRemovesQueryEndpoint(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -686,21 +682,15 @@ func TestKanbanCardAPIUsesHotMetadataFieldsAndRemovesQueryEndpoint(t *testing.T)
 
 	readyColumnID := createColumn("Ready")
 	doneColumnID := createColumn("Done")
-	postCard := func(nodeID, title, workType, assignedTo string) string {
+	postCard := func(nodeID, title string) string {
 		t.Helper()
 		body, _ := json.Marshal(map[string]any{
 			"company_id":           companyID,
 			"board_id":             boardID,
 			"column_id":            readyColumnID,
-			"item_type":            "node",
-			"item_id":              nodeID,
-			"title_snapshot":       title,
+			"node_id":              nodeID,
+			"node_title":           title,
 			"description_snapshot": "longer API-visible text",
-			"work_type":            workType,
-			"assigned_to":          assignedTo,
-			"assigned_by":          "lead-1",
-			"actor_id":             "agent-writer-1",
-			"last_activity":        "assigned card",
 		})
 		req := httptest.NewRequest(http.MethodPost, "/v1/kanban/cards", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -710,22 +700,22 @@ func TestKanbanCardAPIUsesHotMetadataFieldsAndRemovesQueryEndpoint(t *testing.T)
 			t.Fatalf("POST kanban card status = %d body=%s", rec.Code, rec.Body.String())
 		}
 		var payload struct {
-			CardID     string `json:"card_id"`
-			Status     string `json:"status"`
-			AssignedTo string `json:"assigned_to"`
-			CreatedBy  string `json:"created_by"`
+			CardID              string `json:"card_id"`
+			NodeID              string `json:"node_id"`
+			NodeTitle           string `json:"node_title"`
+			DescriptionSnapshot string `json:"description_snapshot"`
 		}
 		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 			t.Fatalf("decode card: %v", err)
 		}
-		if payload.Status != "Ready" || payload.AssignedTo != assignedTo || payload.CreatedBy != "agent-writer-1" {
-			t.Fatalf("metadata payload = %+v, want ready/assigned/created_by", payload)
+		if payload.NodeID != nodeID || payload.NodeTitle != title || payload.DescriptionSnapshot != "longer API-visible text" {
+			t.Fatalf("card payload = %+v, want node-only card fields", payload)
 		}
 		return payload.CardID
 	}
 
-	cardAID := postCard(nodeA.NodeID, "Alpha task", "Feature", "agent-1")
-	postCard(nodeB.NodeID, "Beta task", "Bug", "person-1")
+	cardAID := postCard(nodeA.NodeID, "Alpha task")
+	postCard(nodeB.NodeID, "Beta task")
 
 	listReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/cards?company_id="+companyID+"&board_id="+boardID+"&column_id="+readyColumnID+"&limit=50", nil)
 	listRec := httptest.NewRecorder()
@@ -735,16 +725,16 @@ func TestKanbanCardAPIUsesHotMetadataFieldsAndRemovesQueryEndpoint(t *testing.T)
 	}
 	var listPayload struct {
 		Cards []struct {
-			CardID     string `json:"card_id"`
-			AssignedTo string `json:"assigned_to"`
-			WorkType   string `json:"work_type"`
+			CardID    string `json:"card_id"`
+			NodeID    string `json:"node_id"`
+			NodeTitle string `json:"node_title"`
 		} `json:"cards"`
 	}
 	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
 		t.Fatalf("decode list payload: %v", err)
 	}
-	if len(listPayload.Cards) != 2 || listPayload.Cards[0].AssignedTo != "agent-1" || listPayload.Cards[0].WorkType != "Feature" {
-		t.Fatalf("list cards = %+v, want ordered cards with hot metadata fields", listPayload.Cards)
+	if len(listPayload.Cards) != 2 || listPayload.Cards[0].NodeID != nodeA.NodeID || listPayload.Cards[0].NodeTitle != "Alpha task" {
+		t.Fatalf("list cards = %+v, want ordered node-only cards", listPayload.Cards)
 	}
 
 	queryReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/query", bytes.NewReader([]byte(`{}`)))
@@ -759,7 +749,6 @@ func TestKanbanCardAPIUsesHotMetadataFieldsAndRemovesQueryEndpoint(t *testing.T)
 		"company_id": companyID,
 		"board_id":   boardID,
 		"column_id":  doneColumnID,
-		"actor_id":   "agent-mover-1",
 	})
 	moveReq := httptest.NewRequest(http.MethodPut, "/v1/kanban/cards/"+cardAID, bytes.NewReader(moveBody))
 	moveReq.Header.Set("Content-Type", "application/json")
@@ -769,15 +758,14 @@ func TestKanbanCardAPIUsesHotMetadataFieldsAndRemovesQueryEndpoint(t *testing.T)
 		t.Fatalf("PUT kanban card move status = %d body=%s", moveRec.Code, moveRec.Body.String())
 	}
 	var moved struct {
-		Status       string `json:"status"`
-		UpdatedBy    string `json:"updated_by"`
-		LastActivity string `json:"last_activity"`
+		ColumnID  string `json:"column_id"`
+		NodeTitle string `json:"node_title"`
 	}
 	if err := json.NewDecoder(moveRec.Body).Decode(&moved); err != nil {
 		t.Fatalf("decode moved card: %v", err)
 	}
-	if moved.Status != "Done" || moved.UpdatedBy != "agent-mover-1" || moved.LastActivity != "moved card" {
-		t.Fatalf("moved metadata = %+v, want Done/agent activity", moved)
+	if moved.ColumnID != doneColumnID || moved.NodeTitle != "Alpha task" {
+		t.Fatalf("moved card = %+v, want column changed without metadata fields", moved)
 	}
 }
 

@@ -1,4 +1,4 @@
-import type { KanbanCard, KanbanColumn, KanbanItemType } from "./shared";
+import type { KanbanCard, KanbanColumn } from "./shared";
 
 type FetchJSONOptions = {
   method?: string;
@@ -80,17 +80,10 @@ export async function upsertKanbanCard(args: {
   companyID: string;
   boardID: string;
   columnID: string;
-  itemType: KanbanItemType;
-  itemID: string;
-  titleSnapshot: string;
+  nodeID: string;
+  nodeTitle: string;
   position: number;
-  status?: string;
-  workType?: string;
-  assignedTo?: string;
-  assignedBy?: string;
-  actorID?: string;
   descriptionSnapshot?: string;
-  lastActivity?: string;
 }): Promise<KanbanCard> {
   return fetchJSON<KanbanCard>(args.apiBase, "/v1/kanban/cards", {
     method: "POST",
@@ -98,17 +91,10 @@ export async function upsertKanbanCard(args: {
       company_id: args.companyID,
       board_id: args.boardID,
       column_id: args.columnID,
-      item_type: args.itemType,
-      item_id: args.itemID,
-      title_snapshot: args.titleSnapshot,
+      node_id: args.nodeID,
+      node_title: args.nodeTitle,
       position: args.position,
-      status: args.status,
-      work_type: args.workType,
-      assigned_to: args.assignedTo,
-      assigned_by: args.assignedBy,
-      actor_id: args.actorID,
       description_snapshot: args.descriptionSnapshot,
-      last_activity: args.lastActivity,
     },
   });
 }
@@ -120,13 +106,6 @@ export async function moveKanbanCard(args: {
   cardID: string;
   columnID: string;
   position: number;
-  status?: string;
-  workType?: string;
-  assignedTo?: string;
-  assignedBy?: string;
-  actorID?: string;
-  descriptionSnapshot?: string;
-  lastActivity?: string;
 }): Promise<KanbanCard> {
   return fetchJSON<KanbanCard>(args.apiBase, `/v1/kanban/cards/${encodeURIComponent(args.cardID)}`, {
     method: "PUT",
@@ -135,13 +114,6 @@ export async function moveKanbanCard(args: {
       board_id: args.boardID,
       column_id: args.columnID,
       position: args.position,
-      status: args.status,
-      work_type: args.workType,
-      assigned_to: args.assignedTo,
-      assigned_by: args.assignedBy,
-      actor_id: args.actorID,
-      description_snapshot: args.descriptionSnapshot,
-      last_activity: args.lastActivity,
     },
   });
 }

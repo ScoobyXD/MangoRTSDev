@@ -196,6 +196,16 @@ func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
 	delete(r.nodeText, k)
 	delete(r.folderItems, folderItemKey(companyID, "node", nodeID))
 	delete(r.nodeMapPositions, k)
+	for board, cards := range r.kanbanCards {
+		next := make([]domain.KanbanCard, 0, len(cards))
+		for _, card := range cards {
+			if card.CompanyID == companyID && card.NodeID == nodeID {
+				continue
+			}
+			next = append(next, card)
+		}
+		r.kanbanCards[board] = next
+	}
 
 	filtered := make([]domain.NodeRelationship, 0, len(r.nodeRels[companyID]))
 	for _, rel := range r.nodeRels[companyID] {
@@ -437,10 +447,6 @@ func nextKanbanCardPosition(cards []domain.KanbanCard, columnID string) int {
 	return next
 }
 
-func isKanbanItemType(itemType string) bool {
-	return itemType == "node" || itemType == "logic_gate"
-}
-
 func (r *MemoryRepo) kanbanColumnExistsLocked(companyID, boardID, columnID string) bool {
 	_, ok := r.kanbanColumnTitleLocked(companyID, boardID, columnID)
 	return ok
@@ -453,18 +459,6 @@ func (r *MemoryRepo) kanbanColumnTitleLocked(companyID, boardID, columnID string
 		}
 	}
 	return "", false
-}
-
-func (r *MemoryRepo) kanbanItemExistsLocked(companyID, itemType, itemID string) bool {
-	if itemType == "node" {
-		_, ok := r.nodes[key(companyID, itemID)]
-		return ok
-	}
-	if itemType == "logic_gate" {
-		_, ok := r.logicGates[key(companyID, itemID)]
-		return ok
-	}
-	return false
 }
 
 func (r *MemoryRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
@@ -593,44 +587,13 @@ func (r *MemoryRepo) ListKanbanCards(companyID, boardID string, query KanbanCard
 	return items, nil
 }
 
-func applyKanbanCardMetadata(card *domain.KanbanCard, metadata KanbanCardMetadataInput, columnTitle, itemType, fallbackActivity string, now time.Time) {
-	nextStatus := NormalizeKanbanCardStatus(metadata.Status, columnTitle)
-	if card.Status == "" || card.Status != nextStatus || card.StatusEnteredTimestamp.IsZero() {
-		card.Status = nextStatus
-		card.StatusEnteredTimestamp = now
-	}
-	if workType := NormalizeKanbanCardWorkType(metadata.WorkType, itemType); card.WorkType == "" || metadata.WorkType != "" {
-		card.WorkType = workType
-	}
-	if assignedTo := strings.TrimSpace(metadata.AssignedTo); assignedTo != "" || card.AssignedTo == "" {
-		card.AssignedTo = assignedTo
-	}
-	if assignedBy := strings.TrimSpace(metadata.AssignedBy); assignedBy != "" || card.AssignedBy == "" {
-		card.AssignedBy = assignedBy
-	}
-	if description := strings.TrimSpace(metadata.DescriptionSnapshot); description != "" || card.DescriptionSnapshot == "" {
-		card.DescriptionSnapshot = description
-	}
-	if actorID := strings.TrimSpace(metadata.ActorID); actorID != "" {
-		if card.CreatedBy == "" {
-			card.CreatedBy = actorID
-		}
-		card.UpdatedBy = actorID
-	}
-	card.LastActivity = NormalizeKanbanLastActivity(metadata.LastActivity, fallbackActivity)
-}
-
 func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if input.ItemType != "node" {
-		return domain.KanbanCard{}, ErrInvalid
-	}
-	columnTitle, columnExists := r.kanbanColumnTitleLocked(input.CompanyID, input.BoardID, input.ColumnID)
-	if !columnExists || !r.kanbanItemExistsLocked(input.CompanyID, input.ItemType, input.ItemID) {
+	if !r.kanbanColumnExistsLocked(input.CompanyID, input.BoardID, input.ColumnID) {
 		return domain.KanbanCard{}, ErrNotFound
 	}
-	if !isKanbanItemType(input.ItemType) {
+	if _, ok := r.nodes[key(input.CompanyID, input.NodeID)]; !ok {
 		return domain.KanbanCard{}, ErrNotFound
 	}
 	k := boardKey(input.CompanyID, input.BoardID)
@@ -638,33 +601,39 @@ func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.Kan
 		input.Position = nextKanbanCardPosition(r.kanbanCards[k], input.ColumnID)
 	}
 	now := time.Now().UTC()
+	nodeTitle := strings.TrimSpace(input.NodeTitle)
+	if nodeTitle == "" {
+		nodeTitle = input.NodeID
+	}
+	description := strings.TrimSpace(input.DescriptionSnapshot)
 	for index, card := range r.kanbanCards[k] {
-		if card.ItemType != input.ItemType || card.ItemID != input.ItemID {
+		if card.NodeID != input.NodeID {
 			continue
 		}
 		// A drop is a command, not append-only history. Moving the existing card keeps
 		// repeated UI drops and retrying agents idempotent.
 		card.ColumnID = input.ColumnID
-		card.TitleSnapshot = input.TitleSnapshot
+		card.NodeTitle = nodeTitle
 		card.Position = input.Position
-		applyKanbanCardMetadata(&card, input.Metadata, columnTitle, input.ItemType, "updated card", now)
+		if description != "" || card.DescriptionSnapshot == "" {
+			card.DescriptionSnapshot = description
+		}
 		card.UpdatedTimestamp = now
 		r.kanbanCards[k][index] = card
 		return card, nil
 	}
 	card := domain.KanbanCard{
-		CompanyID:        input.CompanyID,
-		BoardID:          input.BoardID,
-		CardID:           newUUIDv7String(),
-		ColumnID:         input.ColumnID,
-		ItemType:         input.ItemType,
-		ItemID:           input.ItemID,
-		TitleSnapshot:    input.TitleSnapshot,
-		Position:         input.Position,
-		CreatedTimestamp: now,
-		UpdatedTimestamp: now,
+		CompanyID:           input.CompanyID,
+		BoardID:             input.BoardID,
+		CardID:              newUUIDv7String(),
+		ColumnID:            input.ColumnID,
+		NodeID:              input.NodeID,
+		NodeTitle:           nodeTitle,
+		DescriptionSnapshot: description,
+		Position:            input.Position,
+		CreatedTimestamp:    now,
+		UpdatedTimestamp:    now,
 	}
-	applyKanbanCardMetadata(&card, input.Metadata, columnTitle, input.ItemType, "created card", now)
 	r.kanbanCards[k] = append(r.kanbanCards[k], card)
 	return card, nil
 }
@@ -672,8 +641,7 @@ func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.Kan
 func (r *MemoryRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	columnTitle, columnExists := r.kanbanColumnTitleLocked(input.CompanyID, input.BoardID, input.ColumnID)
-	if !columnExists {
+	if !r.kanbanColumnExistsLocked(input.CompanyID, input.BoardID, input.ColumnID) {
 		return domain.KanbanCard{}, ErrNotFound
 	}
 	k := boardKey(input.CompanyID, input.BoardID)
@@ -687,7 +655,6 @@ func (r *MemoryRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCar
 		now := time.Now().UTC()
 		card.ColumnID = input.ColumnID
 		card.Position = input.Position
-		applyKanbanCardMetadata(&card, input.Metadata, columnTitle, card.ItemType, "moved card", now)
 		card.UpdatedTimestamp = now
 		r.kanbanCards[k][index] = card
 		return card, nil

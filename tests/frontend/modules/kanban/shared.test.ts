@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_MODULE_TOP_CLEARANCE_PX, buildColumnReorderPlan, clampColumnHeight, clampColumnWidth, formatKanbanStatusAge, getKanbanConditionalColor, groupCardsByColumn, isKanbanBoardDropItemType, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragPayload, sanitizeExplorerEntityDragPayload, type KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_MODULE_TOP_CLEARANCE_PX, buildColumnReorderPlan, clampColumnHeight, clampColumnWidth, getKanbanConditionalColor, groupCardsByColumn, isKanbanBoardDropItemType, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragPayload, sanitizeExplorerEntityDragPayload, type KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 
 function card(overrides: Partial<KanbanCard>): KanbanCard {
   return {
@@ -8,19 +8,10 @@ function card(overrides: Partial<KanbanCard>): KanbanCard {
     board_id: "b",
     card_id: "card",
     column_id: "todo",
-    item_type: "node",
-    item_id: "node-1",
-    title_snapshot: "card",
+    node_id: "node-1",
+    node_title: "card",
     description_snapshot: "",
     position: 1000,
-    status: "Ready",
-    work_type: "Node",
-    assigned_to: "",
-    assigned_by: "",
-    created_by: "",
-    updated_by: "",
-    last_activity: "",
-    status_entered_timestamp: "2026-05-01T00:00:00.000Z",
     created_timestamp: "2026-05-01T00:00:00.000Z",
     updated_timestamp: "2026-05-01T00:00:00.000Z",
     ...overrides,
@@ -28,16 +19,17 @@ function card(overrides: Partial<KanbanCard>): KanbanCard {
 }
 
 test("sanitizes explorer drag payloads and keeps board drops node-only", () => {
-  assert.deepEqual(sanitizeExplorerEntityDragPayload({ itemType: "node", itemID: "node-1", label: " Alpha " }), {
+  assert.deepEqual(sanitizeExplorerEntityDragPayload({ itemType: "node", nodeID: "node-1", label: " Alpha " }), {
     itemType: "node",
-    itemID: "node-1",
+    nodeID: "node-1",
     label: "Alpha",
   });
-  assert.deepEqual(parseExplorerEntityDragPayload(JSON.stringify({ itemType: "logic_gate", itemID: "gate-1", label: "" })), {
-    itemType: "logic_gate",
-    itemID: "gate-1",
-    label: "gate-1",
+  assert.deepEqual(parseExplorerEntityDragPayload(JSON.stringify({ itemType: "node", itemID: "legacy-node", label: "" })), {
+    itemType: "node",
+    nodeID: "legacy-node",
+    label: "legacy-node",
   });
+  assert.equal(parseExplorerEntityDragPayload(JSON.stringify({ itemType: "logic_gate", itemID: "gate-1", label: "" })), null);
   assert.equal(sanitizeExplorerEntityDragPayload({ itemType: "file", itemID: "x", label: "x" }), null);
   assert.equal(isKanbanBoardDropItemType("node"), true);
   assert.equal(isKanbanBoardDropItemType("logic_gate"), false);
@@ -57,17 +49,16 @@ test("groupCardsByColumn sorts each column by stable board position", () => {
   const grouped = groupCardsByColumn([
     card({
       card_id: "late",
-      item_id: "node-2",
-      title_snapshot: "late",
+      node_id: "node-2",
+      node_title: "late",
       position: 2000,
       created_timestamp: "2026-05-01T00:00:02.000Z",
       updated_timestamp: "2026-05-01T00:00:02.000Z",
     }),
     card({
       card_id: "early",
-      item_type: "logic_gate",
-      item_id: "gate-1",
-      title_snapshot: "early",
+      node_id: "node-3",
+      node_title: "early",
       position: 1000,
       created_timestamp: "2026-05-01T00:00:01.000Z",
       updated_timestamp: "2026-05-01T00:00:01.000Z",
@@ -76,14 +67,13 @@ test("groupCardsByColumn sorts each column by stable board position", () => {
   assert.deepEqual((grouped.get("todo") ?? []).map((card) => card.card_id), ["early", "late"]);
 });
 
-test("kanban card helpers color cards and calculate status age without view-query state", () => {
+test("kanban card helpers color node cards without view-query state", () => {
   const cards = [
-    card({ card_id: "beta", title_snapshot: "Beta task", column_id: "done", status: "Done", work_type: "Bug", assigned_to: "agent-1", position: 2000 }),
-    card({ card_id: "alpha", title_snapshot: "Alpha task", column_id: "todo", status: "Ready", work_type: "Feature", assigned_to: "person-1", position: 1000 }),
-    card({ card_id: "alpha-later", title_snapshot: "Alpha later", column_id: "todo", status: "Ready", work_type: "Bug", assigned_to: "agent-1", position: 3000 }),
+    card({ card_id: "beta", node_title: "Beta task", column_id: "done", position: 2000 }),
+    card({ card_id: "alpha", node_title: "Alpha task", column_id: "todo", position: 1000 }),
+    card({ card_id: "alpha-later", node_title: "Alpha later", column_id: "todo", position: 3000 }),
   ];
 
-  assert.equal(formatKanbanStatusAge(card({ status_entered_timestamp: "2026-05-01T00:00:00.000Z" }), Date.parse("2026-05-03T00:00:00.000Z")), "2d");
   assert.equal(getKanbanConditionalColor(cards[0], new Map([["done", "#123abc"]])), "#123abc");
   assert.equal(normalizeKanbanColumnItemColor("not-a-color"), KANBAN_DEFAULT_COLUMN_ITEM_COLOR);
 });

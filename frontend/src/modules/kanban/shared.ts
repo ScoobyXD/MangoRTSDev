@@ -11,11 +11,9 @@ export const KANBAN_MIN_COLUMN_HEIGHT_PX = 160;
 export const KANBAN_MAX_COLUMN_HEIGHT_PX = 720;
 export const KANBAN_DEFAULT_COLUMN_ITEM_COLOR = "#2f7d62";
 
-export type KanbanItemType = "node" | "logic_gate";
-
 export type ExplorerEntityDragPayload = {
-  itemType: KanbanItemType;
-  itemID: string;
+  itemType: "node";
+  nodeID: string;
   label: string;
 };
 
@@ -37,19 +35,10 @@ export type KanbanCard = {
   board_id: string;
   card_id: string;
   column_id: string;
-  item_type: KanbanItemType;
-  item_id: string;
-  title_snapshot: string;
+  node_id: string;
+  node_title: string;
   description_snapshot: string;
   position: number;
-  status: string;
-  work_type: string;
-  assigned_to: string;
-  assigned_by: string;
-  created_by: string;
-  updated_by: string;
-  last_activity: string;
-  status_entered_timestamp: string;
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -70,21 +59,6 @@ export type KanbanColumnPositionUpdate = {
 
 export type KanbanColumnDropPlacement = "before" | "after";
 
-export type KanbanCardSummaryAttribute = "item_type" | "status_age" | "assigned_to" | "work_type";
-
-export const KANBAN_CARD_SUMMARY_ATTRIBUTES: KanbanCardSummaryAttribute[] = ["item_type", "status_age", "assigned_to", "work_type"];
-
-export const KANBAN_CARD_SUMMARY_ATTRIBUTE_LABELS: Record<KanbanCardSummaryAttribute, string> = {
-  item_type: "Item type",
-  status_age: "Status age",
-  assigned_to: "Assigned to",
-  work_type: "Work type",
-};
-
-export function isKanbanItemType(value: unknown): value is KanbanItemType {
-  return value === "node" || value === "logic_gate";
-}
-
 export function isKanbanBoardDropItemType(value: unknown): value is "node" {
   return value === "node";
 }
@@ -97,28 +71,15 @@ export function normalizeKanbanColumnItemColor(value: unknown): string {
   return isKanbanColumnItemColor(value) ? value.trim() : KANBAN_DEFAULT_COLUMN_ITEM_COLOR;
 }
 
-export function defaultKanbanCardMetadata(input: Pick<KanbanCard, "item_type" | "column_id" | "created_timestamp" | "updated_timestamp"> & Partial<KanbanCard>, columnTitle = "Unspecified"): Pick<KanbanCard, "description_snapshot" | "status" | "work_type" | "assigned_to" | "assigned_by" | "created_by" | "updated_by" | "last_activity" | "status_entered_timestamp"> {
-  const now = input.updated_timestamp || input.created_timestamp || new Date().toISOString();
-  return {
-    description_snapshot: input.description_snapshot ?? "",
-    status: (input.status ?? columnTitle).trim() || "Unspecified",
-    work_type: (input.work_type ?? (input.item_type === "logic_gate" ? "Logic Gate" : "Node")).trim(),
-    assigned_to: input.assigned_to ?? "",
-    assigned_by: input.assigned_by ?? "",
-    created_by: input.created_by ?? "",
-    updated_by: input.updated_by ?? "",
-    last_activity: input.last_activity ?? "",
-    status_entered_timestamp: input.status_entered_timestamp || now,
-  };
-}
-
 export function sanitizeExplorerEntityDragPayload(value: unknown): ExplorerEntityDragPayload | null {
   if (!value || typeof value !== "object") return null;
-  const candidate = value as { itemType?: unknown; itemID?: unknown; label?: unknown };
-  if (!isKanbanItemType(candidate.itemType)) return null;
-  if (typeof candidate.itemID !== "string" || candidate.itemID.trim() === "") return null;
-  const label = typeof candidate.label === "string" && candidate.label.trim() ? candidate.label.trim() : candidate.itemID.trim();
-  return { itemType: candidate.itemType, itemID: candidate.itemID.trim(), label };
+  const candidate = value as { itemType?: unknown; nodeID?: unknown; itemID?: unknown; label?: unknown };
+  if (!isKanbanBoardDropItemType(candidate.itemType)) return null;
+  const rawNodeID = typeof candidate.nodeID === "string" ? candidate.nodeID : candidate.itemID;
+  if (typeof rawNodeID !== "string" || rawNodeID.trim() === "") return null;
+  const nodeID = rawNodeID.trim();
+  const label = typeof candidate.label === "string" && candidate.label.trim() ? candidate.label.trim() : nodeID;
+  return { itemType: "node", nodeID, label };
 }
 
 export function parseExplorerEntityDragPayload(raw: string): ExplorerEntityDragPayload | null {
@@ -255,33 +216,12 @@ export function groupCardsByColumn(cards: KanbanCard[]): Map<string, KanbanCard[
   return grouped;
 }
 
-export function formatKanbanStatusAge(card: Pick<KanbanCard, "status_entered_timestamp">, nowMs = Date.now()): string {
-  const startedMs = Date.parse(card.status_entered_timestamp);
-  if (!Number.isFinite(startedMs)) return "unknown";
-  const elapsedMinutes = Math.max(0, Math.floor((nowMs - startedMs) / 60000));
-  if (elapsedMinutes < 60) return `${elapsedMinutes}m`;
-  const elapsedHours = Math.floor(elapsedMinutes / 60);
-  if (elapsedHours < 48) return `${elapsedHours}h`;
-  return `${Math.floor(elapsedHours / 24)}d`;
-}
-
-export function getKanbanItemTypeLabel(itemType: KanbanItemType): string {
-  return itemType === "logic_gate" ? "Logic Gate" : "Node";
-}
-
-export function getKanbanCardSummaryAttributeValue(card: KanbanCard, attribute: KanbanCardSummaryAttribute): string {
-  if (attribute === "item_type") return getKanbanItemTypeLabel(card.item_type);
-  if (attribute === "status_age") return formatKanbanStatusAge(card);
-  if (attribute === "assigned_to") return card.assigned_to.trim();
-  return card.work_type.trim();
-}
-
 export function getKanbanConditionalColor(card: KanbanCard, columnColorByID: Map<string, string> = new Map()): string {
   const columnColor = columnColorByID.get(card.column_id);
   if (isKanbanColumnItemColor(columnColor)) return columnColor;
 
   const palette = ["#2f7d62", "#245c9f", "#9a5b16", "#8f3d56", "#4f6f1f", "#66752c", "#7d4ea3", "#0f766e"];
-  const value = card.status.trim() || card.column_id || "empty";
+  const value = card.node_id || card.column_id || "empty";
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {
     hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
