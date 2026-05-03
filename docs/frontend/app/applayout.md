@@ -100,7 +100,8 @@ The app layout keeps compatibility for persisted payloads:
   - **Header section**: the top band from the frame/module top edge down through the thin divider under the frame name, linked hexagon, tabs, or module title controls.
   - **General section**: the module body below that divider, reserved for module-local work.
 - `applayout` hit-tests the full header section before module content can stop pointer propagation.
-- Root frames can be selected from the header section, and in edit mode the full header section starts frame movement.
+- Root frames can be selected from the header section, and the full header section starts frame movement in edit mode and non-edit mode.
 - Child frames can be selected from the header section and dragged within their parent frame from that full header section.
+- Right-clicking anywhere in the header section opens the frame action menu with Duplicate, Link modules, Delink modules, color choices, and Delete.
 - Dragging no longer starts from the general section; the body remains available for text editing, Kanban card work, map selection, explorer rows, and other module interactions.
 - Selected frames render a persistent cyan frame ring using `FRAME_SELECTION_COLOR`, confirming which frame is active for link, delete, copy, and related frame-level actions.

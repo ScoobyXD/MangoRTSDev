@@ -444,7 +444,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
     if (shouldIgnoreFramePointerTarget(target) || isResizeHandleTarget(target)) return false;
     if (!isFrameHeaderSectionPointer(event, element)) return false;
     if (target.closest('[data-header-drag-handle="true"]')) return false;
-    return editMode || nested;
+    return true;
   };
   const suppressNextModuleHeaderClick = () => {
     suppressModuleHeaderClickRef.current = true;
@@ -505,6 +505,14 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         e.stopPropagation();
       }}
       onClick={(e) => e.stopPropagation()}
+      onContextMenuCapture={(e) => {
+        const target = e.target as HTMLElement;
+        if (shouldIgnoreFramePointerTarget(target) || isResizeHandleTarget(target)) return;
+        if (!isFrameHeaderSectionPointer(e, e.currentTarget)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu(e, frame.id);
+      }}
       onMouseDownCapture={(e) => {
         const target = e.target as HTMLElement;
         if (shouldIgnoreFramePointerTarget(target)) return;
@@ -524,7 +532,6 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         if (isResizeHandleTarget(target)) return;
         const isCompactHeaderHandle = !!target.closest('[data-header-drag-handle="true"]');
         if (!isCompactHeaderHandle && !isFrameHeaderSectionPointer(e, e.currentTarget)) return;
-        if (!editMode && !nested && !isCompactHeaderHandle) return;
         onDragStart(e, frame.id);
       }}
       onTouchStart={(e) => {
@@ -533,7 +540,6 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         if (isResizeHandleTarget(target)) return;
         const isCompactHeaderHandle = !!target.closest('[data-header-drag-handle="true"]');
         if (!isCompactHeaderHandle && !isFrameHeaderSectionPointer(e, e.currentTarget)) return;
-        if (!editMode && !nested && !isCompactHeaderHandle) return;
         onDragStart(e, frame.id);
       }}
     >
