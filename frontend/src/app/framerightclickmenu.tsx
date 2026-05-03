@@ -23,15 +23,15 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
     });
   }, [x, y]);
 
-  // Global outside-click handler: close this menu when users interact elsewhere.
+  // Use capture so nested modules that stop propagation still let menus close on outside clicks.
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
     };
-    const timer = setTimeout(() => window.addEventListener("mousedown", handler), 0);
+    const timer = setTimeout(() => window.addEventListener("mousedown", handler, true), 0);
     return () => {
       clearTimeout(timer);
-      window.removeEventListener("mousedown", handler);
+      window.removeEventListener("mousedown", handler, true);
     };
   }, [onClose]);
 

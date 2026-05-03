@@ -2,13 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { EVENT_EXPLORER_CONTEXT_UPDATED } from "../node-map/eventbus";
 import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
-import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../logic-gate-map/shared";
 import { createKanbanColumn, deleteKanbanColumn, listKanbanCards, listKanbanColumns, moveKanbanCard, updateKanbanColumn, upsertKanbanCard } from "./kanbanApi";
 import {
   EXPLORER_ENTITY_DRAG_MIME,
   KANBAN_CARD_DRAG_MIME,
-  KANBAN_CARD_SUMMARY_ATTRIBUTES,
-  KANBAN_CARD_SUMMARY_ATTRIBUTE_LABELS,
   KANBAN_COLUMN_DRAG_MIME,
   KANBAN_COLUMN_TITLE_TEXT_TRANSFORM,
   KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
@@ -17,13 +14,10 @@ import {
   buildColumnReorderPlan,
   clampColumnHeight,
   clampColumnWidth,
-  defaultKanbanCardMetadata,
   getColumnHeight,
   getColumnWidth,
-  getKanbanCardSummaryAttributeValue,
   getKanbanConditionalColor,
   groupCardsByColumn,
-  isKanbanBoardDropItemType,
   normalizeKanbanColumnItemColor,
   nextCardPosition,
   nextColumnPosition,
@@ -34,10 +28,9 @@ import {
   type KanbanCard,
   type KanbanColumn,
   type KanbanColumnDropPlacement,
-  type KanbanItemType,
 } from "./shared";
 
-type HighlightedEntity = { itemType: KanbanItemType; itemID: string } | null;
+type HighlightedEntity = { nodeID: string } | null;
 
 type ColumnResizeState = {
   axis: "width" | "height";
@@ -72,20 +65,21 @@ const contextMenuHoverHandlers = {
   onMouseLeave: (event: React.MouseEvent) => { (event.currentTarget as HTMLElement).style.background = "none"; },
 };
 
+const NodeDocumentIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
+    <path d="M4 1.75h5.25L12 4.5v9.75H4z" fill="none" stroke={color} strokeWidth="1.35" />
+    <path d="M9.25 1.75V4.5H12M5.75 7.25h4.5M5.75 9.5h4.5M5.75 11.75h3" fill="none" stroke={color} strokeWidth="1.15" />
+  </svg>
+);
+
 function readLinkedExplorerSelection(companyID: string, scope: string): HighlightedEntity {
   try {
     const nodeRaw = localStorage.getItem(`${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
     if (nodeRaw) {
       const parsed = JSON.parse(nodeRaw) as { selectedNodeID?: unknown };
       if (typeof parsed.selectedNodeID === "string" && parsed.selectedNodeID.trim()) {
-        return { itemType: "node", itemID: parsed.selectedNodeID.trim() };
+        return { nodeID: parsed.selectedNodeID.trim() };
       }
-    }
-    const logicRaw = localStorage.getItem(`${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
-    if (logicRaw) {
-      const parsed = JSON.parse(logicRaw) as { selectedLogicGateID?: unknown; selectedNodeID?: unknown };
-      const id = typeof parsed.selectedLogicGateID === "string" ? parsed.selectedLogicGateID : parsed.selectedNodeID;
-      if (typeof id === "string" && id.trim()) return { itemType: "logic_gate", itemID: id.trim() };
     }
   } catch {
     return null;
@@ -131,7 +125,6 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const cardBackground = isDark ? "#101418" : "#ffffff";
 
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
-  const columnTitleByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, column.title])), [orderedColumns]);
   const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, normalizeKanbanColumnItemColor(column.item_color)])), [orderedColumns]);
   const cardsByColumn = useMemo(() => groupCardsByColumn(cards), [cards]);
 
@@ -320,8 +313,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const moveCardToColumn = useCallback(async (cardID: string, columnID: string) => {
     const position = nextCardPosition(cards, columnID);
     const movedAt = new Date().toISOString();
-    const status = columnTitleByID.get(columnID) ?? "Unspecified";
-    setCards((previous) => previous.map((card) => (card.card_id === cardID ? { ...card, column_id: columnID, position, status, status_entered_timestamp: movedAt, last_activity: "moved card", updated_timestamp: movedAt } : card)));
+    setCards((previous) => previous.map((card) => (card.card_id === cardID ? { ...card, column_id: columnID, position, updated_timestamp: movedAt } : card)));
     try {
       const moved = await moveKanbanCard({ apiBase, companyID, boardID, cardID, columnID, position });
       setCards((previous) => previous.map((card) => (card.card_id === moved.card_id ? moved : card)));
@@ -329,37 +321,32 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setError("Card move failed");
       refreshBoard();
     }
-  }, [apiBase, boardID, cards, columnTitleByID, companyID, refreshBoard]);
+  }, [apiBase, boardID, cards, companyID, refreshBoard]);
 
-  const addEntityToColumn = useCallback(async (columnID: string, itemType: KanbanItemType, itemID: string, label: string) => {
-    if (!isKanbanBoardDropItemType(itemType)) {
-      setError("Only nodes can be added to the Kanban board");
-      return;
-    }
+  const addEntityToColumn = useCallback(async (columnID: string, nodeID: string, label: string) => {
     const position = nextCardPosition(cards, columnID);
     const now = new Date().toISOString();
     const optimistic: KanbanCard = {
       company_id: companyID,
       board_id: boardID,
-      card_id: `pending-${itemType}-${itemID}`,
+      card_id: `pending-node-${nodeID}`,
       column_id: columnID,
-      item_type: itemType,
-      item_id: itemID,
-      title_snapshot: label,
-      ...defaultKanbanCardMetadata({ item_type: itemType, column_id: columnID, created_timestamp: now, updated_timestamp: now }, columnTitleByID.get(columnID)),
+      node_id: nodeID,
+      node_title: label,
+      description_snapshot: "",
       position,
       created_timestamp: now,
       updated_timestamp: now,
     };
-    setCards((previous) => [...previous.filter((card) => !(card.item_type === itemType && card.item_id === itemID)), optimistic]);
+    setCards((previous) => [...previous.filter((card) => card.node_id !== nodeID), optimistic]);
     try {
-      const saved = await upsertKanbanCard({ apiBase, companyID, boardID, columnID, itemType, itemID, titleSnapshot: label, position });
-      setCards((previous) => [...previous.filter((card) => card.card_id !== optimistic.card_id && !(card.item_type === itemType && card.item_id === itemID)), saved]);
+      const saved = await upsertKanbanCard({ apiBase, companyID, boardID, columnID, nodeID, nodeTitle: label, position });
+      setCards((previous) => [...previous.filter((card) => card.card_id !== optimistic.card_id && card.node_id !== nodeID), saved]);
     } catch {
       setError("Drop failed");
       refreshBoard();
     }
-  }, [apiBase, boardID, cards, columnTitleByID, companyID, refreshBoard]);
+  }, [apiBase, boardID, cards, companyID, refreshBoard]);
 
   const onDropColumn = useCallback((event: React.DragEvent<HTMLElement>, columnID: string) => {
     event.preventDefault();
@@ -371,19 +358,14 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
     const cardPayload = parseKanbanCardDragPayload(event.dataTransfer.getData(KANBAN_CARD_DRAG_MIME));
     if (cardPayload) {
-      const draggedCard = cards.find((card) => card.card_id === cardPayload.cardID);
-      if (draggedCard && !isKanbanBoardDropItemType(draggedCard.item_type)) {
-        setError("Only nodes can be moved on the Kanban board");
-        return;
-      }
       if (cardPayload.sourceColumnID !== columnID) void moveCardToColumn(cardPayload.cardID, columnID);
       return;
     }
     const explorerPayload = parseExplorerEntityDragPayload(event.dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
     if (explorerPayload) {
-      void addEntityToColumn(columnID, explorerPayload.itemType, explorerPayload.itemID, explorerPayload.label);
+      void addEntityToColumn(columnID, explorerPayload.nodeID, explorerPayload.label);
     }
-  }, [addEntityToColumn, cards, moveCardToColumn, reorderColumn]);
+  }, [addEntityToColumn, moveCardToColumn, reorderColumn]);
 
   const onDropAtEnd = useCallback((event: React.DragEvent) => {
     const columnPayload = parseKanbanColumnDragPayload(event.dataTransfer.getData(KANBAN_COLUMN_DRAG_MIME));
@@ -405,13 +387,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, []);
 
   const renderCard = (card: KanbanCard): React.ReactNode => {
-    const highlighted = highlightedEntity?.itemType === card.item_type && highlightedEntity.itemID === card.item_id;
+    const highlighted = highlightedEntity?.nodeID === card.node_id;
     const expanded = expandedCardIDs.has(card.card_id);
     const description = (card.description_snapshot ?? "").trim();
     const color = getKanbanConditionalColor(card, columnColorByID);
-    const attributes = KANBAN_CARD_SUMMARY_ATTRIBUTES
-      .map((attribute) => ({ attribute, value: getKanbanCardSummaryAttributeValue(card, attribute) }))
-      .filter((item) => item.value.trim());
     return (
       <article
         key={card.card_id}
@@ -433,14 +412,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         }}
       >
         <div style={{ display: "grid", gridTemplateColumns: "16px minmax(0, 1fr) 22px", gap: 6, alignItems: "start" }}>
-          <span
-            aria-hidden="true"
-            title="Node"
-            style={{ width: 14, height: 14, marginTop: 1, border: `1.5px solid ${color}`, borderRadius: 4, display: "grid", placeItems: "center" }}
-          >
-            <span style={{ width: 5, height: 5, borderRadius: 999, background: color, display: "block" }} />
+          <span title="Node" style={{ width: 16, height: 16, marginTop: 1, display: "grid", placeItems: "center" }}>
+            <NodeDocumentIcon color={color} />
           </span>
-          <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.title_snapshot}</div>
+          <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.node_title}</div>
           <button
             type="button"
             title={expanded ? "Collapse card text" : "Expand card text"}
@@ -453,15 +428,6 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         {description && (
           <div style={{ marginTop: 7, color: subtext, fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere", maxHeight: expanded ? undefined : 32, overflow: "hidden" }}>
             {description}
-          </div>
-        )}
-        {attributes.length > 0 && (
-          <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 5 }}>
-            {attributes.map(({ attribute, value }) => (
-              <span key={attribute} style={{ border: `1px solid ${line}`, color: subtext, fontSize: 10, fontWeight: 700, padding: "2px 5px", overflowWrap: "anywhere" }}>
-                {KANBAN_CARD_SUMMARY_ATTRIBUTE_LABELS[attribute]} {value}
-              </span>
-            ))}
           </div>
         )}
       </article>

@@ -46,7 +46,7 @@ Payload:
 ```json
 {
   "itemType": "node",
-  "itemID": "node-id",
+  "nodeID": "node-id",
   "label": "Visible title"
 }
 ```
@@ -65,22 +65,15 @@ Endpoints:
 - `DELETE /v1/kanban/columns/:column_id?company_id=...&board_id=...`
 - `GET /v1/kanban/cards?company_id=...&board_id=...&column_id=...&after_position=0&limit=200`
 - `POST /v1/kanban/cards`
-  - `{ company_id, board_id, column_id, item_type: "node", item_id, title_snapshot, position?, description_snapshot?, work_type?, assigned_to?, assigned_by?, actor_id?, last_activity? }`
+  - `{ company_id, board_id, column_id, node_id, node_title, position?, description_snapshot? }`
 - `PUT /v1/kanban/cards/:card_id`
-  - `{ company_id, board_id, column_id, position?, status?, work_type?, assigned_to?, assigned_by?, actor_id?, description_snapshot?, last_activity? }`
+  - `{ company_id, board_id, column_id, position? }`
 - `DELETE /v1/kanban/cards/:card_id?company_id=...&board_id=...`
 
 `POST /v1/kanban/cards` is idempotent per board and node. If the same node is dropped again, the existing card moves instead of duplicating.
-The card write API rejects `logic_gate` item types; Kanban board cards are node-only.
+The card write API has no item-type field; Kanban board cards are node-only.
 
 The removed `/v1/kanban/query` endpoint should stay removed until a specific filter or grouping capability is designed again. Headless agents should currently use the same bounded column/card APIs as the UI.
-
-Hot metadata fields:
-- `status`: defaults to the destination column title.
-- `status_entered_timestamp`: changes when `status` changes, used for status age.
-- `work_type`: defaults to `Node`, but agents can set domain-specific work types.
-- `assigned_to` and `assigned_by`: external user/agent IDs; no UI-only assignment state.
-- `created_by`, `updated_by`, and `last_activity`: enough current activity context for board reads without fetching an audit stream.
 
 ## Hot Path Rules
 - Reads are scoped by `company_id` and `board_id`.
@@ -88,9 +81,9 @@ Hot metadata fields:
 - Backend tables keep board/column position indexes for fast interactive reads. Extra filter indexes were removed with the old query surface.
 - Column reorder usually writes only the moved column position. Rare position compaction is scoped to visible board columns.
 - Column width, height, and item color are stored on the column row so UI users and headless agents share the same layout contract.
-- Card rows store a title snapshot to avoid requiring a details lookup on every board render.
-- Card rows store a small set of direct metadata columns instead of JSON so the first production query path can stay index-friendly.
-- Node IDs remain the source of truth; the snapshot is display-only.
+- Card rows store `node_title` to avoid requiring a details lookup on every board render.
+- Card rows intentionally do not store item type, logic-gate ID, status age, work type, or assignment metadata until a specific product/API need returns.
+- Node IDs remain the source of truth; `node_title` is display-only.
 
 Junior engineer note: keep future bulk behavior as paged API reads. Do not load every card for a company-wide board into React.
 When adding filters back, add only the specific filter the product needs, then pair it with a measured read path and a matching index or projection.

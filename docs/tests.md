@@ -174,7 +174,7 @@ Use this checklist format and keep it complete.
   - keeps Kanban board drops node-only while still parsing legacy drag payloads
   - computes append positions within the target column only
   - groups and sorts board cards by stable per-column position
-  - colors cards from their column item color and formats status age without view-query state
+  - colors node-only cards from their column item color without view-query state
   - computes bounded Kanban column reorder and width/height resize values
   - locks the Kanban visual contract for preserving column title casing and clearing frame chrome
 - [x] `backend/internal/http/server_test.go`
@@ -189,7 +189,7 @@ Use this checklist format and keep it complete.
   - Company Explorer folder APIs create nested folders, rename and move folders, reject cyclic folder moves, assign node placements, and include folder data in workspace snapshots
   - Kanban column create/rename and node card API flow
   - Kanban rejects logic-gate card creation through the headless card API
-  - Kanban card APIs update hot metadata fields for headless agents and keep the removed query endpoint at 404
+  - Kanban card APIs expose node-only card fields and keep the removed query endpoint at 404
   - Kanban column layout update flow for durable reorder/width/height/color state
   - Kanban column delete API flow
   - Kanban card upsert moves an existing board card instead of duplicating it

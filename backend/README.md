@@ -307,7 +307,7 @@ curl -X POST http://localhost:8080/v1/kanban/columns \
 
 curl -X POST http://localhost:8080/v1/kanban/cards \
   -H 'content-type: application/json' \
-  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","column_id":"<column_id>","item_type":"node","item_id":"<node_id>","title_snapshot":"Customer onboarding","work_type":"Customer work","assigned_to":"agent-1","assigned_by":"person-2","actor_id":"agent-1","last_activity":"created card"}'
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","column_id":"<column_id>","node_id":"<node_id>","node_title":"Customer onboarding"}'
 ```
 
 Read a bounded card window for headless agents and the UI:
@@ -316,7 +316,7 @@ Read a bounded card window for headless agents and the UI:
 curl "http://localhost:8080/v1/kanban/cards?company_id=11111111-1111-1111-1111-111111111111&board_id=frame-kanban-1&column_id=<column_id>&after_position=0&limit=200"
 ```
 
-Kanban card metadata still uses direct columns for current activity context: `status`, `work_type`, `assigned_to`, `assigned_by`, `created_by`, `updated_by`, `last_activity`, and `status_entered_timestamp`. Keep the hot path bounded with `company_id`, `board_id`, optional `column_id`, `after_position`, and `limit`. The previous grouped/filter query endpoint was removed so filtering can be rebuilt deliberately one capability at a time.
+Kanban cards are intentionally node-only and minimal: `node_id`, `node_title`, optional `description_snapshot`, position, and timestamps. Keep the hot path bounded with `company_id`, `board_id`, optional `column_id`, `after_position`, and `limit`. The previous grouped/filter query endpoint and card metadata columns were removed so filtering can be rebuilt deliberately one capability at a time.
 
 Kanban cards are node-only through the API. Logic gates should stay in Logic Gate Map and Company Explorer workflows, not Kanban boards.
 
