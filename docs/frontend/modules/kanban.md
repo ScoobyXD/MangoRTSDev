@@ -11,7 +11,8 @@ Users can:
 - resize columns horizontally and vertically,
 - drag nodes from Company Explorer into a column,
 - drag cards between columns and vertically reorder cards inside a column,
-- delete selected cards with the Delete key or the card context menu.
+- select one or more cards with click, Ctrl/Cmd-click, and Shift-click range selection across columns,
+- request selected-card deletion with the Delete key or the card context menu.
 
 ## Visual Rules
 - The board surface stays white in the light theme.
@@ -22,6 +23,8 @@ Users can:
 - Column deletion is confirmation-gated with the same modal treatment as frame and map deletes.
 - Right-clicking a column opens column actions: rename, delete, and native RGB color selection for cards inside that column.
 - Right-clicking a card opens card actions only; currently that menu contains Delete card.
+- Card deletion is confirmation-gated. Delete and the card context menu only open the confirmation modal; the card is removed only after Yes.
+- Backspace must not delete Kanban cards.
 - Cards do not show a top-right expand/collapse control. Card titles and optional descriptions render directly.
 - The module reserves top clearance for the frame title plate and linked-module hexagon so column headers do not bleed into frame chrome.
 - The top clearance remains empty for now. It belongs to frame tabs/title/link state; board controls should not be rebuilt below the divider.
