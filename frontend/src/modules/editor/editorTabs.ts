@@ -1,4 +1,11 @@
-export type EditorTabID = "editor" | "metadata" | "history";
+export type EditorTabID = "editor" | "outline-styles" | "metadata" | "history";
+
+export const EDITOR_TAB_ITEMS: ReadonlyArray<{ id: EditorTabID; label: string }> = [
+  { id: "editor", label: "Editor" },
+  { id: "outline-styles", label: "Outline Styles" },
+  { id: "metadata", label: "Metadata" },
+  { id: "history", label: "History" },
+];
 
 export type EditorDocumentIsolationState = {
   ariaHidden: boolean;
