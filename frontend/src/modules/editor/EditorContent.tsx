@@ -663,7 +663,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       style={{ width: "100%", height: "100%", position: "relative", background: surfaceBackground, color: surfaceText, overflow: "hidden", userSelect: "text", cursor: "text" }}
     >
       <div style={{ position: "relative", width: "100%", height: "100%", minHeight: 0, cursor: "text" }}>
-        <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 2 }}>
+        {hasLinkedDocument && (
+          <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 2 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, paddingLeft: 106 }}>
             {tabItems.map((tab) => {
               const selected = activeTab === tab.id;
@@ -676,7 +677,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           </div>
           
           <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 21, borderBottom: `1px solid ${ruleColor}`, transform: "translateY(8px)", pointerEvents: "none", zIndex: 1 }} />
-          {hasLinkedDocument && activeTab === "editor" && (
+          {activeTab === "editor" && (
             <div style={{ display: "grid", gap: 8 }}>
               <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.12em", color: accent, cursor: "text" }}>
                 <span style={{ textTransform: "uppercase" }}>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>&nbsp;
@@ -722,7 +723,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             </div>
           )}
 
-          {hasLinkedDocument && activeTab === "metadata" && linkedNodeMetadataRows.length > 0 && (
+          {activeTab === "metadata" && linkedNodeMetadataRows.length > 0 && (
             <section style={{ display: "grid", gap: 6, maxWidth: 520 }}>
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>Metadata</div>
               <div style={{ display: "grid", gap: 4 }}>
@@ -736,7 +737,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             </section>
           )}
 
-          {hasLinkedDocument && activeTab === "history" && linkedNodeHistoryRows.length > 0 && (
+          {activeTab === "history" && linkedNodeHistoryRows.length > 0 && (
             <section style={{ display: "grid", gap: 6, maxWidth: 640 }}>
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>History</div>
               <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "6px 8px 6px 22px" }}>
@@ -744,10 +745,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
               </ul>
             </section>
           )}
-        </div>
+          </div>
+        )}
 
-      {hasLinkedDocument && (
-        <textarea
+        {hasLinkedDocument && (
+          <textarea
           ref={editorTextAreaRef}
           className="editor-document-scroll"
           aria-label="Linked document editor"

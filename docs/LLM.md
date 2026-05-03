@@ -225,7 +225,6 @@ Interaction convention:
 - Root frames use the full header section as a drag handle in edit mode and non-edit mode.
 - Child frames use the full header section as a drag handle inside their parent frame.
 - Right-clicking the header section opens the frame/module actions menu: Duplicate, Link modules, Delink modules, color choices, and Delete.
-- Non-map modules show a grab cursor while hovering the header section. Node Map and Logic Gate Map preserve their map canvas cursor behavior instead of forcing the grab cursor.
 - The general section should remain reserved for module-local work such as editing text, manipulating Kanban cards, selecting map nodes, and interacting with explorer rows.
 - A selected frame must show a visible frame-border/ring indication so users can tell which module will participate in link, delete, copy, or other frame-level actions.
 
