@@ -104,6 +104,7 @@ function coerceFrame(value: unknown): FrameDataModel | null {
   ) return null;
 
   const normalizedKind = kind === "node-doc" ? "editor" : kind;
+  const normalizedTitle = normalizedKind === "kanban" && title === "Kanban" ? "Kanban board" : title;
 
   return {
     id,
@@ -114,7 +115,7 @@ function coerceFrame(value: unknown): FrameDataModel | null {
     y: Math.max(0, snapToHalfStep(y)),
     w: Math.max(MIN_W, Math.round(w)),
     h: Math.max(MIN_H, Math.round(h)),
-    title,
+    title: normalizedTitle,
     color,
     accent,
   };

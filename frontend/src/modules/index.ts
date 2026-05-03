@@ -18,7 +18,7 @@ export interface ModuleTemplate {
 export const MODULE_LIBRARY: ModuleTemplate[] = [
   { kind: "company-explorer", label: "Company Explorer", defaultW: 18, defaultH: 14, render: CompanyExplorerContent },
   { kind: "editor", label: "Editor", defaultW: 16, defaultH: 14, render: EditorContent },
-  { kind: "kanban", label: "Kanban", defaultW: 18, defaultH: 14, render: KanbanContent },
+  { kind: "kanban", label: "Kanban board", defaultW: 18, defaultH: 7, render: KanbanContent },
   { kind: "nodes-map", label: "Node Map", defaultW: 16, defaultH: 14, render: NodeMapContent },
   { kind: "logic-map", label: "Logic Gate Map", defaultW: 16, defaultH: 14, render: LogicGateMapContent },
   { kind: "stats", label: "Stats", defaultW: 12, defaultH: 10, render: StatsContent },

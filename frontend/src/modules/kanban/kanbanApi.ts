@@ -1,4 +1,4 @@
-import type { KanbanCard, KanbanColumn, KanbanFilter, KanbanGroupField, KanbanItemType, KanbanSortSpec, KanbanVisibleAttribute } from "./shared";
+import type { KanbanCard, KanbanColumn, KanbanItemType } from "./shared";
 
 type FetchJSONOptions = {
   method?: string;
@@ -32,10 +32,10 @@ export async function listKanbanColumns(apiBase: string, companyID: string, boar
   return payload.columns ?? [];
 }
 
-export async function createKanbanColumn(apiBase: string, companyID: string, boardID: string, title: string, position?: number, widthPx?: number): Promise<KanbanColumn> {
+export async function createKanbanColumn(apiBase: string, companyID: string, boardID: string, title: string, position?: number, widthPx?: number, heightPx?: number): Promise<KanbanColumn> {
   return fetchJSON<KanbanColumn>(apiBase, "/v1/kanban/columns", {
     method: "POST",
-    body: { company_id: companyID, board_id: boardID, title, position, width_px: widthPx },
+    body: { company_id: companyID, board_id: boardID, title, position, width_px: widthPx, height_px: heightPx },
   });
 }
 
@@ -47,6 +47,7 @@ export async function updateKanbanColumn(args: {
   title?: string;
   position?: number;
   widthPx?: number;
+  heightPx?: number;
 }): Promise<KanbanColumn> {
   return fetchJSON<KanbanColumn>(args.apiBase, `/v1/kanban/columns/${encodeURIComponent(args.columnID)}`, {
     method: "PUT",
@@ -56,6 +57,7 @@ export async function updateKanbanColumn(args: {
       title: args.title,
       position: args.position,
       width_px: args.widthPx,
+      height_px: args.heightPx,
     },
   });
 }
@@ -69,42 +71,6 @@ export async function listKanbanCards(apiBase: string, companyID: string, boardI
   const params = query({ company_id: companyID, board_id: boardID, column_id: columnID, limit, after_position: afterPosition > 0 ? afterPosition : undefined });
   const payload = await fetchJSON<{ cards?: KanbanCard[] }>(apiBase, `/v1/kanban/cards?${params}`);
   return payload.cards ?? [];
-}
-
-export type KanbanQueryResponse = {
-  company_id: string;
-  board_id: string;
-  limit: number;
-  group_by: KanbanGroupField[];
-  visible_attributes: KanbanVisibleAttribute[];
-  cards: KanbanCard[];
-  groups: unknown[];
-};
-
-export async function queryKanbanBoard(args: {
-  apiBase: string;
-  companyID: string;
-  boardID: string;
-  filters: KanbanFilter[];
-  sort: KanbanSortSpec[];
-  groupBy: KanbanGroupField[];
-  visibleAttributes: KanbanVisibleAttribute[];
-  collapsedGroupKeys: string[];
-  limit?: number;
-}): Promise<KanbanQueryResponse> {
-  return fetchJSON<KanbanQueryResponse>(args.apiBase, "/v1/kanban/query", {
-    method: "POST",
-    body: {
-      company_id: args.companyID,
-      board_id: args.boardID,
-      filters: args.filters,
-      sort: args.sort,
-      group_by: args.groupBy,
-      visible_attributes: args.visibleAttributes,
-      collapsed_groups: args.collapsedGroupKeys,
-      limit: args.limit ?? 500,
-    },
-  });
 }
 
 export async function upsertKanbanCard(args: {

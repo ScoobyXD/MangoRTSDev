@@ -6,47 +6,46 @@ import { createKanbanColumn, deleteKanbanColumn, listKanbanCards, listKanbanColu
 import {
   EXPLORER_ENTITY_DRAG_MIME,
   KANBAN_CARD_DRAG_MIME,
+  KANBAN_CARD_SUMMARY_ATTRIBUTES,
+  KANBAN_CARD_SUMMARY_ATTRIBUTE_LABELS,
   KANBAN_COLUMN_DRAG_MIME,
   KANBAN_COLUMN_TITLE_TEXT_TRANSFORM,
+  KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
   KANBAN_DEFAULT_COLUMN_WIDTH_PX,
-  KANBAN_DEFAULT_GROUP_BY,
-  KANBAN_DEFAULT_SORT,
-  KANBAN_DEFAULT_VISIBLE_ATTRIBUTES,
-  KANBAN_GROUP_FIELD_LABELS,
-  KANBAN_GROUP_FIELDS,
   KANBAN_MODULE_TOP_CLEARANCE_PX,
-  KANBAN_SORT_FIELD_LABELS,
-  KANBAN_SORT_FIELDS,
-  KANBAN_VISIBLE_ATTRIBUTE_LABELS,
-  KANBAN_VISIBLE_ATTRIBUTES,
-  buildKanbanCardGroups,
   buildColumnReorderPlan,
+  clampColumnHeight,
   clampColumnWidth,
   defaultKanbanCardMetadata,
-  filterAndSortKanbanCards,
-  formatKanbanStatusAge,
-  getKanbanCardFieldValue,
-  getKanbanConditionalColor,
-  getKanbanGroupLabel,
+  getColumnHeight,
   getColumnWidth,
+  getKanbanCardSummaryAttributeValue,
+  getKanbanConditionalColor,
   groupCardsByColumn,
-  nextColumnPosition,
   nextCardPosition,
-  parseKanbanColumnDragPayload,
+  nextColumnPosition,
   parseExplorerEntityDragPayload,
   parseKanbanCardDragPayload,
+  parseKanbanColumnDragPayload,
   sortColumns,
   type KanbanCard,
-  type KanbanCardGroup,
   type KanbanColumn,
-  type KanbanFilter,
-  type KanbanGroupField,
+  type KanbanColumnDropPlacement,
   type KanbanItemType,
-  type KanbanSortField,
-  type KanbanVisibleAttribute,
 } from "./shared";
 
 type HighlightedEntity = { itemType: KanbanItemType; itemID: string } | null;
+
+type ColumnResizeState = {
+  axis: "width" | "height";
+  columnID: string;
+  startX: number;
+  startY: number;
+  startWidth: number;
+  startHeight: number;
+  currentWidth: number;
+  currentHeight: number;
+};
 
 function readLinkedExplorerSelection(companyID: string, scope: string): HighlightedEntity {
   try {
@@ -69,6 +68,15 @@ function readLinkedExplorerSelection(companyID: string, scope: string): Highligh
   return null;
 }
 
+function dataTransferIncludes(event: React.DragEvent, mime: string): boolean {
+  return Array.from(event.dataTransfer.types).includes(mime);
+}
+
+function columnDropPlacement(event: React.DragEvent<HTMLElement>): KanbanColumnDropPlacement {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  return event.clientX > bounds.left + bounds.width / 2 ? "after" : "before";
+}
+
 export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
@@ -80,16 +88,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [highlightedEntity, setHighlightedEntity] = useState<HighlightedEntity>(() => readLinkedExplorerSelection(companyID, boardID));
   const [editingColumnID, setEditingColumnID] = useState("");
   const [draggingColumnID, setDraggingColumnID] = useState("");
-  const [groupByFields, setGroupByFields] = useState<KanbanGroupField[]>(KANBAN_DEFAULT_GROUP_BY);
-  const [filterField, setFilterField] = useState<KanbanFilter["field"]>("title_snapshot");
-  const [filterValue, setFilterValue] = useState("");
-  const [sortField, setSortField] = useState<KanbanSortField>(KANBAN_DEFAULT_SORT[0].field);
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">(KANBAN_DEFAULT_SORT[0].direction);
-  const [visibleAttributes, setVisibleAttributes] = useState<Set<KanbanVisibleAttribute>>(() => new Set(KANBAN_DEFAULT_VISIBLE_ATTRIBUTES));
-  const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(() => new Set());
+  const [dragOverColumn, setDragOverColumn] = useState<{ columnID: string; placement: KanbanColumnDropPlacement } | null>(null);
   const [expandedCardIDs, setExpandedCardIDs] = useState<Set<string>>(() => new Set());
-  const [colorBy, setColorBy] = useState<KanbanGroupField>("status");
-  const resizeRef = useRef<{ columnID: string; startX: number; startWidth: number } | null>(null);
+  const [addColumnHover, setAddColumnHover] = useState(false);
+  const resizeRef = useRef<ColumnResizeState | null>(null);
 
   const isDark = theme === "dark";
   const surface = isDark ? "#11161b" : "#ffffff";
@@ -103,19 +105,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
   const columnTitleByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, column.title])), [orderedColumns]);
-  const kanbanFilters = useMemo<KanbanFilter[]>(() => {
-    const value = filterValue.trim();
-    if (!value) return [];
-    return [{ field: filterField, op: filterField === "title_snapshot" ? "prefix" : "eq", value }];
-  }, [filterField, filterValue]);
-  const sortedVisibleCards = useMemo(() => filterAndSortKanbanCards(cards, {
-    filters: kanbanFilters,
-    sort: [{ field: sortField, direction: sortDirection }],
-  }, columnTitleByID), [cards, columnTitleByID, kanbanFilters, sortDirection, sortField]);
-  const cardsByColumn = useMemo(() => groupCardsByColumn(sortedVisibleCards), [sortedVisibleCards]);
-  const effectiveGroupBy = groupByFields.length ? groupByFields : KANBAN_DEFAULT_GROUP_BY;
-  const rootGroups = useMemo(() => buildKanbanCardGroups(sortedVisibleCards, effectiveGroupBy, collapsedGroupKeys, columnTitleByID), [collapsedGroupKeys, columnTitleByID, effectiveGroupBy, sortedVisibleCards]);
-  const visibleAttributeList = useMemo(() => KANBAN_VISIBLE_ATTRIBUTES.filter((attribute) => visibleAttributes.has(attribute)), [visibleAttributes]);
+  const cardsByColumn = useMemo(() => groupCardsByColumn(cards), [cards]);
 
   const refreshBoard = useCallback(async () => {
     setLoading(true);
@@ -123,14 +113,14 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     try {
       const [nextColumns, nextCards] = await Promise.all([
         listKanbanColumns(apiBase, companyID, boardID),
-        // The UI reads the first window only. Headless agents should page through the API
-        // by column when operating at larger scale instead of rendering everything.
+        // The UI renders a bounded first window. Headless agents should page by
+        // column through the cards API instead of loading company-scale boards.
         listKanbanCards(apiBase, companyID, boardID, "", 500),
       ]);
       setColumns(sortColumns(nextColumns));
       setCards(nextCards);
     } catch {
-      setError("Kanban API unavailable");
+      setError("Kanban board API unavailable");
     } finally {
       setLoading(false);
     }
@@ -170,6 +160,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         "New Column Name",
         nextColumnPosition(columns),
         KANBAN_DEFAULT_COLUMN_WIDTH_PX,
+        KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
       );
       setColumns((previous) => [...previous, column].sort((a, b) => a.position - b.position));
       setEditingColumnID(column.column_id);
@@ -208,15 +199,20 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [apiBase, boardID, cards, columns, companyID]);
 
-  const reorderColumn = useCallback(async (draggedColumnID: string, targetColumnID: string | null) => {
-    const plan = buildColumnReorderPlan(columns, draggedColumnID, targetColumnID);
-    if (plan.updates.length === 0) return;
+  const reorderColumn = useCallback(async (draggedColumnID: string, targetColumnID: string | null, placement: KanbanColumnDropPlacement = "before") => {
+    const plan = buildColumnReorderPlan(columns, draggedColumnID, targetColumnID, placement);
+    if (plan.updates.length === 0) {
+      setDraggingColumnID("");
+      setDragOverColumn(null);
+      return;
+    }
     setColumns(plan.columns);
     setDraggingColumnID("");
+    setDragOverColumn(null);
     setError("");
     try {
-      // Most reorders are one write thanks to sparse positions. A rare compaction only
-      // rewrites the visible board columns when positions no longer have room.
+      // Sparse positions keep most reorders to a single API write. Compaction is
+      // rare and still limited to visible board columns.
       await Promise.all(plan.updates.map((update) => updateKanbanColumn({
         apiBase,
         companyID,
@@ -230,10 +226,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [apiBase, boardID, columns, companyID, refreshBoard]);
 
-  const persistColumnWidth = useCallback(async (columnID: string, widthPx: number) => {
+  const persistColumnSize = useCallback(async (columnID: string, size: { widthPx?: number; heightPx?: number }) => {
     setError("");
     try {
-      const updated = await updateKanbanColumn({ apiBase, companyID, boardID, columnID, widthPx });
+      const updated = await updateKanbanColumn({ apiBase, companyID, boardID, columnID, ...size });
       setColumns((previous) => previous.map((column) => (column.column_id === updated.column_id ? updated : column)));
     } catch {
       setError("Column resize failed");
@@ -245,15 +241,25 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const onMove = (event: MouseEvent) => {
       const resize = resizeRef.current;
       if (!resize) return;
-      const widthPx = clampColumnWidth(resize.startWidth + event.clientX - resize.startX);
-      setColumns((previous) => previous.map((column) => (column.column_id === resize.columnID ? { ...column, width_px: widthPx } : column)));
+      if (resize.axis === "width") {
+        const widthPx = clampColumnWidth(resize.startWidth + event.clientX - resize.startX);
+        resize.currentWidth = widthPx;
+        setColumns((previous) => previous.map((column) => (column.column_id === resize.columnID ? { ...column, width_px: widthPx } : column)));
+        return;
+      }
+      const heightPx = clampColumnHeight(resize.startHeight + event.clientY - resize.startY);
+      resize.currentHeight = heightPx;
+      setColumns((previous) => previous.map((column) => (column.column_id === resize.columnID ? { ...column, height_px: heightPx } : column)));
     };
     const onUp = () => {
       const resize = resizeRef.current;
       if (!resize) return;
       resizeRef.current = null;
-      const column = columns.find((item) => item.column_id === resize.columnID);
-      if (column) void persistColumnWidth(resize.columnID, getColumnWidth(column));
+      if (resize.axis === "width") {
+        void persistColumnSize(resize.columnID, { widthPx: resize.currentWidth });
+        return;
+      }
+      void persistColumnSize(resize.columnID, { heightPx: resize.currentHeight });
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -261,7 +267,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [columns, persistColumnWidth]);
+  }, [persistColumnSize]);
 
   const moveCardToColumn = useCallback(async (cardID: string, columnID: string) => {
     const position = nextCardPosition(cards, columnID);
@@ -303,21 +309,22 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [apiBase, boardID, cards, columnTitleByID, companyID, refreshBoard]);
 
-  const onDropColumn = useCallback((event: React.DragEvent, columnID: string) => {
+  const onDropColumn = useCallback((event: React.DragEvent<HTMLElement>, columnID: string) => {
     event.preventDefault();
+    setDragOverColumn(null);
     const columnPayload = parseKanbanColumnDragPayload(event.dataTransfer.getData(KANBAN_COLUMN_DRAG_MIME));
     if (columnPayload) {
-      reorderColumn(columnPayload.columnID, columnID);
+      void reorderColumn(columnPayload.columnID, columnID, columnDropPlacement(event));
       return;
     }
     const cardPayload = parseKanbanCardDragPayload(event.dataTransfer.getData(KANBAN_CARD_DRAG_MIME));
     if (cardPayload) {
-      if (cardPayload.sourceColumnID !== columnID) moveCardToColumn(cardPayload.cardID, columnID);
+      if (cardPayload.sourceColumnID !== columnID) void moveCardToColumn(cardPayload.cardID, columnID);
       return;
     }
     const explorerPayload = parseExplorerEntityDragPayload(event.dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
     if (explorerPayload) {
-      addEntityToColumn(columnID, explorerPayload.itemType, explorerPayload.itemID, explorerPayload.label);
+      void addEntityToColumn(columnID, explorerPayload.itemType, explorerPayload.itemID, explorerPayload.label);
     }
   }, [addEntityToColumn, moveCardToColumn, reorderColumn]);
 
@@ -325,41 +332,8 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const columnPayload = parseKanbanColumnDragPayload(event.dataTransfer.getData(KANBAN_COLUMN_DRAG_MIME));
     if (!columnPayload) return;
     event.preventDefault();
-    reorderColumn(columnPayload.columnID, null);
+    void reorderColumn(columnPayload.columnID, null);
   }, [reorderColumn]);
-
-  const addGroupField = useCallback((field: KanbanGroupField) => {
-    setGroupByFields((previous) => (previous.includes(field) ? previous : [...previous, field]));
-  }, []);
-
-  const removeGroupField = useCallback((field: KanbanGroupField) => {
-    setGroupByFields((previous) => previous.filter((item) => item !== field));
-    setCollapsedGroupKeys(new Set());
-  }, []);
-
-  const toggleVisibleAttribute = useCallback((attribute: KanbanVisibleAttribute) => {
-    setVisibleAttributes((previous) => {
-      const next = new Set(previous);
-      if (next.has(attribute)) {
-        next.delete(attribute);
-      } else {
-        next.add(attribute);
-      }
-      return next;
-    });
-  }, []);
-
-  const toggleGroupCollapsed = useCallback((key: string) => {
-    setCollapsedGroupKeys((previous) => {
-      const next = new Set(previous);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
-  }, []);
 
   const toggleCardExpanded = useCallback((cardID: string) => {
     setExpandedCardIDs((previous) => {
@@ -373,20 +347,14 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     });
   }, []);
 
-  const renderAttribute = (card: KanbanCard, attribute: KanbanVisibleAttribute): React.ReactNode => {
-    if (attribute === "status_age") return `${KANBAN_VISIBLE_ATTRIBUTE_LABELS[attribute]} ${formatKanbanStatusAge(card)}`;
-    const value = getKanbanCardFieldValue(card, attribute, columnTitleByID);
-    if (!value.trim()) return null;
-    const displayValue = attribute === "item_type" ? getKanbanGroupLabel("item_type", value, columnTitleByID) : value;
-    return `${KANBAN_VISIBLE_ATTRIBUTE_LABELS[attribute]} ${displayValue}`;
-  };
-
   const renderCard = (card: KanbanCard): React.ReactNode => {
     const highlighted = highlightedEntity?.itemType === card.item_type && highlightedEntity.itemID === card.item_id;
     const expanded = expandedCardIDs.has(card.card_id);
     const description = (card.description_snapshot ?? "").trim();
-    const color = getKanbanConditionalColor(card, colorBy, columnTitleByID);
-    const attributes = visibleAttributeList.map((attribute) => ({ attribute, value: renderAttribute(card, attribute) })).filter((item) => item.value);
+    const color = getKanbanConditionalColor(card);
+    const attributes = KANBAN_CARD_SUMMARY_ATTRIBUTES
+      .map((attribute) => ({ attribute, value: getKanbanCardSummaryAttributeValue(card, attribute) }))
+      .filter((item) => item.value.trim());
     return (
       <article
         key={card.card_id}
@@ -427,7 +395,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 5 }}>
             {attributes.map(({ attribute, value }) => (
               <span key={attribute} style={{ border: `1px solid ${line}`, color: subtext, fontSize: 10, fontWeight: 700, padding: "2px 5px", overflowWrap: "anywhere" }}>
-                {value}
+                {KANBAN_CARD_SUMMARY_ATTRIBUTE_LABELS[attribute]} {value}
               </span>
             ))}
           </div>
@@ -435,29 +403,6 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       </article>
     );
   };
-
-  const renderCardGroups = (groups: KanbanCardGroup[], depth = 0): React.ReactNode => (
-    <div style={{ display: "grid", alignContent: "start", gap: 8 }}>
-      {groups.map((group) => (
-        <section key={group.key} style={{ border: `1px solid ${line}`, background: depth % 2 === 0 ? "rgba(127,127,127,0.04)" : "transparent" }}>
-          <button
-            type="button"
-            onClick={() => toggleGroupCollapsed(group.key)}
-            style={{ width: "100%", minHeight: 30, display: "grid", gridTemplateColumns: "18px minmax(0, 1fr) auto", alignItems: "center", gap: 6, border: "none", borderBottom: group.collapsed ? "none" : `1px solid ${line}`, background: "transparent", color: text, cursor: "pointer", padding: "5px 7px", textAlign: "left" }}
-          >
-            <span style={{ color: subtext, fontSize: 11 }}>{group.collapsed ? ">" : "v"}</span>
-            <span style={{ minWidth: 0, fontSize: 11, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{group.label}</span>
-            <span style={{ color: subtext, fontSize: 10, fontWeight: 800 }}>{group.count}</span>
-          </button>
-          {!group.collapsed && (
-            <div style={{ display: "grid", alignContent: "start", gap: 8, padding: 7 }}>
-              {group.groups.length > 0 ? renderCardGroups(group.groups, depth + 1) : group.cards.map((card) => renderCard(card))}
-            </div>
-          )}
-        </section>
-      ))}
-    </div>
-  );
 
   return (
     <div
@@ -469,160 +414,85 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       <div style={{ height: "100%", overflow: "auto", padding: "12px 12px 14px", boxSizing: "border-box" }}>
         {error && <div style={{ marginBottom: 8, color: "#c62828", fontSize: 11, fontWeight: 700 }}>{error}</div>}
         {loading && <div style={{ color: subtext, fontSize: 12 }}>Loading board...</div>}
-        <div style={{ display: "grid", gap: 8, marginBottom: 10, borderBottom: `1px solid ${line}`, paddingBottom: 10 }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-            {groupByFields.map((field) => (
-              <button
-                key={field}
-                type="button"
-                title="Remove group"
-                onClick={() => removeGroupField(field)}
-                style={{ minHeight: 28, border: `1px solid ${line}`, background: "transparent", color: text, cursor: "pointer", fontSize: 11, fontWeight: 800, padding: "0 8px" }}
-              >
-                {KANBAN_GROUP_FIELD_LABELS[field]} x
-              </button>
-            ))}
-            <select
-              aria-label="Add group"
-              value=""
-              onChange={(event) => {
-                const value = event.target.value as KanbanGroupField;
-                if (value) addGroupField(value);
-              }}
-              style={{ minHeight: 28, border: `1px solid ${line}`, background: surface, color: text, fontSize: 11, fontWeight: 700 }}
-            >
-              <option value="">Group</option>
-              {KANBAN_GROUP_FIELDS.filter((field) => !groupByFields.includes(field)).map((field) => (
-                <option key={field} value={field}>{KANBAN_GROUP_FIELD_LABELS[field]}</option>
-              ))}
-            </select>
-            <select
-              aria-label="Filter field"
-              value={filterField}
-              onChange={(event) => setFilterField(event.target.value as KanbanFilter["field"])}
-              style={{ minHeight: 28, border: `1px solid ${line}`, background: surface, color: text, fontSize: 11, fontWeight: 700 }}
-            >
-              {(["title_snapshot", "status", "work_type", "assigned_to", "assigned_by", "item_type"] as KanbanFilter["field"][]).map((field) => (
-                <option key={field} value={field}>{field === "title_snapshot" ? "Title" : field.replace(/_/g, " ")}</option>
-              ))}
-            </select>
-            <input
-              aria-label="Filter value"
-              value={filterValue}
-              onChange={(event) => setFilterValue(event.target.value)}
-              placeholder="Filter"
-              style={{ minHeight: 28, width: 150, minWidth: 0, border: `1px solid ${line}`, background: surface, color: text, fontSize: 11, padding: "0 8px", boxSizing: "border-box" }}
-            />
-            <select
-              aria-label="Sort field"
-              value={sortField}
-              onChange={(event) => setSortField(event.target.value as KanbanSortField)}
-              style={{ minHeight: 28, border: `1px solid ${line}`, background: surface, color: text, fontSize: 11, fontWeight: 700 }}
-            >
-              {KANBAN_SORT_FIELDS.map((field) => (
-                <option key={field} value={field}>{KANBAN_SORT_FIELD_LABELS[field]}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              title="Toggle sort direction"
-              onClick={() => setSortDirection((previous) => (previous === "asc" ? "desc" : "asc"))}
-              style={{ width: 36, minHeight: 28, border: `1px solid ${line}`, background: "transparent", color: text, cursor: "pointer", fontSize: 11, fontWeight: 800 }}
-            >
-              {sortDirection === "asc" ? "AZ" : "ZA"}
-            </button>
-            <select
-              aria-label="Color by"
-              value={colorBy}
-              onChange={(event) => setColorBy(event.target.value as KanbanGroupField)}
-              style={{ minHeight: 28, border: `1px solid ${line}`, background: surface, color: text, fontSize: 11, fontWeight: 700 }}
-            >
-              {KANBAN_GROUP_FIELDS.map((field) => (
-                <option key={field} value={field}>{KANBAN_GROUP_FIELD_LABELS[field]}</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {KANBAN_VISIBLE_ATTRIBUTES.map((attribute) => (
-              <label key={attribute} style={{ display: "inline-flex", alignItems: "center", gap: 5, color: subtext, fontSize: 10, fontWeight: 800 }}>
-                <input
-                  type="checkbox"
-                  checked={visibleAttributes.has(attribute)}
-                  onChange={() => toggleVisibleAttribute(attribute)}
-                  style={{ width: 14, height: 14 }}
-                />
-                {KANBAN_VISIBLE_ATTRIBUTE_LABELS[attribute]}
-              </label>
-            ))}
-          </div>
-        </div>
-        {effectiveGroupBy[0] !== "column_id" ? (
-          <div style={{ display: "flex", alignItems: "stretch", gap: 10, minHeight: "100%" }}>
-            {rootGroups.map((group) => (
-              <section key={group.key} style={{ flex: "0 0 280px", minHeight: "100%", background: laneBackground, border: `1px solid ${laneBorder}`, boxShadow: laneShadow, display: "grid", gridTemplateRows: "42px minmax(0, 1fr)" }}>
-                <button
-                  type="button"
-                  onClick={() => toggleGroupCollapsed(group.key)}
-                  style={{ display: "grid", gridTemplateColumns: "24px minmax(0, 1fr) auto", alignItems: "center", gap: 6, border: "none", borderBottom: group.collapsed ? "none" : `1px solid ${line}`, background: "transparent", color: text, cursor: "pointer", padding: "0 8px", textAlign: "left" }}
-                >
-                  <span style={{ color: subtext, fontSize: 11 }}>{group.collapsed ? ">" : "v"}</span>
-                  <span style={{ minWidth: 0, fontSize: 12, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{group.label}</span>
-                  <span style={{ color: subtext, fontSize: 10, fontWeight: 800 }}>{group.count}</span>
-                </button>
-                {!group.collapsed && (
-                  <div style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 8, padding: 8 }}>
-                    {group.groups.length > 0 ? renderCardGroups(group.groups, 1) : group.cards.map((card) => renderCard(card))}
-                  </div>
-                )}
-              </section>
-            ))}
-          </div>
-        ) : (
-        <div style={{ display: "flex", alignItems: "stretch", gap: 10, minHeight: "100%" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX + 18, paddingBottom: 16 }}>
           {orderedColumns.map((column) => {
             const columnCards = cardsByColumn.get(column.column_id) ?? [];
             const columnWidth = getColumnWidth(column);
-            const nestedGroupFields = effectiveGroupBy.filter((field) => field !== "column_id");
-            const nestedGroups = buildKanbanCardGroups(columnCards, nestedGroupFields, collapsedGroupKeys, columnTitleByID, `column_id=${column.column_id}`);
+            const columnHeight = getColumnHeight(column);
+            const insertBefore = dragOverColumn?.columnID === column.column_id && dragOverColumn.placement === "before";
+            const insertAfter = dragOverColumn?.columnID === column.column_id && dragOverColumn.placement === "after";
+            const insertionShadow = insertBefore ? `-3px 0 0 ${accent}` : insertAfter ? `3px 0 0 ${accent}` : "";
+            const columnShadow = insertionShadow ? (laneShadow === "none" ? insertionShadow : `${insertionShadow}, ${laneShadow}`) : laneShadow;
             return (
               <section
                 key={column.column_id}
-                onDragOver={(event) => event.preventDefault()}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  if (dataTransferIncludes(event, KANBAN_COLUMN_DRAG_MIME) && draggingColumnID !== column.column_id) {
+                    setDragOverColumn({ columnID: column.column_id, placement: columnDropPlacement(event) });
+                  }
+                }}
+                onDragLeave={() => setDragOverColumn((previous) => (previous?.columnID === column.column_id ? null : previous))}
                 onDrop={(event) => onDropColumn(event, column.column_id)}
-                style={{ position: "relative", flex: `0 0 ${columnWidth}px`, minHeight: "100%", background: laneBackground, border: `1px solid ${laneBorder}`, boxShadow: laneShadow, display: "grid", gridTemplateRows: "42px minmax(0, 1fr)", opacity: draggingColumnID === column.column_id ? 0.72 : 1 }}
+                style={{
+                  position: "relative",
+                  flex: `0 0 ${columnWidth}px`,
+                  height: columnHeight,
+                  minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX / 2,
+                  background: laneBackground,
+                  border: `1px solid ${laneBorder}`,
+                  boxShadow: columnShadow,
+                  display: "grid",
+                  gridTemplateRows: "42px minmax(0, 1fr)",
+                  opacity: draggingColumnID === column.column_id ? 0.72 : 1,
+                }}
               >
                 <div
-                  draggable
+                  draggable={editingColumnID !== column.column_id}
                   onDragStart={(event) => {
+                    if (editingColumnID === column.column_id) return;
                     setDraggingColumnID(column.column_id);
                     event.dataTransfer.effectAllowed = "move";
                     event.dataTransfer.setData(KANBAN_COLUMN_DRAG_MIME, JSON.stringify({ columnID: column.column_id }));
                   }}
-                  onDragEnd={() => setDraggingColumnID("")}
-                  style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${line}`, cursor: "grab" }}
+                  onDragEnd={() => {
+                    setDraggingColumnID("");
+                    setDragOverColumn(null);
+                  }}
+                  style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${line}`, cursor: editingColumnID === column.column_id ? "default" : "grab" }}
                 >
-                  <span aria-hidden="true" style={{ color: subtext, fontSize: 16, lineHeight: 1, textAlign: "center" }}>⋮</span>
-                  <input
-                    value={column.title}
-                    autoFocus={editingColumnID === column.column_id}
-                    draggable={false}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setColumns((previous) => previous.map((item) => (item.column_id === column.column_id ? { ...item, title: value } : item)));
-                    }}
-                    onBlur={(event) => commitColumnTitle(column.column_id, event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") event.currentTarget.blur();
-                      if (event.key === "Escape") {
-                        setEditingColumnID("");
-                        void refreshBoard();
-                      }
-                    }}
-                    // Column titles are user-authored board data. Preserve casing here so
-                    // the UI does not silently change meaning or naming conventions.
-                    style={{ height: 40, width: "100%", minWidth: 0, border: "none", background: "transparent", color: text, fontSize: 12, fontWeight: 800, padding: "0 5px", outline: "none", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM }}
-                  />
+                  <span aria-hidden="true" style={{ color: subtext, fontSize: 15, lineHeight: 1, textAlign: "center" }}>::</span>
+                  {editingColumnID === column.column_id ? (
+                    <input
+                      value={column.title}
+                      autoFocus
+                      draggable={false}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setColumns((previous) => previous.map((item) => (item.column_id === column.column_id ? { ...item, title: value } : item)));
+                      }}
+                      onBlur={(event) => commitColumnTitle(column.column_id, event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") event.currentTarget.blur();
+                        if (event.key === "Escape") {
+                          setEditingColumnID("");
+                          void refreshBoard();
+                        }
+                      }}
+                      // Column titles are user-authored board data. Preserve casing so
+                      // names keep the exact meaning users and agents assigned.
+                      style={{ height: 40, width: "100%", minWidth: 0, border: "none", background: "transparent", color: text, fontSize: 12, fontWeight: 800, padding: "0 5px", outline: "none", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM }}
+                    />
+                  ) : (
+                    <div
+                      title={column.title}
+                      onDoubleClick={() => setEditingColumnID(column.column_id)}
+                      style={{ minWidth: 0, color: text, fontSize: 12, fontWeight: 800, padding: "0 5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM }}
+                    >
+                      {column.title}
+                    </div>
+                  )}
                   <button
                     title="Delete column"
                     type="button"
@@ -630,20 +500,47 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
                     onClick={() => void removeColumn(column.column_id)}
                     style={{ width: 28, height: 28, border: "none", background: "transparent", color: subtext, cursor: "pointer", fontSize: 20, lineHeight: 1 }}
                   >
-                    ×
+                    x
                   </button>
                 </div>
                 <div style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 8, padding: 8 }}>
-                  {nestedGroups.length > 0 ? renderCardGroups(nestedGroups, 1) : columnCards.map((card) => renderCard(card))}
+                  {columnCards.map((card) => renderCard(card))}
                 </div>
                 <div
-                  title="Resize column"
+                  title="Resize column width"
                   onMouseDown={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    resizeRef.current = { columnID: column.column_id, startX: event.clientX, startWidth: columnWidth };
+                    resizeRef.current = {
+                      axis: "width",
+                      columnID: column.column_id,
+                      startX: event.clientX,
+                      startY: event.clientY,
+                      startWidth: columnWidth,
+                      startHeight: columnHeight,
+                      currentWidth: columnWidth,
+                      currentHeight: columnHeight,
+                    };
                   }}
                   style={{ position: "absolute", top: 0, right: -4, bottom: 0, width: 8, cursor: "col-resize", zIndex: 2 }}
+                />
+                <div
+                  title="Resize column height"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    resizeRef.current = {
+                      axis: "height",
+                      columnID: column.column_id,
+                      startX: event.clientX,
+                      startY: event.clientY,
+                      startWidth: columnWidth,
+                      startHeight: columnHeight,
+                      currentWidth: columnWidth,
+                      currentHeight: columnHeight,
+                    };
+                  }}
+                  style={{ position: "absolute", left: 0, right: 0, bottom: -4, height: 8, cursor: "row-resize", zIndex: 2 }}
                 />
               </section>
             );
@@ -652,16 +549,33 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             type="button"
             title="Add column"
             onClick={() => void addColumn()}
+            onMouseEnter={() => setAddColumnHover(true)}
+            onMouseLeave={() => setAddColumnHover(false)}
             onDragOver={(event) => {
-              if (event.dataTransfer.types.includes(KANBAN_COLUMN_DRAG_MIME)) event.preventDefault();
+              if (dataTransferIncludes(event, KANBAN_COLUMN_DRAG_MIME)) event.preventDefault();
             }}
             onDrop={onDropAtEnd}
-            style={{ flex: "0 0 92px", minHeight: "100%", border: `1px dashed ${laneBorder}`, background: "transparent", color: accent, cursor: "pointer", display: "grid", placeItems: "center", fontSize: 42, lineHeight: 1 }}
+            style={{
+              flex: "0 0 72px",
+              width: 72,
+              height: 72,
+              border: "1.5px solid #111111",
+              background: "#ffffff",
+              color: "#111111",
+              cursor: "pointer",
+              display: "grid",
+              placeItems: "center",
+              fontSize: 34,
+              fontWeight: 500,
+              lineHeight: 1,
+              boxShadow: addColumnHover ? "0 8px 18px rgba(16,24,40,0.18)" : "none",
+              transition: "box-shadow 120ms ease, transform 120ms ease",
+              transform: addColumnHover ? "translateY(-1px)" : "none",
+            }}
           >
             +
           </button>
         </div>
-        )}
       </div>
     </div>
   );

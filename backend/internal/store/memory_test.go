@@ -99,7 +99,7 @@ func TestMemoryRepo_DeleteNode_RemovesKanbanCardsAndKeepsOperations(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateNode failed: %v", err)
 	}
-	column, err := repo.CreateKanbanColumn(companyID, boardID, "Ready", 0, 260)
+	column, err := repo.CreateKanbanColumn(companyID, boardID, "Ready", 0, 260, 240)
 	if err != nil {
 		t.Fatalf("CreateKanbanColumn failed: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestMemoryRepo_DeleteLogicGate_RemovesKanbanCardsAndKeepsOperations(t *test
 	if err != nil {
 		t.Fatalf("CreateLogicGate failed: %v", err)
 	}
-	column, err := repo.CreateKanbanColumn(companyID, boardID, "Ready", 0, 260)
+	column, err := repo.CreateKanbanColumn(companyID, boardID, "Ready", 0, 260, 240)
 	if err != nil {
 		t.Fatalf("CreateKanbanColumn failed: %v", err)
 	}

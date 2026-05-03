@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,7 +49,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/logic-gate-relationships/", s.handleLogicGateRelationshipByID)
 	mux.HandleFunc("/v1/operations", s.handleOperations)
 	mux.HandleFunc("/v1/operations/", s.handleOperationByID)
-	mux.HandleFunc("/v1/kanban/query", s.handleKanbanQuery)
 	mux.HandleFunc("/v1/kanban/columns", s.handleKanbanColumns)
 	mux.HandleFunc("/v1/kanban/columns/", s.handleKanbanColumnByID)
 	mux.HandleFunc("/v1/kanban/cards", s.handleKanbanCards)
@@ -1315,6 +1313,11 @@ func parseKanbanCardQueryParams(r *http.Request) (store.KanbanCardQuery, bool, s
 		ColumnID: strings.TrimSpace(r.URL.Query().Get("column_id")),
 		Limit:    limit,
 	}
+	for _, unsupported := range []string{"item_type", "status", "work_type", "assigned_to", "assigned_by", "title_prefix", "sort", "sort_dir"} {
+		if r.URL.Query().Has(unsupported) {
+			return store.KanbanCardQuery{}, false, "unsupported_kanban_card_query_param"
+		}
+	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("after_position")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 0 {
@@ -1322,244 +1325,7 @@ func parseKanbanCardQueryParams(r *http.Request) (store.KanbanCardQuery, bool, s
 		}
 		query.AfterPosition = parsed
 	}
-	for _, field := range []string{"item_type", "status", "work_type", "assigned_to", "assigned_by"} {
-		value := strings.TrimSpace(r.URL.Query().Get(field))
-		if value == "" {
-			continue
-		}
-		query.Filters = append(query.Filters, store.KanbanCardFilter{Field: field, Op: "eq", Value: value})
-	}
-	if titlePrefix := strings.TrimSpace(r.URL.Query().Get("title_prefix")); titlePrefix != "" {
-		query.Filters = append(query.Filters, store.KanbanCardFilter{Field: "title_snapshot", Op: "prefix", Value: titlePrefix})
-	}
-	sortField := strings.TrimSpace(r.URL.Query().Get("sort"))
-	if sortField != "" {
-		if !store.IsKanbanCardSortField(sortField) {
-			return store.KanbanCardQuery{}, false, "invalid_sort"
-		}
-		query.Sort = append(query.Sort, store.KanbanCardSort{
-			Field:     sortField,
-			Direction: strings.TrimSpace(r.URL.Query().Get("sort_dir")),
-		})
-	}
 	return query, true, ""
-}
-
-type kanbanQueryFilterRequest struct {
-	Field string `json:"field"`
-	Op    string `json:"op"`
-	Value string `json:"value"`
-}
-
-type kanbanQuerySortRequest struct {
-	Field     string `json:"field"`
-	Direction string `json:"direction"`
-}
-
-type kanbanQueryRequest struct {
-	CompanyID         string                     `json:"company_id"`
-	BoardID           string                     `json:"board_id"`
-	ColumnID          string                     `json:"column_id"`
-	AfterPosition     int                        `json:"after_position"`
-	Limit             int                        `json:"limit"`
-	Filters           []kanbanQueryFilterRequest `json:"filters"`
-	Sort              []kanbanQuerySortRequest   `json:"sort"`
-	GroupBy           []string                   `json:"group_by"`
-	VisibleAttributes []string                   `json:"visible_attributes"`
-	CollapsedGroups   []string                   `json:"collapsed_groups"`
-}
-
-type kanbanQueryGroup struct {
-	Key       string              `json:"key"`
-	Field     string              `json:"field"`
-	Value     string              `json:"value"`
-	Label     string              `json:"label"`
-	Count     int                 `json:"count"`
-	Collapsed bool                `json:"collapsed"`
-	Groups    []kanbanQueryGroup  `json:"groups,omitempty"`
-	Cards     []domain.KanbanCard `json:"cards,omitempty"`
-}
-
-func isKanbanVisibleAttribute(value string) bool {
-	return value == "status_age" || store.IsKanbanCardQueryField(value)
-}
-
-func sanitizeKanbanGroupFields(fields []string) ([]string, bool) {
-	if len(fields) > 8 {
-		return nil, false
-	}
-	out := make([]string, 0, len(fields))
-	seen := map[string]bool{}
-	for _, field := range fields {
-		field = strings.TrimSpace(field)
-		if field == "" {
-			continue
-		}
-		if !store.IsKanbanCardQueryField(field) || seen[field] {
-			return nil, false
-		}
-		seen[field] = true
-		out = append(out, field)
-	}
-	if len(out) == 0 {
-		out = []string{"column_id"}
-	}
-	return out, true
-}
-
-func sanitizeKanbanVisibleAttributes(fields []string) ([]string, bool) {
-	if len(fields) > 16 {
-		return nil, false
-	}
-	out := make([]string, 0, len(fields))
-	seen := map[string]bool{}
-	for _, field := range fields {
-		field = strings.TrimSpace(field)
-		if field == "" {
-			continue
-		}
-		if !isKanbanVisibleAttribute(field) || seen[field] {
-			return nil, false
-		}
-		seen[field] = true
-		out = append(out, field)
-	}
-	return out, true
-}
-
-func buildKanbanQueryGroups(cards []domain.KanbanCard, groupBy []string, collapsed map[string]bool, prefix string) []kanbanQueryGroup {
-	if len(groupBy) == 0 {
-		return nil
-	}
-	field := groupBy[0]
-	buckets := map[string][]domain.KanbanCard{}
-	order := make([]string, 0)
-	for _, card := range cards {
-		value := store.KanbanCardFieldValue(card, field)
-		if _, ok := buckets[value]; !ok {
-			order = append(order, value)
-		}
-		buckets[value] = append(buckets[value], card)
-	}
-	sort.Strings(order)
-
-	groups := make([]kanbanQueryGroup, 0, len(order))
-	for _, value := range order {
-		key := field + "=" + value
-		if prefix != "" {
-			key = prefix + "|" + key
-		}
-		label := value
-		if strings.TrimSpace(label) == "" {
-			label = "Unassigned"
-		}
-		group := kanbanQueryGroup{
-			Key:       key,
-			Field:     field,
-			Value:     value,
-			Label:     label,
-			Count:     len(buckets[value]),
-			Collapsed: collapsed[key],
-		}
-		if !group.Collapsed {
-			if len(groupBy) == 1 {
-				group.Cards = buckets[value]
-			} else {
-				group.Groups = buildKanbanQueryGroups(buckets[value], groupBy[1:], collapsed, key)
-			}
-		}
-		groups = append(groups, group)
-	}
-	return groups
-}
-
-func (s *Server) handleKanbanQuery(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-	var req kanbanQueryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
-		return
-	}
-	req.CompanyID = strings.TrimSpace(req.CompanyID)
-	req.BoardID = strings.TrimSpace(req.BoardID)
-	req.ColumnID = strings.TrimSpace(req.ColumnID)
-	if req.CompanyID == "" || req.BoardID == "" {
-		writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
-		return
-	}
-	// Keep this endpoint a bounded card-window query. Whole-board analytics for
-	// millions of cards should use a separate aggregate projection, not a UI read.
-	groupBy, ok := sanitizeKanbanGroupFields(req.GroupBy)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid_group_by")
-		return
-	}
-	visibleAttributes, ok := sanitizeKanbanVisibleAttributes(req.VisibleAttributes)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid_visible_attributes")
-		return
-	}
-
-	query := store.KanbanCardQuery{
-		ColumnID:      req.ColumnID,
-		AfterPosition: req.AfterPosition,
-		Limit:         req.Limit,
-	}
-	for _, filter := range req.Filters {
-		next := store.KanbanCardFilter{
-			Field: strings.TrimSpace(filter.Field),
-			Op:    strings.TrimSpace(filter.Op),
-			Value: strings.TrimSpace(filter.Value),
-		}
-		if next.Op == "" {
-			next.Op = "eq"
-		}
-		if !store.IsKanbanCardFilterSupported(next) {
-			writeError(w, http.StatusBadRequest, "invalid_filter")
-			return
-		}
-		query.Filters = append(query.Filters, next)
-	}
-	for _, sortSpec := range req.Sort {
-		next := store.KanbanCardSort{
-			Field:     strings.TrimSpace(sortSpec.Field),
-			Direction: strings.TrimSpace(sortSpec.Direction),
-		}
-		if !store.IsKanbanCardSortField(next.Field) {
-			writeError(w, http.StatusBadRequest, "invalid_sort")
-			return
-		}
-		query.Sort = append(query.Sort, next)
-	}
-	items, err := s.repo.ListKanbanCards(req.CompanyID, req.BoardID, query)
-	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_kanban_query")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_query_kanban_cards")
-		return
-	}
-
-	collapsed := map[string]bool{}
-	for _, key := range req.CollapsedGroups {
-		key = strings.TrimSpace(key)
-		if key != "" {
-			collapsed[key] = true
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"company_id":         req.CompanyID,
-		"board_id":           req.BoardID,
-		"limit":              store.NormalizeKanbanCardQuery(query).Limit,
-		"group_by":           groupBy,
-		"visible_attributes": visibleAttributes,
-		"cards":              items,
-		"groups":             buildKanbanQueryGroups(items, groupBy, collapsed, ""),
-	})
 }
 
 func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
@@ -1589,6 +1355,7 @@ func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
 		Title     string `json:"title"`
 		Position  int    `json:"position"`
 		WidthPx   int    `json:"width_px"`
+		HeightPx  int    `json:"height_px"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
@@ -1601,7 +1368,7 @@ func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_board_id_and_title_required")
 		return
 	}
-	item, err := s.repo.CreateKanbanColumn(req.CompanyID, req.BoardID, req.Title, req.Position, req.WidthPx)
+	item, err := s.repo.CreateKanbanColumn(req.CompanyID, req.BoardID, req.Title, req.Position, req.WidthPx, req.HeightPx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_kanban_column")
 		return
@@ -1627,6 +1394,7 @@ func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) 
 			Title     string `json:"title"`
 			Position  int    `json:"position"`
 			WidthPx   int    `json:"width_px"`
+			HeightPx  int    `json:"height_px"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
@@ -1639,7 +1407,7 @@ func (s *Server) handleKanbanColumnByID(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
 			return
 		}
-		item, err := s.repo.UpdateKanbanColumn(req.CompanyID, req.BoardID, columnID, req.Title, req.Position, req.WidthPx)
+		item, err := s.repo.UpdateKanbanColumn(req.CompanyID, req.BoardID, columnID, req.Title, req.Position, req.WidthPx, req.HeightPx)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "kanban_column_not_found")
 			return

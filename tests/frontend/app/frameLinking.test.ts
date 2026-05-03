@@ -6,7 +6,7 @@ import type { FrameDataModel } from "../../../frontend/src/types.js";
 const map: FrameDataModel = { id: "map-1", kind: "nodes-map", title: "Node Map", x: 0, y: 0, w: 8, h: 8, color: "#fff", accent: "#111" };
 const editor: FrameDataModel = { id: "editor-1", kind: "editor", title: "Editor", x: 0, y: 0, w: 8, h: 8, color: "#fff", accent: "#111" };
 const explorer: FrameDataModel = { id: "explorer-1", kind: "company-explorer", title: "Company Explorer", x: 0, y: 0, w: 8, h: 8, color: "#fff", accent: "#111" };
-const kanban: FrameDataModel = { id: "kanban-1", kind: "kanban", title: "Kanban", x: 0, y: 0, w: 8, h: 8, color: "#fff", accent: "#111" };
+const kanban: FrameDataModel = { id: "kanban-1", kind: "kanban", title: "Kanban board", x: 0, y: 0, w: 8, h: 8, color: "#fff", accent: "#111" };
 
 test("link menu label falls back to no-other-selected when only one frame is in pool", () => {
   const label = buildLinkModulesLabel([map], null);
