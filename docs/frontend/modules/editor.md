@@ -44,14 +44,14 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 - Saves are serialized per editor instance. If a save is in flight, the editor queues only the latest follow-up value, preserving user-perceived order without flooding the API.
 - The editor surface owns the full frame height. This prevents the textarea viewport from collapsing to a thin strip and lets mouse-wheel scrolling behave like a regular text editor.
 - Selecting a linked node or logic gate switches back to the Editor tab and focuses the document so the caret starts blinking immediately.
-- Enter is native textarea Enter. Tab inserts seven plain spaces; there is no automatic list or outline formatting in this pass.
+- Enter is native textarea Enter. Tab inserts five plain spaces; there is no automatic list or outline formatting in this pass.
 - Clearing all text calls the projection delete API. This keeps reload behavior correct while preserving append-only nonblank history for audit and scale.
 - The same APIs work for headless agents: agents can post latest document text with a stable `information_id`, read projections for sub-100ms hot paths, and delete a projection to clear the latest document value.
 
 ## Approved Editor Feel
 - Keep the editor feeling like this: a simple, fast, native text document surface with immediate caret focus after linked selection, natural typing, native Enter/new-line behavior, vertical mouse-wheel scrolling, and projection-backed autosave.
 - Do not add automatic bullets, numbered-list transforms, outline transforms, or rich-text behavior unless there is a specific future product decision and matching tests. The current plain-text behavior is the desired baseline.
-- Tab is intentionally seven literal spaces. This is UI-only text input behavior; the backend remains the same headless API contract for users and agents.
+- Tab is intentionally five literal spaces. This is UI-only text input behavior; the backend remains the same headless API contract for users and agents.
 
 ## Semantic vs layout persistence policy (2026-04-27)
 - Editor information values are persisted server-side and served through typed node/logic-gate projection rows for hot-path loads.
