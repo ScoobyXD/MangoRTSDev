@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { filterLogicGateGraphToFolderScope, filterNodeGraphToFolderScope, getFolderSubtreeIDs } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
+import { filterLogicGateGraphToFolderScope, filterNodeGraphToFolderScope, getFolderSubtreeIDs, resolveScopedMapSelectionFallback } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
 
 const folders = [
   { company_id: "c", folder_id: "folder-parent", folder_kind: "node" as const, name: "Parent", created_timestamp: "1", updated_timestamp: "1" },
@@ -54,4 +54,35 @@ test("logic gate folder scope uses logic_gate folder items only", () => {
 
   assert.deepEqual(scoped.nodes.map((node) => node.node_id), ["gate-a"]);
   assert.deepEqual(scoped.relationships, []);
+});
+
+test("scoped map selection keeps Explorer click during folder projection handoff", () => {
+  const fallback = resolveScopedMapSelectionFallback({
+    selectedID: "child-node-8",
+    visibleItemIDs: ["parent-node-1", "parent-node-2"],
+    knownItemIDs: ["parent-node-1", "parent-node-2", "child-node-8"],
+    explorerRequestedID: "child-node-8",
+  });
+
+  assert.equal(fallback, null);
+});
+
+test("scoped map selection does not invent a fallback for hidden but known items", () => {
+  const fallback = resolveScopedMapSelectionFallback({
+    selectedID: "child-node-8",
+    visibleItemIDs: ["parent-node-1", "parent-node-2"],
+    knownItemIDs: ["parent-node-1", "parent-node-2", "child-node-8"],
+  });
+
+  assert.equal(fallback, null);
+});
+
+test("scoped map selection falls back only when selected item is gone", () => {
+  const fallback = resolveScopedMapSelectionFallback({
+    selectedID: "deleted-node",
+    visibleItemIDs: ["parent-node-1", "parent-node-2"],
+    knownItemIDs: ["parent-node-1", "parent-node-2"],
+  });
+
+  assert.equal(fallback, "parent-node-1");
 });

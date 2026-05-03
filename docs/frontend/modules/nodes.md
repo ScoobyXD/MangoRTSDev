@@ -377,6 +377,7 @@ Linked Company Explorer frames consume those selection events and map-state upda
 When an event payload already includes `selectedNodeID`, linked Company Explorer applies that payload directly. The debounced `node-map-state-v1:*` value is only a fallback for selection events without an entity payload, so stale storage cannot overwrite a fresh Explorer-driven map selection.
 When Node Map emits a selection after applying Company Explorer context, it includes `sourceExplorerID`; the originating Explorer ignores that self-echo, while other linked explorers can still consume the event. Empty Explorer context clears Node Map folder scope and selection, which keeps parent/root folder selection from falling back to a previous child node.
 Node Map also suppresses cached selection emission while a newer Explorer context is pending in storage. This prevents a remounted unified Map from broadcasting an old cached node before it applies the Explorer click that caused the mode/scope change.
+When Company Explorer selects a node in a different folder, Node Map preserves that Explorer-selected ID while the active folder projection catches up. It only falls back to the first visible node when the selected ID is absent from the known graph snapshot, so a scoped render tick cannot turn an Explorer click into a stale map-originated selection event.
 
 Layout safety note:
 - Node graph cache delta reducers must preserve `node_map_positions`; only a deleted node should remove its own position.
