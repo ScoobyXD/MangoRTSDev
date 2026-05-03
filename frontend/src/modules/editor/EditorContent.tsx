@@ -13,6 +13,7 @@ import { EDITOR_TAB_ITEMS, getEditorDocumentIsolationState, type EditorTabID } f
 import { classifyEditorInputType, createEditorUndoHistory, recordEditorUndoChange, redoEditorText, resetEditorUndoHistory, snapshotEditorText, snapshotEditorTextArea, undoEditorText, type EditorTextChangeKind, type EditorTextSnapshot } from "./editorUndoHistory";
 import { DEFAULT_EDITOR_OUTLINE_STYLE, EDITOR_TAB_TEXT, insertEditorEnterText, insertEditorTabText, isEditorOutlineStyleID, type EditorOutlineStyleID } from "./plainTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
+import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
 
 type LinkedEntityKind = "node" | "logic_gate";
 
@@ -57,6 +58,9 @@ const EDITOR_OUTLINE_STYLE_ITEMS: ReadonlyArray<{ id: EditorOutlineStyleID; labe
   { id: "automatic-outline-numbering", label: "Automatic Numbering" },
   { id: "indent-guides", label: "Indent Guides" },
 ];
+const EDITOR_DOCUMENT_FONT_SIZE_PX = 15;
+const EDITOR_DOCUMENT_LINE_HEIGHT = 1.55;
+const EDITOR_DOCUMENT_LINE_HEIGHT_PX = EDITOR_DOCUMENT_FONT_SIZE_PX * EDITOR_DOCUMENT_LINE_HEIGHT;
 
 // Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
@@ -76,6 +80,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
   const [outlineStyle, setOutlineStyle] = useState<EditorOutlineStyleID>(() => readStoredOutlineStyle(outlineStyleStorageKey));
+  const [documentScrollTop, setDocumentScrollTop] = useState(0);
+  const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const editingTitleRef = useRef<HTMLSpanElement | null>(null);
   const editingTitleDraftRef = useRef("");
@@ -83,6 +89,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const activeTabRef = useRef<EditorTabID>("editor");
   const restoringScrollRef = useRef(false);
   const scrollMemoryRef = useRef(createEditorScrollMemory());
+  const indentGuideFrameRef = useRef<number | null>(null);
   const documentDraftRef = useRef("");
   const persistedDocumentRef = useRef("");
   const documentInformationIDRef = useRef("");
@@ -111,6 +118,35 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [outlineStyle, outlineStyleStorageKey]);
 
+  const scheduleIndentGuideUpdate = useCallback((text: string) => {
+    if (indentGuideFrameRef.current !== null) {
+      window.cancelAnimationFrame(indentGuideFrameRef.current);
+      indentGuideFrameRef.current = null;
+    }
+    if (outlineStyle !== "indent-guides") {
+      setIndentGuideSegments((current) => current.length > 0 ? [] : current);
+      return;
+    }
+
+    // Guide calculation waits for the next frame so normal typing stays on the
+    // browser's native textarea path. The helper is pure, so API/headless edit
+    // commands can share the same indentation contract later.
+    indentGuideFrameRef.current = window.requestAnimationFrame(() => {
+      indentGuideFrameRef.current = null;
+      setIndentGuideSegments(buildEditorIndentGuideSegments(text, EDITOR_TAB_TEXT.length));
+    });
+  }, [outlineStyle]);
+
+  useEffect(() => {
+    scheduleIndentGuideUpdate(editorTextAreaRef.current?.value ?? documentDraftRef.current);
+    return () => {
+      if (indentGuideFrameRef.current !== null) {
+        window.cancelAnimationFrame(indentGuideFrameRef.current);
+        indentGuideFrameRef.current = null;
+      }
+    };
+  }, [outlineStyle, scheduleIndentGuideUpdate]);
+
   const rememberCurrentDocumentScroll = useCallback(() => {
     const targetKey = currentDocumentTargetKeyRef.current;
     const element = editorTextAreaRef.current;
@@ -122,7 +158,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     window.requestAnimationFrame(() => {
       const element = editorTextAreaRef.current;
       if (!element || currentDocumentTargetKeyRef.current !== targetKey) return;
-      element.scrollTop = scrollMemoryRef.current.read(targetKey) ?? 0;
+      const nextScrollTop = scrollMemoryRef.current.read(targetKey) ?? 0;
+      element.scrollTop = nextScrollTop;
+      setDocumentScrollTop(nextScrollTop);
     });
   }, []);
 
@@ -132,7 +170,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (!element) return;
       element.focus({ preventScroll: true });
       if (targetKey && currentDocumentTargetKeyRef.current === targetKey) {
-        element.scrollTop = scrollMemoryRef.current.read(targetKey) ?? element.scrollTop;
+        const nextScrollTop = scrollMemoryRef.current.read(targetKey) ?? element.scrollTop;
+        element.scrollTop = nextScrollTop;
+        setDocumentScrollTop(nextScrollTop);
       }
     });
   }, []);
@@ -304,13 +344,20 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     return after;
   }, []);
 
+  const applyDocumentTextToEditor = useCallback((nextText: string) => {
+    if (editorTextAreaRef.current) editorTextAreaRef.current.value = nextText;
+    scheduleDocumentSave(nextText);
+    scheduleIndentGuideUpdate(nextText);
+  }, [scheduleDocumentSave, scheduleIndentGuideUpdate]);
+
   const applyEditorUndoSnapshot = useCallback((element: HTMLTextAreaElement, snapshot: EditorTextSnapshot) => {
     element.value = snapshot.value;
     element.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
     lastEditorTextSnapshotRef.current = snapshot;
     pendingEditorInputKindRef.current = "unknown";
     scheduleDocumentSave(snapshot.value);
-  }, [scheduleDocumentSave]);
+    scheduleIndentGuideUpdate(snapshot.value);
+  }, [scheduleDocumentSave, scheduleIndentGuideUpdate]);
 
   const selectTab = useCallback((tab: EditorTabID) => {
     rememberCurrentDocumentScroll();
@@ -340,19 +387,22 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     persistedDocumentTargetKeyRef.current = targetKey;
     const element = editorTextAreaRef.current;
     restoringScrollRef.current = true;
+    const restoredScrollTop = scrollMemoryRef.current.read(targetKey) ?? 0;
     if (element) {
       if (element.value !== text) element.value = text;
       resetEditorTextUndo(text, element.selectionStart, element.selectionEnd);
-      element.scrollTop = scrollMemoryRef.current.read(targetKey) ?? 0;
+      element.scrollTop = restoredScrollTop;
     } else {
       resetEditorTextUndo(text);
     }
+    setDocumentScrollTop(restoredScrollTop);
+    scheduleIndentGuideUpdate(text);
     restoreEditorDocumentScroll(targetKey);
     window.requestAnimationFrame(() => {
       restoringScrollRef.current = false;
     });
     if (activeTabRef.current === "editor") focusEditorDocumentWithoutScrollJump(targetKey);
-  }, [focusEditorDocumentWithoutScrollJump, resetEditorTextUndo, restoreEditorDocumentScroll]);
+  }, [focusEditorDocumentWithoutScrollJump, resetEditorTextUndo, restoreEditorDocumentScroll, scheduleIndentGuideUpdate]);
 
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
@@ -673,6 +723,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         editorTextAreaRef.current.value = "";
         editorTextAreaRef.current.scrollTop = 0;
       }
+      setDocumentScrollTop(0);
+      scheduleIndentGuideUpdate("");
       return;
     }
     (async () => {
@@ -734,7 +786,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyLoadedDocument, companyID, linkedEntityKind, linkedNodeID]);
+  }, [apiBase, applyLoadedDocument, companyID, linkedEntityKind, linkedNodeID, scheduleIndentGuideUpdate]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
@@ -747,14 +799,13 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const scrollbarAccent = theme === "light" ? "rgb(0, 233, 255)" : accent;
   const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)";
   const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.12)" : "rgba(3,25,30,0.12)";
-  const indentGuideBackground = outlineStyle === "indent-guides"
-    ? `repeating-linear-gradient(to right, transparent 0, transparent calc(${EDITOR_TAB_TEXT.length}ch - 1px), ${indentGuideColor} calc(${EDITOR_TAB_TEXT.length}ch - 1px), ${indentGuideColor} ${EDITOR_TAB_TEXT.length}ch)`
-    : "none";
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
   const hasLinkedDocument = linkedNodeID.trim().length > 0;
+  const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
 
   return (
     <div
+      data-frame-interactive="true"
       onMouseDown={(event) => event.stopPropagation()}
       onTouchStart={(event) => event.stopPropagation()}
       style={{ width: "100%", height: "100%", position: "relative", background: surfaceBackground, color: surfaceText, overflow: "hidden", userSelect: "text", cursor: "text" }}
@@ -878,6 +929,44 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           </div>
         )}
 
+        {hasLinkedDocument && showIndentGuides && (
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              top: 86,
+              right: 0,
+              bottom: 0,
+              left: 0,
+              zIndex: 0,
+              visibility: documentIsolation.visibility,
+              pointerEvents: "none",
+              boxSizing: "border-box",
+              overflow: "hidden",
+              padding: "0 18px 24px 24px",
+              fontSize: EDITOR_DOCUMENT_FONT_SIZE_PX,
+              lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT,
+              fontFamily: "'Manrope', 'Helvetica Neue', sans-serif",
+            }}
+          >
+            <div style={{ position: "relative", transform: `translateY(-${documentScrollTop}px)` }}>
+              {indentGuideSegments.map((segment) => (
+                <div
+                  key={`${segment.depth}-${segment.lineStart}-${segment.lineEnd}`}
+                  style={{
+                    position: "absolute",
+                    top: segment.lineStart * EDITOR_DOCUMENT_LINE_HEIGHT_PX,
+                    left: `calc(${segment.depth * EDITOR_TAB_TEXT.length}ch - ${EDITOR_TAB_TEXT.length / 2}ch)`,
+                    height: Math.max(EDITOR_DOCUMENT_LINE_HEIGHT_PX, (segment.lineEnd - segment.lineStart + 1) * EDITOR_DOCUMENT_LINE_HEIGHT_PX),
+                    borderLeft: `1px solid ${indentGuideColor}`,
+                    opacity: 0.9,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         {hasLinkedDocument && (
           <textarea
           ref={editorTextAreaRef}
@@ -894,6 +983,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           onChange={(event) => {
             const snapshot = recordEditorTextChange(event.currentTarget);
             scheduleDocumentSave(snapshot.value);
+            scheduleIndentGuideUpdate(snapshot.value);
           }}
           onSelect={(event) => syncEditorTextSelectionSnapshot(event.currentTarget)}
           onClick={(event) => syncEditorTextSelectionSnapshot(event.currentTarget)}
@@ -907,6 +997,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             if (restoringScrollRef.current) return;
             const targetKey = currentDocumentTargetKeyRef.current;
             if (targetKey) scrollMemoryRef.current.remember(targetKey, event.currentTarget.scrollTop);
+            setDocumentScrollTop(event.currentTarget.scrollTop);
           }}
           onWheel={(event) => event.stopPropagation()}
           onKeyDown={(event) => {
@@ -930,12 +1021,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
               event.preventDefault();
               const before = snapshotEditorTextArea(event.currentTarget);
               const edit = insertEditorEnterText(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd, outlineStyle);
-              event.currentTarget.value = edit.value;
+              applyDocumentTextToEditor(edit.value);
               event.currentTarget.setSelectionRange(edit.selectionStart, edit.selectionEnd);
               recordEditorUndoChange(editorUndoHistoryRef.current, before, snapshotEditorTextArea(event.currentTarget), "lineBreak");
               lastEditorTextSnapshotRef.current = snapshotEditorTextArea(event.currentTarget);
               pendingEditorInputKindRef.current = "unknown";
-              scheduleDocumentSave(edit.value);
               return;
             }
             if (event.key !== "Tab") return;
@@ -945,12 +1035,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             // isolated editor edit group so one undo removes only this Tab.
             const before = snapshotEditorTextArea(event.currentTarget);
             const edit = insertEditorTabText(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
-            event.currentTarget.value = edit.value;
+            applyDocumentTextToEditor(edit.value);
             event.currentTarget.setSelectionRange(edit.selectionStart, edit.selectionEnd);
             recordEditorUndoChange(editorUndoHistoryRef.current, before, snapshotEditorTextArea(event.currentTarget), "tab");
             lastEditorTextSnapshotRef.current = snapshotEditorTextArea(event.currentTarget);
             pendingEditorInputKindRef.current = "unknown";
-            scheduleDocumentSave(edit.value);
           }}
           style={{
             position: "absolute",
@@ -961,8 +1050,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             zIndex: 1,
             border: 0,
             backgroundColor: "transparent",
-            backgroundImage: indentGuideBackground,
-            backgroundOrigin: "content-box",
             color: surfaceText,
             display: "block",
             visibility: documentIsolation.visibility,
@@ -971,8 +1058,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             resize: "none",
             padding: "0 18px 24px 24px",
             outline: "none",
-            fontSize: 15,
-            lineHeight: 1.55,
+            fontSize: EDITOR_DOCUMENT_FONT_SIZE_PX,
+            lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT,
             fontFamily: "'Manrope', 'Helvetica Neue', sans-serif",
             whiteSpace: "pre-wrap",
             tabSize: 2,

@@ -169,6 +169,9 @@ Use this checklist format and keep it complete.
   - legacy editor/explorer -> Node Map compatibility derivation through indirect link graph paths
   - context-frame pool fallback when no explicit selection set exists
   - delink behavior removes all graph edges touching selected/context modules
+- [x] `tests/frontend/app/framePointerRouting.test.ts`
+  - frame selection ignores controls marked as frame-interactive
+  - ordinary frame targets still remain selectable
 - [x] `frontend/src/modules/linkingGraph.test.ts`
   - frame-link edge sanitization canonicalizes and deduplicates undirected graph edges
   - unified `map` frame kind resolves as the canonical map target
@@ -228,6 +231,11 @@ Use this checklist format and keep it complete.
   - restores the last scroll viewport for a document target
   - bounds in-session scroll memory for long editing sessions
   - ignores empty document keys and invalid scroll positions
+- [x] `tests/frontend/modules/editor/editorIndentGuides.test.ts`
+  - keeps guide output empty for unindented text
+  - creates guides only across actual indented line runs
+  - closes nested guides when indentation drops
+  - continues guides through blank lines inside an indented block
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
   - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)
