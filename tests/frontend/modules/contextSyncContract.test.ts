@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasSequenceGap, isNewerSequence, readIncomingSequence } from "../../../frontend/src/modules/contextSyncContract.js";
+import { hasSequenceGap, isNewerSequence, nextLocalContextSequence, readIncomingSequence } from "../../../frontend/src/modules/contextSyncContract.js";
 
 test("drops stale and duplicate sequences so projection state stays deterministic", () => {
   assert.equal(isNewerSequence(10, 9), false);
@@ -18,4 +18,11 @@ test("flags explicit sequence gaps for scoped reconciliation", () => {
 test("prefers envelope sequence and keeps legacy revision fallback during migration", () => {
   assert.equal(readIncomingSequence({ revision: 7 }), 7);
   assert.equal(readIncomingSequence({ envelope: { context_id: "c", source_module_id: "m", sequence: 9, timestamp: "2026-04-29T00:00:00.000Z", user_action_type: "node_selection_changed" }, revision: 7 }), 9);
+});
+
+test("keeps local context sequences monotonic across remount-style resets", () => {
+  const contextID = "active_node_selection:test-map-remount";
+  assert.equal(nextLocalContextSequence(contextID, 1000), 1000);
+  assert.equal(nextLocalContextSequence(contextID, 900), 1001);
+  assert.equal(nextLocalContextSequence(contextID, 1500), 1500);
 });

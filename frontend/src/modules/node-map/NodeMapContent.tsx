@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
-import { type ContextMutationEnvelope } from "../contextSyncContract";
+import { nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
@@ -94,7 +94,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const editingNodeTitleElementRef = useRef<HTMLDivElement | null>(null);
   const connectionPathsRef = useRef<Array<{ id: string; points: { x: number; y: number }[] }>>([]);
   const suppressNextRelationshipLineClickRef = useRef(false);
-  const selectionRevisionRef = useRef(0);
   const isDarkTheme = theme === "dark";
   const nodeCardBackground = isDarkTheme ? "rgba(20,26,32,0.95)" : "rgba(252,252,252,0.93)";
   const nodeCardSelectedBackground = isDarkTheme ? "rgba(32,40,49,0.98)" : "#ffffff";
@@ -506,18 +505,19 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
 
   useEffect(() => {
     if (!restoredViewport) return;
-    selectionRevisionRef.current += 1;
+    const contextID = `active_node_selection:${companyID}:${mapScope}`;
+    const sequence = nextLocalContextSequence(contextID);
     const envelope: ContextMutationEnvelope = {
-      context_id: `active_node_selection:${companyID}:${mapScope}`,
+      context_id: contextID,
       source_module_id: mapScope,
-      sequence: selectionRevisionRef.current,
+      sequence,
       timestamp: new Date().toISOString(),
       user_action_type: "node_selection_changed",
     };
     emitDashboardEvent(EVENT_NODE_MAP_SELECTION_UPDATED, {
       mapWidgetID: mapScope,
       selectedNodeID,
-      revision: selectionRevisionRef.current,
+      revision: sequence,
       changedAt: Date.now(),
       envelope,
     });

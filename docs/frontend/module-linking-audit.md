@@ -37,6 +37,7 @@ These are dispatched with `emitDashboardEvent(...)` as typed `CustomEvent`s.
 
 - Explorer applies map-originated selection only if the node/tree values actually change (`shouldApplyMapSelection`).
 - When Explorer applies map-driven state, it sets `suppressNextExplorerBroadcastRef` so it does not immediately rebroadcast the same state.
+- Map selection event sequences are generated per context ID, not per React component instance. This matters for the unified Map because switching between node and logic-gate views remounts the underlying renderer; consumers must still see later selections as newer events.
 
 ## 6) "How does each module know what to view?"
 
