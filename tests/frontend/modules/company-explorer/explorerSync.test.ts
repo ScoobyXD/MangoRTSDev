@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { shouldApplyMapSelection, shouldBroadcastSelection } from "../../../../frontend/src/modules/company-explorer/explorerSync.js";
+import { shouldApplyMapSelection, shouldBroadcastSelection, shouldReadMapStateForSelectionEvent } from "../../../../frontend/src/modules/company-explorer/explorerSync.js";
 
 type SelectionState = { selectedNodeID: string; selectedTreeID: string };
 
@@ -29,4 +29,10 @@ run("broadcasts only when semantic selection changes", () => {
   const changed: SelectionState = { selectedNodeID: "node-3", selectedTreeID: "node-node-3" };
   assert.equal(shouldBroadcastSelection(previous, unchanged), false);
   assert.equal(shouldBroadcastSelection(previous, changed), true);
+});
+
+run("uses event payload instead of stale debounced map state during gap recovery", () => {
+  assert.equal(shouldReadMapStateForSelectionEvent(true, true), false);
+  assert.equal(shouldReadMapStateForSelectionEvent(true, false), true);
+  assert.equal(shouldReadMapStateForSelectionEvent(false, false), false);
 });

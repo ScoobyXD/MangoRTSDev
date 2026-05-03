@@ -100,6 +100,7 @@ Linked behavior:
 - Company Explorer shows real logic gates under the Logic Gates tree and can drive linked Logic Gate Map selection.
 - Editor follows linked Logic Gate Map selection and labels the header `Logic Gate:` instead of `Node:`.
 - When the unified Map receives logic-gate Explorer context, it renders this logic-gate path and writes `logic-gate-map-state-v1:<companyID>:<mapWidgetID>` using the same frame ID.
+- Linked Company Explorer treats `selectedLogicGateID`/`selectedNodeID` in the selection event as fresher than debounced `logic-gate-map-state-v1:*` storage. Storage is used only when a gap-recovery event lacks an entity payload, which keeps Explorer selection stable after Explorer-driven map updates.
 
 ## File Ownership
 Primary files:

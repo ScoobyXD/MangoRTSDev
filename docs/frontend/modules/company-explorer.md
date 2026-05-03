@@ -135,6 +135,11 @@ Selection sync hardening update (2026-04-29):
 - Map-originated selection echoes are treated as no-op when Explorer already holds the same selected node/tree, which prevents "every other click" suppression churn.
 - This keeps anti-loop behavior while protecting hot-path click reliability for linked Explorer<->Node Map flows.
 
+Selection sync hardening update (2026-05-03):
+- When a linked map selection event already includes the selected node or logic-gate ID, Explorer applies that event payload directly and does not read debounced map-state storage for sequence-gap recovery.
+- Map-state storage remains a fallback only for gap events that do not carry a selected entity ID. This prevents stale localStorage from jumping the Explorer highlight back to an older row after Explorer drives the map.
+- Explorer rows keep file-explorer drag/drop behavior, but hover uses the normal cursor instead of a grab cursor so the tree does not look like it is always in a drag state.
+
 Folder runtime update (2026-05-02):
 - Explorer folders are now durable backend rows, not local-only UI state.
 - `company_explorer_folders` stores nested folders separately for `node` and `logic_gate` trees. A folder can only contain matching node or logic-gate items, which keeps UI behavior and headless API writes aligned.

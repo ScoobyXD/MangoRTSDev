@@ -374,6 +374,7 @@ and reads `selectedNodeID`. That selected node becomes the active storage target
 
 Selection notifications are event-driven (`EVENT_NODE_MAP_SELECTION_UPDATED`) and only emit on selected-node changes (not on pan/zoom/drag geometry churn).
 Linked Company Explorer frames consume those selection events and map-state updates so Explorer row highlight follows Node Map selection in the same linked workspace.
+When an event payload already includes `selectedNodeID`, linked Company Explorer applies that payload directly. The debounced `node-map-state-v1:*` value is only a fallback for selection events without an entity payload, so stale storage cannot overwrite a fresh Explorer-driven map selection.
 
 ### 9.4 Node Doc persistence behavior
 
