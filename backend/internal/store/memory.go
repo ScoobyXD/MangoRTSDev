@@ -54,8 +54,8 @@ type Repository interface {
 	CreateOperation(in CreateOperationInput) (domain.Operation, error)
 	GetOperation(companyID, operationID string) (domain.Operation, error)
 	ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error)
-	CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int, heightPx int) (domain.KanbanColumn, error)
-	UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int) (domain.KanbanColumn, error)
+	CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int, heightPx int, itemColor string) (domain.KanbanColumn, error)
+	UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int, itemColor string) (domain.KanbanColumn, error)
 	DeleteKanbanColumn(companyID, boardID, columnID string) error
 	ListKanbanCards(companyID, boardID string, query KanbanCardQuery) ([]domain.KanbanCard, error)
 	UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error)
@@ -431,6 +431,20 @@ func normalizeKanbanColumnHeight(heightPx int) int {
 	return heightPx
 }
 
+func normalizeKanbanColumnItemColor(itemColor string) string {
+	itemColor = strings.TrimSpace(itemColor)
+	if len(itemColor) != 7 || itemColor[0] != '#' {
+		return "#2f7d62"
+	}
+	for _, char := range itemColor[1:] {
+		if (char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F') {
+			continue
+		}
+		return "#2f7d62"
+	}
+	return itemColor
+}
+
 func nextKanbanCardPosition(cards []domain.KanbanCard, columnID string) int {
 	next := 1000
 	for _, card := range cards {
@@ -482,7 +496,7 @@ func (r *MemoryRepo) ListKanbanColumns(companyID, boardID string) ([]domain.Kanb
 	return items, nil
 }
 
-func (r *MemoryRepo) CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int, heightPx int) (domain.KanbanColumn, error) {
+func (r *MemoryRepo) CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int, heightPx int, itemColor string) (domain.KanbanColumn, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	k := boardKey(companyID, boardID)
@@ -498,6 +512,7 @@ func (r *MemoryRepo) CreateKanbanColumn(companyID, boardID, title string, positi
 		Position:         position,
 		WidthPx:          normalizeKanbanColumnWidth(widthPx),
 		HeightPx:         normalizeKanbanColumnHeight(heightPx),
+		ItemColor:        normalizeKanbanColumnItemColor(itemColor),
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
@@ -505,7 +520,7 @@ func (r *MemoryRepo) CreateKanbanColumn(companyID, boardID, title string, positi
 	return item, nil
 }
 
-func (r *MemoryRepo) UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int) (domain.KanbanColumn, error) {
+func (r *MemoryRepo) UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int, itemColor string) (domain.KanbanColumn, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	k := boardKey(companyID, boardID)
@@ -524,6 +539,9 @@ func (r *MemoryRepo) UpdateKanbanColumn(companyID, boardID, columnID, title stri
 		}
 		if heightPx > 0 {
 			column.HeightPx = normalizeKanbanColumnHeight(heightPx)
+		}
+		if strings.TrimSpace(itemColor) != "" {
+			column.ItemColor = normalizeKanbanColumnItemColor(itemColor)
 		}
 		column.UpdatedTimestamp = time.Now().UTC()
 		r.kanbanColumns[k][index] = column
@@ -626,6 +644,9 @@ func applyKanbanCardMetadata(card *domain.KanbanCard, metadata KanbanCardMetadat
 func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if input.ItemType != "node" {
+		return domain.KanbanCard{}, ErrInvalid
+	}
 	columnTitle, columnExists := r.kanbanColumnTitleLocked(input.CompanyID, input.BoardID, input.ColumnID)
 	if !columnExists || !r.kanbanItemExistsLocked(input.CompanyID, input.ItemType, input.ItemID) {
 		return domain.KanbanCard{}, ErrNotFound

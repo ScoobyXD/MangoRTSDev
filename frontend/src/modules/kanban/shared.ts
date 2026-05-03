@@ -9,6 +9,7 @@ export const KANBAN_MAX_COLUMN_WIDTH_PX = 520;
 export const KANBAN_DEFAULT_COLUMN_HEIGHT_PX = 240;
 export const KANBAN_MIN_COLUMN_HEIGHT_PX = 160;
 export const KANBAN_MAX_COLUMN_HEIGHT_PX = 720;
+export const KANBAN_DEFAULT_COLUMN_ITEM_COLOR = "#2f7d62";
 
 export type KanbanItemType = "node" | "logic_gate";
 
@@ -26,6 +27,7 @@ export type KanbanColumn = {
   position: number;
   width_px: number;
   height_px: number;
+  item_color: string;
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -81,6 +83,18 @@ export const KANBAN_CARD_SUMMARY_ATTRIBUTE_LABELS: Record<KanbanCardSummaryAttri
 
 export function isKanbanItemType(value: unknown): value is KanbanItemType {
   return value === "node" || value === "logic_gate";
+}
+
+export function isKanbanBoardDropItemType(value: unknown): value is "node" {
+  return value === "node";
+}
+
+export function isKanbanColumnItemColor(value: unknown): value is string {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value.trim());
+}
+
+export function normalizeKanbanColumnItemColor(value: unknown): string {
+  return isKanbanColumnItemColor(value) ? value.trim() : KANBAN_DEFAULT_COLUMN_ITEM_COLOR;
 }
 
 export function defaultKanbanCardMetadata(input: Pick<KanbanCard, "item_type" | "column_id" | "created_timestamp" | "updated_timestamp"> & Partial<KanbanCard>, columnTitle = "Unspecified"): Pick<KanbanCard, "description_snapshot" | "status" | "work_type" | "assigned_to" | "assigned_by" | "created_by" | "updated_by" | "last_activity" | "status_entered_timestamp"> {
@@ -262,7 +276,10 @@ export function getKanbanCardSummaryAttributeValue(card: KanbanCard, attribute: 
   return card.work_type.trim();
 }
 
-export function getKanbanConditionalColor(card: KanbanCard): string {
+export function getKanbanConditionalColor(card: KanbanCard, columnColorByID: Map<string, string> = new Map()): string {
+  const columnColor = columnColorByID.get(card.column_id);
+  if (isKanbanColumnItemColor(columnColor)) return columnColor;
+
   const palette = ["#2f7d62", "#245c9f", "#9a5b16", "#8f3d56", "#4f6f1f", "#66752c", "#7d4ea3", "#0f766e"];
   const value = card.status.trim() || card.column_id || "empty";
   let hash = 0;

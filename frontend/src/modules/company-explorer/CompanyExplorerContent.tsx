@@ -856,7 +856,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 event.dataTransfer.effectAllowed = row.kind === "folder" ? "move" : "copyMove";
                 const serialized = JSON.stringify(rowDragPayload);
                 event.dataTransfer.setData(EXPLORER_DRAG_MIME, serialized);
-                if ((row.kind === "node" || row.kind === "logic_gate") && rowDragPayload.itemID && rowDragPayload.itemType) {
+                if (row.kind === "node" && rowDragPayload.itemID && rowDragPayload.itemType === "node") {
                   const kanbanPayload = serializeExplorerEntityDragPayload({
                     itemType: rowDragPayload.itemType,
                     itemID: rowDragPayload.itemID,

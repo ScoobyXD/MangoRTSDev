@@ -3,6 +3,8 @@ package store
 import (
 	"testing"
 	"time"
+
+	"miraeopus/backend/internal/domain"
 )
 
 func TestMemoryRepo_AddNodeInformation_ProjectionKeyStaysStableWhenInformationIDProvided(t *testing.T) {
@@ -99,7 +101,7 @@ func TestMemoryRepo_DeleteNode_RemovesKanbanCardsAndKeepsOperations(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateNode failed: %v", err)
 	}
-	column, err := repo.CreateKanbanColumn(companyID, boardID, "Ready", 0, 260, 240)
+	column, err := repo.CreateKanbanColumn(companyID, boardID, "Ready", 0, 260, 240, "#2f7d62")
 	if err != nil {
 		t.Fatalf("CreateKanbanColumn failed: %v", err)
 	}
@@ -249,20 +251,23 @@ func TestMemoryRepo_DeleteLogicGate_RemovesKanbanCardsAndKeepsOperations(t *test
 	if err != nil {
 		t.Fatalf("CreateLogicGate failed: %v", err)
 	}
-	column, err := repo.CreateKanbanColumn(companyID, boardID, "Ready", 0, 260, 240)
+	column, err := repo.CreateKanbanColumn(companyID, boardID, "Ready", 0, 260, 240, "#2f7d62")
 	if err != nil {
 		t.Fatalf("CreateKanbanColumn failed: %v", err)
 	}
-	if _, err := repo.UpsertKanbanCard(KanbanCardMutationInput{
-		CompanyID:     companyID,
-		BoardID:       boardID,
-		ColumnID:      column.ColumnID,
-		ItemType:      "logic_gate",
-		ItemID:        logicGate.LogicGateID,
-		TitleSnapshot: logicGate.Header,
-	}); err != nil {
-		t.Fatalf("UpsertKanbanCard failed: %v", err)
-	}
+	now := time.Now().UTC()
+	repo.kanbanCards[boardKey(companyID, boardID)] = append(repo.kanbanCards[boardKey(companyID, boardID)], domain.KanbanCard{
+		CompanyID:        companyID,
+		BoardID:          boardID,
+		CardID:           newUUIDv7String(),
+		ColumnID:         column.ColumnID,
+		ItemType:         "logic_gate",
+		ItemID:           logicGate.LogicGateID,
+		TitleSnapshot:    logicGate.Header,
+		Position:         1000,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	})
 	logicGateID := logicGate.LogicGateID
 	operation, err := repo.CreateOperation(CreateOperationInput{
 		CompanyID:      companyID,

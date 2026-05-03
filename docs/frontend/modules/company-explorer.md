@@ -158,7 +158,7 @@ Folder runtime update (2026-05-01):
 Kanban drag update (2026-05-01):
 - Node and Logic Gate rows are draggable.
 - Drag payloads use `application/x-mango-explorer-entity` with `{ itemType, itemID, label }`.
-- Kanban consumes the payload through its API-first board contract so the same operation can be performed by headless agents.
+- Kanban consumes node payloads through its API-first board contract so the same operation can be performed by headless agents. Logic gates are intentionally not exported as Kanban drag payloads.
 
 ---
 
