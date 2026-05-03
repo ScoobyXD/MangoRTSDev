@@ -9,7 +9,10 @@ import {
   resolveExplorerCreationTargets,
   resolveExplorerDeleteTarget,
   resolveExplorerDropTarget,
+  resolveExplorerKeyboardNavigation,
   resolveExplorerRenameTarget,
+  resolveExplorerRootDropTarget,
+  shouldAcceptMapSelectionAfterExplorerSelection,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
 
 function run(name: string, fn: () => void): void {
@@ -100,6 +103,23 @@ run("drop targets resolve item rows to their containing folder", () => {
   assert.equal(resolveExplorerDropTarget({ kind: "node", nodeID: "root-node" }, { kind: "node", itemType: "node", itemID: "node-2" }), null);
 });
 
+run("folder drops can target the Company root", () => {
+  assert.deepEqual(
+    resolveExplorerRootDropTarget(
+      { kind: "folder" },
+      { kind: "folder", folderKind: "logic_gate", folderID: "logic-folder-1" },
+    ),
+    { folderID: "", folderKind: "logic_gate", treeID: "folder-root" },
+  );
+  assert.equal(
+    resolveExplorerRootDropTarget(
+      { kind: "folder" },
+      { kind: "node", itemType: "node", itemID: "node-1" },
+    ),
+    null,
+  );
+});
+
 run("row reorder plan uses sparse single-row position updates", () => {
   const plan = buildExplorerRowReorderPlan(
     [
@@ -177,4 +197,52 @@ run("click selection supports plain, shift range, and ctrl toggle behavior", () 
   });
   assert.deepEqual([...additiveRange.selectedIDs], ["root", "b", "c", "d"]);
   assert.equal(additiveRange.anchorID, "b");
+});
+
+run("keyboard navigation moves selection and expands folders without DOM focus assumptions", () => {
+  const rows = [
+    { id: "folder-root", kind: "folder" as const },
+    { id: "node-a", kind: "node" as const },
+    { id: "workspace-folder-1", kind: "folder" as const },
+  ];
+  const down = resolveExplorerKeyboardNavigation({
+    rows,
+    selectedTreeID: "folder-root",
+    expandedIDs: new Set(["folder-root"]),
+    key: "ArrowDown",
+  });
+  assert.equal(down.handled, true);
+  assert.equal(down.selectedTreeID, "node-a");
+
+  const expand = resolveExplorerKeyboardNavigation({
+    rows,
+    selectedTreeID: "workspace-folder-1",
+    expandedIDs: new Set(["folder-root"]),
+    key: "ArrowRight",
+  });
+  assert.equal(expand.handled, true);
+  assert.deepEqual([...(expand.expandedIDs ?? new Set())], ["folder-root", "workspace-folder-1"]);
+});
+
+run("stale opposite-map selections do not override recent Explorer domain changes", () => {
+  assert.equal(
+    shouldAcceptMapSelectionAfterExplorerSelection({
+      incomingDomain: "node",
+      currentDomain: "logic_gate",
+      localSelectionChangedAt: 2000,
+      incomingChangedAt: 1500,
+      now: 2100,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAcceptMapSelectionAfterExplorerSelection({
+      incomingDomain: "node",
+      currentDomain: "logic_gate",
+      localSelectionChangedAt: 2000,
+      incomingChangedAt: 2500,
+      now: 2600,
+    }),
+    true,
+  );
 });

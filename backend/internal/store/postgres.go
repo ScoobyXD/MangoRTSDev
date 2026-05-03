@@ -1086,6 +1086,30 @@ func (r *PostgresRepo) GetLogicGateDetails(companyID, logicGateID string) (domai
 	}, nil
 }
 
+// Explorer folders and items are stored in separate tables but render as one
+// sibling list. Append positions must therefore inspect both tables.
+func nextCompanyExplorerSQLRowPosition(ctx context.Context, tx *sql.Tx, companyID, folderKind string, parent any) (int, error) {
+	var position int
+	err := tx.QueryRowContext(ctx,
+		`select coalesce(max(position), 0) + 1000
+		 from (
+		   select position
+		   from company_explorer_folders
+		   where company_id=$1
+		     and folder_kind=$2
+		     and (($3::uuid is null and parent_folder_id is null) or parent_folder_id=$3::uuid)
+		   union all
+		   select position
+		   from company_explorer_folder_items
+		   where company_id=$1
+		     and item_type=$2
+		     and folder_id=$3::uuid
+		 ) explorer_siblings`,
+		companyID, folderKind, parent,
+	).Scan(&position)
+	return position, err
+}
+
 func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -1114,15 +1138,8 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 		parent = parentFolderID
 	}
 
-	var position int
-	if err := tx.QueryRowContext(ctx,
-		`select coalesce(max(position), 0) + 1000
-		 from company_explorer_folders
-		 where company_id=$1
-		   and folder_kind=$2
-		   and (($3::uuid is null and parent_folder_id is null) or parent_folder_id=$3::uuid)`,
-		companyID, folderKind, parent,
-	).Scan(&position); err != nil {
+	position, err := nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, folderKind, parent)
+	if err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
 
@@ -1284,14 +1301,8 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 
 	if position <= 0 {
 		if parentChanged {
-			if err := tx.QueryRowContext(ctx,
-				`select coalesce(max(position), 0) + 1000
-				 from company_explorer_folders
-				 where company_id=$1
-				   and folder_kind=$2
-				   and (($3::uuid is null and parent_folder_id is null) or parent_folder_id=$3::uuid)`,
-				companyID, folderKind, parent,
-			).Scan(&position); err != nil {
+			position, err = nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, folderKind, parent)
+			if err != nil {
 				return domain.CompanyExplorerFolder{}, err
 			}
 		} else {
@@ -1444,12 +1455,8 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 		position = existingPosition
 	}
 	if position <= 0 {
-		if err := tx.QueryRowContext(ctx,
-			`select coalesce(max(position), 0) + 1000
-			 from company_explorer_folder_items
-			 where company_id=$1 and folder_id=$2 and item_type=$3`,
-			companyID, folderID, itemType,
-		).Scan(&position); err != nil {
+		position, err = nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, itemType, folderID)
+		if err != nil {
 			return domain.CompanyExplorerFolderItem{}, err
 		}
 	}

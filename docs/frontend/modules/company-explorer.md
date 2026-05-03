@@ -139,7 +139,7 @@ Folder runtime update (2026-05-02):
 - Explorer folders are now durable backend rows, not local-only UI state.
 - `company_explorer_folders` stores nested folders separately for `node` and `logic_gate` trees. A folder can only contain matching node or logic-gate items, which keeps UI behavior and headless API writes aligned.
 - `company_explorer_folder_items` stores one placement per node or logic gate, matching file-explorer move semantics.
-- Folder and folder-item rows carry sparse integer `position` values. Reorder writes usually update one row; compaction is limited to the visible sibling set only when adjacent positions no longer have numeric room.
+- Folder and folder-item rows carry sparse integer `position` values. New API-created rows append after both folder and item siblings in the same parent, so the backend preserves the mixed order users see instead of maintaining separate folder/item queues. Reorder writes usually update one row; compaction is limited to the visible sibling set only when adjacent positions no longer have numeric room.
 - The tree has one `Company` root row. It is collapsible, and a brand-new company renders no child rows until folders, nodes, or logic gates are created.
 - Direct nodes or logic gates render immediately under their expanded folder. Placed items and child folders share the same sparse ordering inside that folder, so users can vertically reorder folders, nodes, and logic gates together.
 - The old virtual `Nodes`, `Logic Gates`, `All Nodes`, `All Logic Gates`, Knowledge, and Knowledge Nodes rows are removed from the Explorer tree.
@@ -149,16 +149,18 @@ Folder runtime update (2026-05-02):
 - Folder creation is now a Company Explorer context-menu action, not an inline plus button. Right-clicking the tree body opens Explorer actions, while frame-level actions remain scoped to the frame/module title plate.
 - When the right-click context has no folder type, the menu order is `Create node folder`, `Create node`, `Create logic gate folder`, `Create logic gate`. Typed folder creation keeps empty folders aligned with the backend item-type invariant. Right-clicking typed rows uses the compatible single `Create folder` action.
 - Right-clicking a concrete folder, node, or logic gate exposes `Rename` and `Delete`, backed by folder/node/logic-gate APIs.
-- Double-clicking a concrete folder, node, or logic gate starts inline rename with the caret at the end of the current title.
+- Double-clicking the title text of a concrete folder, node, or logic gate starts inline rename with the caret at the end of the current title. Double-clicks on the disclosure control, icon, indent, or blank row area only select/toggle and never start rename.
 - Left-clicking elsewhere inside Company Explorer closes the Explorer context menu before applying the new selection.
 - New folders are created inside the right-clicked compatible folder/tree. New nodes and logic gates are created through their canonical APIs and then assigned to the compatible right-clicked folder through `company_explorer_folder_items` when a folder target exists.
 - After any create action, the newly created folder, node, or logic gate becomes the selected highlighted row.
 - Plain click selects one row, Shift-click adds the visible range from the anchor row without clearing previous selections, and Ctrl/Cmd-click toggles individual rows. This selection state is UI-local until a concrete action consumes it, keeping linked map broadcasts focused on the active row.
 - Node, logic-gate, and folder moves still use the existing folder APIs (`POST /v1/company-explorer/folder-items` and `PUT /v1/company-explorer/folders/{folder_id}`), so headless agents can perform the same placement changes without a browser.
 - Drag-and-drop now accepts any compatible row inside a folder section. Dropping a folder, node, or logic gate on a child row resolves to that row's containing folder, while dropping directly on a compatible folder still targets that folder.
-- Dragging over the top or bottom half of a sibling row reorders the dragged folder/item before or after that row, using the same sparse-position pattern as Kanban cards.
+- Dragging over the top or bottom half of a sibling row reorders the dragged folder/item before or after that row, using the same sparse-position pattern as Kanban cards. Folders and items participate in the same visible sibling order for their compatible parent.
+- Dropping a folder on the `Company` root moves that folder back to the root of its node or logic-gate tree.
 - Drag moves do not auto-expand the moved folder or the target folder; expanded/collapsed state remains a user-controlled local view.
-- The Explorer tree supports keyboard navigation: Up/Down moves selection through visible rows, Right expands a selected folder, and Left collapses a selected folder.
+- The Explorer tree supports keyboard navigation: Up/Down moves selection through visible rows, Right expands a selected folder, and Left collapses a selected folder. The module keeps the last interacted Explorer active for arrow commands even when browser focus would otherwise fall back to the frame shell.
+- Row hover shows a visual selection preview only. It does not publish linked-map context or write API state, which keeps accidental mouse movement off the hot synchronization path.
 - Expanded rows, tree scroll position, and root-level order for unplaced rows persist in localStorage per company/frame on the user's own machine. This state is intentionally not propagated through backend or company-wide sync.
 - The Explorer tree owns its vertical overflow and uses the same thin scrollbar treatment as Editor surfaces. The scrollbar is browser-native, appears only when the tree exceeds the frame height, and keeps rendering virtualized for large company trees. Light frames use the Editor light-mode cyan scrollbar color.
 - Selecting a node folder broadcasts `selectedFolderID`/`selectedFolderKind=node`; linked Node Map filters its cached graph to nodes placed in that folder or any descendant folder.

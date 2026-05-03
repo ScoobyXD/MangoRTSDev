@@ -289,7 +289,7 @@ curl -X PUT http://localhost:8080/v1/company-explorer/folders/<folder_id> \
 
 Folder rows are API-backed so headless agents can create the same explorer structure as the UI.
 `company_explorer_folder_items` keeps one placement per node or logic gate, matching file-explorer move semantics.
-Folders and folder items carry sparse integer `position` values; agents can reorder with one bounded write in the common case. Folder moves reject self/descendant parents to keep the hierarchy acyclic. Folder renames use the same API path so agents do not need UI-specific behavior.
+Folders and folder items carry sparse integer `position` values; agents can reorder with one bounded write in the common case. New folders/items append after both tables in the same parent so API-created rows preserve the mixed folder/item order users see. Folder moves reject self/descendant parents to keep the hierarchy acyclic. Folder renames use the same API path so agents do not need UI-specific behavior.
 
 Create operation:
 
