@@ -40,7 +40,9 @@
     "../../../frontend/src/modules/contextSyncContract.ts",
     "../modules/contextSyncContract.test.ts",
     "../../../frontend/src/modules/kanban/shared.ts",
-    "../modules/kanban/shared.test.ts"
+    "../modules/kanban/shared.test.ts",
+    "../../../frontend/src/modules/editor/documentEditing.ts",
+    "../modules/editor/documentEditing.test.ts"
   ],
   "exclude": []
 }

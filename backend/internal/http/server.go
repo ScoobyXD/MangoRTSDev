@@ -532,6 +532,35 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(parts) == 3 && parts[1] == "projection" {
+		if r.Method != http.MethodDelete {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		informationID := strings.TrimSpace(parts[2])
+		if informationID == "" {
+			writeError(w, http.StatusBadRequest, "information_id_required")
+			return
+		}
+		// Clearing an editor document removes the latest hot-read projection only.
+		// The append-only information history stays intact for audit/debug paths.
+		if err := s.repo.DeleteNodeProjection(companyID, nodeID, informationID); errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "node_not_found")
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_delete_node_projection")
+			return
+		}
+		s.publishWorkspaceEvent(companyID, "node_projection_deleted", map[string]any{"node_id": nodeID, "information_id": informationID})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+		return
+	}
+
 	if len(parts) == 2 && parts[1] == "information" {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -983,6 +1012,35 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			"logic_gate_id": logicGateID,
 			"items":         items,
 		})
+		return
+	}
+
+	if len(parts) == 3 && parts[1] == "projection" {
+		if r.Method != http.MethodDelete {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		informationID := strings.TrimSpace(parts[2])
+		if informationID == "" {
+			writeError(w, http.StatusBadRequest, "information_id_required")
+			return
+		}
+		// Same contract as nodes: clear the latest value without manufacturing
+		// blank history rows on high-volume UI or agent writes.
+		if err := s.repo.DeleteLogicGateProjection(companyID, logicGateID, informationID); errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "logic_gate_not_found")
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_delete_logic_gate_projection")
+			return
+		}
+		s.publishWorkspaceEvent(companyID, "logic_gate_projection_deleted", map[string]any{"logic_gate_id": logicGateID, "information_id": informationID})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}
 

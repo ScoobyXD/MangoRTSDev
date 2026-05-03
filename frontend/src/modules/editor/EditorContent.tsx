@@ -7,6 +7,37 @@ import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, in
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches } from "../logic-gate-map/LogicGateRecordStore";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import type { NodeInformation } from "../node-map/shared";
+import { applyDocumentTextareaKey } from "./documentEditing";
+
+type LinkedEntityKind = "node" | "logic_gate";
+
+type DocumentSaveTarget = {
+  entityKind: LinkedEntityKind;
+  entityID: string;
+  informationID: string;
+};
+
+type DocumentSaveRequest = {
+  target: DocumentSaveTarget;
+  text: string;
+};
+
+const EDITOR_AUTOSAVE_DELAY_MS = 550;
+
+function documentTargetKey(target: DocumentSaveTarget): string {
+  return `${target.entityKind}:${target.entityID}:${target.informationID}`;
+}
+
+function sameSaveRequest(a: DocumentSaveRequest | null, b: DocumentSaveRequest | null): boolean {
+  if (!a || !b) return false;
+  return documentTargetKey(a.target) === documentTargetKey(b.target) && a.text === b.text;
+}
+
+function generateStableInformationID(): string {
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0").slice(0, 12)}`;
+}
 
 // Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
@@ -27,29 +58,27 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const editingTitleRef = useRef<HTMLSpanElement | null>(null);
   const editingTitleDraftRef = useRef("");
-  const editorDocRef = useRef<HTMLDivElement | null>(null);
-  const editorScrollRef = useRef<HTMLDivElement | null>(null);
+  const editorTextAreaRef = useRef<HTMLTextAreaElement | null>(null);
   const documentDraftRef = useRef("");
   const persistedDocumentRef = useRef("");
+  const documentInformationIDRef = useRef("");
+  const currentDocumentTargetKeyRef = useRef("");
+  const persistedDocumentTargetKeyRef = useRef("");
+  const saveTimerRef = useRef<number | null>(null);
+  const pendingSaveRef = useRef<DocumentSaveRequest | null>(null);
+  const queuedSaveRef = useRef<DocumentSaveRequest | null>(null);
+  const saveInFlightRef = useRef(false);
   const lastSelectionRevisionRef = useRef(0);
   const lastLogicGateSelectionRevisionRef = useRef(0);
 
   const placeEditorCaretAtDocumentEnd = useCallback((scrollToEnd = false) => {
     window.requestAnimationFrame(() => {
-      const element = editorDocRef.current;
+      const element = editorTextAreaRef.current;
       if (!element) return;
       element.focus({ preventScroll: true });
-      const selection = window.getSelection();
-      if (selection) {
-        const range = document.createRange();
-        range.selectNodeContents(element);
-        range.collapse(false);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
-      if (scrollToEnd && editorScrollRef.current) {
-        editorScrollRef.current.scrollTop = editorScrollRef.current.scrollHeight;
-      }
+      const end = element.value.length;
+      element.setSelectionRange(end, end);
+      if (scrollToEnd) element.scrollTop = element.scrollHeight;
     });
   }, []);
 
@@ -62,51 +91,157 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     return response.json() as Promise<T>;
   }, [apiBase]);
 
-  const saveDocument = useCallback(async (nextText: string) => {
-    if (!linkedNodeID) return;
-    // Avoid creating projection/history rows when nothing changed.
-    if (nextText === persistedDocumentRef.current) return;
-    if (nextText.trim().length === 0) {
-      // Blank editor content is UI state only. Never persist it, because one empty
-      // row per accidental blur becomes expensive noise at company/agent scale.
-      documentDraftRef.current = persistedDocumentRef.current;
-      if (editorDocRef.current && editorDocRef.current.textContent !== persistedDocumentRef.current) {
-        editorDocRef.current.textContent = persistedDocumentRef.current;
-      }
-      placeEditorCaretAtDocumentEnd(true);
-      return;
+  const invalidateDocumentTargetCaches = useCallback((target: DocumentSaveTarget) => {
+    if (target.entityKind === "logic_gate") invalidateLogicGateRecordStoreCaches(apiBase, companyID, target.entityID);
+    else invalidateNodeRecordStoreCaches(apiBase, companyID, target.entityID);
+  }, [apiBase, companyID]);
+
+  const ensureDocumentInformationID = useCallback(() => {
+    if (!documentInformationIDRef.current) {
+      documentInformationIDRef.current = generateStableInformationID();
+      setDocumentInformationID(documentInformationIDRef.current);
     }
-    const stableInformationID = documentInformationID
-      || (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0").slice(0, 12)}`);
+    return documentInformationIDRef.current;
+  }, []);
+
+  const buildDocumentSaveRequest = useCallback((nextText: string): DocumentSaveRequest | null => {
+    if (!linkedNodeID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) return null;
+    if (!documentInformationIDRef.current && nextText.trim().length === 0) return null;
+    const target = {
+      entityKind: linkedEntityKind,
+      entityID: linkedNodeID,
+      informationID: ensureDocumentInformationID(),
+    };
+    currentDocumentTargetKeyRef.current = documentTargetKey(target);
+    return { target, text: nextText };
+  }, [ensureDocumentInformationID, linkedEntityKind, linkedNodeID]);
+
+  const persistDocumentRequest = useCallback(async (request: DocumentSaveRequest) => {
+    const targetKey = documentTargetKey(request.target);
+    const isCurrentTarget = () => currentDocumentTargetKeyRef.current === targetKey;
+    if (isCurrentTarget() && request.text === persistedDocumentRef.current && persistedDocumentTargetKeyRef.current === targetKey) return;
+
     setError("");
     try {
+      if (request.text.trim().length === 0) {
+        const path = request.target.entityKind === "logic_gate"
+          ? `/v1/logic-gates/${request.target.entityID}/projection/${request.target.informationID}?company_id=${encodeURIComponent(companyID)}`
+          : `/v1/nodes/${request.target.entityID}/projection/${request.target.informationID}?company_id=${encodeURIComponent(companyID)}`;
+        await requestJSON<{ status: string }>(path, { method: "DELETE" });
+        if (isCurrentTarget()) {
+          persistedDocumentRef.current = "";
+          persistedDocumentTargetKeyRef.current = targetKey;
+        }
+        invalidateDocumentTargetCaches(request.target);
+        return;
+      }
+
       const informationPayload = {
         company_id: companyID,
         type: "Text box",
-        information: nextText,
-        information_id: stableInformationID,
+        information: request.text,
+        information_id: request.target.informationID,
       };
-      if (linkedEntityKind === "logic_gate") {
-        await requestJSON<LogicGateInformation>(`/v1/logic-gates/${linkedNodeID}/information`, {
+      if (request.target.entityKind === "logic_gate") {
+        await requestJSON<LogicGateInformation>(`/v1/logic-gates/${request.target.entityID}/information`, {
           method: "POST",
           body: JSON.stringify(informationPayload),
         });
       } else {
-        await requestJSON<NodeInformation>(`/v1/nodes/${linkedNodeID}/information`, {
+        await requestJSON<NodeInformation>(`/v1/nodes/${request.target.entityID}/information`, {
           method: "POST",
           body: JSON.stringify(informationPayload),
         });
       }
-      setDocumentInformationID(stableInformationID);
-      persistedDocumentRef.current = nextText;
-      if (linkedEntityKind === "logic_gate") invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
-      else invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+      if (isCurrentTarget()) {
+        setDocumentInformationID(request.target.informationID);
+        persistedDocumentRef.current = request.text;
+        persistedDocumentTargetKeyRef.current = targetKey;
+      }
+      invalidateDocumentTargetCaches(request.target);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_save_document");
     }
-  }, [apiBase, companyID, documentInformationID, linkedEntityKind, linkedNodeID, placeEditorCaretAtDocumentEnd, requestJSON]);
+  }, [companyID, invalidateDocumentTargetCaches, requestJSON]);
+
+  const enqueueDocumentSave = useCallback((request: DocumentSaveRequest) => {
+    if (saveInFlightRef.current) {
+      queuedSaveRef.current = request;
+      return;
+    }
+
+    // Autosaves must preserve the user's final text without POSTing every
+    // keystroke. One request runs at a time; while it is running, we keep only
+    // the newest queued value for this editor instance.
+    saveInFlightRef.current = true;
+    void (async () => {
+      let nextRequest: DocumentSaveRequest | null = request;
+      try {
+        while (nextRequest) {
+          const activeRequest: DocumentSaveRequest = nextRequest;
+          queuedSaveRef.current = null;
+          await persistDocumentRequest(activeRequest);
+          const queued = queuedSaveRef.current;
+          nextRequest = queued && !sameSaveRequest(queued, activeRequest) ? queued : null;
+        }
+      } finally {
+        saveInFlightRef.current = false;
+      }
+    })();
+  }, [persistDocumentRequest]);
+
+  const scheduleDocumentSave = useCallback((nextText: string, immediate = false) => {
+    documentDraftRef.current = nextText;
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+
+    const request = buildDocumentSaveRequest(nextText);
+    pendingSaveRef.current = request;
+    if (!request) return;
+
+    if (immediate) {
+      pendingSaveRef.current = null;
+      enqueueDocumentSave(request);
+      return;
+    }
+
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      const pending = pendingSaveRef.current;
+      pendingSaveRef.current = null;
+      if (pending) enqueueDocumentSave(pending);
+    }, EDITOR_AUTOSAVE_DELAY_MS);
+  }, [buildDocumentSaveRequest, enqueueDocumentSave]);
+
+  const flushPendingDocumentSave = useCallback((fallbackText?: string) => {
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const pending = pendingSaveRef.current ?? (typeof fallbackText === "string" ? buildDocumentSaveRequest(fallbackText) : null);
+    pendingSaveRef.current = null;
+    if (pending) enqueueDocumentSave(pending);
+  }, [buildDocumentSaveRequest, enqueueDocumentSave]);
+
+  useEffect(() => {
+    return () => {
+      flushPendingDocumentSave(documentDraftRef.current);
+    };
+  }, [flushPendingDocumentSave, linkedEntityKind, linkedNodeID]);
+
+  const applyLoadedDocument = useCallback((entityKind: LinkedEntityKind, entityID: string, informationID: string, text: string) => {
+    documentDraftRef.current = text;
+    persistedDocumentRef.current = text;
+    documentInformationIDRef.current = informationID;
+    setDocumentInformationID(informationID);
+    const targetKey = informationID ? documentTargetKey({ entityKind, entityID, informationID }) : `${entityKind}:${entityID}:`;
+    currentDocumentTargetKeyRef.current = targetKey;
+    persistedDocumentTargetKeyRef.current = targetKey;
+    if (editorTextAreaRef.current && editorTextAreaRef.current.value !== text) editorTextAreaRef.current.value = text;
+    placeEditorCaretAtDocumentEnd(true);
+  }, [placeEditorCaretAtDocumentEnd]);
 
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
@@ -344,9 +479,15 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setLinkedNodeHistoryRows([]);
       documentDraftRef.current = "";
       persistedDocumentRef.current = "";
+      documentInformationIDRef.current = "";
+      currentDocumentTargetKeyRef.current = "";
+      persistedDocumentTargetKeyRef.current = "";
+      pendingSaveRef.current = null;
       setDocumentInformationID("");
-      if (editorDocRef.current) editorDocRef.current.textContent = "";
-      if (editorScrollRef.current) editorScrollRef.current.scrollTop = 0;
+      if (editorTextAreaRef.current) {
+        editorTextAreaRef.current.value = "";
+        editorTextAreaRef.current.scrollTop = 0;
+      }
       return;
     }
     (async () => {
@@ -377,11 +518,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           setLinkedNodeHistoryRows(historyRows);
           const first = nonBlankTextBoxes[0] ?? projections[0];
           const initialDocument = first?.information ?? "";
-          documentDraftRef.current = initialDocument;
-          persistedDocumentRef.current = initialDocument;
-          setDocumentInformationID(first?.information_id ?? "");
-          if (editorDocRef.current && editorDocRef.current.textContent !== initialDocument) editorDocRef.current.textContent = initialDocument;
-          placeEditorCaretAtDocumentEnd(true);
+          applyLoadedDocument("logic_gate", linkedNodeID, first?.information_id ?? "", initialDocument);
           return;
         }
         const [details, projections] = await Promise.all([
@@ -406,17 +543,13 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         setLinkedNodeHistoryRows(historyRows);
         const first = projections.find((item) => item.information.trim().length > 0) ?? projections[0];
         const initialDocument = first?.information ?? "";
-        documentDraftRef.current = initialDocument;
-        persistedDocumentRef.current = initialDocument;
-        setDocumentInformationID(first?.information_id ?? "");
-        if (editorDocRef.current && editorDocRef.current.textContent !== initialDocument) editorDocRef.current.textContent = initialDocument;
-        placeEditorCaretAtDocumentEnd(true);
+        applyLoadedDocument("node", linkedNodeID, first?.information_id ?? "", initialDocument);
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load linked information");
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, placeEditorCaretAtDocumentEnd]);
+  }, [apiBase, applyLoadedDocument, companyID, linkedEntityKind, linkedNodeID]);
 
   const tabItems = useMemo(() => ([
     { id: "editor", label: "Editor" },
@@ -497,7 +630,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                   {linkedNodeTitle || "\u00A0"}
                 </span>
               </div>
-              {linkedNodeInfoPreview.length > 0 && <div style={{ fontSize: 10, opacity: 0.7 }}>{linkedNodeInfoPreview.join(" • ")}</div>}
+              {linkedNodeInfoPreview.length > 0 && <div style={{ fontSize: 10, opacity: 0.7 }}>{linkedNodeInfoPreview.join(" - ")}</div>}
             </div>
           )}
 
@@ -527,16 +660,52 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       )}
 
       {linkedNodeID.trim().length > 0 && (
-        <div
-          ref={editorScrollRef}
+        <textarea
+          ref={editorTextAreaRef}
           className="editor-document-scroll"
+          aria-label="Linked document editor"
+          spellCheck
+          onChange={(event) => scheduleDocumentSave(event.currentTarget.value)}
+          onBlur={(event) => flushPendingDocumentSave(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.currentTarget.blur();
+              return;
+            }
+            const edit = applyDocumentTextareaKey({
+              value: event.currentTarget.value,
+              selectionStart: event.currentTarget.selectionStart,
+              selectionEnd: event.currentTarget.selectionEnd,
+              key: event.key,
+              shiftKey: event.shiftKey,
+            });
+            if (!edit) return;
+            event.preventDefault();
+            event.currentTarget.value = edit.value;
+            event.currentTarget.setSelectionRange(edit.selectionStart, edit.selectionEnd);
+            scheduleDocumentSave(edit.value);
+          }}
           style={{
             position: "absolute",
             top: 86,
             right: 0,
             bottom: 0,
             left: 0,
-            padding: "0 12px 24px 24px",
+            border: 0,
+            background: "transparent",
+            color: surfaceText,
+            display: "block",
+            boxSizing: "border-box",
+            resize: "none",
+            padding: "0 18px 24px 24px",
+            outline: "none",
+            fontSize: 15,
+            lineHeight: 1.55,
+            fontFamily: "'Manrope', 'Helvetica Neue', sans-serif",
+            whiteSpace: "pre-wrap",
+            tabSize: 2,
+            caretColor: accent,
             cursor: "text",
             overflowY: "auto",
             overflowX: "hidden",
@@ -544,27 +713,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             ["--editor-document-scroll-accent" as string]: scrollbarAccent,
             ["--editor-document-scroll-track" as string]: scrollbarTrack,
           }}
-        >
-          <div
-            ref={editorDocRef}
-            contentEditable
-            suppressContentEditableWarning
-            spellCheck
-            onInput={(event) => { documentDraftRef.current = event.currentTarget.textContent ?? ""; }}
-            onBlur={(event) => {
-              const nextText = event.currentTarget.textContent ?? "";
-              documentDraftRef.current = nextText;
-              void saveDocument(nextText);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                event.currentTarget.blur();
-              }
-            }}
-            style={{ minHeight: "100%", paddingRight: 12, outline: "none", fontSize: 15, lineHeight: 1.55, fontFamily: "'Manrope', 'Helvetica Neue', sans-serif", whiteSpace: "pre-wrap", caretColor: accent, cursor: "text" }}
-          />
-        </div>
+        />
       )}
       {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020", zIndex: 3 }}>{error}</div>}
       </div>
