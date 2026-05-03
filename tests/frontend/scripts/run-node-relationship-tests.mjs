@@ -25,6 +25,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/contextSyncContract.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/shared.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTabs.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorUndoHistory.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/plainTextEditing.test.js"),
 ];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
@@ -55,6 +56,7 @@ for (const testFile of testFiles) {
   contents = contents.replaceAll('"../../../../frontend/src/modules/company-explorer/treePresentation"', '"../../../../frontend/src/modules/company-explorer/treePresentation.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/shared"', '"../../../../frontend/src/modules/kanban/shared.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/plainTextEditing"', '"../../../../frontend/src/modules/editor/plainTextEditing.js"');
+  contents = contents.replaceAll('"../../../../frontend/src/modules/editor/editorUndoHistory"', '"../../../../frontend/src/modules/editor/editorUndoHistory.js"');
   contents = contents.replaceAll('"../../../frontend/src/hooks/keyboardShortcutRouting"', '"../../../frontend/src/hooks/keyboardShortcutRouting.js"');
   writeFileSync(testFile, contents, "utf8");
 }

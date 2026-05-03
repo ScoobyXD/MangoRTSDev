@@ -12,7 +12,7 @@ function keyEvent(input: Partial<KeyboardShortcutEventLike> & { key: string }): 
   };
 }
 
-test("Ctrl+Z inside the editor textarea is left to native text undo", () => {
+test("Ctrl+Z inside the editor textarea is not routed to dashboard undo", () => {
   assert.equal(
     resolveGlobalKeyboardShortcut(keyEvent({
       key: "z",
