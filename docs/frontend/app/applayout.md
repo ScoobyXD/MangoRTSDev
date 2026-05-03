@@ -103,5 +103,7 @@ The app layout keeps compatibility for persisted payloads:
 - Root frames can be selected from the header section, and the full header section starts frame movement in edit mode and non-edit mode.
 - Child frames can be selected from the header section and dragged within their parent frame from that full header section.
 - Right-clicking anywhere in the header section opens the frame action menu with Duplicate, Link modules, Delink modules, color choices, and Delete.
+- Non-map frame headers show the grab/grabbing cursor while hovered or dragged. Node Map and Logic Gate Map frames keep their map canvas cursor behavior instead of forcing the grab cursor.
+- Map frames use a capture-phase pointer selection path for Shift/Ctrl frame multi-select because map canvases consume modifier `pointerdown` for module-local box selection before mouse selection can fire.
 - Dragging no longer starts from the general section; the body remains available for text editing, Kanban card work, map selection, explorer rows, and other module interactions.
 - Selected frames render a persistent cyan frame ring using `FRAME_SELECTION_COLOR`, confirming which frame is active for link, delete, copy, and related frame-level actions.

@@ -393,7 +393,7 @@ interface FrameCardProps {
   onResizeStart: (e: React.MouseEvent | React.TouchEvent, id: string, edges: ResizeEdges) => void;
   onContextMenu: (e: React.MouseEvent, id: string) => void;
   onModuleNameClick: (e: React.MouseEvent, id: string) => void;
-  onSelect: (event: React.MouseEvent | React.TouchEvent, id: string) => void;
+  onSelect: (event: React.MouseEvent | React.TouchEvent | React.PointerEvent, id: string) => void;
   isLinked: boolean;
   edgeHit?: { left: boolean; right: boolean; top: boolean; bottom: boolean };
 }
@@ -401,7 +401,8 @@ interface FrameCardProps {
 const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nestedChildren, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked, edgeHit }) => {
   const Content = CONTENT_MAP[frame.kind];
   const theme = COLORWAYS[frame.theme ?? "teal"];
-  const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-map" || frame.kind === "logic-map" || frame.kind === "editor" || frame.kind === "node-doc";
+  const isMapInteractionFrame = frame.kind === "nodes" || frame.kind === "nodes-map" || frame.kind === "logic-map";
+  const isNodesFrame = isMapInteractionFrame || frame.kind === "editor" || frame.kind === "node-doc";
   const isEdgeToEdgeContentFrame = isNodesFrame || frame.kind === "company-explorer" || frame.kind === "kanban";
   const left = frame.x * stepX;
   const top = frame.y * stepY;
@@ -412,7 +413,9 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
   const timersRef = useRef<Partial<Record<"left" | "right" | "top" | "bottom", number>>>({});
   const suppressModuleHeaderClickRef = useRef(false);
   const suppressModuleHeaderClickTimerRef = useRef<number | null>(null);
+  const headerSectionHoveredRef = useRef(false);
   const [edgeBump, setEdgeBump] = useState<{ left: boolean; right: boolean; top: boolean; bottom: boolean }>({ left: false, right: false, top: false, bottom: false });
+  const [isHeaderSectionHovered, setIsHeaderSectionHovered] = useState(false);
 
   useEffect(() => {
     if (nested || !edgeHit) return;
@@ -440,6 +443,19 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
 
   const shouldIgnoreFramePointerTarget = (target: HTMLElement) => !nested && !!target.closest('[data-child-frame="true"]');
   const isResizeHandleTarget = (target: HTMLElement) => !!target.closest('[data-handle="true"]');
+  const updateHeaderSectionHover = (next: boolean) => {
+    if (headerSectionHoveredRef.current === next) return;
+    headerSectionHoveredRef.current = next;
+    setIsHeaderSectionHovered(next);
+  };
+  const updateHeaderSectionHoverFromPointer = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    const next = !isMapInteractionFrame
+      && !shouldIgnoreFramePointerTarget(target)
+      && !isResizeHandleTarget(target)
+      && isFrameHeaderSectionPointer(event, event.currentTarget);
+    updateHeaderSectionHover(next);
+  };
   const canStartHeaderSectionDrag = (event: React.MouseEvent | React.TouchEvent, target: HTMLElement, element: HTMLElement) => {
     if (shouldIgnoreFramePointerTarget(target) || isResizeHandleTarget(target)) return false;
     if (!isFrameHeaderSectionPointer(event, element)) return false;
@@ -472,6 +488,8 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
   return (
     <Frame
       data-child-frame={nested ? "true" : "false"}
+      data-frame-dragging={isDragging ? "true" : undefined}
+      data-frame-header-section-hover={isHeaderSectionHovered ? "true" : undefined}
       style={{
         position: "absolute",
         left,
@@ -505,6 +523,8 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         e.stopPropagation();
       }}
       onClick={(e) => e.stopPropagation()}
+      onMouseMoveCapture={updateHeaderSectionHoverFromPointer}
+      onMouseLeave={() => updateHeaderSectionHover(false)}
       onContextMenuCapture={(e) => {
         const target = e.target as HTMLElement;
         if (shouldIgnoreFramePointerTarget(target) || isResizeHandleTarget(target)) return;
@@ -512,6 +532,12 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         e.preventDefault();
         e.stopPropagation();
         onContextMenu(e, frame.id);
+      }}
+      onPointerDownCapture={(e) => {
+        if (!isMapInteractionFrame || e.button !== 0 || (!e.shiftKey && !e.ctrlKey)) return;
+        const target = e.target as HTMLElement;
+        if (shouldIgnoreFramePointerTarget(target) || isResizeHandleTarget(target)) return;
+        onSelect(e, frame.id);
       }}
       onMouseDownCapture={(e) => {
         const target = e.target as HTMLElement;
@@ -565,7 +591,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
           borderRight: "none",
           borderBottom: "none",
           background: frame.color,
-          cursor: isDragging ? "grabbing" : "grab",
+          cursor: isMapInteractionFrame ? "default" : (isDragging ? "grabbing" : "grab"),
           fontFamily: "'IBM Plex Mono', monospace",
         }}
       >
@@ -1137,6 +1163,14 @@ const App: React.FC = () => {
         @keyframes frame-edge-bump-y {
           0% { opacity: 0.75; transform: scaleY(1); }
           100% { opacity: 0; transform: scaleY(0.18); }
+        }
+        [data-frame-header-section-hover="true"],
+        [data-frame-header-section-hover="true"] * {
+          cursor: grab !important;
+        }
+        [data-frame-header-section-hover="true"][data-frame-dragging="true"],
+        [data-frame-header-section-hover="true"][data-frame-dragging="true"] * {
+          cursor: grabbing !important;
         }
       `}</style>
       <header
