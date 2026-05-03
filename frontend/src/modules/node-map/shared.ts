@@ -117,6 +117,68 @@ export function snapToGrid(value: number): number {
   return Math.round(value / MINI_GRID) * MINI_GRID;
 }
 
+function formatGridNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+function plusGridSvgDataURL(input: {
+  size: number;
+  color: string;
+  opacity: number;
+  arm: number;
+  strokeWidth: number;
+}): string {
+  const center = input.size / 2;
+  const arm = Math.min(input.arm, input.size / 2 - 1);
+  const x1 = formatGridNumber(center - arm);
+  const x2 = formatGridNumber(center + arm);
+  const xCenter = formatGridNumber(center);
+  const yCenter = formatGridNumber(center);
+  const y1 = formatGridNumber(center - arm);
+  const y2 = formatGridNumber(center + arm);
+  const strokeWidth = formatGridNumber(input.strokeWidth);
+  const size = formatGridNumber(input.size);
+  const opacity = formatGridNumber(clamp(input.opacity, 0, 1));
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><path d="M${x1} ${yCenter}H${x2}M${xCenter} ${y1}V${y2}" fill="none" stroke="${input.color}" stroke-opacity="${opacity}" stroke-width="${strokeWidth}" stroke-linecap="square"/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
+export function adaptivePlusGridWorldStep(zoom: number): number {
+  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  let step = 48;
+  while (step * safeZoom < 22) step *= 2;
+  while (step * safeZoom > 64 && step > MINI_GRID) step /= 2;
+  return step;
+}
+
+export function buildPlusGridBackgroundStyle(input: {
+  zoom: number;
+  accent: string;
+  theme: "light" | "dark";
+}): React.CSSProperties {
+  const zoom = Number.isFinite(input.zoom) && input.zoom > 0 ? input.zoom : 1;
+  const minorStep = adaptivePlusGridWorldStep(zoom);
+  const majorStep = minorStep * 4;
+  const strokeWidth = clamp(1 / zoom, 0.45, 1.4);
+  const minorArm = clamp(3.5 / zoom, 1.8, 5.5);
+  const majorArm = clamp(5.5 / zoom, 2.6, 7.5);
+  const minorColor = input.theme === "dark" ? "#bcecf2" : "#425961";
+  const majorColor = input.accent || (input.theme === "dark" ? "#72f1ff" : "#007b88");
+
+  // The browser repeats two tiny SVG tiles instead of us creating thousands of
+  // grid DOM nodes. That keeps pan/zoom cheap for very large company maps.
+  return {
+    backgroundColor: input.theme === "dark" ? "rgba(10, 14, 18, 0.68)" : "rgba(247, 251, 252, 0.82)",
+    backgroundImage: [
+      plusGridSvgDataURL({ size: minorStep, color: minorColor, opacity: input.theme === "dark" ? 0.28 : 0.24, arm: minorArm, strokeWidth }),
+      plusGridSvgDataURL({ size: majorStep, color: majorColor, opacity: input.theme === "dark" ? 0.42 : 0.30, arm: majorArm, strokeWidth }),
+    ].join(", "),
+    backgroundPosition: "0 0, 0 0",
+    backgroundRepeat: "repeat, repeat",
+    backgroundSize: `${minorStep}px ${minorStep}px, ${majorStep}px ${majorStep}px`,
+  };
+}
+
 export function reconcileNodeMapPositions<T extends { node_id: string }>(input: {
   previous: Record<string, NodePosition>;
   nodes: T[];

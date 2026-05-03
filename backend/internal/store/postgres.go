@@ -175,6 +175,25 @@ func (r *PostgresRepo) DeleteNode(companyID, nodeID string) error {
 	}
 
 	if _, err := tx.ExecContext(ctx,
+		`delete from kanban_cards
+		 where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
+	); err != nil {
+		return err
+	}
+
+	// Operations are audit records. Keep the row, but clear the direct node pointer
+	// before deleting the node so a historical operation never blocks item cleanup.
+	if _, err := tx.ExecContext(ctx,
+		`update operations
+		 set node_id=null
+		 where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
+	); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx,
 		`delete from node_information
 		 where company_id=$1 and node_id=$2`,
 		companyID, nodeID,
@@ -613,6 +632,24 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	if _, err := tx.ExecContext(ctx,
 		`delete from company_explorer_folder_items
 		 where company_id=$1 and item_type='logic_gate' and item_id=$2`,
+		companyID, logicGateID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from kanban_cards
+		 where company_id=$1 and logic_gate_id=$2`,
+		companyID, logicGateID,
+	); err != nil {
+		return err
+	}
+
+	// Keep operation history but release the gate FK so deleting a gate is not
+	// blocked by old executions or agent activity logs.
+	if _, err := tx.ExecContext(ctx,
+		`update operations
+		 set logic_gate_id=null
+		 where company_id=$1 and logic_gate_id=$2`,
 		companyID, logicGateID,
 	); err != nil {
 		return err

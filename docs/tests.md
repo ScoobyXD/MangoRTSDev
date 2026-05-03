@@ -128,6 +128,10 @@ Use this checklist format and keep it complete.
   - preserves positions for nodes hidden by scoped Company Explorer views
   - converts backend map-layout rows into canvas position records
   - detects changed positions so UI writes only dirty layout rows
+- [x] `tests/frontend/modules/node-map/mapGridBackground.test.ts`
+  - adaptive plus-grid spacing stays readable across zoom levels
+  - map backgrounds use repeated SVG tiles instead of per-cell DOM nodes
+  - zoomed-out backgrounds coarsen tile size for lower render churn
 - [x] `tests/frontend/modules/node-map/editorCanvasKeydownRouting.test.ts`
   - editor canvas key-routing guard ignores key events from contentEditable/input/textarea surfaces
   - non-editable canvas targets continue through normal canvas key handling
@@ -179,6 +183,10 @@ Use this checklist format and keep it complete.
   - Kanban column delete API flow
   - Kanban card upsert moves an existing board card instead of duplicating it
   - Kanban card reads honor `after_position` pagination for bounded hot-path reads
+- [x] `backend/internal/store/memory_test.go`
+  - node and logic-gate deletes remove projection rows
+  - node and logic-gate deletes remove Kanban card placements for the deleted item
+  - operation history is retained while deleted item pointers are cleared
 
 ### Integration tests
 - [ ] None committed yet (to be added)
