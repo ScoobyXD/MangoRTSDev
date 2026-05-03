@@ -5,7 +5,7 @@ import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GR
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
-import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
+import { shouldApplyMapSelection, shouldBroadcastSelection, shouldReadMapStateForSelectionEvent, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
 import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../kanban/shared";
@@ -804,10 +804,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       if (!detail || detail.mapWidgetID !== linkedMapFrameID) return;
       const revision = readIncomingSequence(detail);
       if (revision > 0 && !isNewerSequence(lastMapSelectionRevisionRef.current, revision)) return;
-      if (revision > 0 && hasSequenceGap(lastMapSelectionRevisionRef.current, revision)) readFromMapState();
+      const eventSelectedNodeID = typeof detail.selectedNodeID === "string" ? detail.selectedNodeID : "";
+      const eventHasSelection = typeof detail.selectedNodeID === "string";
+      if (revision > 0 && shouldReadMapStateForSelectionEvent(hasSequenceGap(lastMapSelectionRevisionRef.current, revision), eventHasSelection)) readFromMapState();
       if (revision > 0) lastMapSelectionRevisionRef.current = revision;
-      if (typeof detail.selectedNodeID !== "string") return;
-      applyMapSelection(detail.selectedNodeID);
+      if (!eventHasSelection) return;
+      applyMapSelection(eventSelectedNodeID);
     };
     window.addEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapSelectionUpdated);
     return () => {
@@ -855,10 +857,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       if (!detail || detail.mapWidgetID !== logicContextFrameID) return;
       const revision = readIncomingSequence(detail);
       if (revision > 0 && !isNewerSequence(lastLogicMapSelectionRevisionRef.current, revision)) return;
-      if (revision > 0 && hasSequenceGap(lastLogicMapSelectionRevisionRef.current, revision)) readFromLogicMapState();
-      if (revision > 0) lastLogicMapSelectionRevisionRef.current = revision;
       const selected = typeof detail.selectedLogicGateID === "string" ? detail.selectedLogicGateID : detail.selectedNodeID;
-      if (typeof selected !== "string") return;
+      const eventHasSelection = typeof selected === "string";
+      if (revision > 0 && shouldReadMapStateForSelectionEvent(hasSequenceGap(lastLogicMapSelectionRevisionRef.current, revision), eventHasSelection)) readFromLogicMapState();
+      if (revision > 0) lastLogicMapSelectionRevisionRef.current = revision;
+      if (!eventHasSelection) return;
       applyLogicGateMapSelection(selected);
     };
     window.addEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapSelectionUpdated);
@@ -1085,7 +1088,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 padding: "4px 8px",
                 paddingLeft: TREE_BASE_LEFT_PX + row.depth * TREE_INDENT_PX,
                 fontSize: 12,
-                cursor: rowDragPayload ? "grab" : "pointer",
+                cursor: "default",
                 opacity: isDragging ? 0.55 : 1,
                 background: isDropTarget ? dropRowBackground : (isSelected ? selectedRowBackground : "transparent"),
                 borderBottom: `1px solid ${rowRuleColor}`,

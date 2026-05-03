@@ -19,3 +19,10 @@ export function shouldApplyMapSelection(current: ExplorerSelectionState, nextNod
 export function shouldBroadcastSelection(previous: ExplorerSelectionState, next: ExplorerSelectionState): boolean {
   return previous.selectedNodeID !== next.selectedNodeID || previous.selectedTreeID !== next.selectedTreeID;
 }
+
+// Map state is written through a small debounce, while selection events are
+// dispatched immediately. If the event already carries the selected entity ID,
+// using localStorage for sequence-gap recovery can reapply an older selection.
+export function shouldReadMapStateForSelectionEvent(hasSequenceGap: boolean, hasEventSelection: boolean): boolean {
+  return hasSequenceGap && !hasEventSelection;
+}
