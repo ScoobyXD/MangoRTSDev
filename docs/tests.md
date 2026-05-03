@@ -142,6 +142,10 @@ Use this checklist format and keep it complete.
   - linked target resolution by kind supports traversal through intermediary graph hops, including Kanban
   - direct-neighbor resolution returns adjacency-only targets for explorer fanout
 - [x] `tests/frontend/modules/company-explorer/explorerSync.test.ts`
+- [x] `tests/frontend/modules/company-explorer/treePresentation.test.ts`
+  - locks Company Explorer root order as Company -> Logic Gates -> Nodes
+  - guards against reintroducing the Knowledge Nodes placeholder row
+  - verifies right-click creation targets for nested node and logic-gate folder contexts
 - [x] `tests/frontend/modules/folders/companyExplorerFolders.test.ts`
   - nested folder subtree expansion for map scope
   - node folder filtering keeps only folder/descendant contents
