@@ -7,7 +7,7 @@ import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceS
 import { summarizeRelationshipDeleteResults } from "../node-map/relationshipDeleteSummary";
 import { invalidateLogicGateRecordStoreCaches } from "./LogicGateRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
-import { filterLogicGateGraphToFolderScope, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
+import { filterLogicGateGraphToFolderScope, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 
 type ExplorerSelectionOrigin = {
   sourceExplorerID: string;
@@ -374,13 +374,20 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     });
   }, [relationships]);
 
+  const scopedNodeIDSet = useMemo(() => new Set(nodes.map((node) => node.node_id)), [nodes]);
+  const knownGraphNodeIDSet = useMemo(() => new Set(allNodes.map((node) => node.node_id)), [allNodes]);
+
   useEffect(() => {
-    if (!selectedNodeID) return;
-    if (nodes.some((node) => node.node_id === selectedNodeID)) return;
-    const fallback = nodes[0]?.node_id ?? "";
+    const fallback = resolveScopedMapSelectionFallback({
+      selectedID: selectedNodeID,
+      visibleItemIDs: scopedNodeIDSet,
+      knownItemIDs: knownGraphNodeIDSet,
+      explorerRequestedID: explorerSelectionOriginRef.current?.selectedEntityID,
+    });
+    if (fallback === null) return;
     setSelectedNodeID(fallback);
     setSelectedNodeIDs(fallback ? new Set([fallback]) : new Set());
-  }, [nodes, selectedNodeID]);
+  }, [knownGraphNodeIDSet, scopedNodeIDSet, selectedNodeID]);
 
   useEffect(() => {
     if (!relationshipDraft) return;
@@ -603,7 +610,10 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           setActiveFolderLabel(typeof parsed.selectedFolderLabel === "string" ? parsed.selectedFolderLabel : (typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : ""));
           const selected = parsed.selectedLogicGateID || parsed.selectedNodeID || "";
           rememberExplorerSelectionOrigin(parsed, selected);
-          if (selected && allNodes.some((node) => node.node_id === selected)) {
+          if (selected) {
+            // Explorer owns navigation intent. A map can momentarily have stale
+            // all-node data during mode/scope switches, so accept the Explorer
+            // selected gate and let the filtered projection catch up.
             setSelectedNodeID(selected);
             setSelectedNodeIDs(new Set([selected]));
           } else {
@@ -623,8 +633,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           return;
         }
         rememberExplorerSelectionOrigin(parsed, selectedLogicGateID);
-        const exists = allNodes.some((node) => node.node_id === selectedLogicGateID);
-        if (!exists) return;
         setActiveFolderID("");
         setActiveFolderLabel("");
         setSelectedNodeID(selectedLogicGateID);

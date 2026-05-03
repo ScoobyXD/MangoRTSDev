@@ -96,3 +96,29 @@ export function filterLogicGateGraphToFolderScope(args: {
     relationships: relationships.filter((relationship) => visible.has(relationship.node_id_a) && visible.has(relationship.node_id_b)),
   };
 }
+
+export function resolveScopedMapSelectionFallback(args: {
+  selectedID: string;
+  visibleItemIDs: Iterable<string>;
+  knownItemIDs: Iterable<string>;
+  explorerRequestedID?: string;
+}): string | null {
+  if (!args.selectedID) return null;
+  const visibleItemIDs = args.visibleItemIDs instanceof Set ? args.visibleItemIDs : new Set(args.visibleItemIDs);
+  if (visibleItemIDs.has(args.selectedID)) return null;
+
+  // Explorer intent is stronger than the map's current filtered projection.
+  // During a folder switch React can render one tick where the new selection is
+  // active but the old folder's nodes are still visible. In that tick we must
+  // not replace the user's click with "the first visible node", or the map will
+  // broadcast that fallback back to Explorer as if it were a real map click.
+  if (args.explorerRequestedID === args.selectedID) return null;
+
+  // If the item still exists in the workspace, keep the semantic selection even
+  // when the active folder scope hides it. Picking a fallback is only safe after
+  // the selected item is actually absent from the known graph snapshot.
+  const knownItemIDs = args.knownItemIDs instanceof Set ? args.knownItemIDs : new Set(args.knownItemIDs);
+  if (knownItemIDs.has(args.selectedID)) return null;
+
+  return Array.from(visibleItemIDs)[0] ?? "";
+}

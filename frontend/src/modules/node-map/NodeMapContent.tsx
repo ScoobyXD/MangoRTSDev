@@ -7,7 +7,7 @@ import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceS
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
 import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
-import { filterNodeGraphToFolderScope, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
+import { filterNodeGraphToFolderScope, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 
 type ExplorerSelectionOrigin = {
   sourceExplorerID: string;
@@ -369,13 +369,20 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     });
   }, [relationships]);
 
+  const scopedNodeIDSet = useMemo(() => new Set(nodes.map((node) => node.node_id)), [nodes]);
+  const knownGraphNodeIDSet = useMemo(() => new Set(allNodes.map((node) => node.node_id)), [allNodes]);
+
   useEffect(() => {
-    if (!selectedNodeID) return;
-    if (nodes.some((node) => node.node_id === selectedNodeID)) return;
-    const fallback = nodes[0]?.node_id ?? "";
+    const fallback = resolveScopedMapSelectionFallback({
+      selectedID: selectedNodeID,
+      visibleItemIDs: scopedNodeIDSet,
+      knownItemIDs: knownGraphNodeIDSet,
+      explorerRequestedID: explorerSelectionOriginRef.current?.selectedEntityID,
+    });
+    if (fallback === null) return;
     setSelectedNodeID(fallback);
     setSelectedNodeIDs(fallback ? new Set([fallback]) : new Set());
-  }, [nodes, selectedNodeID]);
+  }, [knownGraphNodeIDSet, scopedNodeIDSet, selectedNodeID]);
 
   useEffect(() => {
     if (!relationshipDraft) return;
@@ -597,7 +604,10 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           setActiveFolderLabel(typeof parsed.selectedFolderLabel === "string" ? parsed.selectedFolderLabel : (typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : ""));
           const selected = typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "";
           rememberExplorerSelectionOrigin(parsed, selected);
-          if (selected && allNodes.some((node) => node.node_id === selected)) {
+          if (selected) {
+            // Explorer is the navigation authority. Trust its selected ID even
+            // if the map's all-node snapshot is one render behind; folder scope
+            // reconciliation below will catch up without inventing a fallback.
             setSelectedNodeID(selected);
             setSelectedNodeIDs(new Set([selected]));
           } else {
@@ -616,8 +626,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           return;
         }
         rememberExplorerSelectionOrigin(parsed, parsed.selectedNodeID);
-        const exists = allNodes.some((node) => node.node_id === parsed.selectedNodeID);
-        if (!exists) return;
         setActiveFolderID("");
         setActiveFolderLabel("");
         setSelectedNodeID(parsed.selectedNodeID);
