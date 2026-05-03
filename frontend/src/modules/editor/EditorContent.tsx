@@ -7,6 +7,7 @@ import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, in
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches } from "../logic-gate-map/LogicGateRecordStore";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import type { NodeInformation } from "../node-map/shared";
+import { getEditorDocumentIsolationState, type EditorTabID } from "./editorTabs";
 import { insertEditorTabText } from "./plainTextEditing";
 
 type LinkedEntityKind = "node" | "logic_gate";
@@ -54,7 +55,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [linkedNodeHistoryRows, setLinkedNodeHistoryRows] = useState<string[]>([]);
   const [documentInformationID, setDocumentInformationID] = useState("");
   const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState<"editor" | "metadata" | "history">("editor");
+  const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const editingTitleRef = useRef<HTMLSpanElement | null>(null);
   const editingTitleDraftRef = useRef("");
@@ -224,6 +225,16 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     pendingSaveRef.current = null;
     if (pending) enqueueDocumentSave(pending);
   }, [buildDocumentSaveRequest, enqueueDocumentSave]);
+
+  const selectTab = useCallback((tab: EditorTabID) => {
+    if (tab === activeTab) return;
+    if (activeTab === "editor" && tab !== "editor" && editorTextAreaRef.current) {
+      flushPendingDocumentSave(editorTextAreaRef.current.value);
+      editorTextAreaRef.current.blur();
+    }
+    setActiveTab(tab);
+    if (tab === "editor") placeEditorCaretAtDocumentEnd(false);
+  }, [activeTab, flushPendingDocumentSave, placeEditorCaretAtDocumentEnd]);
 
   useEffect(() => {
     return () => {
@@ -574,6 +585,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const panelBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 255, 255, 0.8)";
   const scrollbarAccent = theme === "light" ? "rgb(0, 233, 255)" : accent;
   const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)";
+  const documentIsolation = getEditorDocumentIsolationState(activeTab);
 
   return (
     <div
@@ -588,7 +600,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             {tabItems.map((tab) => {
               const selected = activeTab === tab.id;
               return (
-                <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} style={{ border: `1px solid ${selected ? accent : strokeColor}`, background: selected ? tabSelectedBackground : tabBackground, color: surfaceText, fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 10px", borderRadius: 4, cursor: "pointer" }}>
+                <button key={tab.id} type="button" onClick={() => selectTab(tab.id)} style={{ border: `1px solid ${selected ? accent : strokeColor}`, background: selected ? tabSelectedBackground : tabBackground, color: surfaceText, fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 10px", borderRadius: 4, cursor: "pointer" }}>
                   {tab.label}
                 </button>
               );
@@ -672,6 +684,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           ref={editorTextAreaRef}
           className="editor-document-scroll"
           aria-label="Linked document editor"
+          aria-hidden={documentIsolation.ariaHidden}
+          tabIndex={documentIsolation.tabIndex}
           spellCheck
           onChange={(event) => scheduleDocumentSave(event.currentTarget.value)}
           onBlur={(event) => flushPendingDocumentSave(event.currentTarget.value)}
@@ -702,6 +716,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             background: "transparent",
             color: surfaceText,
             display: "block",
+            visibility: documentIsolation.visibility,
+            pointerEvents: documentIsolation.pointerEvents,
             boxSizing: "border-box",
             resize: "none",
             padding: "0 18px 24px 24px",
