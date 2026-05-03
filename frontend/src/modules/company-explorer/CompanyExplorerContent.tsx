@@ -10,7 +10,7 @@ import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMuta
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
 import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload } from "../kanban/shared";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
-import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, formatExplorerFolderLabel, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerCreationTargets } from "./treePresentation";
+import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, formatExplorerFolderLabel, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerDropTarget, resolveExplorerRenameTarget, type ExplorerCreationTargets, type ExplorerDropPayload } from "./treePresentation";
 
 type ExplorerTreeNode = {
   id: string;
@@ -25,13 +25,7 @@ type ExplorerTreeNode = {
   scopeLevel: number;
 };
 
-type ExplorerDragPayload = {
-  kind: "folder" | "node" | "logic_gate";
-  folderID?: string;
-  folderKind?: CompanyExplorerFolderKind;
-  itemID?: string;
-  itemType?: CompanyExplorerFolderKind;
-};
+type ExplorerDragPayload = ExplorerDropPayload;
 
 type ExplorerDeleteTarget = NonNullable<ReturnType<typeof resolveExplorerDeleteTarget>>;
 type ExplorerRenameTarget = NonNullable<ReturnType<typeof resolveExplorerRenameTarget>>;
@@ -687,14 +681,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     setRenaming({ treeID: row.id, target, value: row.label });
   }, [focusTreeRow]);
 
-  const canDropOnRow = useCallback((target: ExplorerTreeNode, payload: ExplorerDragPayload | null) => {
-    if (!payload || target.kind !== "folder" || !target.folderKind) return false;
-    if (payload.kind === "folder") {
-      return payload.folderKind === target.folderKind && payload.folderID !== target.folderID;
-    }
-    return !!target.folderID && payload.itemType === target.folderKind;
-  }, []);
-
   const openExplorerContextMenu = useCallback((event: React.MouseEvent, row?: ExplorerTreeNode | null) => {
     event.preventDefault();
     event.stopPropagation();
@@ -939,7 +925,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           if (event.button === 0) setExplorerContextMenu(null);
         }}
         onContextMenu={(event) => openExplorerContextMenu(event)}
-        style={{ overflow: "auto", minWidth: 0, ["--company-explorer-scroll-accent" as string]: accent }}
+        style={{ overflowY: "auto", overflowX: "hidden", minWidth: 0, scrollbarGutter: "stable", ["--company-explorer-scroll-accent" as string]: accent }}
       >
         <div style={{ padding: "9px 10px", borderBottom: `1px solid ${ruleColor}`, fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Company Explorer</div>
         {error && <div style={{ padding: "7px 10px", borderBottom: `1px solid ${ruleColor}`, color: "#b00020", fontSize: 11, fontWeight: 700 }}>Error: {error}</div>}
@@ -990,7 +976,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
               }}
               onDragOver={(event) => {
                 const payload = dragPayload ?? readExplorerDragPayload(event.dataTransfer);
-                if (!canDropOnRow(row, payload)) return;
+                const dropTarget = resolveExplorerDropTarget(row, payload);
+                if (!dropTarget) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
                 setDragOverTreeID(row.id);
@@ -1000,20 +987,21 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
               }}
               onDrop={(event) => {
                 const payload = dragPayload ?? readExplorerDragPayload(event.dataTransfer);
+                const dropTarget = resolveExplorerDropTarget(row, payload);
                 setDragOverTreeID("");
-                if (!canDropOnRow(row, payload) || !payload) return;
+                if (!dropTarget || !payload) return;
                 event.preventDefault();
                 setExpanded((previous) => {
                   const next = new Set(previous);
-                  next.add(row.id);
+                  next.add(dropTarget.treeID);
                   return next;
                 });
                 if (payload.kind === "folder" && payload.folderID) {
-                  void moveFolder(payload.folderID, row.folderID ?? "");
+                  void moveFolder(payload.folderID, dropTarget.folderID);
                   return;
                 }
-                if (payload.itemID && payload.itemType && row.folderID) {
-                  void assignItemToFolder(row.folderID, payload.itemType, payload.itemID);
+                if (payload.itemID && payload.itemType) {
+                  void assignItemToFolder(dropTarget.folderID, payload.itemType, payload.itemID);
                 }
               }}
               style={{

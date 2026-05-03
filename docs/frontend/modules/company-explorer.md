@@ -153,7 +153,9 @@ Folder runtime update (2026-05-02):
 - New folders are created inside the right-clicked compatible folder/tree. New nodes and logic gates are created through their canonical APIs and then assigned to the compatible right-clicked folder through `company_explorer_folder_items` when a folder target exists.
 - After any create action, the newly created folder, node, or logic gate becomes the selected highlighted row.
 - Plain click selects one row, Shift-click adds the visible range from the anchor row without clearing previous selections, and Ctrl/Cmd-click toggles individual rows. This selection state is UI-local until a concrete action consumes it, keeping linked map broadcasts focused on the active row.
-- Node, logic-gate, and folder moves still use drag-and-drop onto compatible folders.
+- Node, logic-gate, and folder moves still use the existing folder APIs (`POST /v1/company-explorer/folder-items` and `PUT /v1/company-explorer/folders/{folder_id}`), so headless agents can perform the same placement changes without a browser.
+- Drag-and-drop now accepts any compatible row inside a folder section. Dropping a folder, node, or logic gate on a child row resolves to that row's containing folder, while dropping directly on a compatible folder still targets that folder.
+- The Explorer tree owns its vertical overflow and uses the same thin scrollbar treatment as Editor surfaces. The scrollbar is browser-native, appears only when the tree exceeds the frame height, and keeps rendering virtualized for large company trees.
 - Selecting a node folder broadcasts `selectedFolderID`/`selectedFolderKind=node`; linked Node Map filters its cached graph to nodes placed in that folder or any descendant folder.
 - Selecting a logic-gate folder broadcasts `selectedFolderID`/`selectedFolderKind=logic_gate`; linked Logic Gate Map applies the same folder-scope rule for gates.
 - Selecting an individual node or logic gate inside a folder keeps that folder scope in the broadcast, so linked maps can select the item without expanding back to the whole company.

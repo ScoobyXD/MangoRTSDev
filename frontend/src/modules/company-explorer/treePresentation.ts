@@ -10,6 +10,20 @@ export type ExplorerCreationContextRow = {
   folderKind?: CompanyExplorerFolderKind;
 };
 
+export type ExplorerDropPayload = {
+  kind: ExplorerTreeEntityKind;
+  folderID?: string;
+  folderKind?: CompanyExplorerFolderKind;
+  itemID?: string;
+  itemType?: CompanyExplorerFolderKind;
+};
+
+export type ExplorerDropTarget = {
+  folderID: string;
+  folderKind: CompanyExplorerFolderKind;
+  treeID: string;
+};
+
 export type ExplorerCreationTargets = {
   preferredFolderKind: CompanyExplorerFolderKind;
   preferredFolderParentID: string;
@@ -27,6 +41,21 @@ export const EXPLORER_ROOT_ROW_LABELS = {
 
 export function formatExplorerFolderLabel(name: string): string {
   return name;
+}
+
+export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | null, payload?: ExplorerDropPayload | null): ExplorerDropTarget | null {
+  if (!row || !payload || !row.folderID || !row.folderKind) return null;
+
+  // Drag events fire on the row under the pointer. A file row already carries
+  // its containing folderID, so users can drop anywhere inside that visible
+  // folder section without us scanning the DOM or the full tree on every hover.
+  if (payload.kind === "folder") {
+    if (!payload.folderID || payload.folderID === row.folderID || payload.folderKind !== row.folderKind) return null;
+    return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
+  }
+
+  if (!payload.itemID || payload.itemType !== row.folderKind) return null;
+  return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
 }
 
 export function resolveExplorerCreationTargets(row?: ExplorerCreationContextRow | null): ExplorerCreationTargets {
