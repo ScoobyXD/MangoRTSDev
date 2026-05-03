@@ -212,6 +212,21 @@ A Case is the source of truth for one piece of work. Everything related to that 
 Prefer **module** over widget in product language and UI labels.
 Prefer **frame data model** over widget for the container model in code.
 
+## Frame/Module Surface Terminology
+
+Use these names consistently in product notes, code comments, and future implementation work:
+
+- **Header section**: the top band of a frame/module, from the top edge down through the thin divider line under the frame name, link hexagon, tabs, or module title controls.
+- **General section**: the module body below that thin divider line. This is where the module's primary content and in-module interactions live.
+
+Interaction convention:
+
+- The header section is the frame/module movement and frame-selection surface.
+- Root frames use the full header section as a drag handle in edit mode.
+- Child frames use the full header section as a drag handle inside their parent frame.
+- The general section should remain reserved for module-local work such as editing text, manipulating Kanban cards, selecting map nodes, and interacting with explorer rows.
+- A selected frame must show a visible frame-border/ring indication so users can tell which module will participate in link, delete, copy, or other frame-level actions.
+
 ## Implementation Decision (April 8, 2026)
 
 ### MVP stack
