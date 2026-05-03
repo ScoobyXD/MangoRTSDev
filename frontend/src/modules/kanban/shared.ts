@@ -57,7 +57,14 @@ export type KanbanColumnPositionUpdate = {
   position: number;
 };
 
-export type KanbanColumnDropPlacement = "before" | "after";
+export type KanbanCardPositionUpdate = {
+  cardID: string;
+  columnID: string;
+  position: number;
+};
+
+export type KanbanColumnDropPlacement = "before" | "after" | "swap";
+export type KanbanCardDropPlacement = "before" | "after";
 
 export function isKanbanBoardDropItemType(value: unknown): value is "node" {
   return value === "node";
@@ -161,6 +168,22 @@ function resolveColumnDropTarget(columns: KanbanColumn[], draggedColumnID: strin
 export function buildColumnReorderPlan(columns: KanbanColumn[], draggedColumnID: string, targetColumnID: string | null, placement: KanbanColumnDropPlacement = "before"): { columns: KanbanColumn[]; updates: KanbanColumnPositionUpdate[] } {
   const sorted = sortColumns(columns);
   const dragged = sorted.find((column) => column.column_id === draggedColumnID);
+  const target = targetColumnID ? sorted.find((column) => column.column_id === targetColumnID) : null;
+  if (placement === "swap") {
+    if (!dragged || !target || dragged.column_id === target.column_id) return { columns: sorted, updates: [] };
+    const swapped = sorted.map((column) => {
+      if (column.column_id === dragged.column_id) return { ...column, position: target.position };
+      if (column.column_id === target.column_id) return { ...column, position: dragged.position };
+      return column;
+    });
+    return {
+      columns: sortColumns(swapped),
+      updates: [
+        { columnID: dragged.column_id, position: target.position },
+        { columnID: target.column_id, position: dragged.position },
+      ],
+    };
+  }
   const resolvedTargetID = resolveColumnDropTarget(sorted, draggedColumnID, targetColumnID, placement);
   if (!dragged || dragged.column_id === resolvedTargetID) return { columns: sorted, updates: [] };
 
@@ -201,6 +224,59 @@ export function nextCardPosition(cards: Pick<KanbanCard, "column_id" | "position
     if (card.position >= next) next = card.position + 1000;
   }
   return next;
+}
+
+function buildCompactedCardUpdates(cards: KanbanCard[], columnID: string): KanbanCardPositionUpdate[] {
+  return cards
+    .filter((card) => card.column_id === columnID)
+    .map((card, index) => ({ cardID: card.card_id, columnID, position: (index + 1) * 1000 }));
+}
+
+export function buildCardReorderPlan(cards: KanbanCard[], draggedCardID: string, targetColumnID: string, targetCardID: string | null = null, placement: KanbanCardDropPlacement = "before"): { cards: KanbanCard[]; updates: KanbanCardPositionUpdate[] } {
+  const dragged = cards.find((card) => card.card_id === draggedCardID);
+  if (!dragged) return { cards, updates: [] };
+
+  const targetColumnCards = groupCardsByColumn(cards).get(targetColumnID) ?? [];
+  const withoutDragged = targetColumnCards.filter((card) => card.card_id !== draggedCardID);
+  const targetIndex = targetCardID ? withoutDragged.findIndex((card) => card.card_id === targetCardID) : withoutDragged.length;
+  if (targetIndex < 0) return { cards, updates: [] };
+
+  const insertIndex = targetCardID && placement === "after" ? targetIndex + 1 : targetIndex;
+  if (dragged.column_id === targetColumnID) {
+    const currentIndex = targetColumnCards.findIndex((card) => card.card_id === draggedCardID);
+    if (!targetCardID && currentIndex === targetColumnCards.length - 1) return { cards, updates: [] };
+  }
+
+  const moved = { ...dragged, column_id: targetColumnID };
+  const reorderedTargetCards = [
+    ...withoutDragged.slice(0, insertIndex),
+    moved,
+    ...withoutDragged.slice(insertIndex),
+  ];
+  const prev = reorderedTargetCards[insertIndex - 1];
+  const next = reorderedTargetCards[insertIndex + 1];
+  const hasRoomBeforeNext = !next || (prev ? next.position - prev.position > 1 : next.position > 1);
+
+  if (!hasRoomBeforeNext) {
+    const compacted = reorderedTargetCards.map((card, index) => ({ ...card, position: (index + 1) * 1000 }));
+    const byID = new Map(compacted.map((card) => [card.card_id, card]));
+    const updates = buildCompactedCardUpdates(compacted, targetColumnID);
+    return {
+      cards: cards.map((card) => byID.get(card.card_id) ?? (card.card_id === dragged.card_id ? moved : card)),
+      updates,
+    };
+  }
+
+  const position = prev && next
+    ? Math.floor((prev.position + next.position) / 2)
+    : prev
+      ? prev.position + 1000
+      : Math.max(1, (next?.position ?? 1001) - 1000);
+  const updated = { ...moved, position };
+  return {
+    cards: cards.map((card) => (card.card_id === dragged.card_id ? updated : card)),
+    updates: [{ cardID: dragged.card_id, columnID: targetColumnID, position }],
+  };
 }
 
 export function groupCardsByColumn(cards: KanbanCard[]): Map<string, KanbanCard[]> {

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { EVENT_EXPLORER_CONTEXT_UPDATED } from "../node-map/eventbus";
 import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
-import { createKanbanColumn, deleteKanbanColumn, listKanbanCards, listKanbanColumns, moveKanbanCard, updateKanbanColumn, upsertKanbanCard } from "./kanbanApi";
+import { createKanbanColumn, deleteKanbanCard, deleteKanbanColumn, listKanbanCards, listKanbanColumns, moveKanbanCard, updateKanbanColumn, upsertKanbanCard } from "./kanbanApi";
 import {
   EXPLORER_ENTITY_DRAG_MIME,
   KANBAN_CARD_DRAG_MIME,
@@ -11,6 +11,7 @@ import {
   KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
   KANBAN_DEFAULT_COLUMN_WIDTH_PX,
   KANBAN_MODULE_TOP_CLEARANCE_PX,
+  buildCardReorderPlan,
   buildColumnReorderPlan,
   clampColumnHeight,
   clampColumnWidth,
@@ -26,6 +27,7 @@ import {
   parseKanbanColumnDragPayload,
   sortColumns,
   type KanbanCard,
+  type KanbanCardDropPlacement,
   type KanbanColumn,
   type KanbanColumnDropPlacement,
 } from "./shared";
@@ -91,9 +93,15 @@ function dataTransferIncludes(event: React.DragEvent, mime: string): boolean {
   return Array.from(event.dataTransfer.types).includes(mime);
 }
 
-function columnDropPlacement(event: React.DragEvent<HTMLElement>): KanbanColumnDropPlacement {
+function cardDropPlacement(event: React.DragEvent<HTMLElement>): KanbanCardDropPlacement {
   const bounds = event.currentTarget.getBoundingClientRect();
-  return event.clientX > bounds.left + bounds.width / 2 ? "after" : "before";
+  return event.clientY > bounds.top + bounds.height / 2 ? "after" : "before";
+}
+
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName.toLowerCase();
+  return target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
 }
 
 export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
@@ -107,10 +115,12 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [highlightedEntity, setHighlightedEntity] = useState<HighlightedEntity>(() => readLinkedExplorerSelection(companyID, boardID));
   const [editingColumnID, setEditingColumnID] = useState("");
   const [draggingColumnID, setDraggingColumnID] = useState("");
-  const [dragOverColumn, setDragOverColumn] = useState<{ columnID: string; placement: KanbanColumnDropPlacement } | null>(null);
-  const [expandedCardIDs, setExpandedCardIDs] = useState<Set<string>>(() => new Set());
+  const [dragOverColumnID, setDragOverColumnID] = useState("");
+  const [dragOverCard, setDragOverCard] = useState<{ cardID: string; placement: KanbanCardDropPlacement } | null>(null);
+  const [selectedCardID, setSelectedCardID] = useState("");
   const [addColumnHover, setAddColumnHover] = useState(false);
   const [columnContextMenu, setColumnContextMenu] = useState<{ x: number; y: number; columnID: string } | null>(null);
+  const [cardContextMenu, setCardContextMenu] = useState<{ x: number; y: number; cardID: string } | null>(null);
   const [deleteColumnConfirmation, setDeleteColumnConfirmation] = useState<{ columnID: string; title: string } | null>(null);
   const resizeRef = useRef<ColumnResizeState | null>(null);
 
@@ -224,6 +234,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const column = columns.find((item) => item.column_id === columnID);
     if (!column) return;
     setColumnContextMenu(null);
+    setCardContextMenu(null);
     setDeleteColumnConfirmation({ columnID, title: column.title });
   }, [columns]);
 
@@ -231,12 +242,12 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const plan = buildColumnReorderPlan(columns, draggedColumnID, targetColumnID, placement);
     if (plan.updates.length === 0) {
       setDraggingColumnID("");
-      setDragOverColumn(null);
+      setDragOverColumnID("");
       return;
     }
     setColumns(plan.columns);
     setDraggingColumnID("");
-    setDragOverColumn(null);
+    setDragOverColumnID("");
     setError("");
     try {
       // Sparse positions keep most reorders to a single API write. Compaction is
@@ -310,18 +321,53 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     };
   }, [persistColumnSize]);
 
-  const moveCardToColumn = useCallback(async (cardID: string, columnID: string) => {
-    const position = nextCardPosition(cards, columnID);
-    const movedAt = new Date().toISOString();
-    setCards((previous) => previous.map((card) => (card.card_id === cardID ? { ...card, column_id: columnID, position, updated_timestamp: movedAt } : card)));
+  const reorderCard = useCallback(async (cardID: string, columnID: string, targetCardID: string | null = null, placement: KanbanCardDropPlacement = "before") => {
+    const plan = buildCardReorderPlan(cards, cardID, columnID, targetCardID, placement);
+    setDragOverCard(null);
+    if (plan.updates.length === 0) return;
+    setCards(plan.cards);
+    setError("");
     try {
-      const moved = await moveKanbanCard({ apiBase, companyID, boardID, cardID, columnID, position });
-      setCards((previous) => previous.map((card) => (card.card_id === moved.card_id ? moved : card)));
+      const updatedCards = await Promise.all(plan.updates.map((update) => moveKanbanCard({
+        apiBase,
+        companyID,
+        boardID,
+        cardID: update.cardID,
+        columnID: update.columnID,
+        position: update.position,
+      })));
+      const byID = new Map(updatedCards.map((card) => [card.card_id, card]));
+      setCards((previous) => previous.map((card) => byID.get(card.card_id) ?? card));
     } catch {
-      setError("Card move failed");
+      setError("Card reorder failed");
       refreshBoard();
     }
   }, [apiBase, boardID, cards, companyID, refreshBoard]);
+
+  const removeCard = useCallback(async (cardID: string) => {
+    const previousCards = cards;
+    setCards((current) => current.filter((card) => card.card_id !== cardID));
+    setSelectedCardID((current) => (current === cardID ? "" : current));
+    setCardContextMenu(null);
+    setError("");
+    try {
+      await deleteKanbanCard(apiBase, companyID, boardID, cardID);
+    } catch {
+      setError("Card delete failed");
+      setCards(previousCards);
+    }
+  }, [apiBase, boardID, cards, companyID]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.key !== "Delete" && event.key !== "Backspace") || !selectedCardID) return;
+      if (isEditableKeyboardTarget(event.target)) return;
+      event.preventDefault();
+      void removeCard(selectedCardID);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [removeCard, selectedCardID]);
 
   const addEntityToColumn = useCallback(async (columnID: string, nodeID: string, label: string) => {
     const position = nextCardPosition(cards, columnID);
@@ -350,22 +396,23 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   const onDropColumn = useCallback((event: React.DragEvent<HTMLElement>, columnID: string) => {
     event.preventDefault();
-    setDragOverColumn(null);
+    setDragOverColumnID("");
+    setDragOverCard(null);
     const columnPayload = parseKanbanColumnDragPayload(event.dataTransfer.getData(KANBAN_COLUMN_DRAG_MIME));
     if (columnPayload) {
-      void reorderColumn(columnPayload.columnID, columnID, columnDropPlacement(event));
+      void reorderColumn(columnPayload.columnID, columnID, "swap");
       return;
     }
     const cardPayload = parseKanbanCardDragPayload(event.dataTransfer.getData(KANBAN_CARD_DRAG_MIME));
     if (cardPayload) {
-      if (cardPayload.sourceColumnID !== columnID) void moveCardToColumn(cardPayload.cardID, columnID);
+      void reorderCard(cardPayload.cardID, columnID, null);
       return;
     }
     const explorerPayload = parseExplorerEntityDragPayload(event.dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
     if (explorerPayload) {
       void addEntityToColumn(columnID, explorerPayload.nodeID, explorerPayload.label);
     }
-  }, [addEntityToColumn, moveCardToColumn, reorderColumn]);
+  }, [addEntityToColumn, reorderCard, reorderColumn]);
 
   const onDropAtEnd = useCallback((event: React.DragEvent) => {
     const columnPayload = parseKanbanColumnDragPayload(event.dataTransfer.getData(KANBAN_COLUMN_DRAG_MIME));
@@ -374,31 +421,51 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     void reorderColumn(columnPayload.columnID, null);
   }, [reorderColumn]);
 
-  const toggleCardExpanded = useCallback((cardID: string) => {
-    setExpandedCardIDs((previous) => {
-      const next = new Set(previous);
-      if (next.has(cardID)) {
-        next.delete(cardID);
-      } else {
-        next.add(cardID);
-      }
-      return next;
-    });
-  }, []);
-
   const renderCard = (card: KanbanCard): React.ReactNode => {
     const highlighted = highlightedEntity?.nodeID === card.node_id;
-    const expanded = expandedCardIDs.has(card.card_id);
+    const selected = selectedCardID === card.card_id;
+    const dragBefore = dragOverCard?.cardID === card.card_id && dragOverCard.placement === "before";
+    const dragAfter = dragOverCard?.cardID === card.card_id && dragOverCard.placement === "after";
     const description = (card.description_snapshot ?? "").trim();
     const color = getKanbanConditionalColor(card, columnColorByID);
     return (
       <article
         key={card.card_id}
         draggable
+        tabIndex={0}
+        onClick={(event) => {
+          event.stopPropagation();
+          setSelectedCardID(card.card_id);
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setSelectedCardID(card.card_id);
+          setColumnContextMenu(null);
+          setCardContextMenu({ x: event.clientX, y: event.clientY, cardID: card.card_id });
+        }}
         onDragStart={(event) => {
           event.stopPropagation();
+          setSelectedCardID(card.card_id);
+          setCardContextMenu(null);
+          setColumnContextMenu(null);
           event.dataTransfer.effectAllowed = "move";
           event.dataTransfer.setData(KANBAN_CARD_DRAG_MIME, JSON.stringify({ cardID: card.card_id, sourceColumnID: card.column_id }));
+        }}
+        onDragEnd={() => setDragOverCard(null)}
+        onDragOver={(event) => {
+          if (!dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setDragOverCard({ cardID: card.card_id, placement: cardDropPlacement(event) });
+        }}
+        onDragLeave={() => setDragOverCard((previous) => (previous?.cardID === card.card_id ? null : previous))}
+        onDrop={(event) => {
+          const cardPayload = parseKanbanCardDragPayload(event.dataTransfer.getData(KANBAN_CARD_DRAG_MIME));
+          if (!cardPayload) return;
+          event.preventDefault();
+          event.stopPropagation();
+          void reorderCard(cardPayload.cardID, card.column_id, card.card_id, cardDropPlacement(event));
         }}
         style={{
           border: `1px solid ${highlighted ? accent : line}`,
@@ -408,25 +475,23 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           padding: "8px 9px",
           minHeight: 58,
           cursor: "grab",
-          boxShadow: highlighted ? `0 0 0 1px ${accent} inset` : undefined,
+          outline: selected ? `2px solid ${accent}` : "none",
+          outlineOffset: selected ? 1 : 0,
+          boxShadow: [
+            highlighted ? `0 0 0 1px ${accent} inset` : "",
+            dragBefore ? `0 -3px 0 ${accent}` : "",
+            dragAfter ? `0 3px 0 ${accent}` : "",
+          ].filter(Boolean).join(", ") || undefined,
         }}
       >
-        <div style={{ display: "grid", gridTemplateColumns: "16px minmax(0, 1fr) 22px", gap: 6, alignItems: "start" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "16px minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
           <span title="Node" style={{ width: 16, height: 16, marginTop: 1, display: "grid", placeItems: "center" }}>
             <NodeDocumentIcon color={color} />
           </span>
           <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.node_title}</div>
-          <button
-            type="button"
-            title={expanded ? "Collapse card text" : "Expand card text"}
-            onClick={() => toggleCardExpanded(card.card_id)}
-            style={{ width: 22, height: 22, border: `1px solid ${line}`, background: "transparent", color: subtext, cursor: "pointer", fontSize: 11, lineHeight: 1 }}
-          >
-            {expanded ? "^" : "v"}
-          </button>
         </div>
         {description && (
-          <div style={{ marginTop: 7, color: subtext, fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere", maxHeight: expanded ? undefined : 32, overflow: "hidden" }}>
+          <div style={{ marginTop: 7, color: subtext, fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere" }}>
             {description}
           </div>
         )}
@@ -435,6 +500,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   };
 
   const contextColumn = columnContextMenu ? columns.find((column) => column.column_id === columnContextMenu.columnID) : null;
+  const contextCard = cardContextMenu ? cards.find((card) => card.card_id === cardContextMenu.cardID) : null;
 
   return (
     <div
@@ -451,25 +517,26 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             const columnCards = cardsByColumn.get(column.column_id) ?? [];
             const columnWidth = getColumnWidth(column);
             const columnHeight = getColumnHeight(column);
-            const insertBefore = dragOverColumn?.columnID === column.column_id && dragOverColumn.placement === "before";
-            const insertAfter = dragOverColumn?.columnID === column.column_id && dragOverColumn.placement === "after";
-            const insertionShadow = insertBefore ? `-3px 0 0 ${accent}` : insertAfter ? `3px 0 0 ${accent}` : "";
+            const columnDropActive = dragOverColumnID === column.column_id;
+            const insertionShadow = columnDropActive ? `0 0 0 3px ${accent}` : "";
             const columnShadow = insertionShadow ? (laneShadow === "none" ? insertionShadow : `${insertionShadow}, ${laneShadow}`) : laneShadow;
             return (
               <section
                 key={column.column_id}
+                onMouseDown={() => setSelectedCardID("")}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
+                  setCardContextMenu(null);
                   setColumnContextMenu({ x: event.clientX, y: event.clientY, columnID: column.column_id });
                 }}
                 onDragOver={(event) => {
                   event.preventDefault();
                   if (dataTransferIncludes(event, KANBAN_COLUMN_DRAG_MIME) && draggingColumnID !== column.column_id) {
-                    setDragOverColumn({ columnID: column.column_id, placement: columnDropPlacement(event) });
+                    setDragOverColumnID(column.column_id);
                   }
                 }}
-                onDragLeave={() => setDragOverColumn((previous) => (previous?.columnID === column.column_id ? null : previous))}
+                onDragLeave={() => setDragOverColumnID((previous) => (previous === column.column_id ? "" : previous))}
                 onDrop={(event) => onDropColumn(event, column.column_id)}
                 style={{
                   position: "relative",
@@ -495,7 +562,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
                   }}
                   onDragEnd={() => {
                     setDraggingColumnID("");
-                    setDragOverColumn(null);
+                    setDragOverColumnID("");
                   }}
                   style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${line}`, cursor: "default" }}
                 >
@@ -646,6 +713,18 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
               style={{ width: 34, height: 24, border: "1px solid #d0d0d0", background: "#fff", cursor: "pointer", padding: 0 }}
             />
           </label>
+        </FrameRightClickMenu>
+      )}
+      {contextCard && cardContextMenu && (
+        <FrameRightClickMenu x={cardContextMenu.x} y={cardContextMenu.y} onClose={() => setCardContextMenu(null)}>
+          <button
+            type="button"
+            style={{ ...contextMenuButtonStyle, color: "#c62828" }}
+            onClick={() => void removeCard(contextCard.card_id)}
+            {...contextMenuHoverHandlers}
+          >
+            Delete card
+          </button>
         </FrameRightClickMenu>
       )}
       {deleteColumnConfirmation && (
