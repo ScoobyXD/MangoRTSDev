@@ -26,17 +26,38 @@ button, input, textarea {
   font-family: inherit;
 }
 
-/* Company Explorer scrollbar treatment (thin, high-contrast industrial look). */
+/* Company Explorer scrollbar treatment: match the Editor's thin scrollbar. */
 .company-explorer-scroll {
   --company-explorer-scroll-accent: #00b8cc;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  --company-explorer-scroll-track: transparent;
+  scrollbar-width: thin;
+  scrollbar-color: var(--company-explorer-scroll-accent) transparent;
 }
 
 .company-explorer-scroll::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-  display: none;
+  width: 8px;
+  height: 8px;
+}
+
+.company-explorer-scroll::-webkit-scrollbar-track {
+  background: var(--company-explorer-scroll-track);
+  border-radius: 999px;
+}
+
+.company-explorer-scroll::-webkit-scrollbar-thumb {
+  min-height: 40px;
+  background: var(--company-explorer-scroll-accent);
+  background-clip: content-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+
+.company-explorer-scroll::-webkit-scrollbar-thumb:hover {
+  border-width: 1px;
+}
+
+.company-explorer-scroll::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* Editor document scrollbar: slim, edge-aligned, and driven by the frame theme. */

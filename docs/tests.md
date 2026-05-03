@@ -158,6 +158,7 @@ Use this checklist format and keep it complete.
 - [x] `tests/frontend/modules/company-explorer/explorerSync.test.ts`
 - [x] `tests/frontend/modules/company-explorer/treePresentation.test.ts`
   - locks Company Explorer root order to the single collapsible Company row
+  - resolves Explorer drag drops on child rows to the containing folder
   - guards against reintroducing virtual Logic Gates, Nodes, or Knowledge Nodes placeholder rows
   - locks root/custom folder labels without live count suffixes
   - verifies right-click creation targets for nested node and logic-gate folder contexts

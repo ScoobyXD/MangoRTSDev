@@ -7,6 +7,7 @@ import {
   resolveExplorerClickSelection,
   resolveExplorerCreationTargets,
   resolveExplorerDeleteTarget,
+  resolveExplorerDropTarget,
   resolveExplorerRenameTarget,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
 
@@ -69,6 +70,33 @@ run("delete targets only resolve for concrete folders and entities", () => {
   assert.deepEqual(resolveExplorerDeleteTarget({ kind: "node", nodeID: "node-1" }), { kind: "node", id: "node-1" });
   assert.deepEqual(resolveExplorerDeleteTarget({ kind: "logic_gate", logicGateID: "gate-1" }), { kind: "logic_gate", id: "gate-1" });
   assert.equal(resolveExplorerDeleteTarget({ kind: "folder", folderKind: "node" }), null);
+});
+
+run("drop targets resolve item rows to their containing folder", () => {
+  assert.deepEqual(
+    resolveExplorerDropTarget(
+      { kind: "node", folderKind: "node", folderID: "test-folder", nodeID: "node-1" },
+      { kind: "folder", folderKind: "node", folderID: "lotion-folder" },
+    ),
+    { folderID: "test-folder", folderKind: "node", treeID: "workspace-folder-test-folder" },
+  );
+
+  assert.deepEqual(
+    resolveExplorerDropTarget(
+      { kind: "logic_gate", folderKind: "logic_gate", folderID: "gate-folder", logicGateID: "gate-1" },
+      { kind: "logic_gate", itemType: "logic_gate", itemID: "gate-2" },
+    ),
+    { folderID: "gate-folder", folderKind: "logic_gate", treeID: "workspace-folder-gate-folder" },
+  );
+
+  assert.equal(
+    resolveExplorerDropTarget(
+      { kind: "node", folderKind: "node", folderID: "test-folder", nodeID: "node-1" },
+      { kind: "logic_gate", itemType: "logic_gate", itemID: "gate-1" },
+    ),
+    null,
+  );
+  assert.equal(resolveExplorerDropTarget({ kind: "node", nodeID: "root-node" }, { kind: "node", itemType: "node", itemID: "node-2" }), null);
 });
 
 run("click selection supports plain, shift range, and ctrl toggle behavior", () => {
