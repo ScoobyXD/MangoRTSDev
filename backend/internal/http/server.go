@@ -247,33 +247,57 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 
 	if r.Method == http.MethodPut {
 		var req struct {
-			CompanyID      string `json:"company_id"`
-			ParentFolderID string `json:"parent_folder_id"`
+			CompanyID      string  `json:"company_id"`
+			ParentFolderID *string `json:"parent_folder_id"`
+			Name           string  `json:"name"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
 			return
 		}
 		req.CompanyID = strings.TrimSpace(req.CompanyID)
-		req.ParentFolderID = strings.TrimSpace(req.ParentFolderID)
+		req.Name = strings.TrimSpace(req.Name)
 		if req.CompanyID == "" {
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		item, err := s.repo.MoveCompanyExplorerFolder(req.CompanyID, folderID, req.ParentFolderID)
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+		var item domain.CompanyExplorerFolder
+		var err error
+		changed := false
+		if req.ParentFolderID != nil {
+			parentFolderID := strings.TrimSpace(*req.ParentFolderID)
+			item, err = s.repo.MoveCompanyExplorerFolder(req.CompanyID, folderID, parentFolderID)
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+				return
+			}
+			if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusBadRequest, "invalid_company_explorer_folder_move")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_move_company_explorer_folder")
+				return
+			}
+			changed = true
+		}
+		if req.Name != "" {
+			item, err = s.repo.RenameCompanyExplorerFolder(req.CompanyID, folderID, req.Name)
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_rename_company_explorer_folder")
+				return
+			}
+			changed = true
+		}
+		if !changed {
+			writeError(w, http.StatusBadRequest, "company_explorer_folder_update_required")
 			return
 		}
-		if errors.Is(err, store.ErrInvalid) {
-			writeError(w, http.StatusBadRequest, "invalid_company_explorer_folder_move")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_move_company_explorer_folder")
-			return
-		}
-		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_moved", map[string]any{"folder_id": item.FolderID, "folder": item})
+		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_updated", map[string]any{"folder_id": item.FolderID, "folder": item})
 		writeJSON(w, http.StatusOK, item)
 		return
 	}

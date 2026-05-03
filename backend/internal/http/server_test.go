@@ -410,6 +410,27 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 		t.Fatalf("moved folder parent = %v, want %s", movedFolder.ParentFolderID, siblingID)
 	}
 
+	renameBody, _ := json.Marshal(map[string]string{
+		"company_id": companyID,
+		"name":       "Renamed Customers",
+	})
+	renameReq := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/folders/"+parentID, bytes.NewReader(renameBody))
+	renameReq.Header.Set("Content-Type", "application/json")
+	renameRec := httptest.NewRecorder()
+	handler.ServeHTTP(renameRec, renameReq)
+	if renameRec.Code != http.StatusOK {
+		t.Fatalf("rename company explorer folder status = %d, want %d body=%s", renameRec.Code, http.StatusOK, renameRec.Body.String())
+	}
+	var renamedFolder struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(renameRec.Body).Decode(&renamedFolder); err != nil {
+		t.Fatalf("decode renamed folder: %v", err)
+	}
+	if renamedFolder.Name != "Renamed Customers" {
+		t.Fatalf("renamed folder name = %q, want Renamed Customers", renamedFolder.Name)
+	}
+
 	cycleBody, _ := json.Marshal(map[string]string{
 		"company_id":       companyID,
 		"parent_folder_id": childID,

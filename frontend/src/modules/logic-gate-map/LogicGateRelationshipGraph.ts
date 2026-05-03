@@ -257,7 +257,7 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
     };
     return true;
   }
-  if (envelope.type === "company_explorer_folder_created" || envelope.type === "company_explorer_folder_moved") {
+  if (envelope.type === "company_explorer_folder_created" || envelope.type === "company_explorer_folder_moved" || envelope.type === "company_explorer_folder_updated") {
     const folder = data.folder as CompanyExplorerFolder | undefined;
     if (!folder || typeof folder.folder_id !== "string") return false;
     const currentFolders = entry.snapshot.folders ?? [];

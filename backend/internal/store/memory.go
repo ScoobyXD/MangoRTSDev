@@ -43,6 +43,7 @@ type Repository interface {
 	CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error)
 	ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error)
 	MoveCompanyExplorerFolder(companyID, folderID, parentFolderID string) (domain.CompanyExplorerFolder, error)
+	RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error)
 	DeleteCompanyExplorerFolder(companyID, folderID string) error
 	AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string) (domain.CompanyExplorerFolderItem, error)
 	ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error)
@@ -1155,6 +1156,20 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID, parentFolder
 	}
 
 	item.ParentFolderID = parent
+	item.UpdatedTimestamp = time.Now().UTC()
+	r.folders[key(companyID, item.FolderID)] = item
+	return item, nil
+}
+
+func (r *MemoryRepo) RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	item, ok := r.folders[key(companyID, folderID)]
+	if !ok {
+		return domain.CompanyExplorerFolder{}, ErrNotFound
+	}
+	item.Name = name
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
 	return item, nil

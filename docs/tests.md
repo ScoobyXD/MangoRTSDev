@@ -148,11 +148,13 @@ Use this checklist format and keep it complete.
   - direct-neighbor resolution returns adjacency-only targets for explorer fanout
 - [x] `tests/frontend/modules/company-explorer/explorerSync.test.ts`
 - [x] `tests/frontend/modules/company-explorer/treePresentation.test.ts`
-  - locks Company Explorer root order as Company -> Logic Gates -> Nodes
-  - guards against reintroducing the Knowledge Nodes placeholder row
+  - locks Company Explorer root order to the single collapsible Company row
+  - guards against reintroducing virtual Logic Gates, Nodes, or Knowledge Nodes placeholder rows
   - locks root/custom folder labels without live count suffixes
   - verifies right-click creation targets for nested node and logic-gate folder contexts
+  - verifies rename actions only resolve for concrete folder/node/logic-gate records
   - verifies delete actions only resolve for concrete folder/node/logic-gate records
+  - verifies plain click, Shift-click range, and Ctrl-click toggle selection behavior
 - [x] `tests/frontend/modules/folders/companyExplorerFolders.test.ts`
   - nested folder subtree expansion for map scope
   - node folder filtering keeps only folder/descendant contents
@@ -184,7 +186,7 @@ Use this checklist format and keep it complete.
   - logic gate relationship position-pair legality helper (Input/Output or Output/Input only)
   - logic gate create/read/information/relationship API flow
   - node and logic-gate information APIs reject blank/whitespace-only `information` so empty editor blurs do not persist rows
-  - Company Explorer folder APIs create nested folders, move folders, reject cyclic folder moves, assign node placements, and include folder data in workspace snapshots
+  - Company Explorer folder APIs create nested folders, rename and move folders, reject cyclic folder moves, assign node placements, and include folder data in workspace snapshots
   - Kanban column create/rename and node card API flow
   - Kanban rejects logic-gate card creation through the headless card API
   - Kanban card APIs update hot metadata fields for headless agents and keep the removed query endpoint at 404
