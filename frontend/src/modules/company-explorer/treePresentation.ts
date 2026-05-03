@@ -11,11 +11,17 @@ export type ExplorerCreationContextRow = {
 };
 
 export type ExplorerDropPayload = {
-  kind: ExplorerTreeEntityKind;
+  kind: ExplorerTreeEntityKind | "batch";
   folderID?: string;
   folderKind?: CompanyExplorerFolderKind;
   itemID?: string;
   itemType?: CompanyExplorerFolderKind;
+  items?: ExplorerDropPayloadItem[];
+};
+
+export type ExplorerDropPayloadItem = {
+  itemID: string;
+  itemType: CompanyExplorerFolderKind;
 };
 
 export type ExplorerDropTarget = {
@@ -69,6 +75,31 @@ export function formatExplorerFolderLabel(name: string): string {
   return name;
 }
 
+export function getExplorerDropPayloadItems(payload?: ExplorerDropPayload | null): ExplorerDropPayloadItem[] {
+  if (!payload) return [];
+  if (payload.kind === "batch" && Array.isArray(payload.items)) {
+    const items: ExplorerDropPayloadItem[] = [];
+    const seen = new Set<string>();
+    for (const item of payload.items) {
+      if (!item?.itemID || !item.itemType) continue;
+      const key = `${item.itemType}:${item.itemID}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({ itemID: item.itemID, itemType: item.itemType });
+    }
+    return items;
+  }
+  if (payload.itemID && payload.itemType) return [{ itemID: payload.itemID, itemType: payload.itemType }];
+  return [];
+}
+
+export function getExplorerDropPayloadItemType(payload?: ExplorerDropPayload | null): CompanyExplorerFolderKind | null {
+  const items = getExplorerDropPayloadItems(payload);
+  if (items.length === 0) return null;
+  const itemType = items[0].itemType;
+  return items.every((item) => item.itemType === itemType) ? itemType : null;
+}
+
 export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | null, payload?: ExplorerDropPayload | null): ExplorerDropTarget | null {
   if (!row || !payload || !row.folderID || !row.folderKind) return null;
 
@@ -80,7 +111,7 @@ export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | nul
     return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
   }
 
-  if (!payload.itemID || payload.itemType !== row.folderKind) return null;
+  if (getExplorerDropPayloadItemType(payload) !== row.folderKind) return null;
   return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
 }
 
@@ -98,41 +129,64 @@ export function buildExplorerRowReorderPlan(
   targetRowID: string,
   placement: ExplorerRowDropPlacement,
 ): { rows: ExplorerOrderRow[]; updates: ExplorerOrderUpdate[] } {
-  const sorted = sortExplorerOrderRows(rows);
-  const dragged = sorted.find((row) => row.id === draggedRowID);
-  if (!dragged || draggedRowID === targetRowID) return { rows: sorted, updates: [] };
+  return buildExplorerRowBatchReorderPlan(rows, [draggedRowID], targetRowID, placement);
+}
 
-  const withoutDragged = sorted.filter((row) => row.id !== draggedRowID);
+export function buildExplorerRowBatchReorderPlan(
+  rows: ExplorerOrderRow[],
+  draggedRowIDs: string[],
+  targetRowID: string,
+  placement: ExplorerRowDropPlacement,
+): { rows: ExplorerOrderRow[]; updates: ExplorerOrderUpdate[] } {
+  const sorted = sortExplorerOrderRows(rows);
+  const orderedDraggedIDs = Array.from(new Set(draggedRowIDs.map((rowID) => rowID.trim()).filter(Boolean)));
+  if (orderedDraggedIDs.length === 0 || orderedDraggedIDs.includes(targetRowID)) return { rows: sorted, updates: [] };
+
+  const byID = new Map(sorted.map((row) => [row.id, row]));
+  const draggedRows = orderedDraggedIDs.map((rowID) => byID.get(rowID)).filter((row): row is ExplorerOrderRow => Boolean(row));
+  if (draggedRows.length === 0) return { rows: sorted, updates: [] };
+
+  const draggedIDSet = new Set(draggedRows.map((row) => row.id));
+  const withoutDragged = sorted.filter((row) => !draggedIDSet.has(row.id));
   const targetIndex = withoutDragged.findIndex((row) => row.id === targetRowID);
   if (targetIndex < 0) return { rows: sorted, updates: [] };
 
   const insertIndex = placement === "after" ? targetIndex + 1 : targetIndex;
   const reordered = [
     ...withoutDragged.slice(0, insertIndex),
-    dragged,
+    ...draggedRows,
     ...withoutDragged.slice(insertIndex),
   ];
   const prev = reordered[insertIndex - 1];
-  const next = reordered[insertIndex + 1];
-  const hasRoomBeforeNext = !next || (prev ? next.position - prev.position > 1 : next.position > 1);
+  const next = reordered[insertIndex + draggedRows.length];
+  const updatedByID = new Map<string, ExplorerOrderRow>();
 
-  if (!hasRoomBeforeNext) {
-    const updates = compactExplorerOrderRows(reordered);
+  const applySparsePositions = (positions: number[]): ExplorerOrderUpdate[] => {
+    return draggedRows.map((row, index) => {
+      const updated = { ...row, position: positions[index] };
+      updatedByID.set(row.id, updated);
+      return { rowID: row.id, position: updated.position };
+    });
+  };
+
+  let updates: ExplorerOrderUpdate[];
+  if (prev && next && next.position - prev.position > draggedRows.length) {
+    const step = Math.floor((next.position - prev.position) / (draggedRows.length + 1));
+    updates = applySparsePositions(draggedRows.map((_, index) => prev.position + step * (index + 1)));
+  } else if (prev && !next) {
+    updates = applySparsePositions(draggedRows.map((_, index) => prev.position + 1000 * (index + 1)));
+  } else if (!prev && next && next.position > draggedRows.length) {
+    const step = Math.floor(next.position / (draggedRows.length + 1));
+    updates = applySparsePositions(draggedRows.map((_, index) => step * (index + 1)));
+  } else {
+    updates = compactExplorerOrderRows(reordered);
     const byID = new Map(updates.map((update) => [update.rowID, update.position]));
-    return {
-      rows: sortExplorerOrderRows(reordered.map((row) => ({ ...row, position: byID.get(row.id) ?? row.position }))),
-      updates,
-    };
+    for (const row of reordered) updatedByID.set(row.id, { ...row, position: byID.get(row.id) ?? row.position });
   }
 
-  const position = prev && next
-    ? Math.floor((prev.position + next.position) / 2)
-    : prev
-      ? prev.position + 1000
-      : Math.max(1, (next?.position ?? 1001) - 1000);
   return {
-    rows: sortExplorerOrderRows(reordered.map((row) => (row.id === draggedRowID ? { ...row, position } : row))),
-    updates: [{ rowID: draggedRowID, position }],
+    rows: sortExplorerOrderRows(reordered.map((row) => updatedByID.get(row.id) ?? row)),
+    updates,
   };
 }
 

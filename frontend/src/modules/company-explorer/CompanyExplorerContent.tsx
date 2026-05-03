@@ -10,7 +10,7 @@ import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMuta
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
 import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../kanban/shared";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
-import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, buildExplorerRowReorderPlan, formatExplorerFolderLabel, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerDropTarget, resolveExplorerKeyboardNavigation, resolveExplorerRenameTarget, resolveExplorerRootDropTarget, shouldAcceptMapSelectionAfterExplorerSelection, type ExplorerCreationTargets, type ExplorerDropPayload, type ExplorerRowDropPlacement, type ExplorerSelectionDomain } from "./treePresentation";
+import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, formatExplorerFolderLabel, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerDropTarget, resolveExplorerKeyboardNavigation, resolveExplorerRenameTarget, resolveExplorerRootDropTarget, shouldAcceptMapSelectionAfterExplorerSelection, type ExplorerCreationTargets, type ExplorerDropPayload, type ExplorerRowDropPlacement, type ExplorerSelectionDomain } from "./treePresentation";
 
 type ExplorerTreeNode = {
   id: string;
@@ -54,6 +54,30 @@ function getExplorerDragPayload(row: ExplorerTreeNode): ExplorerDragPayload | nu
   return null;
 }
 
+function getExplorerItemPayload(row: ExplorerTreeNode): { itemID: string; itemType: CompanyExplorerFolderKind } | null {
+  if (row.kind === "node" && row.nodeID) return { itemID: row.nodeID, itemType: "node" };
+  if (row.kind === "logic_gate" && row.logicGateID) return { itemID: row.logicGateID, itemType: "logic_gate" };
+  return null;
+}
+
+function getExplorerDragPayloadForSelection(row: ExplorerTreeNode, selectedIDs: Set<string>, rows: ExplorerTreeNode[]): ExplorerDragPayload | null {
+  const basePayload = getExplorerDragPayload(row);
+  const baseItem = getExplorerItemPayload(row);
+  if (!basePayload || !baseItem) return basePayload;
+
+  const dragIDs = selectedIDs.has(row.id) ? selectedIDs : new Set([row.id]);
+  const items: { itemID: string; itemType: CompanyExplorerFolderKind }[] = [];
+  const seen = new Set<string>();
+  for (const candidate of rows) {
+    if (!dragIDs.has(candidate.id)) continue;
+    const item = getExplorerItemPayload(candidate);
+    if (!item || item.itemType !== baseItem.itemType || seen.has(item.itemID)) continue;
+    seen.add(item.itemID);
+    items.push(item);
+  }
+  return items.length > 1 ? { kind: "batch", itemType: baseItem.itemType, items } : basePayload;
+}
+
 function readExplorerDragPayload(dataTransfer: DataTransfer): ExplorerDragPayload | null {
   try {
     const raw = dataTransfer.getData(EXPLORER_DRAG_MIME);
@@ -61,6 +85,11 @@ function readExplorerDragPayload(dataTransfer: DataTransfer): ExplorerDragPayloa
     const parsed = JSON.parse(raw) as ExplorerDragPayload;
     if (parsed.kind === "folder" && parsed.folderID && parsed.folderKind) return parsed;
     if ((parsed.kind === "node" || parsed.kind === "logic_gate") && parsed.itemID && parsed.itemType) return parsed;
+    if (parsed.kind === "batch") {
+      const itemType = getExplorerDropPayloadItemType(parsed);
+      const items = getExplorerDropPayloadItems(parsed);
+      if (itemType && items.length > 0) return { kind: "batch", itemType, items };
+    }
   } catch {
     // Drag payloads can come from outside the app; ignore anything we do not own.
   }
@@ -120,6 +149,11 @@ function getExplorerDropIntent(event: React.DragEvent<HTMLElement>): ExplorerRow
   if (y < rect.height * 0.25) return "before";
   if (y > rect.height * 0.75) return "after";
   return "inside";
+}
+
+function getExplorerRowReorderPlacement(event: React.DragEvent<HTMLElement>): ExplorerRowDropPlacement {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return event.clientY > rect.top + rect.height / 2 ? "after" : "before";
 }
 
 function readExpandedRowsFromStorage(key: string): Set<string> {
@@ -219,6 +253,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [selectedLogicGateID, setSelectedLogicGateID] = useState("");
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => readExpandedRowsFromStorage(expandedStorageKey));
+  const selectedTreeIDRef = useRef(selectedTreeID);
+  const expandedRef = useRef(expanded);
+  const treeRowsRef = useRef<ExplorerTreeNode[]>([]);
   const [renaming, setRenaming] = useState<ExplorerRenameDraft | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const cancelRenameOnBlurRef = useRef(false);
@@ -467,6 +504,18 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const selectedFolderKind = selectedTree?.folderKind;
   const selectedFolderID = selectedTree?.folderID ?? "";
   const selectedFolderLabel = selectedTree?.folderLabel ?? (selectedTree?.folderKind ? selectedTree.label : "");
+
+  useEffect(() => {
+    selectedTreeIDRef.current = selectedTreeID;
+  }, [selectedTreeID]);
+
+  useEffect(() => {
+    expandedRef.current = expanded;
+  }, [expanded]);
+
+  useEffect(() => {
+    treeRowsRef.current = treeRows;
+  }, [treeRows]);
 
   useEffect(() => {
     latestSelectionRef.current = { selectedNodeID, selectedTreeID };
@@ -809,6 +858,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     if (options.localIntent !== false) {
       lastLocalExplorerSelectionRef.current = { domain: getExplorerSelectionDomain(row), changedAt: Date.now() };
     }
+    selectedTreeIDRef.current = row.id;
     setSelectedTreeID(row.id);
     if (row.kind === "node") {
       setSelectedNodeID(row.nodeID ?? "");
@@ -883,23 +933,27 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   const handleTreeKeyCommand = useCallback((event: React.KeyboardEvent<HTMLDivElement> | KeyboardEvent) => {
     if (isExplorerTextInputTarget(event.target)) return;
+    const activeTreeRows = treeRowsRef.current;
     const result = resolveExplorerKeyboardNavigation({
-      rows: treeRows.map((row) => ({ id: row.id, kind: row.kind })),
-      selectedTreeID,
-      expandedIDs: expanded,
+      rows: activeTreeRows.map((row) => ({ id: row.id, kind: row.kind })),
+      selectedTreeID: selectedTreeIDRef.current,
+      expandedIDs: expandedRef.current,
       key: event.key,
     });
     if (!result.handled) return;
 
     event.preventDefault();
-    if (result.expandedIDs) setExpanded(result.expandedIDs);
+    if (result.expandedIDs) {
+      expandedRef.current = result.expandedIDs;
+      setExpanded(result.expandedIDs);
+    }
     if (result.selectedTreeID) {
-      const next = treeRows.find((row) => row.id === result.selectedTreeID);
+      const next = activeTreeRows.find((row) => row.id === result.selectedTreeID);
       if (!next) return;
       selectSingleTreeRow(next);
       scrollTreeRowIntoView(next.id);
     }
-  }, [expanded, scrollTreeRowIntoView, selectSingleTreeRow, selectedTreeID, treeRows]);
+  }, [scrollTreeRowIntoView, selectSingleTreeRow]);
 
   const handleTreeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     handleTreeKeyCommand(event);
@@ -923,6 +977,26 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     window.addEventListener("pointerdown", onPointerDown, true);
     return () => window.removeEventListener("pointerdown", onPointerDown, true);
   }, []);
+
+  const getExplorerItemRowsForPayload = useCallback((payload: ExplorerDragPayload | null): ExplorerTreeNode[] => {
+    const payloadItems = getExplorerDropPayloadItems(payload);
+    if (payloadItems.length === 0) return [];
+    const keys = new Set(payloadItems.map((item) => `${item.itemType}:${item.itemID}`));
+    return treeRows.filter((row) => {
+      const item = getExplorerItemPayload(row);
+      return item ? keys.has(`${item.itemType}:${item.itemID}`) : false;
+    });
+  }, [treeRows]);
+
+  const canPlaceExplorerItemsAtTarget = useCallback((payload: ExplorerDragPayload | null, target: ExplorerTreeNode): boolean => {
+    const itemType = getExplorerDropPayloadItemType(payload);
+    if (!itemType || getExplorerRowOrderKind(target) !== itemType) return false;
+    const itemRows = getExplorerItemRowsForPayload(payload);
+    if (itemRows.length === 0 || itemRows.some((row) => row.id === target.id)) return false;
+    const targetContainer = getExplorerRowContainerID(target);
+    if (targetContainer == null) return false;
+    return targetContainer !== "" || itemRows.every((row) => getExplorerRowContainerID(row) === "");
+  }, [getExplorerItemRowsForPayload]);
 
   const getReorderRowsForTarget = useCallback((source: ExplorerTreeNode, target: ExplorerTreeNode): ExplorerTreeNode[] => {
     const sourceContainer = getExplorerRowContainerID(source);
@@ -966,6 +1040,62 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }));
     return true;
   }, [assignItemToFolder, getReorderRowsForTarget, moveFolder]);
+
+  const placeExplorerItemsAtTarget = useCallback(async (payload: ExplorerDragPayload | null, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => {
+    const itemType = getExplorerDropPayloadItemType(payload);
+    const targetContainer = getExplorerRowContainerID(target);
+    if (!itemType || targetContainer == null || !canPlaceExplorerItemsAtTarget(payload, target)) return false;
+
+    const itemRows = getExplorerItemRowsForPayload(payload);
+    const targetRows = treeRows.filter((row) => getExplorerRowContainerID(row) === targetContainer && getExplorerRowOrderKind(row) === itemType);
+    const targetRowIDs = new Set(targetRows.map((row) => row.id));
+    const rowsForPlan = [
+      ...targetRows,
+      ...itemRows.filter((row) => !targetRowIDs.has(row.id)),
+    ];
+    const plan = buildExplorerRowBatchReorderPlan(rowsForPlan.map(explorerRowOrder), itemRows.map((row) => row.id), target.id, placement);
+    if (plan.updates.length === 0) return false;
+
+    const rowByPlanID = new Map(rowsForPlan.map((row) => [row.id, row]));
+    const updates: ExplorerRowOrderUpdate[] = [];
+    for (const update of plan.updates) {
+      const row = rowByPlanID.get(update.rowID);
+      if (row) updates.push({ row, position: update.position });
+    }
+    if (updates.length === 0) return false;
+
+    if (targetContainer === "") {
+      setRootRowOrder((previous) => {
+        const next = { ...previous };
+        for (const { row, position } of updates) {
+          if (row.kind !== "folder") next[row.id] = position;
+        }
+        return next;
+      });
+    }
+
+    await Promise.all(updates.map(({ row, position }) => {
+      if (row.kind === "folder" && row.folderID) {
+        return moveFolder(row.folderID, row.parentFolderID ?? "", { position, parentProvided: false });
+      }
+      const rowItemType: CompanyExplorerFolderKind | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : null;
+      const itemID = row.kind === "node" ? row.nodeID : row.logicGateID;
+      if (targetContainer && rowItemType && itemID) return assignItemToFolder(targetContainer, rowItemType, itemID, { position });
+      return Promise.resolve();
+    }));
+    return true;
+  }, [assignItemToFolder, canPlaceExplorerItemsAtTarget, getExplorerItemRowsForPayload, moveFolder, treeRows]);
+
+  const assignExplorerPayloadItemsToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerFolderKind, payload: ExplorerDragPayload) => {
+    const items = getExplorerDropPayloadItems(payload).filter((item) => item.itemType === itemType);
+    if (!targetFolderID || items.length === 0) return;
+    const existingRows = treeRows.filter((row) => getExplorerRowContainerID(row) === targetFolderID && getExplorerRowOrderKind(row) === itemType);
+    let position = existingRows.reduce((max, row) => Math.max(max, row.position || 0), 0);
+    for (const item of items) {
+      position += TREE_ROW_POSITION_STEP;
+      await assignItemToFolder(targetFolderID, itemType, item.itemID, { position, expandTarget: true });
+    }
+  }, [assignItemToFolder, treeRows]);
 
   const openExplorerContextMenu = useCallback((event: React.MouseEvent, row?: ExplorerTreeNode | null) => {
     event.preventDefault();
@@ -1325,7 +1455,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           const isFolder = row.kind === "folder";
           const isOpen = expanded.has(row.id);
           const isSelected = selectedTreeID === row.id || selectedTreeIDs.has(row.id);
-          const rowDragPayload = getExplorerDragPayload(row);
+          const rowDragPayload = getExplorerDragPayloadForSelection(row, selectedTreeIDs, treeRows);
           const isDragging = draggingTreeID === row.id;
           const isDropTarget = dragOverTreeID === row.id;
           return (
@@ -1341,6 +1471,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                   return;
                 }
                 const kanbanDragItems = getKanbanDragItemsForRow(row);
+                const explorerDragRows = getExplorerItemRowsForPayload(rowDragPayload);
                 if (!selectedTreeIDs.has(row.id)) selectTreeRow(row);
                 setDraggingTreeID(row.id);
                 setDragPayload(rowDragPayload);
@@ -1358,6 +1489,13 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                     KANBAN_DEFAULT_COLUMN_ITEM_COLOR,
                     "Explorer nodes",
                   );
+                } else if (explorerDragRows.length > 1) {
+                  attachStackedDragPreview(
+                    event.dataTransfer,
+                    explorerDragRows.map((item) => ({ label: item.label, color: rowIconColor })),
+                    rowIconColor,
+                    row.kind === "logic_gate" ? "Explorer logic gates" : "Explorer items",
+                  );
                 }
                 event.dataTransfer.setData("text/plain", kanbanDragItems.length > 1 ? `${kanbanDragItems.length} nodes` : row.label);
               }}
@@ -1370,8 +1508,17 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
               onDragOver={(event) => {
                 const payload = dragPayload ?? readExplorerDragPayload(event.dataTransfer);
                 const sourceRow = treeRows.find((item) => item.id === draggingTreeID);
-                const placement = getExplorerDropIntent(event);
-                if (placement !== "inside" && sourceRow && sourceRow.id !== row.id && getReorderRowsForTarget(sourceRow, row).length > 0) {
+                const placement = row.kind === "folder" ? getExplorerDropIntent(event) : getExplorerRowReorderPlacement(event);
+                const isDraggedItemRow = payload?.kind !== "folder" && getExplorerItemRowsForPayload(payload).some((item) => item.id === row.id);
+                if (isDraggedItemRow) return;
+                if (payload?.kind === "folder" && placement !== "inside" && sourceRow && sourceRow.id !== row.id && getReorderRowsForTarget(sourceRow, row).length > 0) {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  setDragOverTreeID(row.id);
+                  setDragOverPlacement(placement);
+                  return;
+                }
+                if (payload?.kind !== "folder" && placement !== "inside" && canPlaceExplorerItemsAtTarget(payload, row)) {
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
                   setDragOverTreeID(row.id);
@@ -1392,13 +1539,20 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
               onDrop={(event) => {
                 const payload = dragPayload ?? readExplorerDragPayload(event.dataTransfer);
                 const sourceRow = treeRows.find((item) => item.id === draggingTreeID);
-                const placement = dragOverPlacement ?? getExplorerDropIntent(event);
+                const placement = dragOverPlacement ?? (row.kind === "folder" ? getExplorerDropIntent(event) : getExplorerRowReorderPlacement(event));
                 const dropTarget = resolveExplorerDropTarget(row, payload) ?? resolveExplorerRootDropTarget(row, payload);
+                const isDraggedItemRow = payload?.kind !== "folder" && getExplorerItemRowsForPayload(payload).some((item) => item.id === row.id);
                 setDragOverTreeID("");
                 setDragOverPlacement(null);
-                if (placement !== "inside" && sourceRow && sourceRow.id !== row.id && getReorderRowsForTarget(sourceRow, row).length > 0) {
+                if (isDraggedItemRow) return;
+                if (payload?.kind === "folder" && placement !== "inside" && sourceRow && sourceRow.id !== row.id && getReorderRowsForTarget(sourceRow, row).length > 0) {
                   event.preventDefault();
                   void reorderExplorerRows(sourceRow, row, placement);
+                  return;
+                }
+                if (payload?.kind !== "folder" && placement !== "inside" && canPlaceExplorerItemsAtTarget(payload, row)) {
+                  event.preventDefault();
+                  void placeExplorerItemsAtTarget(payload, row, placement);
                   return;
                 }
                 if (!dropTarget || !payload) return;
@@ -1407,9 +1561,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                   void moveFolder(payload.folderID, dropTarget.folderID);
                   return;
                 }
-                if (payload.itemID && payload.itemType) {
-                  void assignItemToFolder(dropTarget.folderID, payload.itemType, payload.itemID);
-                }
+                void assignExplorerPayloadItemsToFolder(dropTarget.folderID, dropTarget.folderKind, payload);
               }}
               style={{
                 position: "relative",
@@ -1496,7 +1648,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                     event.stopPropagation();
                     startRenamingRow(row);
                   }}
-                  style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "text" }}
+                  style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "default", userSelect: "none" }}
                 >
                   {row.label}
                 </span>

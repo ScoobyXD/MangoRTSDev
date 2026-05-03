@@ -3,6 +3,7 @@ import {
   EXPLORER_DEFAULT_EXPANDED_ROW_IDS,
   EXPLORER_ROOT_ROW_LABELS,
   EXPLORER_ROOT_ROW_ORDER,
+  buildExplorerRowBatchReorderPlan,
   buildExplorerRowReorderPlan,
   formatExplorerFolderLabel,
   resolveExplorerClickSelection,
@@ -101,6 +102,21 @@ run("drop targets resolve item rows to their containing folder", () => {
     null,
   );
   assert.equal(resolveExplorerDropTarget({ kind: "node", nodeID: "root-node" }, { kind: "node", itemType: "node", itemID: "node-2" }), null);
+
+  assert.deepEqual(
+    resolveExplorerDropTarget(
+      { kind: "logic_gate", folderKind: "logic_gate", folderID: "gate-folder", logicGateID: "gate-1" },
+      {
+        kind: "batch",
+        itemType: "logic_gate",
+        items: [
+          { itemType: "logic_gate", itemID: "gate-2" },
+          { itemType: "logic_gate", itemID: "gate-3" },
+        ],
+      },
+    ),
+    { folderID: "gate-folder", folderKind: "logic_gate", treeID: "workspace-folder-gate-folder" },
+  );
 });
 
 run("folder drops can target the Company root", () => {
@@ -148,6 +164,27 @@ run("row reorder plan uses sparse single-row position updates", () => {
     { rowID: "c", position: 1000 },
     { rowID: "a", position: 2000 },
     { rowID: "b", position: 3000 },
+  ]);
+});
+
+run("batch row reorder plan keeps selected rows together in drag order", () => {
+  const plan = buildExplorerRowBatchReorderPlan(
+    [
+      { id: "a", position: 1000, createdTimestamp: "1" },
+      { id: "b", position: 2000, createdTimestamp: "2" },
+      { id: "c", position: 3000, createdTimestamp: "3" },
+      { id: "d", position: 4000, createdTimestamp: "4" },
+      { id: "e", position: 5000, createdTimestamp: "5" },
+    ],
+    ["b", "c"],
+    "e",
+    "after",
+  );
+
+  assert.deepEqual(plan.rows.map((row) => row.id), ["a", "d", "e", "b", "c"]);
+  assert.deepEqual(plan.updates, [
+    { rowID: "b", position: 6000 },
+    { rowID: "c", position: 7000 },
   ]);
 });
 
