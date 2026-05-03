@@ -8,6 +8,7 @@ const repoRoot = resolve(scriptDir, "../../..");
 const frontendRoot = resolve(repoRoot, "frontend");
 const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/app/frameLinking.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/app/framePointerRouting.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/linkingGraph.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipProjection.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/logic-gate-map/relationshipProjection.test.js"),
@@ -26,6 +27,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTabs.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/plainTextEditing.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorScroll.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorIndentGuides.test.js"),
 ];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
 const tscEntrypoint = resolve(frontendRoot, "node_modules/typescript/bin/tsc");

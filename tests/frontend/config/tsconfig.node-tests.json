@@ -19,6 +19,8 @@
     "../support/test-node-shims.d.ts",
     "../../../frontend/src/app/frameLinking.ts",
     "../app/frameLinking.test.ts",
+    "../../../frontend/src/app/framePointerRouting.ts",
+    "../app/framePointerRouting.test.ts",
     "../../../frontend/src/modules/linkingGraph.ts",
     "../modules/linkingGraph.test.ts",
     "../../../frontend/src/modules/node-map/shared.ts",
@@ -51,7 +53,9 @@
     "../../../frontend/src/modules/editor/plainTextEditing.ts",
     "../modules/editor/plainTextEditing.test.ts",
     "../../../frontend/src/modules/editor/editorScroll.ts",
-    "../modules/editor/editorScroll.test.ts"
+    "../modules/editor/editorScroll.test.ts",
+    "../../../frontend/src/modules/editor/editorIndentGuides.ts",
+    "../modules/editor/editorIndentGuides.test.ts"
   ],
   "exclude": []
 }

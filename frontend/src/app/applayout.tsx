@@ -10,6 +10,7 @@ import { emitDashboardEvent, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/n
 import { FRAME_REGISTRY_KEY } from "../modules/linkingGraph";
 import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, FRAME_LINKS_KEY, mergeLinkPlan, sanitizeFrameLinks, type FrameLinkEdge } from "./frameLinking";
 import { createDefaultNodeViewFrames } from "./DefaultViews";
+import { isFrameInteractiveTarget } from "./framePointerRouting";
 
 const CELL_SIZE = 28;
 const HEADER_H = 48;
@@ -438,7 +439,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
     };
   }, []);
 
-  const shouldIgnoreFramePointerTarget = (target: HTMLElement) => !nested && !!target.closest('[data-child-frame="true"]');
+  const shouldIgnoreFramePointerTarget = (target: HTMLElement) => isFrameInteractiveTarget(target) || (!nested && !!target.closest('[data-child-frame="true"]'));
   const isResizeHandleTarget = (target: HTMLElement) => !!target.closest('[data-handle="true"]');
   const canStartHeaderSectionDrag = (event: React.MouseEvent | React.TouchEvent, target: HTMLElement, element: HTMLElement) => {
     if (shouldIgnoreFramePointerTarget(target) || isResizeHandleTarget(target)) return false;

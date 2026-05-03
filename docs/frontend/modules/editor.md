@@ -54,7 +54,7 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 - The editor remembers the last scroll offset per open document target in a small bounded in-memory cache. Returning to a node, logic gate, or the Editor tab restores that viewport; unseen documents start at the top.
 - Outline Styles has two input modes: `Automatic Numbering` and `Indent Guides`.
 - `Automatic Numbering` only affects new Enter presses after numbered lines such as `1. ` or `1.2. `. It inserts the next number at the same indentation and does not rewrite existing document text when the mode is selected.
-- `Indent Guides` keeps text input plain and draws lightweight vertical indentation guides behind the textarea. Tab still inserts five literal spaces.
+- `Indent Guides` keeps text input plain and draws lightweight vertical indentation guides only for actual indented lines. It must not use a document-wide repeating grid; guides open when a line is indented and close when indentation drops back. Tab still inserts five literal spaces.
 - Clearing all text calls the projection delete API. This keeps reload behavior correct while preserving append-only nonblank history for audit and scale.
 - The same document APIs work for headless agents: agents can post latest document text with a stable `information_id`, read projections for sub-100ms hot paths, and delete a projection to clear the latest document value. The outline input helpers are pure frontend functions, so future agent-facing command APIs can reuse the same text-edit rules without needing a browser.
 
@@ -98,6 +98,7 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 - The document surface fills the remaining frame body. Clicking normal text places the caret there; clicking below the written text focuses the editor at the document end, matching native document editor behavior.
 - Long documents scroll inside the editor body with a thin frame-themed scrollbar.
 - Long documents restore the user's last in-session scroll position when they return to the same document target.
+- Editor document controls mark themselves as frame-interactive so tab clicks, outline-style buttons, and typing do not select or drag the containing frame.
 - Text value is persisted server-side through append-only history plus latest-value projections.
 
 ## Commenting Convention Reminder
