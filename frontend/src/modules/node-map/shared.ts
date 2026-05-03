@@ -200,6 +200,9 @@ export function reconcileNodeMapPositions<T extends { node_id: string }>(input: 
     if (next === input.previous) next = { ...input.previous };
   };
 
+  const missingCount = input.nodes.reduce((count, node) => count + (input.previous[node.node_id] ? 0 : 1), 0);
+  const useViewportInsertion = !!input.defaultPosition && missingCount <= 1 && Object.keys(input.previous).length > 0;
+
   for (const [index, node] of input.nodes.entries()) {
     const existing = input.previous[node.node_id];
     if (existing) {
@@ -215,9 +218,12 @@ export function reconcileNodeMapPositions<T extends { node_id: string }>(input: 
     }
 
     const perRow = Math.max(1, Math.floor(input.canvasWidth / (input.nodeWidth + 40)));
-    const baseX = input.defaultPosition ? input.defaultPosition.x : 100;
-    const baseY = input.defaultPosition ? input.defaultPosition.y : 120;
-    const placementIndex = input.defaultPosition ? missingIndex : index;
+    // Viewport insertion is for one newly created item. When many nodes become
+    // visible after load/remount/folder broadening, use the stable grid instead
+    // so a stale pan value cannot pack the whole workspace into the top-left.
+    const baseX = useViewportInsertion && input.defaultPosition ? input.defaultPosition.x : 100;
+    const baseY = useViewportInsertion && input.defaultPosition ? input.defaultPosition.y : 120;
+    const placementIndex = useViewportInsertion ? missingIndex : index;
     const x = snapToGrid((placementIndex % perRow) * (input.nodeWidth + 26) + baseX);
     const y = snapToGrid(Math.floor(placementIndex / perRow) * (input.nodeHeight + 26) + baseY);
     missingIndex += 1;

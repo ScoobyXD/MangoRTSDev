@@ -54,3 +54,13 @@ export function readIncomingSequence(detail: { envelope?: ContextMutationEnvelop
 export function hasExplicitExplorerSelectionContext(detail: { sourceExplorerID?: unknown; selectedTreeID?: unknown }): boolean {
   return typeof detail.sourceExplorerID === "string" || typeof detail.selectedTreeID === "string";
 }
+
+export function hasPendingContextStorageUpdate(raw: string | null, lastAppliedTimestamp: number): boolean {
+  if (!raw) return false;
+  try {
+    const parsed = JSON.parse(raw) as { ts?: unknown };
+    return typeof parsed.ts === "number" && Number.isFinite(parsed.ts) && parsed.ts > lastAppliedTimestamp;
+  } catch {
+    return false;
+  }
+}

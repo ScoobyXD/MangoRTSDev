@@ -141,6 +141,8 @@ Selection sync hardening update (2026-05-03):
 - Explorer rows keep file-explorer drag/drop behavior, but hover uses the normal cursor instead of a grab cursor so the tree does not look like it is always in a drag state.
 - Linked maps now tag selection events that were caused by Explorer context with `sourceExplorerID`. Company Explorer ignores events from its own frame ID, so child-to-parent folder changes and node-tree/logic-gate-tree switches cannot be overwritten by delayed self-echoes.
 - Root/empty Explorer context is a real broadening command. Node Map and Logic Gate Map clear active folder scope and selection when they receive Explorer context with no selected entity or folder, instead of keeping the previous child selection alive.
+- Node Map and Logic Gate Map suppress cached selection events while a newer Explorer context is pending in storage. This blocks stale cached map selections during unified Map remounts/mode switches.
+- Graph cache reducers preserve map-layout positions when applying node/gate/relationship deltas, so Explorer-driven creates/deletes and SSE updates cannot accidentally drop layout state and force the map to regenerate positions.
 
 Folder runtime update (2026-05-02):
 - Explorer folders are now durable backend rows, not local-only UI state.

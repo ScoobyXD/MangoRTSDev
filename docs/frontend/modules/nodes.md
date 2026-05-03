@@ -376,6 +376,12 @@ Selection notifications are event-driven (`EVENT_NODE_MAP_SELECTION_UPDATED`) an
 Linked Company Explorer frames consume those selection events and map-state updates so Explorer row highlight follows Node Map selection in the same linked workspace.
 When an event payload already includes `selectedNodeID`, linked Company Explorer applies that payload directly. The debounced `node-map-state-v1:*` value is only a fallback for selection events without an entity payload, so stale storage cannot overwrite a fresh Explorer-driven map selection.
 When Node Map emits a selection after applying Company Explorer context, it includes `sourceExplorerID`; the originating Explorer ignores that self-echo, while other linked explorers can still consume the event. Empty Explorer context clears Node Map folder scope and selection, which keeps parent/root folder selection from falling back to a previous child node.
+Node Map also suppresses cached selection emission while a newer Explorer context is pending in storage. This prevents a remounted unified Map from broadcasting an old cached node before it applies the Explorer click that caused the mode/scope change.
+
+Layout safety note:
+- Node graph cache delta reducers must preserve `node_map_positions`; only a deleted node should remove its own position.
+- Bulk remount/folder-broadening placement uses the stable grid bootstrap, not the current viewport insertion point. The viewport insertion point is reserved for one newly created/missing node, so stale pan cannot pack a whole workspace into the top-left and persist it.
+- Delete key and node context-menu delete both resolve from the full current selection. Right-clicking a selected node must not collapse the multi-selection before the menu opens.
 
 ### 9.4 Node Doc persistence behavior
 

@@ -53,6 +53,23 @@ test("reconcileNodeMapPositions places newly created map items near the visible 
   assert.deepEqual(next.new, { x: 3024, y: 2112 });
 });
 
+test("reconcileNodeMapPositions uses stable grid when many nodes are missing after remount", () => {
+  const next = reconcileNodeMapPositions({
+    previous: {},
+    nodes: [{ node_id: "a" }, { node_id: "b" }, { node_id: "c" }],
+    canvasWidth: 1000,
+    worldWidth: 6400,
+    worldHeight: 4400,
+    nodeWidth: 148,
+    nodeHeight: 96,
+    defaultPosition: { x: 0, y: 0 },
+  });
+
+  assert.deepEqual(next.a, { x: 96, y: 120 });
+  assert.deepEqual(next.b, { x: 276, y: 120 });
+  assert.deepEqual(next.c, { x: 444, y: 120 });
+});
+
 test("persistedMapPositionsToNodePositions accepts backend node and logic-gate ids", () => {
   const next = persistedMapPositionsToNodePositions({
     positions: [

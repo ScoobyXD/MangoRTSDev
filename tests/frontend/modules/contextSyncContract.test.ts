@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasExplicitExplorerSelectionContext, hasSequenceGap, isNewerSequence, nextLocalContextSequence, readIncomingSequence } from "../../../frontend/src/modules/contextSyncContract.js";
+import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, hasSequenceGap, isNewerSequence, nextLocalContextSequence, readIncomingSequence } from "../../../frontend/src/modules/contextSyncContract.js";
 
 test("drops stale and duplicate sequences so projection state stays deterministic", () => {
   assert.equal(isNewerSequence(10, 9), false);
@@ -31,4 +31,10 @@ test("recognizes explicit empty explorer context as a map clear command", () => 
   assert.equal(hasExplicitExplorerSelectionContext({ sourceExplorerID: "explorer-1" }), true);
   assert.equal(hasExplicitExplorerSelectionContext({ selectedTreeID: "folder-root" }), true);
   assert.equal(hasExplicitExplorerSelectionContext({}), false);
+});
+
+test("detects pending explorer context before emitting cached map selection", () => {
+  assert.equal(hasPendingContextStorageUpdate(JSON.stringify({ ts: 25 }), 10), true);
+  assert.equal(hasPendingContextStorageUpdate(JSON.stringify({ ts: 10 }), 10), false);
+  assert.equal(hasPendingContextStorageUpdate("not-json", 10), false);
 });
