@@ -7,7 +7,7 @@ import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceS
 import { summarizeRelationshipDeleteResults } from "../node-map/relationshipDeleteSummary";
 import { invalidateLogicGateRecordStoreCaches } from "./LogicGateRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
-import { buildFolderLevelMapProjection, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem, type MapFolderCard } from "../folders/companyExplorerFolders";
+import { filterLogicGateGraphToFolderScope, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 
 type ExplorerSelectionOrigin = {
   sourceExplorerID: string;
@@ -15,8 +15,6 @@ type ExplorerSelectionOrigin = {
   sourceExplorerSelectedTreeID: string;
   selectedEntityID: string;
 };
-
-const folderCardNodeID = (folderID: string) => `folder:${folderID}`;
 
 // Logic Gate Map module: node-map canvas behavior with logic-gate persistence and Input/Output edges.
 const LOGIC_GATE_SIDE_CONTROLS: Array<{ direction: NodeDirection; style: React.CSSProperties }> = [
@@ -52,8 +50,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const [relationships, setRelationships] = useState<NodeRelationship[]>([]);
   const [folders, setFolders] = useState<CompanyExplorerFolder[]>([]);
   const [folderItems, setFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
-  const [folderCards, setFolderCards] = useState<MapFolderCard[]>([]);
-  const [folderPositions, setFolderPositions] = useState<Record<string, NodePosition>>({});
   const [activeFolderID, setActiveFolderID] = useState("");
   const [activeFolderLabel, setActiveFolderLabel] = useState("");
   const [relationshipAnchors, setRelationshipAnchors] = useState<Record<string, RelationshipAnchor>>({});
@@ -148,28 +144,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     x: clamp(snapToGrid((canvasSize.width / 2 - pan.x) / zoom - NODE_W / 2), 0, WORLD_W - NODE_W),
     y: clamp(snapToGrid((canvasSize.height / 2 - pan.y) / zoom - NODE_H / 2), 0, WORLD_H - NODE_H),
   }), [WORLD_H, WORLD_W, canvasSize.height, canvasSize.width, pan.x, pan.y, zoom]);
-  const activeFolder = useMemo(() => folders.find((folder) => folder.folder_id === activeFolderID), [activeFolderID, folders]);
-  const activeFolderDisplayLabel = activeFolderLabel || activeFolder?.name || "";
-  const navigateToFolder = (folderID: string) => {
-    const folder = folders.find((candidate) => candidate.folder_id === folderID);
-    if (!folder) return;
-    setActiveFolderID(folder.folder_id);
-    setActiveFolderLabel(folder.name);
-    setSelectedNodeID("");
-    setSelectedNodeIDs(new Set());
-    setSelectedRelationshipIDs(new Set());
-    setRelationshipDraft(null);
-  };
-  const navigateToParentFolder = () => {
-    const parentFolderID = activeFolder?.parent_folder_id ?? "";
-    const parentFolder = parentFolderID ? folders.find((folder) => folder.folder_id === parentFolderID) : null;
-    setActiveFolderID(parentFolderID);
-    setActiveFolderLabel(parentFolder?.name ?? "");
-    setSelectedNodeID("");
-    setSelectedNodeIDs(new Set());
-    setSelectedRelationshipIDs(new Set());
-    setRelationshipDraft(null);
-  };
 
   // Keep relationship projection derivation centralized so callers can reuse the exact same
   // filtering logic without triggering additional network calls.
@@ -185,25 +159,19 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     snapshotFolderItems: CompanyExplorerFolderItem[],
     folderID = activeFolderID,
   ) => {
-    // Folder cards are derived from durable Explorer folder rows. We do not
-    // create a second map-only folder model; agents use the same APIs as the UI.
-    const scoped = buildFolderLevelMapProjection({
-      items: snapshotNodes,
+    const scoped = filterLogicGateGraphToFolderScope({
+      nodes: snapshotNodes,
       relationships: snapshotRelationships,
       folders: snapshotFolders,
       folderItems: snapshotFolderItems,
       folderID,
-      itemType: "logic_gate",
-      getItemID: (node) => node.node_id,
-      getRelationshipItemIDs: (relationship) => [relationship.node_id_a, relationship.node_id_b],
     });
     setAllNodes(snapshotNodes);
     setFolders(snapshotFolders);
     setFolderItems(snapshotFolderItems);
-    setFolderCards(scoped.childFolders);
-    setNodes(scoped.items);
+    setNodes(scoped.nodes);
     setRelationships(scoped.relationships);
-    return scoped.items;
+    return scoped.nodes;
   };
 
   const startNodeMapMultiSelect = (pointerID: number, clientX: number, clientY: number, additive: boolean) => {
@@ -600,20 +568,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       });
     });
   }, [nodes, canvasSize.width, visibleInsertionPosition]);
-
-  useEffect(() => {
-    setFolderPositions((previous) => {
-      return reconcileNodeMapPositions({
-        previous,
-        nodes: folderCards.map((folder) => ({ node_id: folderCardNodeID(folder.folder_id) })),
-        canvasWidth: canvasSize.width,
-        worldWidth: WORLD_W,
-        worldHeight: WORLD_H,
-        nodeWidth: NODE_W,
-        nodeHeight: NODE_H,
-      });
-    });
-  }, [folderCards, canvasSize.width]);
 
   useNodeMapDragControls({
     dragState,
@@ -1340,17 +1294,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   }, [relationshipDraft, nodePositions, relationshipRoutingGrid]);
 
   const visibleNodes = useMemo(() => nodes.filter((node) => visibleNodeIDSet.has(node.node_id)), [nodes, visibleNodeIDSet]);
-  const visibleFolderCards = useMemo(() => {
-    const minX = (-pan.x) / zoom;
-    const minY = (-pan.y) / zoom;
-    const maxX = minX + canvasSize.width / zoom;
-    const maxY = minY + canvasSize.height / zoom;
-    const pad = 180;
-    return folderCards.filter((folder) => {
-      const position = folderPositions[folderCardNodeID(folder.folder_id)] ?? { x: 120, y: 120 };
-      return position.x + NODE_W >= minX - pad && position.x <= maxX + pad && position.y + NODE_H >= minY - pad && position.y <= maxY + pad;
-    });
-  }, [canvasSize.height, canvasSize.width, folderCards, folderPositions, pan.x, pan.y, zoom]);
 
   useEffect(() => {
     const canvas = relationshipCanvasRef.current;
@@ -1571,108 +1514,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
             ))}
           </svg>
 
-          {visibleFolderCards.map((folder) => {
-            const renderID = folderCardNodeID(folder.folder_id);
-            const position = folderPositions[renderID] ?? { x: 120, y: 120 };
-            const folderName = folder.name || "Untitled folder";
-            const gateCountLabel = `${folder.descendant_item_count} gate${folder.descendant_item_count === 1 ? "" : "s"}`;
-            const childFolderLabel = `${folder.child_folder_count} folder${folder.child_folder_count === 1 ? "" : "s"}`;
-
-            return (
-              <div
-                key={renderID}
-                data-folder-card="logic_gate"
-                style={{
-                  position: "absolute",
-                  left: position.x,
-                  top: position.y,
-                  width: NODE_W,
-                  height: NODE_H,
-                  borderRadius: `4px ${NODE_H / 2}px ${NODE_H / 2}px 4px`,
-                  border: `1.5px dashed ${accent}`,
-                  background: isDarkTheme ? "rgba(25,33,39,0.96)" : "rgba(255,255,255,0.96)",
-                  boxShadow: "0 6px 16px rgba(0,0,0,0.16)",
-                  color: nodeCardText,
-                  display: "grid",
-                  gridTemplateRows: "auto 1fr auto",
-                  padding: "7px 23px 8px 9px",
-                  boxSizing: "border-box",
-                  userSelect: "none",
-                  zIndex: 4,
-                }}
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  setCanvasActive(true);
-                  setContextMenu(null);
-                  setNodeContextMenu(null);
-                  setRelationshipContextMenu(null);
-                  setRelationshipDraft(null);
-                  setSelectedNodeID("");
-                  setSelectedNodeIDs(new Set());
-                  setSelectedRelationshipIDs(new Set());
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, minWidth: 0 }}>
-                  <span style={{ fontSize: 9, fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace", color: accent, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    GATE FOLDER
-                  </span>
-                  <button
-                    type="button"
-                    aria-label={`Expand ${folderName}`}
-                    title={`Expand ${folderName}`}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      navigateToFolder(folder.folder_id);
-                    }}
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: 4,
-                      border: `1px solid ${accent}`,
-                      background: panelSurface,
-                      color: accent,
-                      display: "grid",
-                      placeItems: "center",
-                      fontSize: 14,
-                      fontWeight: 800,
-                      cursor: "pointer",
-                      padding: 0,
-                      lineHeight: 1,
-                      flexShrink: 0,
-                    }}
-                  >
-                    &gt;
-                  </button>
-                </div>
-                <div style={{ minWidth: 0, display: "grid", placeItems: "center", textAlign: "center", padding: "2px 0" }}>
-                  <div
-                    style={{
-                      whiteSpace: "normal",
-                      overflowWrap: "anywhere",
-                      wordBreak: "break-word",
-                      overflow: "hidden",
-                      maxWidth: "100%",
-                      textOverflow: "ellipsis",
-                      display: "-webkit-box",
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: "vertical",
-                      fontSize: 16,
-                      fontWeight: 800,
-                      lineHeight: 1.12,
-                      fontFamily: "'IBM Plex Mono', monospace",
-                    }}
-                  >
-                    {folderName}
-                  </div>
-                </div>
-                <div style={{ fontSize: 9, fontWeight: 700, color: panelMutedText, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {gateCountLabel} / {childFolderLabel}
-                </div>
-              </div>
-            );
-          })}
-
           {visibleNodes.map((node) => {
             const position = nodePositions[node.node_id] ?? { x: 120, y: 120 };
             const size = nodeSizes[node.node_id] ?? { w: NODE_W, h: NODE_H };
@@ -1689,7 +1530,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
                   top: position.y,
                   width: size.w,
                   height: size.h,
-                  borderRadius: `4px ${Math.max(40, size.h / 2)}px ${Math.max(40, size.h / 2)}px 4px`,
+                  borderRadius: 8,
                   border: `1px solid ${isSelected ? SELECTION_CYAN : nodeCardBorder}`,
                   background: isSelected ? nodeCardSelectedBackground : nodeCardBackground,
                   outline: isSelected ? `2px solid ${SELECTION_CYAN}` : "none",
@@ -1763,7 +1604,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
                     width: "100%",
                     height: "100%",
                     textAlign: "center",
-                    padding: "10px 22px 10px 10px",
+                    padding: "10px",
                   }}
                 >
                   {/* Latency-obsession alignment: keep logic-gate-card render minimal.
@@ -1971,55 +1812,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
             );
           })}
         </div>
-
-        {activeFolderID && (
-          <div
-            style={{
-              position: "absolute",
-              top: 10,
-              left: 10,
-              zIndex: 30,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              maxWidth: "min(520px, calc(100% - 20px))",
-              border: `1px solid ${accent}`,
-              borderRadius: 8,
-              background: panelSurface,
-              color: panelText,
-              padding: "5px 7px",
-              boxShadow: "0 6px 16px rgba(0,0,0,0.16)",
-              fontFamily: "'IBM Plex Mono', monospace",
-              fontSize: 10,
-              fontWeight: 700,
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              title="Go to parent folder"
-              onClick={navigateToParentFolder}
-              style={{
-                border: `1px solid ${accent}`,
-                background: panelSubtleSurface,
-                color: accent,
-                borderRadius: 4,
-                cursor: "pointer",
-                fontSize: 10,
-                fontWeight: 800,
-                padding: "3px 7px",
-              }}
-            >
-              Up
-            </button>
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {activeFolderDisplayLabel || "Folder"}
-            </span>
-            <span style={{ color: panelMutedText, whiteSpace: "nowrap" }}>
-              {nodes.length} gate{nodes.length === 1 ? "" : "s"} / {folderCards.length} folder{folderCards.length === 1 ? "" : "s"}
-            </span>
-          </div>
-        )}
 
         {selectionBox.active && (
           <div
@@ -2237,7 +2029,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           <div
             style={{
               position: "absolute",
-              top: activeFolderID ? 48 : 10,
+              top: 10,
               left: 10,
               zIndex: 30,
               background: "rgba(0,0,0,0.75)",

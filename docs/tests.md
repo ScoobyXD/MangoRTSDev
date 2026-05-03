@@ -194,9 +194,6 @@ Use this checklist format and keep it complete.
   - node folder filtering keeps only folder/descendant contents
   - relationship filtering keeps only relationships whose endpoints are both in scope
   - logic-gate folder filtering ignores node placements and hides cross-scope relationships
-  - folder-level map projection shows root folders with unassigned items only
-  - folder-level map projection expands one folder level at a time instead of recursively flattening child folders
-  - logic-gate folder-level projection uses logic-gate placements and hides cross-folder gate relationships
   - scoped map selection preserves Explorer-requested IDs during folder projection handoff
   - scoped map selection only falls back to the first visible item after the selected ID is absent from the known graph snapshot
 - [x] `tests/frontend/modules/contextSyncContract.test.ts`

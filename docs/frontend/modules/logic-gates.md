@@ -85,9 +85,7 @@ Logic Gate Map follows the latency architecture rules:
 - the visual background uses the shared repeated SVG plus-grid, which adapts tile size by zoom without creating per-cell DOM,
 - the major plus layer is aligned to the minor grid axes so scale cues stay readable during pan and zoom,
 - layout geometry is a backend projection in `logic_gate_map_positions`; browser storage keeps only small viewport/selection cache data.
-- Company Explorer folder selection filters the cached snapshot in memory as a folder-level projection. At root, Logic Gate Map renders unassigned gates plus top-level logic-gate folder cards. Inside a folder, it renders direct child gates plus immediate child folder cards; clicking a folder card's expand control changes the map scope so that folder's contents occupy the full canvas instead of a mini-preview.
-- Relationship lines render only when both endpoints are direct visible gate cards in the current map level. Cross-folder relationships stay persisted and become visible when the relevant folder level is expanded.
-- Logic-gate folder cards use the same AND-gate silhouette with a dashed folder treatment so users can distinguish a folder projection from a concrete gate.
+- Company Explorer folder selection filters the cached snapshot in memory. A selected folder includes descendant folders, and relationship lines render only when both gates are inside that active scope.
 - Selecting an individual gate from inside a Company Explorer folder keeps that folder scope active while selecting the gate.
 - New logic gates created while a folder scope is active are assigned to that folder through the folder-items API.
 
