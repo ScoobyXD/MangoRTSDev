@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { filterLogicGateGraphToFolderScope, filterNodeGraphToFolderScope, getFolderSubtreeIDs } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
 
 const folders = [
-  { company_id: "c", folder_id: "folder-parent", folder_kind: "node" as const, name: "Parent", created_timestamp: "1", updated_timestamp: "1" },
-  { company_id: "c", folder_id: "folder-child", parent_folder_id: "folder-parent", folder_kind: "node" as const, name: "Child", created_timestamp: "2", updated_timestamp: "2" },
-  { company_id: "c", folder_id: "logic-parent", folder_kind: "logic_gate" as const, name: "Logic", created_timestamp: "3", updated_timestamp: "3" },
+  { company_id: "c", folder_id: "folder-parent", folder_kind: "node" as const, name: "Parent", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
+  { company_id: "c", folder_id: "folder-child", parent_folder_id: "folder-parent", folder_kind: "node" as const, name: "Child", position: 1000, created_timestamp: "2", updated_timestamp: "2" },
+  { company_id: "c", folder_id: "logic-parent", folder_kind: "logic_gate" as const, name: "Logic", position: 1000, created_timestamp: "3", updated_timestamp: "3" },
 ];
 
 test("folder subtree includes nested descendants", () => {
@@ -25,8 +25,8 @@ test("node folder scope keeps only nodes in selected folder subtree and their in
     ],
     folders,
     folderItems: [
-      { company_id: "c", folder_id: "folder-parent", item_type: "node", item_id: "node-a", created_timestamp: "1", updated_timestamp: "1" },
-      { company_id: "c", folder_id: "folder-child", item_type: "node", item_id: "node-b", created_timestamp: "2", updated_timestamp: "2" },
+      { company_id: "c", folder_id: "folder-parent", item_type: "node", item_id: "node-a", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
+      { company_id: "c", folder_id: "folder-child", item_type: "node", item_id: "node-b", position: 1000, created_timestamp: "2", updated_timestamp: "2" },
     ],
     folderID: "folder-parent",
   });
@@ -46,8 +46,8 @@ test("logic gate folder scope uses logic_gate folder items only", () => {
     ],
     folders,
     folderItems: [
-      { company_id: "c", folder_id: "logic-parent", item_type: "logic_gate", item_id: "gate-a", created_timestamp: "1", updated_timestamp: "1" },
-      { company_id: "c", folder_id: "folder-parent", item_type: "node", item_id: "gate-b", created_timestamp: "2", updated_timestamp: "2" },
+      { company_id: "c", folder_id: "logic-parent", item_type: "logic_gate", item_id: "gate-a", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
+      { company_id: "c", folder_id: "folder-parent", item_type: "node", item_id: "gate-b", position: 1000, created_timestamp: "2", updated_timestamp: "2" },
     ],
     folderID: "logic-parent",
   });

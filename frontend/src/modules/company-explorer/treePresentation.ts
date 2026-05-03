@@ -24,6 +24,19 @@ export type ExplorerDropTarget = {
   treeID: string;
 };
 
+export type ExplorerRowDropPlacement = "before" | "after";
+
+export type ExplorerOrderRow = {
+  id: string;
+  position: number;
+  createdTimestamp: string;
+};
+
+export type ExplorerOrderUpdate = {
+  rowID: string;
+  position: number;
+};
+
 export type ExplorerCreationTargets = {
   preferredFolderKind: CompanyExplorerFolderKind;
   preferredFolderParentID: string;
@@ -56,6 +69,58 @@ export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | nul
 
   if (!payload.itemID || payload.itemType !== row.folderKind) return null;
   return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
+}
+
+export function sortExplorerOrderRows<T extends ExplorerOrderRow>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => a.position - b.position || a.createdTimestamp.localeCompare(b.createdTimestamp) || a.id.localeCompare(b.id));
+}
+
+function compactExplorerOrderRows(rows: ExplorerOrderRow[]): ExplorerOrderUpdate[] {
+  return rows.map((row, index) => ({ rowID: row.id, position: (index + 1) * 1000 }));
+}
+
+export function buildExplorerRowReorderPlan(
+  rows: ExplorerOrderRow[],
+  draggedRowID: string,
+  targetRowID: string,
+  placement: ExplorerRowDropPlacement,
+): { rows: ExplorerOrderRow[]; updates: ExplorerOrderUpdate[] } {
+  const sorted = sortExplorerOrderRows(rows);
+  const dragged = sorted.find((row) => row.id === draggedRowID);
+  if (!dragged || draggedRowID === targetRowID) return { rows: sorted, updates: [] };
+
+  const withoutDragged = sorted.filter((row) => row.id !== draggedRowID);
+  const targetIndex = withoutDragged.findIndex((row) => row.id === targetRowID);
+  if (targetIndex < 0) return { rows: sorted, updates: [] };
+
+  const insertIndex = placement === "after" ? targetIndex + 1 : targetIndex;
+  const reordered = [
+    ...withoutDragged.slice(0, insertIndex),
+    dragged,
+    ...withoutDragged.slice(insertIndex),
+  ];
+  const prev = reordered[insertIndex - 1];
+  const next = reordered[insertIndex + 1];
+  const hasRoomBeforeNext = !next || (prev ? next.position - prev.position > 1 : next.position > 1);
+
+  if (!hasRoomBeforeNext) {
+    const updates = compactExplorerOrderRows(reordered);
+    const byID = new Map(updates.map((update) => [update.rowID, update.position]));
+    return {
+      rows: sortExplorerOrderRows(reordered.map((row) => ({ ...row, position: byID.get(row.id) ?? row.position }))),
+      updates,
+    };
+  }
+
+  const position = prev && next
+    ? Math.floor((prev.position + next.position) / 2)
+    : prev
+      ? prev.position + 1000
+      : Math.max(1, (next?.position ?? 1001) - 1000);
+  return {
+    rows: sortExplorerOrderRows(reordered.map((row) => (row.id === draggedRowID ? { ...row, position } : row))),
+    updates: [{ rowID: draggedRowID, position }],
+  };
 }
 
 export function resolveExplorerCreationTargets(row?: ExplorerCreationContextRow | null): ExplorerCreationTargets {

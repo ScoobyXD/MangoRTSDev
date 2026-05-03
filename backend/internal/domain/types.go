@@ -95,6 +95,7 @@ type CompanyExplorerFolder struct {
 	ParentFolderID   *string   `json:"parent_folder_id,omitempty"`
 	FolderKind       string    `json:"folder_kind"`
 	Name             string    `json:"name"`
+	Position         int       `json:"position"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
@@ -104,6 +105,7 @@ type CompanyExplorerFolderItem struct {
 	FolderID         string    `json:"folder_id"`
 	ItemType         string    `json:"item_type"`
 	ItemID           string    `json:"item_id"`
+	Position         int       `json:"position"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }

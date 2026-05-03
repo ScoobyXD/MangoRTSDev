@@ -9,6 +9,7 @@ export type CompanyExplorerFolder = {
   parent_folder_id?: string;
   folder_kind: CompanyExplorerFolderKind;
   name: string;
+  position: number;
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -18,6 +19,7 @@ export type CompanyExplorerFolderItem = {
   folder_id: string;
   item_type: CompanyExplorerFolderKind;
   item_id: string;
+  position: number;
   created_timestamp: string;
   updated_timestamp: string;
 };

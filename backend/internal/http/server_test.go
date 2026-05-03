@@ -357,6 +357,10 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateNode() error = %v", err)
 	}
+	secondNode, err := repo.CreateNode(companyID, "Second foldered node")
+	if err != nil {
+		t.Fatalf("CreateNode(second) error = %v", err)
+	}
 
 	createFolder := func(name, parentFolderID string) string {
 		t.Helper()
@@ -456,6 +460,33 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	if assignRec.Code != http.StatusOK {
 		t.Fatalf("POST company explorer folder-items status = %d, want %d body=%s", assignRec.Code, http.StatusOK, assignRec.Body.String())
 	}
+	secondAssignBody, _ := json.Marshal(map[string]string{
+		"company_id": companyID,
+		"folder_id":  childID,
+		"item_type":  "node",
+		"item_id":    secondNode.NodeID,
+	})
+	secondAssignReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items", bytes.NewReader(secondAssignBody))
+	secondAssignReq.Header.Set("Content-Type", "application/json")
+	secondAssignRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondAssignRec, secondAssignReq)
+	if secondAssignRec.Code != http.StatusOK {
+		t.Fatalf("POST second company explorer folder-items status = %d, want %d body=%s", secondAssignRec.Code, http.StatusOK, secondAssignRec.Body.String())
+	}
+	reorderBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"folder_id":  childID,
+		"item_type":  "node",
+		"item_id":    node.NodeID,
+		"position":   3000,
+	})
+	reorderReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items", bytes.NewReader(reorderBody))
+	reorderReq.Header.Set("Content-Type", "application/json")
+	reorderRec := httptest.NewRecorder()
+	handler.ServeHTTP(reorderRec, reorderReq)
+	if reorderRec.Code != http.StatusOK {
+		t.Fatalf("POST reorder company explorer folder-items status = %d, want %d body=%s", reorderRec.Code, http.StatusOK, reorderRec.Body.String())
+	}
 
 	itemsReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folder-items?company_id="+companyID+"&folder_id="+childID+"&item_type=node", nil)
 	itemsRec := httptest.NewRecorder()
@@ -468,13 +499,14 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 			FolderID string `json:"folder_id"`
 			ItemType string `json:"item_type"`
 			ItemID   string `json:"item_id"`
+			Position int    `json:"position"`
 		} `json:"folder_items"`
 	}
 	if err := json.NewDecoder(itemsRec.Body).Decode(&itemsPayload); err != nil {
 		t.Fatalf("decode folder items: %v", err)
 	}
-	if len(itemsPayload.Items) != 1 || itemsPayload.Items[0].FolderID != childID || itemsPayload.Items[0].ItemID != node.NodeID {
-		t.Fatalf("folder item payload = %+v, want node in child folder", itemsPayload.Items)
+	if len(itemsPayload.Items) != 2 || itemsPayload.Items[0].ItemID != secondNode.NodeID || itemsPayload.Items[1].ItemID != node.NodeID || itemsPayload.Items[1].Position != 3000 {
+		t.Fatalf("folder item payload = %+v, want reordered nodes in child folder", itemsPayload.Items)
 	}
 
 	snapshotReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID, nil)
@@ -496,8 +528,8 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	if err := json.NewDecoder(snapshotRec.Body).Decode(&snapshot); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
-	if len(snapshot.Folders) != 3 || len(snapshot.FolderItems) != 1 {
-		t.Fatalf("snapshot folder counts = folders:%d items:%d, want 3/1", len(snapshot.Folders), len(snapshot.FolderItems))
+	if len(snapshot.Folders) != 3 || len(snapshot.FolderItems) != 2 {
+		t.Fatalf("snapshot folder counts = folders:%d items:%d, want 3/2", len(snapshot.Folders), len(snapshot.FolderItems))
 	}
 	foundChild := false
 	for _, folder := range snapshot.Folders {
