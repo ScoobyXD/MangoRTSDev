@@ -13,6 +13,8 @@ import { createDefaultNodeViewFrames } from "./DefaultViews";
 
 const CELL_SIZE = 28;
 const HEADER_H = 48;
+const FRAME_HEADER_SECTION_HEIGHT = 38;
+const FRAME_SELECTION_COLOR = "rgb(0, 233, 255)";
 const CROSS_ARM = 2;
 const MIN_W = 3;
 const MIN_H = 3;
@@ -138,6 +140,13 @@ function getPointer(e: React.MouseEvent | React.TouchEvent | MouseEvent | TouchE
   if ("touches" in e && e.touches.length > 0) return { px: e.touches[0].clientX, py: e.touches[0].clientY };
   if ("clientX" in e) return { px: e.clientX, py: e.clientY };
   return { px: 0, py: 0 };
+}
+
+function isFrameHeaderSectionPointer(e: React.MouseEvent | React.TouchEvent, element: HTMLElement) {
+  const { py } = getPointer(e);
+  const bounds = element.getBoundingClientRect();
+  const headerBottom = bounds.top + Math.min(FRAME_HEADER_SECTION_HEIGHT, bounds.height);
+  return py >= bounds.top && py <= headerBottom;
 }
 
 const VIEWS_KEY = "grid-dashboard-views-v1";
@@ -401,6 +410,8 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
   const contentScale = shouldScaleContent ? clamp(Math.min((frame.w * stepX) / 320, (frame.h * stepY) / 220), 0.65, 1) : 1;
   const previousEdgeRef = useRef<{ left: boolean; right: boolean; top: boolean; bottom: boolean }>({ left: false, right: false, top: false, bottom: false });
   const timersRef = useRef<Partial<Record<"left" | "right" | "top" | "bottom", number>>>({});
+  const suppressModuleHeaderClickRef = useRef(false);
+  const suppressModuleHeaderClickTimerRef = useRef<number | null>(null);
   const [edgeBump, setEdgeBump] = useState<{ left: boolean; right: boolean; top: boolean; bottom: boolean }>({ left: false, right: false, top: false, bottom: false });
 
   useEffect(() => {
@@ -423,8 +434,33 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
       for (const timer of Object.values(timersRef.current)) {
         if (timer) window.clearTimeout(timer);
       }
+      if (suppressModuleHeaderClickTimerRef.current) window.clearTimeout(suppressModuleHeaderClickTimerRef.current);
     };
   }, []);
+
+  const shouldIgnoreFramePointerTarget = (target: HTMLElement) => !nested && !!target.closest('[data-child-frame="true"]');
+  const isResizeHandleTarget = (target: HTMLElement) => !!target.closest('[data-handle="true"]');
+  const canStartHeaderSectionDrag = (event: React.MouseEvent | React.TouchEvent, target: HTMLElement, element: HTMLElement) => {
+    if (shouldIgnoreFramePointerTarget(target) || isResizeHandleTarget(target)) return false;
+    if (!isFrameHeaderSectionPointer(event, element)) return false;
+    if (target.closest('[data-header-drag-handle="true"]')) return false;
+    return editMode || nested;
+  };
+  const suppressNextModuleHeaderClick = () => {
+    suppressModuleHeaderClickRef.current = true;
+    if (suppressModuleHeaderClickTimerRef.current) window.clearTimeout(suppressModuleHeaderClickTimerRef.current);
+    suppressModuleHeaderClickTimerRef.current = window.setTimeout(() => {
+      suppressModuleHeaderClickRef.current = false;
+      suppressModuleHeaderClickTimerRef.current = null;
+    }, 500);
+  };
+  const startHeaderSectionDragFromCapture = (event: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (!canStartHeaderSectionDrag(event, target, event.currentTarget)) return;
+    onDragStart(event, frame.id);
+    suppressNextModuleHeaderClick();
+    event.stopPropagation();
+  };
 
   const edgeBumpBase = {
     position: "absolute",
@@ -452,36 +488,52 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         zIndex: nested ? 200 : (isDragging ? 100 : 1),
         color: theme.text,
         boxShadow: isSelected
-          ? `0 0 0 2px ${frame.accent}, 0 8px 20px rgba(2,22,46,0.24)`
+          ? `inset 0 0 0 1px ${FRAME_SELECTION_COLOR}, 0 0 0 2px ${FRAME_SELECTION_COLOR}, 0 8px 20px rgba(2,22,46,0.24)`
           : nested
             ? "0 3px 16px rgba(0,0,0,0.18)"
             : undefined,
         border: "none",
       }}
+      onClickCapture={(e) => {
+        if (!suppressModuleHeaderClickRef.current) return;
+        suppressModuleHeaderClickRef.current = false;
+        if (suppressModuleHeaderClickTimerRef.current) {
+          window.clearTimeout(suppressModuleHeaderClickTimerRef.current);
+          suppressModuleHeaderClickTimerRef.current = null;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+      }}
       onClick={(e) => e.stopPropagation()}
       onMouseDownCapture={(e) => {
         const target = e.target as HTMLElement;
-        if (!nested && target.closest('[data-child-frame="true"]')) return;
+        if (shouldIgnoreFramePointerTarget(target)) return;
         if (e.button !== 0) return;
         onSelect(e, frame.id);
+        startHeaderSectionDragFromCapture(e);
       }}
       onTouchStartCapture={(e) => {
         const target = e.target as HTMLElement;
-        if (!nested && target.closest('[data-child-frame="true"]')) return;
+        if (shouldIgnoreFramePointerTarget(target)) return;
         onSelect(e, frame.id);
+        startHeaderSectionDragFromCapture(e);
       }}
       onMouseDown={(e) => {
         const target = e.target as HTMLElement;
-        if (!nested && target.closest('[data-child-frame="true"]')) return;
-        if (target.dataset.handle) return;
-        if (!editMode && !target.closest('[data-header-drag-handle="true"]')) return;
+        if (shouldIgnoreFramePointerTarget(target)) return;
+        if (isResizeHandleTarget(target)) return;
+        const isCompactHeaderHandle = !!target.closest('[data-header-drag-handle="true"]');
+        if (!isCompactHeaderHandle && !isFrameHeaderSectionPointer(e, e.currentTarget)) return;
+        if (!editMode && !nested && !isCompactHeaderHandle) return;
         onDragStart(e, frame.id);
       }}
       onTouchStart={(e) => {
         const target = e.target as HTMLElement;
-        if (!nested && target.closest('[data-child-frame="true"]')) return;
-        if (target.dataset.handle) return;
-        if (!editMode && !target.closest('[data-header-drag-handle="true"]')) return;
+        if (shouldIgnoreFramePointerTarget(target)) return;
+        if (isResizeHandleTarget(target)) return;
+        const isCompactHeaderHandle = !!target.closest('[data-header-drag-handle="true"]');
+        if (!isCompactHeaderHandle && !isFrameHeaderSectionPointer(e, e.currentTarget)) return;
+        if (!editMode && !nested && !isCompactHeaderHandle) return;
         onDragStart(e, frame.id);
       }}
     >
@@ -512,6 +564,7 @@ const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nes
         }}
       >
           <span
+            data-module-name-switcher="true"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onModuleNameClick(e, frame.id); }}
             style={{ fontSize: 12, fontWeight: 800, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.09em", background: theme.tagBg, padding: "3px 8px", cursor: "pointer", lineHeight: 1.1 }}
           >

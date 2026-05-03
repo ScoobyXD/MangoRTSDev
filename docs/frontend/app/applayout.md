@@ -93,3 +93,14 @@ The app layout keeps compatibility for persisted payloads:
   3. only remove frames after explicit `Yes`
 - This aligns frame deletion safety with existing Node Map delete-confirm behavior, reducing accidental destructive actions on hot interaction paths.
 - Confirmation dialog copy includes Undo guidance (`Ctrl/Cmd + Z`) so recovery remains obvious for rapid workflows.
+
+## Header-section selection and drag update (2026-05-03)
+
+- Frame/module surfaces now use two explicit terms:
+  - **Header section**: the top band from the frame/module top edge down through the thin divider under the frame name, linked hexagon, tabs, or module title controls.
+  - **General section**: the module body below that divider, reserved for module-local work.
+- `applayout` hit-tests the full header section before module content can stop pointer propagation.
+- Root frames can be selected from the header section, and in edit mode the full header section starts frame movement.
+- Child frames can be selected from the header section and dragged within their parent frame from that full header section.
+- Dragging no longer starts from the general section; the body remains available for text editing, Kanban card work, map selection, explorer rows, and other module interactions.
+- Selected frames render a persistent cyan frame ring using `FRAME_SELECTION_COLOR`, confirming which frame is active for link, delete, copy, and related frame-level actions.
