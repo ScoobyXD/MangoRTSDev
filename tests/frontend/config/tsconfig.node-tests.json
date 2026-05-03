@@ -17,6 +17,8 @@
   "include": [
     "../../../frontend/src/types.ts",
     "../support/test-node-shims.d.ts",
+    "../../../frontend/src/hooks/keyboardShortcutRouting.ts",
+    "../hooks/keyboardShortcutRouting.test.ts",
     "../../../frontend/src/app/frameLinking.ts",
     "../app/frameLinking.test.ts",
     "../../../frontend/src/modules/linkingGraph.ts",

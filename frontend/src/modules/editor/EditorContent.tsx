@@ -10,7 +10,7 @@ import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGr
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import type { NodeInformation } from "../node-map/shared";
 import { getEditorDocumentIsolationState, type EditorTabID } from "./editorTabs";
-import { insertEditorTabText } from "./plainTextEditing";
+import { insertEditorTabTextIntoTextArea } from "./plainTextEditing";
 
 type LinkedEntityKind = "node" | "logic_gate";
 
@@ -768,11 +768,10 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             if (event.key !== "Tab") return;
 
             event.preventDefault();
-            // Textareas normally use Tab to leave the field. In the editor, Tab
-            // should insert five plain spaces and then save like any typed input.
-            const edit = insertEditorTabText(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
-            event.currentTarget.value = edit.value;
-            event.currentTarget.setSelectionRange(edit.selectionStart, edit.selectionEnd);
+            // Textareas normally use Tab to leave the field. In this document
+            // editor it inserts spaces, while preserving native undo when the
+            // browser exposes an undo-aware text insertion command.
+            const edit = insertEditorTabTextIntoTextArea(event.currentTarget);
             scheduleDocumentSave(edit.value);
           }}
           style={{

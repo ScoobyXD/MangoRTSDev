@@ -93,6 +93,19 @@ This currently runs, in order:
 Use this checklist format and keep it complete.
 
 ### Unit tests
+- [x] `tests/frontend/hooks/keyboardShortcutRouting.test.ts`
+  - Ctrl/Cmd+Z inside the editor textarea defers to native text undo
+  - editable descendants keep native text shortcut handling
+  - dashboard undo/redo still routes when focus is outside editable text
+  - Delete/Backspace do not steal text-editing delete keys
+- [x] `tests/frontend/modules/editor/editorTabs.test.ts`
+  - editor document is visible and interactive only on the Editor tab
+  - metadata and history tabs wall off the editor document surface
+- [x] `tests/frontend/modules/editor/plainTextEditing.test.ts`
+  - editor Tab inserts exactly five plain spaces
+  - editor Tab replaces selected text with five spaces and moves caret after them
+  - editor Tab prefers browser `insertText` so native undo can track it
+  - editor Tab still has deterministic range replacement when `insertText` is unavailable
 - [x] `frontend/src/modules/node-map/relationshipProjection.test.ts`
   - side -> role mapping
   - `+` linked top/bottom semantics

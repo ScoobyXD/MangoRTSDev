@@ -107,9 +107,9 @@ Use this checklist before editing features so existing behavior is not accidenta
 - Delete / Backspace: delete selected module.
 - Ctrl/Cmd + C: copy selected module.
 - Ctrl/Cmd + V: paste copied module with small offset.
-- Ctrl/Cmd + Z: undo.
-- Ctrl/Cmd + Y or Ctrl/Cmd + Shift + Z: redo.
-- Keyboard shortcuts are ignored while typing in inputs/textareas/contentEditable.
+- Ctrl/Cmd + Z: undo dashboard frame/layout changes when focus is outside editable text.
+- Ctrl/Cmd + Y or Ctrl/Cmd + Shift + Z: redo dashboard frame/layout changes when focus is outside editable text.
+- Keyboard shortcuts defer to native browser behavior while typing in inputs, textareas, selects, contentEditable, and nested editable surfaces; this lets the Editor textarea use normal text undo/redo.
 
 ### 8) Undo/Redo History
 - Snapshot-based undo/redo tracks:
@@ -157,8 +157,8 @@ Widget `onContextMenu` calls `e.stopPropagation()` to prevent canvas menu from o
 - **Delete / Backspace**: delete selected module
 - **Ctrl/Cmd + C**: copy selected module
 - **Ctrl/Cmd + V**: paste copied module with a small offset
-- **Ctrl/Cmd + Z**: undo
-- **Ctrl/Cmd + Y** or **Ctrl/Cmd + Shift + Z**: redo
+- **Ctrl/Cmd + Z**: undo dashboard frame/layout changes unless focus is inside editable text
+- **Ctrl/Cmd + Y** or **Ctrl/Cmd + Shift + Z**: redo dashboard frame/layout changes unless focus is inside editable text
 
 ## Persistence
 
