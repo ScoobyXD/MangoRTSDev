@@ -1,4 +1,4 @@
-export const EDITOR_TAB_TEXT = "       ";
+export const EDITOR_TAB_TEXT = "     ";
 
 export type PlainTextEdit = {
   value: string;

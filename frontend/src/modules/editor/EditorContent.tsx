@@ -686,7 +686,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
             event.preventDefault();
             // Textareas normally use Tab to leave the field. In the editor, Tab
-            // should insert seven plain spaces and then save like any typed input.
+            // should insert five plain spaces and then save like any typed input.
             const edit = insertEditorTabText(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
             event.currentTarget.value = edit.value;
             event.currentTarget.setSelectionRange(edit.selectionStart, edit.selectionEnd);
