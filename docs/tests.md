@@ -161,8 +161,9 @@ Use this checklist format and keep it complete.
   - keeps Kanban board drops node-only while still parsing legacy drag payloads
   - computes append positions within the target column only
   - groups and sorts board cards by stable per-column position
+  - computes vertical card reorder writes with sparse positions
   - colors node-only cards from their column item color without view-query state
-  - computes bounded Kanban column reorder and width/height resize values
+  - computes bounded Kanban column reorder/swap and width/height resize values
   - locks the Kanban visual contract for preserving column title casing and clearing frame chrome
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)

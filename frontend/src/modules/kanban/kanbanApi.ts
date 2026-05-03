@@ -117,3 +117,8 @@ export async function moveKanbanCard(args: {
     },
   });
 }
+
+export async function deleteKanbanCard(apiBase: string, companyID: string, boardID: string, cardID: string): Promise<void> {
+  const params = query({ company_id: companyID, board_id: boardID });
+  await fetchJSON<{ status?: string }>(apiBase, `/v1/kanban/cards/${encodeURIComponent(cardID)}?${params}`, { method: "DELETE" });
+}

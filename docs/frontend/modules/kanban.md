@@ -10,8 +10,8 @@ Users can:
 - drag column headers left/right to reorder columns,
 - resize columns horizontally and vertically,
 - drag nodes from Company Explorer into a column,
-- drag cards between columns,
-- collapse card description text.
+- drag cards between columns and vertically reorder cards inside a column,
+- delete selected cards with the Delete key or the card context menu.
 
 ## Visual Rules
 - The board surface stays white in the light theme.
@@ -21,6 +21,8 @@ Users can:
 - Column title text enters edit mode on one click. Header dragging still starts from the header before a click is completed.
 - Column deletion is confirmation-gated with the same modal treatment as frame and map deletes.
 - Right-clicking a column opens column actions: rename, delete, and native RGB color selection for cards inside that column.
+- Right-clicking a card opens card actions only; currently that menu contains Delete card.
+- Cards do not show a top-right expand/collapse control. Card titles and optional descriptions render directly.
 - The module reserves top clearance for the frame title plate and linked-module hexagon so column headers do not bleed into frame chrome.
 - The top clearance remains empty for now. It belongs to frame tabs/title/link state; board controls should not be rebuilt below the divider.
 
@@ -71,6 +73,7 @@ Endpoints:
 - `DELETE /v1/kanban/cards/:card_id?company_id=...&board_id=...`
 
 `POST /v1/kanban/cards` is idempotent per board and node. If the same node is dropped again, the existing card moves instead of duplicating.
+`PUT /v1/kanban/cards/:card_id` is also used for vertical card reordering by writing a new sparse `position`.
 The card write API has no item-type field; Kanban board cards are node-only.
 
 The removed `/v1/kanban/query` endpoint should stay removed until a specific filter or grouping capability is designed again. Headless agents should currently use the same bounded column/card APIs as the UI.
@@ -80,6 +83,7 @@ The removed `/v1/kanban/query` endpoint should stay removed until a specific fil
 - Cards are fetched with an explicit limit; the UI reads a bounded first window and agents should page with `after_position`.
 - Backend tables keep board/column position indexes for fast interactive reads. Extra filter indexes were removed with the old query surface.
 - Column reorder usually writes only the moved column position. Rare position compaction is scoped to visible board columns.
+- Card reorder usually writes only the moved card position. Rare position compaction is scoped to the visible target column.
 - Column width, height, and item color are stored on the column row so UI users and headless agents share the same layout contract.
 - Card rows store `node_title` to avoid requiring a details lookup on every board render.
 - Card rows intentionally do not store item type, logic-gate ID, status age, work type, or assignment metadata until a specific product/API need returns.

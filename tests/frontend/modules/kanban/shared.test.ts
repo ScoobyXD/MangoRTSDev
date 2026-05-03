@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_MODULE_TOP_CLEARANCE_PX, buildColumnReorderPlan, clampColumnHeight, clampColumnWidth, getKanbanConditionalColor, groupCardsByColumn, isKanbanBoardDropItemType, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragPayload, sanitizeExplorerEntityDragPayload, type KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardReorderPlan, buildColumnReorderPlan, clampColumnHeight, clampColumnWidth, getKanbanConditionalColor, groupCardsByColumn, isKanbanBoardDropItemType, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragPayload, sanitizeExplorerEntityDragPayload, type KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 
 function card(overrides: Partial<KanbanCard>): KanbanCard {
   return {
@@ -78,6 +78,19 @@ test("kanban card helpers color node cards without view-query state", () => {
   assert.equal(normalizeKanbanColumnItemColor("not-a-color"), KANBAN_DEFAULT_COLUMN_ITEM_COLOR);
 });
 
+test("card reorder helper moves cards vertically with bounded position writes", () => {
+  const cards = [
+    card({ card_id: "alpha", node_id: "node-a", position: 1000 }),
+    card({ card_id: "beta", node_id: "node-b", position: 2000 }),
+    card({ card_id: "gamma", node_id: "node-c", position: 3000 }),
+  ];
+  const plan = buildCardReorderPlan(cards, "alpha", "todo", "beta", "after");
+  const sorted = groupCardsByColumn(plan.cards).get("todo") ?? [];
+
+  assert.deepEqual(sorted.map((item) => item.card_id), ["beta", "alpha", "gamma"]);
+  assert.deepEqual(plan.updates, [{ cardID: "alpha", columnID: "todo", position: 2500 }]);
+});
+
 test("column layout helpers keep reorder and resize writes bounded", () => {
   const columns = [
     { company_id: "c", board_id: "b", column_id: "left", title: "Left", position: 1000, width_px: 260, height_px: 240, item_color: "#2f7d62", created_timestamp: "2026-05-01T00:00:01.000Z", updated_timestamp: "2026-05-01T00:00:01.000Z" },
@@ -89,6 +102,9 @@ test("column layout helpers keep reorder and resize writes bounded", () => {
   assert.deepEqual(plan.updates, [{ columnID: "left", position: 4000 }]);
   const afterPlan = buildColumnReorderPlan(columns, "left", "middle", "after");
   assert.deepEqual(afterPlan.columns.map((column) => column.column_id), ["middle", "left", "right"]);
+  const swapPlan = buildColumnReorderPlan(columns, "left", "middle", "swap");
+  assert.deepEqual(swapPlan.columns.map((column) => column.column_id), ["middle", "left", "right"]);
+  assert.deepEqual(swapPlan.updates, [{ columnID: "left", position: 2000 }, { columnID: "middle", position: 1000 }]);
   assert.equal(nextColumnPosition(columns), 4000);
   assert.equal(clampColumnWidth(9999), 520);
   assert.equal(clampColumnWidth(Number.NaN), KANBAN_DEFAULT_COLUMN_WIDTH_PX);
