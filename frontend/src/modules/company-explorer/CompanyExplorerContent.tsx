@@ -8,7 +8,7 @@ import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksF
 import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
-import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload } from "../kanban/shared";
+import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../kanban/shared";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, formatExplorerFolderLabel, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerDropTarget, resolveExplorerRenameTarget, type ExplorerCreationTargets, type ExplorerDropPayload } from "./treePresentation";
 
@@ -342,6 +342,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, [expanded, nodes, logicGates, folders, folderItems]);
 
   const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID) ?? treeRows[0], [selectedTreeID, treeRows]);
+  const rowByID = useMemo(() => new Map(treeRows.map((row) => [row.id, row])), [treeRows]);
   const selectedFolderKind = selectedTree?.folderKind;
   const selectedFolderID = selectedTree?.folderID ?? "";
   const selectedFolderLabel = selectedTree?.folderLabel ?? (selectedTree?.folderKind ? selectedTree.label : "");
@@ -657,18 +658,22 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, []);
 
   const selectTreeRow = useCallback((row: ExplorerTreeNode, event?: React.MouseEvent) => {
+    const orderedIDs = treeRows.map((item) => item.id);
     const selected = resolveExplorerClickSelection({
-      orderedIDs: treeRows.map((item) => item.id),
+      orderedIDs,
       previousSelectedIDs: selectedTreeIDs,
       anchorID: selectionAnchorTreeID,
       clickedID: row.id,
       shiftKey: !!event?.shiftKey,
       ctrlKey: !!event?.ctrlKey || !!event?.metaKey,
     });
-    setSelectedTreeIDs(selected.selectedIDs);
+    if (selected.selectedIDs.size === 0) selected.selectedIDs.add(row.id);
+    const orderedSelectedIDs = orderedIDs.filter((id) => selected.selectedIDs.has(id));
+    const primaryID = selected.selectedIDs.has(row.id) ? row.id : (orderedSelectedIDs[0] ?? row.id);
+    setSelectedTreeIDs(new Set(orderedSelectedIDs));
     setSelectionAnchorTreeID(selected.anchorID);
-    focusTreeRow(row);
-  }, [focusTreeRow, selectedTreeIDs, selectionAnchorTreeID, treeRows]);
+    focusTreeRow(rowByID.get(primaryID) ?? row);
+  }, [focusTreeRow, rowByID, selectedTreeIDs, selectionAnchorTreeID, treeRows]);
 
   const startRenamingRow = useCallback((row: ExplorerTreeNode) => {
     const target = resolveExplorerRenameTarget(row);
@@ -698,6 +703,23 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       canCreateBothFolderTypes: !contextKind,
     });
   }, [selectTreeRow]);
+
+  // Kanban accepts node cards only. A mixed Explorer selection is still valid
+  // for navigation, but the drag payload intentionally exports node rows only.
+  const getKanbanDragItemsForRow = useCallback((row: ExplorerTreeNode): ExplorerEntityDragItem[] => {
+    const dragIDs = selectedTreeIDs.has(row.id) ? selectedTreeIDs : new Set([row.id]);
+    const items: ExplorerEntityDragItem[] = [];
+    const seen = new Set<string>();
+    for (const item of treeRows) {
+      if (!dragIDs.has(item.id) || item.kind !== "node" || !item.nodeID || seen.has(item.nodeID)) continue;
+      seen.add(item.nodeID);
+      items.push({ nodeID: item.nodeID, label: item.label });
+    }
+    if (items.length === 0 && row.kind === "node" && row.nodeID) {
+      items.push({ nodeID: row.nodeID, label: row.label });
+    }
+    return items;
+  }, [selectedTreeIDs, treeRows]);
 
   useEffect(() => {
     const refreshLinkedMap = () => {
@@ -753,9 +775,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       suppressNextExplorerBroadcastRef.current = true;
       setSelectedNodeID(selectedFromMap);
       setSelectedLogicGateID("");
-      setSelectedTreeID(`node-${selectedFromMap}`);
-      setSelectedTreeIDs(new Set([`node-${selectedFromMap}`]));
-      setSelectionAnchorTreeID(`node-${selectedFromMap}`);
+      const nextTreeID = `node-${selectedFromMap}`;
+      setSelectedTreeID(nextTreeID);
+      setSelectedTreeIDs(new Set([nextTreeID]));
+      setSelectionAnchorTreeID(nextTreeID);
       setExpanded((previous) => {
         if (previous.has("folder-root")) return previous;
         const next = new Set(previous);
@@ -843,6 +866,56 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       window.removeEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapSelectionUpdated);
     };
   }, [companyID, linkedLogicMapFrameID, linkedMapFrameID]);
+
+  useEffect(() => {
+    // Other modules can target the Explorer with node context. This lets a
+    // linked Kanban card click highlight the matching Explorer row without a
+    // special Kanban-only event bus.
+    const applyTargetedExplorerSelection = (selectedFromContext: string) => {
+      if (!selectedFromContext) return;
+      const nextTreeID = `node-${selectedFromContext}`;
+      const current = latestSelectionRef.current;
+      if (current.selectedNodeID === selectedFromContext && current.selectedTreeID === nextTreeID) return;
+      setSelectedNodeID(selectedFromContext);
+      setSelectedLogicGateID("");
+      setSelectedTreeID(nextTreeID);
+      setSelectedTreeIDs(new Set([nextTreeID]));
+      setSelectionAnchorTreeID(nextTreeID);
+      setExpanded((previous) => {
+        if (previous.has("folder-root")) return previous;
+        const next = new Set(previous);
+        next.add("folder-root");
+        return next;
+      });
+    };
+    const readTargetedExplorerContext = () => {
+      const key = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as { selectedNodeID?: unknown };
+        if (typeof parsed.selectedNodeID === "string") applyTargetedExplorerSelection(parsed.selectedNodeID);
+      } catch {
+        // ignore malformed cross-module context payloads
+      }
+    };
+    readTargetedExplorerContext();
+    const onExplorerContextUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ targetID?: string }>).detail;
+      if (!detail || detail.targetID !== scope) return;
+      readTargetedExplorerContext();
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`) return;
+      readTargetedExplorerContext();
+    };
+    window.addEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [companyID, scope]);
 
   useEffect(() => {
     const nextSelection = { selectedNodeID, selectedTreeID };
@@ -933,7 +1006,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         {virtualizedTree.rows.map((row) => {
           const isFolder = row.kind === "folder";
           const isOpen = expanded.has(row.id);
-          const isSelected = selectedTreeIDs.has(row.id);
+          const isSelected = selectedTreeID === row.id || selectedTreeIDs.has(row.id);
           const rowDragPayload = getExplorerDragPayload(row);
           const isDragging = draggingTreeID === row.id;
           const isDropTarget = dragOverTreeID === row.id;
@@ -953,21 +1026,20 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                   event.preventDefault();
                   return;
                 }
-                selectTreeRow(row);
+                const kanbanDragItems = getKanbanDragItemsForRow(row);
+                if (!selectedTreeIDs.has(row.id)) selectTreeRow(row);
                 setDraggingTreeID(row.id);
                 setDragPayload(rowDragPayload);
                 event.dataTransfer.effectAllowed = row.kind === "folder" ? "move" : "copyMove";
                 const serialized = JSON.stringify(rowDragPayload);
                 event.dataTransfer.setData(EXPLORER_DRAG_MIME, serialized);
-                if (row.kind === "node" && rowDragPayload.itemID && rowDragPayload.itemType === "node") {
-                  const kanbanPayload = serializeExplorerEntityDragPayload({
-                    itemType: rowDragPayload.itemType,
-                    nodeID: rowDragPayload.itemID,
-                    label: row.label,
-                  });
+                if (kanbanDragItems.length > 0) {
+                  const kanbanPayload = serializeExplorerEntityDragPayload(kanbanDragItems.length === 1
+                    ? { itemType: "node", nodeID: kanbanDragItems[0].nodeID, label: kanbanDragItems[0].label }
+                    : { itemType: "node_batch", nodes: kanbanDragItems });
                   event.dataTransfer.setData(EXPLORER_ENTITY_DRAG_MIME, kanbanPayload);
                 }
-                event.dataTransfer.setData("text/plain", row.label);
+                event.dataTransfer.setData("text/plain", kanbanDragItems.length > 1 ? `${kanbanDragItems.length} nodes` : row.label);
               }}
               onDragEnd={() => {
                 setDraggingTreeID("");

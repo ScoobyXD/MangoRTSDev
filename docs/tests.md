@@ -182,11 +182,11 @@ Use this checklist format and keep it complete.
   - scopes Explorer broadcast emission to semantic selection changes (node/tree)
 - [x] `tests/frontend/modules/kanban/shared.test.ts`
   - sanitizes Company Explorer drag payloads for Kanban drops
-  - keeps Kanban board drops node-only while still parsing legacy drag payloads
+  - keeps Kanban board drops node-only while still parsing legacy and batch drag payloads
   - computes append positions within the target column only
   - groups and sorts board cards by stable per-column position
   - computes vertical card reorder writes with sparse positions
-  - computes click, additive, and cross-column Shift range card selection
+  - computes click, additive, and continuous cross-column Shift range card selection
   - colors node-only cards from their column item color without view-query state
   - computes bounded Kanban column reorder/swap and width/height resize values
   - locks the Kanban visual contract for preserving column title casing and clearing frame chrome
