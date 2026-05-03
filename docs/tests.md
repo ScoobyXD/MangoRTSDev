@@ -124,6 +124,10 @@ Use this checklist format and keep it complete.
 - [x] `frontend/src/modules/node-map/relationshipDeleteSummary.test.ts`
   - success/failure summarization for batched relationship-line delete requests
   - preserves per-relationship failure reason reporting for visibility
+- [x] `tests/frontend/modules/node-map/nodeMapLayout.test.ts`
+  - preserves positions for nodes hidden by scoped Company Explorer views
+  - converts backend map-layout rows into canvas position records
+  - detects changed positions so UI writes only dirty layout rows
 - [x] `tests/frontend/modules/node-map/editorCanvasKeydownRouting.test.ts`
   - editor canvas key-routing guard ignores key events from contentEditable/input/textarea surfaces
   - non-editable canvas targets continue through normal canvas key handling
@@ -152,6 +156,7 @@ Use this checklist format and keep it complete.
   - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)
   - node creation contract uses canonical `title` payload semantics only (legacy `header` fallback removed)
   - node rename contract via `PUT /v1/nodes/{node_id}` persists updated title
+  - shared map layout contract persists node/logic-gate positions through `PUT /v1/map-layout` and exposes them in workspace snapshots
   - workspace context event write path persists projection updates (`POST /v1/workspace/context-events` -> `GET /v1/workspace/context-projections`)
   - ordered context delta feed returns persisted event rows after sequence (`GET /v1/workspace/context-deltas?after_sequence=`)
   - logic gate relationship position-pair legality helper (Input/Output or Output/Input only)

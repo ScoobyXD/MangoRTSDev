@@ -150,6 +150,14 @@ For existing databases that were created before logic-gate information projectio
 psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260501_logic_gate_projection_table.sql
 ```
 
+For existing databases that were created before shared map layout persistence was added, run:
+
+```powershell
+psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260502_map_layout_positions.sql
+```
+
+These tables store the latest shared Node Map and Logic Gate Map positions by company/entity so UI users and headless agents read and write the same canonical layout.
+
 ## API endpoints (MVP canonical set)
 
 - `GET /healthz`
@@ -239,6 +247,8 @@ For cross-module context synchronization, backend now supports:
 - `POST /v1/workspace/context-events` for append-only context mutation writes
 - `GET /v1/workspace/context-projections` for latest read projection by `company_id`, `workspace_id`, `context_id`
 - `GET /v1/workspace/context-deltas` for ordered event deltas after a provided sequence
+- `GET /v1/map-layout?company_id={uuid}&map_type=node|logic_gate` for shared visual positions
+- `PUT /v1/map-layout` for bulk position upserts used by UI clients and headless agents
 
 Required event fields:
 - `company_id`
@@ -250,3 +260,23 @@ Required event fields:
 
 Schema SQL (includes workspace context tables):
 - `backend/db/schema.sql`
+
+### Shared map layout contract
+
+Node Map and Logic Gate Map geometry is persisted as a read-optimized projection, not as browser-only state.
+
+Read layout:
+
+```bash
+curl "http://localhost:8080/v1/map-layout?company_id=11111111-1111-1111-1111-111111111111&map_type=node"
+```
+
+Write layout:
+
+```bash
+curl -X PUT http://localhost:8080/v1/map-layout \
+  -H 'content-type: application/json' \
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","map_type":"node","positions":[{"entity_id":"<node_id>","x":240,"y":360}]}'
+```
+
+Use `map_type:"logic_gate"` with `entity_id:"<logic_gate_id>"` for Logic Gate Map positions. Writes are intentionally bulk and capped per request so clients can debounce drag interactions and agents can batch operations without forcing full-map rewrites.

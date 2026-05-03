@@ -30,6 +30,10 @@ Endpoints used:
 - `POST /v1/logic-gate-relationships`
   - payload: `{ company_id, logic_gate_id_a, logic_gate_id_b, a_position, b_position }`
 - `DELETE /v1/logic-gate-relationships/:logic_gate_relationship_id?company_id=...`
+- `GET /v1/map-layout?company_id=...&map_type=logic_gate`
+  - reads canonical shared logic-gate canvas positions.
+- `PUT /v1/map-layout`
+  - bulk upserts changed logic-gate positions with `{ company_id, map_type: "logic_gate", positions: [{ entity_id, x, y }] }`.
 
 ## Relationship Semantics
 Logic gate relationships are not parent/child/peer.
@@ -60,11 +64,16 @@ Junior engineer note:
 ## Hot Path Behavior
 Logic Gate Map follows the latency architecture rules:
 - initial graph load comes from one bulk workspace snapshot,
+- the workspace snapshot includes `logic_gate_map_positions` for one hot read,
 - local create/update/delete operations apply optimistic graph-cache updates,
 - SSE deltas converge the cache without polling loops,
 - unchanged snapshot responses use ETag/304,
 - visible gate rendering uses the same viewport culling strategy as Node Map,
-- layout geometry stays local to the browser and does not enter the hot backend path.
+- layout geometry is a backend projection in `logic_gate_map_positions`; browser storage keeps only small viewport/selection cache data.
+
+Junior engineer note:
+- A position update is not a new logic-gate relationship and does not change gate semantics.
+- It is a shared UI projection row keyed by `(company_id, logic_gate_id)` so agents and browsers can coordinate on the same layout through APIs.
 
 ## Linking Behavior
 Frame linking uses the existing `frame-module-links-v1` graph and `logic-map` frame kind.

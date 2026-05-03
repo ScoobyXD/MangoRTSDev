@@ -89,6 +89,22 @@ type LogicGateDetails struct {
 	Relationships []LogicGateRelationship `json:"relationships"`
 }
 
+type NodeMapPosition struct {
+	CompanyID        string    `json:"company_id"`
+	NodeID           string    `json:"node_id"`
+	X                float64   `json:"x"`
+	Y                float64   `json:"y"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type LogicGateMapPosition struct {
+	CompanyID        string    `json:"company_id"`
+	LogicGateID      string    `json:"logic_gate_id"`
+	X                float64   `json:"x"`
+	Y                float64   `json:"y"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
 type Operation struct {
 	CompanyID      string     `json:"company_id"`
 	OperationID    string     `json:"operation_id"`

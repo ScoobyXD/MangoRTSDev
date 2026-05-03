@@ -3,6 +3,7 @@ import {
   LogicGateRelationship,
   NodeRecord,
   NodeRelationship,
+  PersistedMapPosition,
   toLogicGateCanvasRecord,
   toLogicGateCanvasRelationship,
 } from "./shared";
@@ -12,6 +13,7 @@ export type LogicGateRelationshipGraphSnapshot = {
   relationships: NodeRelationship[];
   logic_gates?: LogicGateRecord[];
   logic_gate_relationships?: LogicGateRelationship[];
+  logic_gate_map_positions?: PersistedMapPosition[];
   generated_at?: string;
 };
 
@@ -175,6 +177,29 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
     };
     return true;
   }
+  if (envelope.type === "logic_gate_map_positions_updated") {
+    const positions = Array.isArray(data.positions) ? data.positions : [];
+    const nextByID = new Map((entry.snapshot.logic_gate_map_positions ?? []).map((position) => [position.logic_gate_id || position.entity_id || "", position]));
+    for (const candidate of positions) {
+      if (!candidate || typeof candidate !== "object") continue;
+      const value = candidate as Partial<PersistedMapPosition>;
+      const id = typeof value.logic_gate_id === "string" ? value.logic_gate_id : typeof value.entity_id === "string" ? value.entity_id : "";
+      if (!id || typeof value.x !== "number" || typeof value.y !== "number") continue;
+      nextByID.set(id, {
+        entity_id: id,
+        logic_gate_id: id,
+        x: value.x,
+        y: value.y,
+        updated_timestamp: typeof value.updated_timestamp === "string" ? value.updated_timestamp : envelope.ts,
+      });
+    }
+    entry.snapshot = {
+      ...entry.snapshot,
+      logic_gate_map_positions: Array.from(nextByID.values()).filter((position) => position.logic_gate_id || position.entity_id),
+      generated_at: envelope.ts,
+    };
+    return true;
+  }
   return false;
 }
 
@@ -199,6 +224,7 @@ export async function refreshLogicGateRelationshipGraphSnapshot(apiBase: string,
       relationships: (payload.logic_gate_relationships ?? []).map(toLogicGateCanvasRelationship),
       logic_gates: payload.logic_gates ?? [],
       logic_gate_relationships: payload.logic_gate_relationships ?? [],
+      logic_gate_map_positions: payload.logic_gate_map_positions ?? [],
       generated_at: payload.generated_at,
     };
     notify(entry);

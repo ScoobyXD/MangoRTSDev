@@ -91,6 +91,16 @@ create table if not exists node_projection_table (
   foreign key (company_id, node_id) references nodes (company_id, node_id)
 );
 
+create table if not exists node_map_positions (
+  company_id uuid not null,
+  node_id uuid not null,
+  x double precision not null,
+  y double precision not null,
+  updated_timestamp timestamptz not null default now(),
+  primary key (company_id, node_id),
+  foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade
+);
+
 create table if not exists logic_gates (
   company_id uuid not null,
   logic_gate_id uuid not null,
@@ -143,6 +153,16 @@ create table if not exists logic_gate_projection_table (
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
 );
 
+create table if not exists logic_gate_map_positions (
+  company_id uuid not null,
+  logic_gate_id uuid not null,
+  x double precision not null,
+  y double precision not null,
+  updated_timestamp timestamptz not null default now(),
+  primary key (company_id, logic_gate_id),
+  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade
+);
+
 -- Existing deployments may already have current-value logic_gate_information rows.
 -- Seed the projection table once so the new hot read path can serve those rows too.
 insert into logic_gate_projection_table (
@@ -187,8 +207,10 @@ create table if not exists operations (
 
 create index if not exists idx_node_information_node on node_information(company_id, node_id);
 create index if not exists idx_node_projection_table_node_updated on node_projection_table(company_id, node_id, updated_timestamp desc);
+create index if not exists idx_node_map_positions_company_updated on node_map_positions(company_id, updated_timestamp desc);
 create index if not exists idx_logic_gate_information_logic_gate on logic_gate_information(company_id, logic_gate_id);
 create index if not exists idx_logic_gate_projection_table_logic_gate_updated on logic_gate_projection_table(company_id, logic_gate_id, updated_timestamp desc);
+create index if not exists idx_logic_gate_map_positions_company_updated on logic_gate_map_positions(company_id, updated_timestamp desc);
 create index if not exists idx_logic_gate_relationships_a on logic_gate_relationships(company_id, logic_gate_id_a);
 create index if not exists idx_logic_gate_relationships_b on logic_gate_relationships(company_id, logic_gate_id_b);
 create index if not exists idx_operations_node on operations(company_id, node_id);

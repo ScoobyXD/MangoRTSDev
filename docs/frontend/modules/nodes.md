@@ -25,6 +25,7 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 - view relationship lines between nodes,
 - add node information records,
 - and keep node layout/view state persisted locally.
+- and persist shared node positions through the backend map-layout API.
 - link a Node Map module to a Node Doc module,
 - and edit text-box notes in Node Doc that attach to whichever node is currently selected in the linked Node Map.
 
@@ -62,6 +63,12 @@ Base values are read from:
   - deletes a relationship by id.
 - `POST /v1/nodes/:node_id/information`
   - adds info item with `{ company_id, type, information }`.
+- `GET /v1/map-layout?company_id=...&map_type=node`
+  - reads canonical shared node positions for UI users and headless agents.
+- `PUT /v1/map-layout`
+  - bulk upserts changed node positions with `{ company_id, map_type: "node", positions: [{ entity_id, x, y }] }`.
+- `GET /v1/workspace/snapshot?company_id=...`
+  - hot initial read includes `node_map_positions` alongside nodes and relationships.
 
 ### Error handling
 
@@ -83,6 +90,12 @@ The module uses a virtual world and a viewport:
 - **Viewport**: container inside widget (`minHeight: 560`)
 
 Nodes are positioned in **world coordinates**, while pan/zoom transform the world into viewport screen space.
+
+Node positions are no longer browser-only truth. The browser keeps only small
+viewport/selection cache data in `localStorage`; canonical shared geometry lives
+in `node_map_positions` and is exposed through `GET/PUT /v1/map-layout`. The UI
+writes only changed positions after drag/resize activity settles, so position
+writes scale with user action size instead of full company map size.
 
 ### Grid
 
@@ -295,16 +308,17 @@ What the command does:
 
 ---
 
-## 8) Local persistence (layout + viewport)
+## 8) Local persistence (viewport only)
 
-The module persists canvas state in `localStorage` keyed per company and frame scope:
+The module persists small viewport/selection state in `localStorage` keyed per company and frame scope:
 
 - Key format: `node-map-state-v1:<companyID>:<frameId-or-global>`
 - Stored fields:
   - `zoom`
   - `pan`
   - `selectedNodeID`
-  - `nodePositions`
+
+`nodePositions` may appear in old cached payloads for migration compatibility, but new writes keep that field empty. Shared geometry is stored through `GET/PUT /v1/map-layout`.
 
 ### Restore behavior
 
@@ -316,9 +330,9 @@ On mount:
 
 ### Save behavior
 
-Whenever restored state is active, writes latest `{ zoom, pan, selectedNodeID, nodePositions }` back to localStorage.
+Whenever restored state is active, writes latest `{ zoom, pan, selectedNodeID }` back to localStorage.
 
-This keeps layout and viewport stable when switching views and reopening the module.
+This keeps the viewport stable without letting browser storage become the layout source of truth.
 
 ---
 
@@ -435,7 +449,7 @@ This is the requested teal update used by teal-themed modules.
 
 ## 12) Known scope notes
 
-- Node layout persistence is frontend-local (browser localStorage), not backend-persisted.
+- Node layout persistence is backend-persisted in `node_map_positions`; browser storage is viewport/selection cache only.
 - Relationship anchor memory for side-origin is strongest for in-session-created links; fallback inference handles existing links.
 - Graph relationship loading currently calls per-node details and deduplicates results in frontend.
 

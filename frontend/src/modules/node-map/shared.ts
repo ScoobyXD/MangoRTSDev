@@ -49,12 +49,22 @@ export type NodeDirection = "left" | "right" | "top" | "bottom";
 export type PanelEdge = "top" | "right" | "bottom" | "left";
 export type NodePosition = { x: number; y: number };
 export type RelationshipAnchor = { from: NodeDirection; to: NodeDirection };
+export type PersistedMapPosition = {
+  entity_id?: string;
+  node_id?: string;
+  logic_gate_id?: string;
+  x: number;
+  y: number;
+  updated_timestamp?: string;
+};
 
 // Persisted node-map viewport + selection state (used for cross-module linking).
 export type NodeMapState = {
   zoom: number;
   pan: { x: number; y: number };
   selectedNodeID: string;
+  // Legacy cache slot. New browser-cache writes keep this empty because shared
+  // map geometry is owned by the map-layout API/database, not localStorage.
   nodePositions: Record<string, NodePosition>;
   relationshipColorsEnabled?: boolean;
   relationshipRoleColors?: { parent: string; peer: string; child: string };
@@ -148,6 +158,41 @@ export function reconcileNodeMapPositions<T extends { node_id: string }>(input: 
   }
 
   return next;
+}
+
+export function persistedMapPositionsToNodePositions(input: {
+  positions: PersistedMapPosition[] | undefined;
+  worldWidth: number;
+  worldHeight: number;
+  nodeWidth: number;
+  nodeHeight: number;
+}): Record<string, NodePosition> {
+  const out: Record<string, NodePosition> = {};
+  for (const position of input.positions ?? []) {
+    const id = position.entity_id || position.node_id || position.logic_gate_id || "";
+    if (!id || !Number.isFinite(position.x) || !Number.isFinite(position.y)) continue;
+    out[id] = {
+      x: clamp(snapToGrid(position.x), 0, input.worldWidth - input.nodeWidth),
+      y: clamp(snapToGrid(position.y), 0, input.worldHeight - input.nodeHeight),
+    };
+  }
+  return out;
+}
+
+export function changedPersistedMapPositions(input: {
+  previous: Record<string, NodePosition>;
+  current: Record<string, NodePosition>;
+  entityIDs?: Set<string>;
+}): Array<{ entity_id: string; x: number; y: number }> {
+  const changed: Array<{ entity_id: string; x: number; y: number }> = [];
+  for (const [entityID, position] of Object.entries(input.current)) {
+    if (input.entityIDs && !input.entityIDs.has(entityID)) continue;
+    if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) continue;
+    const previous = input.previous[entityID];
+    if (previous && previous.x === position.x && previous.y === position.y) continue;
+    changed.push({ entity_id: entityID, x: position.x, y: position.y });
+  }
+  return changed;
 }
 
 type KeydownTargetLike = {
