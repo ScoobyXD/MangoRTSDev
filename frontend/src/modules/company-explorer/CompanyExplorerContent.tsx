@@ -8,7 +8,7 @@ import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksF
 import { shouldApplyMapSelection, shouldBroadcastSelection, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
-import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../kanban/shared";
+import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../kanban/shared";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, formatExplorerFolderLabel, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerDropTarget, resolveExplorerRenameTarget, type ExplorerCreationTargets, type ExplorerDropPayload } from "./treePresentation";
 
@@ -974,6 +974,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const selectedRowBackground = isDarkTheme ? "rgba(0,233,255,0.2)" : "rgba(0, 233, 255, 0.28)";
   const dropRowBackground = isDarkTheme ? "rgba(109, 240, 211, 0.18)" : "rgba(30, 160, 120, 0.16)";
   const folderToggleColor = isDarkTheme ? "#95c7d1" : "#326872";
+  const rowIconColor = isDarkTheme ? "#b8d9e1" : "#315f68";
   const explorerMenuButtonStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
@@ -1038,6 +1039,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                     ? { itemType: "node", nodeID: kanbanDragItems[0].nodeID, label: kanbanDragItems[0].label }
                     : { itemType: "node_batch", nodes: kanbanDragItems });
                   event.dataTransfer.setData(EXPLORER_ENTITY_DRAG_MIME, kanbanPayload);
+                  attachStackedDragPreview(
+                    event.dataTransfer,
+                    kanbanDragItems.map((item) => ({ label: item.label, color: rowIconColor })),
+                    KANBAN_DEFAULT_COLUMN_ITEM_COLOR,
+                    "Explorer nodes",
+                  );
                 }
                 event.dataTransfer.setData("text/plain", kanbanDragItems.length > 1 ? `${kanbanDragItems.length} nodes` : row.label);
               }}

@@ -24,11 +24,14 @@ Users can:
 - Column deletion is confirmation-gated with the same modal treatment as frame and map deletes.
 - Right-clicking a column opens column actions: rename, delete, and native RGB color selection for cards inside that column.
 - Right-clicking a card opens card actions only; currently that menu contains Delete card.
+- Selected cards use a thin, vibrant frame in the card's column item color. Do not use the old heavy global-accent outline.
+- The left color rail is always rendered from the card's column item color and must not disappear when selection changes.
 - Card deletion is confirmation-gated. Delete and the card context menu only open the confirmation modal; the card is removed only after Yes.
 - Backspace uses the same confirmation-gated delete path as Delete.
 - Card delete confirmation must state that only the Kanban board card is removed and the underlying node continues to exist outside the board.
 - Clicking a card publishes that node selection to directly linked Company Explorer frames so the Explorer row highlights with the selected card.
 - Cards do not show a top-right expand/collapse control. Card titles and optional descriptions render directly.
+- Drag previews for Explorer-to-Kanban node batches and Kanban card batches show the selected batch, not just the row under the cursor.
 - The module reserves top clearance for the frame title plate and linked-module hexagon so column headers do not bleed into frame chrome.
 - The top clearance remains empty for now. It belongs to frame tabs/title/link state; board controls should not be rebuilt below the divider.
 
@@ -75,6 +78,24 @@ Company Explorer can also write a node-only batch for multi-row drags:
 
 Kanban de-dupes node IDs in the payload and upserts each card into the target column.
 
+Kanban card drags use:
+
+```text
+application/x-mango-kanban-card
+```
+
+Payload:
+
+```json
+{
+  "cardID": "primary-card-id",
+  "cardIDs": ["primary-card-id", "second-card-id"],
+  "sourceColumnID": "source-column-id"
+}
+```
+
+`cardID` is kept for old single-card payload compatibility. `cardIDs` is the selected-card batch and is moved together in visual order.
+
 ## Backend/API Contract
 Kanban board is API-first so future agents can operate boards without rendering React.
 
@@ -93,7 +114,7 @@ Endpoints:
 - `DELETE /v1/kanban/cards/:card_id?company_id=...&board_id=...`
 
 `POST /v1/kanban/cards` is idempotent per board and node. If the same node is dropped again, the existing card moves instead of duplicating.
-`PUT /v1/kanban/cards/:card_id` is also used for vertical card reordering by writing a new sparse `position`.
+`PUT /v1/kanban/cards/:card_id` is also used for vertical card reordering and selected-card batch moves by writing new sparse `position` values.
 The card write API has no item-type field; Kanban board cards are node-only.
 
 The removed `/v1/kanban/query` endpoint should stay removed until a specific filter or grouping capability is designed again. Headless agents should currently use the same bounded column/card APIs as the UI.
@@ -104,6 +125,7 @@ The removed `/v1/kanban/query` endpoint should stay removed until a specific fil
 - Backend tables keep board/column position indexes for fast interactive reads. Extra filter indexes were removed with the old query surface.
 - Column reorder usually writes only the moved column position. Rare position compaction is scoped to visible board columns.
 - Card reorder usually writes only the moved card position. Rare position compaction is scoped to the visible target column.
+- Card batch reorder writes only the moved selected cards when there is sparse-position room. Rare position compaction is scoped to the visible target column.
 - Column width, height, and item color are stored on the column row so UI users and headless agents share the same layout contract.
 - Card rows store `node_title` to avoid requiring a details lookup on every board render.
 - Card rows intentionally do not store item type, logic-gate ID, status age, work type, or assignment metadata until a specific product/API need returns.
