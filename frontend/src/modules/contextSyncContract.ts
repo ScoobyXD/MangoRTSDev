@@ -50,3 +50,7 @@ export function readIncomingSequence(detail: { envelope?: ContextMutationEnvelop
   if (detail.envelope && Number.isFinite(detail.envelope.sequence)) return detail.envelope.sequence;
   return typeof detail.revision === "number" ? detail.revision : 0;
 }
+
+export function hasExplicitExplorerSelectionContext(detail: { sourceExplorerID?: unknown; selectedTreeID?: unknown }): boolean {
+  return typeof detail.sourceExplorerID === "string" || typeof detail.selectedTreeID === "string";
+}

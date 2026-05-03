@@ -26,3 +26,7 @@ export function shouldBroadcastSelection(previous: ExplorerSelectionState, next:
 export function shouldReadMapStateForSelectionEvent(hasSequenceGap: boolean, hasEventSelection: boolean): boolean {
   return hasSequenceGap && !hasEventSelection;
 }
+
+export function shouldIgnoreSelfOriginatedMapSelection(sourceExplorerID: string | undefined, currentExplorerID: string): boolean {
+  return !!sourceExplorerID && sourceExplorerID === currentExplorerID;
+}
