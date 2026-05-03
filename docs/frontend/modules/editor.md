@@ -45,6 +45,7 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 
 ## Document Editing Reliability Update (2026-05-03)
 - The body editor uses a styled native `textarea`, not raw `contentEditable`, so browser-native caret drawing, insertion point movement, text input, and scrollbars remain reliable inside frame wrappers.
+- The editor tabs and thin divider line render even when no linked note/node is selected, preserving the same header-section visual target before document content exists.
 - Typing schedules a debounced save. Blur, node switch, and unmount flush the latest pending value so edits do not wait for a manual save action.
 - Saves are serialized per editor instance. If a save is in flight, the editor queues only the latest follow-up value, preserving user-perceived order without flooding the API.
 - The editor surface owns the full frame height. This prevents the textarea viewport from collapsing to a thin strip and lets mouse-wheel scrolling behave like a regular text editor.
