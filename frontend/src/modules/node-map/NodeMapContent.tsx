@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, trimOrEmpty } from "./shared";
+import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
@@ -122,6 +122,10 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     ...contextMenuButtonStyle,
     color: panelDangerText,
   };
+  const gridBackgroundStyle = useMemo(
+    () => buildPlusGridBackgroundStyle({ zoom, accent, theme: isDarkTheme ? "dark" : "light" }),
+    [accent, isDarkTheme, zoom],
+  );
 
   // Keep relationship projection derivation centralized so callers can reuse the exact same
   // filtering logic without triggering additional network calls.
@@ -1349,6 +1353,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
             height: WORLD_H,
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: "0 0",
+            ...gridBackgroundStyle,
           }}
         >
           <canvas

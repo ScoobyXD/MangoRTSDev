@@ -86,7 +86,7 @@ All HTTP calls go through a shared `requestJSON` helper:
 
 The module uses a virtual world and a viewport:
 
-- **World size**: `WORLD_W = 3200`, `WORLD_H = 2200`
+- **World size**: `WORLD_W = 6400`, `WORLD_H = 4400`
 - **Viewport**: container inside widget (`minHeight: 560`)
 
 Nodes are positioned in **world coordinates**, while pan/zoom transform the world into viewport screen space.
@@ -101,6 +101,8 @@ writes scale with user action size instead of full company map size.
 
 - Fine grid step: `MINI_GRID = 12`
 - Grid-snap applied to node movement and placement via `snapToGrid(...)`.
+- The visual background uses a repeated SVG plus-sign tile, not one DOM node per cell.
+- `adaptivePlusGridWorldStep(...)` coarsens the plus grid when zoomed out and adds detail when zoomed in so the canvas stays readable without creating millions of rendered grid elements.
 
 ### Node card sizing
 
@@ -413,6 +415,7 @@ Linked Company Explorer frames consume those selection events and map-state upda
 - Right-click on a node opens node actions (`Rename node`, `Delete node`).
 - `Rename node` enters inline title-edit mode on the card and persists through the generic node-title update call (`PUT /v1/nodes/{node_id}`), while updating node-map cache without forcing full snapshot refetch.
 - Delete key support for selected node(s), guarded by themed confirmation modal.
+- Node delete also removes Kanban card placements for that node and clears operation pointers while keeping operation history. This keeps headless `DELETE /v1/nodes/{node_id}` usable even when the item was previously placed on boards or used by agents.
 
 ### Node Map right overlay details panel
 

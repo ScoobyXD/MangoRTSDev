@@ -41,6 +41,10 @@ Endpoints used:
 - `PUT /v1/map-layout`
   - bulk upserts changed logic-gate positions with `{ company_id, map_type: "logic_gate", positions: [{ entity_id, x, y }] }`.
 
+`DELETE /v1/logic-gates/:logic_gate_id` also removes Kanban card placements for
+that gate and clears operation pointers while preserving operation history. This
+keeps the same command safe for UI users and headless agents.
+
 ## Relationship Semantics
 Logic gate relationships are not parent/child/peer.
 
@@ -75,6 +79,7 @@ Logic Gate Map follows the latency architecture rules:
 - SSE deltas converge the cache without polling loops,
 - unchanged snapshot responses use ETag/304,
 - visible gate rendering uses the same viewport culling strategy as Node Map,
+- the visual background uses the shared repeated SVG plus-grid, which adapts tile size by zoom without creating per-cell DOM,
 - layout geometry is a backend projection in `logic_gate_map_positions`; browser storage keeps only small viewport/selection cache data.
 - Company Explorer folder selection filters the cached snapshot in memory. A selected folder includes descendant folders, and relationship lines render only when both gates are inside that active scope.
 - Selecting an individual gate from inside a Company Explorer folder keeps that folder scope active while selecting the gate.

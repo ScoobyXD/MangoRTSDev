@@ -287,15 +287,19 @@ create table if not exists kanban_cards (
   ),
   primary key (company_id, board_id, card_id),
   foreign key (company_id, board_id, column_id) references kanban_columns (company_id, board_id, column_id) on delete cascade,
-  foreign key (company_id, node_id) references nodes (company_id, node_id),
-  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
+  constraint kanban_cards_node_fk foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
+  constraint kanban_cards_logic_gate_fk foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade
 );
 ```
 
 Kanban hot-path indexes include `(company_id, board_id, column_id, position)`,
 `status`, `assigned_to`, `work_type`, `item_type`, `status_entered_timestamp`,
+direct item cleanup indexes on `(company_id, node_id)` / `(company_id, logic_gate_id)`,
 and a lowercased title-prefix index. These are direct columns instead of JSON so
-the first board query path can stay bounded and index-friendly.
+the first board query path and delete cleanup path can stay bounded and index-friendly.
+
+Kanban cards are board placements, not ownership roots. Deleting a node or logic gate
+removes its cards so a board placement FK cannot block headless API deletes.
 
 ## Field-by-field mapping from your sheet
 

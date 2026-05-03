@@ -198,6 +198,15 @@ func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
 	delete(r.nodeText, k)
 	delete(r.folderItems, folderItemKey(companyID, "node", nodeID))
 	delete(r.nodeMapPositions, k)
+	r.removeKanbanCardsForItemLocked(companyID, "node", nodeID)
+	for operationKey, operation := range r.operations {
+		if operation.CompanyID != companyID || operation.NodeID == nil || *operation.NodeID != nodeID {
+			continue
+		}
+		// Preserve operation history while releasing the FK-shaped in-memory pointer.
+		operation.NodeID = nil
+		r.operations[operationKey] = operation
+	}
 
 	filtered := make([]domain.NodeRelationship, 0, len(r.nodeRels[companyID]))
 	for _, rel := range r.nodeRels[companyID] {
@@ -682,6 +691,19 @@ func (r *MemoryRepo) DeleteKanbanCard(companyID, boardID, cardID string) error {
 	return nil
 }
 
+func (r *MemoryRepo) removeKanbanCardsForItemLocked(companyID, itemType, itemID string) {
+	for board, cards := range r.kanbanCards {
+		next := make([]domain.KanbanCard, 0, len(cards))
+		for _, card := range cards {
+			if card.CompanyID == companyID && card.ItemType == itemType && card.ItemID == itemID {
+				continue
+			}
+			next = append(next, card)
+		}
+		r.kanbanCards[board] = next
+	}
+}
+
 func (r *MemoryRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -779,6 +801,14 @@ func (r *MemoryRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	delete(r.logicGateText, k)
 	delete(r.folderItems, folderItemKey(companyID, "logic_gate", logicGateID))
 	delete(r.logicMapPositions, k)
+	r.removeKanbanCardsForItemLocked(companyID, "logic_gate", logicGateID)
+	for operationKey, operation := range r.operations {
+		if operation.CompanyID != companyID || operation.LogicGateID == nil || *operation.LogicGateID != logicGateID {
+			continue
+		}
+		operation.LogicGateID = nil
+		r.operations[operationKey] = operation
+	}
 
 	filtered := make([]domain.LogicGateRelationship, 0, len(r.logicGateRels[companyID]))
 	for _, rel := range r.logicGateRels[companyID] {

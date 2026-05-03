@@ -248,8 +248,8 @@ create table if not exists kanban_cards (
   ),
   primary key (company_id, board_id, card_id),
   foreign key (company_id, board_id, column_id) references kanban_columns (company_id, board_id, column_id) on delete cascade,
-  foreign key (company_id, node_id) references nodes (company_id, node_id),
-  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
+  constraint kanban_cards_node_fk foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
+  constraint kanban_cards_logic_gate_fk foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade
 );
 
 create index if not exists idx_node_information_node on node_information(company_id, node_id);
@@ -270,6 +270,8 @@ create index if not exists idx_kanban_cards_work_type_position on kanban_cards(c
 create index if not exists idx_kanban_cards_item_type_position on kanban_cards(company_id, board_id, item_type, position);
 create index if not exists idx_kanban_cards_status_entered on kanban_cards(company_id, board_id, status_entered_timestamp);
 create index if not exists idx_kanban_cards_title_prefix on kanban_cards(company_id, board_id, lower(title_snapshot) text_pattern_ops);
+create index if not exists idx_kanban_cards_node_cleanup on kanban_cards(company_id, node_id) where node_id is not null;
+create index if not exists idx_kanban_cards_logic_gate_cleanup on kanban_cards(company_id, logic_gate_id) where logic_gate_id is not null;
 create unique index if not exists idx_kanban_cards_unique_node on kanban_cards(company_id, board_id, node_id) where node_id is not null;
 create unique index if not exists idx_kanban_cards_unique_logic_gate on kanban_cards(company_id, board_id, logic_gate_id) where logic_gate_id is not null;
 

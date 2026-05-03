@@ -208,6 +208,12 @@ These tables store the latest shared Node Map and Logic Gate Map positions by co
 - `PUT /v1/kanban/cards/{card_id}`
 - `DELETE /v1/kanban/cards/{card_id}?company_id={uuid}&board_id={board_id}`
 
+Node and logic-gate deletes are API-first cleanup commands. `DELETE /v1/nodes/{node_id}`
+and `DELETE /v1/logic-gates/{logic_gate_id}` remove relationships, explorer placements,
+map positions, projections, and any Kanban card placements for that item. Operation rows
+are retained as history, with the deleted item pointer cleared so old activity cannot block
+the delete command.
+
 ### Request examples
 
 Create node:
