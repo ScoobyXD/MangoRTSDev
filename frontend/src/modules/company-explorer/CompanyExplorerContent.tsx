@@ -5,7 +5,7 @@ import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GR
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
-import { shouldApplyMapSelection, shouldBroadcastSelection, shouldReadMapStateForSelectionEvent, type ExplorerSelectionState } from "./explorerSync";
+import { shouldApplyMapSelection, shouldBroadcastSelection, shouldIgnoreSelfOriginatedMapSelection, shouldReadMapStateForSelectionEvent, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
 import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../kanban/shared";
@@ -800,10 +800,14 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     };
     readFromMapState();
     const onMapSelectionUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number; sourceExplorerID?: string; envelope?: ContextMutationEnvelope }>).detail;
       if (!detail || detail.mapWidgetID !== linkedMapFrameID) return;
       const revision = readIncomingSequence(detail);
       if (revision > 0 && !isNewerSequence(lastMapSelectionRevisionRef.current, revision)) return;
+      if (shouldIgnoreSelfOriginatedMapSelection(detail.sourceExplorerID, scope)) {
+        if (revision > 0) lastMapSelectionRevisionRef.current = revision;
+        return;
+      }
       const eventSelectedNodeID = typeof detail.selectedNodeID === "string" ? detail.selectedNodeID : "";
       const eventHasSelection = typeof detail.selectedNodeID === "string";
       if (revision > 0 && shouldReadMapStateForSelectionEvent(hasSequenceGap(lastMapSelectionRevisionRef.current, revision), eventHasSelection)) readFromMapState();
@@ -852,11 +856,15 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     };
     readFromLogicMapState();
     const onLogicMapSelectionUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; selectedLogicGateID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; selectedLogicGateID?: string; revision?: number; sourceExplorerID?: string; envelope?: ContextMutationEnvelope }>).detail;
       const logicContextFrameID = linkedLogicMapFrameID || linkedMapFrameID;
       if (!detail || detail.mapWidgetID !== logicContextFrameID) return;
       const revision = readIncomingSequence(detail);
       if (revision > 0 && !isNewerSequence(lastLogicMapSelectionRevisionRef.current, revision)) return;
+      if (shouldIgnoreSelfOriginatedMapSelection(detail.sourceExplorerID, scope)) {
+        if (revision > 0) lastLogicMapSelectionRevisionRef.current = revision;
+        return;
+      }
       const selected = typeof detail.selectedLogicGateID === "string" ? detail.selectedLogicGateID : detail.selectedNodeID;
       const eventHasSelection = typeof selected === "string";
       if (revision > 0 && shouldReadMapStateForSelectionEvent(hasSequenceGap(lastLogicMapSelectionRevisionRef.current, revision), eventHasSelection)) readFromLogicMapState();

@@ -1,13 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
-import { nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
+import { hasExplicitExplorerSelectionContext, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
 import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
 import { filterNodeGraphToFolderScope, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
+
+type ExplorerSelectionOrigin = {
+  sourceExplorerID: string;
+  sourceExplorerContextSequence: number;
+  sourceExplorerSelectedTreeID: string;
+  selectedEntityID: string;
+};
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
 export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "teal" }) => {
@@ -83,6 +90,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const selectionBoxRef = useRef(selectionBox);
   const restoredSelectionRef = useRef<string>("");
   const explorerContextRef = useRef<number>(0);
+  const explorerSelectionOriginRef = useRef<ExplorerSelectionOrigin | null>(null);
   const layoutPersistenceReadyRef = useRef(false);
   const lastPersistedNodePositionsRef = useRef<Record<string, NodePosition>>({});
   const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(false);
@@ -507,6 +515,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     if (!restoredViewport) return;
     const contextID = `active_node_selection:${companyID}:${mapScope}`;
     const sequence = nextLocalContextSequence(contextID);
+    const explorerOrigin = explorerSelectionOriginRef.current;
+    const echoedExplorerSelection = explorerOrigin?.selectedEntityID === selectedNodeID ? explorerOrigin : null;
     const envelope: ContextMutationEnvelope = {
       context_id: contextID,
       source_module_id: mapScope,
@@ -519,8 +529,14 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       selectedNodeID,
       revision: sequence,
       changedAt: Date.now(),
+      sourceExplorerID: echoedExplorerSelection?.sourceExplorerID,
+      sourceExplorerContextSequence: echoedExplorerSelection?.sourceExplorerContextSequence,
+      sourceExplorerSelectedTreeID: echoedExplorerSelection?.sourceExplorerSelectedTreeID,
       envelope,
     });
+    if (explorerOrigin && explorerOrigin.selectedEntityID !== selectedNodeID) {
+      explorerSelectionOriginRef.current = null;
+    }
   }, [mapScope, restoredViewport, selectedNodeID]);
 
   useEffect(() => {
@@ -553,17 +569,32 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
 
   useEffect(() => {
     const explorerKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${mapScope}`;
+    const rememberExplorerSelectionOrigin = (parsed: { sourceExplorerID?: string; selectedTreeID?: string; envelope?: ContextMutationEnvelope }, selectedEntityID: string) => {
+      if (!parsed.sourceExplorerID) {
+        explorerSelectionOriginRef.current = null;
+        return;
+      }
+      // This marks the next map selection event as an Explorer-caused echo.
+      // Explorer can then ignore its own echo while still accepting real map clicks.
+      explorerSelectionOriginRef.current = {
+        sourceExplorerID: parsed.sourceExplorerID,
+        sourceExplorerContextSequence: parsed.envelope?.sequence ?? 0,
+        sourceExplorerSelectedTreeID: parsed.selectedTreeID ?? "",
+        selectedEntityID,
+      };
+    };
     const applyExplorerContext = () => {
       try {
         const raw = localStorage.getItem(explorerKey);
         if (!raw) return;
-        const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedFolderID?: string; selectedFolderKind?: string; selectedFolderLabel?: string; selectedLabel?: string; ts?: number };
+        const parsed = JSON.parse(raw) as { sourceExplorerID?: string; selectedNodeID?: string; selectedFolderID?: string; selectedFolderKind?: string; selectedFolderLabel?: string; selectedLabel?: string; selectedTreeID?: string; ts?: number; envelope?: ContextMutationEnvelope };
         if (typeof parsed.ts !== "number" || parsed.ts <= explorerContextRef.current) return;
         explorerContextRef.current = parsed.ts;
         if (parsed.selectedFolderKind === "node") {
           setActiveFolderID(typeof parsed.selectedFolderID === "string" ? parsed.selectedFolderID : "");
           setActiveFolderLabel(typeof parsed.selectedFolderLabel === "string" ? parsed.selectedFolderLabel : (typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : ""));
           const selected = typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "";
+          rememberExplorerSelectionOrigin(parsed, selected);
           if (selected && allNodes.some((node) => node.node_id === selected)) {
             setSelectedNodeID(selected);
             setSelectedNodeIDs(new Set([selected]));
@@ -573,7 +604,16 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           }
           return;
         }
-        if (!parsed.selectedNodeID) return;
+        if (!parsed.selectedNodeID) {
+          if (!hasExplicitExplorerSelectionContext(parsed)) return;
+          rememberExplorerSelectionOrigin(parsed, "");
+          setActiveFolderID("");
+          setActiveFolderLabel("");
+          setSelectedNodeID("");
+          setSelectedNodeIDs(new Set());
+          return;
+        }
+        rememberExplorerSelectionOrigin(parsed, parsed.selectedNodeID);
         const exists = allNodes.some((node) => node.node_id === parsed.selectedNodeID);
         if (!exists) return;
         setActiveFolderID("");

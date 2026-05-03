@@ -139,6 +139,8 @@ Selection sync hardening update (2026-05-03):
 - When a linked map selection event already includes the selected node or logic-gate ID, Explorer applies that event payload directly and does not read debounced map-state storage for sequence-gap recovery.
 - Map-state storage remains a fallback only for gap events that do not carry a selected entity ID. This prevents stale localStorage from jumping the Explorer highlight back to an older row after Explorer drives the map.
 - Explorer rows keep file-explorer drag/drop behavior, but hover uses the normal cursor instead of a grab cursor so the tree does not look like it is always in a drag state.
+- Linked maps now tag selection events that were caused by Explorer context with `sourceExplorerID`. Company Explorer ignores events from its own frame ID, so child-to-parent folder changes and node-tree/logic-gate-tree switches cannot be overwritten by delayed self-echoes.
+- Root/empty Explorer context is a real broadening command. Node Map and Logic Gate Map clear active folder scope and selection when they receive Explorer context with no selected entity or folder, instead of keeping the previous child selection alive.
 
 Folder runtime update (2026-05-02):
 - Explorer folders are now durable backend rows, not local-only UI state.

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { shouldApplyMapSelection, shouldBroadcastSelection, shouldReadMapStateForSelectionEvent } from "../../../../frontend/src/modules/company-explorer/explorerSync.js";
+import { shouldApplyMapSelection, shouldBroadcastSelection, shouldIgnoreSelfOriginatedMapSelection, shouldReadMapStateForSelectionEvent } from "../../../../frontend/src/modules/company-explorer/explorerSync.js";
 
 type SelectionState = { selectedNodeID: string; selectedTreeID: string };
 
@@ -35,4 +35,10 @@ run("uses event payload instead of stale debounced map state during gap recovery
   assert.equal(shouldReadMapStateForSelectionEvent(true, true), false);
   assert.equal(shouldReadMapStateForSelectionEvent(true, false), true);
   assert.equal(shouldReadMapStateForSelectionEvent(false, false), false);
+});
+
+run("ignores map selection events that are echoes of this explorer", () => {
+  assert.equal(shouldIgnoreSelfOriginatedMapSelection("explorer-1", "explorer-1"), true);
+  assert.equal(shouldIgnoreSelfOriginatedMapSelection("explorer-2", "explorer-1"), false);
+  assert.equal(shouldIgnoreSelfOriginatedMapSelection(undefined, "explorer-1"), false);
 });
