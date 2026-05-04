@@ -230,6 +230,70 @@ func TestLogicGateInformationProjectionAPIKeepsLatestValueAndHistory(t *testing.
 	}
 }
 
+func TestNodeInformationProjectionAPICollapsesEditorTextBoxes(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-node-projection-collapse-test"
+
+	node, err := repo.CreateNode(companyID, "node with one editor document")
+	if err != nil {
+		t.Fatalf("CreateNode() error = %v", err)
+	}
+
+	postInformation := func(informationID string, value string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{
+			"company_id":     companyID,
+			"type":           "Text box",
+			"information":    value,
+			"information_id": informationID,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+node.NodeID+"/information", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST node information status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+		}
+	}
+
+	postInformation("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "old editor document")
+	postInformation("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "current editor document")
+
+	projectionReq := httptest.NewRequest(http.MethodGet, "/v1/nodes/"+node.NodeID+"/projection?company_id="+companyID, nil)
+	projectionRec := httptest.NewRecorder()
+	handler.ServeHTTP(projectionRec, projectionReq)
+	if projectionRec.Code != http.StatusOK {
+		t.Fatalf("GET node projection status = %d, want %d body=%s", projectionRec.Code, http.StatusOK, projectionRec.Body.String())
+	}
+	var projectionPayload struct {
+		Items []struct {
+			Type        string `json:"type"`
+			Information string `json:"information"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(projectionRec.Body).Decode(&projectionPayload); err != nil {
+		t.Fatalf("decode projection: %v", err)
+	}
+	if len(projectionPayload.Items) != 1 {
+		t.Fatalf("projection item count = %d, want 1", len(projectionPayload.Items))
+	}
+	if projectionPayload.Items[0].Type != "Text box" || projectionPayload.Items[0].Information != "current editor document" {
+		t.Fatalf("projection item = %+v, want current Text box document", projectionPayload.Items[0])
+	}
+
+	details, err := repo.GetNodeDetails(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetNodeDetails() error = %v", err)
+	}
+	if len(details.Information) != 2 {
+		t.Fatalf("node history row count = %d, want 2", len(details.Information))
+	}
+}
+
 func TestProjectionDeleteAPIClearsLatestDocumentForHeadlessClients(t *testing.T) {
 	t.Parallel()
 

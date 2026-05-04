@@ -57,6 +57,17 @@ export type ExplorerKeyboardNavigationResult = {
 
 export type ExplorerSelectionDomain = "node" | "logic_gate" | "kanban" | "folder" | "root";
 
+export type ExplorerPublishedSelectionKind = "node" | "logic_gate" | "kanban" | "folder";
+
+export type ExplorerPublishedSelection = {
+  entityKind: ExplorerPublishedSelectionKind;
+  entityID: string;
+  selectedNodeID: string;
+  selectedLogicGateID: string;
+  selectedKanbanBoardID: string;
+  isLogicGateContext: boolean;
+};
+
 export type ExplorerFindEntity = {
   kind: "node" | "logic_gate";
   id: string;
@@ -255,6 +266,56 @@ export function resolveExplorerRenameTarget(row?: ExplorerCreationContextRow | n
   if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
   if (row.kind === "kanban" && row.kanbanBoardID) return { kind: "kanban", id: row.kanbanBoardID };
   return null;
+}
+
+export function resolveExplorerPublishedSelection(input: {
+  selectedTreeID: string;
+  selectedNodeID: string;
+  selectedLogicGateID: string;
+  selectedKanbanBoardID: string;
+  selectedFolderID: string;
+  selectedFolderKind?: CompanyExplorerFolderKind;
+  targetFrameKind?: string | null;
+}): ExplorerPublishedSelection {
+  const treeID = input.selectedTreeID.trim();
+  let entityKind: ExplorerPublishedSelectionKind = "folder";
+  let entityID = input.selectedFolderID;
+
+  if (treeID.startsWith("node-")) {
+    entityKind = "node";
+    entityID = treeID.slice("node-".length) || input.selectedNodeID;
+  } else if (treeID.startsWith("logic-gate-")) {
+    entityKind = "logic_gate";
+    entityID = treeID.slice("logic-gate-".length) || input.selectedLogicGateID;
+  } else if (treeID.startsWith("kanban-")) {
+    entityKind = "kanban";
+    entityID = treeID.slice("kanban-".length) || input.selectedKanbanBoardID;
+  } else if (input.selectedKanbanBoardID) {
+    entityKind = "kanban";
+    entityID = input.selectedKanbanBoardID;
+  } else if (input.selectedLogicGateID) {
+    entityKind = "logic_gate";
+    entityID = input.selectedLogicGateID;
+  } else if (input.selectedNodeID) {
+    entityKind = "node";
+    entityID = input.selectedNodeID;
+  }
+
+  const selectedNodeID = entityKind === "node" ? entityID : "";
+  const selectedLogicGateID = entityKind === "logic_gate" ? entityID : "";
+  const selectedKanbanBoardID = entityKind === "kanban" ? entityID : "";
+  const isLogicGateContext = entityKind === "logic_gate"
+    || (entityKind === "folder" && input.selectedFolderKind === "logic_gate")
+    || (entityKind === "folder" && !input.selectedFolderKind && input.targetFrameKind === "logic-map");
+
+  return {
+    entityKind,
+    entityID,
+    selectedNodeID,
+    selectedLogicGateID,
+    selectedKanbanBoardID,
+    isLogicGateContext,
+  };
 }
 
 export function resolveExplorerClickSelection(input: {

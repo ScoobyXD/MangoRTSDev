@@ -126,6 +126,40 @@ func folderItemKey(companyID, itemType, itemID string) string {
 	return companyID + ":" + itemType + ":" + itemID
 }
 
+func isEditorTextBoxType(infoType string) bool {
+	return infoType == "Text box"
+}
+
+func newestNodeTextProjectionKey(items map[string]domain.NodeProjection) string {
+	keyValue := ""
+	var newest domain.NodeProjection
+	for key, item := range items {
+		if !isEditorTextBoxType(item.Type) {
+			continue
+		}
+		if keyValue == "" || item.UpdatedTimestamp.After(newest.UpdatedTimestamp) || (item.UpdatedTimestamp.Equal(newest.UpdatedTimestamp) && item.InformationID > newest.InformationID) {
+			keyValue = key
+			newest = item
+		}
+	}
+	return keyValue
+}
+
+func newestLogicGateTextProjectionKey(items map[string]domain.LogicGateProjection) string {
+	keyValue := ""
+	var newest domain.LogicGateProjection
+	for key, item := range items {
+		if !isEditorTextBoxType(item.Type) {
+			continue
+		}
+		if keyValue == "" || item.UpdatedTimestamp.After(newest.UpdatedTimestamp) || (item.UpdatedTimestamp.Equal(newest.UpdatedTimestamp) && item.InformationID > newest.InformationID) {
+			keyValue = key
+			newest = item
+		}
+	}
+	return keyValue
+}
+
 func (r *MemoryRepo) CreateNode(companyID, title string) (domain.Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -311,6 +345,19 @@ func (r *MemoryRepo) AddNodeInformation(companyID, nodeID, infoType, information
 	if r.nodeText[k] == nil {
 		r.nodeText[k] = map[string]domain.NodeProjection{}
 	}
+	if isEditorTextBoxType(infoType) {
+		// The current editor has exactly one document surface per node. Keep
+		// history append-only above, but collapse the hot projection to one
+		// current Text box row so UI and headless reads never rotate old drafts.
+		if existingTextKey := newestNodeTextProjectionKey(r.nodeText[k]); existingTextKey != "" {
+			keyValue = existingTextKey
+			for projectionID, projection := range r.nodeText[k] {
+				if projectionID != keyValue && isEditorTextBoxType(projection.Type) {
+					delete(r.nodeText[k], projectionID)
+				}
+			}
+		}
+	}
 	existing, ok := r.nodeText[k][keyValue]
 	created := item.CreatedTimestamp
 	if ok {
@@ -335,7 +382,11 @@ func (r *MemoryRepo) ListNodeProjections(companyID, nodeID string) ([]domain.Nod
 		return nil, ErrNotFound
 	}
 	items := make([]domain.NodeProjection, 0)
-	for _, item := range r.nodeText[key(companyID, nodeID)] {
+	latestTextKey := newestNodeTextProjectionKey(r.nodeText[key(companyID, nodeID)])
+	for projectionID, item := range r.nodeText[key(companyID, nodeID)] {
+		if isEditorTextBoxType(item.Type) && projectionID != latestTextKey {
+			continue
+		}
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -1176,6 +1227,19 @@ func (r *MemoryRepo) AddLogicGateInformation(companyID, logicGateID, infoType, i
 	if r.logicGateText[k] == nil {
 		r.logicGateText[k] = map[string]domain.LogicGateProjection{}
 	}
+	if isEditorTextBoxType(infoType) {
+		// Logic gates share the same one-document editor contract as nodes:
+		// many history rows are fine, but one hot Text box projection is the
+		// read model clients and agents should render.
+		if existingTextKey := newestLogicGateTextProjectionKey(r.logicGateText[k]); existingTextKey != "" {
+			projectionID = existingTextKey
+			for keyValue, projection := range r.logicGateText[k] {
+				if keyValue != projectionID && isEditorTextBoxType(projection.Type) {
+					delete(r.logicGateText[k], keyValue)
+				}
+			}
+		}
+	}
 	created := item.CreatedTimestamp
 	if existing, ok := r.logicGateText[k][projectionID]; ok {
 		created = existing.CreatedTimestamp
@@ -1199,7 +1263,11 @@ func (r *MemoryRepo) ListLogicGateProjections(companyID, logicGateID string) ([]
 		return nil, ErrNotFound
 	}
 	items := make([]domain.LogicGateProjection, 0)
-	for _, item := range r.logicGateText[key(companyID, logicGateID)] {
+	latestTextKey := newestLogicGateTextProjectionKey(r.logicGateText[key(companyID, logicGateID)])
+	for projectionID, item := range r.logicGateText[key(companyID, logicGateID)] {
+		if isEditorTextBoxType(item.Type) && projectionID != latestTextKey {
+			continue
+		}
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {

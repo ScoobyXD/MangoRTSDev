@@ -61,7 +61,9 @@
     "../../../frontend/src/modules/editor/editorScroll.ts",
     "../modules/editor/editorScroll.test.ts",
     "../../../frontend/src/modules/editor/editorIndentGuides.ts",
-    "../modules/editor/editorIndentGuides.test.ts"
+    "../modules/editor/editorIndentGuides.test.ts",
+    "../../../frontend/src/modules/editor/editorProjection.ts",
+    "../modules/editor/editorProjection.test.ts"
   ],
   "exclude": []
 }

@@ -436,18 +436,36 @@ func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, informati
 	if keyValue == "" {
 		keyValue = item.InformationID
 	}
-	if _, err := tx.ExecContext(ctx,
-		`insert into node_projection_table
-		 (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4::information_type, $5, now(), now())
-		 on conflict (company_id, node_id, information_id)
-		 do update set
-		   type=excluded.type,
-		   information=excluded.information,
-		   updated_timestamp=now()`,
-		item.CompanyID, item.NodeID, keyValue, item.Type, information,
-	); err != nil {
-		return domain.NodeInformation{}, err
+	if isEditorTextBoxType(item.Type) {
+		// The editor has one document surface per node. History remains
+		// append-only, but the projection is the single current Text box row
+		// used by hot UI/API reads.
+		if _, err := tx.ExecContext(ctx,
+			`insert into node_projection_table
+			 (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
+			 values ($1, $2, $3, $4::information_type, $5, now(), now())
+			 on conflict (company_id, node_id, type) where type = 'Text box'::information_type
+			 do update set
+			   information=excluded.information,
+			   updated_timestamp=now()`,
+			item.CompanyID, item.NodeID, keyValue, item.Type, information,
+		); err != nil {
+			return domain.NodeInformation{}, err
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx,
+			`insert into node_projection_table
+			 (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
+			 values ($1, $2, $3, $4::information_type, $5, now(), now())
+			 on conflict (company_id, node_id, information_id)
+			 do update set
+			   type=excluded.type,
+			   information=excluded.information,
+			   updated_timestamp=now()`,
+			item.CompanyID, item.NodeID, keyValue, item.Type, information,
+		); err != nil {
+			return domain.NodeInformation{}, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -470,9 +488,18 @@ func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.N
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		`select company_id, node_id, information_id, type::text, information, created_timestamp, updated_timestamp
-		 from node_projection_table
-		 where company_id=$1 and node_id=$2
+		`with ranked as (
+		   select company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp,
+		          row_number() over (
+		            partition by type
+		            order by updated_timestamp desc, created_timestamp desc, information_id desc
+		          ) as rn
+		   from node_projection_table
+		   where company_id=$1 and node_id=$2
+		 )
+		 select company_id, node_id, information_id, type::text, information, created_timestamp, updated_timestamp
+		 from ranked
+		 where type <> 'Text box'::information_type or rn = 1
 		 order by updated_timestamp asc`,
 		companyID, nodeID,
 	)
@@ -932,24 +959,39 @@ func (r *PostgresRepo) AddLogicGateInformation(companyID, logicGateID, infoType,
 		return domain.LogicGateInformation{}, err
 	}
 
-	// History is append-only above. This read model keeps the latest value per
-	// stable information_id for the editor and headless agents on hot read paths.
+	// History is append-only above. For the one-document editor surface, the
+	// Text box projection is the single current row for hot UI/API reads.
 	projectionID := informationID
 	if projectionID == "" {
 		projectionID = item.InformationID
 	}
-	if _, err := tx.ExecContext(ctx,
-		`insert into logic_gate_projection_table
-		 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4::information_type, $5, now(), now())
-		 on conflict (company_id, logic_gate_id, information_id)
-		 do update set
-		   type=excluded.type,
-		   information=excluded.information,
-		   updated_timestamp=now()`,
-		item.CompanyID, item.LogicGateID, projectionID, item.Type, item.Information,
-	); err != nil {
-		return domain.LogicGateInformation{}, err
+	if isEditorTextBoxType(item.Type) {
+		if _, err := tx.ExecContext(ctx,
+			`insert into logic_gate_projection_table
+			 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
+			 values ($1, $2, $3, $4::information_type, $5, now(), now())
+			 on conflict (company_id, logic_gate_id, type) where type = 'Text box'::information_type
+			 do update set
+			   information=excluded.information,
+			   updated_timestamp=now()`,
+			item.CompanyID, item.LogicGateID, projectionID, item.Type, item.Information,
+		); err != nil {
+			return domain.LogicGateInformation{}, err
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx,
+			`insert into logic_gate_projection_table
+			 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)
+			 values ($1, $2, $3, $4::information_type, $5, now(), now())
+			 on conflict (company_id, logic_gate_id, information_id)
+			 do update set
+			   type=excluded.type,
+			   information=excluded.information,
+			   updated_timestamp=now()`,
+			item.CompanyID, item.LogicGateID, projectionID, item.Type, item.Information,
+		); err != nil {
+			return domain.LogicGateInformation{}, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -972,9 +1014,18 @@ func (r *PostgresRepo) ListLogicGateProjections(companyID, logicGateID string) (
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		`select company_id, logic_gate_id, information_id, type::text, information, created_timestamp, updated_timestamp
-		 from logic_gate_projection_table
-		 where company_id=$1 and logic_gate_id=$2
+		`with ranked as (
+		   select company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp,
+		          row_number() over (
+		            partition by type
+		            order by updated_timestamp desc, created_timestamp desc, information_id desc
+		          ) as rn
+		   from logic_gate_projection_table
+		   where company_id=$1 and logic_gate_id=$2
+		 )
+		 select company_id, logic_gate_id, information_id, type::text, information, created_timestamp, updated_timestamp
+		 from ranked
+		 where type <> 'Text box'::information_type or rn = 1
 		 order by updated_timestamp asc`,
 		companyID, logicGateID,
 	)

@@ -79,7 +79,10 @@ export function shouldAcceptLiveSelection(current: LiveSelectionChange | null | 
   if (current.sourceFrameID === incoming.sourceFrameID) return incoming.sequence > current.sequence;
   if (incoming.changedAt < current.changedAt) return false;
   if (incoming.changedAt > current.changedAt) return true;
-  return incoming.sequence > current.sequence;
+  // Different sources have independent sequence counters. When two modules emit
+  // in the same millisecond, arrival order is the only deterministic ordering we
+  // have; comparing source-local sequences can drop the user's Explorer click.
+  return true;
 }
 
 export function readLiveSelectionForFrame(companyID: string, frameID: string): LiveSelectionChange | null {

@@ -12,6 +12,7 @@ import {
   resolveExplorerDeleteTarget,
   resolveExplorerDropTarget,
   resolveExplorerKeyboardNavigation,
+  resolveExplorerPublishedSelection,
   resolveExplorerRenameTarget,
   resolveExplorerRootDropTarget,
   shouldAcceptMapSelectionAfterExplorerSelection,
@@ -253,6 +254,49 @@ run("click selection supports plain, shift range, and ctrl toggle behavior", () 
   });
   assert.deepEqual([...additiveRange.selectedIDs], ["root", "b", "c", "d"]);
   assert.equal(additiveRange.anchorID, "b");
+});
+
+run("published selection follows the active tree row during domain switches", () => {
+  const selection = resolveExplorerPublishedSelection({
+    selectedTreeID: "node-node-a",
+    selectedNodeID: "node-a",
+    selectedLogicGateID: "stale-gate",
+    selectedKanbanBoardID: "",
+    selectedFolderID: "",
+    selectedFolderKind: "node",
+    targetFrameKind: "node-map",
+  });
+
+  assert.equal(selection.entityKind, "node");
+  assert.equal(selection.entityID, "node-a");
+  assert.equal(selection.selectedNodeID, "node-a");
+  assert.equal(selection.selectedLogicGateID, "");
+  assert.equal(selection.isLogicGateContext, false);
+});
+
+run("published folder selection targets the matching map domain", () => {
+  const logicFolder = resolveExplorerPublishedSelection({
+    selectedTreeID: "workspace-folder-logic",
+    selectedNodeID: "",
+    selectedLogicGateID: "",
+    selectedKanbanBoardID: "",
+    selectedFolderID: "logic",
+    selectedFolderKind: "logic_gate",
+    targetFrameKind: "node-map",
+  });
+  assert.equal(logicFolder.entityKind, "folder");
+  assert.equal(logicFolder.entityID, "logic");
+  assert.equal(logicFolder.isLogicGateContext, true);
+
+  const emptyRootForLogicMap = resolveExplorerPublishedSelection({
+    selectedTreeID: "folder-root",
+    selectedNodeID: "",
+    selectedLogicGateID: "",
+    selectedKanbanBoardID: "",
+    selectedFolderID: "",
+    targetFrameKind: "logic-map",
+  });
+  assert.equal(emptyRootForLogicMap.isLogicGateContext, true);
 });
 
 run("keyboard navigation moves selection and expands folders without DOM focus assumptions", () => {
