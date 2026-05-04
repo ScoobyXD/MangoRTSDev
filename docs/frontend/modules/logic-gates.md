@@ -13,7 +13,11 @@ It intentionally mirrors Node Map interaction patterns so users do not learn a s
 - drag, resize, pan, zoom, multi-select, and delete gates or relationship lines,
 - link selection context into Company Explorer and Editor.
 - keep one selected gate active when clicking blank canvas so linked Editors do
-  not lose context; blank-canvas clicks clear only multi-select batches.
+  not lose context; blank-canvas clicks clear only multi-select batches, and
+  only when the gesture stays a click rather than becoming a drag.
+- pointer-down on an already selected gate batch keeps the full batch available
+  for drag. If that gesture does not move past the click threshold, it clears
+  the batch instead.
 - right-click a selected gate batch and choose `Find on Company Explorer` to
   highlight those gate rows in Explorer, auto-expand their ancestor folders, and
   scroll the primary row into view.

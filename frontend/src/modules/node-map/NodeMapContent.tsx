@@ -6,7 +6,7 @@ import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot,
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
 import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
-import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapBlankCanvasSelection, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
+import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapDragStartSelection, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
 import { filterNodeGraphToFolderScope, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
@@ -624,6 +624,9 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     nodeHeight: NODE_H,
     setNodePositions,
     setDragState,
+    setSelectedNodeID,
+    setSelectedNodeIDs,
+    setSelectedRelationshipIDs,
   });
 
   useEffect(() => {
@@ -710,7 +713,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     return subscribeLiveSelection(mapScope, applyLiveSelection);
   }, [companyID, mapScope]);
 
-  useNodeMapPanControls({ panState, setPan, setPanState });
+  useNodeMapPanControls({ panState, setPan, setPanState, setSelectedNodeID, setSelectedNodeIDs, setSelectedRelationshipIDs });
 
   useNodeMapMultiSelectControls({
     selectionPointerID,
@@ -1446,16 +1449,14 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           }
 
           if (relationshipDraft) setRelationshipDraft(null);
-          const nextSelection = resolveNodeMapBlankCanvasSelection({ selectedNodeID, selectedNodeIDs, selectedRelationshipIDs });
-          setSelectedNodeID(nextSelection.selectedNodeID);
-          setSelectedNodeIDs(nextSelection.selectedNodeIDs);
-          setSelectedRelationshipIDs(nextSelection.selectedRelationshipIDs);
+          const clearSelectionOnClick = selectedNodeIDs.size > 1 || selectedRelationshipIDs.size > 0;
           setPanState({
             pointerID: event.pointerId,
             startMouseX: event.clientX,
             startMouseY: event.clientY,
             startPanX: pan.x,
             startPanY: pan.y,
+            clearSelectionOnClick,
           });
         }}
       >
@@ -1620,9 +1621,9 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                   setSelectedRelationshipIDs(new Set());
                   const bounds = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
 
-                  const nextSelection = resolveNodeMapPointerSelection({ selectedNodeIDs, nodeID: node.node_id, additive: false });
-                  const nextIDs = Array.from(nextSelection.selectedNodeIDs);
-                  setSelectedNodeID(node.node_id);
+                  const nextSelection = resolveNodeMapDragStartSelection({ selectedNodeIDs, selectedNodeID, nodeID: node.node_id });
+                  const nextIDs = nextSelection.dragNodeIDs;
+                  setSelectedNodeID(nextSelection.selectedNodeID);
                   setSelectedNodeIDs(nextSelection.selectedNodeIDs);
 
                   const offsets: Record<string, { x: number; y: number }> = {};
@@ -1632,7 +1633,14 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
                     const pointerWorldY = (event.clientY - bounds.top) / zoom + position.y;
                     offsets[id] = { x: pointerWorldX - pos.x, y: pointerWorldY - pos.y };
                   }
-                  setDragState({ nodeIDs: nextIDs, pointerID: event.pointerId, offsets });
+                  setDragState({
+                    nodeIDs: nextIDs,
+                    pointerID: event.pointerId,
+                    offsets,
+                    startMouseX: event.clientX,
+                    startMouseY: event.clientY,
+                    clearSelectionOnClick: nextSelection.clearSelectionOnClick,
+                  });
                 }}
               >
                 <div

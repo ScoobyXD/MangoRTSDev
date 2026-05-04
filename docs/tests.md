@@ -146,6 +146,8 @@ Use this checklist format and keep it complete.
   - plain node click collapses a previous multi-select batch to the clicked node
   - modifier node click still toggles additive membership
   - blank canvas click preserves single-node editor context but clears batches
+  - drag start on an already selected batch preserves the full drag batch
+  - click-vs-drag threshold separates deselect clicks from batch drags
 - [x] `tests/frontend/modules/node-map/deleteKeyboardRouting.test.ts`
   - Delete/Backspace are ignored when focus is in inline title editing, input, or textarea targets
   - canvas delete still requires an active node or relationship selection

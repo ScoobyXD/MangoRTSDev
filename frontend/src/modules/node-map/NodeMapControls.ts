@@ -5,6 +5,7 @@ export type NodeMapScreenPoint = { x: number; y: number };
 export type NodeMapScreenRect = { minX: number; maxX: number; minY: number; maxY: number };
 
 const EPSILON = 0.000001;
+const CLICK_DRAG_THRESHOLD_PX = 4;
 
 const pointInRect = (point: NodeMapScreenPoint, rect: NodeMapScreenRect) => (
   point.x >= rect.minX && point.x <= rect.maxX && point.y >= rect.minY && point.y <= rect.maxY
@@ -70,6 +71,9 @@ export type NodeMapDragState = {
   nodeIDs: string[];
   pointerID: number;
   offsets: Record<string, { x: number; y: number }>;
+  startMouseX?: number;
+  startMouseY?: number;
+  clearSelectionOnClick?: boolean;
 };
 
 export type NodeMapPanState = {
@@ -78,6 +82,7 @@ export type NodeMapPanState = {
   startMouseY: number;
   startPanX: number;
   startPanY: number;
+  clearSelectionOnClick?: boolean;
 };
 
 export type NodeMapMultiSelectBox = {
@@ -189,6 +194,44 @@ export function resolveNodeMapPointerSelection(input: {
   if (next.has(input.nodeID)) next.delete(input.nodeID);
   else next.add(input.nodeID);
   return { selectedNodeIDs: next, selectedNodeID: next.has(input.nodeID) ? input.nodeID : (Array.from(next)[0] ?? "") };
+}
+
+export function resolveNodeMapDragStartSelection(input: {
+  selectedNodeIDs: Set<string>;
+  selectedNodeID: string;
+  nodeID: string;
+}): { selectedNodeIDs: Set<string>; selectedNodeID: string; dragNodeIDs: string[]; clearSelectionOnClick: boolean } {
+  const clickedSelectedBatch = input.selectedNodeIDs.size > 1 && input.selectedNodeIDs.has(input.nodeID);
+  if (clickedSelectedBatch) {
+    const dragNodeIDs = Array.from(input.selectedNodeIDs);
+    return {
+      selectedNodeIDs: new Set(input.selectedNodeIDs),
+      selectedNodeID: input.selectedNodeID || dragNodeIDs[0] || input.nodeID,
+      dragNodeIDs,
+      clearSelectionOnClick: true,
+    };
+  }
+
+  const nextSelection = resolveNodeMapPointerSelection({ selectedNodeIDs: input.selectedNodeIDs, nodeID: input.nodeID, additive: false });
+  return {
+    selectedNodeIDs: nextSelection.selectedNodeIDs,
+    selectedNodeID: nextSelection.selectedNodeID,
+    dragNodeIDs: Array.from(nextSelection.selectedNodeIDs),
+    clearSelectionOnClick: false,
+  };
+}
+
+export function shouldTreatNodeMapGestureAsClick(input: {
+  startMouseX: number;
+  startMouseY: number;
+  endMouseX: number;
+  endMouseY: number;
+  thresholdPx?: number;
+}): boolean {
+  const threshold = input.thresholdPx ?? CLICK_DRAG_THRESHOLD_PX;
+  const dx = input.endMouseX - input.startMouseX;
+  const dy = input.endMouseY - input.startMouseY;
+  return dx * dx + dy * dy <= threshold * threshold;
 }
 
 export function resolveNodeMapBlankCanvasSelection(input: {
@@ -320,6 +363,9 @@ export function useNodeMapDragControls(input: {
   nodeHeight: number;
   setNodePositions: Dispatch<SetStateAction<Record<string, NodePosition>>>;
   setDragState: Dispatch<SetStateAction<NodeMapDragState | null>>;
+  setSelectedNodeID?: Dispatch<SetStateAction<string>>;
+  setSelectedNodeIDs?: Dispatch<SetStateAction<Set<string>>>;
+  setSelectedRelationshipIDs?: Dispatch<SetStateAction<Set<string>>>;
 }) {
   useEffect(() => {
     if (!input.dragState) return;
@@ -344,7 +390,21 @@ export function useNodeMapDragControls(input: {
       });
     };
     const onUp = (event: PointerEvent) => {
-      if (event.pointerId === input.dragState?.pointerID) input.setDragState(null);
+      if (event.pointerId !== input.dragState?.pointerID) return;
+      if (input.dragState.clearSelectionOnClick && typeof input.dragState.startMouseX === "number" && typeof input.dragState.startMouseY === "number") {
+        const isClick = shouldTreatNodeMapGestureAsClick({
+          startMouseX: input.dragState.startMouseX,
+          startMouseY: input.dragState.startMouseY,
+          endMouseX: event.clientX,
+          endMouseY: event.clientY,
+        });
+        if (isClick) {
+          input.setSelectedNodeID?.("");
+          input.setSelectedNodeIDs?.(new Set());
+          input.setSelectedRelationshipIDs?.(new Set());
+        }
+      }
+      input.setDragState(null);
     };
 
     window.addEventListener("pointermove", onMove);
@@ -360,6 +420,9 @@ export function useNodeMapPanControls(input: {
   panState: NodeMapPanState | null;
   setPan: Dispatch<SetStateAction<{ x: number; y: number }>>;
   setPanState: Dispatch<SetStateAction<NodeMapPanState | null>>;
+  setSelectedNodeID?: Dispatch<SetStateAction<string>>;
+  setSelectedNodeIDs?: Dispatch<SetStateAction<Set<string>>>;
+  setSelectedRelationshipIDs?: Dispatch<SetStateAction<Set<string>>>;
 }) {
   useEffect(() => {
     if (!input.panState) return;
@@ -370,7 +433,21 @@ export function useNodeMapPanControls(input: {
       input.setPan({ x: (input.panState?.startPanX ?? 0) + dx, y: (input.panState?.startPanY ?? 0) + dy });
     };
     const onUp = (event: PointerEvent) => {
-      if (event.pointerId === input.panState?.pointerID) input.setPanState(null);
+      if (event.pointerId !== input.panState?.pointerID) return;
+      if (input.panState.clearSelectionOnClick) {
+        const isClick = shouldTreatNodeMapGestureAsClick({
+          startMouseX: input.panState.startMouseX,
+          startMouseY: input.panState.startMouseY,
+          endMouseX: event.clientX,
+          endMouseY: event.clientY,
+        });
+        if (isClick) {
+          input.setSelectedNodeID?.("");
+          input.setSelectedNodeIDs?.(new Set());
+          input.setSelectedRelationshipIDs?.(new Set());
+        }
+      }
+      input.setPanState(null);
     };
 
     window.addEventListener("pointermove", onMove);

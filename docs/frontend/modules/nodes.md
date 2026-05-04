@@ -149,7 +149,11 @@ writes scale with user action size instead of full company map size.
   - “Group selected: N” badge for multi-select.
 - Clicking blank canvas preserves a single selected node so linked Editors keep
   showing that node's content while the user pans. Clicking blank canvas after
-  a multi-select batch clears the batch.
+  a multi-select batch clears the batch only when the gesture stays a click;
+  click-dragging keeps the batch selected.
+- Pointer-down on an already selected node batch keeps the full batch available
+  for drag. If that gesture does not move past the click threshold, it clears
+  the batch instead of dragging it.
 
 ### 4.5 Node title inline editing (seamless caret behavior)
 
