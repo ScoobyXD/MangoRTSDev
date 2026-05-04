@@ -87,6 +87,12 @@ These are the currently implemented mechanisms that keep the client workspace ca
 ### Cross-Module Sync Architecture Contract (Locked)
 To scale linked workflows across Node Map, Company Explorer, Editor, Logic Gates, Operations, Messages/Email, and KPI surfaces, MangoOS adopts this synchronization contract.
 
+Current frontend implementation note (2026-05-03):
+- Same-tab interactive selection is owned by `selectionCoordinator.ts`.
+- Explorer, Node Map, Logic Gate Map, Editor, and Kanban consume direct live selection payloads instead of inferring live selection from peer localStorage.
+- `localStorage` selection/context keys are restore caches only. They are not a same-tab click authority.
+- Selection is intentionally not POSTed. Backend writes are reserved for durable facts such as node edits, folder moves, map layout projection writes, document saves, and Kanban card mutations.
+
 1. **Single semantic context plane (L2 canonical context store).**
    - No backend workspace-context persistence is currently implemented; any future shared context plane needs an explicit runtime owner before schema is reintroduced.
    - Modules must not treat ad hoc localStorage keys as cross-module source-of-truth.

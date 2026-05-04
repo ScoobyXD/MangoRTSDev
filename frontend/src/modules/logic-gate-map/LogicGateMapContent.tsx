@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LOGIC_GATE_MAP_STATE_KEY_PREFIX, LogicGateRecord, LogicGateRelationship, MINI_GRID, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, toLogicGateCanvasRecord, toLogicGateCanvasRelationship, trimOrEmpty } from "./shared";
-import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
+import { emitDashboardEvent, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "./LogicGateRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, canStartRelationshipFromSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
@@ -8,6 +8,8 @@ import { summarizeRelationshipDeleteResults } from "../node-map/relationshipDele
 import { invalidateLogicGateRecordStoreCaches } from "./LogicGateRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
 import { filterLogicGateGraphToFolderScope, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
+import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
+import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 
 type ExplorerSelectionOrigin = {
   sourceExplorerID: string;
@@ -98,6 +100,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const restoredSelectionRef = useRef<string>("");
   const explorerContextRef = useRef<number>(0);
   const explorerSelectionOriginRef = useRef<ExplorerSelectionOrigin | null>(null);
+  const suppressNextSelectionBroadcastRef = useRef(false);
   const layoutPersistenceReadyRef = useRef(false);
   const lastPersistedNodePositionsRef = useRef<Record<string, NodePosition>>({});
   const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(false);
@@ -144,6 +147,18 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     x: clamp(snapToGrid((canvasSize.width / 2 - pan.x) / zoom - NODE_W / 2), 0, WORLD_W - NODE_W),
     y: clamp(snapToGrid((canvasSize.height / 2 - pan.y) / zoom - NODE_H / 2), 0, WORLD_H - NODE_H),
   }), [WORLD_H, WORLD_W, canvasSize.height, canvasSize.width, pan.x, pan.y, zoom]);
+
+  const selectedNodeLabel = useMemo(() => {
+    if (!selectedNodeID) return "";
+    const selected = allNodes.find((node) => node.node_id === selectedNodeID) ?? nodes.find((node) => node.node_id === selectedNodeID);
+    return selected ? getNodeTitle(selected) : "";
+  }, [allNodes, nodes, selectedNodeID]);
+
+  const readLiveSelectionTargets = () => {
+    const edges = readFrameLinksFromStorage();
+    const registry = readFrameRegistryFromStorage();
+    return resolveConnectedFrameTargets({ sourceFrameID: mapScope, edges, registry });
+  };
 
   // Keep relationship projection derivation centralized so callers can reuse the exact same
   // filtering logic without triggering additional network calls.
@@ -525,6 +540,10 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
 
   useEffect(() => {
     if (!restoredViewport) return;
+    if (suppressNextSelectionBroadcastRef.current) {
+      suppressNextSelectionBroadcastRef.current = false;
+      return;
+    }
     const explorerKey = `${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${mapScope}`;
     if (hasPendingContextStorageUpdate(localStorage.getItem(explorerKey), explorerContextRef.current)) return;
     const contextID = `active_logic_gate_selection:${companyID}:${mapScope}`;
@@ -538,6 +557,17 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       timestamp: new Date().toISOString(),
       user_action_type: "logic_gate_selection_changed",
     };
+    publishLiveSelection({
+      companyID,
+      entityKind: "logic_gate",
+      entityID: selectedNodeID,
+      label: selectedNodeLabel,
+      sourceFrameID: mapScope,
+      sourceModule: "logic-gate-map",
+      targetFrameIDs: readLiveSelectionTargets(),
+      changedAt: Date.now(),
+      sequence,
+    });
     emitDashboardEvent(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, {
       mapWidgetID: mapScope,
       selectedNodeID,
@@ -552,7 +582,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     if (explorerOrigin && explorerOrigin.selectedEntityID !== selectedNodeID) {
       explorerSelectionOriginRef.current = null;
     }
-  }, [companyID, mapScope, restoredViewport, selectedNodeID]);
+  }, [companyID, mapScope, restoredViewport, selectedNodeID, selectedNodeLabel]);
 
   useEffect(() => {
     setNodePositions((previous) => {
@@ -641,23 +671,31 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         // ignore malformed explorer context payload
       }
     };
-    const onStorage = (event: StorageEvent) => {
-      if (event.key && event.key !== explorerKey) return;
-      applyExplorerContext();
-    };
-    const onExplorerContextUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ key?: string }>).detail;
-      if (!detail || detail.key !== explorerKey) return;
-      applyExplorerContext();
-    };
+    // Startup/remount restore only. Live Explorer clicks arrive through
+    // SelectionCoordinator below so we never infer a live selection from storage.
     applyExplorerContext();
-    window.addEventListener("storage", onStorage);
-    window.addEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
-    };
   }, [companyID, mapScope, allNodes]);
+
+  useEffect(() => {
+    const applyLiveSelection = (selection: LiveSelectionChange) => {
+      if (selection.companyID !== companyID || selection.sourceFrameID === mapScope) return;
+      if (selection.entityKind === "node" || selection.folderKind === "node") return;
+
+      explorerContextRef.current = Math.max(explorerContextRef.current, selection.changedAt);
+      suppressNextSelectionBroadcastRef.current = true;
+      const nextFolderID = selection.folderKind === "logic_gate" || selection.entityKind === "folder" ? (selection.folderID ?? selection.entityID) : "";
+      setActiveFolderID(nextFolderID);
+      setActiveFolderLabel(nextFolderID ? (selection.folderLabel ?? selection.label) : "");
+
+      const nextLogicGateID = selection.entityKind === "logic_gate" ? selection.entityID : "";
+      setSelectedNodeID(nextLogicGateID);
+      setSelectedNodeIDs(nextLogicGateID ? new Set([nextLogicGateID]) : new Set());
+    };
+
+    const liveSelection = readLiveSelectionForFrame(companyID, mapScope);
+    if (liveSelection) applyLiveSelection(liveSelection);
+    return subscribeLiveSelection(mapScope, applyLiveSelection);
+  }, [companyID, mapScope]);
 
   useNodeMapPanControls({ panState, setPan, setPanState });
 

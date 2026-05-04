@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, trimOrEmpty } from "./shared";
-import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
+import { emitDashboardEvent, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
@@ -8,6 +8,8 @@ import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary"
 import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
 import { filterNodeGraphToFolderScope, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
+import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
+import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 
 type ExplorerSelectionOrigin = {
   sourceExplorerID: string;
@@ -91,6 +93,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const restoredSelectionRef = useRef<string>("");
   const explorerContextRef = useRef<number>(0);
   const explorerSelectionOriginRef = useRef<ExplorerSelectionOrigin | null>(null);
+  const suppressNextSelectionBroadcastRef = useRef(false);
   const layoutPersistenceReadyRef = useRef(false);
   const lastPersistedNodePositionsRef = useRef<Record<string, NodePosition>>({});
   const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(false);
@@ -137,6 +140,18 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     x: clamp(snapToGrid((canvasSize.width / 2 - pan.x) / zoom - NODE_W / 2), 0, WORLD_W - NODE_W),
     y: clamp(snapToGrid((canvasSize.height / 2 - pan.y) / zoom - NODE_H / 2), 0, WORLD_H - NODE_H),
   }), [WORLD_H, WORLD_W, canvasSize.height, canvasSize.width, pan.x, pan.y, zoom]);
+
+  const selectedNodeLabel = useMemo(() => {
+    if (!selectedNodeID) return "";
+    const selected = allNodes.find((node) => node.node_id === selectedNodeID) ?? nodes.find((node) => node.node_id === selectedNodeID);
+    return selected ? getNodeTitle(selected) : "";
+  }, [allNodes, nodes, selectedNodeID]);
+
+  const readLiveSelectionTargets = () => {
+    const edges = readFrameLinksFromStorage();
+    const registry = readFrameRegistryFromStorage();
+    return resolveConnectedFrameTargets({ sourceFrameID: mapScope, edges, registry });
+  };
 
   // Keep relationship projection derivation centralized so callers can reuse the exact same
   // filtering logic without triggering additional network calls.
@@ -520,6 +535,10 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
 
   useEffect(() => {
     if (!restoredViewport) return;
+    if (suppressNextSelectionBroadcastRef.current) {
+      suppressNextSelectionBroadcastRef.current = false;
+      return;
+    }
     const explorerKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${mapScope}`;
     if (hasPendingContextStorageUpdate(localStorage.getItem(explorerKey), explorerContextRef.current)) return;
     const contextID = `active_node_selection:${companyID}:${mapScope}`;
@@ -533,6 +552,17 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       timestamp: new Date().toISOString(),
       user_action_type: "node_selection_changed",
     };
+    publishLiveSelection({
+      companyID,
+      entityKind: "node",
+      entityID: selectedNodeID,
+      label: selectedNodeLabel,
+      sourceFrameID: mapScope,
+      sourceModule: "node-map",
+      targetFrameIDs: readLiveSelectionTargets(),
+      changedAt: Date.now(),
+      sequence,
+    });
     emitDashboardEvent(EVENT_NODE_MAP_SELECTION_UPDATED, {
       mapWidgetID: mapScope,
       selectedNodeID,
@@ -546,7 +576,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     if (explorerOrigin && explorerOrigin.selectedEntityID !== selectedNodeID) {
       explorerSelectionOriginRef.current = null;
     }
-  }, [companyID, mapScope, restoredViewport, selectedNodeID]);
+  }, [companyID, mapScope, restoredViewport, selectedNodeID, selectedNodeLabel]);
 
   useEffect(() => {
     setNodePositions((previous) => {
@@ -634,23 +664,31 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
         // ignore malformed explorer context payload
       }
     };
-    const onStorage = (event: StorageEvent) => {
-      if (event.key && event.key !== explorerKey) return;
-      applyExplorerContext();
-    };
-    const onExplorerContextUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ key?: string }>).detail;
-      if (!detail || detail.key !== explorerKey) return;
-      applyExplorerContext();
-    };
+    // Startup/remount restore only. Live Explorer clicks arrive through
+    // SelectionCoordinator below so we never infer a live selection from storage.
     applyExplorerContext();
-    window.addEventListener("storage", onStorage);
-    window.addEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
-    };
   }, [companyID, mapScope, allNodes]);
+
+  useEffect(() => {
+    const applyLiveSelection = (selection: LiveSelectionChange) => {
+      if (selection.companyID !== companyID || selection.sourceFrameID === mapScope) return;
+      if (selection.entityKind === "logic_gate" || selection.folderKind === "logic_gate") return;
+
+      explorerContextRef.current = Math.max(explorerContextRef.current, selection.changedAt);
+      suppressNextSelectionBroadcastRef.current = true;
+      const nextFolderID = selection.folderKind === "node" || selection.entityKind === "folder" ? (selection.folderID ?? selection.entityID) : "";
+      setActiveFolderID(nextFolderID);
+      setActiveFolderLabel(nextFolderID ? (selection.folderLabel ?? selection.label) : "");
+
+      const nextNodeID = selection.entityKind === "node" ? selection.entityID : "";
+      setSelectedNodeID(nextNodeID);
+      setSelectedNodeIDs(nextNodeID ? new Set([nextNodeID]) : new Set());
+    };
+
+    const liveSelection = readLiveSelectionForFrame(companyID, mapScope);
+    if (liveSelection) applyLiveSelection(liveSelection);
+    return subscribeLiveSelection(mapScope, applyLiveSelection);
+  }, [companyID, mapScope]);
 
   useNodeMapPanControls({ panState, setPan, setPanState });
 

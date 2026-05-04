@@ -24,6 +24,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/treePresentation.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/folders/companyExplorerFolders.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/contextSyncContract.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/selectionCoordinator.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/shared.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTabs.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorUndoHistory.test.js"),

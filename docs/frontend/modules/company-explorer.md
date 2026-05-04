@@ -136,6 +136,8 @@ Selection sync hardening update (2026-04-29):
 - This keeps anti-loop behavior while protecting hot-path click reliability for linked Explorer<->Node Map flows.
 
 Selection sync hardening update (2026-05-03):
+- Live selection now flows through `selectionCoordinator.ts` for Explorer, Node Map, Logic Gate Map, Editor, and Kanban. The coordinator event carries the selected entity kind/id directly, so linked modules do not infer live clicks from localStorage snapshots.
+- Explorer still writes scoped context keys for startup/remount restore, but same-tab consumers should treat those keys as fallback only.
 - When a linked map selection event already includes the selected node or logic-gate ID, Explorer applies that event payload directly and does not read debounced map-state storage for sequence-gap recovery.
 - Map-state storage remains a fallback only for gap events that do not carry a selected entity ID. This prevents stale localStorage from jumping the Explorer highlight back to an older row after Explorer drives the map.
 - Explorer rows keep file-explorer drag/drop behavior, but hover uses the normal cursor instead of a grab cursor so the tree does not look like it is always in a drag state.

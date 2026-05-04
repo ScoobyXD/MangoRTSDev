@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, type NodeRecord } from "../node-map/shared";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, toLogicGateCanvasRecord, type LogicGateInformation, type LogicGateRecord } from "../logic-gate-map/shared";
-import { EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
+import { EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
@@ -9,6 +9,7 @@ import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingle
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import type { NodeInformation } from "../node-map/shared";
+import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { EDITOR_TAB_ITEMS, getEditorDocumentIsolationState, type EditorTabID } from "./editorTabs";
 import { classifyEditorInputType, createEditorUndoHistory, recordEditorUndoChange, redoEditorText, resetEditorUndoHistory, snapshotEditorText, snapshotEditorTextArea, undoEditorText, type EditorTextChangeKind, type EditorTextSnapshot } from "./editorUndoHistory";
 import { DEFAULT_EDITOR_OUTLINE_STYLE, EDITOR_TAB_TEXT, insertEditorEnterText, insertEditorTabText, isEditorOutlineStyleID, type EditorOutlineStyleID } from "./plainTextEditing";
@@ -632,30 +633,23 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       }
       applyLinkedNode("");
     };
+    // Initial restore only. Same-tab clicks use SelectionCoordinator payloads
+    // below so the editor does not open a stale peer localStorage snapshot.
     refresh();
-    const onStorage = (event: StorageEvent) => {
-      const mapStateKey = linkedMapWidgetID ? `node-map-state-v1:${companyID}:${linkedMapWidgetID}` : "";
-      const logicContextFrameID = linkedLogicMapWidgetID || linkedMapWidgetID;
-      const logicMapStateKey = logicContextFrameID ? `logic-gate-map-state-v1:${companyID}:${logicContextFrameID}` : "";
-      const explorerContextKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
-      const logicExplorerContextKey = `${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
-      if (event.key && event.key !== mapStateKey && event.key !== logicMapStateKey && event.key !== explorerContextKey && event.key !== logicExplorerContextKey) return;
-      if (event.key === logicExplorerContextKey) {
-        const logicExplorerSelected = readSelectedLogicGateFromExplorerContext();
-        if (logicExplorerSelected.id) {
-          applyLinkedLogicGate(logicExplorerSelected.id, logicExplorerSelected.label);
-          return;
-        }
+    const applyLiveSelection = (selection: LiveSelectionChange) => {
+      if (selection.companyID !== companyID || selection.sourceFrameID === scope) return;
+      if (selection.entityKind === "node") {
+        applyLinkedNode(selection.entityID, selection.label);
+        return;
       }
-      if (event.key === explorerContextKey) {
-        const explorerSelected = readSelectedNodeFromExplorerContext();
-        if (explorerSelected.id) {
-          applyLinkedNode(explorerSelected.id, explorerSelected.label);
-          return;
-        }
+      if (selection.entityKind === "logic_gate") {
+        applyLinkedLogicGate(selection.entityID, selection.label);
+        return;
       }
-      refresh();
+      applyLinkedNode("");
     };
+    const liveSelection = readLiveSelectionForFrame(companyID, scope);
+    if (liveSelection) applyLiveSelection(liveSelection);
     const onMapStateUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
       if (!detail || detail.mapWidgetID !== linkedMapWidgetID) return;
@@ -689,47 +683,13 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       }
       refresh();
     };
-    const onExplorerContextUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ key?: string; targetID?: string }>).detail;
-      if (!detail) return;
-      const expectedKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
-      const expectedLogicKey = `${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
-      if (detail.key !== expectedKey && detail.key !== expectedLogicKey && detail.targetID !== scope) return;
-      if (detail.key === expectedLogicKey) {
-        const logicExplorerSelected = readSelectedLogicGateFromExplorerContext();
-        if (logicExplorerSelected.id) {
-          applyLinkedLogicGate(logicExplorerSelected.id, logicExplorerSelected.label);
-          return;
-        }
-      }
-      if (detail.key === expectedKey) {
-        const explorerSelected = readSelectedNodeFromExplorerContext();
-        if (explorerSelected.id) {
-          applyLinkedNode(explorerSelected.id, explorerSelected.label);
-          return;
-        }
-      }
-      const explorerSelected = readSelectedNodeFromExplorerContext();
-      if (explorerSelected.id) {
-        applyLinkedNode(explorerSelected.id, explorerSelected.label);
-        return;
-      }
-      const logicExplorerSelected = readSelectedLogicGateFromExplorerContext();
-      if (logicExplorerSelected.id) {
-        applyLinkedLogicGate(logicExplorerSelected.id, logicExplorerSelected.label);
-        return;
-      }
-      refresh();
-    };
-    window.addEventListener("storage", onStorage);
+    const unsubscribeLiveSelection = subscribeLiveSelection(scope, applyLiveSelection);
     window.addEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapStateUpdated);
     window.addEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapStateUpdated);
-    window.addEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
     return () => {
-      window.removeEventListener("storage", onStorage);
+      unsubscribeLiveSelection();
       window.removeEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapStateUpdated);
       window.removeEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapStateUpdated);
-      window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
     };
   }, [applyLinkedLogicGate, applyLinkedNode, companyID, linkedLogicMapWidgetID, linkedMapWidgetID, readSelectedLogicGateFromExplorerContext, readSelectedLogicGateFromMap, readSelectedNodeFromExplorerContext, readSelectedNodeFromMap, scope]);
 
