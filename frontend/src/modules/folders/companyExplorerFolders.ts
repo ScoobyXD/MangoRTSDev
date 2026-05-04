@@ -37,11 +37,16 @@ export function getFolderSubtreeIDs(folders: CompanyExplorerFolder[], rootFolder
   const ids = new Set<string>();
   if (!rootFolderID) return ids;
   ids.add(rootFolderID);
+  const rootKind = folders.find((folder) => folder.folder_id === rootFolderID)?.folder_kind;
   let changed = true;
   while (changed) {
     changed = false;
     for (const folder of folders) {
       if (!folder.parent_folder_id) continue;
+      // Folder IDs are globally unique in normal data, but scope traversal still
+      // guards by kind so a bad imported row cannot bleed logic gates into a
+      // node folder map, or nodes into a logic-gate folder map.
+      if (rootKind && folder.folder_kind !== rootKind) continue;
       if (!ids.has(folder.parent_folder_id) || ids.has(folder.folder_id)) continue;
       ids.add(folder.folder_id);
       changed = true;
@@ -126,6 +131,30 @@ export function resolveScopedMapSelectionFallback(args: {
   // the selected item is actually absent from the known graph snapshot.
   const knownItemIDs = args.knownItemIDs instanceof Set ? args.knownItemIDs : new Set(args.knownItemIDs);
   if (knownItemIDs.has(args.selectedID)) return null;
+
+  return Array.from(visibleItemIDs)[0] ?? "";
+}
+
+export function resolveMapSelectionAfterGraphLoad(args: {
+  currentSelectedID: string;
+  restoredSelectedID: string;
+  visibleItemIDs: Iterable<string>;
+  knownItemIDs: Iterable<string>;
+  explorerRequestedID?: string;
+}): string | null {
+  const visibleItemIDs = args.visibleItemIDs instanceof Set ? args.visibleItemIDs : new Set(args.visibleItemIDs);
+  const knownItemIDs = args.knownItemIDs instanceof Set ? args.knownItemIDs : new Set(args.knownItemIDs);
+  const currentSelectedID = args.currentSelectedID.trim();
+
+  // The async graph load can finish after an Explorer click. In that case the
+  // selected ID in memory is fresher than the load's stale closure, so keep it
+  // instead of restoring an older cached map selection or picking row zero.
+  if (currentSelectedID && (knownItemIDs.has(currentSelectedID) || args.explorerRequestedID === currentSelectedID)) {
+    return null;
+  }
+
+  const restoredSelectedID = args.restoredSelectedID.trim();
+  if (restoredSelectedID && visibleItemIDs.has(restoredSelectedID)) return restoredSelectedID;
 
   return Array.from(visibleItemIDs)[0] ?? "";
 }

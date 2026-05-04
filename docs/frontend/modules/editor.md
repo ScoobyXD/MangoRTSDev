@@ -91,6 +91,7 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 - The API still appends history rows to `node_information`, but projection identity now remains stable in `node_projection_table`.
 - Logic-gate text boxes follow the same contract with `logic_gate_information` history rows and `logic_gate_projection_table` latest rows.
 - This prevents textbox duplication after refresh caused by projection-key drift during rapid save/blur sequences.
+- Multiple projection rows per node or logic gate are intentional when they have different `information_id` values. Each row is the latest hot-read value for one document/widget/link/media attachment; updating the same attachment must reuse its stable `information_id` instead of creating a second projection row.
 
 ## Blank-title inline-edit continuity fix (2026-04-29)
 - Editor now keeps the node-title header visible whenever a node is selected, even if the node title is currently blank.

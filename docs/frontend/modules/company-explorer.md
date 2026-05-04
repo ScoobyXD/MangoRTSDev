@@ -146,12 +146,14 @@ Selection sync hardening update (2026-05-03):
 - Root/empty Explorer context is a real broadening command. Node Map and Logic Gate Map clear active folder scope and selection when they receive Explorer context with no selected entity or folder, instead of keeping the previous child selection alive.
 - Node Map and Logic Gate Map suppress cached selection events while a newer Explorer context is pending in storage. This blocks stale cached map selections during unified Map remounts/mode switches.
 - Node Map and Logic Gate Map treat Explorer-selected node/gate IDs as authoritative while a folder scope change is being applied. If the new selected ID is temporarily missing from the currently rendered folder projection, the map keeps that selected ID instead of falling back to the first visible item and broadcasting a false map click back to Explorer.
+- Startup graph loads also preserve the latest live Explorer-selected ID and folder scope. This prevents the first Explorer click after opening `http://localhost:5173/` from being overwritten by an older cached map selection or by the first row in a stale graph-load closure.
 - Graph cache reducers preserve map-layout positions when applying node/gate/relationship deltas, so Explorer-driven creates/deletes and SSE updates cannot accidentally drop layout state and force the map to regenerate positions.
 - Explorer publishes a `selectionIntent` with live selections. Pointer selection uses `activate`, so linked Editor frames can focus the document for immediate typing; keyboard tree navigation uses `navigate`, so Up/Down/Left/Right can be repeated without the Editor stealing focus.
 
 Folder runtime update (2026-05-02):
 - Explorer folders are now durable backend rows, not local-only UI state.
 - `company_explorer_folders` stores nested folders separately for `node` and `logic_gate` trees. A folder can only contain matching node or logic-gate items, which keeps UI behavior and headless API writes aligned.
+- Map folder-scope traversal also guards by folder kind. The backend already rejects mixed-kind parents, but this client-side guard keeps imported or repaired data from bleeding logic-gate folders into node maps, or node folders into logic-gate maps.
 - `company_explorer_folder_items` stores one placement per node or logic gate, matching file-explorer move semantics.
 - Folder and folder-item rows carry sparse integer `position` values. New API-created rows append after both folder and item siblings in the same parent, so the backend preserves the mixed order users see instead of maintaining separate folder/item queues. Reorder writes usually update one row; compaction is limited to the visible sibling set only when adjacent positions no longer have numeric room.
 - The tree has one `Company` root row. It is collapsible, and a brand-new company renders no child rows until folders, nodes, or logic gates are created.

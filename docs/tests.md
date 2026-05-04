@@ -207,10 +207,12 @@ Use this checklist format and keep it complete.
 - [x] `tests/frontend/modules/folders/companyExplorerFolders.test.ts`
   - nested folder subtree expansion for map scope
   - node folder filtering keeps only folder/descendant contents
+  - folder subtree traversal stays inside the root folder kind so node and logic-gate scopes cannot bleed together
   - relationship filtering keeps only relationships whose endpoints are both in scope
   - logic-gate folder filtering ignores node placements and hides cross-scope relationships
   - scoped map selection preserves Explorer-requested IDs during folder projection handoff
   - scoped map selection only falls back to the first visible item after the selected ID is absent from the known graph snapshot
+  - startup graph-load selection preserves newer Explorer intent instead of restoring stale cached map selection
 - [x] `tests/frontend/modules/contextSyncContract.test.ts`
   - stale event rejection when incoming sequence is older than last applied
   - duplicate event idempotency guard for repeated delivery
