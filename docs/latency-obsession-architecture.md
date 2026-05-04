@@ -5,8 +5,10 @@ Design the MangoOS architecture for:
 - 1000000s of companies
 - Each company having 1000000s of users and ai agents
 - All having 1000000s of UI elements and simultaneous background operations
-- All of this with strict latency culture with sub-100ms targets for interactive reads
-- ***THIS IS SUPER IMPORTandANT:*** In the future we will have ai agents operate this app without a UI, so we need to make sure everything can be done by ai agents headless with just APIs. The future of the company relies on our ability to integrate agents, and to do that, we need APIs. And of course, it needs to work well with 10000s of ai agents all using the apis all at once.
+- All of this with strict latency culture with sub-100ms targets
+- All of this with strict robustness and reliability
+- ***THIS IS SUPER IMPORTANT:*** In the future we will have ai agents operate this app without a UI, so we need to make sure everything can be done by ai agents headless with just APIs. This will be the main way entities will interact with MangoRTS in the future. The future of the company relies on our ability to integrate agents, and to do that, we need APIs. And of course, it needs to work well with millions of ai agents all using the apis at the same time.
+- MangoRTS will use AWS as the cloud provider. Write code and design data access patterns efficiently to minimize cloud cost because the app and database will be hosted on cloud services.
 
 This document is the source of truth for architecture decisions and execution tracking.
 ---
