@@ -19,6 +19,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/nodeMapLayout.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/mapGridBackground.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipDeleteSummary.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/nodeMapCommands.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/editorCanvasKeydownRouting.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/explorerSync.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/treePresentation.test.js"),
@@ -26,6 +27,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/contextSyncContract.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/selectionCoordinator.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/shared.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanCommands.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTabs.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorUndoHistory.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/plainTextEditing.test.js"),
@@ -50,6 +52,7 @@ for (const testFile of testFiles) {
   let contents = readFileSync(testFile, "utf8");
   contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/relationshipProjection"', '"../../../../frontend/src/modules/node-map/relationshipProjection.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/relationshipDeleteSummary"', '"../../../../frontend/src/modules/node-map/relationshipDeleteSummary.js"');
+  contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/nodeMapCommands"', '"../../../../frontend/src/modules/node-map/nodeMapCommands.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/NodeMapControls"', '"../../../../frontend/src/modules/node-map/NodeMapControls.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/shared"', '"../../../../frontend/src/modules/node-map/shared.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/logic-gate-map/shared"', '"../../../../frontend/src/modules/logic-gate-map/shared.js"');

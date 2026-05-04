@@ -1,0 +1,67 @@
+import type { CompanyExplorerFolderKind, CompanyExplorerItemType } from "../folders/companyExplorerFolders";
+import type {
+  ExplorerCreationTargets,
+  ExplorerDropPayload,
+  ExplorerFindEntity,
+  ExplorerRowDropPlacement,
+  ExplorerSelectionDomain,
+  resolveExplorerDeleteTarget,
+  resolveExplorerRenameTarget,
+} from "./treePresentation";
+
+export type ExplorerTreeNode = {
+  id: string;
+  label: string;
+  depth: number;
+  kind: "folder" | "node" | "logic_gate" | "kanban";
+  nodeID?: string;
+  logicGateID?: string;
+  kanbanBoardID?: string;
+  folderID?: string;
+  parentFolderID?: string;
+  folderKind?: CompanyExplorerFolderKind;
+  folderLabel?: string;
+  scopeLevel: number;
+  position: number;
+  createdTimestamp: string;
+};
+
+export type ExplorerDragPayload = ExplorerDropPayload;
+export type ExplorerDeleteTarget = NonNullable<ReturnType<typeof resolveExplorerDeleteTarget>>;
+export type ExplorerRenameTarget = NonNullable<ReturnType<typeof resolveExplorerRenameTarget>>;
+export type ExplorerRenameDraft = { treeID: string; target: ExplorerRenameTarget; value: string };
+export type ExplorerRowOrderUpdate = { row: ExplorerTreeNode; position: number };
+export type ExplorerFindTarget = { kind: "node"; id: string } | { kind: "logic_gate"; id: string };
+export type CompanyExplorerFindRequestDetail = {
+  companyID?: string;
+  sourceFrameID?: string;
+  targetFrameIDs?: string[];
+  entities?: Array<{ kind?: string; id?: string }>;
+  changedAt?: number;
+};
+
+export type CompanyExplorerContextMenuState = {
+  x: number;
+  y: number;
+  targets: ExplorerCreationTargets;
+  deleteTarget: ExplorerDeleteTarget | null;
+  renameTarget: ExplorerRenameTarget | null;
+  findTarget: ExplorerFindTarget | null;
+  renameTreeID: string;
+  renameLabel: string;
+  contextKind: CompanyExplorerFolderKind | null;
+  kanbanParentFolderID: string;
+  canCreateBothFolderTypes: boolean;
+};
+
+export type ExplorerVirtualizedTree = {
+  rows: ExplorerTreeNode[];
+  topSpacer: number;
+  bottomSpacer: number;
+};
+
+export type {
+  ExplorerFindEntity,
+  ExplorerRowDropPlacement,
+  ExplorerSelectionDomain,
+};

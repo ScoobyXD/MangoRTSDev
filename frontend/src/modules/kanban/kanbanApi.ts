@@ -1,4 +1,4 @@
-import type { KanbanBoard, KanbanCard, KanbanColumn } from "./shared";
+import type { KanbanBoard, KanbanCard, KanbanColumn } from "./shared.js";
 
 type FetchJSONOptions = {
   method?: string;
