@@ -111,6 +111,10 @@ create table if not exists node_projection_table (
   foreign key (company_id, node_id) references nodes (company_id, node_id)
 );
 
+create unique index if not exists idx_node_projection_table_one_text_box
+  on node_projection_table(company_id, node_id, type)
+  where type = 'Text box'::information_type;
+
 create table if not exists node_map_positions (
   company_id uuid not null,
   node_id uuid not null,
@@ -179,6 +183,10 @@ create table if not exists logic_gate_projection_table (
   primary key (company_id, logic_gate_id, information_id),
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
 );
+
+create unique index if not exists idx_logic_gate_projection_table_one_text_box
+  on logic_gate_projection_table(company_id, logic_gate_id, type)
+  where type = 'Text box'::information_type;
 
 create table if not exists logic_gate_map_positions (
   company_id uuid not null,
@@ -317,6 +325,21 @@ The previous grouped/filter query indexes were removed with the query surface.
 - Updated Timestamp (TIMESTAMPTZ) -> `node_information.updated_timestamp`
 - Constraint: `node_information_nonblank_chk` rejects whitespace-only information.
 
+### Node Projection Schema
+
+- Company ID (UUIDv7) (FK) -> `node_projection_table.company_id`
+- Node ID (UUIDv7) (FK) -> `node_projection_table.node_id`
+- Information ID (UUIDv7) -> `node_projection_table.information_id`
+- Type (Enum: text box, checklist, status, due date, employee name, pdf, png, mov, hyperlink) -> `node_projection_table.type`
+- Information (Text) -> `node_projection_table.information`
+- Created Timestamp (TIMESTAMPTZ) -> `node_projection_table.created_timestamp`
+- Updated Timestamp (TIMESTAMPTZ) -> `node_projection_table.updated_timestamp`
+- Constraint: `node_projection_table_nonblank_chk` rejects whitespace-only information.
+- Primary key: `(company_id, node_id, information_id)` keeps one latest row per stable non-editor info identity.
+- Unique index: `idx_node_projection_table_one_text_box` keeps one current `Text box` projection per node because the current Editor has one document surface per node.
+
+`node_information` is durable append-only history. `node_projection_table` is the hot read model for current values used by UI clients and headless agents.
+
 ### Logic Gate Schema
 
 - Company ID (UUIDv7) (FK) -> `logic_gates.company_id`
@@ -357,7 +380,8 @@ The previous grouped/filter query indexes were removed with the query surface.
 - Created Timestamp (TIMESTAMPTZ) -> `logic_gate_projection_table.created_timestamp`
 - Updated Timestamp (TIMESTAMPTZ) -> `logic_gate_projection_table.updated_timestamp`
 - Constraint: `logic_gate_projection_table_nonblank_chk` rejects whitespace-only information.
-- Primary key: `(company_id, logic_gate_id, information_id)` keeps one latest row per stable text-box/info identity.
+- Primary key: `(company_id, logic_gate_id, information_id)` keeps one latest row per stable non-editor info identity.
+- Unique index: `idx_logic_gate_projection_table_one_text_box` keeps one current `Text box` projection per logic gate because the current Editor has one document surface per logic gate.
 
 `logic_gate_information` is the durable history table. `logic_gate_projection_table` is the hot read model for current values used by UI clients and headless agents.
 

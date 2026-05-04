@@ -37,6 +37,34 @@ func TestMemoryRepo_AddNodeInformation_ProjectionKeyStaysStableWhenInformationID
 	}
 }
 
+func TestMemoryRepo_AddNodeInformation_TextBoxProjectionCollapsesToOneCurrentDocument(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+
+	node, err := repo.CreateNode(companyID, "Single editor document node")
+	if err != nil {
+		t.Fatalf("CreateNode failed: %v", err)
+	}
+
+	if _, err := repo.AddNodeInformation(companyID, node.NodeID, "Text box", "old document", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"); err != nil {
+		t.Fatalf("first AddNodeInformation failed: %v", err)
+	}
+	if _, err := repo.AddNodeInformation(companyID, node.NodeID, "Text box", "current document", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"); err != nil {
+		t.Fatalf("second AddNodeInformation failed: %v", err)
+	}
+
+	projections, err := repo.ListNodeProjections(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListNodeProjections failed: %v", err)
+	}
+	if len(projections) != 1 {
+		t.Fatalf("expected one current Text box projection, got %d", len(projections))
+	}
+	if projections[0].Information != "current document" {
+		t.Fatalf("projection information = %q, want current document", projections[0].Information)
+	}
+}
+
 func TestMemoryRepo_DeleteNode_RemovesProjectionRows(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"
@@ -217,6 +245,34 @@ func TestMemoryRepo_AddLogicGateInformation_ProjectionKeyStaysStableAndHistoryAp
 	}
 	if projections[0].Information != "second logic snapshot" {
 		t.Fatalf("expected latest projection information to be updated, got %q", projections[0].Information)
+	}
+}
+
+func TestMemoryRepo_AddLogicGateInformation_TextBoxProjectionCollapsesToOneCurrentDocument(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+
+	logicGate, err := repo.CreateLogicGate(companyID, "Single editor document gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate failed: %v", err)
+	}
+
+	if _, err := repo.AddLogicGateInformation(companyID, logicGate.LogicGateID, "Text box", "old logic document", "cccccccc-cccc-4ccc-8ccc-cccccccccccc"); err != nil {
+		t.Fatalf("first AddLogicGateInformation failed: %v", err)
+	}
+	if _, err := repo.AddLogicGateInformation(companyID, logicGate.LogicGateID, "Text box", "current logic document", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"); err != nil {
+		t.Fatalf("second AddLogicGateInformation failed: %v", err)
+	}
+
+	projections, err := repo.ListLogicGateProjections(companyID, logicGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("ListLogicGateProjections failed: %v", err)
+	}
+	if len(projections) != 1 {
+		t.Fatalf("expected one current Text box projection, got %d", len(projections))
+	}
+	if projections[0].Information != "current logic document" {
+		t.Fatalf("projection information = %q, want current logic document", projections[0].Information)
 	}
 }
 

@@ -176,6 +176,14 @@ psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME 
 
 These tables store the latest shared Node Map and Logic Gate Map positions by company/entity so UI users and headless agents read and write the same canonical layout.
 
+For existing databases that may contain multiple editor `Text box` projection rows for the same node or logic gate, run:
+
+```powershell
+psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260504_editor_text_projection_canonical.sql
+```
+
+This keeps append-only information history, deletes duplicate hot `Text box` projection rows after keeping the newest one, and adds partial unique indexes so the current one-document Editor contract stays deterministic for browsers and headless API clients.
+
 ## API endpoints (MVP canonical set)
 
 - `GET /healthz`

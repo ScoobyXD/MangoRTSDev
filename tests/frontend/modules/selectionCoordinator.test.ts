@@ -31,6 +31,12 @@ test("rejects older cross-source selections so delayed echoes cannot win", () =>
   assert.equal(shouldAcceptLiveSelection(current, delayedEcho), false);
 });
 
+test("accepts same-millisecond cross-source selections by arrival order", () => {
+  const current = selection({ sourceFrameID: "map-1", sourceModule: "logic-gate-map", changedAt: 2000, sequence: 999 });
+  const explorerClick = selection({ sourceFrameID: "explorer-1", sourceModule: "company-explorer", changedAt: 2000, sequence: 1 });
+  assert.equal(shouldAcceptLiveSelection(current, explorerClick), true);
+});
+
 test("publishes selected entity directly to target frames without storing source echo", () => {
   const companyID = "company-selection-publish-test";
   publishLiveSelection({

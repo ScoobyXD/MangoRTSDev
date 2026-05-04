@@ -12,7 +12,7 @@ import { createKanbanBoard, deleteKanbanBoard, listKanbanBoards, updateKanbanBoa
 import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, getKanbanBoardDisplayTitle, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem, type KanbanBoard } from "../kanban/shared";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
-import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, formatExplorerFolderLabel, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerDropTarget, resolveExplorerKeyboardNavigation, resolveExplorerRenameTarget, resolveExplorerRootDropTarget, shouldAcceptMapSelectionAfterExplorerSelection, type ExplorerCreationTargets, type ExplorerDropPayload, type ExplorerFindEntity, type ExplorerRowDropPlacement, type ExplorerSelectionDomain } from "./treePresentation";
+import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, formatExplorerFolderLabel, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerDropTarget, resolveExplorerKeyboardNavigation, resolveExplorerPublishedSelection, resolveExplorerRenameTarget, resolveExplorerRootDropTarget, shouldAcceptMapSelectionAfterExplorerSelection, type ExplorerCreationTargets, type ExplorerDropPayload, type ExplorerFindEntity, type ExplorerRowDropPlacement, type ExplorerSelectionDomain } from "./treePresentation";
 
 type ExplorerTreeNode = {
   id: string;
@@ -1786,20 +1786,26 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       explorerContextSequenceRef.current += 1;
       const changedAt = Date.now();
       const targetFrameIDs = Array.from(targetIDs);
-      const selectedEntityKind = selectedKanbanBoardID ? "kanban" : selectedLogicGateID ? "logic_gate" : selectedNodeID ? "node" : "folder";
-      const selectedEntityID = selectedKanbanBoardID || selectedLogicGateID || selectedNodeID || selectedFolderID;
+      const publishedSelection = resolveExplorerPublishedSelection({
+        selectedTreeID,
+        selectedNodeID,
+        selectedLogicGateID,
+        selectedKanbanBoardID,
+        selectedFolderID,
+        selectedFolderKind,
+      });
       const selectedEntityIDs = Array.from(selectedTreeIDs).map((treeID) => {
-        if (selectedEntityKind === "node" && treeID.startsWith("node-")) return treeID.slice("node-".length);
-        if (selectedEntityKind === "logic_gate" && treeID.startsWith("logic-gate-")) return treeID.slice("logic-gate-".length);
-        if (selectedEntityKind === "kanban" && treeID.startsWith("kanban-")) return treeID.slice("kanban-".length);
+        if (publishedSelection.entityKind === "node" && treeID.startsWith("node-")) return treeID.slice("node-".length);
+        if (publishedSelection.entityKind === "logic_gate" && treeID.startsWith("logic-gate-")) return treeID.slice("logic-gate-".length);
+        if (publishedSelection.entityKind === "kanban" && treeID.startsWith("kanban-")) return treeID.slice("kanban-".length);
         return "";
       }).filter(Boolean);
       const selectionIntent = pendingExplorerSelectionIntentRef.current;
       publishLiveSelection({
         companyID,
-        entityKind: selectedEntityKind,
-        entityID: selectedEntityID,
-        label: selectedKanbanBoardLabel || selectedTree?.label || "",
+        entityKind: publishedSelection.entityKind,
+        entityID: publishedSelection.entityID,
+        label: selectedTree?.label || selectedKanbanBoardLabel || "",
         sourceFrameID: scope,
         sourceModule: "company-explorer",
         targetFrameIDs,
@@ -1813,15 +1819,25 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         sequence: explorerContextSequenceRef.current,
         selectionIntent,
       });
-      if (selectedKanbanBoardID) return;
+      if (publishedSelection.selectedKanbanBoardID) return;
       for (const targetID of targetIDs) {
         if (!targetID) continue;
         const targetKind = classifyFrameKind(registry[targetID]?.kind ?? "");
-        const isLogicGateContext = selectedLogicGateID.trim().length > 0 || selectedFolderKind === "logic_gate" || (!selectedNodeID && !selectedFolderKind && targetKind === "logic-map");
-        const payload = {
-          sourceExplorerID: scope,
+        const targetSelection = resolveExplorerPublishedSelection({
+          selectedTreeID,
           selectedNodeID,
           selectedLogicGateID,
+          selectedKanbanBoardID,
+          selectedFolderID,
+          selectedFolderKind,
+          targetFrameKind: targetKind,
+        });
+        const payload = {
+          sourceExplorerID: scope,
+          // The tree row is the user's primary intent. Normalizing here keeps
+          // stale opposite-domain state from sending a node click to a logic map.
+          selectedNodeID: targetSelection.selectedNodeID,
+          selectedLogicGateID: targetSelection.selectedLogicGateID,
           selectedFolderID,
           selectedFolderKind,
           selectedFolderLabel,
@@ -1838,7 +1854,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
             user_action_type: "explorer_selection_changed",
           } satisfies ContextMutationEnvelope,
         };
-        const keyPrefix = isLogicGateContext ? LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX : NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX;
+        const keyPrefix = targetSelection.isLogicGateContext ? LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX : NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX;
         const key = `${keyPrefix}:${companyID}:${targetID}`;
         localStorage.setItem(key, JSON.stringify(payload));
         emitDashboardEvent(EVENT_EXPLORER_CONTEXT_UPDATED, { key, sourceExplorerID: scope, targetID });

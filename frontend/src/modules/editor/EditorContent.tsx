@@ -15,6 +15,7 @@ import { classifyEditorInputType, createEditorUndoHistory, recordEditorUndoChang
 import { applyEditorInlineFormat, DEFAULT_EDITOR_OUTLINE_STYLE, deleteEditorBackspaceText, EDITOR_TAB_TEXT, insertEditorEnterText, insertEditorTabText, isEditorOutlineStyleID, type EditorInlineFormatCommand, type EditorOutlineStyleID } from "./plainTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
 import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
+import { selectCurrentEditorTextProjection } from "./editorProjection";
 
 type LinkedEntityKind = "node" | "logic_gate";
 
@@ -674,7 +675,25 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [readLinkedLogicMapWidgetID, readLinkedMapWidgetID]);
 
   useEffect(() => {
+    const applyLiveSelection = (selection: LiveSelectionChange) => {
+      if (selection.companyID !== companyID || selection.sourceFrameID === scope) return;
+      const focusEditor = selection.selectionIntent !== "navigate";
+      if (selection.entityKind === "node") {
+        applyLinkedNode(selection.entityID, selection.label, { focusEditor });
+        return;
+      }
+      if (selection.entityKind === "logic_gate") {
+        applyLinkedLogicGate(selection.entityID, selection.label, { focusEditor });
+        return;
+      }
+      applyLinkedNode("", "", { focusEditor });
+    };
     const refresh = () => {
+      const liveSelection = readLiveSelectionForFrame(companyID, scope);
+      if (liveSelection) {
+        applyLiveSelection(liveSelection);
+        return;
+      }
       const selectedFromMap = readSelectedNodeFromMap(linkedMapWidgetID);
       if (selectedFromMap) {
         applyLinkedNode(selectedFromMap);
@@ -700,21 +719,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     // Initial restore only. Same-tab clicks use SelectionCoordinator payloads
     // below so the editor does not open a stale peer localStorage snapshot.
     refresh();
-    const applyLiveSelection = (selection: LiveSelectionChange) => {
-      if (selection.companyID !== companyID || selection.sourceFrameID === scope) return;
-      const focusEditor = selection.selectionIntent !== "navigate";
-      if (selection.entityKind === "node") {
-        applyLinkedNode(selection.entityID, selection.label, { focusEditor });
-        return;
-      }
-      if (selection.entityKind === "logic_gate") {
-        applyLinkedLogicGate(selection.entityID, selection.label, { focusEditor });
-        return;
-      }
-      applyLinkedNode("", "", { focusEditor });
-    };
-    const liveSelection = readLiveSelectionForFrame(companyID, scope);
-    if (liveSelection) applyLiveSelection(liveSelection);
     const onMapStateUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
       if (!detail || detail.mapWidgetID !== linkedMapWidgetID) return;
@@ -827,23 +831,22 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           setLinkedNodeTitle(getLogicGateTitle({ header: details.logic_gate.header, title: details.logic_gate.header }));
           const nonText = details.information.filter((item) => item.type !== "Text box");
           const textBoxes = projections.filter((item) => item.type === "Text box");
-          const nonBlankTextBoxes = textBoxes.filter((item) => item.information.trim().length > 0);
           setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
           setLinkedNodeMetadataRows([
             { label: "Logic Gate ID", value: details.logic_gate.logic_gate_id },
             { label: "Created", value: details.logic_gate.created_timestamp },
             { label: "Relationships", value: String(details.relationships.length) },
             { label: "Information records", value: String(details.information.length) },
-            { label: "Text boxes", value: String(projections.length) },
+            { label: "Text boxes", value: String(textBoxes.length) },
           ]);
           const historyRows = [
             details.logic_gate.created_timestamp ? `Logic gate created at ${details.logic_gate.created_timestamp}` : "Logic gate created",
             ...details.information.slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`),
           ];
           setLinkedNodeHistoryRows(historyRows);
-          const first = nonBlankTextBoxes[0] ?? projections[0];
-          const initialDocument = first?.information ?? "";
-          applyLoadedDocument("logic_gate", linkedNodeID, first?.information_id ?? "", initialDocument);
+          const currentTextBox = selectCurrentEditorTextProjection(projections);
+          const initialDocument = currentTextBox?.information ?? "";
+          applyLoadedDocument("logic_gate", linkedNodeID, currentTextBox?.information_id ?? "", initialDocument);
           return;
         }
         const [details, projections] = await Promise.all([
@@ -853,22 +856,23 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         if (cancelled) return;
         setLinkedNodeTitle(getNodeTitle(details.node));
         const nonText = details.information.filter((item) => item.type !== "Text box");
+        const textBoxes = projections.filter((item) => item.type === "Text box");
         setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
         setLinkedNodeMetadataRows([
           { label: "Node ID", value: details.node.node_id },
           { label: "Created", value: details.node.created_timestamp },
           { label: "Relationships", value: String(details.relationships.length) },
           { label: "Information records", value: String(details.information.length) },
-          { label: "Text boxes", value: String(projections.length) },
+          { label: "Text boxes", value: String(textBoxes.length) },
         ]);
         const historyRows = [
           details.node.created_timestamp ? `Node created at ${details.node.created_timestamp}` : "Node created",
           ...details.information.slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`),
         ];
         setLinkedNodeHistoryRows(historyRows);
-        const first = projections.find((item) => item.information.trim().length > 0) ?? projections[0];
-        const initialDocument = first?.information ?? "";
-        applyLoadedDocument("node", linkedNodeID, first?.information_id ?? "", initialDocument);
+        const currentTextBox = selectCurrentEditorTextProjection(projections);
+        const initialDocument = currentTextBox?.information ?? "";
+        applyLoadedDocument("node", linkedNodeID, currentTextBox?.information_id ?? "", initialDocument);
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load linked information");
       }

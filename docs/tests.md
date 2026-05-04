@@ -204,6 +204,8 @@ Use this checklist format and keep it complete.
   - verifies delete actions only resolve for concrete folder/node/logic-gate records
   - verifies plain click, additive Shift-click range, and Ctrl-click toggle selection behavior
   - verifies find-on-Explorer selection expands ancestor folders and filters unknown duplicate entities
+  - verifies published linked-frame selection follows the active tree row during node/logic-gate domain switches
+  - verifies folder selection targets the matching node-map or logic-gate-map context
 - [x] `tests/frontend/modules/folders/companyExplorerFolders.test.ts`
   - nested folder subtree expansion for map scope
   - node folder filtering keeps only folder/descendant contents
@@ -223,6 +225,12 @@ Use this checklist format and keep it complete.
   - ignores map-originated no-op selection echoes so suppression latches do not eat subsequent Explorer clicks
   - applies map selections only when Explorer semantic selection actually changes
   - scopes Explorer broadcast emission to semantic selection changes (node/tree)
+- [x] `tests/frontend/modules/selectionCoordinator.test.ts`
+  - rejects stale same-source selections
+  - rejects older cross-source delayed echoes
+  - accepts same-millisecond cross-source selections by arrival order because source-local sequences are not comparable
+  - publishes selected entities directly to target frames without storing source echoes
+  - preserves navigation intent for keyboard-driven Explorer selection
 - [x] `tests/frontend/modules/kanban/shared.test.ts`
   - sanitizes Company Explorer drag payloads for Kanban drops
   - keeps Kanban board drops node-only while still parsing legacy and batch drag payloads
@@ -253,6 +261,9 @@ Use this checklist format and keep it complete.
   - creates guides only across actual indented line runs
   - closes nested guides when indentation drops
   - continues guides through blank lines inside an indented block
+- [x] `tests/frontend/modules/editor/editorProjection.test.ts`
+  - selects the newest `Text box` projection for the single editor document
+  - ignores non-text projections for the editor textarea document load
 - [x] `backend/internal/http/server_test.go`
   - relationship position-pair legality helper (Parent/Child, Child/Parent, Peer/Peer only)
   - workspace snapshot conditional GET contract (`If-None-Match` => `304 Not Modified` when data is unchanged)
@@ -262,6 +273,7 @@ Use this checklist format and keep it complete.
   - logic gate relationship position-pair legality helper (Input/Output or Output/Input only)
   - logic gate create/read/information/relationship API flow
   - node and logic-gate information APIs reject blank/whitespace-only `information` so empty editor blurs do not persist rows
+  - node projection API collapses multiple editor `Text box` information IDs to one current hot-read document while preserving history
   - Company Explorer folder APIs create nested folders, rename and move folders, reject cyclic folder moves, assign/reorder node placements, append new folders/items after mixed visible siblings, delete node/logic-gate relationships when folder-item moves cross folder levels, and include folder data in workspace snapshots
   - Kanban column create/rename and node card API flow
   - Kanban rejects logic-gate card creation through the headless card API
@@ -272,6 +284,7 @@ Use this checklist format and keep it complete.
   - Kanban card reads honor `after_position` pagination for bounded hot-path reads
 - [x] `backend/internal/store/memory_test.go`
   - node and logic-gate deletes remove projection rows
+  - node and logic-gate `Text box` projections collapse to one current editor document row
   - node and logic-gate deletes remove Kanban card placements for the deleted item
   - operation history is retained while deleted item pointers are cleared
 
