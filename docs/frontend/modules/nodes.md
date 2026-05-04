@@ -229,6 +229,7 @@ This replaces the old incorrect vertical swap behavior.
 - Right-clicking a relationship line opens a relationship context menu with **Delete relationship** (or plural delete when a selected line group is active).
 - Deletes call `DELETE /v1/node-relationships/:node_relationship_id`.
 - Relationship-line delete operations remove only relationship rows; connected nodes remain intact.
+- Batch relationship deletion now routes the request de-dupe and partial-failure summary through `frontend/src/modules/node-map/nodeMapCommands.ts`, so the same command behavior can be tested or reused without rendering the Node Map canvas.
 
 ---
 

@@ -171,7 +171,7 @@ Rules:
 - Prefer focused hooks, helpers, and leaf components over expanding large host components.
 - Do not edit hot host files unless necessary.
 - If you touch a hot file, explain why in the final response.
-- Preserve the operating principle: latency, reliability, headless APIs, AWS cost efficiency, simplest solution possible.
+- Preserve the operating principle: latency, reliability, headless APIs, AWS cost efficiency, simplest solution possible, and code architecture that can support 20 agents developing simultaneously.
 
 Before final:
 - run powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .

@@ -1,0 +1,234 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  addExplorerNodesToKanbanColumnCommand,
+  createKanbanColumnCommand,
+  deleteKanbanCardsCommand,
+  reorderKanbanCardsCommand,
+  reorderKanbanColumnsCommand,
+  type KanbanCommandClient,
+  type KanbanCommandContext,
+} from "../../../../frontend/src/modules/kanban/kanbanCommands.js";
+import {
+  KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
+  KANBAN_DEFAULT_COLUMN_WIDTH_PX,
+  type KanbanCard,
+  type KanbanColumn,
+} from "../../../../frontend/src/modules/kanban/shared.js";
+
+const context: KanbanCommandContext = {
+  apiBase: "https://api.test",
+  companyID: "company-1",
+  boardID: "board-1",
+};
+
+function column(overrides: Partial<KanbanColumn>): KanbanColumn {
+  return {
+    company_id: context.companyID,
+    board_id: context.boardID,
+    column_id: "todo",
+    title: "Todo",
+    position: 1000,
+    width_px: KANBAN_DEFAULT_COLUMN_WIDTH_PX,
+    height_px: KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
+    item_color: "#2f7d62",
+    created_timestamp: "2026-05-01T00:00:00.000Z",
+    updated_timestamp: "2026-05-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function card(overrides: Partial<KanbanCard>): KanbanCard {
+  return {
+    company_id: context.companyID,
+    board_id: context.boardID,
+    card_id: "card-1",
+    column_id: "todo",
+    node_id: "node-1",
+    node_title: "Node 1",
+    description_snapshot: "",
+    position: 1000,
+    created_timestamp: "2026-05-01T00:00:00.000Z",
+    updated_timestamp: "2026-05-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function createClient(): {
+  client: KanbanCommandClient;
+  calls: {
+    createColumn: unknown[][];
+    updateColumn: unknown[];
+    moveCard: unknown[];
+    upsertCard: unknown[];
+    deleteCard: string[];
+    deleteColumn: string[];
+  };
+} {
+  const calls = {
+    createColumn: [] as unknown[][],
+    updateColumn: [] as unknown[],
+    moveCard: [] as unknown[],
+    upsertCard: [] as unknown[],
+    deleteCard: [] as string[],
+    deleteColumn: [] as string[],
+  };
+  const client: KanbanCommandClient = {
+    async createColumn(apiBase, companyID, boardID, title, position, widthPx, heightPx, itemColor) {
+      calls.createColumn.push([apiBase, companyID, boardID, title, position, widthPx, heightPx, itemColor]);
+      return column({
+        column_id: "created-column",
+        title,
+        position: position ?? 0,
+        width_px: widthPx ?? 0,
+        height_px: heightPx ?? 0,
+        item_color: itemColor ?? "#2f7d62",
+      });
+    },
+    async updateColumn(args) {
+      calls.updateColumn.push(args);
+      return column({
+        column_id: args.columnID,
+        title: args.title ?? "Updated",
+        position: args.position ?? 1000,
+        width_px: args.widthPx ?? KANBAN_DEFAULT_COLUMN_WIDTH_PX,
+        height_px: args.heightPx ?? KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
+        item_color: args.itemColor ?? "#2f7d62",
+      });
+    },
+    async deleteColumn(_apiBase, _companyID, _boardID, columnID) {
+      calls.deleteColumn.push(columnID);
+    },
+    async moveCard(args) {
+      calls.moveCard.push(args);
+      return card({
+        card_id: args.cardID,
+        column_id: args.columnID,
+        position: args.position,
+      });
+    },
+    async upsertCard(args) {
+      calls.upsertCard.push(args);
+      return card({
+        card_id: `card-${args.nodeID}`,
+        column_id: args.columnID,
+        node_id: args.nodeID,
+        node_title: args.nodeTitle,
+        position: args.position,
+      });
+    },
+    async deleteCard(_apiBase, _companyID, _boardID, cardID) {
+      calls.deleteCard.push(cardID);
+    },
+  };
+  return { client, calls };
+}
+
+test("createKanbanColumnCommand creates one bounded column write with default layout", async () => {
+  const { client, calls } = createClient();
+  const result = await createKanbanColumnCommand({
+    context,
+    columns: [
+      column({ column_id: "todo", position: 1000 }),
+      column({ column_id: "done", position: 3000 }),
+    ],
+    client,
+  });
+
+  assert.equal(result.column_id, "created-column");
+  assert.deepEqual(calls.createColumn[0], [
+    context.apiBase,
+    context.companyID,
+    context.boardID,
+    "New Column Name",
+    4000,
+    KANBAN_DEFAULT_COLUMN_WIDTH_PX,
+    KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
+    undefined,
+  ]);
+});
+
+test("reorderKanbanColumnsCommand plans sparse positions and persists only changed columns", async () => {
+  const { client, calls } = createClient();
+  const optimistic: KanbanColumn[][] = [];
+  const result = await reorderKanbanColumnsCommand({
+    context,
+    columns: [
+      column({ column_id: "left", position: 1000 }),
+      column({ column_id: "middle", position: 2000 }),
+      column({ column_id: "right", position: 3000 }),
+    ],
+    draggedColumnID: "left",
+    targetColumnID: null,
+    onOptimisticColumns: (columns) => optimistic.push(columns),
+    client,
+  });
+
+  assert.deepEqual(result.columns.map((item) => item.column_id), ["middle", "right", "left"]);
+  assert.deepEqual(result.updates, [{ columnID: "left", position: 4000 }]);
+  assert.equal(calls.updateColumn.length, 1);
+  assert.deepEqual(optimistic[0].map((item) => item.column_id), ["middle", "right", "left"]);
+});
+
+test("reorderKanbanCardsCommand shares selected-card move semantics with headless callers", async () => {
+  const { client, calls } = createClient();
+  const result = await reorderKanbanCardsCommand({
+    context,
+    cards: [
+      card({ card_id: "todo-a", node_id: "node-a", column_id: "todo", position: 1000 }),
+      card({ card_id: "todo-b", node_id: "node-b", column_id: "todo", position: 2000 }),
+      card({ card_id: "doing-a", node_id: "node-c", column_id: "doing", position: 1000 }),
+      card({ card_id: "doing-b", node_id: "node-d", column_id: "doing", position: 2000 }),
+    ],
+    cardIDs: ["todo-a", "todo-b"],
+    columnID: "doing",
+    targetCardID: "doing-b",
+    client,
+  });
+
+  assert.deepEqual(result.updates, [
+    { cardID: "todo-a", columnID: "doing", position: 1333 },
+    { cardID: "todo-b", columnID: "doing", position: 1666 },
+  ]);
+  assert.equal(calls.moveCard.length, 2);
+  assert.deepEqual(result.persistedCards.map((item) => item.card_id), ["todo-a", "todo-b"]);
+});
+
+test("addExplorerNodesToKanbanColumnCommand dedupes drag rows before API upserts", async () => {
+  const { client, calls } = createClient();
+  const optimistic: KanbanCard[][] = [];
+  const result = await addExplorerNodesToKanbanColumnCommand({
+    context,
+    cards: [card({ card_id: "existing", node_id: "node-0", column_id: "todo", position: 1000 })],
+    columnID: "todo",
+    items: [
+      { nodeID: " node-1 ", label: " Alpha " },
+      { nodeID: "node-1", label: "Duplicate" },
+      { nodeID: "node-2", label: "" },
+      { nodeID: " ", label: "ignored" },
+    ],
+    now: () => "2026-05-04T00:00:00.000Z",
+    onOptimisticCards: (cards) => optimistic.push(cards),
+    client,
+  });
+
+  assert.deepEqual(optimistic[0].map((item) => [item.node_id, item.node_title, item.position]), [
+    ["node-1", "Alpha", 2000],
+    ["node-2", "node-2", 3000],
+  ]);
+  assert.equal(calls.upsertCard.length, 2);
+  assert.deepEqual(result.savedCards.map((item) => item.node_id), ["node-1", "node-2"]);
+  assert.deepEqual(Array.from(result.nodeIDs), ["node-1", "node-2"]);
+});
+
+test("deleteKanbanCardsCommand trims and dedupes card API deletes", async () => {
+  const { client, calls } = createClient();
+  const deleted = await deleteKanbanCardsCommand({
+    context,
+    cardIDs: [" card-a ", "card-a", "", "card-b"],
+    client,
+  });
+
+  assert.deepEqual(deleted, ["card-a", "card-b"]);
+  assert.deepEqual(calls.deleteCard, ["card-a", "card-b"]);
+});
