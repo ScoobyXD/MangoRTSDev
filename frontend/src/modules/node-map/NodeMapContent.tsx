@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, trimOrEmpty } from "./shared";
-import { emitDashboardEvent, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
 import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
-import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
+import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapBlankCanvasSelection, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
 import { filterNodeGraphToFolderScope, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
-import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
+import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 
 type ExplorerSelectionOrigin = {
@@ -96,7 +96,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const suppressNextSelectionBroadcastRef = useRef(false);
   const layoutPersistenceReadyRef = useRef(false);
   const lastPersistedNodePositionsRef = useRef<Record<string, NodePosition>>({});
-  const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(false);
+  const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(true);
   const [relationshipRoleColors, setRelationshipRoleColors] = useState({ parent: "#ff8a00", peer: "#0095ff", child: "#6f5cff" });
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
   const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
@@ -151,6 +151,26 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     const edges = readFrameLinksFromStorage();
     const registry = readFrameRegistryFromStorage();
     return resolveConnectedFrameTargets({ sourceFrameID: mapScope, edges, registry });
+  };
+
+  const readCompanyExplorerFrameTargets = () => {
+    const registry = readFrameRegistryFromStorage();
+    return Object.entries(registry)
+      .filter(([, item]) => classifyFrameKind(item.kind) === "explorer")
+      .map(([frameID]) => frameID);
+  };
+
+  const requestFindNodesOnCompanyExplorer = (nodeIDs: string[]) => {
+    const uniqueNodeIDs = Array.from(new Set(nodeIDs.map((id) => id.trim()).filter(Boolean)));
+    if (uniqueNodeIDs.length === 0) return;
+    emitDashboardEvent(EVENT_COMPANY_EXPLORER_FIND_REQUESTED, {
+      companyID,
+      sourceFrameID: mapScope,
+      sourceModule: "node-map",
+      targetFrameIDs: readCompanyExplorerFrameTargets(),
+      entities: uniqueNodeIDs.map((id) => ({ kind: "node", id })),
+      changedAt: Date.now(),
+    });
   };
 
   // Keep relationship projection derivation centralized so callers can reuse the exact same
@@ -216,7 +236,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       setSelectedNodeID(cached.selectedNodeID);
       setSelectedNodeIDs(cached.selectedNodeID ? new Set([cached.selectedNodeID]) : new Set());
       setNodePositions(cached.nodePositions);
-      setRelationshipColorsEnabled(!!cached.relationshipColorsEnabled);
+      setRelationshipColorsEnabled(cached.relationshipColorsEnabled !== false);
       if (cached.relationshipRoleColors) {
         setRelationshipRoleColors({
           parent: cached.relationshipRoleColors.parent ?? "#ff8a00",
@@ -1330,8 +1350,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     for (const path of connectionPaths) {
       if (path.points.length === 0) continue;
       context.lineWidth = path.selected ? 3.4 : 1.6;
-      const shouldShowRelationshipColors = relationshipColorsEnabled || selectedNodeIDs.size > 0;
-      context.strokeStyle = shouldShowRelationshipColors ? path.stroke : accent;
+      context.strokeStyle = relationshipColorsEnabled ? path.stroke : accent;
       context.globalAlpha = path.alpha;
       context.beginPath();
       context.moveTo(path.points[0].x, path.points[0].y);
@@ -1352,7 +1371,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       context.setLineDash([]);
     }
     context.globalAlpha = 1;
-  }, [WORLD_H, WORLD_W, accent, connectionPaths, relationshipColorsEnabled, draftPath, selectedNodeIDs]);
+  }, [WORLD_H, WORLD_W, accent, connectionPaths, relationshipColorsEnabled, draftPath]);
 
   useEffect(() => {
     if (!editingNodeTitleNodeID || !editingNodeTitleElementRef.current) return;
@@ -1415,7 +1434,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           setContextMenu(null);
           setNodeContextMenu(null);
           setRelationshipContextMenu(null);
-          setSelectedRelationshipIDs(new Set());
           const bounds = viewportRef.current.getBoundingClientRect();
           const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
           const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
@@ -1428,8 +1446,10 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           }
 
           if (relationshipDraft) setRelationshipDraft(null);
-          setSelectedNodeID("");
-          setSelectedNodeIDs(new Set());
+          const nextSelection = resolveNodeMapBlankCanvasSelection({ selectedNodeID, selectedNodeIDs, selectedRelationshipIDs });
+          setSelectedNodeID(nextSelection.selectedNodeID);
+          setSelectedNodeIDs(nextSelection.selectedNodeIDs);
+          setSelectedRelationshipIDs(nextSelection.selectedRelationshipIDs);
           setPanState({
             pointerID: event.pointerId,
             startMouseX: event.clientX,
@@ -1995,6 +2015,13 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
             onPointerDown={(event) => event.stopPropagation()}
           >
             <button style={contextMenuButtonStyle} onClick={() => {
+              const ids = selectedNodeIDs.has(nodeContextMenu.nodeID) ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID];
+              requestFindNodesOnCompanyExplorer(ids);
+              setNodeContextMenu(null);
+            }}>
+              Find on Company Explorer
+            </button>
+            <button style={contextMenuButtonStyle} onClick={() => {
               const current = nodes.find((node) => node.node_id === nodeContextMenu.nodeID);
               editingNodeTitleDraftRef.current = current ? getNodeTitle(current) : "new node";
               setEditingNodeTitleNodeID(nodeContextMenu.nodeID);
@@ -2047,7 +2074,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           <div
             style={{
               position: "absolute",
-              top: 10,
+              bottom: 10,
               left: 10,
               zIndex: 30,
               background: "rgba(0,0,0,0.75)",
@@ -2065,8 +2092,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           <div
             style={{
               position: "absolute",
-              top: 10,
-              right: 10,
+              bottom: selectedNodeIDs.size > 1 && !selectionBox.active ? 40 : 10,
+              left: 10,
               zIndex: 31,
               maxWidth: 420,
               borderRadius: 8,

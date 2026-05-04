@@ -12,6 +12,11 @@ It intentionally mirrors Node Map interaction patterns so users do not learn a s
 - connect existing gates with relationship side controls,
 - drag, resize, pan, zoom, multi-select, and delete gates or relationship lines,
 - link selection context into Company Explorer and Editor.
+- keep one selected gate active when clicking blank canvas so linked Editors do
+  not lose context; blank-canvas clicks clear only multi-select batches.
+- right-click a selected gate batch and choose `Find on Company Explorer` to
+  highlight those gate rows in Explorer, auto-expand their ancestor folders, and
+  scroll the primary row into view.
 
 ## Backend/API Contract
 Logic Gate Map is API-first so future headless agents can perform the same workflows as the UI.
@@ -85,6 +90,11 @@ Logic Gate Map follows the latency architecture rules:
 - the visual background uses the shared repeated SVG plus-grid, which adapts tile size by zoom without creating per-cell DOM,
 - the major plus layer is aligned to the minor grid axes so scale cues stay readable during pan and zoom,
 - layout geometry is a backend projection in `logic_gate_map_positions`; browser storage keeps only small viewport/selection cache data.
+- relationship role colors are enabled by default. Turning the toggle off makes
+  every relationship line use the map accent color only, even while gates are
+  selected.
+- map notification badges, including group-selection count and status/errors,
+  are anchored to the bottom-left viewport corner.
 - Company Explorer folder selection filters the cached snapshot in memory. A selected folder includes descendant folders, and relationship lines render only when both gates are inside that active scope.
 - Selecting an individual gate from inside a Company Explorer folder keeps that folder scope active while selecting the gate.
 - New logic gates created while a folder scope is active are assigned to that folder through the folder-items API.

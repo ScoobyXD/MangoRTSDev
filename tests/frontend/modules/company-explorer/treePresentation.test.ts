@@ -3,6 +3,7 @@ import {
   EXPLORER_DEFAULT_EXPANDED_ROW_IDS,
   EXPLORER_ROOT_ROW_LABELS,
   EXPLORER_ROOT_ROW_ORDER,
+  buildExplorerFindSelection,
   buildExplorerRowBatchReorderPlan,
   buildExplorerRowReorderPlan,
   formatExplorerFolderLabel,
@@ -259,6 +260,48 @@ run("keyboard navigation moves selection and expands folders without DOM focus a
   });
   assert.equal(expand.handled, true);
   assert.deepEqual([...(expand.expandedIDs ?? new Set())], ["folder-root", "workspace-folder-1"]);
+});
+
+run("find selection expands ancestor folders and highlights every requested entity", () => {
+  const plan = buildExplorerFindSelection({
+    entities: [
+      { kind: "node", id: "node-a" },
+      { kind: "node", id: "node-b" },
+    ],
+    nodeIDs: ["node-a", "node-b"],
+    logicGateIDs: [],
+    folders: [
+      { company_id: "c", folder_id: "parent", folder_kind: "node", name: "Parent", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
+      { company_id: "c", folder_id: "child", parent_folder_id: "parent", folder_kind: "node", name: "Child", position: 1000, created_timestamp: "2", updated_timestamp: "2" },
+    ],
+    folderItems: [
+      { company_id: "c", folder_id: "child", item_type: "node", item_id: "node-a", position: 1000, created_timestamp: "3", updated_timestamp: "3" },
+    ],
+    currentExpandedIDs: [],
+  });
+
+  assert.deepEqual(plan.selectedTreeIDs, ["node-node-a", "node-node-b"]);
+  assert.equal(plan.primaryTreeID, "node-node-a");
+  assert.deepEqual([...plan.expandedTreeIDs].sort(), ["folder-root", "workspace-folder-child", "workspace-folder-parent"]);
+});
+
+run("find selection ignores duplicate and unknown requested entities", () => {
+  const plan = buildExplorerFindSelection({
+    entities: [
+      { kind: "logic_gate", id: "gate-a" },
+      { kind: "logic_gate", id: "gate-a" },
+      { kind: "logic_gate", id: "missing" },
+    ],
+    nodeIDs: [],
+    logicGateIDs: ["gate-a"],
+    folders: [],
+    folderItems: [],
+    currentExpandedIDs: ["workspace-folder-open"],
+  });
+
+  assert.deepEqual(plan.selectedTreeIDs, ["logic-gate-gate-a"]);
+  assert.equal(plan.primaryEntity?.id, "gate-a");
+  assert.deepEqual([...plan.expandedTreeIDs].sort(), ["folder-root", "workspace-folder-open"]);
 });
 
 run("stale opposite-map selections do not override recent Explorer domain changes", () => {

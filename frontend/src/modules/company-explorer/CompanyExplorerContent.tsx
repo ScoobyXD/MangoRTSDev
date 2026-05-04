@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeRecord } from "../node-map/shared";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, LogicGateRecord as LogicGateApiRecord, NodeRecord as LogicGateRecord, toLogicGateCanvasRecord } from "../logic-gate-map/shared";
-import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
@@ -11,7 +11,7 @@ import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type Compan
 import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../kanban/shared";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
-import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, formatExplorerFolderLabel, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerDropTarget, resolveExplorerKeyboardNavigation, resolveExplorerRenameTarget, resolveExplorerRootDropTarget, shouldAcceptMapSelectionAfterExplorerSelection, type ExplorerCreationTargets, type ExplorerDropPayload, type ExplorerRowDropPlacement, type ExplorerSelectionDomain } from "./treePresentation";
+import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, formatExplorerFolderLabel, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerDropTarget, resolveExplorerKeyboardNavigation, resolveExplorerRenameTarget, resolveExplorerRootDropTarget, shouldAcceptMapSelectionAfterExplorerSelection, type ExplorerCreationTargets, type ExplorerDropPayload, type ExplorerFindEntity, type ExplorerRowDropPlacement, type ExplorerSelectionDomain } from "./treePresentation";
 
 type ExplorerTreeNode = {
   id: string;
@@ -35,6 +35,13 @@ type ExplorerDeleteTarget = NonNullable<ReturnType<typeof resolveExplorerDeleteT
 type ExplorerRenameTarget = NonNullable<ReturnType<typeof resolveExplorerRenameTarget>>;
 type ExplorerRenameDraft = { treeID: string; target: ExplorerRenameTarget; value: string };
 type ExplorerRowOrderUpdate = { row: ExplorerTreeNode; position: number };
+type CompanyExplorerFindRequestDetail = {
+  companyID?: string;
+  sourceFrameID?: string;
+  targetFrameIDs?: string[];
+  entities?: Array<{ kind?: string; id?: string }>;
+  changedAt?: number;
+};
 
 const EXPLORER_DRAG_MIME = "application/x-mangoos-company-explorer-row";
 const TREE_INDENT_PX = 16;
@@ -257,6 +264,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const selectedTreeIDRef = useRef(selectedTreeID);
   const expandedRef = useRef(expanded);
   const treeRowsRef = useRef<ExplorerTreeNode[]>([]);
+  const pendingScrollTreeIDRef = useRef("");
   const [renaming, setRenaming] = useState<ExplorerRenameDraft | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const cancelRenameOnBlurRef = useRef(false);
@@ -932,6 +940,42 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     setTreeScrollTop(nextScrollTop);
   }, [treeRows, treeViewportHeight]);
 
+  const applyExplorerFindSelection = useCallback((entities: ExplorerFindEntity[]) => {
+    const plan = buildExplorerFindSelection({
+      entities,
+      folders,
+      folderItems,
+      nodeIDs: nodes.map((node) => node.node_id),
+      logicGateIDs: logicGates.map((logicGate) => logicGate.logic_gate_id),
+      currentExpandedIDs: expandedRef.current,
+    });
+    if (!plan.primaryTreeID || !plan.primaryEntity) return;
+
+    suppressNextExplorerBroadcastRef.current = true;
+    treeKeyboardActiveRef.current = true;
+    treeViewportRef.current?.focus({ preventScroll: true });
+    expandedRef.current = plan.expandedTreeIDs;
+    setExpanded(plan.expandedTreeIDs);
+    setSelectedTreeID(plan.primaryTreeID);
+    setSelectedTreeIDs(new Set(plan.selectedTreeIDs));
+    setSelectionAnchorTreeID(plan.primaryTreeID);
+    if (plan.primaryEntity.kind === "node") {
+      setSelectedNodeID(plan.primaryEntity.id);
+      setSelectedLogicGateID("");
+    } else {
+      setSelectedLogicGateID(plan.primaryEntity.id);
+      setSelectedNodeID("");
+    }
+    pendingScrollTreeIDRef.current = plan.primaryTreeID;
+  }, [folderItems, folders, logicGates, nodes]);
+
+  useEffect(() => {
+    const rowID = pendingScrollTreeIDRef.current;
+    if (!rowID || !treeRows.some((row) => row.id === rowID)) return;
+    pendingScrollTreeIDRef.current = "";
+    window.requestAnimationFrame(() => scrollTreeRowIntoView(rowID));
+  }, [scrollTreeRowIntoView, treeRows]);
+
   const handleTreeKeyCommand = useCallback((event: React.KeyboardEvent<HTMLDivElement> | KeyboardEvent) => {
     if (isExplorerTextInputTarget(event.target)) return;
     const activeTreeRows = treeRowsRef.current;
@@ -1261,6 +1305,27 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     if (liveSelection) applyLiveSelection(liveSelection);
     return subscribeLiveSelection(scope, applyLiveSelection);
   }, [companyID, scope]);
+
+  useEffect(() => {
+    const onFindRequested = (event: Event) => {
+      const detail = (event as CustomEvent<CompanyExplorerFindRequestDetail>).detail;
+      if (!detail || (detail.companyID && detail.companyID !== companyID)) return;
+      if (detail.sourceFrameID === scope) return;
+      const targetFrameIDs = Array.isArray(detail.targetFrameIDs) ? detail.targetFrameIDs : [];
+      if (targetFrameIDs.length > 0 && !targetFrameIDs.includes(scope)) return;
+
+      const entities: ExplorerFindEntity[] = [];
+      for (const entity of detail.entities ?? []) {
+        if ((entity.kind !== "node" && entity.kind !== "logic_gate") || !entity.id) continue;
+        entities.push({ kind: entity.kind, id: entity.id });
+      }
+      if (entities.length === 0) return;
+      applyExplorerFindSelection(entities);
+    };
+
+    window.addEventListener(EVENT_COMPANY_EXPLORER_FIND_REQUESTED, onFindRequested);
+    return () => window.removeEventListener(EVENT_COMPANY_EXPLORER_FIND_REQUESTED, onFindRequested);
+  }, [applyExplorerFindSelection, companyID, scope]);
 
   useEffect(() => {
     const applyMapSelection = (selectedFromMap: string, changedAt?: number) => {

@@ -191,6 +191,27 @@ export function resolveNodeMapPointerSelection(input: {
   return { selectedNodeIDs: next, selectedNodeID: next.has(input.nodeID) ? input.nodeID : (Array.from(next)[0] ?? "") };
 }
 
+export function resolveNodeMapBlankCanvasSelection(input: {
+  selectedNodeID: string;
+  selectedNodeIDs: Set<string>;
+  selectedRelationshipIDs: Set<string>;
+}): { selectedNodeID: string; selectedNodeIDs: Set<string>; selectedRelationshipIDs: Set<string> } {
+  const hasBatchSelection = input.selectedNodeIDs.size > 1 || input.selectedRelationshipIDs.size > 0;
+  if (hasBatchSelection) {
+    return { selectedNodeID: "", selectedNodeIDs: new Set(), selectedRelationshipIDs: new Set() };
+  }
+
+  // A plain blank-canvas click is also the pan gesture start. Keep a single
+  // entity selected so linked Editors do not lose their detail context while
+  // still normalizing the selection set for later drag/delete commands.
+  const retainedNodeID = input.selectedNodeID || Array.from(input.selectedNodeIDs)[0] || "";
+  return {
+    selectedNodeID: retainedNodeID,
+    selectedNodeIDs: retainedNodeID ? new Set([retainedNodeID]) : new Set(),
+    selectedRelationshipIDs: new Set(),
+  };
+}
+
 type DeleteKeyTargetLike = {
   tagName?: string;
   isContentEditable?: boolean;

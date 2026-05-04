@@ -147,7 +147,9 @@ writes scale with user action size instead of full company map size.
   - selected border/outline/glow,
   - selected dot marker on card,
   - “Group selected: N” badge for multi-select.
-- Clicking blank canvas clears group selection.
+- Clicking blank canvas preserves a single selected node so linked Editors keep
+  showing that node's content while the user pans. Clicking blank canvas after
+  a multi-select batch clears the batch.
 
 ### 4.5 Node title inline editing (seamless caret behavior)
 
@@ -246,7 +248,13 @@ Relationships are rendered on a world-space `<canvas>` for performance, with a l
 - Routing now uses obstacle-aware orthogonal pathing on the mini-grid so relationship lines remain continuous and do not visually cut through node cards when nodes are moved.
 - Draft relationship traces now use that same routing engine during pointer-move previews, preventing temporary straight-line previews that diverge from final saved path behavior.
 - Connector paths are simplified after routing to keep turns clean while preserving continuous end-to-end segments.
-- Optional relationship role coloring can be toggled on; when active, lines connected to the active selected node (single-selection focus) are color-coded by the opposite-side role field in the row (`node_id_a` uses `b_position`, `node_id_b` uses `a_position`) so visual direction reflects the connected side relative to the selected node.
+- Optional relationship role coloring is on by default and can be toggled off.
+  When active, lines connected to the active selected node (single-selection
+  focus) are color-coded by the opposite-side role field in the row
+  (`node_id_a` uses `b_position`, `node_id_b` uses `a_position`) so visual
+  direction reflects the connected side relative to the selected node. When the
+  toggle is off, relationship lines use only the map accent color even if nodes
+  are selected.
 - Visual rendering sits under node cards, and a transparent hit layer enables selection without degrading line draw performance.
 
 ---
@@ -414,7 +422,8 @@ Layout safety note:
 - In-canvas instruction text.
 - Right-click context menu with `Create new node` at cursor location.
 - Right-click context menu also includes `Enable relationship colors` with an explicit iOS-style on/off slider (knob left = off, knob right = on).
-- A top-right status badge surfaces relationship-line delete progress and failure reasons so delete operations are observable even when the details panel is closed.
+- Map notification badges, including group-selection count and relationship
+  delete status/errors, are anchored to the bottom-left of the map viewport.
 - Right-click menu rows use left-aligned text and box-style row containers.
 - This menu uses the default **Boxy Hierarchical** list style.
 - Relationship role color options (`Parent`, `Peer`, `Child`) are shown directly under `Enable relationship colors` as nested controls with stronger right indentation.
@@ -423,7 +432,10 @@ Layout safety note:
 - Box rows are stacked flush with no vertical gaps between adjacent rows.
 - Role color pickers (`Parent`, `Peer`, `Child`) use RGB hex color inputs.
 - Canvas context menu placement is clamped within the viewport so all actions stay visible near canvas edges.
-- Right-click on a node opens node actions (`Rename node`, `Delete node`).
+- Right-click on a node opens node actions (`Find on Company Explorer`,
+  `Rename node`, `Delete node`). Find emits an entity-id request that Company
+  Explorer handles by selecting the matching row(s), expanding all ancestor
+  folders, and scrolling the primary row into view.
 - `Rename node` enters inline title-edit mode on the card and persists through the generic node-title update call (`PUT /v1/nodes/{node_id}`), while updating node-map cache without forcing full snapshot refetch.
 - Delete key support for selected node(s), guarded by themed confirmation modal.
 - Node delete also removes Kanban card placements for that node and clears operation pointers while keeping operation history. This keeps headless `DELETE /v1/nodes/{node_id}` usable even when the item was previously placed on boards or used by agents.

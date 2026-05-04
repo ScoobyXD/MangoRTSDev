@@ -123,3 +123,17 @@ test("projects visual relationship line metadata without persistent storage", ()
   );
   assert.equal(projected.alpha > 0, true);
 });
+
+test("disabled relationship colors fall back fully to the map accent", () => {
+  const rel = relationship({ a_position: "Child", b_position: "Parent" });
+  const projected = projectRelationshipVisual(rel, {
+    activeNodeID: "node-a",
+    relationshipColorsEnabled: false,
+    relationshipRoleColors: { parent: "#00f", peer: "#ff0", child: "#f00" },
+    accent: "#0ff",
+    nodePositions: {},
+  });
+
+  assert.equal(projected.selectedRole, "Parent");
+  assert.equal(projected.strokeColor, "#0ff");
+});

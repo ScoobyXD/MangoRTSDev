@@ -2,7 +2,7 @@
 // @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeNodeMapMultiSelectResult, mergeNodeMapMultiSelect, resolveNodeMapPointerSelection } from "../../../../frontend/src/modules/node-map/NodeMapControls.js";
+import { computeNodeMapMultiSelectResult, mergeNodeMapMultiSelect, resolveNodeMapBlankCanvasSelection, resolveNodeMapPointerSelection } from "../../../../frontend/src/modules/node-map/NodeMapControls.js";
 
 const defaultLayout = {
   zoom: 1,
@@ -60,4 +60,27 @@ test("modifier node click still toggles membership for additive selection", () =
   });
   assert.deepEqual(Array.from(selection.selectedNodeIDs), ["node-a"]);
   assert.equal(selection.selectedNodeID, "node-a");
+});
+
+test("blank canvas click keeps a single node selected for linked editor context", () => {
+  const selection = resolveNodeMapBlankCanvasSelection({
+    selectedNodeID: "node-a",
+    selectedNodeIDs: new Set(["node-a"]),
+    selectedRelationshipIDs: new Set(),
+  });
+
+  assert.equal(selection.selectedNodeID, "node-a");
+  assert.deepEqual(Array.from(selection.selectedNodeIDs), ["node-a"]);
+  assert.deepEqual(Array.from(selection.selectedRelationshipIDs), []);
+});
+
+test("blank canvas click clears multi-select batches", () => {
+  const selection = resolveNodeMapBlankCanvasSelection({
+    selectedNodeID: "node-a",
+    selectedNodeIDs: new Set(["node-a", "node-b"]),
+    selectedRelationshipIDs: new Set(),
+  });
+
+  assert.equal(selection.selectedNodeID, "");
+  assert.deepEqual(Array.from(selection.selectedNodeIDs), []);
 });
