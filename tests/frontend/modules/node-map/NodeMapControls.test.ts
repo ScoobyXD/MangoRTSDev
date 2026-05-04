@@ -2,7 +2,7 @@
 // @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeNodeMapMultiSelectResult, mergeNodeMapMultiSelect, resolveNodeMapBlankCanvasSelection, resolveNodeMapPointerSelection } from "../../../../frontend/src/modules/node-map/NodeMapControls.js";
+import { computeNodeMapMultiSelectResult, mergeNodeMapMultiSelect, resolveNodeMapBlankCanvasSelection, resolveNodeMapDragStartSelection, resolveNodeMapPointerSelection, shouldTreatNodeMapGestureAsClick } from "../../../../frontend/src/modules/node-map/NodeMapControls.js";
 
 const defaultLayout = {
   zoom: 1,
@@ -83,4 +83,34 @@ test("blank canvas click clears multi-select batches", () => {
 
   assert.equal(selection.selectedNodeID, "");
   assert.deepEqual(Array.from(selection.selectedNodeIDs), []);
+});
+
+test("drag start on an already selected batch keeps the full batch together", () => {
+  const selection = resolveNodeMapDragStartSelection({
+    selectedNodeID: "node-a",
+    selectedNodeIDs: new Set(["node-a", "node-b", "node-c"]),
+    nodeID: "node-b",
+  });
+
+  assert.equal(selection.selectedNodeID, "node-a");
+  assert.deepEqual(selection.dragNodeIDs, ["node-a", "node-b", "node-c"]);
+  assert.deepEqual(Array.from(selection.selectedNodeIDs), ["node-a", "node-b", "node-c"]);
+  assert.equal(selection.clearSelectionOnClick, true);
+});
+
+test("drag start on an unselected node still collapses to that node", () => {
+  const selection = resolveNodeMapDragStartSelection({
+    selectedNodeID: "node-a",
+    selectedNodeIDs: new Set(["node-a", "node-b"]),
+    nodeID: "node-c",
+  });
+
+  assert.equal(selection.selectedNodeID, "node-c");
+  assert.deepEqual(selection.dragNodeIDs, ["node-c"]);
+  assert.equal(selection.clearSelectionOnClick, false);
+});
+
+test("click-vs-drag threshold separates deselect clicks from batch drags", () => {
+  assert.equal(shouldTreatNodeMapGestureAsClick({ startMouseX: 10, startMouseY: 10, endMouseX: 12, endMouseY: 13 }), true);
+  assert.equal(shouldTreatNodeMapGestureAsClick({ startMouseX: 10, startMouseY: 10, endMouseX: 18, endMouseY: 10 }), false);
 });
