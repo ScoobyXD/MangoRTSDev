@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
+import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
-import { createKanbanBoard, createKanbanColumn, deleteKanbanCard, deleteKanbanColumn, listKanbanBoards, listKanbanCards, listKanbanColumns, moveKanbanCard, updateKanbanColumn, upsertKanbanCard } from "./kanbanApi";
+import { createKanbanBoard, createKanbanColumn, deleteKanbanCard, deleteKanbanColumn, listKanbanBoards, listKanbanCards, listKanbanColumns, moveKanbanCard, updateKanbanBoard, updateKanbanColumn, upsertKanbanCard } from "./kanbanApi";
 import {
   EXPLORER_ENTITY_DRAG_MIME,
   KANBAN_CARD_DRAG_MIME,
@@ -101,21 +102,23 @@ function readLinkedExplorerSelection(companyID: string, scope: string): Highligh
   return null;
 }
 
-function publishKanbanSelectionToLinkedFrames(companyID: string, boardID: string, nodeID: string, nodeTitle: string): void {
+function publishKanbanSelectionToLinkedFrames(companyID: string, sourceFrameID: string, nodeID: string, nodeTitle: string, selectedNodeIDs: string[] = [nodeID]): void {
   if (!nodeID) return;
   try {
     const edges = readFrameLinksFromStorage();
     const registry = readFrameRegistryFromStorage();
-    const targetFrameIDs = resolveConnectedFrameTargets({ sourceFrameID: boardID, edges, registry });
+    const targetFrameIDs = resolveConnectedFrameTargets({ sourceFrameID, edges, registry });
     publishLiveSelection({
       companyID,
       entityKind: "node",
       entityID: nodeID,
       label: nodeTitle,
-      sourceFrameID: boardID,
+      sourceFrameID,
       sourceModule: "kanban",
       targetFrameIDs,
       selectedTreeID: `node-${nodeID}`,
+      selectedTreeIDs: selectedNodeIDs.map((id) => `node-${id}`),
+      selectedEntityIDs: selectedNodeIDs,
     });
   } catch {
     // Selection handoff is a UI convenience; card selection must still work if the link graph is unavailable.
@@ -142,15 +145,21 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const frameBoardID = widgetId?.trim() ? widgetId : "global-kanban";
   const [activeBoardID, setActiveBoardID] = useState(frameBoardID);
-  const [activeTab, setActiveTab] = useState<"board" | "boards">("board");
+  const [allBoardsOpen, setAllBoardsOpen] = useState(false);
+  const [boardSearchQuery, setBoardSearchQuery] = useState("");
+  const [editingBoardTitle, setEditingBoardTitle] = useState(false);
+  const [boardTitleDraft, setBoardTitleDraft] = useState("");
   const [boards, setBoards] = useState<KanbanBoard[]>([]);
+  const [explorerFolders, setExplorerFolders] = useState<CompanyExplorerFolder[]>([]);
+  const [explorerFolderItems, setExplorerFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [boardsLoading, setBoardsLoading] = useState(false);
   const [columns, setColumns] = useState<KanbanColumn[]>([]);
   const [cards, setCards] = useState<KanbanCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const frameID = frameBoardID;
   const boardID = activeBoardID;
-  const [highlightedEntity, setHighlightedEntity] = useState<HighlightedEntity>(() => readLinkedExplorerSelection(companyID, boardID));
+  const [highlightedEntity, setHighlightedEntity] = useState<HighlightedEntity>(() => readLinkedExplorerSelection(companyID, frameID));
   const [editingColumnID, setEditingColumnID] = useState("");
   const [draggingColumnID, setDraggingColumnID] = useState("");
   const [dragOverColumnID, setDragOverColumnID] = useState("");
@@ -195,12 +204,61 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       updated_timestamp: "",
     }, ...orderedBoards];
   }, [activeBoard, boardID, companyID, orderedBoards]);
+  const filteredBoardRows = useMemo(() => {
+    const query = boardSearchQuery.trim().toLowerCase();
+    if (!query) return boardRows;
+    return boardRows.filter((board) => getKanbanBoardDisplayTitle(board).toLowerCase().includes(query));
+  }, [boardRows, boardSearchQuery]);
+  const boardFolderLabelByID = useMemo(() => {
+    const folderByID = new Map(explorerFolders.map((folder) => [folder.folder_id, folder]));
+    const folderPathLabel = (folderID: string): string => {
+      const labels: string[] = [];
+      let currentID = folderID;
+      const seen = new Set<string>();
+      while (currentID && !seen.has(currentID)) {
+        seen.add(currentID);
+        const folder = folderByID.get(currentID);
+        if (!folder) break;
+        labels.unshift(folder.name);
+        currentID = folder.parent_folder_id ?? "";
+      }
+      return labels.join(" / ") || "Company";
+    };
+    const labels = new Map<string, string>();
+    for (const item of explorerFolderItems) {
+      if (item.item_type !== "kanban") continue;
+      labels.set(item.item_id, folderPathLabel(item.folder_id));
+    }
+    return labels;
+  }, [explorerFolderItems, explorerFolders]);
+  const filteredBoardGroups = useMemo(() => {
+    const groups = new Map<string, KanbanBoard[]>();
+    for (const board of filteredBoardRows) {
+      const folderLabel = boardFolderLabelByID.get(board.board_id) ?? "Company";
+      const bucket = groups.get(folderLabel) ?? [];
+      bucket.push(board);
+      groups.set(folderLabel, bucket);
+    }
+    return Array.from(groups, ([folderLabel, items]) => ({ folderLabel, items }));
+  }, [boardFolderLabelByID, filteredBoardRows]);
 
   const refreshBoards = useCallback(async () => {
     setBoardsLoading(true);
     try {
-      const nextBoards = await listKanbanBoards(apiBase, companyID, 100);
+      const [nextBoards, folderPayload, folderItemPayload] = await Promise.all([
+        listKanbanBoards(apiBase, companyID, 200),
+        fetch(`${apiBase}/v1/company-explorer/folders?company_id=${encodeURIComponent(companyID)}`),
+        fetch(`${apiBase}/v1/company-explorer/folder-items?company_id=${encodeURIComponent(companyID)}&item_type=kanban`),
+      ]);
       setBoards(sortKanbanBoards(nextBoards));
+      if (folderPayload.ok) {
+        const parsed = await folderPayload.json() as { folders?: CompanyExplorerFolder[] };
+        setExplorerFolders(parsed.folders ?? []);
+      }
+      if (folderItemPayload.ok) {
+        const parsed = await folderItemPayload.json() as { folder_items?: CompanyExplorerFolderItem[] };
+        setExplorerFolderItems(parsed.folder_items ?? []);
+      }
     } catch {
       setError("Kanban board list API unavailable");
     } finally {
@@ -230,11 +288,35 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setSelectedCardIDs(new Set());
       setSelectionAnchorCardID("");
       setActiveBoardID(created.board_id);
-      setActiveTab("board");
+      setAllBoardsOpen(false);
     } catch {
       setError("Kanban board create failed");
     }
   }, [apiBase, companyID]);
+
+  const commitBoardTitle = useCallback(async (title: string) => {
+    const cleanTitle = title.trim();
+    if (!cleanTitle) {
+      setEditingBoardTitle(false);
+      return;
+    }
+    setBoards((previous) => previous.map((board) => (board.board_id === boardID ? { ...board, title: cleanTitle } : board)));
+    setError("");
+    try {
+      const saved = activeBoard
+        ? await updateKanbanBoard(apiBase, companyID, boardID, cleanTitle)
+        : await createKanbanBoard(apiBase, companyID, cleanTitle, boardID);
+      setBoards((previous) => sortKanbanBoards([
+        ...previous.filter((board) => board.board_id !== saved.board_id),
+        saved,
+      ]));
+      setEditingBoardTitle(false);
+    } catch {
+      setError("Kanban board rename failed");
+      setEditingBoardTitle(false);
+      void refreshBoards();
+    }
+  }, [activeBoard, apiBase, boardID, companyID, refreshBoards]);
 
   const clearCardSelection = useCallback(() => {
     setSelectedCardIDs(new Set());
@@ -291,17 +373,30 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   useEffect(() => {
     const applyLiveSelection = (selection: LiveSelectionChange) => {
-      if (selection.companyID !== companyID || selection.sourceFrameID === boardID) return;
+      if (selection.companyID !== companyID || selection.sourceFrameID === frameID) return;
+      if (selection.entityKind === "kanban" && selection.entityID.trim()) {
+        setSelectedCardIDs(new Set());
+        setSelectionAnchorCardID("");
+        setHighlightedEntity(null);
+        setActiveBoardID(selection.entityID.trim());
+        return;
+      }
       if (selection.entityKind === "node" && selection.entityID.trim()) {
+        const selectedNodeIDs = new Set((selection.selectedEntityIDs?.length ? selection.selectedEntityIDs : [selection.entityID]).map((id) => id.trim()).filter(Boolean));
+        const selectedCards = cards.filter((card) => selectedNodeIDs.has(card.node_id));
+        setSelectedCardIDs(new Set(selectedCards.map((card) => card.card_id)));
+        setSelectionAnchorCardID(selectedCards[0]?.card_id ?? "");
         setHighlightedEntity({ nodeID: selection.entityID.trim() });
         return;
       }
       setHighlightedEntity(null);
+      setSelectedCardIDs(new Set());
+      setSelectionAnchorCardID("");
     };
-    const liveSelection = readLiveSelectionForFrame(companyID, boardID);
+    const liveSelection = readLiveSelectionForFrame(companyID, frameID);
     if (liveSelection) applyLiveSelection(liveSelection);
-    return subscribeLiveSelection(boardID, applyLiveSelection);
-  }, [boardID, companyID]);
+    return subscribeLiveSelection(frameID, applyLiveSelection);
+  }, [cards, companyID, frameID]);
 
   const addColumn = useCallback(async () => {
     setError("");
@@ -482,9 +577,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     setSelectionAnchorCardID(next.anchorCardID);
     if (clickedCard) {
       setHighlightedEntity({ nodeID: clickedCard.node_id });
-      publishKanbanSelectionToLinkedFrames(companyID, boardID, clickedCard.node_id, clickedCard.node_title);
+      const selectedNodeIDs = cards.filter((card) => next.selectedCardIDs.has(card.card_id)).map((card) => card.node_id);
+      publishKanbanSelectionToLinkedFrames(companyID, frameID, clickedCard.node_id, clickedCard.node_title, selectedNodeIDs);
     }
-  }, [boardID, cards, companyID, orderedColumns, selectedCardIDs, selectionAnchorCardID]);
+  }, [cards, companyID, frameID, orderedColumns, selectedCardIDs, selectionAnchorCardID]);
 
   const clearCardSelectionFromBlankClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
     if (event.button !== 0 || event.target !== event.currentTarget) return;
@@ -643,7 +739,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             setSelectionAnchorCardID(card.card_id);
           }
           setHighlightedEntity({ nodeID: card.node_id });
-          publishKanbanSelectionToLinkedFrames(companyID, boardID, card.node_id, card.node_title);
+          publishKanbanSelectionToLinkedFrames(companyID, frameID, card.node_id, card.node_title, [card.node_id]);
           setColumnContextMenu(null);
           setCardContextMenu({ x: event.clientX, y: event.clientY, cardID: card.card_id });
         }}
@@ -677,7 +773,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         }}
         style={{
           position: "relative",
-          border: `1px solid ${selected ? color : (highlighted ? accent : line)}`,
+          border: `1px solid ${selected || highlighted ? color : line}`,
           background: cardBackground,
           color: text,
           padding: "8px 9px 8px 13px",
@@ -687,7 +783,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           overflow: "hidden",
           boxShadow: [
             selected ? `0 0 0 1px ${color}, 0 0 12px ${hexToRgba(color, 0.28)}, inset 0 0 0 1px ${hexToRgba(color, 0.16)}` : "",
-            highlighted && !selected ? `0 0 0 1px ${accent} inset` : "",
+            highlighted && !selected ? `0 0 0 1px ${color} inset, 0 0 10px ${hexToRgba(color, 0.22)}` : "",
             dragBefore ? `0 -3px 0 ${accent}` : "",
             dragAfter ? `0 3px 0 ${accent}` : "",
           ].filter(Boolean).join(", ") || undefined,
@@ -720,29 +816,67 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       style={{ position: "relative", width: "100%", height: "100%", boxSizing: "border-box", paddingTop: KANBAN_MODULE_TOP_CLEARANCE_PX, background: surface, color: text, overflow: "hidden" }}
     >
       <div style={{ position: "absolute", top: KANBAN_MODULE_TOP_CLEARANCE_PX - 1, left: 0, right: 0, borderBottom: `1px solid ${line}`, pointerEvents: "none" }} />
-      <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "flex", alignItems: "center", gap: 6, paddingLeft: 106, zIndex: 3, pointerEvents: "auto" }}>
-        {(["board", "boards"] as const).map((tab) => {
-          const selected = activeTab === tab;
-          return (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => {
-                setActiveTab(tab);
-                if (tab === "boards") void refreshBoards();
-              }}
-              style={{ border: `1px solid ${selected ? accent : line}`, background: selected ? (isDark ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.98)") : (isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)"), color: text, fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 10px", borderRadius: 4, cursor: "pointer" }}
-            >
-              {tab === "board" ? "Board" : "Boards"}
-            </button>
-          );
-        })}
-        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: subtext, fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-          {activeBoardTitle}
-        </span>
+      <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gridTemplateColumns: "minmax(120px, 240px) minmax(140px, 1fr) auto", alignItems: "center", gap: 8, paddingLeft: 106, zIndex: 3, pointerEvents: "auto" }}>
+        {editingBoardTitle ? (
+          <input
+            value={boardTitleDraft}
+            autoFocus
+            onFocus={(event) => event.currentTarget.select()}
+            onChange={(event) => setBoardTitleDraft(event.target.value)}
+            onBlur={(event) => void commitBoardTitle(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+              if (event.key === "Escape") {
+                setEditingBoardTitle(false);
+                void refreshBoards();
+              }
+            }}
+            style={{ minWidth: 0, height: 25, border: `1px solid ${accent}`, background: isDark ? "#11161b" : "#ffffff", color: text, fontSize: 12, fontWeight: 800, padding: "0 7px", outline: "none" }}
+          />
+        ) : (
+          <button
+            type="button"
+            title="Rename Kanban board"
+            onClick={() => {
+              setBoardTitleDraft(activeBoardTitle);
+              setEditingBoardTitle(true);
+            }}
+            style={{ minWidth: 0, height: 25, border: `1px solid ${line}`, background: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)", color: text, cursor: "text", fontSize: 12, fontWeight: 800, textAlign: "left", padding: "0 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
+            {activeBoardTitle}
+          </button>
+        )}
+        <label style={{ position: "relative", minWidth: 0, height: 25, display: "block" }}>
+          <input
+            aria-label="Search Kanban boards"
+            value={boardSearchQuery}
+            onChange={(event) => setBoardSearchQuery(event.target.value)}
+            placeholder="Search boards"
+            style={{ width: "100%", height: "100%", boxSizing: "border-box", border: `1px solid ${line}`, background: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.92)", color: text, fontSize: 11, fontWeight: 700, padding: "0 28px 0 8px", outline: "none" }}
+          />
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ position: "absolute", right: 8, top: 5, color: subtext, pointerEvents: "none" }}>
+            <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </label>
+        <button
+          type="button"
+          onClick={() => {
+            setAllBoardsOpen((open) => !open);
+            void refreshBoards();
+          }}
+          style={{ height: 25, display: "flex", alignItems: "center", gap: 6, border: `1px solid ${allBoardsOpen ? accent : line}`, background: allBoardsOpen ? (isDark ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.98)") : (isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)"), color: text, fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", padding: "0 9px", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
+        >
+          <span aria-hidden="true" style={{ width: 12, display: "grid", gap: 2 }}>
+            <span style={{ height: 2, background: text }} />
+            <span style={{ height: 2, background: text }} />
+            <span style={{ height: 2, background: text }} />
+          </span>
+          All Boards
+        </button>
       </div>
-      {activeTab === "boards" && (
-        <section style={{ position: "absolute", top: KANBAN_MODULE_TOP_CLEARANCE_PX + 8, left: 12, width: "min(390px, calc(100% - 24px))", maxHeight: "calc(100% - 58px)", display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", border: `1px solid ${line}`, background: isDark ? "rgba(17,22,27,0.98)" : "rgba(255,255,255,0.98)", boxShadow: isDark ? "0 14px 30px rgba(0,0,0,0.36)" : "0 14px 30px rgba(16,24,40,0.16)", zIndex: 4 }}>
+      {allBoardsOpen && (
+        <section style={{ position: "absolute", top: KANBAN_MODULE_TOP_CLEARANCE_PX + 8, left: 114, width: "min(430px, calc(100% - 126px))", maxHeight: "calc(100% - 58px)", display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", border: `1px solid ${line}`, background: isDark ? "rgba(17,22,27,0.98)" : "rgba(255,255,255,0.98)", boxShadow: isDark ? "0 14px 30px rgba(0,0,0,0.36)" : "0 14px 30px rgba(16,24,40,0.16)", zIndex: 4 }}>
           <div style={{ padding: "9px 10px", borderBottom: `1px solid ${line}`, fontSize: 10, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>
             Saved Kanban Boards
           </div>
@@ -756,32 +890,40 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           </div>
           <div className="company-explorer-scroll" style={{ overflowY: "auto", overflowX: "hidden", minHeight: 0, ["--company-explorer-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--company-explorer-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)" }}>
             {boardsLoading && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>Loading boards...</div>}
-            {!boardsLoading && boardRows.length === 0 && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>No saved boards</div>}
-            {boardRows.map((board) => {
-              const selected = board.board_id === boardID;
-              return (
-                <button
-                  key={board.board_id}
-                  type="button"
-                  title={board.board_id}
-                  onClick={() => {
-                    setSelectedCardIDs(new Set());
-                    setSelectionAnchorCardID("");
-                    setActiveBoardID(board.board_id);
-                    setActiveTab("board");
-                  }}
-                  style={{ width: "100%", display: "grid", gridTemplateColumns: "18px minmax(0, 1fr)", alignItems: "center", gap: 7, minHeight: 30, padding: "5px 9px", border: "none", borderBottom: `1px solid ${isDark ? "rgba(255,255,255,0.08)" : "rgba(3,25,30,0.06)"}`, background: selected ? (isDark ? "rgba(0,233,255,0.2)" : "rgba(0, 233, 255, 0.28)") : "transparent", color: text, cursor: "pointer", textAlign: "left" }}
-                >
-                  <span aria-hidden="true" style={{ width: 14, height: 14, border: `1px solid ${accent}`, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, padding: 2 }}>
-                    <span style={{ background: accent, opacity: 0.8 }} />
-                    <span style={{ background: subtext, opacity: 0.55 }} />
-                  </span>
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 800 : 700 }}>
-                    {getKanbanBoardDisplayTitle(board)}
-                  </span>
-                </button>
-              );
-            })}
+            {!boardsLoading && filteredBoardRows.length === 0 && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>No saved boards</div>}
+            {filteredBoardGroups.map((group) => (
+              <div key={group.folderLabel}>
+                <div style={{ padding: "7px 10px 4px", color: subtext, fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  {group.folderLabel}
+                </div>
+                {group.items.map((board) => {
+                  const selected = board.board_id === boardID;
+                  return (
+                    <button
+                      key={board.board_id}
+                      type="button"
+                      title={board.board_id}
+                      onClick={() => {
+                        setSelectedCardIDs(new Set());
+                        setSelectionAnchorCardID("");
+                        setActiveBoardID(board.board_id);
+                        setAllBoardsOpen(false);
+                      }}
+                      style={{ width: "100%", display: "grid", gridTemplateColumns: "30px minmax(0, 1fr)", alignItems: "center", gap: 7, minHeight: 32, padding: "5px 9px 5px 18px", border: "none", borderBottom: `1px solid ${isDark ? "rgba(255,255,255,0.08)" : "rgba(3,25,30,0.06)"}`, background: selected ? (isDark ? "rgba(0,233,255,0.2)" : "rgba(0, 233, 255, 0.28)") : "transparent", color: text, cursor: "pointer", textAlign: "left" }}
+                    >
+                      <span aria-hidden="true" style={{ width: 14, height: 14, border: `1px solid ${accent}`, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1, padding: 2 }}>
+                        <span style={{ background: accent, opacity: 0.8 }} />
+                        <span style={{ background: subtext, opacity: 0.55 }} />
+                        <span style={{ background: accent, opacity: 0.45 }} />
+                      </span>
+                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 800 : 700 }}>
+                        {getKanbanBoardDisplayTitle(board)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         </section>
       )}
@@ -996,6 +1138,17 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       )}
       {contextCard && cardContextMenu && (
         <FrameRightClickMenu x={cardContextMenu.x} y={cardContextMenu.y} onClose={() => setCardContextMenu(null)}>
+          <button
+            type="button"
+            style={contextMenuButtonStyle}
+            onClick={() => {
+              publishKanbanSelectionToLinkedFrames(companyID, frameID, contextCard.node_id, contextCard.node_title, [contextCard.node_id]);
+              setCardContextMenu(null);
+            }}
+            {...contextMenuHoverHandlers}
+          >
+            Find on company explorer
+          </button>
           <button
             type="button"
             style={{ ...contextMenuButtonStyle, color: "#c62828" }}

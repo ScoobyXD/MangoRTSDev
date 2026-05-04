@@ -67,6 +67,7 @@ run("rename targets only resolve for concrete folders and entities", () => {
   assert.deepEqual(resolveExplorerRenameTarget({ kind: "folder", folderKind: "node", folderID: "folder-1" }), { kind: "folder", id: "folder-1" });
   assert.deepEqual(resolveExplorerRenameTarget({ kind: "node", nodeID: "node-1" }), { kind: "node", id: "node-1" });
   assert.deepEqual(resolveExplorerRenameTarget({ kind: "logic_gate", logicGateID: "gate-1" }), { kind: "logic_gate", id: "gate-1" });
+  assert.deepEqual(resolveExplorerRenameTarget({ kind: "kanban", kanbanBoardID: "board-1" }), { kind: "kanban", id: "board-1" });
   assert.equal(resolveExplorerRenameTarget({ kind: "folder", folderKind: "node" }), null);
 });
 
@@ -74,6 +75,7 @@ run("delete targets only resolve for concrete folders and entities", () => {
   assert.deepEqual(resolveExplorerDeleteTarget({ kind: "folder", folderKind: "node", folderID: "folder-1" }), { kind: "folder", id: "folder-1", folderKind: "node" });
   assert.deepEqual(resolveExplorerDeleteTarget({ kind: "node", nodeID: "node-1" }), { kind: "node", id: "node-1" });
   assert.deepEqual(resolveExplorerDeleteTarget({ kind: "logic_gate", logicGateID: "gate-1" }), { kind: "logic_gate", id: "gate-1" });
+  assert.deepEqual(resolveExplorerDeleteTarget({ kind: "kanban", kanbanBoardID: "board-1" }), { kind: "kanban", id: "board-1" });
   assert.equal(resolveExplorerDeleteTarget({ kind: "folder", folderKind: "node" }), null);
 });
 
@@ -114,6 +116,22 @@ run("drop targets resolve item rows to their containing folder", () => {
           { itemType: "logic_gate", itemID: "gate-3" },
         ],
       },
+    ),
+    { folderID: "gate-folder", folderKind: "logic_gate", treeID: "workspace-folder-gate-folder" },
+  );
+
+  assert.deepEqual(
+    resolveExplorerDropTarget(
+      { kind: "node", folderKind: "node", folderID: "node-folder", nodeID: "node-1" },
+      { kind: "kanban", itemType: "kanban", itemID: "board-1" },
+    ),
+    { folderID: "node-folder", folderKind: "node", treeID: "workspace-folder-node-folder" },
+  );
+
+  assert.deepEqual(
+    resolveExplorerDropTarget(
+      { kind: "logic_gate", folderKind: "logic_gate", folderID: "gate-folder", logicGateID: "gate-1" },
+      { kind: "kanban", itemType: "kanban", itemID: "board-1" },
     ),
     { folderID: "gate-folder", folderKind: "logic_gate", treeID: "workspace-folder-gate-folder" },
   );

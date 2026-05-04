@@ -1,6 +1,6 @@
 export const EVENT_SELECTION_COORDINATOR_UPDATED = "mangoos:selection-coordinator-updated";
 
-export type SelectionEntityKind = "node" | "logic_gate" | "folder";
+export type SelectionEntityKind = "node" | "logic_gate" | "folder" | "kanban";
 
 export type SelectionSourceModule =
   | "company-explorer"
@@ -22,6 +22,8 @@ export type LiveSelectionChange = {
   sequence: number;
   changedAt: number;
   selectedTreeID?: string;
+  selectedTreeIDs?: string[];
+  selectedEntityIDs?: string[];
   folderKind?: "node" | "logic_gate";
   folderID?: string;
   folderLabel?: string;
@@ -39,6 +41,8 @@ export type PublishLiveSelectionInput = {
   sourceModule: SelectionSourceModule;
   targetFrameIDs: string[];
   selectedTreeID?: string;
+  selectedTreeIDs?: string[];
+  selectedEntityIDs?: string[];
   folderKind?: "node" | "logic_gate";
   folderID?: string;
   folderLabel?: string;
@@ -97,6 +101,8 @@ export function publishLiveSelection(input: PublishLiveSelectionInput): LiveSele
     sequence,
     changedAt: input.changedAt ?? Date.now(),
     selectedTreeID: input.selectedTreeID,
+    selectedTreeIDs: uniqueNonBlank(input.selectedTreeIDs ?? []),
+    selectedEntityIDs: uniqueNonBlank(input.selectedEntityIDs ?? []),
     folderKind: input.folderKind,
     folderID: input.folderID,
     folderLabel: input.folderLabel,

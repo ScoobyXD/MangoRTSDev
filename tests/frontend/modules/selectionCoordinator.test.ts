@@ -42,6 +42,8 @@ test("publishes selected entity directly to target frames without storing source
     sourceModule: "company-explorer",
     targetFrameIDs: ["map-1", "editor-1", "explorer-1"],
     selectedTreeID: "logic-gate-gate-1",
+    selectedTreeIDs: ["logic-gate-gate-1", "logic-gate-gate-2", "logic-gate-gate-1"],
+    selectedEntityIDs: ["gate-1", "gate-2", "gate-1"],
     folderKind: "logic_gate",
     changedAt: 3000,
     sequence: 1,
@@ -52,6 +54,8 @@ test("publishes selected entity directly to target frames without storing source
   assert.equal(editorSelection?.entityID, "gate-1");
   assert.equal(editorSelection?.selectedTreeID, "logic-gate-gate-1");
   assert.equal(editorSelection?.selectionIntent, "activate");
+  assert.deepEqual(editorSelection?.selectedTreeIDs, ["logic-gate-gate-1", "logic-gate-gate-2"]);
+  assert.deepEqual(editorSelection?.selectedEntityIDs, ["gate-1", "gate-2"]);
   assert.equal(isSelectionTargetForFrame(editorSelection!, "editor-1"), true);
   assert.equal(readLiveSelectionForFrame(companyID, "explorer-1"), null);
 });

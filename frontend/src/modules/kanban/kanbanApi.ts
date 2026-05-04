@@ -52,6 +52,11 @@ export async function updateKanbanBoard(apiBase: string, companyID: string, boar
   });
 }
 
+export async function deleteKanbanBoard(apiBase: string, companyID: string, boardID: string): Promise<void> {
+  const params = query({ company_id: companyID });
+  await fetchJSON<{ status?: string }>(apiBase, `/v1/kanban/boards/${encodeURIComponent(boardID)}?${params}`, { method: "DELETE" });
+}
+
 export async function createKanbanColumn(apiBase: string, companyID: string, boardID: string, title: string, position?: number, widthPx?: number, heightPx?: number, itemColor?: string): Promise<KanbanColumn> {
   return fetchJSON<KanbanColumn>(apiBase, "/v1/kanban/columns", {
     method: "POST",

@@ -1119,7 +1119,6 @@ func nextCompanyExplorerSQLRowPosition(ctx context.Context, tx *sql.Tx, companyI
 		   select position
 		   from company_explorer_folder_items
 		   where company_id=$1
-		     and item_type=$2
 		     and folder_id=$3::uuid
 		 ) explorer_siblings`,
 		companyID, folderKind, parent,
@@ -1432,7 +1431,7 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 		}
 		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
-	if folderKind != itemType {
+	if folderKind != itemType && itemType != "kanban" {
 		return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
 	}
 
@@ -1442,6 +1441,8 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 		existsQuery = `select exists(select 1 from nodes where company_id=$1 and node_id=$2)`
 	} else if itemType == "logic_gate" {
 		existsQuery = `select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`
+	} else if itemType == "kanban" {
+		existsQuery = `select exists(select 1 from kanban_boards where company_id=$1 and board_id=$2)`
 	} else {
 		return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
 	}
@@ -1472,7 +1473,7 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 		position = existingPosition
 	}
 	if position <= 0 {
-		position, err = nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, itemType, folderID)
+		position, err = nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, folderKind, folderID)
 		if err != nil {
 			return domain.CompanyExplorerFolderItem{}, nil, err
 		}
@@ -1796,6 +1797,45 @@ returning company_id, board_id, title, position, created_timestamp, updated_time
 		return domain.KanbanBoard{}, ErrNotFound
 	}
 	return item, err
+}
+
+func (r *PostgresRepo) DeleteKanbanBoard(companyID, boardID string) error {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
+delete from company_explorer_folder_items
+where company_id=$1 and item_type='kanban' and item_id=$2`, companyID, boardID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from kanban_cards
+where company_id=$1 and board_id=$2`, companyID, boardID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from kanban_columns
+where company_id=$1 and board_id=$2`, companyID, boardID); err != nil {
+		return err
+	}
+	deleted, err := tx.ExecContext(ctx, `
+delete from kanban_boards
+where company_id=$1 and board_id=$2`, companyID, boardID)
+	if err != nil {
+		return err
+	}
+	affected, err := deleted.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
 }
 
 func scanKanbanColumn(row interface {

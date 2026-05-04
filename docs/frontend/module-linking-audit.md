@@ -24,7 +24,7 @@ These are dispatched with `emitDashboardEvent(...)` as typed `CustomEvent`s.
 Current live selection authority is `frontend/src/modules/selectionCoordinator.ts`.
 
 - Interactive selection is an in-browser-tab event contract, not a backend write.
-- Every live selection event carries `companyID`, `entityKind`, `entityID`, `label`, `sourceFrameID`, `sourceModule`, `targetFrameIDs`, `sequence`, and `changedAt`.
+- Every live selection event carries `companyID`, `entityKind`, `entityID`, `label`, `sourceFrameID`, `sourceModule`, `targetFrameIDs`, `sequence`, and `changedAt`. Multi-select handoffs can also carry `selectedTreeIDs` and `selectedEntityIDs`.
 - The coordinator stores the latest accepted selection per target frame and rejects stale same-source or older cross-source events.
 - `localStorage` selection/context keys are startup/restore fallback only. Same-tab clicks must use the coordinator payload directly and must not rediscover the selected entity by reading another module's stored snapshot.
 - Durable operations such as moving Explorer items, creating folders, editing nodes, saving documents, and Kanban card changes remain API-first so future headless agents use the same command surface as the UI.
@@ -83,6 +83,8 @@ Kanban participates in the same frame-link graph using kind `kanban`.
 - Linked Explorer selection is read from the existing Explorer context keys and highlights a matching Kanban card.
 - Kanban card clicks write node context back to directly linked Explorer frames using the same Explorer context key family, allowing the matching Explorer node row to highlight.
 - Company Explorer can export selected node rows as a node-only drag batch; Kanban de-dupes that payload and upserts each node card into the dropped column.
+- Company Explorer can select a Kanban board row (`entityKind=kanban`) to open that board in linked Kanban frames. Node Map, Logic Gate Map, and Editor ignore `kanban` selections.
+- Kanban card clicks publish the full selected node ID set so linked Explorer frames can mirror multi-selected card rows and expand nested folders for Find on company explorer.
 - Parent/Child Frame auto-linking works without extra Kanban-specific storage because child frame groups already run through the generic link plan.
 
 

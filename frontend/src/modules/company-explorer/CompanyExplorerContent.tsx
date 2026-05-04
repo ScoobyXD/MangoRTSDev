@@ -7,8 +7,9 @@ import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGrap
 import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { shouldApplyMapSelection, shouldBroadcastSelection, shouldIgnoreSelfOriginatedMapSelection, shouldReadMapStateForSelectionEvent, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
-import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
-import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../kanban/shared";
+import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerItemType } from "../folders/companyExplorerFolders";
+import { createKanbanBoard, deleteKanbanBoard, listKanbanBoards, updateKanbanBoard } from "../kanban/kanbanApi";
+import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, getKanbanBoardDisplayTitle, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem, type KanbanBoard } from "../kanban/shared";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, formatExplorerFolderLabel, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerDropTarget, resolveExplorerKeyboardNavigation, resolveExplorerRenameTarget, resolveExplorerRootDropTarget, shouldAcceptMapSelectionAfterExplorerSelection, type ExplorerCreationTargets, type ExplorerDropPayload, type ExplorerRowDropPlacement, type ExplorerSelectionDomain } from "./treePresentation";
@@ -17,9 +18,10 @@ type ExplorerTreeNode = {
   id: string;
   label: string;
   depth: number;
-  kind: "folder" | "node" | "logic_gate";
+  kind: "folder" | "node" | "logic_gate" | "kanban";
   nodeID?: string;
   logicGateID?: string;
+  kanbanBoardID?: string;
   folderID?: string;
   parentFolderID?: string;
   folderKind?: CompanyExplorerFolderKind;
@@ -53,12 +55,16 @@ function getExplorerDragPayload(row: ExplorerTreeNode): ExplorerDragPayload | nu
   if (row.kind === "logic_gate" && row.logicGateID) {
     return { kind: "logic_gate", itemID: row.logicGateID, itemType: "logic_gate" };
   }
+  if (row.kind === "kanban" && row.kanbanBoardID) {
+    return { kind: "kanban", itemID: row.kanbanBoardID, itemType: "kanban" };
+  }
   return null;
 }
 
-function getExplorerItemPayload(row: ExplorerTreeNode): { itemID: string; itemType: CompanyExplorerFolderKind } | null {
+function getExplorerItemPayload(row: ExplorerTreeNode): { itemID: string; itemType: CompanyExplorerItemType } | null {
   if (row.kind === "node" && row.nodeID) return { itemID: row.nodeID, itemType: "node" };
   if (row.kind === "logic_gate" && row.logicGateID) return { itemID: row.logicGateID, itemType: "logic_gate" };
+  if (row.kind === "kanban" && row.kanbanBoardID) return { itemID: row.kanbanBoardID, itemType: "kanban" };
   return null;
 }
 
@@ -68,7 +74,7 @@ function getExplorerDragPayloadForSelection(row: ExplorerTreeNode, selectedIDs: 
   if (!basePayload || !baseItem) return basePayload;
 
   const dragIDs = selectedIDs.has(row.id) ? selectedIDs : new Set([row.id]);
-  const items: { itemID: string; itemType: CompanyExplorerFolderKind }[] = [];
+  const items: { itemID: string; itemType: CompanyExplorerItemType }[] = [];
   const seen = new Set<string>();
   for (const candidate of rows) {
     if (!dragIDs.has(candidate.id)) continue;
@@ -86,7 +92,7 @@ function readExplorerDragPayload(dataTransfer: DataTransfer): ExplorerDragPayloa
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ExplorerDragPayload;
     if (parsed.kind === "folder" && parsed.folderID && parsed.folderKind) return parsed;
-    if ((parsed.kind === "node" || parsed.kind === "logic_gate") && parsed.itemID && parsed.itemType) return parsed;
+    if ((parsed.kind === "node" || parsed.kind === "logic_gate" || parsed.kind === "kanban") && parsed.itemID && parsed.itemType) return parsed;
     if (parsed.kind === "batch") {
       const itemType = getExplorerDropPayloadItemType(parsed);
       const items = getExplorerDropPayloadItems(parsed);
@@ -128,15 +134,16 @@ function getExplorerRowContainerID(row: ExplorerTreeNode): string | null {
   return null;
 }
 
-function getExplorerRowOrderKind(row: ExplorerTreeNode): CompanyExplorerFolderKind | null {
+function getExplorerRowOrderKind(row: ExplorerTreeNode): CompanyExplorerItemType | CompanyExplorerFolderKind | null {
   if (row.kind === "folder") return row.folderKind ?? null;
-  return row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : null;
+  return row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "kanban" ? "kanban" : null;
 }
 
 function getExplorerSelectionDomain(row?: ExplorerTreeNode | null): ExplorerSelectionDomain {
   if (!row) return "root";
   if (row.kind === "node") return "node";
   if (row.kind === "logic_gate") return "logic_gate";
+  if (row.kind === "kanban") return "kanban";
   return row.folderKind ?? "root";
 }
 
@@ -217,6 +224,17 @@ const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"] }> = ({ kind })
       </svg>
     );
   }
+  if (kind === "kanban") {
+    return (
+      <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
+        <rect x="1.6" y="2.2" width="12.8" height="11.6" rx="1.1" fill="#fffaf0" stroke="#7a5b12" strokeWidth="1.15" />
+        <path d="M5.6 2.2v11.6M10.4 2.2v11.6" stroke="#7a5b12" strokeWidth="1" />
+        <rect x="2.8" y="4" width="1.8" height="3.1" fill="#f2c94c" />
+        <rect x="6.8" y="4" width="2" height="5.1" fill="#2f7d62" />
+        <rect x="11.2" y="4" width="1.9" height="2.4" fill="#245c9f" />
+      </svg>
+    );
+  }
   return (
     <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
       <path d="M1.4 5.25h3.05M1.4 10.75h3.05M11.7 8h2.9" fill="none" stroke="#0c8f47" strokeWidth="1.25" strokeLinecap="round" />
@@ -252,6 +270,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [logicGates, setLogicGates] = useState<LogicGateRecord[]>([]);
+  const [kanbanBoards, setKanbanBoards] = useState<KanbanBoard[]>([]);
   const [folders, setFolders] = useState<CompanyExplorerFolder[]>([]);
   const [folderItems, setFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [selectedTreeID, setSelectedTreeID] = useState("folder-root");
@@ -259,6 +278,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [selectionAnchorTreeID, setSelectionAnchorTreeID] = useState("folder-root");
   const [selectedNodeID, setSelectedNodeID] = useState("");
   const [selectedLogicGateID, setSelectedLogicGateID] = useState("");
+  const [selectedKanbanBoardID, setSelectedKanbanBoardID] = useState("");
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => readExpandedRowsFromStorage(expandedStorageKey));
   const selectedTreeIDRef = useRef(selectedTreeID);
@@ -287,6 +307,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     renameTreeID: string;
     renameLabel: string;
     contextKind: CompanyExplorerFolderKind | null;
+    kanbanParentFolderID: string;
     canCreateBothFolderTypes: boolean;
   } | null>(null);
   const [linkRevision, setLinkRevision] = useState(0);
@@ -362,6 +383,20 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     });
   }, [apiBase, companyID]);
 
+  const refreshKanbanBoards = useCallback(async () => {
+    try {
+      // The Explorer tree renders a bounded first window. Board creation and
+      // placement stay API-first so headless agents use the same commands.
+      setKanbanBoards(await listKanbanBoards(apiBase, companyID, 200));
+    } catch {
+      // Keep Explorer usable even if Kanban endpoints are temporarily offline.
+    }
+  }, [apiBase, companyID]);
+
+  useEffect(() => {
+    void refreshKanbanBoards();
+  }, [refreshKanbanBoards]);
+
   // Build a file-explorer tree from durable folder rows plus one placement row per item.
   // Folder selection is recursive for map scope, but the tree shows immediate children
   // at each level so the hierarchy stays predictable for users and headless agents.
@@ -369,9 +404,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     const rows: ExplorerTreeNode[] = [];
     const nodeByID = new Map(nodes.map((node) => [node.node_id, node]));
     const logicGateByID = new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
+    const kanbanBoardByID = new Map(kanbanBoards.map((board) => [board.board_id, board]));
     const folderLabelByID = new Map(folders.map((folder) => [folder.folder_id, folder.name]));
     const assignedNodes = new Set(folderItems.filter((item) => item.item_type === "node").map((item) => item.item_id));
     const assignedLogicGates = new Set(folderItems.filter((item) => item.item_type === "logic_gate").map((item) => item.item_id));
+    const assignedKanbanBoards = new Set(folderItems.filter((item) => item.item_type === "kanban").map((item) => item.item_id));
     const foldersByParent = new Map<string, CompanyExplorerFolder[]>();
     for (const folder of folders) {
       const key = `${folder.folder_kind}:${folder.parent_folder_id ?? ""}`;
@@ -381,14 +418,14 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
     const itemsByFolder = new Map<string, CompanyExplorerFolderItem[]>();
     for (const item of folderItems) {
-      const key = `${item.item_type}:${item.folder_id}`;
+      const key = item.folder_id;
       const bucket = itemsByFolder.get(key) ?? [];
       bucket.push(item);
       itemsByFolder.set(key, bucket);
     }
 
     const pushFolderBranch = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number) => {
-      const directItems = itemsByFolder.get(`${folderKind}:${parentFolderID}`) ?? [];
+      const directItems = (itemsByFolder.get(parentFolderID) ?? []).filter((item) => item.item_type === folderKind || item.item_type === "kanban");
       const branchRows: ExplorerTreeNode[] = [];
       let syntheticRootPosition = 0;
       if (parentFolderID === "" && folderKind === "node") {
@@ -430,7 +467,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         }
       }
       for (const item of directItems) {
-        if (folderKind === "node") {
+        if (item.item_type === "node") {
           const node = nodeByID.get(item.item_id);
           if (node) {
             branchRows.push({
@@ -447,7 +484,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
               createdTimestamp: item.created_timestamp,
             });
           }
-        } else {
+        } else if (item.item_type === "logic_gate") {
           const logicGate = logicGateByID.get(item.item_id);
           if (logicGate) {
             branchRows.push({
@@ -456,6 +493,23 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
               depth,
               kind: "logic_gate",
               logicGateID: logicGate.logic_gate_id,
+              folderID: parentFolderID,
+              folderKind,
+              folderLabel: folderLabelByID.get(parentFolderID),
+              scopeLevel: depth,
+              position: item.position || TREE_ROW_POSITION_STEP,
+              createdTimestamp: item.created_timestamp,
+            });
+          }
+        } else {
+          const board = kanbanBoardByID.get(item.item_id);
+          if (board) {
+            branchRows.push({
+              id: `kanban-${board.board_id}`,
+              label: getKanbanBoardDisplayTitle(board),
+              depth,
+              kind: "kanban",
+              kanbanBoardID: board.board_id,
               folderID: parentFolderID,
               folderKind,
               folderLabel: folderLabelByID.get(parentFolderID),
@@ -505,15 +559,33 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     // row exists, because their order is personal UI state rather than graph data.
     pushFolderBranch("node", "", 1);
     pushFolderBranch("logic_gate", "", 1);
+    let syntheticBoardPosition = 0;
+    for (const board of kanbanBoards) {
+      if (assignedKanbanBoards.has(board.board_id)) continue;
+      syntheticBoardPosition += TREE_ROW_POSITION_STEP;
+      const rowID = `kanban-${board.board_id}`;
+      rows.push({
+        id: rowID,
+        label: getKanbanBoardDisplayTitle(board),
+        depth: 1,
+        kind: "kanban",
+        kanbanBoardID: board.board_id,
+        folderID: "",
+        scopeLevel: 1,
+        position: rootRowOrder[rowID] ?? syntheticBoardPosition,
+        createdTimestamp: board.created_timestamp,
+      });
+    }
 
     return rows;
-  }, [expanded, nodes, logicGates, folders, folderItems, rootRowOrder]);
+  }, [expanded, nodes, logicGates, kanbanBoards, folders, folderItems, rootRowOrder]);
 
   const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID) ?? treeRows[0], [selectedTreeID, treeRows]);
   const rowByID = useMemo(() => new Map(treeRows.map((row) => [row.id, row])), [treeRows]);
   const selectedFolderKind = selectedTree?.folderKind;
   const selectedFolderID = selectedTree?.folderID ?? "";
   const selectedFolderLabel = selectedTree?.folderLabel ?? (selectedTree?.folderKind ? selectedTree.label : "");
+  const selectedKanbanBoardLabel = selectedTree?.kind === "kanban" ? selectedTree.label : "";
 
   useEffect(() => {
     selectedTreeIDRef.current = selectedTreeID;
@@ -646,12 +718,13 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setSelectionAnchorTreeID(`workspace-folder-${folder.folder_id}`);
       setSelectedNodeID("");
       setSelectedLogicGateID("");
+      setSelectedKanbanBoardID("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_folder");
     }
   }, [apiBase, companyID, requestJSON]);
 
-  const assignItemToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerFolderKind, itemID: string, options: { position?: number; expandTarget?: boolean } = {}) => {
+  const assignItemToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerItemType, itemID: string, options: { position?: number; expandTarget?: boolean } = {}) => {
     if (!targetFolderID || !itemID) return;
     const previousFolderID = folderItems.find((row) => row.item_type === itemType && row.item_id === itemID)?.folder_id ?? "";
     setError("");
@@ -716,6 +789,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setSelectionAnchorTreeID(`node-${node.node_id}`);
       setSelectedNodeID(node.node_id);
       setSelectedLogicGateID("");
+      setSelectedKanbanBoardID("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node");
     }
@@ -746,10 +820,35 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setSelectionAnchorTreeID(`logic-gate-${logicGate.logic_gate_id}`);
       setSelectedLogicGateID(logicGate.logic_gate_id);
       setSelectedNodeID("");
+      setSelectedKanbanBoardID("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_logic_gate");
     }
   }, [apiBase, assignItemToFolder, companyID, requestJSON]);
+
+  const createKanbanAtFolder = useCallback(async (parentFolderID: string) => {
+    setError("");
+    try {
+      const board = await createKanbanBoard(apiBase, companyID, "New Kanban board");
+      setKanbanBoards((previous) => previous.some((item) => item.board_id === board.board_id) ? previous : [...previous, board]);
+      if (parentFolderID) await assignItemToFolder(parentFolderID, "kanban", board.board_id, { expandTarget: true });
+      setExpanded((previous) => {
+        const next = new Set(previous);
+        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
+        return next;
+      });
+      const treeID = `kanban-${board.board_id}`;
+      lastLocalExplorerSelectionRef.current = { domain: "kanban", changedAt: Date.now() };
+      setSelectedTreeID(treeID);
+      setSelectedTreeIDs(new Set([treeID]));
+      setSelectionAnchorTreeID(treeID);
+      setSelectedKanbanBoardID(board.board_id);
+      setSelectedNodeID("");
+      setSelectedLogicGateID("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_create_kanban");
+    }
+  }, [apiBase, assignItemToFolder, companyID]);
 
   // Delete through canonical REST APIs first, then patch local/shared caches so
   // Explorer and linked maps converge immediately without a full snapshot GET.
@@ -774,6 +873,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         setSelectionAnchorTreeID(parentTreeID);
         setSelectedNodeID("");
         setSelectedLogicGateID("");
+        setSelectedKanbanBoardID("");
         return;
       }
 
@@ -789,6 +889,21 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         setSelectionAnchorTreeID("folder-root");
         setSelectedNodeID("");
         setSelectedLogicGateID("");
+        setSelectedKanbanBoardID("");
+        return;
+      }
+
+      if (target.kind === "kanban") {
+        await deleteKanbanBoard(apiBase, companyID, target.id);
+        setKanbanBoards((previous) => previous.filter((board) => board.board_id !== target.id));
+        setFolderItems((previous) => previous.filter((item) => item.item_type !== "kanban" || item.item_id !== target.id));
+        lastLocalExplorerSelectionRef.current = { domain: "root", changedAt: Date.now() };
+        setSelectedTreeID("folder-root");
+        setSelectedTreeIDs(new Set(["folder-root"]));
+        setSelectionAnchorTreeID("folder-root");
+        setSelectedNodeID("");
+        setSelectedLogicGateID("");
+        setSelectedKanbanBoardID("");
         return;
       }
 
@@ -803,6 +918,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setSelectionAnchorTreeID("folder-root");
       setSelectedNodeID("");
       setSelectedLogicGateID("");
+      setSelectedKanbanBoardID("");
     } catch (err) {
       setError(err instanceof Error ? err.message : `failed_to_delete_${target.kind}`);
     }
@@ -834,7 +950,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         });
         setNodes((previous) => previous.map((item) => (item.node_id === node.node_id ? node : item)));
         upsertNodeRelationshipGraphNode(apiBase, companyID, node);
-      } else {
+      } else if (activeRename.target.kind === "logic_gate") {
         const updated = await requestJSON<LogicGateApiRecord>(`/v1/logic-gates/${activeRename.target.id}`, {
           method: "PUT",
           body: JSON.stringify({ company_id: companyID, header: value }),
@@ -842,6 +958,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         const logicGate = toLogicGateCanvasRecord(updated);
         setLogicGates((previous) => previous.map((item) => (item.logic_gate_id === logicGate.logic_gate_id ? logicGate : item)));
         upsertLogicGateRelationshipGraphNode(apiBase, companyID, logicGate);
+      } else {
+        const board = await updateKanbanBoard(apiBase, companyID, activeRename.target.id, value);
+        setKanbanBoards((previous) => previous.map((item) => (item.board_id === board.board_id ? board : item)));
       }
       setRenaming((current) => (current?.treeID === activeRename.treeID ? null : current));
     } catch (err) {
@@ -887,15 +1006,24 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     if (row.kind === "node") {
       setSelectedNodeID(row.nodeID ?? "");
       setSelectedLogicGateID("");
+      setSelectedKanbanBoardID("");
       return;
     }
     if (row.kind === "logic_gate") {
       setSelectedLogicGateID(row.logicGateID ?? "");
       setSelectedNodeID("");
+      setSelectedKanbanBoardID("");
+      return;
+    }
+    if (row.kind === "kanban") {
+      setSelectedKanbanBoardID(row.kanbanBoardID ?? "");
+      setSelectedNodeID("");
+      setSelectedLogicGateID("");
       return;
     }
     setSelectedNodeID("");
     setSelectedLogicGateID("");
+    setSelectedKanbanBoardID("");
   }, []);
 
   const selectSingleTreeRow = useCallback((row: ExplorerTreeNode) => {
@@ -926,6 +1054,41 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     setSelectionAnchorTreeID(selected.anchorID);
     focusTreeRow(rowByID.get(primaryID) ?? row, { selectionIntent: options.selectionIntent ?? "activate" });
   }, [focusTreeRow, rowByID, selectedTreeIDs, selectionAnchorTreeID, treeRows]);
+
+  const expandTreeIDs = useCallback((treeIDs: string[]) => {
+    const folderByID = new Map(folders.map((folder) => [folder.folder_id, folder]));
+    const addFolderPath = (next: Set<string>, folderID: string) => {
+      let currentID = folderID;
+      const seen = new Set<string>();
+      while (currentID && !seen.has(currentID)) {
+        seen.add(currentID);
+        next.add(`workspace-folder-${currentID}`);
+        currentID = folderByID.get(currentID)?.parent_folder_id ?? "";
+      }
+    };
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      next.add("folder-root");
+      for (const treeID of treeIDs) {
+        if (treeID.startsWith("workspace-folder-")) {
+          addFolderPath(next, treeID.slice("workspace-folder-".length));
+          continue;
+        }
+        const itemType = treeID.startsWith("node-") ? "node"
+          : treeID.startsWith("logic-gate-") ? "logic_gate"
+            : treeID.startsWith("kanban-") ? "kanban"
+              : "";
+        const itemID = itemType === "node" ? treeID.slice("node-".length)
+          : itemType === "logic_gate" ? treeID.slice("logic-gate-".length)
+            : itemType === "kanban" ? treeID.slice("kanban-".length)
+              : "";
+        if (!itemType || !itemID) continue;
+        const placement = folderItems.find((item) => item.item_type === itemType && item.item_id === itemID);
+        if (placement) addFolderPath(next, placement.folder_id);
+      }
+      return next;
+    });
+  }, [folderItems, folders]);
 
   const startRenamingRow = useCallback((row: ExplorerTreeNode) => {
     const target = resolveExplorerRenameTarget(row);
@@ -1014,7 +1177,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   const canPlaceExplorerItemsAtTarget = useCallback((payload: ExplorerDragPayload | null, target: ExplorerTreeNode): boolean => {
     const itemType = getExplorerDropPayloadItemType(payload);
-    if (!itemType || getExplorerRowOrderKind(target) !== itemType) return false;
+    const targetKind = getExplorerRowOrderKind(target);
+    const targetAcceptsItem = itemType === targetKind
+      || itemType === "kanban"
+      || (target.kind === "kanban" && target.folderKind === itemType);
+    if (!itemType || !targetAcceptsItem) return false;
     const itemRows = getExplorerItemRowsForPayload(payload);
     if (itemRows.length === 0 || itemRows.some((row) => row.id === target.id)) return false;
     const targetContainer = getExplorerRowContainerID(target);
@@ -1079,8 +1246,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       if (row.kind === "folder" && row.folderID) {
         return moveFolder(row.folderID, row.parentFolderID ?? "", { position, parentProvided: false });
       }
-      const itemType: CompanyExplorerFolderKind | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : null;
-      const itemID = row.kind === "node" ? row.nodeID : row.logicGateID;
+      const itemType: CompanyExplorerItemType | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "kanban" ? "kanban" : null;
+      const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : row.kanbanBoardID;
       if (row.folderID && itemType && itemID) return assignItemToFolder(row.folderID, itemType, itemID, { position });
       return Promise.resolve();
     }));
@@ -1135,7 +1302,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     if (!itemType || targetContainer == null || !canPlaceExplorerItemsAtTarget(payload, target)) return false;
 
     const itemRows = getExplorerItemRowsForPayload(payload);
-    const targetRows = treeRows.filter((row) => getExplorerRowContainerID(row) === targetContainer && getExplorerRowOrderKind(row) === itemType);
+    const targetRows = treeRows.filter((row) => {
+      if (getExplorerRowContainerID(row) !== targetContainer) return false;
+      const rowKind = getExplorerRowOrderKind(row);
+      return rowKind === itemType || rowKind === "kanban" || itemType === "kanban";
+    });
     const targetRowIDs = new Set(targetRows.map((row) => row.id));
     const rowsForPlan = [
       ...targetRows,
@@ -1166,15 +1337,15 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       if (row.kind === "folder" && row.folderID) {
         return moveFolder(row.folderID, row.parentFolderID ?? "", { position, parentProvided: false });
       }
-      const rowItemType: CompanyExplorerFolderKind | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : null;
-      const itemID = row.kind === "node" ? row.nodeID : row.logicGateID;
+      const rowItemType: CompanyExplorerItemType | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "kanban" ? "kanban" : null;
+      const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : row.kanbanBoardID;
       if (targetContainer && rowItemType && itemID) return assignItemToFolder(targetContainer, rowItemType, itemID, { position });
       return Promise.resolve();
     }));
     return true;
   }, [assignItemToFolder, canPlaceExplorerItemsAtTarget, getExplorerItemRowsForPayload, moveFolder, treeRows]);
 
-  const assignExplorerPayloadItemsToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerFolderKind, payload: ExplorerDragPayload) => {
+  const assignExplorerPayloadItemsToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => {
     const items = getExplorerDropPayloadItems(payload).filter((item) => item.itemType === itemType);
     if (!targetFolderID || items.length === 0) return;
     const existingRows = treeRows.filter((row) => getExplorerRowContainerID(row) === targetFolderID && getExplorerRowOrderKind(row) === itemType);
@@ -1206,6 +1377,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     event.stopPropagation();
     if (row) selectTreeRow(row, event, { selectionIntent: "navigate" });
     const contextKind: CompanyExplorerFolderKind | null = row?.folderKind ?? (row?.kind === "node" ? "node" : row?.kind === "logic_gate" ? "logic_gate" : null);
+    const kanbanParentFolderID = row?.folderKind && row.folderID ? row.folderID : "";
     setExplorerContextMenu({
       x: event.clientX,
       y: event.clientY,
@@ -1216,6 +1388,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       renameTreeID: row?.id ?? "",
       renameLabel: row?.label ?? "",
       contextKind,
+      kanbanParentFolderID,
       canCreateBothFolderTypes: !contextKind,
     });
   }, [selectTreeRow]);
@@ -1288,16 +1461,13 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     const applyLiveSelection = (selection: LiveSelectionChange) => {
       if (selection.companyID !== companyID || selection.sourceFrameID === scope) return;
 
-      const applyTreeSelection = (treeID: string) => {
+      const applyTreeSelection = (treeID: string, treeIDs: string[] = [treeID]) => {
+        const cleanTreeIDs = Array.from(new Set(treeIDs.map((id) => id.trim()).filter(Boolean)));
+        if (cleanTreeIDs.length === 0) cleanTreeIDs.push(treeID);
         setSelectedTreeID(treeID);
-        setSelectedTreeIDs(new Set([treeID]));
+        setSelectedTreeIDs(new Set(cleanTreeIDs));
         setSelectionAnchorTreeID(treeID);
-        setExpanded((previous) => {
-          if (previous.has("folder-root")) return previous;
-          const next = new Set(previous);
-          next.add("folder-root");
-          return next;
-        });
+        expandTreeIDs(cleanTreeIDs);
       };
 
       if (selection.entityKind === "folder") {
@@ -1305,6 +1475,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         const treeID = selection.selectedTreeID || (selection.folderID || selection.entityID ? `workspace-folder-${selection.folderID || selection.entityID}` : "folder-root");
         setSelectedNodeID("");
         setSelectedLogicGateID("");
+        setSelectedKanbanBoardID("");
         applyTreeSelection(treeID);
         return;
       }
@@ -1314,6 +1485,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           suppressNextExplorerBroadcastRef.current = true;
           setSelectedNodeID("");
           setSelectedLogicGateID("");
+          setSelectedKanbanBoardID("");
           applyTreeSelection(selection.selectedTreeID || "folder-root");
           return;
         }
@@ -1331,7 +1503,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         suppressNextExplorerBroadcastRef.current = true;
         setSelectedNodeID(selection.entityID);
         setSelectedLogicGateID("");
-        applyTreeSelection(nextTreeID);
+        setSelectedKanbanBoardID("");
+        const selectedNodeTreeIDs = (selection.selectedEntityIDs?.length ? selection.selectedEntityIDs : [selection.entityID]).map((id) => `node-${id}`);
+        applyTreeSelection(nextTreeID, selection.selectedTreeIDs?.length ? selection.selectedTreeIDs : selectedNodeTreeIDs);
         return;
       }
 
@@ -1340,6 +1514,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           suppressNextExplorerBroadcastRef.current = true;
           setSelectedLogicGateID("");
           setSelectedNodeID("");
+          setSelectedKanbanBoardID("");
           applyTreeSelection(selection.selectedTreeID || "folder-root");
           return;
         }
@@ -1357,14 +1532,27 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         suppressNextExplorerBroadcastRef.current = true;
         setSelectedLogicGateID(selection.entityID);
         setSelectedNodeID("");
-        applyTreeSelection(nextTreeID);
+        setSelectedKanbanBoardID("");
+        applyTreeSelection(nextTreeID, selection.selectedTreeIDs?.length ? selection.selectedTreeIDs : [`logic-gate-${selection.entityID}`]);
+        return;
+      }
+
+      if (selection.entityKind === "kanban") {
+        const boardID = selection.entityID.trim();
+        if (!boardID) return;
+        const nextTreeID = selection.selectedTreeID || `kanban-${boardID}`;
+        suppressNextExplorerBroadcastRef.current = true;
+        setSelectedKanbanBoardID(boardID);
+        setSelectedNodeID("");
+        setSelectedLogicGateID("");
+        applyTreeSelection(nextTreeID, selection.selectedTreeIDs?.length ? selection.selectedTreeIDs : [nextTreeID]);
       }
     };
 
     const liveSelection = readLiveSelectionForFrame(companyID, scope);
     if (liveSelection) applyLiveSelection(liveSelection);
     return subscribeLiveSelection(scope, applyLiveSelection);
-  }, [companyID, scope]);
+  }, [companyID, expandTreeIDs, scope]);
 
   useEffect(() => {
     const applyMapSelection = (selectedFromMap: string, changedAt?: number) => {
@@ -1381,16 +1569,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       suppressNextExplorerBroadcastRef.current = true;
       setSelectedNodeID(selectedFromMap);
       setSelectedLogicGateID("");
+      setSelectedKanbanBoardID("");
       const nextTreeID = `node-${selectedFromMap}`;
       setSelectedTreeID(nextTreeID);
       setSelectedTreeIDs(new Set([nextTreeID]));
       setSelectionAnchorTreeID(nextTreeID);
-      setExpanded((previous) => {
-        if (previous.has("folder-root")) return previous;
-        const next = new Set(previous);
-        next.add("folder-root");
-        return next;
-      });
+      expandTreeIDs([nextTreeID]);
     };
     const readFromMapState = () => {
       if (!linkedMapFrameID) return;
@@ -1425,7 +1609,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return () => {
       window.removeEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapSelectionUpdated);
     };
-  }, [companyID, linkedMapFrameID]);
+  }, [companyID, expandTreeIDs, linkedMapFrameID]);
 
   useEffect(() => {
     const applyLogicGateMapSelection = (selectedFromMap: string, changedAt?: number) => {
@@ -1444,15 +1628,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       suppressNextExplorerBroadcastRef.current = true;
       setSelectedLogicGateID(selectedFromMap);
       setSelectedNodeID("");
+      setSelectedKanbanBoardID("");
       setSelectedTreeID(nextTreeID);
       setSelectedTreeIDs(new Set([nextTreeID]));
       setSelectionAnchorTreeID(nextTreeID);
-      setExpanded((previous) => {
-        if (previous.has("folder-root")) return previous;
-        const next = new Set(previous);
-        next.add("folder-root");
-        return next;
-      });
+      expandTreeIDs([nextTreeID]);
     };
     const readFromLogicMapState = () => {
       const logicContextFrameID = linkedLogicMapFrameID || linkedMapFrameID;
@@ -1490,7 +1670,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return () => {
       window.removeEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapSelectionUpdated);
     };
-  }, [companyID, linkedLogicMapFrameID, linkedMapFrameID]);
+  }, [companyID, expandTreeIDs, linkedLogicMapFrameID, linkedMapFrameID]);
 
   useEffect(() => {
     // Other modules can target the Explorer with node context. This lets a
@@ -1503,15 +1683,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       if (current.selectedNodeID === selectedFromContext && current.selectedTreeID === nextTreeID) return;
       setSelectedNodeID(selectedFromContext);
       setSelectedLogicGateID("");
+      setSelectedKanbanBoardID("");
       setSelectedTreeID(nextTreeID);
       setSelectedTreeIDs(new Set([nextTreeID]));
       setSelectionAnchorTreeID(nextTreeID);
-      setExpanded((previous) => {
-        if (previous.has("folder-root")) return previous;
-        const next = new Set(previous);
-        next.add("folder-root");
-        return next;
-      });
+      expandTreeIDs([nextTreeID]);
     };
     const readTargetedExplorerContext = () => {
       const key = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
@@ -1525,7 +1701,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       }
     };
     readTargetedExplorerContext();
-  }, [companyID, scope]);
+  }, [companyID, expandTreeIDs, scope]);
 
   useEffect(() => {
     const nextSelection = { selectedNodeID, selectedTreeID };
@@ -1545,18 +1721,26 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       explorerContextSequenceRef.current += 1;
       const changedAt = Date.now();
       const targetFrameIDs = Array.from(targetIDs);
-      const selectedEntityKind = selectedLogicGateID ? "logic_gate" : selectedNodeID ? "node" : "folder";
-      const selectedEntityID = selectedLogicGateID || selectedNodeID || selectedFolderID;
+      const selectedEntityKind = selectedKanbanBoardID ? "kanban" : selectedLogicGateID ? "logic_gate" : selectedNodeID ? "node" : "folder";
+      const selectedEntityID = selectedKanbanBoardID || selectedLogicGateID || selectedNodeID || selectedFolderID;
+      const selectedEntityIDs = Array.from(selectedTreeIDs).map((treeID) => {
+        if (selectedEntityKind === "node" && treeID.startsWith("node-")) return treeID.slice("node-".length);
+        if (selectedEntityKind === "logic_gate" && treeID.startsWith("logic-gate-")) return treeID.slice("logic-gate-".length);
+        if (selectedEntityKind === "kanban" && treeID.startsWith("kanban-")) return treeID.slice("kanban-".length);
+        return "";
+      }).filter(Boolean);
       const selectionIntent = pendingExplorerSelectionIntentRef.current;
       publishLiveSelection({
         companyID,
         entityKind: selectedEntityKind,
         entityID: selectedEntityID,
-        label: selectedTree?.label ?? "",
+        label: selectedKanbanBoardLabel || selectedTree?.label || "",
         sourceFrameID: scope,
         sourceModule: "company-explorer",
         targetFrameIDs,
         selectedTreeID,
+        selectedTreeIDs: Array.from(selectedTreeIDs),
+        selectedEntityIDs,
         folderKind: selectedFolderKind,
         folderID: selectedFolderID,
         folderLabel: selectedFolderLabel,
@@ -1564,6 +1748,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         sequence: explorerContextSequenceRef.current,
         selectionIntent,
       });
+      if (selectedKanbanBoardID) return;
       for (const targetID of targetIDs) {
         if (!targetID) continue;
         const targetKind = classifyFrameKind(registry[targetID]?.kind ?? "");
@@ -1596,7 +1781,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     } catch {
       // ignore local storage failures
     }
-  }, [companyID, scope, selectedNodeID, selectedLogicGateID, selectedFolderID, selectedFolderKind, selectedFolderLabel, selectedTreeID, selectedTree, linkRevision]);
+  }, [companyID, scope, selectedNodeID, selectedLogicGateID, selectedKanbanBoardID, selectedFolderID, selectedFolderKind, selectedFolderLabel, selectedKanbanBoardLabel, selectedTreeID, selectedTreeIDs, selectedTree, linkRevision]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
@@ -1767,7 +1952,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                   void moveFolder(payload.folderID, dropTarget.folderID);
                   return;
                 }
-                void assignExplorerPayloadItemsToFolder(dropTarget.folderID, dropTarget.folderKind, payload);
+                void assignExplorerPayloadItemsToFolder(dropTarget.folderID, getExplorerDropPayloadItemType(payload) ?? dropTarget.folderKind, payload);
               }}
               style={{
                 position: "relative",
@@ -1905,6 +2090,15 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
               >
                 Create logic gate
               </button>
+              <button
+                style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+                onClick={() => {
+                  void createKanbanAtFolder("");
+                  setExplorerContextMenu(null);
+                }}
+              >
+                Create new kanban
+              </button>
             </>
           ) : (
             <>
@@ -1939,6 +2133,15 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                   Create logic gate
                 </button>
               )}
+              <button
+                style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+                onClick={() => {
+                  void createKanbanAtFolder(explorerContextMenu.kanbanParentFolderID);
+                  setExplorerContextMenu(null);
+                }}
+              >
+                Create new kanban
+              </button>
             </>
           )}
           {explorerContextMenu.findTarget && (
