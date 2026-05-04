@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
-import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets } from "../linkingGraph";
-import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED } from "../node-map/eventbus";
+import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
+import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { createKanbanBoard, createKanbanColumn, deleteKanbanCard, deleteKanbanColumn, listKanbanBoards, listKanbanCards, listKanbanColumns, moveKanbanCard, updateKanbanColumn, upsertKanbanCard } from "./kanbanApi";
 import {
   EXPLORER_ENTITY_DRAG_MIME,
@@ -101,26 +101,24 @@ function readLinkedExplorerSelection(companyID: string, scope: string): Highligh
   return null;
 }
 
-function publishKanbanSelectionToLinkedExplorers(companyID: string, boardID: string, nodeID: string, nodeTitle: string): void {
+function publishKanbanSelectionToLinkedFrames(companyID: string, boardID: string, nodeID: string, nodeTitle: string): void {
   if (!nodeID) return;
   try {
     const edges = readFrameLinksFromStorage();
     const registry = readFrameRegistryFromStorage();
-    const targetIDs = resolveDirectLinkedTargets({ sourceFrameID: boardID, edges })
-      .filter((targetID) => classifyFrameKind(registry[targetID]?.kind ?? "") === "explorer");
-    for (const targetID of targetIDs) {
-      const key = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${targetID}`;
-      localStorage.setItem(key, JSON.stringify({
-        sourceKanbanID: boardID,
-        selectedNodeID: nodeID,
-        selectedTreeID: `node-${nodeID}`,
-        selectedLabel: nodeTitle,
-        ts: Date.now(),
-      }));
-      emitDashboardEvent(EVENT_EXPLORER_CONTEXT_UPDATED, { key, sourceKanbanID: boardID, targetID });
-    }
+    const targetFrameIDs = resolveConnectedFrameTargets({ sourceFrameID: boardID, edges, registry });
+    publishLiveSelection({
+      companyID,
+      entityKind: "node",
+      entityID: nodeID,
+      label: nodeTitle,
+      sourceFrameID: boardID,
+      sourceModule: "kanban",
+      targetFrameIDs,
+      selectedTreeID: `node-${nodeID}`,
+    });
   } catch {
-    // Selection handoff is a UI convenience; card selection must still work if storage is unavailable.
+    // Selection handoff is a UI convenience; card selection must still work if the link graph is unavailable.
   }
 }
 
@@ -292,23 +290,17 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [apiBase, companyID, syncCardTitlesFromNodeGraph]);
 
   useEffect(() => {
-    const refreshSelection = () => setHighlightedEntity(readLinkedExplorerSelection(companyID, boardID));
-    const onExplorerContext = (event: Event) => {
-      const detail = (event as CustomEvent<{ targetID?: string }>).detail;
-      if (!detail || detail.targetID !== boardID) return;
-      refreshSelection();
+    const applyLiveSelection = (selection: LiveSelectionChange) => {
+      if (selection.companyID !== companyID || selection.sourceFrameID === boardID) return;
+      if (selection.entityKind === "node" && selection.entityID.trim()) {
+        setHighlightedEntity({ nodeID: selection.entityID.trim() });
+        return;
+      }
+      setHighlightedEntity(null);
     };
-    const onStorage = (event: StorageEvent) => {
-      if (!event.key) return;
-      if (!event.key.endsWith(`:${companyID}:${boardID}`)) return;
-      refreshSelection();
-    };
-    window.addEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContext);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContext);
-      window.removeEventListener("storage", onStorage);
-    };
+    const liveSelection = readLiveSelectionForFrame(companyID, boardID);
+    if (liveSelection) applyLiveSelection(liveSelection);
+    return subscribeLiveSelection(boardID, applyLiveSelection);
   }, [boardID, companyID]);
 
   const addColumn = useCallback(async () => {
@@ -490,7 +482,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     setSelectionAnchorCardID(next.anchorCardID);
     if (clickedCard) {
       setHighlightedEntity({ nodeID: clickedCard.node_id });
-      publishKanbanSelectionToLinkedExplorers(companyID, boardID, clickedCard.node_id, clickedCard.node_title);
+      publishKanbanSelectionToLinkedFrames(companyID, boardID, clickedCard.node_id, clickedCard.node_title);
     }
   }, [boardID, cards, companyID, orderedColumns, selectedCardIDs, selectionAnchorCardID]);
 
@@ -651,7 +643,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             setSelectionAnchorCardID(card.card_id);
           }
           setHighlightedEntity({ nodeID: card.node_id });
-          publishKanbanSelectionToLinkedExplorers(companyID, boardID, card.node_id, card.node_title);
+          publishKanbanSelectionToLinkedFrames(companyID, boardID, card.node_id, card.node_title);
           setColumnContextMenu(null);
           setCardContextMenu({ x: event.clientX, y: event.clientY, cardID: card.card_id });
         }}

@@ -48,6 +48,8 @@
     "../modules/folders/companyExplorerFolders.test.ts",
     "../../../frontend/src/modules/contextSyncContract.ts",
     "../modules/contextSyncContract.test.ts",
+    "../../../frontend/src/modules/selectionCoordinator.ts",
+    "../modules/selectionCoordinator.test.ts",
     "../../../frontend/src/modules/kanban/shared.ts",
     "../modules/kanban/shared.test.ts",
     "../../../frontend/src/modules/editor/editorTabs.ts",

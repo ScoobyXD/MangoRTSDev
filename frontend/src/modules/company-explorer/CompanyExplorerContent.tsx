@@ -9,6 +9,7 @@ import { shouldApplyMapSelection, shouldBroadcastSelection, shouldIgnoreSelfOrig
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
 import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../kanban/shared";
+import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, formatExplorerFolderLabel, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerDropTarget, resolveExplorerKeyboardNavigation, resolveExplorerRenameTarget, resolveExplorerRootDropTarget, shouldAcceptMapSelectionAfterExplorerSelection, type ExplorerCreationTargets, type ExplorerDropPayload, type ExplorerRowDropPlacement, type ExplorerSelectionDomain } from "./treePresentation";
 
@@ -1180,6 +1181,88 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, []);
 
   useEffect(() => {
+    const applyLiveSelection = (selection: LiveSelectionChange) => {
+      if (selection.companyID !== companyID || selection.sourceFrameID === scope) return;
+
+      const applyTreeSelection = (treeID: string) => {
+        setSelectedTreeID(treeID);
+        setSelectedTreeIDs(new Set([treeID]));
+        setSelectionAnchorTreeID(treeID);
+        setExpanded((previous) => {
+          if (previous.has("folder-root")) return previous;
+          const next = new Set(previous);
+          next.add("folder-root");
+          return next;
+        });
+      };
+
+      if (selection.entityKind === "folder") {
+        suppressNextExplorerBroadcastRef.current = true;
+        const treeID = selection.selectedTreeID || (selection.folderID || selection.entityID ? `workspace-folder-${selection.folderID || selection.entityID}` : "folder-root");
+        setSelectedNodeID("");
+        setSelectedLogicGateID("");
+        applyTreeSelection(treeID);
+        return;
+      }
+
+      if (selection.entityKind === "node") {
+        if (!selection.entityID) {
+          suppressNextExplorerBroadcastRef.current = true;
+          setSelectedNodeID("");
+          setSelectedLogicGateID("");
+          applyTreeSelection(selection.selectedTreeID || "folder-root");
+          return;
+        }
+        const localSelection = lastLocalExplorerSelectionRef.current;
+        if (!shouldAcceptMapSelectionAfterExplorerSelection({
+          incomingDomain: "node",
+          currentDomain: latestExplorerDomainRef.current,
+          localSelectionChangedAt: localSelection.changedAt,
+          incomingChangedAt: selection.changedAt,
+          now: Date.now(),
+        })) return;
+        const nextTreeID = selection.selectedTreeID || `node-${selection.entityID}`;
+        const current = latestSelectionRef.current;
+        if (current.selectedNodeID === selection.entityID && current.selectedTreeID === nextTreeID) return;
+        suppressNextExplorerBroadcastRef.current = true;
+        setSelectedNodeID(selection.entityID);
+        setSelectedLogicGateID("");
+        applyTreeSelection(nextTreeID);
+        return;
+      }
+
+      if (selection.entityKind === "logic_gate") {
+        if (!selection.entityID) {
+          suppressNextExplorerBroadcastRef.current = true;
+          setSelectedLogicGateID("");
+          setSelectedNodeID("");
+          applyTreeSelection(selection.selectedTreeID || "folder-root");
+          return;
+        }
+        const localSelection = lastLocalExplorerSelectionRef.current;
+        if (!shouldAcceptMapSelectionAfterExplorerSelection({
+          incomingDomain: "logic_gate",
+          currentDomain: latestExplorerDomainRef.current,
+          localSelectionChangedAt: localSelection.changedAt,
+          incomingChangedAt: selection.changedAt,
+          now: Date.now(),
+        })) return;
+        const nextTreeID = selection.selectedTreeID || `logic-gate-${selection.entityID}`;
+        const current = latestLogicGateSelectionRef.current;
+        if (current.selectedLogicGateID === selection.entityID && current.selectedTreeID === nextTreeID) return;
+        suppressNextExplorerBroadcastRef.current = true;
+        setSelectedLogicGateID(selection.entityID);
+        setSelectedNodeID("");
+        applyTreeSelection(nextTreeID);
+      }
+    };
+
+    const liveSelection = readLiveSelectionForFrame(companyID, scope);
+    if (liveSelection) applyLiveSelection(liveSelection);
+    return subscribeLiveSelection(scope, applyLiveSelection);
+  }, [companyID, scope]);
+
+  useEffect(() => {
     const applyMapSelection = (selectedFromMap: string, changedAt?: number) => {
       const current = latestSelectionRef.current;
       const localSelection = lastLocalExplorerSelectionRef.current;
@@ -1338,21 +1421,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       }
     };
     readTargetedExplorerContext();
-    const onExplorerContextUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ targetID?: string }>).detail;
-      if (!detail || detail.targetID !== scope) return;
-      readTargetedExplorerContext();
-    };
-    const onStorage = (event: StorageEvent) => {
-      if (event.key !== `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`) return;
-      readTargetedExplorerContext();
-    };
-    window.addEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
-      window.removeEventListener("storage", onStorage);
-    };
   }, [companyID, scope]);
 
   useEffect(() => {
@@ -1371,6 +1439,25 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       if (targetIDs.size === 0) return;
 
       explorerContextSequenceRef.current += 1;
+      const changedAt = Date.now();
+      const targetFrameIDs = Array.from(targetIDs);
+      const selectedEntityKind = selectedLogicGateID ? "logic_gate" : selectedNodeID ? "node" : "folder";
+      const selectedEntityID = selectedLogicGateID || selectedNodeID || selectedFolderID;
+      publishLiveSelection({
+        companyID,
+        entityKind: selectedEntityKind,
+        entityID: selectedEntityID,
+        label: selectedTree?.label ?? "",
+        sourceFrameID: scope,
+        sourceModule: "company-explorer",
+        targetFrameIDs,
+        selectedTreeID,
+        folderKind: selectedFolderKind,
+        folderID: selectedFolderID,
+        folderLabel: selectedFolderLabel,
+        changedAt,
+        sequence: explorerContextSequenceRef.current,
+      });
       for (const targetID of targetIDs) {
         if (!targetID) continue;
         const targetKind = classifyFrameKind(registry[targetID]?.kind ?? "");
@@ -1385,7 +1472,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           selectedTreeID,
           scopeLevel: selectedTree?.scopeLevel ?? 0,
           selectedLabel: selectedTree?.label ?? "",
-          ts: Date.now(),
+          ts: changedAt,
           envelope: {
             context_id: `explorer_navigation_context:${companyID}:${targetID}`,
             source_module_id: scope,

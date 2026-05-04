@@ -3,7 +3,7 @@ import { NodeMapContent } from "../node-map/NodeMapContent";
 import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
 import { LogicGateMapContent } from "../logic-gate-map/LogicGateMapContent";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../logic-gate-map/shared";
-import { EVENT_EXPLORER_CONTEXT_UPDATED } from "../node-map/eventbus";
+import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 
 type MapMode = "node" | "logic_gate";
 
@@ -32,6 +32,23 @@ export const MapContent: React.FC<MapProps> = ({ initialMode = "node", ...props 
   const logicGateContextKey = `${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
   const [mode, setMode] = useState<MapMode>(initialMode);
 
+  const applyLiveSelectionMode = (selection: LiveSelectionChange) => {
+    if (selection.companyID !== companyID) return;
+    if (selection.entityKind === "logic_gate" || selection.folderKind === "logic_gate") {
+      setMode("logic_gate");
+      return;
+    }
+    if (selection.entityKind === "node" || selection.folderKind === "node") {
+      setMode("node");
+    }
+  };
+
+  useEffect(() => {
+    const liveSelection = readLiveSelectionForFrame(companyID, scope);
+    if (liveSelection) applyLiveSelectionMode(liveSelection);
+    return subscribeLiveSelection(scope, applyLiveSelectionMode);
+  }, [companyID, scope]);
+
   useEffect(() => {
     const refreshModeFromExplorerContext = () => {
       const nodeTs = contextTimestamp(localStorage.getItem(nodeContextKey));
@@ -39,23 +56,9 @@ export const MapContent: React.FC<MapProps> = ({ initialMode = "node", ...props 
       if (logicGateTs <= 0 && nodeTs <= 0) return;
       setMode(logicGateTs > nodeTs ? "logic_gate" : "node");
     };
+    // Restore the mode after reload/remount only. Live mode switches use the
+    // SelectionCoordinator event above and do not read storage snapshots.
     refreshModeFromExplorerContext();
-
-    const onStorage = (event: StorageEvent) => {
-      if (event.key && event.key !== nodeContextKey && event.key !== logicGateContextKey) return;
-      refreshModeFromExplorerContext();
-    };
-    const onExplorerContextUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ key?: string }>).detail;
-      if (!detail || (detail.key !== nodeContextKey && detail.key !== logicGateContextKey)) return;
-      refreshModeFromExplorerContext();
-    };
-    window.addEventListener("storage", onStorage);
-    window.addEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener(EVENT_EXPLORER_CONTEXT_UPDATED, onExplorerContextUpdated);
-    };
   }, [logicGateContextKey, nodeContextKey]);
 
   return mode === "logic_gate" ? <LogicGateMapContent {...props} /> : <NodeMapContent {...props} />;

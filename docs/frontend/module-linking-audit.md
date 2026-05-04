@@ -12,25 +12,37 @@ This note explains how context linking currently works across frames/modules in 
 
 Shared event names:
 - `mangoos:frame-link-graph-updated`
+- `mangoos:selection-coordinator-updated`
 - `mangoos:node-map-selection-updated`
 - `mangoos:logic-gate-map-selection-updated`
 - `mangoos:explorer-context-updated`
 
 These are dispatched with `emitDashboardEvent(...)` as typed `CustomEvent`s.
 
+## 2.1 Live Selection Coordinator
+
+Current live selection authority is `frontend/src/modules/selectionCoordinator.ts`.
+
+- Interactive selection is an in-browser-tab event contract, not a backend write.
+- Every live selection event carries `companyID`, `entityKind`, `entityID`, `label`, `sourceFrameID`, `sourceModule`, `targetFrameIDs`, `sequence`, and `changedAt`.
+- The coordinator stores the latest accepted selection per target frame and rejects stale same-source or older cross-source events.
+- `localStorage` selection/context keys are startup/restore fallback only. Same-tab clicks must use the coordinator payload directly and must not rediscover the selected entity by reading another module's stored snapshot.
+- Durable operations such as moving Explorer items, creating folders, editing nodes, saving documents, and Kanban card changes remain API-first so future headless agents use the same command surface as the UI.
+
 ## 3) Node Map -> Explorer/Editor selection flow
 
-- Node Map writes its selection into scoped localStorage state: `node-map-state-v1:<companyID>:<mapWidgetID>`.
-- Node Map emits `EVENT_NODE_MAP_SELECTION_UPDATED` with payload including `mapWidgetID`, `selectedNodeID`, and a monotonic-ish `revision`.
+- Node Map publishes a live coordinator event with `entityKind=node` and the selected node ID to connected target frames.
+- Node Map still stores scoped local map state (`node-map-state-v1:<companyID>:<mapWidgetID>`) for viewport/selection restore, not as live authority.
+- Node Map emits `EVENT_NODE_MAP_SELECTION_UPDATED` with payload including `mapWidgetID`, `selectedNodeID`, and a monotonic-ish `revision` for legacy compatibility during migration.
 - Explorer and Editor each resolve their linked map frame first, then ignore node-map events unless `detail.mapWidgetID` matches that resolved map frame.
 - Both consumers use `revision` guards to drop stale/out-of-order updates.
 
 ## 4) Explorer -> Node Map/Editor context flow
 
 - Explorer broadcasts only on semantic selection changes (`shouldBroadcastSelection`).
-- Explorer writes payload into per-target localStorage keys: `node-map-explorer-context-v1:<companyID>:<targetFrameID>`.
-- Explorer emits `EVENT_EXPLORER_CONTEXT_UPDATED` with target metadata.
-- Editor listens for this and uses explorer context as fallback when map selection is absent.
+- Explorer publishes one live coordinator event to every connected target frame.
+- Explorer still writes per-target localStorage keys (`node-map-explorer-context-v1:<companyID>:<targetFrameID>` and logic-gate equivalent) for startup/restore compatibility.
+- Editor, Map, Node Map, Logic Gate Map, Kanban, and Explorer-target handoffs consume the live coordinator event for same-tab clicks.
 - Explorer broadcasts to every connected frame in the link graph. This makes `A -> B -> C` behave as one linked context group without requiring a direct `A -> C` edge.
 
 ## 5) Echo-loop prevention
@@ -42,10 +54,10 @@ These are dispatched with `emitDashboardEvent(...)` as typed `CustomEvent`s.
 ## 6) "How does each module know what to view?"
 
 Priority model currently implemented:
-1. Resolve linked map frame through frame-link graph + frame registry.
-2. Try map-selected node from linked map state/event.
-3. If no map selection, Editor can fallback to explorer context key targeted at the editor frame.
-4. Ignore events whose `mapWidgetID`/target does not match the current linked topology.
+1. Consume live `selectionCoordinator` events targeted at the current frame.
+2. On startup/remount, read the last in-tab live selection for the frame.
+3. Use localStorage map/explorer keys only as restore fallback when no live selection exists.
+4. Ignore events whose target frame does not match the current linked topology.
 
 This design makes view selection topology-aware (via links), scoped (via frame IDs), and resilient to stale events (via revisions and no-op guards).
 
@@ -83,8 +95,8 @@ Current behavior is functional, but these gaps were identified during architectu
 2. **Sequence semantics are module-local.**
    - Current revision guards are "monotonic-ish" and scoped to module behavior rather than a single canonical workspace sequence contract.
 
-3. **Authority is still partly implicit.**
-   - Some context write/read decisions are embedded in module logic instead of a single explicit authority matrix per context type.
+3. **Backend/session context plane is not implemented.**
+   - Live single-tab selection now has one coordinator, but collaborative/presence selection across users would still need an explicit backend/session owner before it is added.
 
 4. **Reconciliation trigger is not yet formalized.**
    - We already do selective refresh in places, but sequence-gap-triggered targeted reconciliation must be explicit and testable.
