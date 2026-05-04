@@ -1,4 +1,4 @@
-import type { CompanyExplorerFolderKind, CompanyExplorerItemType } from "../folders/companyExplorerFolders.js";
+import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind, CompanyExplorerItemType } from "../folders/companyExplorerFolders.js";
 
 export type ExplorerTreeEntityKind = "folder" | "node" | "logic_gate" | "kanban";
 
@@ -56,6 +56,18 @@ export type ExplorerKeyboardNavigationResult = {
 };
 
 export type ExplorerSelectionDomain = "node" | "logic_gate" | "kanban" | "folder" | "root";
+
+export type ExplorerFindEntity = {
+  kind: "node" | "logic_gate";
+  id: string;
+};
+
+export type ExplorerFindSelection = {
+  selectedTreeIDs: string[];
+  primaryTreeID: string;
+  primaryEntity: ExplorerFindEntity | null;
+  expandedTreeIDs: Set<string>;
+};
 
 export type ExplorerCreationTargets = {
   preferredFolderKind: CompanyExplorerFolderKind;
@@ -306,6 +318,66 @@ export function resolveExplorerKeyboardNavigation(input: {
   if (key === "ArrowRight") nextExpanded.add(current.id);
   if (key === "ArrowLeft") nextExpanded.delete(current.id);
   return { handled: true, expandedIDs: nextExpanded };
+}
+
+export function buildExplorerFindSelection(input: {
+  entities: ExplorerFindEntity[];
+  folders: CompanyExplorerFolder[];
+  folderItems: CompanyExplorerFolderItem[];
+  nodeIDs?: Iterable<string>;
+  logicGateIDs?: Iterable<string>;
+  currentExpandedIDs?: Iterable<string>;
+}): ExplorerFindSelection {
+  const selectedTreeIDs: string[] = [];
+  const seenTreeIDs = new Set<string>();
+  const expandedTreeIDs = new Set(input.currentExpandedIDs ?? []);
+  expandedTreeIDs.add("folder-root");
+
+  const folderByID = new Map(input.folders.map((folder) => [folder.folder_id, folder]));
+  const itemFolderByKey = new Map<string, string>();
+  for (const item of input.folderItems) {
+    if (!item.item_id || !item.item_type) continue;
+    itemFolderByKey.set(`${item.item_type}:${item.item_id}`, item.folder_id);
+  }
+
+  const knownNodeIDs = input.nodeIDs ? new Set(input.nodeIDs) : null;
+  const knownLogicGateIDs = input.logicGateIDs ? new Set(input.logicGateIDs) : null;
+  let primaryEntity: ExplorerFindEntity | null = null;
+
+  const expandContainingFolderPath = (folderID: string | undefined) => {
+    let currentFolderID = folderID ?? "";
+    const visited = new Set<string>();
+    while (currentFolderID && !visited.has(currentFolderID)) {
+      visited.add(currentFolderID);
+      expandedTreeIDs.add(`workspace-folder-${currentFolderID}`);
+      currentFolderID = folderByID.get(currentFolderID)?.parent_folder_id ?? "";
+    }
+  };
+
+  for (const entity of input.entities) {
+    const id = entity.id.trim();
+    if (!id) continue;
+    if (entity.kind === "node" && knownNodeIDs && !knownNodeIDs.has(id)) continue;
+    if (entity.kind === "logic_gate" && knownLogicGateIDs && !knownLogicGateIDs.has(id)) continue;
+
+    const treeID = entity.kind === "node" ? `node-${id}` : `logic-gate-${id}`;
+    if (seenTreeIDs.has(treeID)) continue;
+    seenTreeIDs.add(treeID);
+    selectedTreeIDs.push(treeID);
+    if (!primaryEntity) primaryEntity = { kind: entity.kind, id };
+
+    // Folder expansion is derived from indexed folder/item rows, not visible
+    // DOM rows. That keeps "find" bounded by the selected entity batch and
+    // still works when every ancestor folder starts collapsed.
+    expandContainingFolderPath(itemFolderByKey.get(`${entity.kind}:${id}`));
+  }
+
+  return {
+    selectedTreeIDs,
+    primaryTreeID: selectedTreeIDs[0] ?? "",
+    primaryEntity,
+    expandedTreeIDs,
+  };
 }
 
 export function shouldAcceptMapSelectionAfterExplorerSelection(input: {

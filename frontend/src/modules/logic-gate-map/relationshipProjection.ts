@@ -105,10 +105,11 @@ export function projectRelationshipVisual(
 ): RelationshipProjection {
   const anchor = inferRelationshipAnchor(relationship, options.nodePositions, options.rememberedAnchor);
   const selectedRole = selectedRoleForRelationship(relationship, options.activeNodeID);
-  const strokeColor =
+  const roleColor =
     selectedRole === "Input" ? options.relationshipRoleColors.input
       : selectedRole === "Output" ? options.relationshipRoleColors.output
         : options.accent;
+  const strokeColor = options.relationshipColorsEnabled ? roleColor : options.accent;
   const alpha = !options.relationshipColorsEnabled ? 0.72 : (selectedRole ? 0.92 : 0.35);
 
   return {

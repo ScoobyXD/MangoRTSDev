@@ -122,6 +122,7 @@ Use this checklist format and keep it complete.
   - selected-node opposite-side role resolution
   - parent/child anchor inference
   - projected visual relationship line metadata output
+  - disabled relationship colors fall back fully to the map accent
 - [x] `tests/frontend/modules/logic-gate-map/relationshipProjection.test.ts`
   - side -> Input/Output mapping
   - left/right-only relationship draft and linked-gate creation controls
@@ -131,6 +132,7 @@ Use this checklist format and keep it complete.
   - selected-gate opposite-side role resolution
   - input/output anchor inference
   - projected visual relationship metadata output
+  - disabled relationship colors fall back fully to the map accent
 - [x] `frontend/src/modules/node-map/relationshipSelection.test.ts`
   - line-segment vs multi-select box rectangle intersection detection
   - polyline relationship-path vs multi-select box rectangle intersection detection
@@ -143,6 +145,7 @@ Use this checklist format and keep it complete.
   - additive behavior is pointer-session driven (does not depend on modifier state at pointer-up)
   - plain node click collapses a previous multi-select batch to the clicked node
   - modifier node click still toggles additive membership
+  - blank canvas click preserves single-node editor context but clears batches
 - [x] `tests/frontend/modules/node-map/deleteKeyboardRouting.test.ts`
   - Delete/Backspace are ignored when focus is in inline title editing, input, or textarea targets
   - canvas delete still requires an active node or relationship selection
@@ -192,6 +195,7 @@ Use this checklist format and keep it complete.
   - verifies rename actions only resolve for concrete folder/node/logic-gate records
   - verifies delete actions only resolve for concrete folder/node/logic-gate records
   - verifies plain click, additive Shift-click range, and Ctrl-click toggle selection behavior
+  - verifies find-on-Explorer selection expands ancestor folders and filters unknown duplicate entities
 - [x] `tests/frontend/modules/folders/companyExplorerFolders.test.ts`
   - nested folder subtree expansion for map scope
   - node folder filtering keeps only folder/descendant contents

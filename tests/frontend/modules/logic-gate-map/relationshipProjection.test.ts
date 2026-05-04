@@ -137,3 +137,16 @@ test("projects visual relationship metadata with input/output colors", () => {
   assert.equal(projected.alpha > 0, true);
 });
 
+test("disabled logic-gate relationship colors fall back fully to the map accent", () => {
+  const rel = relationship({ a_position: "Input", b_position: "Output" });
+  const projected = projectRelationshipVisual(rel, {
+    activeNodeID: "logic-a",
+    relationshipColorsEnabled: false,
+    relationshipRoleColors: { input: "#00f", output: "#f80" },
+    accent: "#0ff",
+    nodePositions: {},
+  });
+
+  assert.equal(projected.selectedRole, "Output");
+  assert.equal(projected.strokeColor, "#0ff");
+});

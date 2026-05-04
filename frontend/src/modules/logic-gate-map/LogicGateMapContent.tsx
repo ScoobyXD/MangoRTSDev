@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LOGIC_GATE_MAP_STATE_KEY_PREFIX, LogicGateRecord, LogicGateRelationship, MINI_GRID, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, toLogicGateCanvasRecord, toLogicGateCanvasRelationship, trimOrEmpty } from "./shared";
-import { emitDashboardEvent, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "./LogicGateRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, canStartRelationshipFromSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "../node-map/relationshipDeleteSummary";
 import { invalidateLogicGateRecordStoreCaches } from "./LogicGateRecordStore";
-import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
+import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapBlankCanvasSelection, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
 import { filterLogicGateGraphToFolderScope, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
-import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
+import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 
 type ExplorerSelectionOrigin = {
@@ -104,7 +104,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const pendingFocusNodeIDRef = useRef("");
   const layoutPersistenceReadyRef = useRef(false);
   const lastPersistedNodePositionsRef = useRef<Record<string, NodePosition>>({});
-  const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(false);
+  const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(true);
   const [relationshipRoleColors, setRelationshipRoleColors] = useState({ input: "#0095ff", output: "#ff8a00" });
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
   const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
@@ -177,6 +177,26 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     const edges = readFrameLinksFromStorage();
     const registry = readFrameRegistryFromStorage();
     return resolveConnectedFrameTargets({ sourceFrameID: mapScope, edges, registry });
+  };
+
+  const readCompanyExplorerFrameTargets = () => {
+    const registry = readFrameRegistryFromStorage();
+    return Object.entries(registry)
+      .filter(([, item]) => classifyFrameKind(item.kind) === "explorer")
+      .map(([frameID]) => frameID);
+  };
+
+  const requestFindLogicGatesOnCompanyExplorer = (logicGateIDs: string[]) => {
+    const uniqueLogicGateIDs = Array.from(new Set(logicGateIDs.map((id) => id.trim()).filter(Boolean)));
+    if (uniqueLogicGateIDs.length === 0) return;
+    emitDashboardEvent(EVENT_COMPANY_EXPLORER_FIND_REQUESTED, {
+      companyID,
+      sourceFrameID: mapScope,
+      sourceModule: "logic-gate-map",
+      targetFrameIDs: readCompanyExplorerFrameTargets(),
+      entities: uniqueLogicGateIDs.map((id) => ({ kind: "logic_gate", id })),
+      changedAt: Date.now(),
+    });
   };
 
   // Keep relationship projection derivation centralized so callers can reuse the exact same
@@ -259,7 +279,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       setSelectedNodeID(cached.selectedNodeID);
       setSelectedNodeIDs(cached.selectedNodeID ? new Set([cached.selectedNodeID]) : new Set());
       setNodePositions(cached.nodePositions);
-      setRelationshipColorsEnabled(!!cached.relationshipColorsEnabled);
+      setRelationshipColorsEnabled(cached.relationshipColorsEnabled !== false);
       if (cached.relationshipRoleColors) {
         setRelationshipRoleColors({
           input: cached.relationshipRoleColors.input ?? "#0095ff",
@@ -1387,8 +1407,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     for (const path of connectionPaths) {
       if (path.points.length === 0) continue;
       context.lineWidth = path.selected ? 3.4 : 1.6;
-      const shouldShowRelationshipColors = relationshipColorsEnabled || selectedNodeIDs.size > 0;
-      context.strokeStyle = shouldShowRelationshipColors ? path.stroke : accent;
+      context.strokeStyle = relationshipColorsEnabled ? path.stroke : accent;
       context.globalAlpha = path.alpha;
       context.beginPath();
       context.moveTo(path.points[0].x, path.points[0].y);
@@ -1409,7 +1428,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       context.setLineDash([]);
     }
     context.globalAlpha = 1;
-  }, [WORLD_H, WORLD_W, accent, connectionPaths, relationshipColorsEnabled, draftPath, selectedNodeIDs]);
+  }, [WORLD_H, WORLD_W, accent, connectionPaths, relationshipColorsEnabled, draftPath]);
 
   useEffect(() => {
     if (!editingNodeTitleNodeID || !editingNodeTitleElementRef.current) return;
@@ -1472,7 +1491,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           setContextMenu(null);
           setNodeContextMenu(null);
           setRelationshipContextMenu(null);
-          setSelectedRelationshipIDs(new Set());
           const bounds = viewportRef.current.getBoundingClientRect();
           const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
           const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
@@ -1485,8 +1503,10 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           }
 
           if (relationshipDraft) setRelationshipDraft(null);
-          setSelectedNodeID("");
-          setSelectedNodeIDs(new Set());
+          const nextSelection = resolveNodeMapBlankCanvasSelection({ selectedNodeID, selectedNodeIDs, selectedRelationshipIDs });
+          setSelectedNodeID(nextSelection.selectedNodeID);
+          setSelectedNodeIDs(nextSelection.selectedNodeIDs);
+          setSelectedRelationshipIDs(nextSelection.selectedRelationshipIDs);
           setPanState({
             pointerID: event.pointerId,
             startMouseX: event.clientX,
@@ -2052,6 +2072,13 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
             onPointerDown={(event) => event.stopPropagation()}
           >
             <button style={contextMenuButtonStyle} onClick={() => {
+              const ids = selectedNodeIDs.has(nodeContextMenu.nodeID) ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID];
+              requestFindLogicGatesOnCompanyExplorer(ids);
+              setNodeContextMenu(null);
+            }}>
+              Find on Company Explorer
+            </button>
+            <button style={contextMenuButtonStyle} onClick={() => {
               const current = nodes.find((node) => node.node_id === nodeContextMenu.nodeID);
               editingNodeTitleDraftRef.current = current ? getNodeTitle(current) : "new logic gate";
               setEditingNodeTitleNodeID(nodeContextMenu.nodeID);
@@ -2104,7 +2131,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           <div
             style={{
               position: "absolute",
-              top: 10,
+              bottom: 10,
               left: 10,
               zIndex: 30,
               background: "rgba(0,0,0,0.75)",
@@ -2122,8 +2149,8 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           <div
             style={{
               position: "absolute",
-              top: 10,
-              right: 10,
+              bottom: selectedNodeIDs.size > 1 && !selectionBox.active ? 40 : 10,
+              left: 10,
               zIndex: 31,
               maxWidth: 420,
               borderRadius: 8,
