@@ -1,11 +1,12 @@
-import type { CompanyExplorerFolderKind } from "../folders/companyExplorerFolders.js";
+import type { CompanyExplorerFolderKind, CompanyExplorerItemType } from "../folders/companyExplorerFolders.js";
 
-export type ExplorerTreeEntityKind = "folder" | "node" | "logic_gate";
+export type ExplorerTreeEntityKind = "folder" | "node" | "logic_gate" | "kanban";
 
 export type ExplorerCreationContextRow = {
   kind: ExplorerTreeEntityKind;
   nodeID?: string;
   logicGateID?: string;
+  kanbanBoardID?: string;
   folderID?: string;
   folderKind?: CompanyExplorerFolderKind;
 };
@@ -15,13 +16,13 @@ export type ExplorerDropPayload = {
   folderID?: string;
   folderKind?: CompanyExplorerFolderKind;
   itemID?: string;
-  itemType?: CompanyExplorerFolderKind;
+  itemType?: CompanyExplorerItemType;
   items?: ExplorerDropPayloadItem[];
 };
 
 export type ExplorerDropPayloadItem = {
   itemID: string;
-  itemType: CompanyExplorerFolderKind;
+  itemType: CompanyExplorerItemType;
 };
 
 export type ExplorerDropTarget = {
@@ -54,7 +55,7 @@ export type ExplorerKeyboardNavigationResult = {
   expandedIDs?: Set<string>;
 };
 
-export type ExplorerSelectionDomain = "node" | "logic_gate" | "folder" | "root";
+export type ExplorerSelectionDomain = "node" | "logic_gate" | "kanban" | "folder" | "root";
 
 export type ExplorerCreationTargets = {
   preferredFolderKind: CompanyExplorerFolderKind;
@@ -93,7 +94,7 @@ export function getExplorerDropPayloadItems(payload?: ExplorerDropPayload | null
   return [];
 }
 
-export function getExplorerDropPayloadItemType(payload?: ExplorerDropPayload | null): CompanyExplorerFolderKind | null {
+export function getExplorerDropPayloadItemType(payload?: ExplorerDropPayload | null): CompanyExplorerItemType | null {
   const items = getExplorerDropPayloadItems(payload);
   if (items.length === 0) return null;
   const itemType = items[0].itemType;
@@ -111,7 +112,11 @@ export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | nul
     return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
   }
 
-  if (getExplorerDropPayloadItemType(payload) !== row.folderKind) return null;
+  const itemType = getExplorerDropPayloadItemType(payload);
+  // Kanban boards are durable Explorer items, but they are not map/editor
+  // entities. They can live in either current folder kind without creating a
+  // third folder taxonomy.
+  if (itemType !== "kanban" && itemType !== row.folderKind) return null;
   return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
 }
 
@@ -211,11 +216,13 @@ export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | n
   | { kind: "folder"; id: string; folderKind: CompanyExplorerFolderKind }
   | { kind: "node"; id: string }
   | { kind: "logic_gate"; id: string }
+  | { kind: "kanban"; id: string }
   | null {
   if (!row) return null;
   if (row.kind === "folder" && row.folderID && row.folderKind) return { kind: "folder", id: row.folderID, folderKind: row.folderKind };
   if (row.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
   if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
+  if (row.kind === "kanban" && row.kanbanBoardID) return { kind: "kanban", id: row.kanbanBoardID };
   return null;
 }
 
@@ -228,11 +235,13 @@ export function resolveExplorerRenameTarget(row?: ExplorerCreationContextRow | n
   | { kind: "folder"; id: string }
   | { kind: "node"; id: string }
   | { kind: "logic_gate"; id: string }
+  | { kind: "kanban"; id: string }
   | null {
   if (!row) return null;
   if (row.kind === "folder" && row.folderID) return { kind: "folder", id: row.folderID };
   if (row.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
   if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
+  if (row.kind === "kanban" && row.kanbanBoardID) return { kind: "kanban", id: row.kanbanBoardID };
   return null;
 }
 

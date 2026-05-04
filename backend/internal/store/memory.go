@@ -57,6 +57,7 @@ type Repository interface {
 	ListKanbanBoards(companyID string, query KanbanBoardQuery) ([]domain.KanbanBoard, error)
 	CreateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error)
 	UpdateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error)
+	DeleteKanbanBoard(companyID, boardID string) error
 	ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error)
 	CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int, heightPx int, itemColor string) (domain.KanbanColumn, error)
 	UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int, itemColor string) (domain.KanbanColumn, error)
@@ -548,7 +549,7 @@ func nextCompanyExplorerRowPosition(folders map[string]domain.CompanyExplorerFol
 		return next
 	}
 	for _, item := range items {
-		if item.CompanyID != companyID || item.FolderID != parentFolderID || item.ItemType != folderKind {
+		if item.CompanyID != companyID || item.FolderID != parentFolderID {
 			continue
 		}
 		if item.Position >= next {
@@ -558,10 +559,10 @@ func nextCompanyExplorerRowPosition(folders map[string]domain.CompanyExplorerFol
 	return next
 }
 
-func nextCompanyExplorerFolderItemPosition(items map[string]domain.CompanyExplorerFolderItem, companyID, folderID, itemType string) int {
+func nextCompanyExplorerFolderItemPosition(items map[string]domain.CompanyExplorerFolderItem, companyID, folderID string) int {
 	next := 1000
 	for _, item := range items {
-		if item.CompanyID != companyID || item.FolderID != folderID || item.ItemType != itemType {
+		if item.CompanyID != companyID || item.FolderID != folderID {
 			continue
 		}
 		if item.Position >= next {
@@ -572,7 +573,7 @@ func nextCompanyExplorerFolderItemPosition(items map[string]domain.CompanyExplor
 }
 
 func nextCompanyExplorerFolderChildPosition(folders map[string]domain.CompanyExplorerFolder, items map[string]domain.CompanyExplorerFolderItem, companyID, folderID, itemType string) int {
-	next := nextCompanyExplorerFolderItemPosition(items, companyID, folderID, itemType)
+	next := nextCompanyExplorerFolderItemPosition(items, companyID, folderID)
 	for _, folder := range folders {
 		if folder.CompanyID != companyID || folder.FolderKind != itemType || companyExplorerParentID(folder) != folderID {
 			continue
@@ -688,6 +689,20 @@ func (r *MemoryRepo) UpdateKanbanBoard(companyID, boardID, title string, positio
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.kanbanBoards[k] = item
 	return item, nil
+}
+
+func (r *MemoryRepo) DeleteKanbanBoard(companyID, boardID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := boardKey(companyID, boardID)
+	if _, ok := r.kanbanBoards[k]; !ok {
+		return ErrNotFound
+	}
+	delete(r.kanbanBoards, k)
+	delete(r.kanbanColumns, k)
+	delete(r.kanbanCards, k)
+	delete(r.folderItems, folderItemKey(companyID, "kanban", boardID))
+	return nil
 }
 
 func (r *MemoryRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
@@ -1402,7 +1417,7 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemTy
 	defer r.mu.Unlock()
 
 	folder, ok := r.folders[key(companyID, folderID)]
-	if !ok || folder.FolderKind != itemType {
+	if !ok || (folder.FolderKind != itemType && itemType != "kanban") {
 		return domain.CompanyExplorerFolderItem{}, ErrNotFound
 	}
 	if itemType == "node" {
@@ -1411,6 +1426,10 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemTy
 		}
 	} else if itemType == "logic_gate" {
 		if _, ok := r.logicGates[key(companyID, itemID)]; !ok {
+			return domain.CompanyExplorerFolderItem{}, ErrNotFound
+		}
+	} else if itemType == "kanban" {
+		if _, ok := r.kanbanBoards[boardKey(companyID, itemID)]; !ok {
 			return domain.CompanyExplorerFolderItem{}, ErrNotFound
 		}
 	} else {
@@ -1427,7 +1446,7 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemTy
 		}
 	}
 	if position <= 0 {
-		position = nextCompanyExplorerFolderChildPosition(r.folders, r.folderItems, companyID, folderID, itemType)
+		position = nextCompanyExplorerRowPosition(r.folders, r.folderItems, companyID, folder.FolderKind, folderID)
 	}
 	item := domain.CompanyExplorerFolderItem{
 		CompanyID:        companyID,

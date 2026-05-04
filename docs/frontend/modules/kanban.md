@@ -4,7 +4,9 @@
 Kanban board is a module for placing `node` work items into titled columns.
 
 Users can:
-- switch between saved Kanban board views from the header Boards tab,
+- rename the active board from the header,
+- search saved Kanban board views from the header,
+- switch between saved Kanban board views from the header All Boards list,
 - save the current board view into the company-wide board list,
 - create a new saved board view,
 - add columns,
@@ -26,17 +28,18 @@ Users can:
 - Column title text enters edit mode on one click. Header dragging still starts from the header before a click is completed.
 - Column deletion is confirmation-gated with the same modal treatment as frame and map deletes.
 - Right-clicking a column opens column actions: rename, delete, and native RGB color selection for cards inside that column.
-- Right-clicking a card opens card actions only; currently that menu contains Delete card.
+- Right-clicking a card opens card actions: Find on company explorer and Delete card.
 - Selected cards use a thin, vibrant frame in the card's column item color. Do not use the old heavy global-accent outline.
 - The left color rail is always rendered from the card's column item color and must not disappear when selection changes.
 - Card deletion is confirmation-gated. Delete and the card context menu only open the confirmation modal; the card is removed only after Yes.
 - Backspace uses the same confirmation-gated delete path as Delete.
 - Card delete confirmation must state that only the Kanban board card is removed and the underlying node continues to exist outside the board.
-- Clicking a card publishes that node selection to directly linked Company Explorer frames so the Explorer row highlights with the selected card.
+- Clicking a card publishes that node selection to directly linked Company Explorer frames so the Explorer row highlights with the selected card. Multi-selected cards publish all selected node IDs so Explorer can mirror the selected rows.
+- Explorer-originated node selections replace the current Kanban card selection unless the Explorer selection itself is a Shift/Ctrl multi-selection payload.
 - Cards do not show a top-right expand/collapse control. Card titles and optional descriptions render directly.
 - Drag previews for Explorer-to-Kanban node batches and Kanban card batches show the selected batch, not just the row under the cursor.
 - The module reserves top clearance for the frame title plate and linked-module hexagon so column headers do not bleed into frame chrome.
-- The top clearance owns the Kanban tabs. `Board` shows the active board and `Boards` opens the saved-board list window.
+- The top clearance owns the editable board name, search box, and `All Boards` list button. The list groups boards by Company Explorer folder label.
 - The main board viewport uses the same thin horizontal/vertical scrollbar treatment as Editor and Company Explorer.
 
 ## Linkable Frame Behavior
@@ -48,6 +51,7 @@ It participates in the same `frame-module-links-v1` graph as Explorer, Node Map,
 - a child Kanban board can therefore receive linked Explorer context without adding a second link model.
 
 Linked Explorer selection highlights matching cards on the board.
+Linked Explorer selection of a Kanban board opens that board in the linked Kanban frame. Kanban board selections are ignored by Map and Editor modules.
 
 ## Drag Contract
 Company Explorer writes drag payloads using:
@@ -109,6 +113,7 @@ Endpoints:
   - `{ company_id, board_id?, title?, position? }`
 - `PUT /v1/kanban/boards/:board_id`
   - `{ company_id, title?, position? }`
+- `DELETE /v1/kanban/boards/:board_id?company_id=...`
 - `GET /v1/kanban/columns?company_id=...&board_id=...`
 - `POST /v1/kanban/columns`
   - `{ company_id, board_id, title, position?, width_px?, height_px?, item_color? }`
@@ -126,6 +131,7 @@ Endpoints:
 `PUT /v1/kanban/cards/:card_id` is also used for vertical card reordering and selected-card batch moves by writing new sparse `position` values.
 The card write API has no item-type field; Kanban board cards are node-only.
 Saved board rows are metadata only. Columns/cards remain the source of board contents, column order, dimensions, colors, and card positions.
+Kanban boards can be placed in Company Explorer through `company_explorer_folder_items` with `item_type=kanban`. This makes board organization API-first for agents while keeping board display out of maps and editors.
 
 The removed `/v1/kanban/query` endpoint should stay removed until a specific filter or grouping capability is designed again. Headless agents should currently use the same bounded column/card APIs as the UI.
 

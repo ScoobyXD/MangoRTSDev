@@ -339,7 +339,7 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		if itemType != "" && !isValidCompanyExplorerFolderKind(itemType) {
+		if itemType != "" && !isValidCompanyExplorerItemType(itemType) {
 			writeError(w, http.StatusBadRequest, "invalid_item_type")
 			return
 		}
@@ -368,7 +368,7 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 		req.FolderID = strings.TrimSpace(req.FolderID)
 		req.ItemType = strings.TrimSpace(req.ItemType)
 		req.ItemID = strings.TrimSpace(req.ItemID)
-		if req.CompanyID == "" || req.FolderID == "" || req.ItemID == "" || !isValidCompanyExplorerFolderKind(req.ItemType) {
+		if req.CompanyID == "" || req.FolderID == "" || req.ItemID == "" || !isValidCompanyExplorerItemType(req.ItemType) {
 			writeError(w, http.StatusBadRequest, "company_folder_item_required")
 			return
 		}
@@ -390,7 +390,7 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		itemType := strings.TrimSpace(r.URL.Query().Get("item_type"))
 		itemID := strings.TrimSpace(r.URL.Query().Get("item_id"))
-		if companyID == "" || itemID == "" || !isValidCompanyExplorerFolderKind(itemType) {
+		if companyID == "" || itemID == "" || !isValidCompanyExplorerItemType(itemType) {
 			writeError(w, http.StatusBadRequest, "company_item_required")
 			return
 		}
@@ -411,6 +411,10 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 
 func isValidCompanyExplorerFolderKind(value string) bool {
 	return value == "node" || value == "logic_gate"
+}
+
+func isValidCompanyExplorerItemType(value string) bool {
+	return isValidCompanyExplorerFolderKind(value) || value == "kanban"
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -782,6 +786,11 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_positions")
 		return
 	}
+	kanbanBoards, err := s.repo.ListKanbanBoards(companyID, store.KanbanBoardQuery{Limit: store.KanbanMaxBoardsLimit})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_boards")
+		return
+	}
 	// Keep snapshot payload deterministic for unchanged data so ETag-based 304 responses
 	// actually work. Using a "now" timestamp here makes every response look different and
 	// defeats conditional GETs on this hot path.
@@ -794,6 +803,7 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		"folder_items":             folderItems,
 		"node_map_positions":       nodeMapPositions,
 		"logic_gate_map_positions": logicGateMapPositions,
+		"kanban_boards":            kanbanBoards,
 	})
 }
 
@@ -1414,6 +1424,25 @@ func (s *Server) handleKanbanBoardByID(w http.ResponseWriter, r *http.Request) {
 	boardID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/kanban/boards/"))
 	if boardID == "" || strings.Contains(boardID, "/") {
 		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if r.Method == http.MethodDelete {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		err := s.repo.DeleteKanbanBoard(companyID, boardID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "kanban_board_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_delete_kanban_board")
+			return
+		}
+		s.publishWorkspaceEvent(companyID, "kanban_board_deleted", map[string]any{"board_id": boardID})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}
 	if r.Method != http.MethodPut {

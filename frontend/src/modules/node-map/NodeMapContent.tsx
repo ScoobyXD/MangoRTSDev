@@ -672,6 +672,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   useEffect(() => {
     const applyLiveSelection = (selection: LiveSelectionChange) => {
       if (selection.companyID !== companyID || selection.sourceFrameID === mapScope) return;
+      if (selection.entityKind === "kanban") return;
       if (selection.entityKind === "logic_gate" || selection.folderKind === "logic_gate") return;
 
       explorerContextRef.current = Math.max(explorerContextRef.current, selection.changedAt);

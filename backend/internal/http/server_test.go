@@ -901,6 +901,64 @@ func TestKanbanBoardAPIFlow(t *testing.T) {
 	if len(listPayload.Boards) != 1 || listPayload.Boards[0].BoardID != boardID || listPayload.Boards[0].Title != "Operations board renamed" || listPayload.Boards[0].Position != 777 {
 		t.Fatalf("listed boards = %+v, want updated paged board", listPayload.Boards)
 	}
+
+	folderBody, _ := json.Marshal(map[string]any{
+		"company_id":  companyID,
+		"folder_kind": "node",
+		"name":        "Delivery",
+	})
+	folderReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(folderBody))
+	folderReq.Header.Set("Content-Type", "application/json")
+	folderRec := httptest.NewRecorder()
+	handler.ServeHTTP(folderRec, folderReq)
+	if folderRec.Code != http.StatusCreated {
+		t.Fatalf("POST explorer folder status = %d, want %d body=%s", folderRec.Code, http.StatusCreated, folderRec.Body.String())
+	}
+	var folder struct {
+		FolderID string `json:"folder_id"`
+	}
+	if err := json.NewDecoder(folderRec.Body).Decode(&folder); err != nil {
+		t.Fatalf("decode folder: %v", err)
+	}
+
+	assignBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"folder_id":  folder.FolderID,
+		"item_type":  "kanban",
+		"item_id":    boardID,
+	})
+	assignReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items", bytes.NewReader(assignBody))
+	assignReq.Header.Set("Content-Type", "application/json")
+	assignRec := httptest.NewRecorder()
+	handler.ServeHTTP(assignRec, assignReq)
+	if assignRec.Code != http.StatusOK {
+		t.Fatalf("POST kanban explorer folder item status = %d, want %d body=%s", assignRec.Code, http.StatusOK, assignRec.Body.String())
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/kanban/boards/"+boardID+"?company_id="+companyID, nil)
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("DELETE kanban board status = %d, want %d body=%s", deleteRec.Code, http.StatusOK, deleteRec.Body.String())
+	}
+	itemsReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folder-items?company_id="+companyID+"&item_type=kanban", nil)
+	itemsRec := httptest.NewRecorder()
+	handler.ServeHTTP(itemsRec, itemsReq)
+	if itemsRec.Code != http.StatusOK {
+		t.Fatalf("GET kanban explorer items status = %d, want %d body=%s", itemsRec.Code, http.StatusOK, itemsRec.Body.String())
+	}
+	var itemsPayload struct {
+		Items []struct {
+			ItemType string `json:"item_type"`
+			ItemID   string `json:"item_id"`
+		} `json:"folder_items"`
+	}
+	if err := json.NewDecoder(itemsRec.Body).Decode(&itemsPayload); err != nil {
+		t.Fatalf("decode kanban explorer items: %v", err)
+	}
+	if len(itemsPayload.Items) != 0 {
+		t.Fatalf("kanban explorer items after board delete = %+v, want cleanup", itemsPayload.Items)
+	}
 }
 
 func TestKanbanCardAPIUsesNodeOnlyCardsAndRemovesQueryEndpoint(t *testing.T) {

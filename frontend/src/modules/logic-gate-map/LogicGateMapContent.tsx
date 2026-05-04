@@ -679,6 +679,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   useEffect(() => {
     const applyLiveSelection = (selection: LiveSelectionChange) => {
       if (selection.companyID !== companyID || selection.sourceFrameID === mapScope) return;
+      if (selection.entityKind === "kanban") return;
       if (selection.entityKind === "node" || selection.folderKind === "node") return;
 
       explorerContextRef.current = Math.max(explorerContextRef.current, selection.changedAt);

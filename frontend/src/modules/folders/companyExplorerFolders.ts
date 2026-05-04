@@ -2,6 +2,7 @@ import type { NodeRelationship as LogicGateCanvasRelationship, NodeRecord as Log
 import type { NodeRecord, NodeRelationship } from "../node-map/shared.js";
 
 export type CompanyExplorerFolderKind = "node" | "logic_gate";
+export type CompanyExplorerItemType = CompanyExplorerFolderKind | "kanban";
 
 export type CompanyExplorerFolder = {
   company_id: string;
@@ -17,7 +18,7 @@ export type CompanyExplorerFolder = {
 export type CompanyExplorerFolderItem = {
   company_id: string;
   folder_id: string;
-  item_type: CompanyExplorerFolderKind;
+  item_type: CompanyExplorerItemType;
   item_id: string;
   position: number;
   created_timestamp: string;
@@ -26,6 +27,10 @@ export type CompanyExplorerFolderItem = {
 
 export function isCompanyExplorerFolderKind(value: unknown): value is CompanyExplorerFolderKind {
   return value === "node" || value === "logic_gate";
+}
+
+export function isCompanyExplorerItemType(value: unknown): value is CompanyExplorerItemType {
+  return isCompanyExplorerFolderKind(value) || value === "kanban";
 }
 
 export function getFolderSubtreeIDs(folders: CompanyExplorerFolder[], rootFolderID: string): Set<string> {
@@ -49,7 +54,7 @@ export function getScopedItemIDs(args: {
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
   folderID: string;
-  itemType: CompanyExplorerFolderKind;
+  itemType: CompanyExplorerItemType;
 }): Set<string> {
   const { folders, folderItems, folderID, itemType } = args;
   if (!folderID) {

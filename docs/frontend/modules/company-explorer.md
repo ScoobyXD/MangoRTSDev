@@ -36,6 +36,7 @@ Each explorer row represents one company "file" entity with a normalized type:
 
 - `node`
 - `logic_gate`
+- `kanban`
 
 ### 2.3 Tree UX rules
 
@@ -180,6 +181,14 @@ Folder runtime update (2026-05-02):
 - Selecting an individual node or logic gate inside a folder keeps that folder scope in the broadcast, so linked maps can select the item without expanding back to the whole company.
 - Relationships are displayed only when both endpoints are inside the active folder scope. Cross-folder relationships stay persisted but are hidden in that scoped map view.
 
+Kanban Explorer update (2026-05-04):
+- Kanban boards are durable Explorer items with `item_type=kanban` and a fixed three-column board icon.
+- Kanban boards can be placed in either node folders or logic-gate folders. Folder kinds remain `node` and `logic_gate`; Kanban is an item type, not a third map scope.
+- Right-clicking Explorer now offers `Create new kanban`. The board is created through `/v1/kanban/boards` first, then assigned to the target folder with `/v1/company-explorer/folder-items` when a folder target exists.
+- Kanban board rows support selection, drag/drop placement, inline rename, and delete through the same Explorer interaction model as node and logic-gate rows.
+- Selecting a Kanban board broadcasts a `kanban` live-selection event to linked Kanban frames so they open that board. Map and Editor modules explicitly ignore `kanban` selections, because boards are not displayable map/editor entities.
+- Selecting a card in Kanban can target Explorer with all selected node IDs. Explorer expands the containing folders for those node rows so `Find on company explorer` works for deeply nested cards.
+
 Unified map/linking update (2026-05-03):
 - The module picker now exposes one `Map` module. The map switches between node and logic-gate views from the latest Explorer context: node folders/items show nodes, logic-gate folders/items show logic gates.
 - Legacy `nodes-map` and `logic-map` frame kinds still load for existing saved layouts, but new workspaces should use `map`.
@@ -219,6 +228,7 @@ Headless API surface:
 
 This keeps source-of-truth entity IDs and persistence semantics intact while making Explorer organization durable.
 Folder move writes reject self/descendant parents so the folder tree remains safe for recursive scope filtering. `position` is part of the API contract so agents can reorder Explorer rows without relying on browser-only drag state.
+Folder item `item_type` accepts `node`, `logic_gate`, and `kanban`; folder `folder_kind` remains limited to `node` and `logic_gate`.
 
 ---
 
