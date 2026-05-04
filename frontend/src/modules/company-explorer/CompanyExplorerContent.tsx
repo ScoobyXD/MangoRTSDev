@@ -1,15 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NodeRecord } from "../node-map/shared";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, LogicGateRecord as LogicGateApiRecord, NodeRecord as LogicGateRecord, toLogicGateCanvasRecord } from "../logic-gate-map/shared";
-import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
-import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
-import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
+import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
+import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, removeNodeRelationshipGraphRelationshipsForNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
+import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, removeLogicGateRelationshipGraphRelationshipsForLogicGate, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { shouldApplyMapSelection, shouldBroadcastSelection, shouldIgnoreSelfOriginatedMapSelection, shouldReadMapStateForSelectionEvent, type ExplorerSelectionState } from "./explorerSync";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
 import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../kanban/shared";
-import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
+import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { EXPLORER_DEFAULT_EXPANDED_ROW_IDS, EXPLORER_ROOT_ROW_LABELS, EXPLORER_ROOT_ROW_ORDER, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, formatExplorerFolderLabel, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerDropTarget, resolveExplorerKeyboardNavigation, resolveExplorerRenameTarget, resolveExplorerRootDropTarget, shouldAcceptMapSelectionAfterExplorerSelection, type ExplorerCreationTargets, type ExplorerDropPayload, type ExplorerRowDropPlacement, type ExplorerSelectionDomain } from "./treePresentation";
 
@@ -35,6 +35,7 @@ type ExplorerDeleteTarget = NonNullable<ReturnType<typeof resolveExplorerDeleteT
 type ExplorerRenameTarget = NonNullable<ReturnType<typeof resolveExplorerRenameTarget>>;
 type ExplorerRenameDraft = { treeID: string; target: ExplorerRenameTarget; value: string };
 type ExplorerRowOrderUpdate = { row: ExplorerTreeNode; position: number };
+type ExplorerFindTarget = { kind: "node"; id: string } | { kind: "logic_gate"; id: string };
 
 const EXPLORER_DRAG_MIME = "application/x-mangoos-company-explorer-row";
 const TREE_INDENT_PX = 16;
@@ -137,6 +138,12 @@ function getExplorerSelectionDomain(row?: ExplorerTreeNode | null): ExplorerSele
   if (row.kind === "node") return "node";
   if (row.kind === "logic_gate") return "logic_gate";
   return row.folderKind ?? "root";
+}
+
+function getExplorerFindTarget(row?: ExplorerTreeNode | null): ExplorerFindTarget | null {
+  if (row?.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
+  if (row?.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
+  return null;
 }
 
 function isExplorerTextInputTarget(target: EventTarget | null): boolean {
@@ -276,6 +283,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     targets: ExplorerCreationTargets;
     deleteTarget: ExplorerDeleteTarget | null;
     renameTarget: ExplorerRenameTarget | null;
+    findTarget: ExplorerFindTarget | null;
     renameTreeID: string;
     renameLabel: string;
     contextKind: CompanyExplorerFolderKind | null;
@@ -292,6 +300,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const latestLogicGateSelectionRef = useRef({ selectedLogicGateID: "", selectedTreeID: "" });
   const latestExplorerDomainRef = useRef<ExplorerSelectionDomain>("root");
   const lastLocalExplorerSelectionRef = useRef<{ domain: ExplorerSelectionDomain; changedAt: number }>({ domain: "root", changedAt: 0 });
+  const pendingExplorerSelectionIntentRef = useRef<SelectionIntent>("activate");
   const explorerContextSequenceRef = useRef(0);
 
   const TREE_ROW_HEIGHT = 30;
@@ -631,6 +640,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
       upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
       lastLocalExplorerSelectionRef.current = { domain: folderKind, changedAt: Date.now() };
+      pendingExplorerSelectionIntentRef.current = "activate";
       setSelectedTreeID(`workspace-folder-${folder.folder_id}`);
       setSelectedTreeIDs(new Set([`workspace-folder-${folder.folder_id}`]));
       setSelectionAnchorTreeID(`workspace-folder-${folder.folder_id}`);
@@ -643,6 +653,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   const assignItemToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerFolderKind, itemID: string, options: { position?: number; expandTarget?: boolean } = {}) => {
     if (!targetFolderID || !itemID) return;
+    const previousFolderID = folderItems.find((row) => row.item_type === itemType && row.item_id === itemID)?.folder_id ?? "";
     setError("");
     try {
       const item = await requestJSON<CompanyExplorerFolderItem>("/v1/company-explorer/folder-items", {
@@ -663,6 +674,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       });
       upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
       upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
+      if (previousFolderID !== item.folder_id) {
+        // Moving between folder levels starts a new local context. Drop stale
+        // edges immediately; the API performs the same cleanup canonically.
+        if (itemType === "node") removeNodeRelationshipGraphRelationshipsForNode(apiBase, companyID, itemID);
+        else removeLogicGateRelationshipGraphRelationshipsForLogicGate(apiBase, companyID, itemID);
+      }
       if (options.expandTarget) {
         setExpanded((previous) => {
           const next = new Set(previous);
@@ -673,7 +690,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_move_item");
     }
-  }, [apiBase, companyID, requestJSON]);
+  }, [apiBase, companyID, folderItems, requestJSON]);
 
   const createNodeAtFolder = useCallback(async (parentFolderID: string) => {
     setError("");
@@ -693,6 +710,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         return next;
       });
       lastLocalExplorerSelectionRef.current = { domain: "node", changedAt: Date.now() };
+      pendingExplorerSelectionIntentRef.current = "activate";
       setSelectedTreeID(`node-${node.node_id}`);
       setSelectedTreeIDs(new Set([`node-${node.node_id}`]));
       setSelectionAnchorTreeID(`node-${node.node_id}`);
@@ -722,6 +740,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         return next;
       });
       lastLocalExplorerSelectionRef.current = { domain: "logic_gate", changedAt: Date.now() };
+      pendingExplorerSelectionIntentRef.current = "activate";
       setSelectedTreeID(`logic-gate-${logicGate.logic_gate_id}`);
       setSelectedTreeIDs(new Set([`logic-gate-${logicGate.logic_gate_id}`]));
       setSelectionAnchorTreeID(`logic-gate-${logicGate.logic_gate_id}`);
@@ -749,6 +768,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           ? `workspace-folder-${deletedFolder.parent_folder_id}`
           : "folder-root";
         lastLocalExplorerSelectionRef.current = { domain: parentTreeID === "folder-root" ? "root" : target.folderKind, changedAt: Date.now() };
+        pendingExplorerSelectionIntentRef.current = "navigate";
         setSelectedTreeID(parentTreeID);
         setSelectedTreeIDs(new Set([parentTreeID]));
         setSelectionAnchorTreeID(parentTreeID);
@@ -763,6 +783,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         setFolderItems((previous) => previous.filter((item) => item.item_type !== "node" || item.item_id !== target.id));
         removeNodeRelationshipGraphNode(apiBase, companyID, target.id);
         lastLocalExplorerSelectionRef.current = { domain: "root", changedAt: Date.now() };
+        pendingExplorerSelectionIntentRef.current = "navigate";
         setSelectedTreeID("folder-root");
         setSelectedTreeIDs(new Set(["folder-root"]));
         setSelectionAnchorTreeID("folder-root");
@@ -776,6 +797,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setFolderItems((previous) => previous.filter((item) => item.item_type !== "logic_gate" || item.item_id !== target.id));
       removeLogicGateRelationshipGraphNode(apiBase, companyID, target.id);
       lastLocalExplorerSelectionRef.current = { domain: "root", changedAt: Date.now() };
+      pendingExplorerSelectionIntentRef.current = "navigate";
       setSelectedTreeID("folder-root");
       setSelectedTreeIDs(new Set(["folder-root"]));
       setSelectionAnchorTreeID("folder-root");
@@ -855,10 +877,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [apiBase, companyID, requestJSON]);
 
-  const focusTreeRow = useCallback((row: ExplorerTreeNode, options: { localIntent?: boolean } = {}) => {
+  const focusTreeRow = useCallback((row: ExplorerTreeNode, options: { localIntent?: boolean; selectionIntent?: SelectionIntent } = {}) => {
     if (options.localIntent !== false) {
       lastLocalExplorerSelectionRef.current = { domain: getExplorerSelectionDomain(row), changedAt: Date.now() };
     }
+    pendingExplorerSelectionIntentRef.current = options.selectionIntent ?? "activate";
     selectedTreeIDRef.current = row.id;
     setSelectedTreeID(row.id);
     if (row.kind === "node") {
@@ -881,10 +904,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     setSelectedTreeID(row.id);
     setSelectedTreeIDs(new Set([row.id]));
     setSelectionAnchorTreeID(row.id);
-    focusTreeRow(row);
+    focusTreeRow(row, { selectionIntent: "navigate" });
   }, [focusTreeRow]);
 
-  const selectTreeRow = useCallback((row: ExplorerTreeNode, event?: React.MouseEvent) => {
+  const selectTreeRow = useCallback((row: ExplorerTreeNode, event?: React.MouseEvent, options: { selectionIntent?: SelectionIntent } = {}) => {
     const orderedIDs = treeRows.map((item) => item.id);
     treeKeyboardActiveRef.current = true;
     treeViewportRef.current?.focus({ preventScroll: true });
@@ -901,7 +924,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     const primaryID = selected.selectedIDs.has(row.id) ? row.id : (orderedSelectedIDs[0] ?? row.id);
     setSelectedTreeIDs(new Set(orderedSelectedIDs));
     setSelectionAnchorTreeID(selected.anchorID);
-    focusTreeRow(rowByID.get(primaryID) ?? row);
+    focusTreeRow(rowByID.get(primaryID) ?? row, { selectionIntent: options.selectionIntent ?? "activate" });
   }, [focusTreeRow, rowByID, selectedTreeIDs, selectionAnchorTreeID, treeRows]);
 
   const startRenamingRow = useCallback((row: ExplorerTreeNode) => {
@@ -910,7 +933,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     setSelectedTreeID(row.id);
     setSelectedTreeIDs(new Set([row.id]));
     setSelectionAnchorTreeID(row.id);
-    focusTreeRow(row);
+    focusTreeRow(row, { selectionIntent: "navigate" });
     cancelRenameOnBlurRef.current = false;
     setRenaming({ treeID: row.id, target, value: row.label });
   }, [focusTreeRow]);
@@ -933,7 +956,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, [treeRows, treeViewportHeight]);
 
   const handleTreeKeyCommand = useCallback((event: React.KeyboardEvent<HTMLDivElement> | KeyboardEvent) => {
-    if (isExplorerTextInputTarget(event.target)) return;
+    if (isExplorerTextInputTarget(event.target) && event.target instanceof Node && treeViewportRef.current?.contains(event.target)) return;
     const activeTreeRows = treeRowsRef.current;
     const result = resolveExplorerKeyboardNavigation({
       rows: activeTreeRows.map((row) => ({ id: row.id, kind: row.kind })),
@@ -999,6 +1022,28 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return targetContainer !== "" || itemRows.every((row) => getExplorerRowContainerID(row) === "");
   }, [getExplorerItemRowsForPayload]);
 
+  const isFolderDescendantOf = useCallback((candidateFolderID: string, ancestorFolderID: string): boolean => {
+    if (!candidateFolderID || !ancestorFolderID) return false;
+    let currentFolderID = candidateFolderID;
+    const seen = new Set<string>();
+    while (currentFolderID && !seen.has(currentFolderID)) {
+      if (currentFolderID === ancestorFolderID) return true;
+      seen.add(currentFolderID);
+      const folder = folders.find((item) => item.folder_id === currentFolderID);
+      currentFolderID = folder?.parent_folder_id ?? "";
+    }
+    return false;
+  }, [folders]);
+
+  const canPlaceExplorerFolderAtTarget = useCallback((source: ExplorerTreeNode | undefined, target: ExplorerTreeNode): boolean => {
+    if (!source || source.kind !== "folder" || !source.folderID || !source.folderKind || source.id === target.id) return false;
+    if (getExplorerRowOrderKind(target) !== source.folderKind) return false;
+    const targetContainer = getExplorerRowContainerID(target);
+    if (targetContainer == null) return false;
+    if (targetContainer === source.folderID || isFolderDescendantOf(targetContainer, source.folderID)) return false;
+    return true;
+  }, [isFolderDescendantOf]);
+
   const getReorderRowsForTarget = useCallback((source: ExplorerTreeNode, target: ExplorerTreeNode): ExplorerTreeNode[] => {
     const sourceContainer = getExplorerRowContainerID(source);
     const targetContainer = getExplorerRowContainerID(target);
@@ -1041,6 +1086,48 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }));
     return true;
   }, [assignItemToFolder, getReorderRowsForTarget, moveFolder]);
+
+  const placeExplorerFolderAtTarget = useCallback(async (source: ExplorerTreeNode, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => {
+    if (!source.folderID || !source.folderKind || !canPlaceExplorerFolderAtTarget(source, target)) return false;
+    const targetContainer = getExplorerRowContainerID(target);
+    if (targetContainer == null) return false;
+
+    const targetRows = treeRows.filter((row) => getExplorerRowContainerID(row) === targetContainer && getExplorerRowOrderKind(row) === source.folderKind);
+    const targetRowIDs = new Set(targetRows.map((row) => row.id));
+    const rowsForPlan = targetRowIDs.has(source.id) ? targetRows : [...targetRows, source];
+    const plan = buildExplorerRowBatchReorderPlan(rowsForPlan.map(explorerRowOrder), [source.id], target.id, placement);
+    if (plan.updates.length === 0) return false;
+
+    const rowByPlanID = new Map(rowsForPlan.map((row) => [row.id, row]));
+    const updates: ExplorerRowOrderUpdate[] = [];
+    for (const update of plan.updates) {
+      const row = rowByPlanID.get(update.rowID);
+      if (row) updates.push({ row, position: update.position });
+    }
+    if (updates.length === 0) return false;
+
+    if (targetContainer === "") {
+      setRootRowOrder((previous) => {
+        const next = { ...previous };
+        for (const { row, position } of updates) {
+          if (row.kind !== "folder") next[row.id] = position;
+        }
+        return next;
+      });
+    }
+
+    await Promise.all(updates.map(({ row, position }) => {
+      if (row.kind === "folder" && row.folderID) {
+        const parentFolderID = row.id === source.id ? targetContainer : (row.parentFolderID ?? "");
+        return moveFolder(row.folderID, parentFolderID, { position, parentProvided: row.id === source.id });
+      }
+      const rowItemType: CompanyExplorerFolderKind | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : null;
+      const itemID = row.kind === "node" ? row.nodeID : row.logicGateID;
+      if (targetContainer && rowItemType && itemID) return assignItemToFolder(targetContainer, rowItemType, itemID, { position });
+      return Promise.resolve();
+    }));
+    return true;
+  }, [assignItemToFolder, canPlaceExplorerFolderAtTarget, moveFolder, treeRows]);
 
   const placeExplorerItemsAtTarget = useCallback(async (payload: ExplorerDragPayload | null, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => {
     const itemType = getExplorerDropPayloadItemType(payload);
@@ -1098,10 +1185,26 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [assignItemToFolder, treeRows]);
 
+  const requestMapFind = useCallback((target: ExplorerFindTarget) => {
+    if (target.kind === "node") {
+      emitDashboardEvent(EVENT_NODE_MAP_FOCUS_REQUESTED, {
+        mapWidgetID: linkedMapFrameID,
+        nodeID: target.id,
+        sourceExplorerID: scope,
+      });
+      return;
+    }
+    emitDashboardEvent(EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, {
+      mapWidgetID: linkedLogicMapFrameID || linkedMapFrameID,
+      logicGateID: target.id,
+      sourceExplorerID: scope,
+    });
+  }, [linkedLogicMapFrameID, linkedMapFrameID, scope]);
+
   const openExplorerContextMenu = useCallback((event: React.MouseEvent, row?: ExplorerTreeNode | null) => {
     event.preventDefault();
     event.stopPropagation();
-    if (row) selectTreeRow(row);
+    if (row) selectTreeRow(row, event, { selectionIntent: "navigate" });
     const contextKind: CompanyExplorerFolderKind | null = row?.folderKind ?? (row?.kind === "node" ? "node" : row?.kind === "logic_gate" ? "logic_gate" : null);
     setExplorerContextMenu({
       x: event.clientX,
@@ -1109,6 +1212,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       targets: resolveExplorerCreationTargets(row ?? null),
       deleteTarget: resolveExplorerDeleteTarget(row ?? null),
       renameTarget: resolveExplorerRenameTarget(row ?? null),
+      findTarget: getExplorerFindTarget(row ?? null),
       renameTreeID: row?.id ?? "",
       renameLabel: row?.label ?? "",
       contextKind,
@@ -1443,6 +1547,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       const targetFrameIDs = Array.from(targetIDs);
       const selectedEntityKind = selectedLogicGateID ? "logic_gate" : selectedNodeID ? "node" : "folder";
       const selectedEntityID = selectedLogicGateID || selectedNodeID || selectedFolderID;
+      const selectionIntent = pendingExplorerSelectionIntentRef.current;
       publishLiveSelection({
         companyID,
         entityKind: selectedEntityKind,
@@ -1457,6 +1562,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         folderLabel: selectedFolderLabel,
         changedAt,
         sequence: explorerContextSequenceRef.current,
+        selectionIntent,
       });
       for (const targetID of targetIDs) {
         if (!targetID) continue;
@@ -1472,6 +1578,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           selectedTreeID,
           scopeLevel: selectedTree?.scopeLevel ?? 0,
           selectedLabel: selectedTree?.label ?? "",
+          selectionIntent,
           ts: changedAt,
           envelope: {
             context_id: `explorer_navigation_context:${companyID}:${targetID}`,
@@ -1559,7 +1666,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 }
                 const kanbanDragItems = getKanbanDragItemsForRow(row);
                 const explorerDragRows = getExplorerItemRowsForPayload(rowDragPayload);
-                if (!selectedTreeIDs.has(row.id)) selectTreeRow(row);
+                if (!selectedTreeIDs.has(row.id)) selectTreeRow(row, undefined, { selectionIntent: "navigate" });
                 setDraggingTreeID(row.id);
                 setDragPayload(rowDragPayload);
                 event.dataTransfer.effectAllowed = row.kind === "folder" ? "move" : "copyMove";
@@ -1605,6 +1712,13 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                   setDragOverPlacement(placement);
                   return;
                 }
+                if (payload?.kind === "folder" && placement !== "inside" && sourceRow && canPlaceExplorerFolderAtTarget(sourceRow, row)) {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  setDragOverTreeID(row.id);
+                  setDragOverPlacement(placement);
+                  return;
+                }
                 if (payload?.kind !== "folder" && placement !== "inside" && canPlaceExplorerItemsAtTarget(payload, row)) {
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
@@ -1635,6 +1749,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 if (payload?.kind === "folder" && placement !== "inside" && sourceRow && sourceRow.id !== row.id && getReorderRowsForTarget(sourceRow, row).length > 0) {
                   event.preventDefault();
                   void reorderExplorerRows(sourceRow, row, placement);
+                  return;
+                }
+                if (payload?.kind === "folder" && placement !== "inside" && sourceRow && canPlaceExplorerFolderAtTarget(sourceRow, row)) {
+                  event.preventDefault();
+                  void placeExplorerFolderAtTarget(sourceRow, row, placement);
                   return;
                 }
                 if (payload?.kind !== "folder" && placement !== "inside" && canPlaceExplorerItemsAtTarget(payload, row)) {
@@ -1821,6 +1940,18 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                 </button>
               )}
             </>
+          )}
+          {explorerContextMenu.findTarget && (
+            <button
+              style={{ ...explorerMenuButtonStyle, color: "#111111" }}
+              onClick={() => {
+                const target = explorerContextMenu.findTarget;
+                setExplorerContextMenu(null);
+                if (target) requestMapFind(target);
+              }}
+            >
+              {explorerContextMenu.findTarget.kind === "logic_gate" ? "Find Logic Gate" : "Find Node"}
+            </button>
           )}
           {explorerContextMenu.renameTarget && (
             <button

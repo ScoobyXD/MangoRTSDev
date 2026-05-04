@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LOGIC_GATE_MAP_STATE_KEY_PREFIX, LogicGateRecord, LogicGateRelationship, MINI_GRID, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, toLogicGateCanvasRecord, toLogicGateCanvasRelationship, trimOrEmpty } from "./shared";
-import { emitDashboardEvent, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
+import { emitDashboardEvent, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "./LogicGateRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, canStartRelationshipFromSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
@@ -101,6 +101,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const explorerContextRef = useRef<number>(0);
   const explorerSelectionOriginRef = useRef<ExplorerSelectionOrigin | null>(null);
   const suppressNextSelectionBroadcastRef = useRef(false);
+  const pendingFocusNodeIDRef = useRef("");
   const layoutPersistenceReadyRef = useRef(false);
   const lastPersistedNodePositionsRef = useRef<Record<string, NodePosition>>({});
   const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(false);
@@ -147,6 +148,24 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     x: clamp(snapToGrid((canvasSize.width / 2 - pan.x) / zoom - NODE_W / 2), 0, WORLD_W - NODE_W),
     y: clamp(snapToGrid((canvasSize.height / 2 - pan.y) / zoom - NODE_H / 2), 0, WORLD_H - NODE_H),
   }), [WORLD_H, WORLD_W, canvasSize.height, canvasSize.width, pan.x, pan.y, zoom]);
+
+  const centerNodeInViewport = (nodeID: string): boolean => {
+    const position = nodePositions[nodeID];
+    const isVisible = nodes.some((node) => node.node_id === nodeID);
+    const isKnown = isVisible || allNodes.some((node) => node.node_id === nodeID);
+    if (!nodeID || !isKnown || !isVisible || !position) return false;
+    const size = nodeSizes[nodeID] ?? { w: NODE_W, h: NODE_H };
+    pendingFocusNodeIDRef.current = "";
+    setSelectedRelationshipIDs(new Set());
+    setSelectedNodeID(nodeID);
+    setSelectedNodeIDs(new Set([nodeID]));
+    setPan({
+      x: canvasSize.width / 2 - (position.x + size.w / 2) * zoom,
+      y: canvasSize.height / 2 - (position.y + size.h / 2) * zoom,
+    });
+    setCanvasActive(true);
+    return true;
+  };
 
   const selectedNodeLabel = useMemo(() => {
     if (!selectedNodeID) return "";
@@ -212,6 +231,23 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     }
     layoutPersistenceReadyRef.current = true;
   };
+
+  useEffect(() => {
+    const pendingNodeID = pendingFocusNodeIDRef.current;
+    if (pendingNodeID) centerNodeInViewport(pendingNodeID);
+  }, [canvasSize.height, canvasSize.width, nodePositions, nodeSizes, nodes, allNodes, zoom]);
+
+  useEffect(() => {
+    const onFocusRequested = (event: Event) => {
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; logicGateID?: string; nodeID?: string }>).detail;
+      const logicGateID = detail?.logicGateID || detail?.nodeID || "";
+      if (!detail || detail.mapWidgetID !== mapScope || !logicGateID) return;
+      pendingFocusNodeIDRef.current = logicGateID;
+      centerNodeInViewport(logicGateID);
+    };
+    window.addEventListener(EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, onFocusRequested);
+    return () => window.removeEventListener(EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, onFocusRequested);
+  }, [canvasSize.height, canvasSize.width, mapScope, nodePositions, nodeSizes, nodes, allNodes, zoom]);
 
   useEffect(() => {
     const cached = SESSION_NODE_MAP_STATE.get(mapStateKey) ?? SESSION_NODE_MAP_STATE.get(fallbackMapStateKey);

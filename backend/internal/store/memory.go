@@ -45,7 +45,7 @@ type Repository interface {
 	MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error)
 	RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error)
 	DeleteCompanyExplorerFolder(companyID, folderID string) error
-	AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, error)
+	AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error)
 	ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error)
 	RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error
 	ListNodeMapPositions(companyID string) ([]domain.NodeMapPosition, error)
@@ -1397,31 +1397,33 @@ func (r *MemoryRepo) DeleteCompanyExplorerFolder(companyID, folderID string) err
 	return nil
 }
 
-func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, error) {
+func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	folder, ok := r.folders[key(companyID, folderID)]
 	if !ok || folder.FolderKind != itemType {
-		return domain.CompanyExplorerFolderItem{}, ErrNotFound
+		return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
 	}
 	if itemType == "node" {
 		if _, ok := r.nodes[key(companyID, itemID)]; !ok {
-			return domain.CompanyExplorerFolderItem{}, ErrNotFound
+			return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
 		}
 	} else if itemType == "logic_gate" {
 		if _, ok := r.logicGates[key(companyID, itemID)]; !ok {
-			return domain.CompanyExplorerFolderItem{}, ErrNotFound
+			return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
 		}
 	} else {
-		return domain.CompanyExplorerFolderItem{}, ErrNotFound
+		return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
 	}
 
 	now := time.Now().UTC()
 	k := folderItemKey(companyID, itemType, itemID)
 	created := now
+	previousFolderID := ""
 	if existing, ok := r.folderItems[k]; ok {
 		created = existing.CreatedTimestamp
+		previousFolderID = existing.FolderID
 		if position <= 0 && existing.FolderID == folderID {
 			position = existing.Position
 		}
@@ -1439,7 +1441,34 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemTy
 		UpdatedTimestamp: now,
 	}
 	r.folderItems[k] = item
-	return item, nil
+
+	deletedRelationshipIDs := make([]string, 0)
+	if previousFolderID != folderID {
+		// Moving an entity to another Explorer folder level gives it a new local
+		// graph context. Existing edges are no longer valid in that context.
+		if itemType == "node" {
+			next := r.nodeRels[companyID][:0]
+			for _, rel := range r.nodeRels[companyID] {
+				if rel.NodeIDA == itemID || rel.NodeIDB == itemID {
+					deletedRelationshipIDs = append(deletedRelationshipIDs, rel.NodeRelationshipID)
+					continue
+				}
+				next = append(next, rel)
+			}
+			r.nodeRels[companyID] = next
+		} else if itemType == "logic_gate" {
+			next := r.logicGateRels[companyID][:0]
+			for _, rel := range r.logicGateRels[companyID] {
+				if rel.LogicGateIDA == itemID || rel.LogicGateIDB == itemID {
+					deletedRelationshipIDs = append(deletedRelationshipIDs, rel.LogicGateRelationshipID)
+					continue
+				}
+				next = append(next, rel)
+			}
+			r.logicGateRels[companyID] = next
+		}
+	}
+	return item, deletedRelationshipIDs, nil
 }
 
 func (r *MemoryRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error) {

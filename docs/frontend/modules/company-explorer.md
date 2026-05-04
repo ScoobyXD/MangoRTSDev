@@ -146,6 +146,7 @@ Selection sync hardening update (2026-05-03):
 - Node Map and Logic Gate Map suppress cached selection events while a newer Explorer context is pending in storage. This blocks stale cached map selections during unified Map remounts/mode switches.
 - Node Map and Logic Gate Map treat Explorer-selected node/gate IDs as authoritative while a folder scope change is being applied. If the new selected ID is temporarily missing from the currently rendered folder projection, the map keeps that selected ID instead of falling back to the first visible item and broadcasting a false map click back to Explorer.
 - Graph cache reducers preserve map-layout positions when applying node/gate/relationship deltas, so Explorer-driven creates/deletes and SSE updates cannot accidentally drop layout state and force the map to regenerate positions.
+- Explorer publishes a `selectionIntent` with live selections. Pointer selection uses `activate`, so linked Editor frames can focus the document for immediate typing; keyboard tree navigation uses `navigate`, so Up/Down/Left/Right can be repeated without the Editor stealing focus.
 
 Folder runtime update (2026-05-02):
 - Explorer folders are now durable backend rows, not local-only UI state.
@@ -161,6 +162,7 @@ Folder runtime update (2026-05-02):
 - Folder creation is now a Company Explorer context-menu action, not an inline plus button. Right-clicking the tree body opens Explorer actions, while frame-level actions remain scoped to the frame/module title plate.
 - When the right-click context has no folder type, the menu order is `Create node folder`, `Create node`, `Create logic gate folder`, `Create logic gate`. Typed folder creation keeps empty folders aligned with the backend item-type invariant. Right-clicking typed rows uses the compatible single `Create folder` action.
 - Right-clicking a concrete folder, node, or logic gate exposes `Rename` and `Delete`, backed by folder/node/logic-gate APIs.
+- Right-clicking a concrete node or logic gate also exposes `Find Node` or `Find Logic Gate`. The action emits a lightweight focus request to the linked map frame, selects the entity on the map, and pans the map so the card is centered without issuing a new graph read.
 - Double-clicking the title text of a concrete folder, node, or logic gate starts inline rename with the caret at the end of the current title. Double-clicks on the disclosure control, icon, indent, or blank row area only select/toggle and never start rename.
 - Left-clicking elsewhere inside Company Explorer closes the Explorer context menu before applying the new selection.
 - New folders are created inside the right-clicked compatible folder/tree. New nodes and logic gates are created through their canonical APIs and then assigned to the compatible right-clicked folder through `company_explorer_folder_items` when a folder target exists.
@@ -169,6 +171,7 @@ Folder runtime update (2026-05-02):
 - Node, logic-gate, and folder moves still use the existing folder APIs (`POST /v1/company-explorer/folder-items` and `PUT /v1/company-explorer/folders/{folder_id}`), so headless agents can perform the same placement changes without a browser.
 - Drag-and-drop now accepts any compatible row inside a folder section. Dropping a folder, node, or logic gate on a child row resolves to that row's containing folder, while dropping directly on a compatible folder still targets that folder.
 - Dragging over the top or bottom half of a sibling row reorders the dragged folder/item before or after that row, using the same sparse-position pattern as Kanban cards. Folders and items participate in the same visible sibling order for their compatible parent.
+- Dragging a folder across folder levels can now land before or after a row in the target folder instead of only appending inside the target. The UI sends the same sparse `position` writes that headless callers can send through the folder APIs.
 - Dropping a folder on the `Company` root moves that folder back to the root of its node or logic-gate tree.
 - Drag moves do not auto-expand the moved folder or the target folder; expanded/collapsed state remains a user-controlled local view.
 - The Explorer tree supports keyboard navigation: Up/Down moves selection through visible rows, Right expands a selected folder, and Left collapses a selected folder. The module keeps the last interacted Explorer active for arrow commands even when browser focus would otherwise fall back to the frame shell.
@@ -178,7 +181,7 @@ Folder runtime update (2026-05-02):
 - Selecting a node folder broadcasts `selectedFolderID`/`selectedFolderKind=node`; linked Node Map filters its cached graph to nodes placed in that folder or any descendant folder.
 - Selecting a logic-gate folder broadcasts `selectedFolderID`/`selectedFolderKind=logic_gate`; linked Logic Gate Map applies the same folder-scope rule for gates.
 - Selecting an individual node or logic gate inside a folder keeps that folder scope in the broadcast, so linked maps can select the item without expanding back to the whole company.
-- Relationships are displayed only when both endpoints are inside the active folder scope. Cross-folder relationships stay persisted but are hidden in that scoped map view.
+- Relationships are displayed only when both endpoints are inside the active folder scope. Moving a node or logic gate to a different Explorer folder level deletes relationships touching that entity through the `POST /v1/company-explorer/folder-items` API, and local graph caches prune those edges immediately so the map matches the new folder context.
 
 Unified map/linking update (2026-05-03):
 - The module picker now exposes one `Map` module. The map switches between node and logic-gate views from the latest Explorer context: node folders/items show nodes, logic-gate folders/items show logic gates.
@@ -218,7 +221,7 @@ Headless API surface:
 - `GET/POST/DELETE /v1/company-explorer/folder-items`
 
 This keeps source-of-truth entity IDs and persistence semantics intact while making Explorer organization durable.
-Folder move writes reject self/descendant parents so the folder tree remains safe for recursive scope filtering. `position` is part of the API contract so agents can reorder Explorer rows without relying on browser-only drag state.
+Folder move writes reject self/descendant parents so the folder tree remains safe for recursive scope filtering. `position` is part of the API contract so agents can reorder Explorer rows without relying on browser-only drag state. Folder-item assignment is also the relationship-boundary API: if a node or logic gate changes folder level, relationships touching that entity are removed in the same canonical write.
 
 ---
 

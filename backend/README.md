@@ -198,7 +198,7 @@ These tables store the latest shared Node Map and Logic Gate Map positions by co
 - `PUT /v1/company-explorer/folders/{folder_id}` (rename with `name`, move with `parent_folder_id`, reorder with `position`, or combine those fields)
 - `DELETE /v1/company-explorer/folders/{folder_id}?company_id={uuid}`
 - `GET /v1/company-explorer/folder-items?company_id={uuid}&folder_id={uuid}&item_type=node|logic_gate`
-- `POST /v1/company-explorer/folder-items`
+- `POST /v1/company-explorer/folder-items` (assign/move item; moving to a different folder level deletes relationships touching that node or logic gate)
 - `DELETE /v1/company-explorer/folder-items?company_id={uuid}&item_type=node|logic_gate&item_id={uuid}`
 - `GET /v1/map-layout?company_id={uuid}&map_type=node|logic_gate`
 - `PUT /v1/map-layout`
@@ -292,7 +292,7 @@ curl -X PUT http://localhost:8080/v1/company-explorer/folders/<folder_id> \
 
 Folder rows are API-backed so headless agents can create the same explorer structure as the UI.
 `company_explorer_folder_items` keeps one placement per node or logic gate, matching file-explorer move semantics.
-Folders and folder items carry sparse integer `position` values; agents can reorder with one bounded write in the common case. New folders/items append after both tables in the same parent so API-created rows preserve the mixed folder/item order users see. Folder moves reject self/descendant parents to keep the hierarchy acyclic. Folder renames use the same API path so agents do not need UI-specific behavior.
+Folders and folder items carry sparse integer `position` values; agents can reorder with one bounded write in the common case. New folders/items append after both tables in the same parent so API-created rows preserve the mixed folder/item order users see. Folder moves reject self/descendant parents to keep the hierarchy acyclic. Folder-item moves to a different folder level remove relationships for the moved node or logic gate in the same API transaction, using indexed endpoint deletes. Folder renames use the same API path so agents do not need UI-specific behavior.
 
 Create operation:
 

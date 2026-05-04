@@ -9,6 +9,8 @@ export type SelectionSourceModule =
   | "kanban"
   | "editor";
 
+export type SelectionIntent = "activate" | "navigate";
+
 export type LiveSelectionChange = {
   companyID: string;
   entityKind: SelectionEntityKind;
@@ -23,6 +25,9 @@ export type LiveSelectionChange = {
   folderKind?: "node" | "logic_gate";
   folderID?: string;
   folderLabel?: string;
+  // "activate" lets linked editors focus their typing surface. "navigate"
+  // updates context without stealing focus from keyboard-driven tree movement.
+  selectionIntent: SelectionIntent;
 };
 
 export type PublishLiveSelectionInput = {
@@ -39,6 +44,7 @@ export type PublishLiveSelectionInput = {
   folderLabel?: string;
   changedAt?: number;
   sequence?: number;
+  selectionIntent?: SelectionIntent;
 };
 
 const liveSelectionsByTarget = new Map<string, LiveSelectionChange>();
@@ -94,6 +100,7 @@ export function publishLiveSelection(input: PublishLiveSelectionInput): LiveSele
     folderKind: input.folderKind,
     folderID: input.folderID,
     folderLabel: input.folderLabel,
+    selectionIntent: input.selectionIntent ?? "activate",
   };
 
   const acceptedTargetFrameIDs: string[] = [];

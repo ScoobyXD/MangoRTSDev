@@ -88,6 +88,7 @@ Logic Gate Map follows the latency architecture rules:
 - Company Explorer folder selection filters the cached snapshot in memory. A selected folder includes descendant folders, and relationship lines render only when both gates are inside that active scope.
 - Selecting an individual gate from inside a Company Explorer folder keeps that folder scope active while selecting the gate.
 - New logic gates created while a folder scope is active are assigned to that folder through the folder-items API.
+- Moving a logic gate to a different Company Explorer folder level through the folder-items API removes relationships touching that gate. Logic Gate Map prunes those relationship lines locally and also applies the backend `logic_gate_relationship_deleted` stream events.
 
 Junior engineer note:
 - A position update is not a new logic-gate relationship and does not change gate semantics.
