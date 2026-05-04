@@ -8,6 +8,7 @@ Read in this order:
 docs/agents/sacred-text.md
 docs/agents/current-decisions.md
 docs/agents/naming-conventions.md
+docs/agents/batch-workflow.md
 docs/agents/orchestrator-protocol.md
 docs/agents/worker-protocol.md
 docs/agents/project-merge-agent-protocol.md
@@ -15,6 +16,7 @@ docs/agents/lifecycle-and-branching.md
 docs/agents/state-ledger.md
 docs/agents/dependencies-and-docker-plan.md
 docs/agents/prompt-templates.md
+docs/agents/copy-paste-prompts.md
 ```
 
 Related existing references:
@@ -28,18 +30,17 @@ docs/tests.md
 
 ## Current Model
 
-The user gives the orchestrator three to five large-ish project prompts. The orchestrator allocates project IDs, pre-creates one integration branch/worktree per project, splits each project into worker tasks, and assigns recommended file scopes to workers.
+The preferred model is small batch trains. The user gives the orchestrator a batch containing normally two to four project prompts. The orchestrator creates one batch branch from approved `main`, records the batch base commit, creates one project branch/worktree per project from that same batch base commit, and starts one project manager agent per project.
 
-Workers implement their assigned slices on worker branches. Scope is recommended to reduce merge conflicts, not a hard silo. Workers may edit adjacent files when correctness requires it, but they must report those edits and why.
+Project managers split their project into worker tasks. Workers implement their assigned slices on simple worker branches. Scope is recommended to reduce merge conflicts, not a hard silo. Workers may edit adjacent files when correctness requires it, but they must report those edits and why.
 
-Each top-level project gets one project merge agent. That merge agent merges the project's worker branches into the project's integration branch, runs checks, and reports exact commands for manual QA. By default, agents do not merge to `main` and do not push. The human tests the integration branch and decides whether to approve, request fixes, drop the project, or manually merge/push.
+Each top-level project gets one project manager agent. That manager merges the project's worker branches into the project's project branch, runs checks, and reports exact commands for manual QA. The human tests each project branch and chooses good, fix, or rollback. Approved project branches merge into the batch branch. The human then tests the combined batch branch and chooses good, fix, or rollback. By default, agents do not merge to `main` and do not push.
 
 ## Core Rule
 
 ```text
-Agents prepare project integration branches.
+Agents prepare project and batch branches.
 Humans judge product quality.
 Main changes only after explicit human approval.
 Push happens only by human action or explicit user request.
 ```
-

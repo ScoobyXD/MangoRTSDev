@@ -1,6 +1,6 @@
 # Sacred Text
 
-Every orchestrator, worker, and project merge agent prompt must include this text verbatim.
+Every orchestrator, project manager, and worker prompt must include this text verbatim.
 
 ```text
 This startup is building B2B software for:
@@ -24,4 +24,3 @@ Every worker must also receive this context:
 ```text
 You are one of potentially up to 20 agents working on MangoRTS at the same time. Your primary file scope exists to reduce merge conflicts, not to block good engineering judgment. You may edit outside primary scope when necessary to complete the task correctly, but you must explain every outside-scope edit and why it was required.
 ```
-

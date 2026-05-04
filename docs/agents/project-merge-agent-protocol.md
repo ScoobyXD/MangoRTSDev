@@ -1,36 +1,35 @@
-# Project Merge Agent Protocol
+# Project Manager Agent Protocol
 
-A project merge agent owns one project integration branch. Its job is to merge all worker branches for that project into that integration branch, run checks, and produce a ready-for-human-QA worktree.
+A project manager agent owns one project branch. Its job is to split a project into workers, merge all worker branches for that project into that project branch, run checks, and produce a ready-for-human-QA worktree.
 
-Use one project merge agent per top-level project prompt.
+Use one project manager agent per top-level project prompt.
 
 ## Inputs
 
 ```text
-Merge agent:
-merge-0000044-kanban-board
+Manager agent:
+FixKanbanBoardCardsUIManager-project0001005
 
 Project:
-project-0000012-kanban-board
+FixKanbanBoardCardsUIProject-project0001005
 
-Integration branch:
-integration/0000012-kanban-board
+Project branch:
+FixKanbanBoardCardsUIProject-project0001005
 
-Integration worktree:
-C:\Users\Jonat\MangoOSDev-integration-0000012-kanban-board
+Project worktree:
+C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005
 
 Worker branches:
-- codex/0001000-kanban-board-picker
-- codex/0001001-kanban-header-hit-targets
-- codex/0001002-kanban-explorer-icon
-- codex/0001003-kanban-scrollbars
+- worker0095348
+- worker0095349
+- worker0095350
 ```
 
 ## Responsibilities
 
 1. Read the required docs.
-2. Run preflight in the integration worktree.
-3. Confirm the integration branch/worktree is correct.
+2. Run preflight in the project worktree.
+3. Confirm the project branch/worktree is correct.
 4. Merge worker branches one at a time.
 5. Resolve only conflicts relevant to this project.
 6. Run conflict-marker scan after each merge.
@@ -38,16 +37,17 @@ Worker branches:
 8. Run full verification before reporting ready for QA.
 9. Record merged, skipped, and blocked branches in the ledger.
 10. Report exact manual QA commands.
+11. If project QA requires rollback, reset/recreate from `batch_base_commit`, not from current batch branch HEAD.
 
 ## Default Stop Point
 
-Stop at the project integration branch. Do not merge to `main` by default. Do not push by default.
+Stop at the project branch. Do not merge to the batch branch until the human approves project QA. Do not merge to `main`. Do not push.
 
-The user will manually test and decide whether to approve, request fixes, drop the project, or explicitly ask for a main merge.
+The user will manually test and decide whether to approve, request fixes, or roll back the project.
 
 ## Required Checks
 
-From the integration worktree:
+From the project worktree:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
@@ -61,13 +61,13 @@ Use this shape:
 
 ```text
 Project ready for manual QA:
-project-0000012-kanban-board
+FixKanbanBoardCardsUIProject-project0001005
 
-Integration branch:
-integration/0000012-kanban-board
+Project branch:
+FixKanbanBoardCardsUIProject-project0001005
 
-Integration worktree:
-C:\Users\Jonat\MangoOSDev-integration-0000012-kanban-board
+Project worktree:
+C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005
 
 Merged worker branches:
 <list>
@@ -81,21 +81,23 @@ Checks already run:
 - node scripts\run_all_tests.mjs passed
 
 Run backend:
-cd C:\Users\Jonat\MangoOSDev-integration-0000012-kanban-board\backend
+cd C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005\backend
 go run ./cmd/miraeopus-api
 
 Run frontend:
-cd C:\Users\Jonat\MangoOSDev-integration-0000012-kanban-board\frontend
+cd C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005\frontend
 npm run dev
 
 Apply schema:
-cd C:\Users\Jonat\MangoOSDev-integration-0000012-kanban-board
+cd C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005
 powershell -ExecutionPolicy Bypass -File .\scripts\apply_canonical_schema.ps1
+
+Schema/migration files changed:
+<none or list backend/db/schema.sql and backend/db/migrations/*.sql>
 ```
 
 There is no `backend\go` directory. Backend commands run from:
 
 ```text
-<integration-worktree>\backend
+<project-worktree>\backend
 ```
-

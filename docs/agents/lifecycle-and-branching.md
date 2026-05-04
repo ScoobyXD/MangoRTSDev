@@ -6,78 +6,118 @@ This document explains when agents are created and which source branch/worktree 
 
 ```text
 Orchestrator:
-main worktree, latest local main after origin/main ff-only when allowed.
+main worktree, latest approved local main after origin/main ff-only when allowed.
 
-Project integration branch:
-created from fresh main at the start of that project.
+Batch branch:
+created from approved main at batch start.
+
+Project branch:
+created from batch_base_commit, even if the batch branch later moves.
 
 Initial workers:
-created from that project's integration branch.
+created from that project's project branch.
 
 Follow-up workers after manual QA finds issues:
-created from the same project integration branch the human tested.
+created from the same project branch the human tested.
 
 Replacement workers for additional project scope:
-created from the latest project integration branch after prior workers have merged.
+created from the latest project branch after prior workers have merged.
 
-New unrelated project:
-created from fresh main or another explicitly approved base.
+Project rollback:
+recreate or reset the project branch from batch_base_commit, not from current batch branch HEAD.
+
+Batch-fix project:
+created from current batch branch HEAD when the combined approved projects reveal an integration bug.
+
+New unrelated batch:
+created from fresh approved main or another explicitly approved base.
 ```
 
 ## Normal Flow
 
 ```text
-User gives orchestrator three project prompts.
+User gives orchestrator one batch with two project prompts.
 
 Orchestrator:
-- creates integration/0000012-text-editor
-- creates integration/0000013-kanban-board
-- creates integration/0000014-company-explorer
+- records batch_base_commit from main
+- creates BatchName-batch0000007
+- creates FixKanbanBoardCardsUIProject-project0001005 from batch_base_commit
+- creates EditorTextStyleChangesProject-project0001006 from batch_base_commit
 
-Workers for text-editor:
-- branch from integration/0000012-text-editor
-- merge back into integration/0000012-text-editor
+Workers for Kanban:
+- branch from FixKanbanBoardCardsUIProject-project0001005
+- merge back into FixKanbanBoardCardsUIProject-project0001005
 
-Workers for kanban:
-- branch from integration/0000013-kanban-board
-- merge back into integration/0000013-kanban-board
+Workers for Editor:
+- branch from EditorTextStyleChangesProject-project0001006
+- merge back into EditorTextStyleChangesProject-project0001006
 
-Workers for company-explorer:
-- branch from integration/0000014-company-explorer
-- merge back into integration/0000014-company-explorer
+Human approves Kanban:
+- FixKanbanBoardCardsUIProject-project0001005 merges into BatchName-batch0000007
+
+Human rejects Editor hard:
+- EditorTextStyleChangesProject-project0001006 rolls back to batch_base_commit, not BatchName-batch0000007 HEAD
 ```
 
-## Why Workers Branch From Project Integration
+## Why Projects Branch From Batch Base
 
-`main` may not contain the project's earlier worker changes yet. The project integration branch is the candidate product state for that project. Follow-up work should build on what the user is testing.
+All projects in a batch need the same initial switch point. If one project succeeds and merges into the batch branch, a different failed project must still be able to restart from the original batch start, without accidentally inheriting the successful project's changes.
+
+Project branches are independently testable product candidates. Follow-up work should build on the project branch the user tested unless the user requests a full rollback.
 
 ## When A Worker Finishes
 
 ```text
 worker exits
-project merge agent merges it into the project integration branch
-orchestrator may spawn another worker from the updated project integration branch
+project manager merges it into the project branch
+project manager may spawn another worker from the updated project branch
 ```
 
 ## When Manual QA Fails
 
 ```text
 human tells orchestrator what failed
-orchestrator spawns fix worker from the tested project integration branch
-project merge agent merges fix back into the same project integration branch
+project manager spawns fix worker from the tested project branch
+project manager merges fix back into the same project branch
 human tests again
 ```
 
 ## When Manual QA Passes
 
 ```text
-human chooses whether to merge integration/<project> to main
-human pushes, or explicitly asks an agent to merge/push
+human approves project branch for batch merge
+orchestrator merges approved project branch into batch branch
+human later approves batch branch for main merge
+human pushes main, or explicitly asks an agent to push
 ```
+
+## When Project QA Requires Rollback
+
+```text
+human says rollback project
+project manager records current failed project commit
+project manager recreates/resets project branch from batch_base_commit
+project manager starts fresh workers
+human tests project again
+```
+
+The project rollback source is the original batch base, not the current batch branch.
+
+## When Batch QA Fails
+
+```text
+human says batch needs fixes
+orchestrator creates batch-fix project from current batch branch
+workers fix combined behavior
+orchestrator merges fix into batch branch
+human tests batch again
+```
+
+If the batch is bad enough to abandon and has not merged to main, mark it abandoned and leave main untouched.
 
 ## Branch Lifetime
 
-Worker branches and project integration branches should not become permanent development branches. The goal is short-lived candidate branches:
+Worker branches, project branches, and batch branches should not become permanent development branches. The goal is short-lived candidate branches:
 
 ```text
 create from fresh approved base
@@ -93,6 +133,5 @@ Do not set hard line-count or file-count limits for workers. Instead, use judgme
 The approved project batch guardrail is:
 
 ```text
-One broad architectural change per project integration batch.
+One broad architectural change per batch.
 ```
-

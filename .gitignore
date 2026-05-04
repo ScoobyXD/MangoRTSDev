@@ -1,5 +1,6 @@
 docs/MangoOS.txt
 .env
+.agent-state/
 # Frontend build artifacts
 frontend/.test-dist/
 frontend/dist/

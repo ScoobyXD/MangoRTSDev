@@ -1,21 +1,24 @@
 # Orchestrator Protocol
 
-The orchestrator is the coordinator. It receives the user's large request, decomposes it into projects and worker assignments, manages the ledger, and decides what agents should exist next.
+The orchestrator is the coordinator. It receives the user's batch request, decomposes it into projects and project manager assignments, manages the ledger, and decides what agents should exist next.
 
-The orchestrator should not personally do all implementation or all merges. It should delegate implementation to workers and project integration to project merge agents.
+The orchestrator should not personally do all implementation or all merges. It should delegate implementation to workers and project-level integration to project manager agents. The orchestrator owns the batch branch and should normally perform project-to-batch merges.
 
 ## Inputs
 
-The user may give up to three to five top-level project prompts, for example:
+The user gives one batch prompt with two to four top-level project prompts, for example:
 
 ```text
-Text Editor:
+Batch:
+UI polish batch
+
+Project 1 - Text Editor:
 <list of editor behavior/UI changes>
 
-Kanban Board:
+Project 2 - Kanban Board:
 <list of Kanban board behavior/UI changes>
 
-Company Explorer:
+Project 3 - Company Explorer:
 <list of Company Explorer behavior/UI changes>
 ```
 
@@ -27,17 +30,20 @@ Each top-level prompt becomes one project.
 2. Read `docs/agents/current-decisions.md`.
 3. Run preflight and inspect current repo/worktree state.
 4. Allocate IDs from the ledger:
-   - run ID
+   - batch ID
    - orchestrator ID
    - project IDs
+   - manager IDs
    - worker IDs
-   - merge IDs
-5. Create or update the run ledger.
-6. Create one project integration branch/worktree per project from the chosen base.
-7. Split each project into worker assignments.
-8. Create worker branches/worktrees from the project integration branch.
-9. Spawn workers with the sacred text, project objective, recommended primary file scope, and scope freedom rule.
-10. Spawn one project merge agent per project after workers have branches ready to integrate.
+5. Create or update the batch ledger.
+6. Record `batch_base_commit` from approved `main`.
+7. Create one batch branch/worktree from `batch_base_commit`.
+8. Create one project branch/worktree per project from `batch_base_commit`.
+9. Start one visible PowerShell terminal per project manager worktree.
+10. Spawn or prompt one project manager per project.
+11. Project managers split each project into worker assignments.
+12. Project managers create worker branches/worktrees from their project branch.
+13. Project managers spawn workers with the sacred text, project objective, recommended primary file scope, and scope freedom rule.
 
 ## Decomposition Rule
 
@@ -51,28 +57,34 @@ The orchestrator owns:
 
 - ID allocation.
 - Ledger updates.
+- Batch creation.
 - Project creation.
-- Worker creation.
-- Merge agent creation.
+- Project manager creation.
 - Deciding when to create replacement workers.
+- Project-to-batch merge ownership unless explicitly delegated through a ledger lock.
+- Final batch-to-main merge only after explicit human approval.
 - Deciding when to recreate itself.
 
 The orchestrator does not own:
 
 - Product acceptance. The human owns this.
+- Worker implementation details. Workers own their assigned implementation tasks.
+- Project-level worker merges. Project managers own these.
 - Default merge to `main`. This requires explicit human approval.
-- Default push to GitHub. This requires explicit human approval.
+- Push to GitHub. This is human action unless explicitly requested.
 
 ## When To Spawn New Workers
 
-Spawn initial workers from the project integration branch after the project branch/worktree is created.
+Initial workers are spawned by the project manager from the project branch after the project branch/worktree is created.
 
-Spawn follow-up workers from the latest project integration branch after:
+Spawn follow-up workers from the latest project branch after:
 
-- a worker's changes have been merged into the project integration branch, or
-- the human reports a QA issue against the project integration branch.
+- a worker's changes have been merged into the project branch, or
+- the human reports a QA issue against the project branch.
 
-For unrelated new projects, create a fresh project integration branch from the approved base.
+For a full project rollback, recreate or reset the project branch from `batch_base_commit`, not from the current batch branch HEAD.
+
+For a batch-level integration bug after projects have merged into the batch branch, create a batch-fix project from current batch branch HEAD.
 
 ## When To Recreate The Orchestrator
 
@@ -81,7 +93,8 @@ Create a new orchestrator instance when:
 - context is getting large,
 - a major user request completes,
 - all active workers for a run are finished,
-- a set of project integration branches is ready for human QA,
+- a set of project branches is ready for human QA,
+- projects are merged into the batch branch and final batch QA is ready,
 - the user provides a new major set of prompts,
 - the current orchestrator can safely resume from the ledger.
 
@@ -91,7 +104,7 @@ A fresh orchestrator resumes from:
 .agent-state/orchestration.json
 .agent-state/counters.json
 git worktree list
-git branch --list codex/* integration/*
+git branch --list *batch* *project* worker*
 git status for main and active worktrees
 ```
 
@@ -99,9 +112,9 @@ git status for main and active worktrees
 
 ```text
 Workers do work.
-Project merge agents integrate project candidates.
+Project managers integrate worker candidates.
 The orchestrator decides what exists next.
+The orchestrator owns the batch branch.
 The ledger is the source of truth.
-The human decides whether a project is good enough for main.
+The human decides whether a project is good enough for the batch and whether a batch is good enough for main.
 ```
-

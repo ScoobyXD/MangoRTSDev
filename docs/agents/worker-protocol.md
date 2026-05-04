@@ -49,13 +49,13 @@ Primary file scope is recommended to reduce merge conflicts. It is not a hard si
 
 ```text
 Worker:
-worker-<id>-<slug>
+worker<id>
 
 Branch:
-codex/<id>-<slug>
+worker<id>
 
 Project:
-project-<id>-<slug>
+<ProjectName>Project-project<id>
 
 Primary scope:
 <files/directories assigned>
@@ -78,4 +78,3 @@ Tests/checks run:
 Known risks/follow-ups:
 <summary>
 ```
-

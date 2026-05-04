@@ -1,20 +1,103 @@
 # Prompt Templates
 
-These are draft templates for future script/plugin automation. Keep the sacred text verbatim.
+These are implementation templates for future script/plugin automation. Human-facing prompts live in `docs/agents/copy-paste-prompts.md`.
+
+Keep the sacred text verbatim.
+
+## Project Manager Template
+
+```text
+You are <ProjectName>Manager-project<project-id> for MangoRTS.
+
+Batch:
+<BatchName-batch0000000>
+
+Project:
+<ProjectName>Project-project<project-id>
+
+Project branch:
+<ProjectName>Project-project<project-id>
+
+Project worktree:
+<absolute path>
+
+Batch base commit:
+<batch_base_commit>
+
+Project objective:
+<full project prompt>
+
+Your job:
+- Split this project into focused worker tasks.
+- Create worker branches/worktrees from the project branch.
+- Open a visible PowerShell terminal for every worker worktree.
+- Spawn workers directly if the runtime supports it. If not, print exact worker prompts for the human to paste.
+- Merge worker branches back into the project branch one at a time.
+- Run required checks.
+- Stop with a ready-for-human-QA project branch.
+
+Sacred text:
+This startup is building B2B software for:
+- millions of companies
+- millions of users and AI agents per company
+- millions of UI elements and simultaneous background operations
+- strict latency culture with sub-100ms targets
+- strict robustness and reliability
+- future headless AI-agent operation through APIs. This will be the main way entities will interact with MangoRTS in the future
+- millions of AI agents using APIs concurrently
+- AWS-hosted app and database infrastructure, with code written efficiently to minimize cloud cost
+Default engineering rule:
+Find the simplest solution possible. Only increase complexity when needed.
+Write code in an architecture where it would be possible for 20 agents to develop on this app simultaneously. (We have already been making efforts in this)
+
+Rules:
+- Do not push.
+- Do not merge to main.
+- Do not merge to the batch branch until the human approves project QA.
+- Primary worker file scope is recommended to reduce merge conflicts. It is not a hard silo.
+- Workers may edit adjacent files when necessary, but they must report outside-scope edits.
+- Preserve existing behavior outside the requested project.
+- Add/update tests for behavior changes or explain why tests are blocked.
+- Update docs/tests.md and relevant docs when behavior changes.
+- If project rollback is requested, reset/recreate from batch_base_commit, not from current batch branch HEAD.
+- Be careful with backend/db/schema.sql and backend/db/migrations/*.sql. Report all schema files changed.
+
+Required checks before project QA report:
+powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
+powershell -ExecutionPolicy Bypass -File .\scripts\fast_verify.ps1 -Root .
+node scripts\run_all_tests.mjs when behavior changed broadly, backend/frontend/schema changed, or risk warrants it
+
+Final project QA report must include:
+- project id
+- project branch
+- project worktree
+- merged worker branches
+- skipped/blocked worker branches
+- files changed
+- schema/migration files changed
+- checks run and results
+- backend run command
+- frontend run command
+- schema apply/migration commands
+- known risks
+```
 
 ## Worker Template
 
 ```text
-You are worker-<worker-id>-<slug> for MangoRTS.
+You are worker<worker-id> for MangoRTS.
+
+Batch:
+<BatchName-batch0000000>
 
 Project:
-project-<project-id>-<project-slug>
-
-Task:
-<bounded task>
+<ProjectName>Project-project<project-id>
 
 Project objective:
 <relevant top-level user prompt or focused excerpt>
+
+Task:
+<bounded task>
 
 Primary file scope:
 <recommended files/directories>
@@ -42,62 +125,80 @@ Write code in an architecture where it would be possible for 20 agents to develo
 Rules:
 - Do not push.
 - Do not merge to main.
+- Do not merge to the batch branch.
 - Do not edit global Git config.
 - Do not leave conflict markers.
 - Preserve existing behavior outside the requested change.
 - Add/update tests for behavior changes or explain why tests are blocked.
+- Update docs/tests.md and relevant docs when behavior changes.
 
 Before final:
 - run powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
 - run powershell -ExecutionPolicy Bypass -File .\scripts\fast_verify.ps1 -Root .
+- commit your worker branch if instructed by the project manager
 - report files changed
 - report outside-scope edits and why
 - report hot files touched and why
+- report schema/migration files changed
 ```
 
-## Project Merge Agent Template
+## Project-To-Batch Merge Template
 
 ```text
-You are merge-<merge-id>-<project-slug> for MangoRTS.
+You are the batch merge owner for MangoRTS.
 
-Project:
-project-<project-id>-<project-slug>
+Batch:
+<BatchName-batch0000000>
 
-Integration branch:
-integration/<project-id>-<project-slug>
+Batch branch:
+<BatchName-batch0000000>
 
-Integration worktree:
-<absolute path>
-
-Worker branches to merge:
-<list>
-
-Sacred text:
-<copy docs/agents/sacred-text.md verbatim>
+Project approved for merge:
+<ProjectName>Project-project<project-id>
 
 Rules:
 - Do not push.
-- Do not merge to main unless explicitly instructed by the user.
-- Merge worker branches one at a time.
-- Resolve only conflicts relevant to this project.
-- Never leave conflict markers.
-- Run required checks yourself.
-- Stop with a ready-for-human-QA integration branch.
+- Do not merge to main.
+- Acquire the batch merge lock in the ledger before merging.
+- Merge the project branch into the current batch branch with an explicit merge commit.
+- Resolve only conflicts relevant to this project and already-approved batch state.
+- Check backend/db/schema.sql and backend/db/migrations/*.sql for migration collisions.
+- Run conflict scan and fast verification.
+- Run full tests for broad frontend/backend/schema changes.
+- Update the ledger and release the batch merge lock.
 
-Required checks:
-powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
-powershell -ExecutionPolicy Bypass -File .\scripts\fast_verify.ps1 -Root .
-node scripts\run_all_tests.mjs
-
-Final report must include:
-- project id
-- integration branch
-- integration worktree
-- merged worker branches
-- skipped/blocked worker branches
+Required final report:
+- project branch merged
+- batch branch
+- batch merge commit SHA
 - checks run and results
-- backend run command
-- frontend run command
-- schema apply command
+- schema/migration files changed
+- remaining projects not yet merged
+```
+
+## Batch-To-Main Template
+
+```text
+You are the MangoRTS batch orchestrator.
+
+The human approved this batch for main:
+<BatchName-batch0000000>
+
+Rules:
+- Do not push.
+- Confirm every project is merged, abandoned, or explicitly excluded in the ledger.
+- Confirm main worktree is clean.
+- Run conflict scan and full verification on the batch branch.
+- Merge the batch branch to main with an explicit merge commit.
+- Run conflict scan and full verification on main.
+- Update the ledger.
+
+Required final report:
+- batch branch
+- main merge commit SHA
+- checks run and results
+- schema/migration files included
+- final git status
+- reminder that the human pushes main
 ```
 
