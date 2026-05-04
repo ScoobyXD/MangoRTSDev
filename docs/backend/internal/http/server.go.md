@@ -4,10 +4,13 @@ Design the MangoOS hot-path architecture for:
 - 100000s of UI elements and simultaneous background operations per active workspace
 - 100000s of companies
 - 1000000s of users and ai agency
-- strict latency culture with sub-100ms targets for interactive reads
-- ***THIS IS SUPER IMPORTandANT:*** In the future we will have ai agents operate this app without a UI,
-    so we need to make sure everything can be done by ai agents headless with just APIs. 
-    And of course, it needs to work well with 10000s of ai agents all using the apis all at once.
+- strict latency culture with sub-100ms targets
+- strict robustness and reliability
+- ***THIS IS SUPER IMPORTANT:*** In the future we will have ai agents operate this app without a UI,
+    so we need to make sure everything can be done by ai agents headless with just APIs.
+    This will be the main way entities will interact with MangoRTS in the future.
+    And of course, it needs to work well with millions of ai agents all using the apis at the same time.
+- MangoRTS will use AWS as the cloud provider. Write code and design data access patterns efficiently to minimize cloud cost because the app and database will be hosted on cloud services.
 
 These rules are from the latency-obsession-architecture.md file 
 

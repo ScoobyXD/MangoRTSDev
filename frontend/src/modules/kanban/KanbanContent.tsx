@@ -5,33 +5,37 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folder
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
-import { createKanbanBoard, createKanbanColumn, deleteKanbanCard, deleteKanbanColumn, listKanbanBoards, listKanbanCards, listKanbanColumns, moveKanbanCard, updateKanbanBoard, updateKanbanColumn, upsertKanbanCard } from "./kanbanApi";
+import { createKanbanBoard, listKanbanBoards, listKanbanCards, listKanbanColumns, updateKanbanBoard } from "./kanbanApi";
+import {
+  addExplorerNodesToKanbanColumnCommand,
+  createKanbanColumnCommand,
+  deleteKanbanCardsCommand,
+  deleteKanbanColumnCommand,
+  persistKanbanColumnLayoutCommand,
+  renameKanbanColumnCommand,
+  reorderKanbanCardsCommand,
+  reorderKanbanColumnsCommand,
+  type KanbanCommandContext,
+} from "./kanbanCommands";
+import { KanbanBoardSidebar } from "./KanbanBoardSidebar";
+import { KanbanCardView } from "./KanbanCardView";
+import { KanbanColumnView } from "./KanbanColumnView";
 import {
   EXPLORER_ENTITY_DRAG_MIME,
   KANBAN_CARD_DRAG_MIME,
   KANBAN_COLUMN_DRAG_MIME,
-  KANBAN_COLUMN_TITLE_TEXT_TRANSFORM,
   KANBAN_DEFAULT_BOARD_TITLE,
   KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
-  KANBAN_DEFAULT_COLUMN_WIDTH_PX,
   KANBAN_MODULE_TOP_CLEARANCE_PX,
   attachStackedDragPreview,
-  buildCardBatchReorderPlan,
   buildKanbanCardSelectionUpdate,
-  buildColumnReorderPlan,
   clampColumnHeight,
   clampColumnWidth,
-  getColumnHeight,
-  getColumnWidth,
   getKanbanBoardDisplayTitle,
-  getKanbanCardColorRailStyle,
   getKanbanConditionalColor,
   getOrderedKanbanCardIDs,
   groupCardsByColumn,
-  hexToRgba,
   normalizeKanbanColumnItemColor,
-  nextCardPosition,
-  nextColumnPosition,
   parseExplorerEntityDragItems,
   parseKanbanCardDragPayload,
   parseKanbanColumnDragPayload,
@@ -79,13 +83,6 @@ const contextMenuHoverHandlers = {
   onMouseEnter: (event: React.MouseEvent) => { (event.currentTarget as HTMLElement).style.background = "#f5f5f5"; },
   onMouseLeave: (event: React.MouseEvent) => { (event.currentTarget as HTMLElement).style.background = "none"; },
 };
-
-const NodeDocumentIcon: React.FC<{ color: string }> = ({ color }) => (
-  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
-    <path d="M4 1.75h5.25L12 4.5v9.75H4z" fill="none" stroke={color} strokeWidth="1.35" />
-    <path d="M9.25 1.75V4.5H12M5.75 7.25h4.5M5.75 9.5h4.5M5.75 11.75h3" fill="none" stroke={color} strokeWidth="1.15" />
-  </svg>
-);
 
 function readLinkedExplorerSelection(companyID: string, scope: string): HighlightedEntity {
   try {
@@ -159,6 +156,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [error, setError] = useState("");
   const frameID = frameBoardID;
   const boardID = activeBoardID;
+  const kanbanCommandContext = useMemo<KanbanCommandContext>(() => ({ apiBase, companyID, boardID }), [apiBase, boardID, companyID]);
   const [highlightedEntity, setHighlightedEntity] = useState<HighlightedEntity>(() => readLinkedExplorerSelection(companyID, frameID));
   const [editingColumnID, setEditingColumnID] = useState("");
   const [draggingColumnID, setDraggingColumnID] = useState("");
@@ -401,37 +399,27 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const addColumn = useCallback(async () => {
     setError("");
     try {
-      const column = await createKanbanColumn(
-        apiBase,
-        companyID,
-        boardID,
-        "New Column Name",
-        nextColumnPosition(columns),
-        KANBAN_DEFAULT_COLUMN_WIDTH_PX,
-        KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
-      );
+      const column = await createKanbanColumnCommand({ context: kanbanCommandContext, columns });
       setColumns((previous) => [...previous, column].sort((a, b) => a.position - b.position));
       setEditingColumnID(column.column_id);
       void refreshBoards();
     } catch {
       setError("Column create failed");
     }
-  }, [apiBase, boardID, columns, companyID, refreshBoards]);
+  }, [columns, kanbanCommandContext, refreshBoards]);
 
   const commitColumnTitle = useCallback(async (columnID: string, title: string) => {
-    const cleanTitle = title.trim();
-    const existing = columns.find((column) => column.column_id === columnID);
-    if (!existing || !cleanTitle) return;
     setError("");
     try {
-      const updated = await updateKanbanColumn({ apiBase, companyID, boardID, columnID, title: cleanTitle });
+      const updated = await renameKanbanColumnCommand({ context: kanbanCommandContext, columns, columnID, title });
+      if (!updated) return;
       setColumns((previous) => previous.map((column) => (column.column_id === columnID ? updated : column)));
       setEditingColumnID("");
     } catch {
       setError("Column rename failed");
       refreshBoard();
     }
-  }, [apiBase, boardID, columns, companyID, refreshBoard]);
+  }, [columns, kanbanCommandContext, refreshBoard]);
 
   const removeColumn = useCallback(async (columnID: string) => {
     const previousColumns = columns;
@@ -440,13 +428,13 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     setCards((current) => current.filter((card) => card.column_id !== columnID));
     setError("");
     try {
-      await deleteKanbanColumn(apiBase, companyID, boardID, columnID);
+      await deleteKanbanColumnCommand({ context: kanbanCommandContext, columnID });
     } catch {
       setError("Column delete failed");
       setColumns(previousColumns);
       setCards(previousCards);
     }
-  }, [apiBase, boardID, cards, columns, companyID]);
+  }, [cards, columns, kanbanCommandContext]);
 
   const requestColumnDelete = useCallback((columnID: string) => {
     const column = columns.find((item) => item.column_id === columnID);
@@ -457,55 +445,47 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [columns]);
 
   const reorderColumn = useCallback(async (draggedColumnID: string, targetColumnID: string | null, placement: KanbanColumnDropPlacement = "before") => {
-    const plan = buildColumnReorderPlan(columns, draggedColumnID, targetColumnID, placement);
-    if (plan.updates.length === 0) {
-      setDraggingColumnID("");
-      setDragOverColumnID("");
-      return;
-    }
-    setColumns(plan.columns);
     setDraggingColumnID("");
     setDragOverColumnID("");
     setError("");
     try {
-      // Sparse positions keep most reorders to a single API write. Compaction is
-      // rare and still limited to visible board columns.
-      await Promise.all(plan.updates.map((update) => updateKanbanColumn({
-        apiBase,
-        companyID,
-        boardID,
-        columnID: update.columnID,
-        position: update.position,
-      })));
+      await reorderKanbanColumnsCommand({
+        context: kanbanCommandContext,
+        columns,
+        draggedColumnID,
+        targetColumnID,
+        placement,
+        onOptimisticColumns: setColumns,
+      });
     } catch {
       setError("Column reorder failed");
       refreshBoard();
     }
-  }, [apiBase, boardID, columns, companyID, refreshBoard]);
+  }, [columns, kanbanCommandContext, refreshBoard]);
 
   const persistColumnSize = useCallback(async (columnID: string, size: { widthPx?: number; heightPx?: number }) => {
     setError("");
     try {
-      const updated = await updateKanbanColumn({ apiBase, companyID, boardID, columnID, ...size });
+      const updated = await persistKanbanColumnLayoutCommand({ context: kanbanCommandContext, columnID, ...size });
       setColumns((previous) => previous.map((column) => (column.column_id === updated.column_id ? updated : column)));
     } catch {
       setError("Column resize failed");
       refreshBoard();
     }
-  }, [apiBase, boardID, companyID, refreshBoard]);
+  }, [kanbanCommandContext, refreshBoard]);
 
   const persistColumnItemColor = useCallback(async (columnID: string, itemColor: string) => {
     const cleanColor = normalizeKanbanColumnItemColor(itemColor);
     setColumns((previous) => previous.map((column) => (column.column_id === columnID ? { ...column, item_color: cleanColor } : column)));
     setError("");
     try {
-      const updated = await updateKanbanColumn({ apiBase, companyID, boardID, columnID, itemColor: cleanColor });
+      const updated = await persistKanbanColumnLayoutCommand({ context: kanbanCommandContext, columnID, itemColor: cleanColor });
       setColumns((previous) => previous.map((column) => (column.column_id === updated.column_id ? updated : column)));
     } catch {
       setError("Column color update failed");
       refreshBoard();
     }
-  }, [apiBase, boardID, companyID, refreshBoard]);
+  }, [kanbanCommandContext, refreshBoard]);
 
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
@@ -540,27 +520,25 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [persistColumnSize]);
 
   const reorderCards = useCallback(async (cardIDs: string[], columnID: string, targetCardID: string | null = null, placement: KanbanCardDropPlacement = "before") => {
-    const plan = buildCardBatchReorderPlan(cards, cardIDs, columnID, targetCardID, placement);
     setDragOverCard(null);
-    if (plan.updates.length === 0) return;
-    setCards(plan.cards);
     setError("");
     try {
-      const updatedCards = await Promise.all(plan.updates.map((update) => moveKanbanCard({
-        apiBase,
-        companyID,
-        boardID,
-        cardID: update.cardID,
-        columnID: update.columnID,
-        position: update.position,
-      })));
-      const byID = new Map(updatedCards.map((card) => [card.card_id, card]));
+      const result = await reorderKanbanCardsCommand({
+        context: kanbanCommandContext,
+        cards,
+        cardIDs,
+        columnID,
+        targetCardID,
+        placement,
+        onOptimisticCards: setCards,
+      });
+      const byID = new Map(result.persistedCards.map((card) => [card.card_id, card]));
       setCards((previous) => previous.map((card) => byID.get(card.card_id) ?? card));
     } catch {
       setError("Card reorder failed");
       refreshBoard();
     }
-  }, [apiBase, boardID, cards, companyID, refreshBoard]);
+  }, [cards, kanbanCommandContext, refreshBoard]);
 
   const selectCard = useCallback((cardID: string, event: React.MouseEvent<HTMLElement>) => {
     const clickedCard = cards.find((card) => card.card_id === cardID);
@@ -606,12 +584,12 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     setCardContextMenu(null);
     setError("");
     try {
-      await Promise.all(Array.from(ids, (cardID) => deleteKanbanCard(apiBase, companyID, boardID, cardID)));
+      await deleteKanbanCardsCommand({ context: kanbanCommandContext, cardIDs: Array.from(ids) });
     } catch {
       setError("Card delete failed");
       setCards(previousCards);
     }
-  }, [apiBase, boardID, cards, companyID]);
+  }, [cards, kanbanCommandContext]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -629,48 +607,23 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [deleteCardConfirmation, requestCardDelete, selectedCardIDs]);
 
   const addEntitiesToColumn = useCallback(async (columnID: string, items: ExplorerEntityDragItem[]) => {
-    const dedupedItems: ExplorerEntityDragItem[] = [];
-    const seenNodeIDs = new Set<string>();
-    for (const item of items) {
-      const nodeID = item.nodeID.trim();
-      if (!nodeID || seenNodeIDs.has(nodeID)) continue;
-      seenNodeIDs.add(nodeID);
-      dedupedItems.push({ nodeID, label: item.label.trim() || nodeID });
-    }
-    if (dedupedItems.length === 0) return;
-
-    const firstPosition = nextCardPosition(cards, columnID);
-    const now = new Date().toISOString();
-    const optimisticCards: KanbanCard[] = dedupedItems.map((item, index) => ({
-      company_id: companyID,
-      board_id: boardID,
-      card_id: `pending-node-${item.nodeID}`,
-      column_id: columnID,
-      node_id: item.nodeID,
-      node_title: item.label,
-      description_snapshot: "",
-      position: firstPosition + index * 1000,
-      created_timestamp: now,
-      updated_timestamp: now,
-    }));
-    setCards((previous) => [...previous.filter((card) => !seenNodeIDs.has(card.node_id)), ...optimisticCards]);
     try {
-      const savedCards = await Promise.all(dedupedItems.map((item, index) => upsertKanbanCard({
-        apiBase,
-        companyID,
-        boardID,
+      const result = await addExplorerNodesToKanbanColumnCommand({
+        context: kanbanCommandContext,
+        cards,
         columnID,
-        nodeID: item.nodeID,
-        nodeTitle: item.label,
-        position: firstPosition + index * 1000,
-      })));
-      const optimisticCardIDs = new Set(optimisticCards.map((card) => card.card_id));
-      setCards((previous) => [...previous.filter((card) => !optimisticCardIDs.has(card.card_id) && !seenNodeIDs.has(card.node_id)), ...savedCards]);
+        items,
+        onOptimisticCards: (optimisticCards, nodeIDs) => {
+          setCards((previous) => [...previous.filter((card) => !nodeIDs.has(card.node_id)), ...optimisticCards]);
+        },
+      });
+      if (result.savedCards.length === 0) return;
+      setCards((previous) => [...previous.filter((card) => !result.optimisticCardIDs.has(card.card_id) && !result.nodeIDs.has(card.node_id)), ...result.savedCards]);
     } catch {
       setError("Drop failed");
       refreshBoard();
     }
-  }, [apiBase, boardID, cards, companyID, refreshBoard]);
+  }, [cards, kanbanCommandContext, refreshBoard]);
 
   const onDropColumn = useCallback((event: React.DragEvent<HTMLElement>, columnID: string) => {
     event.preventDefault();
@@ -719,13 +672,21 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const selected = selectedCardIDs.has(card.card_id);
     const dragBefore = dragOverCard?.cardID === card.card_id && dragOverCard.placement === "before";
     const dragAfter = dragOverCard?.cardID === card.card_id && dragOverCard.placement === "after";
-    const description = (card.description_snapshot ?? "").trim();
     const color = getKanbanConditionalColor(card, columnColorByID);
     return (
-      <article
+      <KanbanCardView
         key={card.card_id}
-        draggable
-        tabIndex={0}
+        card={card}
+        color={color}
+        highlighted={highlighted}
+        selected={selected}
+        dragBefore={dragBefore}
+        dragAfter={dragAfter}
+        line={line}
+        cardBackground={cardBackground}
+        text={text}
+        subtext={subtext}
+        accent={accent}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
@@ -771,38 +732,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           event.stopPropagation();
           void reorderCards(cardPayload.cardIDs, card.column_id, card.card_id, cardDropPlacement(event));
         }}
-        style={{
-          position: "relative",
-          border: `1px solid ${selected || highlighted ? color : line}`,
-          background: cardBackground,
-          color: text,
-          padding: "8px 9px 8px 13px",
-          minHeight: 58,
-          cursor: "grab",
-          outline: "none",
-          overflow: "hidden",
-          boxShadow: [
-            selected ? `0 0 0 1px ${color}, 0 0 12px ${hexToRgba(color, 0.28)}, inset 0 0 0 1px ${hexToRgba(color, 0.16)}` : "",
-            highlighted && !selected ? `0 0 0 1px ${color} inset, 0 0 10px ${hexToRgba(color, 0.22)}` : "",
-            dragBefore ? `0 -3px 0 ${accent}` : "",
-            dragAfter ? `0 3px 0 ${accent}` : "",
-          ].filter(Boolean).join(", ") || undefined,
-        }}
-      >
-        {/* The color rail is a separate layer so selection border changes cannot erase it. */}
-        <span aria-hidden="true" style={getKanbanCardColorRailStyle(color)} />
-        <div style={{ display: "grid", gridTemplateColumns: "16px minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
-          <span title="Node" style={{ width: 16, height: 16, marginTop: 1, display: "grid", placeItems: "center" }}>
-            <NodeDocumentIcon color={color} />
-          </span>
-          <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.node_title}</div>
-        </div>
-        {description && (
-          <div style={{ marginTop: 7, color: subtext, fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere" }}>
-            {description}
-          </div>
-        )}
-      </article>
+      />
     );
   };
 
@@ -816,260 +746,76 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       style={{ position: "relative", width: "100%", height: "100%", boxSizing: "border-box", paddingTop: KANBAN_MODULE_TOP_CLEARANCE_PX, background: surface, color: text, overflow: "hidden" }}
     >
       <div style={{ position: "absolute", top: KANBAN_MODULE_TOP_CLEARANCE_PX - 1, left: 0, right: 0, borderBottom: `1px solid ${line}`, pointerEvents: "none" }} />
-      <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gridTemplateColumns: "minmax(120px, 240px) minmax(140px, 1fr) auto", alignItems: "center", gap: 8, paddingLeft: 106, zIndex: 3, pointerEvents: "auto" }}>
-        {editingBoardTitle ? (
-          <input
-            value={boardTitleDraft}
-            autoFocus
-            onFocus={(event) => event.currentTarget.select()}
-            onChange={(event) => setBoardTitleDraft(event.target.value)}
-            onBlur={(event) => void commitBoardTitle(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") event.currentTarget.blur();
-              if (event.key === "Escape") {
-                setEditingBoardTitle(false);
-                void refreshBoards();
-              }
-            }}
-            style={{ minWidth: 0, height: 25, border: `1px solid ${accent}`, background: isDark ? "#11161b" : "#ffffff", color: text, fontSize: 12, fontWeight: 800, padding: "0 7px", outline: "none" }}
-          />
-        ) : (
-          <button
-            type="button"
-            title="Rename Kanban board"
-            onClick={() => {
-              setBoardTitleDraft(activeBoardTitle);
-              setEditingBoardTitle(true);
-            }}
-            style={{ minWidth: 0, height: 25, border: `1px solid ${line}`, background: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)", color: text, cursor: "text", fontSize: 12, fontWeight: 800, textAlign: "left", padding: "0 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-          >
-            {activeBoardTitle}
-          </button>
-        )}
-        <label style={{ position: "relative", minWidth: 0, height: 25, display: "block" }}>
-          <input
-            aria-label="Search Kanban boards"
-            value={boardSearchQuery}
-            onChange={(event) => setBoardSearchQuery(event.target.value)}
-            placeholder="Search boards"
-            style={{ width: "100%", height: "100%", boxSizing: "border-box", border: `1px solid ${line}`, background: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.92)", color: text, fontSize: 11, fontWeight: 700, padding: "0 28px 0 8px", outline: "none" }}
-          />
-          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ position: "absolute", right: 8, top: 5, color: subtext, pointerEvents: "none" }}>
-            <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
-            <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </label>
-        <button
-          type="button"
-          onClick={() => {
-            setAllBoardsOpen((open) => !open);
-            void refreshBoards();
-          }}
-          style={{ height: 25, display: "flex", alignItems: "center", gap: 6, border: `1px solid ${allBoardsOpen ? accent : line}`, background: allBoardsOpen ? (isDark ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.98)") : (isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)"), color: text, fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", padding: "0 9px", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
-        >
-          <span aria-hidden="true" style={{ width: 12, display: "grid", gap: 2 }}>
-            <span style={{ height: 2, background: text }} />
-            <span style={{ height: 2, background: text }} />
-            <span style={{ height: 2, background: text }} />
-          </span>
-          All Boards
-        </button>
-      </div>
-      {allBoardsOpen && (
-        <section style={{ position: "absolute", top: KANBAN_MODULE_TOP_CLEARANCE_PX + 8, left: 114, width: "min(430px, calc(100% - 126px))", maxHeight: "calc(100% - 58px)", display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", border: `1px solid ${line}`, background: isDark ? "rgba(17,22,27,0.98)" : "rgba(255,255,255,0.98)", boxShadow: isDark ? "0 14px 30px rgba(0,0,0,0.36)" : "0 14px 30px rgba(16,24,40,0.16)", zIndex: 4 }}>
-          <div style={{ padding: "9px 10px", borderBottom: `1px solid ${line}`, fontSize: 10, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>
-            Saved Kanban Boards
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 8, borderBottom: `1px solid ${line}` }}>
-            <button type="button" onClick={() => void saveCurrentBoardView()} style={{ border: `1px solid ${accent}`, background: "transparent", color: text, cursor: "pointer", fontSize: 11, fontWeight: 800, padding: "6px 8px" }}>
-              Save current
-            </button>
-            <button type="button" onClick={() => void createNewBoardView()} style={{ border: `1px solid ${accent}`, background: "transparent", color: text, cursor: "pointer", fontSize: 11, fontWeight: 800, padding: "6px 8px" }}>
-              New board
-            </button>
-          </div>
-          <div className="company-explorer-scroll" style={{ overflowY: "auto", overflowX: "hidden", minHeight: 0, ["--company-explorer-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--company-explorer-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)" }}>
-            {boardsLoading && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>Loading boards...</div>}
-            {!boardsLoading && filteredBoardRows.length === 0 && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>No saved boards</div>}
-            {filteredBoardGroups.map((group) => (
-              <div key={group.folderLabel}>
-                <div style={{ padding: "7px 10px 4px", color: subtext, fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                  {group.folderLabel}
-                </div>
-                {group.items.map((board) => {
-                  const selected = board.board_id === boardID;
-                  return (
-                    <button
-                      key={board.board_id}
-                      type="button"
-                      title={board.board_id}
-                      onClick={() => {
-                        setSelectedCardIDs(new Set());
-                        setSelectionAnchorCardID("");
-                        setActiveBoardID(board.board_id);
-                        setAllBoardsOpen(false);
-                      }}
-                      style={{ width: "100%", display: "grid", gridTemplateColumns: "30px minmax(0, 1fr)", alignItems: "center", gap: 7, minHeight: 32, padding: "5px 9px 5px 18px", border: "none", borderBottom: `1px solid ${isDark ? "rgba(255,255,255,0.08)" : "rgba(3,25,30,0.06)"}`, background: selected ? (isDark ? "rgba(0,233,255,0.2)" : "rgba(0, 233, 255, 0.28)") : "transparent", color: text, cursor: "pointer", textAlign: "left" }}
-                    >
-                      <span aria-hidden="true" style={{ width: 14, height: 14, border: `1px solid ${accent}`, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1, padding: 2 }}>
-                        <span style={{ background: accent, opacity: 0.8 }} />
-                        <span style={{ background: subtext, opacity: 0.55 }} />
-                        <span style={{ background: accent, opacity: 0.45 }} />
-                      </span>
-                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 800 : 700 }}>
-                        {getKanbanBoardDisplayTitle(board)}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      <KanbanBoardSidebar
+        activeBoardTitle={activeBoardTitle}
+        boardID={boardID}
+        boardTitleDraft={boardTitleDraft}
+        boardSearchQuery={boardSearchQuery}
+        allBoardsOpen={allBoardsOpen}
+        boardsLoading={boardsLoading}
+        filteredBoardRowsLength={filteredBoardRows.length}
+        filteredBoardGroups={filteredBoardGroups}
+        accent={accent}
+        line={line}
+        text={text}
+        subtext={subtext}
+        isDark={isDark}
+        theme={theme}
+        editingBoardTitle={editingBoardTitle}
+        onSetBoardTitleDraft={setBoardTitleDraft}
+        onSetBoardSearchQuery={setBoardSearchQuery}
+        onSetEditingBoardTitle={setEditingBoardTitle}
+        onToggleAllBoards={() => {
+          setAllBoardsOpen((open) => !open);
+          void refreshBoards();
+        }}
+        onCommitBoardTitle={(title) => void commitBoardTitle(title)}
+        onRefreshBoards={() => void refreshBoards()}
+        onSaveCurrentBoardView={() => void saveCurrentBoardView()}
+        onCreateNewBoardView={() => void createNewBoardView()}
+        onSelectBoard={(nextBoardID) => {
+          setSelectedCardIDs(new Set());
+          setSelectionAnchorCardID("");
+          setActiveBoardID(nextBoardID);
+          setAllBoardsOpen(false);
+        }}
+      />
       <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#c62828", fontSize: 11, fontWeight: 700 }}>{error}</div>}
         {loading && <div style={{ color: subtext, fontSize: 12 }}>Loading board...</div>}
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX + 18, paddingBottom: 16 }}>
           {orderedColumns.map((column) => {
             const columnCards = cardsByColumn.get(column.column_id) ?? [];
-            const columnWidth = getColumnWidth(column);
-            const columnHeight = getColumnHeight(column);
-            const columnDropActive = dragOverColumnID === column.column_id;
-            const insertionShadow = columnDropActive ? `0 0 0 3px ${accent}` : "";
-            const columnShadow = insertionShadow ? (laneShadow === "none" ? insertionShadow : `${insertionShadow}, ${laneShadow}`) : laneShadow;
             return (
-              <section
+              <KanbanColumnView
                 key={column.column_id}
-                onMouseDown={clearCardSelectionFromBlankClick}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setCardContextMenu(null);
-                  setColumnContextMenu({ x: event.clientX, y: event.clientY, columnID: column.column_id });
-                }}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  if (dataTransferIncludes(event, KANBAN_COLUMN_DRAG_MIME) && draggingColumnID !== column.column_id) {
-                    setDragOverColumnID(column.column_id);
-                  }
-                }}
-                onDragLeave={() => setDragOverColumnID((previous) => (previous === column.column_id ? "" : previous))}
-                onDrop={(event) => onDropColumn(event, column.column_id)}
-                style={{
-                  position: "relative",
-                  flex: `0 0 ${columnWidth}px`,
-                  height: columnHeight,
-                  minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX / 2,
-                  background: laneBackground,
-                  border: `1px solid ${laneBorder}`,
-                  boxShadow: columnShadow,
-                  display: "grid",
-                  gridTemplateRows: "42px minmax(0, 1fr)",
-                  opacity: draggingColumnID === column.column_id ? 0.72 : 1,
-                  cursor: "default",
-                }}
-              >
-                <div
-                  draggable={editingColumnID !== column.column_id}
-                  onDragStart={(event) => {
-                    if (editingColumnID === column.column_id) return;
-                    setDraggingColumnID(column.column_id);
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData(KANBAN_COLUMN_DRAG_MIME, JSON.stringify({ columnID: column.column_id }));
-                  }}
-                  onDragEnd={() => {
-                    setDraggingColumnID("");
-                    setDragOverColumnID("");
-                  }}
-                  style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${line}`, cursor: "default" }}
-                >
-                  <span aria-hidden="true" style={{ color: subtext, fontSize: 15, lineHeight: 1, textAlign: "center", cursor: editingColumnID === column.column_id ? "default" : "grab" }}>::</span>
-                  {editingColumnID === column.column_id ? (
-                    <input
-                      value={column.title}
-                      autoFocus
-                      draggable={false}
-                      onFocus={(event) => event.currentTarget.select()}
-                      onMouseDown={(event) => event.stopPropagation()}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setColumns((previous) => previous.map((item) => (item.column_id === column.column_id ? { ...item, title: value } : item)));
-                      }}
-                      onBlur={(event) => commitColumnTitle(column.column_id, event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") event.currentTarget.blur();
-                        if (event.key === "Escape") {
-                          setEditingColumnID("");
-                          void refreshBoard();
-                        }
-                      }}
-                      // Column titles are user-authored board data. Preserve casing so
-                      // names keep the exact meaning users and agents assigned.
-                      style={{ height: 40, width: "100%", minWidth: 0, border: "none", background: "transparent", color: text, fontSize: 12, fontWeight: 800, padding: "0 5px", outline: "none", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM }}
-                    />
-                  ) : (
-                    <div
-                      title={column.title}
-                      onClick={() => setEditingColumnID(column.column_id)}
-                      style={{ minWidth: 0, color: text, fontSize: 12, fontWeight: 800, padding: "0 5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, cursor: "text" }}
-                    >
-                      {column.title}
-                    </div>
-                  )}
-                  <button
-                    title="Delete column"
-                    type="button"
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onClick={() => requestColumnDelete(column.column_id)}
-                    style={{ width: 28, height: 28, border: "none", background: "transparent", color: subtext, cursor: "pointer", fontSize: 20, lineHeight: 1 }}
-                  >
-                    x
-                  </button>
-                </div>
-                <div
-                  onMouseDown={clearCardSelectionFromBlankClick}
-                  style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 8, padding: 8 }}
-                >
-                  {columnCards.map((card) => renderCard(card))}
-                </div>
-                <div
-                  title="Resize column width"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    resizeRef.current = {
-                      axis: "width",
-                      columnID: column.column_id,
-                      startX: event.clientX,
-                      startY: event.clientY,
-                      startWidth: columnWidth,
-                      startHeight: columnHeight,
-                      currentWidth: columnWidth,
-                      currentHeight: columnHeight,
-                    };
-                  }}
-                  style={{ position: "absolute", top: 0, right: -4, bottom: 0, width: 8, cursor: "col-resize", zIndex: 2 }}
-                />
-                <div
-                  title="Resize column height"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    resizeRef.current = {
-                      axis: "height",
-                      columnID: column.column_id,
-                      startX: event.clientX,
-                      startY: event.clientY,
-                      startWidth: columnWidth,
-                      startHeight: columnHeight,
-                      currentWidth: columnWidth,
-                      currentHeight: columnHeight,
-                    };
-                  }}
-                  style={{ position: "absolute", left: 0, right: 0, bottom: -4, height: 8, cursor: "row-resize", zIndex: 2 }}
-                />
-              </section>
+                column={column}
+                columnCards={columnCards}
+                renderedCards={columnCards.map((card) => renderCard(card))}
+                accent={accent}
+                line={line}
+                subtext={subtext}
+                text={text}
+                laneBackground={laneBackground}
+                laneBorder={laneBorder}
+                laneShadow={laneShadow}
+                draggingColumnID={draggingColumnID}
+                dragOverColumnID={dragOverColumnID}
+                editingColumnID={editingColumnID}
+                resizeRef={resizeRef}
+                onBlankMouseDown={clearCardSelectionFromBlankClick}
+                onSetCardContextMenu={setCardContextMenu}
+                onSetColumnContextMenu={setColumnContextMenu}
+                onSetDraggingColumnID={setDraggingColumnID}
+                onSetDragOverColumnID={setDragOverColumnID}
+                onSetColumns={setColumns}
+                onSetEditingColumnID={setEditingColumnID}
+                onCommitColumnTitle={(columnID, title) => void commitColumnTitle(columnID, title)}
+                onRefreshBoard={() => void refreshBoard()}
+                onRequestColumnDelete={requestColumnDelete}
+                onDropColumn={onDropColumn}
+                dataTransferIncludes={dataTransferIncludes}
+              />
             );
           })}
           <button

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, type NodeRecord } from "../node-map/shared";
-import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, toLogicGateCanvasRecord, type LogicGateInformation, type LogicGateRecord } from "../logic-gate-map/shared";
+import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, toLogicGateCanvasRecord, type LogicGateRecord } from "../logic-gate-map/shared";
 import { EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
@@ -8,92 +8,33 @@ import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upser
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches } from "../logic-gate-map/LogicGateRecordStore";
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
-import type { NodeInformation } from "../node-map/shared";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
-import { EDITOR_TAB_ITEMS, getEditorDocumentIsolationState, type EditorTabID } from "./editorTabs";
-import { classifyEditorInputType, createEditorUndoHistory, recordEditorUndoChange, redoEditorText, resetEditorUndoHistory, snapshotEditorText, snapshotEditorTextArea, undoEditorText, type EditorTextChangeKind, type EditorTextSnapshot } from "./editorUndoHistory";
-import { applyEditorInlineFormat, DEFAULT_EDITOR_OUTLINE_STYLE, deleteEditorBackspaceText, EDITOR_TAB_TEXT, insertEditorEnterText, insertEditorTabText, isEditorOutlineStyleID, type EditorInlineFormatCommand, type EditorOutlineStyleID } from "./plainTextEditing";
+import { getEditorDocumentIsolationState, type EditorTabID } from "./editorTabs";
+import { createEditorUndoHistory, recordEditorUndoChange, resetEditorUndoHistory, snapshotEditorText, snapshotEditorTextArea, type EditorTextChangeKind, type EditorTextSnapshot } from "./editorUndoHistory";
+import { applyEditorInlineFormat, EDITOR_TAB_TEXT, type EditorInlineFormatCommand } from "./plainTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
 import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import { selectCurrentEditorTextProjection } from "./editorProjection";
-
-type LinkedEntityKind = "node" | "logic_gate";
-
-type DocumentSaveTarget = {
-  entityKind: LinkedEntityKind;
-  entityID: string;
-  informationID: string;
-};
-
-type DocumentSaveRequest = {
-  target: DocumentSaveTarget;
-  text: string;
-};
-
-type LinkedSelection = {
-  id: string;
-  label: string;
-  selectionIntent?: SelectionIntent;
-};
-
-const EDITOR_AUTOSAVE_DELAY_MS = 550;
-
-function documentTargetKey(target: DocumentSaveTarget): string {
-  return `${target.entityKind}:${target.entityID}:${target.informationID}`;
-}
-
-function sameSaveRequest(a: DocumentSaveRequest | null, b: DocumentSaveRequest | null): boolean {
-  if (!a || !b) return false;
-  return documentTargetKey(a.target) === documentTargetKey(b.target) && a.text === b.text;
-}
-
-function generateStableInformationID(): string {
-  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-    ? crypto.randomUUID()
-    : `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0").slice(0, 12)}`;
-}
-
-function readStoredOutlineStyle(storageKey: string): EditorOutlineStyleID {
-  try {
-    const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(storageKey);
-    return raw && isEditorOutlineStyleID(raw) ? raw : DEFAULT_EDITOR_OUTLINE_STYLE;
-  } catch {
-    return DEFAULT_EDITOR_OUTLINE_STYLE;
-  }
-}
-
-const EDITOR_OUTLINE_STYLE_ITEMS: ReadonlyArray<{ id: EditorOutlineStyleID; label: string }> = [
-  { id: "automatic-outline-numbering", label: "Automatic Numbering" },
-  { id: "indent-guides", label: "Indent Guides" },
-];
-const EDITOR_DOCUMENT_FONT_SIZE_PX = 15;
-const EDITOR_DOCUMENT_MIN_FONT_SIZE_PX = 10;
-const EDITOR_DOCUMENT_MAX_FONT_SIZE_PX = 28;
-const EDITOR_DOCUMENT_LINE_HEIGHT = 1.55;
-const EDITOR_DOCUMENT_TOP_PX = 86;
-const EDITOR_FORMAT_DOCUMENT_TOP_PX = 122;
-
-function readStoredDocumentFontSize(storageKey: string): number {
-  try {
-    const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(storageKey);
-    const parsed = raw ? Number(raw) : EDITOR_DOCUMENT_FONT_SIZE_PX;
-    return Number.isFinite(parsed)
-      ? Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, Math.round(parsed)))
-      : EDITOR_DOCUMENT_FONT_SIZE_PX;
-  } catch {
-    return EDITOR_DOCUMENT_FONT_SIZE_PX;
-  }
-}
-
-function shouldReadStoredSelectionForEvent(hasGap: boolean, hasEventSelection: boolean): boolean {
-  return hasGap && !hasEventSelection;
-}
-
-const EditorDisclosureIcon: React.FC<{ color: string }> = ({ color }) => (
-  <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style={{ display: "block" }}>
-    <path d="M3.25 4.55 6 7.3l2.75-2.75" fill="none" stroke={color} strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
+import { EditorDocumentSurface } from "./EditorDocumentSurface";
+import { EditorFormattingToolbar } from "./EditorFormattingToolbar";
+import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
+import { EditorTabBar } from "./EditorTabBar";
+import {
+  documentTargetKey,
+  shouldReadStoredSelectionForEvent,
+  type DocumentSaveRequest,
+  type DocumentSaveTarget,
+  type LinkedEntityKind,
+  type LinkedSelection,
+} from "./editorTypes";
+import {
+  EDITOR_DOCUMENT_LINE_HEIGHT,
+  EDITOR_DOCUMENT_TOP_PX,
+  EDITOR_FORMAT_DOCUMENT_TOP_PX,
+  useEditorPreferences,
+} from "./useEditorPreferences";
+import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHandlers";
+import { useEditorDocumentPersistence } from "./useEditorDocumentPersistence";
 
 // Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
@@ -113,8 +54,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [documentInformationID, setDocumentInformationID] = useState("");
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
-  const [outlineStyle, setOutlineStyle] = useState<EditorOutlineStyleID>(() => readStoredOutlineStyle(outlineStyleStorageKey));
-  const [documentFontSize, setDocumentFontSize] = useState(() => readStoredDocumentFontSize(documentFontSizeStorageKey));
+  const { outlineStyle, setOutlineStyle, documentFontSize, adjustDocumentFontSize } = useEditorPreferences(outlineStyleStorageKey, documentFontSizeStorageKey);
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -144,24 +84,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   useEffect(() => {
     activeTabRef.current = activeTab;
   }, [activeTab]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(outlineStyleStorageKey, outlineStyle);
-    } catch {
-      // Local persistence is a convenience only. The document API stays usable
-      // for headless agents even if browser storage is blocked.
-    }
-  }, [outlineStyle, outlineStyleStorageKey]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(documentFontSizeStorageKey, String(documentFontSize));
-    } catch {
-      // Font size is a local view preference; document text persistence does
-      // not depend on browser storage for users or future headless agents.
-    }
-  }, [documentFontSize, documentFontSizeStorageKey]);
 
   const scheduleIndentGuideUpdate = useCallback((text: string) => {
     if (indentGuideFrameRef.current !== null) {
@@ -236,134 +158,24 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     else invalidateNodeRecordStoreCaches(apiBase, companyID, target.entityID);
   }, [apiBase, companyID]);
 
-  const ensureDocumentInformationID = useCallback(() => {
-    if (!documentInformationIDRef.current) {
-      documentInformationIDRef.current = generateStableInformationID();
-      setDocumentInformationID(documentInformationIDRef.current);
-    }
-    return documentInformationIDRef.current;
-  }, []);
-
-  const buildDocumentSaveRequest = useCallback((nextText: string): DocumentSaveRequest | null => {
-    if (!linkedNodeID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) return null;
-    if (!documentInformationIDRef.current && nextText.trim().length === 0) return null;
-    const target = {
-      entityKind: linkedEntityKind,
-      entityID: linkedNodeID,
-      informationID: ensureDocumentInformationID(),
-    };
-    currentDocumentTargetKeyRef.current = documentTargetKey(target);
-    return { target, text: nextText };
-  }, [ensureDocumentInformationID, linkedEntityKind, linkedNodeID]);
-
-  const persistDocumentRequest = useCallback(async (request: DocumentSaveRequest) => {
-    const targetKey = documentTargetKey(request.target);
-    const isCurrentTarget = () => currentDocumentTargetKeyRef.current === targetKey;
-    if (isCurrentTarget() && request.text === persistedDocumentRef.current && persistedDocumentTargetKeyRef.current === targetKey) return;
-
-    setError("");
-    try {
-      if (request.text.trim().length === 0) {
-        const path = request.target.entityKind === "logic_gate"
-          ? `/v1/logic-gates/${request.target.entityID}/projection/${request.target.informationID}?company_id=${encodeURIComponent(companyID)}`
-          : `/v1/nodes/${request.target.entityID}/projection/${request.target.informationID}?company_id=${encodeURIComponent(companyID)}`;
-        await requestJSON<{ status: string }>(path, { method: "DELETE" });
-        if (isCurrentTarget()) {
-          persistedDocumentRef.current = "";
-          persistedDocumentTargetKeyRef.current = targetKey;
-        }
-        invalidateDocumentTargetCaches(request.target);
-        return;
-      }
-
-      const informationPayload = {
-        company_id: companyID,
-        type: "Text box",
-        information: request.text,
-        information_id: request.target.informationID,
-      };
-      if (request.target.entityKind === "logic_gate") {
-        await requestJSON<LogicGateInformation>(`/v1/logic-gates/${request.target.entityID}/information`, {
-          method: "POST",
-          body: JSON.stringify(informationPayload),
-        });
-      } else {
-        await requestJSON<NodeInformation>(`/v1/nodes/${request.target.entityID}/information`, {
-          method: "POST",
-          body: JSON.stringify(informationPayload),
-        });
-      }
-      if (isCurrentTarget()) {
-        setDocumentInformationID(request.target.informationID);
-        persistedDocumentRef.current = request.text;
-        persistedDocumentTargetKeyRef.current = targetKey;
-      }
-      invalidateDocumentTargetCaches(request.target);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_save_document");
-    }
-  }, [companyID, invalidateDocumentTargetCaches, requestJSON]);
-
-  const enqueueDocumentSave = useCallback((request: DocumentSaveRequest) => {
-    if (saveInFlightRef.current) {
-      queuedSaveRef.current = request;
-      return;
-    }
-
-    // Autosaves must preserve the user's final text without POSTing every
-    // keystroke. One request runs at a time; while it is running, we keep only
-    // the newest queued value for this editor instance.
-    saveInFlightRef.current = true;
-    void (async () => {
-      let nextRequest: DocumentSaveRequest | null = request;
-      try {
-        while (nextRequest) {
-          const activeRequest: DocumentSaveRequest = nextRequest;
-          queuedSaveRef.current = null;
-          await persistDocumentRequest(activeRequest);
-          const queued = queuedSaveRef.current;
-          nextRequest = queued && !sameSaveRequest(queued, activeRequest) ? queued : null;
-        }
-      } finally {
-        saveInFlightRef.current = false;
-      }
-    })();
-  }, [persistDocumentRequest]);
-
-  const scheduleDocumentSave = useCallback((nextText: string, immediate = false) => {
-    documentDraftRef.current = nextText;
-    if (saveTimerRef.current) {
-      window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-
-    const request = buildDocumentSaveRequest(nextText);
-    pendingSaveRef.current = request;
-    if (!request) return;
-
-    if (immediate) {
-      pendingSaveRef.current = null;
-      enqueueDocumentSave(request);
-      return;
-    }
-
-    saveTimerRef.current = window.setTimeout(() => {
-      saveTimerRef.current = null;
-      const pending = pendingSaveRef.current;
-      pendingSaveRef.current = null;
-      if (pending) enqueueDocumentSave(pending);
-    }, EDITOR_AUTOSAVE_DELAY_MS);
-  }, [buildDocumentSaveRequest, enqueueDocumentSave]);
-
-  const flushPendingDocumentSave = useCallback((fallbackText?: string) => {
-    if (saveTimerRef.current) {
-      window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-    const pending = pendingSaveRef.current ?? (typeof fallbackText === "string" ? buildDocumentSaveRequest(fallbackText) : null);
-    pendingSaveRef.current = null;
-    if (pending) enqueueDocumentSave(pending);
-  }, [buildDocumentSaveRequest, enqueueDocumentSave]);
+  const { scheduleDocumentSave, flushPendingDocumentSave } = useEditorDocumentPersistence({
+    companyID,
+    linkedEntityKind,
+    linkedEntityID: linkedNodeID,
+    documentDraftRef,
+    persistedDocumentRef,
+    documentInformationIDRef,
+    currentDocumentTargetKeyRef,
+    persistedDocumentTargetKeyRef,
+    saveTimerRef,
+    pendingSaveRef,
+    queuedSaveRef,
+    saveInFlightRef,
+    setDocumentInformationID,
+    setError,
+    requestJSON,
+    invalidateDocumentTargetCaches,
+  });
 
   const resetEditorTextUndo = useCallback((text: string, selectionStart = text.length, selectionEnd = selectionStart) => {
     resetEditorUndoHistory(editorUndoHistoryRef.current);
@@ -422,10 +234,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     commitEditorPlainTextEdit(element, edit, "typing");
     element.focus({ preventScroll: true });
   }, [commitEditorPlainTextEdit]);
-
-  const adjustDocumentFontSize = useCallback((delta: number) => {
-    setDocumentFontSize((current) => Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, current + delta)));
-  }, []);
 
   const selectTab = useCallback((tab: EditorTabID) => {
     rememberCurrentDocumentScroll();
@@ -898,6 +706,24 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const documentTopPx = showFormatToolbar ? EDITOR_FORMAT_DOCUMENT_TOP_PX : EDITOR_DOCUMENT_TOP_PX;
   const documentLineHeightPx = documentFontSize * EDITOR_DOCUMENT_LINE_HEIGHT;
   const documentFontFamily = "'IBM Plex Mono', 'Consolas', 'Liberation Mono', monospace";
+  const documentSurfaceHandlers = useEditorDocumentSurfaceHandlers({
+    pendingEditorInputKindRef,
+    restoringScrollRef,
+    currentDocumentTargetKeyRef,
+    scrollMemoryRef,
+    editorUndoHistoryRef,
+    outlineStyle,
+    setDocumentScrollTop,
+    recordEditorTextChange,
+    scheduleDocumentSave,
+    scheduleIndentGuideUpdate,
+    syncEditorTextSelectionSnapshot,
+    rememberCurrentDocumentScroll,
+    flushPendingDocumentSave,
+    applyEditorUndoSnapshot,
+    applyInlineFormatCommand,
+    commitEditorPlainTextEdit,
+  });
 
   return (
     <div
@@ -909,324 +735,74 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       <div style={{ position: "relative", width: "100%", height: "100%", minHeight: 0, cursor: "text" }}>
         {hasLinkedDocument && (
           <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 5, pointerEvents: "none" }}>
-          <div style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", gap: 6, paddingLeft: 106, overflowX: "auto", scrollbarWidth: "none", pointerEvents: "auto" }}>
-            {EDITOR_TAB_ITEMS.map((tab) => {
-              const selected = activeTab === tab.id;
-              const tabStyle: React.CSSProperties = {
-                flex: "0 0 auto",
-                whiteSpace: "nowrap",
-                border: `1px solid ${selected ? accent : strokeColor}`,
-                background: selected ? tabSelectedBackground : tabBackground,
-                color: surfaceText,
-                fontSize: 10,
-                fontWeight: 800,
-                letterSpacing: "0.1em",
-                textTransform: "uppercase",
-                padding: "4px 10px",
-                borderRadius: 4,
-                cursor: "pointer",
-              };
-              if (tab.id === "outline-styles") {
-                return (
-                  <label key={tab.id} style={{ ...tabStyle, position: "relative", display: "inline-flex", alignItems: "center", gap: 6, paddingRight: 24 }}>
-                    <select
-                      aria-label="Outline styles"
-                      value={outlineStyle}
-                      onFocus={() => setActiveTab("outline-styles")}
-                      onChange={(event) => {
-                        setOutlineStyle(event.currentTarget.value as EditorOutlineStyleID);
-                        setActiveTab("outline-styles");
-                      }}
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        opacity: 0,
-                        cursor: "pointer",
-                      }}
-                    >
-                      {EDITOR_OUTLINE_STYLE_ITEMS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                    </select>
-                    <span>{tab.label}</span>
-                    <span style={{ position: "absolute", right: 7, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
-                      <EditorDisclosureIcon color={surfaceText} />
-                    </span>
-                  </label>
-                );
-              }
-              return (
-                <button key={tab.id} type="button" onClick={() => selectTab(tab.id)} style={tabStyle}>
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
+          <EditorTabBar
+            activeTab={activeTab}
+            outlineStyle={outlineStyle}
+            accent={accent}
+            strokeColor={strokeColor}
+            surfaceText={surfaceText}
+            tabBackground={tabBackground}
+            tabSelectedBackground={tabSelectedBackground}
+            onSelectTab={selectTab}
+            onOutlineStyleFocus={() => setActiveTab("outline-styles")}
+            onOutlineStyleChange={(nextOutlineStyle) => {
+              setOutlineStyle(nextOutlineStyle);
+              setActiveTab("outline-styles");
+            }}
+          />
           
           <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 21, borderBottom: `1px solid ${ruleColor}`, transform: "translateY(8px)", pointerEvents: "none", zIndex: 1 }} />
-          {activeTab === "editor" && (
-            <div style={{ display: "grid", gap: 8, pointerEvents: "auto" }}>
-              <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.12em", color: accent, cursor: "text" }}>
-                <span style={{ textTransform: "uppercase" }}>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>&nbsp;
-                <span
-                  ref={editingTitleRef}
-                  contentEditable={isEditingTitle}
-                  suppressContentEditableWarning
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (!isEditingTitle) {
-                      editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new logic gate" : "new node");
-                      setIsEditingTitle(true);
-                    }
-                  }}
-                  onInput={(event) => {
-                    editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
-                  }}
-                  onBlur={() => {
-                    if (!isEditingTitle) return;
-                    const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
-                    void updateNodeTitle(latestTitle);
-                    setIsEditingTitle(false);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
-                      void updateNodeTitle(latestTitle);
-                      setIsEditingTitle(false);
-                    }
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      if (editingTitleRef.current) editingTitleRef.current.textContent = linkedNodeTitle;
-                      setIsEditingTitle(false);
-                    }
-                  }}
-                  style={{ outline: "none", cursor: "text" }}
-                >
-                  {linkedNodeTitle || "\u00A0"}
-                </span>
-              </div>
-              {linkedNodeInfoPreview.length > 0 && <div style={{ fontSize: 10, opacity: 0.7 }}>{linkedNodeInfoPreview.join(" - ")}</div>}
-            </div>
-          )}
-
+          <EditorLinkedDocumentPanels
+            activeTab={activeTab}
+            linkedEntityKind={linkedEntityKind}
+            linkedNodeTitle={linkedNodeTitle}
+            linkedNodeInfoPreview={linkedNodeInfoPreview}
+            linkedNodeMetadataRows={linkedNodeMetadataRows}
+            linkedNodeHistoryRows={linkedNodeHistoryRows}
+            isEditingTitle={isEditingTitle}
+            editingTitleRef={editingTitleRef}
+            editingTitleDraftRef={editingTitleDraftRef}
+            accent={accent}
+            panelBackground={panelBackground}
+            ruleColor={ruleColor}
+            onSetIsEditingTitle={setIsEditingTitle}
+            onUpdateTitle={updateNodeTitle}
+          />
           {showFormatToolbar && (
-            <section aria-label="Editor formatting" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", maxWidth: 720, pointerEvents: "auto" }}>
-              {([
-                { command: "bold" as const, label: "B", title: "Bold (Ctrl+B)", style: { fontWeight: 900 } },
-                { command: "underline" as const, label: "U", title: "Underline (Ctrl+U)", style: { textDecoration: "underline" } },
-                { command: "hyperlink" as const, label: "Link", title: "Hyperlink" },
-              ]).map((item) => (
-                <button
-                  key={item.command}
-                  type="button"
-                  title={item.title}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => applyInlineFormatCommand(item.command)}
-                  style={{
-                    minWidth: item.command === "hyperlink" ? 46 : 28,
-                    height: 26,
-                    border: `1px solid ${strokeColor}`,
-                    background: panelBackground,
-                    color: surfaceText,
-                    borderRadius: 4,
-                    cursor: "pointer",
-                    fontSize: 12,
-                    fontWeight: 800,
-                    ...item.style,
-                  }}
-                >
-                  {item.label}
-                </button>
-              ))}
-              <div aria-label="Font size" style={{ display: "inline-flex", alignItems: "center", height: 26, border: `1px solid ${strokeColor}`, background: panelBackground, borderRadius: 4, overflow: "hidden" }}>
-                <button type="button" title="Decrease font size" onMouseDown={(event) => event.preventDefault()} onClick={() => adjustDocumentFontSize(-1)} style={{ width: 28, height: "100%", border: 0, borderRight: `1px solid ${ruleColor}`, background: "transparent", color: surfaceText, cursor: "pointer", fontSize: 16, lineHeight: 1 }}>-</button>
-                <span style={{ minWidth: 34, textAlign: "center", fontSize: 12, fontWeight: 800 }}>{documentFontSize}</span>
-                <button type="button" title="Increase font size" onMouseDown={(event) => event.preventDefault()} onClick={() => adjustDocumentFontSize(1)} style={{ width: 28, height: "100%", border: 0, borderLeft: `1px solid ${ruleColor}`, background: "transparent", color: surfaceText, cursor: "pointer", fontSize: 15, lineHeight: 1 }}>+</button>
-              </div>
-            </section>
+            <EditorFormattingToolbar
+              strokeColor={strokeColor}
+              ruleColor={ruleColor}
+              panelBackground={panelBackground}
+              surfaceText={surfaceText}
+              documentFontSize={documentFontSize}
+              onInlineFormatCommand={applyInlineFormatCommand}
+              onAdjustDocumentFontSize={adjustDocumentFontSize}
+            />
           )}
 
-          {activeTab === "metadata" && linkedNodeMetadataRows.length > 0 && (
-            <section style={{ display: "grid", gap: 6, maxWidth: 520, pointerEvents: "auto" }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>Metadata</div>
-              <div style={{ display: "grid", gap: 4 }}>
-                {linkedNodeMetadataRows.map((row) => (
-                  <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "4px 6px" }}>
-                    <span style={{ opacity: 0.75 }}>{row.label}</span>
-                    <strong>{row.value}</strong>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {activeTab === "history" && linkedNodeHistoryRows.length > 0 && (
-            <section style={{ display: "grid", gap: 6, maxWidth: 640, pointerEvents: "auto" }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>History</div>
-              <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "6px 8px 6px 22px" }}>
-                {linkedNodeHistoryRows.map((row, index) => <li key={`${row}-${index}`}>{row}</li>)}
-              </ul>
-            </section>
-          )}
-          </div>
-        )}
-
-        {hasLinkedDocument && showIndentGuides && (
-          <div
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              top: documentTopPx,
-              right: 0,
-              bottom: 0,
-              left: 0,
-              zIndex: 0,
-              visibility: documentIsolation.visibility,
-              pointerEvents: "none",
-              boxSizing: "border-box",
-              overflow: "hidden",
-              padding: "0 18px 24px 24px",
-              fontSize: documentFontSize,
-              lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT,
-              fontFamily: documentFontFamily,
-              letterSpacing: 0,
-            }}
-          >
-            <div style={{ position: "relative", transform: `translateY(-${documentScrollTop}px)` }}>
-              {indentGuideSegments.map((segment) => (
-                <div
-                  key={`${segment.depth}-${segment.lineStart}-${segment.lineEnd}`}
-                  style={{
-                    position: "absolute",
-                    top: segment.lineStart * documentLineHeightPx,
-                    left: `${(segment.depth - 1) * EDITOR_TAB_TEXT.length}ch`,
-                    height: Math.max(documentLineHeightPx, (segment.lineEnd - segment.lineStart + 1) * documentLineHeightPx),
-                    borderLeft: `1px solid ${indentGuideColor}`,
-                    opacity: 0.9,
-                  }}
-                />
-              ))}
-            </div>
           </div>
         )}
 
         {hasLinkedDocument && (
-          <textarea
-          ref={editorTextAreaRef}
-          className="editor-document-scroll"
-          aria-label="Linked document editor"
-          aria-hidden={documentIsolation.ariaHidden}
-          tabIndex={documentIsolation.tabIndex}
-          spellCheck
-          onBeforeInput={(event) => {
-            pendingEditorInputKindRef.current = classifyEditorInputType((event.nativeEvent as InputEvent).inputType);
-          }}
-          onPaste={() => { pendingEditorInputKindRef.current = "paste"; }}
-          onDrop={() => { pendingEditorInputKindRef.current = "paste"; }}
-          onChange={(event) => {
-            const snapshot = recordEditorTextChange(event.currentTarget);
-            scheduleDocumentSave(snapshot.value);
-            scheduleIndentGuideUpdate(snapshot.value);
-          }}
-          onSelect={(event) => syncEditorTextSelectionSnapshot(event.currentTarget)}
-          onClick={(event) => syncEditorTextSelectionSnapshot(event.currentTarget)}
-          onKeyUp={(event) => syncEditorTextSelectionSnapshot(event.currentTarget)}
-          onBlur={(event) => {
-            syncEditorTextSelectionSnapshot(event.currentTarget);
-            rememberCurrentDocumentScroll();
-            flushPendingDocumentSave(event.currentTarget.value);
-          }}
-          onScroll={(event) => {
-            if (restoringScrollRef.current) return;
-            const targetKey = currentDocumentTargetKeyRef.current;
-            if (targetKey) scrollMemoryRef.current.remember(targetKey, event.currentTarget.scrollTop);
-            setDocumentScrollTop(event.currentTarget.scrollTop);
-          }}
-          onWheel={(event) => event.stopPropagation()}
-          onKeyDown={(event) => {
-            const key = event.key.toLowerCase();
-            const mod = event.ctrlKey || event.metaKey;
-            if (mod && !event.altKey && (key === "z" || key === "y")) {
-              const shouldRedo = key === "y" || event.shiftKey;
-              event.preventDefault();
-              const snapshot = shouldRedo
-                ? redoEditorText(editorUndoHistoryRef.current, event.currentTarget.value)
-                : undoEditorText(editorUndoHistoryRef.current, event.currentTarget.value);
-              if (snapshot) applyEditorUndoSnapshot(event.currentTarget, snapshot);
-              return;
-            }
-            if (mod && !event.altKey && (key === "b" || key === "u")) {
-              event.preventDefault();
-              applyInlineFormatCommand(key === "b" ? "bold" : "underline");
-              return;
-            }
-            if (event.key === "Escape") {
-              event.preventDefault();
-              event.currentTarget.blur();
-              return;
-            }
-            if (event.key === "Backspace") {
-              const edit = deleteEditorBackspaceText(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
-              if (edit) {
-                event.preventDefault();
-                commitEditorPlainTextEdit(event.currentTarget, edit, "delete");
-                return;
-              }
-            }
-            if (event.key === "Enter") {
-              event.preventDefault();
-              const edit = insertEditorEnterText(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd, outlineStyle);
-              commitEditorPlainTextEdit(event.currentTarget, edit, "lineBreak");
-              return;
-            }
-            if (event.key !== "Tab") return;
-
-            event.preventDefault();
-            // Textareas normally use Tab to leave the field. Here it is an
-            // isolated editor edit group so one undo removes only this Tab.
-            const edit = insertEditorTabText(
-              event.currentTarget.value,
-              event.currentTarget.selectionStart,
-              event.currentTarget.selectionEnd,
-              outlineStyle,
-              event.shiftKey ? "outdent" : "indent",
-            );
-            commitEditorPlainTextEdit(event.currentTarget, edit, "tab");
-          }}
-          style={{
-            position: "absolute",
-            top: documentTopPx,
-            right: 0,
-            bottom: 0,
-            left: 0,
-            zIndex: 1,
-            border: 0,
-            backgroundColor: "transparent",
-            color: surfaceText,
-            display: "block",
-            visibility: documentIsolation.visibility,
-            pointerEvents: documentIsolation.pointerEvents,
-            boxSizing: "border-box",
-            resize: "none",
-            padding: "0 18px 24px 24px",
-            outline: "none",
-            fontSize: documentFontSize,
-            lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT,
-            fontFamily: documentFontFamily,
-            whiteSpace: "pre-wrap",
-            tabSize: 2,
-            letterSpacing: 0,
-            fontVariantLigatures: "none",
-            caretColor: accent,
-            cursor: "text",
-            overflowY: "auto",
-            overflowX: "hidden",
-            scrollbarGutter: "stable",
-            ["--editor-document-scroll-accent" as string]: scrollbarAccent,
-            ["--editor-document-scroll-track" as string]: scrollbarTrack,
-          }}
-        />
-      )}
-      {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020", zIndex: 3 }}>{error}</div>}
+          <EditorDocumentSurface
+            textAreaRef={editorTextAreaRef}
+            documentIsolation={documentIsolation}
+            documentTopPx={documentTopPx}
+            documentFontSize={documentFontSize}
+            documentLineHeightPx={documentLineHeightPx}
+            documentFontFamily={documentFontFamily}
+            documentScrollTop={documentScrollTop}
+            showIndentGuides={showIndentGuides}
+            indentGuideSegments={indentGuideSegments}
+            indentGuideColor={indentGuideColor}
+            surfaceText={surfaceText}
+            accent={accent}
+            scrollbarAccent={scrollbarAccent}
+            scrollbarTrack={scrollbarTrack}
+            {...documentSurfaceHandlers}
+          />
+        )}
+        {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020", zIndex: 3 }}>{error}</div>}
       </div>
     </div>
   );

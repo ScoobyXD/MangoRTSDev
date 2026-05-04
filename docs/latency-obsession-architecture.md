@@ -1,12 +1,19 @@
 # Latency Obsession Architecture
 
 ## Goal
-Design the MangoOS architecture for:
-- 1000000s of companies
-- Each company having 1000000s of users and ai agents
-- All having 1000000s of UI elements and simultaneous background operations
-- All of this with strict latency culture with sub-100ms targets for interactive reads
-- ***THIS IS SUPER IMPORTandANT:*** In the future we will have ai agents operate this app without a UI, so we need to make sure everything can be done by ai agents headless with just APIs. The future of the company relies on our ability to integrate agents, and to do that, we need APIs. And of course, it needs to work well with 10000s of ai agents all using the apis all at once.
+This startup is building B2B software for:
+- millions of companies
+- millions of users and AI agents per company
+- millions of UI elements and simultaneous background operations
+- strict latency culture with sub-100ms targets
+- strict robustness and reliability
+- future headless AI-agent operation through APIs. This will be the main way entities will interact with MangoRTS in the future
+- millions of AI agents using APIs concurrently
+- AWS-hosted app and database infrastructure, with code written efficiently to minimize cloud cost
+
+Default engineering rule:
+Find the simplest solution possible. Only increase complexity when needed.
+Write code in an architecture where it would be possible for 20 agents to develop on this app simultaneously. (We have already been making efforts in this)
 
 This document is the source of truth for architecture decisions and execution tracking.
 ---

@@ -1,12 +1,19 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, trimOrEmpty } from "./shared";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, buildPlusGridBackgroundStyle, clamp, divider, getNodeTitle, reconcileNodeMapPositions, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_NODE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
-import { summarizeRelationshipDeleteResults } from "./relationshipDeleteSummary";
+import { deleteNodeMapRelationshipsCommand, normalizeNodeMapRelationshipIDs } from "./nodeMapCommands";
 import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
-import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapDragStartSelection, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
+import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
+import { NodeMapContextMenus, type NodeMapCanvasContextMenuState, type NodeMapDeleteConfirmationState, type NodeMapNodeContextMenuState, type NodeMapRelationshipContextMenuState, type NodeMapRelationshipRole } from "./NodeMapContextMenus";
+import { NodeMapNodeCard } from "./NodeMapNodeCard";
+import { NodeMapRelationshipHitLines } from "./NodeMapRelationshipHitLines";
+import { buildNodeMapRelationshipRoutingGrid, getNodeMapAnchorPoint, routeNodeMapDraftPath, routeNodeMapOrthogonalPath } from "./nodeMapRouting";
+import { useNodeMapGraphPersistence } from "./useNodeMapGraphPersistence";
+import { useNodeMapGraphLoader } from "./useNodeMapGraphLoader";
+import { useNodeMapViewportHandlers } from "./useNodeMapViewportHandlers";
 import { filterNodeGraphToFolderScope, resolveMapSelectionAfterGraphLoad, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
@@ -58,10 +65,10 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const [statusMessage, setStatusMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [detailsPanelNodeID, setDetailsPanelNodeID] = useState<string>("");
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
-  const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeID: string } | null>(null);
-  const [relationshipContextMenu, setRelationshipContextMenu] = useState<{ x: number; y: number; relationshipID: string } | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[]; relationshipIDs: string[] } | null>(null);
+  const [contextMenu, setContextMenu] = useState<NodeMapCanvasContextMenuState | null>(null);
+  const [nodeContextMenu, setNodeContextMenu] = useState<NodeMapNodeContextMenuState | null>(null);
+  const [relationshipContextMenu, setRelationshipContextMenu] = useState<NodeMapRelationshipContextMenuState | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<NodeMapDeleteConfirmationState | null>(null);
   const [canvasActive, setCanvasActive] = useState(false);
   const [panelRect, setPanelRect] = useState({ x: 0, y: 10, width: 340, height: 360 });
   const [panelDrag, setPanelDrag] = useState<NodeMapPanelDragState | null>(null);
@@ -100,7 +107,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const layoutPersistenceReadyRef = useRef(false);
   const lastPersistedNodePositionsRef = useRef<Record<string, NodePosition>>({});
   const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(true);
-  const [relationshipRoleColors, setRelationshipRoleColors] = useState({ parent: "#ff8a00", peer: "#0095ff", child: "#6f5cff" });
+  const [relationshipRoleColors, setRelationshipRoleColors] = useState<Record<NodeMapRelationshipRole, string>>({ parent: "#ff8a00", peer: "#0095ff", child: "#6f5cff" });
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
   const [selectedRelationshipIDs, setSelectedRelationshipIDs] = useState<Set<string>>(new Set());
   const [editingNodeTitleNodeID, setEditingNodeTitleNodeID] = useState<string | null>(null);
@@ -253,21 +260,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     setSelectionBox(nextSelectionBox);
   };
 
-  const applyServerMapPositions = (positions: Parameters<typeof persistedMapPositionsToNodePositions>[0]["positions"]) => {
-    const serverPositions = persistedMapPositionsToNodePositions({
-      positions,
-      worldWidth: WORLD_W,
-      worldHeight: WORLD_H,
-      nodeWidth: NODE_W,
-      nodeHeight: NODE_H,
-    });
-    lastPersistedNodePositionsRef.current = { ...lastPersistedNodePositionsRef.current, ...serverPositions };
-    if (Object.keys(serverPositions).length > 0) {
-      setNodePositions((previous) => ({ ...previous, ...serverPositions }));
-    }
-    layoutPersistenceReadyRef.current = true;
-  };
-
   useEffect(() => {
     const pendingNodeID = pendingFocusNodeIDRef.current;
     if (pendingNodeID) centerNodeInViewport(pendingNodeID);
@@ -284,87 +276,8 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     return () => window.removeEventListener(EVENT_NODE_MAP_FOCUS_REQUESTED, onFocusRequested);
   }, [canvasSize.height, canvasSize.width, mapScope, nodePositions, nodeSizes, nodes, allNodes, zoom]);
 
-  useEffect(() => {
-    const cached = SESSION_NODE_MAP_STATE.get(mapStateKey) ?? SESSION_NODE_MAP_STATE.get(fallbackMapStateKey);
-    if (cached) {
-      setZoom(clamp(cached.zoom, 0.45, 2.7));
-      setPan(cached.pan);
-      setPanInitialized(true);
-      restoredSelectionRef.current = cached.selectedNodeID;
-      selectedNodeIDRef.current = cached.selectedNodeID;
-      setSelectedNodeID(cached.selectedNodeID);
-      setSelectedNodeIDs(cached.selectedNodeID ? new Set([cached.selectedNodeID]) : new Set());
-      setNodePositions(cached.nodePositions);
-      setRelationshipColorsEnabled(cached.relationshipColorsEnabled !== false);
-      if (cached.relationshipRoleColors) {
-        setRelationshipRoleColors({
-          parent: cached.relationshipRoleColors.parent ?? "#ff8a00",
-          peer: cached.relationshipRoleColors.peer ?? "#0095ff",
-          child: cached.relationshipRoleColors.child ?? "#6f5cff",
-        });
-      }
-      setRestoredViewport(true);
-      return;
-    }
-    try {
-      const raw = localStorage.getItem(mapStateKey) ?? localStorage.getItem(fallbackMapStateKey);
-      if (!raw) {
-        setRestoredViewport(true);
-        return;
-      }
-      const parsed = JSON.parse(raw) as {
-        zoom?: number;
-        pan?: { x?: number; y?: number };
-        selectedNodeID?: string;
-        nodePositions?: Record<string, { x?: number; y?: number }>;
-        relationshipColorsEnabled?: boolean;
-        relationshipRoleColors?: { parent?: string; peer?: string; child?: string };
-      };
-      if (typeof parsed.zoom === "number" && Number.isFinite(parsed.zoom)) {
-        setZoom(clamp(parsed.zoom, 0.45, 2.7));
-      }
-      if (parsed.pan && typeof parsed.pan.x === "number" && typeof parsed.pan.y === "number") {
-        setPan({ x: parsed.pan.x, y: parsed.pan.y });
-        setPanInitialized(true);
-      }
-      if (typeof parsed.selectedNodeID === "string") {
-        restoredSelectionRef.current = parsed.selectedNodeID;
-        selectedNodeIDRef.current = parsed.selectedNodeID;
-        setSelectedNodeID(parsed.selectedNodeID);
-        setSelectedNodeIDs(parsed.selectedNodeID ? new Set([parsed.selectedNodeID]) : new Set());
-      }
-      if (parsed.nodePositions && typeof parsed.nodePositions === "object") {
-        const sanitized: Record<string, NodePosition> = {};
-        for (const [key, value] of Object.entries(parsed.nodePositions)) {
-          if (!value) continue;
-          const x = typeof value.x === "number" ? value.x : 0;
-          const y = typeof value.y === "number" ? value.y : 0;
-          sanitized[key] = {
-            x: clamp(snapToGrid(x), 0, WORLD_W - NODE_W),
-            y: clamp(snapToGrid(y), 0, WORLD_H - NODE_H),
-          };
-        }
-        setNodePositions(sanitized);
-      }
-      if (typeof parsed.relationshipColorsEnabled === "boolean") {
-        setRelationshipColorsEnabled(parsed.relationshipColorsEnabled);
-      }
-      if (parsed.relationshipRoleColors && typeof parsed.relationshipRoleColors === "object") {
-        setRelationshipRoleColors({
-          parent: typeof parsed.relationshipRoleColors.parent === "string" ? parsed.relationshipRoleColors.parent : "#ff8a00",
-          peer: typeof parsed.relationshipRoleColors.peer === "string" ? parsed.relationshipRoleColors.peer : "#0095ff",
-          child: typeof parsed.relationshipRoleColors.child === "string" ? parsed.relationshipRoleColors.child : "#6f5cff",
-        });
-      }
-    } catch {
-      // ignore local cache parse errors
-    } finally {
-      setRestoredViewport(true);
-    }
-  }, [fallbackMapStateKey, mapStateKey]);
-
   // Shared API request helper for node CRUD, details, and relationship operations.
-  const requestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+  const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const headers = new Headers(init?.headers);
     // Avoid setting Content-Type on GET/HEAD requests; this reduces cross-origin preflights.
     if (init?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
@@ -393,66 +306,58 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       return {} as T;
     }
     return response.json() as Promise<T>;
-  };
+  }, [apiBase]);
 
-  // Snapshot-driven node loader that also restores/maintains active selection.
-  const loadNodes = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
-      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-      const snapshotNodes = snapshot.nodes ?? [];
-      const nextNodes = applyFolderScope(snapshotNodes, snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? [], activeFolderIDRef.current);
-      applyServerMapPositions(snapshot.node_map_positions ?? []);
+  const applyServerMapPositions = useNodeMapGraphPersistence({
+    companyID,
+    mapStateKey,
+    fallbackMapStateKey,
+    restoredViewport,
+    zoom,
+    pan,
+    selectedNodeID,
+    nodePositions,
+    nodes,
+    relationshipColorsEnabled,
+    relationshipRoleColors,
+    worldWidth: WORLD_W,
+    worldHeight: WORLD_H,
+    setZoom,
+    setPan,
+    setPanInitialized,
+    setRestoredViewport,
+    restoredSelectionRef,
+    selectedNodeIDRef,
+    setSelectedNodeID,
+    setSelectedNodeIDs,
+    setNodePositions,
+    setRelationshipColorsEnabled,
+    setRelationshipRoleColors,
+    layoutPersistenceReadyRef,
+    lastPersistedNodePositionsRef,
+    requestJSON,
+  });
 
-      const nextSelection = resolveMapSelectionAfterGraphLoad({
-        currentSelectedID: selectedNodeIDRef.current,
-        restoredSelectedID: restoredSelectionRef.current,
-        visibleItemIDs: nextNodes.map((item) => item.node_id),
-        knownItemIDs: snapshotNodes.map((item) => item.node_id),
-        explorerRequestedID: explorerSelectionOriginRef.current?.selectedEntityID,
-      });
-      if (nextSelection === null) return;
-      selectedNodeIDRef.current = nextSelection;
-      setSelectedNodeID(nextSelection);
-      setSelectedNodeIDs(nextSelection ? new Set([nextSelection]) : new Set());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_load_nodes");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Load relationship set scoped to nodes currently available in the local workspace snapshot cache.
-  // IMPORTANT: this intentionally does not fetch. Fetching here created a hot-path feedback loop:
-  // nodes changed -> refresh snapshot -> subscription setNodes -> nodes changed again.
-  const loadGraphRelationshipsFromSnapshot = (graphNodes: NodeRecord[]) => {
-    if (graphNodes.length === 0) {
-      setRelationships([]);
-      return;
-    }
-    const payload = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-    setRelationships(projectVisibleRelationships(graphNodes, payload.relationships ?? []));
-  };
-
-
-  useEffect(() => {
-    void loadNodes();
-  }, []);
-
-  useEffect(() => {
-    return subscribeNodeRelationshipGraph(apiBase, companyID, () => {
-      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-      applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? []);
-      applyServerMapPositions(snapshot.node_map_positions ?? []);
-    });
-  }, [apiBase, companyID, activeFolderID]);
-
-  useEffect(() => {
-    const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-    applyFolderScope(snapshot.nodes ?? allNodes, snapshot.relationships ?? [], snapshot.folders ?? folders, snapshot.folder_items ?? folderItems);
-  }, [activeFolderID]);
+  const { loadGraphRelationshipsFromSnapshot } = useNodeMapGraphLoader({
+    apiBase,
+    companyID,
+    activeFolderID,
+    activeFolderIDRef,
+    restoredSelectionRef,
+    selectedNodeIDRef,
+    explorerSelectionOriginRef,
+    allNodes,
+    folders,
+    folderItems,
+    applyFolderScope,
+    applyServerMapPositions,
+    projectVisibleRelationships,
+    setLoading,
+    setError,
+    setSelectedNodeID,
+    setSelectedNodeIDs,
+    setRelationships,
+  });
 
   useEffect(() => {
     setSelectedRelationshipIDs((previous) => {
@@ -542,76 +447,6 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     setPan({ x: centeredX, y: centeredY });
     setPanInitialized(true);
   }, [panInitialized, restoredViewport, canvasSize.width, canvasSize.height, zoom]);
-
-  useEffect(() => {
-    if (!restoredViewport) return;
-    const timeout = window.setTimeout(() => {
-      try {
-        const nextState: NodeMapState = {
-          zoom,
-          pan,
-          selectedNodeID,
-          // Positions can be huge and are shared by every user/agent. Keep the
-          // browser cache small; the database-backed map-layout API owns geometry.
-          nodePositions: {},
-          relationshipColorsEnabled,
-          relationshipRoleColors,
-        };
-        SESSION_NODE_MAP_STATE.set(mapStateKey, nextState);
-        SESSION_NODE_MAP_STATE.set(fallbackMapStateKey, nextState);
-        const serializedState = JSON.stringify(nextState);
-        localStorage.setItem(mapStateKey, serializedState);
-        localStorage.setItem(fallbackMapStateKey, serializedState);
-      } catch {
-        // ignore local storage quota/security errors
-      }
-    }, 120);
-    return () => window.clearTimeout(timeout);
-  }, [fallbackMapStateKey, mapStateKey, restoredViewport, zoom, pan, selectedNodeID, relationshipColorsEnabled, relationshipRoleColors]);
-
-  useEffect(() => {
-    if (!restoredViewport || !layoutPersistenceReadyRef.current) return;
-    const timeout = window.setTimeout(() => {
-      const changed = changedPersistedMapPositions({
-        previous: lastPersistedNodePositionsRef.current,
-        current: nodePositions,
-        entityIDs: new Set(nodes.map((node) => node.node_id)),
-      });
-      if (changed.length === 0) return;
-
-      const persist = async () => {
-        try {
-          for (let index = 0; index < changed.length; index += 500) {
-            const chunk = changed.slice(index, index + 500);
-            const payload = await requestJSON<{ positions: Array<{ node_id?: string; entity_id?: string; x: number; y: number }> }>("/v1/map-layout", {
-              method: "PUT",
-              body: JSON.stringify({
-                company_id: companyID,
-                map_type: "node",
-                positions: chunk,
-              }),
-            });
-            const savedPositions = persistedMapPositionsToNodePositions({
-              positions: payload.positions,
-              worldWidth: WORLD_W,
-              worldHeight: WORLD_H,
-              nodeWidth: NODE_W,
-              nodeHeight: NODE_H,
-            });
-            lastPersistedNodePositionsRef.current = { ...lastPersistedNodePositionsRef.current, ...savedPositions };
-          }
-        } catch {
-          // Keep local interaction responsive if the layout write is temporarily unavailable.
-          // The next drag/resize or snapshot refresh gets another chance to converge.
-        }
-      };
-
-      // Fire and forget by design: layout is an eventually consistent projection.
-      // Local drag stays instant; the API write catches up after pointer activity settles.
-      void persist();
-    }, 350);
-    return () => window.clearTimeout(timeout);
-  }, [companyID, nodePositions, nodes, restoredViewport]);
 
   useEffect(() => {
     if (!restoredViewport) return;
@@ -1050,15 +885,12 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   };
 
   const deleteRelationships = async (relationshipIDs: string[]) => {
-    const unique = Array.from(new Set(relationshipIDs.filter(Boolean)));
+    const unique = normalizeNodeMapRelationshipIDs(relationshipIDs);
     if (unique.length === 0) return;
     setError("");
     setStatusMessage(`Deleting ${unique.length} relationship line${unique.length === 1 ? "" : "s"}...`);
     try {
-      const settled = await Promise.allSettled(unique.map((relationshipID) => requestJSON<{ status: string }>(`/v1/node-relationships/${relationshipID}?company_id=${encodeURIComponent(companyID)}`, {
-        method: "DELETE",
-      })));
-      const summary = summarizeRelationshipDeleteResults(unique, settled);
+      const summary = await deleteNodeMapRelationshipsCommand({ companyID, relationshipIDs: unique, requestJSON });
 
       if (summary.succeededIDs.length > 0) {
         const deletedSet = new Set(summary.succeededIDs);
@@ -1115,14 +947,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   }, [selectedNodeIDs, selectedNodeID]);
 
 
-  const getAnchorPoint = (nodeID: string, side: NodeDirection) => {
-    const pos = nodePositions[nodeID];
-    if (!pos) return null;
-    if (side === "left") return { x: pos.x, y: pos.y + NODE_H / 2 };
-    if (side === "right") return { x: pos.x + NODE_W, y: pos.y + NODE_H / 2 };
-    if (side === "top") return { x: pos.x + NODE_W / 2, y: pos.y };
-    return { x: pos.x + NODE_W / 2, y: pos.y + NODE_H };
-  };
+  const getAnchorPoint = (nodeID: string, side: NodeDirection) => getNodeMapAnchorPoint({ nodeID, side, nodePositions });
 
   const visibleNodeIDSet = useMemo(() => {
     const minX = (-pan.x) / zoom;
@@ -1139,29 +964,10 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     return visible;
   }, [nodes, nodePositions, pan.x, pan.y, zoom, canvasSize.width, canvasSize.height]);
 
-  const relationshipRoutingGrid = useMemo(() => {
-    const step = MINI_GRID;
-    const cols = Math.floor(WORLD_W / step) + 1;
-    const rows = Math.floor(WORLD_H / step) + 1;
-    const blocked = new Uint8Array(cols * rows);
-    const margin = step;
-
-    for (const node of nodes) {
-      const pos = nodePositions[node.node_id];
-      if (!pos) continue;
-      const minX = Math.max(0, Math.floor((pos.x - margin) / step));
-      const maxX = Math.min(cols - 1, Math.ceil((pos.x + NODE_W + margin) / step));
-      const minY = Math.max(0, Math.floor((pos.y - margin) / step));
-      const maxY = Math.min(rows - 1, Math.ceil((pos.y + NODE_H + margin) / step));
-      for (let gy = minY; gy <= maxY; gy += 1) {
-        for (let gx = minX; gx <= maxX; gx += 1) {
-          blocked[gy * cols + gx] = 1;
-        }
-      }
-    }
-
-    return { step, cols, rows, blocked };
-  }, [WORLD_H, WORLD_W, nodes, nodePositions]);
+  const relationshipRoutingGrid = useMemo(
+    () => buildNodeMapRelationshipRoutingGrid({ nodes, nodePositions, worldWidth: WORLD_W, worldHeight: WORLD_H }),
+    [WORLD_H, WORLD_W, nodes, nodePositions],
+  );
 
   const routeOrthogonalPath = (
     from: { x: number; y: number },
@@ -1170,188 +976,30 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     to: { x: number; y: number },
     sourceNodeID: string,
     targetNodeID: string,
-  ) => {
-    const { step, cols, rows, blocked } = relationshipRoutingGrid;
-    const toCell = (point: { x: number; y: number }) => ({
-      gx: clamp(Math.round(point.x / step), 0, cols - 1),
-      gy: clamp(Math.round(point.y / step), 0, rows - 1),
-    });
-    const toPoint = (gx: number, gy: number) => ({ x: gx * step, y: gy * step });
-    const key = (gx: number, gy: number) => gy * cols + gx;
-    const sourcePos = nodePositions[sourceNodeID];
-    const targetPos = nodePositions[targetNodeID];
+  ) => routeNodeMapOrthogonalPath({
+    from,
+    fromOut,
+    toIn,
+    to,
+    sourceNodeID,
+    targetNodeID,
+    nodePositions,
+    routingGrid: relationshipRoutingGrid,
+  });
 
-    const isBlocked = (gx: number, gy: number) => {
-      const idx = key(gx, gy);
-      if (!blocked[idx]) return false;
-      const worldX = gx * step;
-      const worldY = gy * step;
-      const isInsideSource = sourcePos && worldX >= sourcePos.x - step && worldX <= sourcePos.x + NODE_W + step && worldY >= sourcePos.y - step && worldY <= sourcePos.y + NODE_H + step;
-      if (isInsideSource) return false;
-      const isInsideTarget = targetPos && worldX >= targetPos.x - step && worldX <= targetPos.x + NODE_W + step && worldY >= targetPos.y - step && worldY <= targetPos.y + NODE_H + step;
-      if (isInsideTarget) return false;
-      return true;
-    };
-
-    const start = toCell(fromOut);
-    const goal = toCell(toIn);
-    const startKey = key(start.gx, start.gy);
-    const goalKey = key(goal.gx, goal.gy);
-    const queue = [startKey];
-    const cameFrom = new Int32Array(cols * rows).fill(-1);
-    const visited = new Uint8Array(cols * rows);
-    visited[startKey] = 1;
-    let found = false;
-
-    for (let pointer = 0; pointer < queue.length; pointer += 1) {
-      const current = queue[pointer];
-      if (current === goalKey) {
-        found = true;
-        break;
-      }
-      const gx = current % cols;
-      const gy = Math.floor(current / cols);
-      const neighbors = [
-        { gx: gx + 1, gy },
-        { gx: gx - 1, gy },
-        { gx, gy: gy + 1 },
-        { gx, gy: gy - 1 },
-      ];
-      for (const next of neighbors) {
-        if (next.gx < 0 || next.gx >= cols || next.gy < 0 || next.gy >= rows) continue;
-        const nextKey = key(next.gx, next.gy);
-        if (visited[nextKey]) continue;
-        if (isBlocked(next.gx, next.gy) && nextKey !== goalKey) continue;
-        visited[nextKey] = 1;
-        cameFrom[nextKey] = current;
-        queue.push(nextKey);
-      }
-    }
-
-    const fallback = [from, fromOut, { x: toIn.x, y: fromOut.y }, toIn, to];
-    if (!found) return fallback.map((point) => ({ x: snapToGrid(point.x), y: snapToGrid(point.y) }));
-
-    const cells: number[] = [];
-    let current = goalKey;
-    while (current !== -1) {
-      cells.push(current);
-      if (current === startKey) break;
-      current = cameFrom[current];
-    }
-    cells.reverse();
-
-    const routed = cells.map((cell) => toPoint(cell % cols, Math.floor(cell / cols)));
-    const collapsed = [from, fromOut, ...routed, toIn, to].filter((point, index, list) => {
-      if (index === 0) return true;
-      const prev = list[index - 1];
-      return prev.x !== point.x || prev.y !== point.y;
-    });
-
-    const simplified = [collapsed[0]];
-    for (let i = 1; i < collapsed.length - 1; i += 1) {
-      const prev = simplified[simplified.length - 1];
-      const currentPoint = collapsed[i];
-      const next = collapsed[i + 1];
-      const sameLine = (prev.x === currentPoint.x && currentPoint.x === next.x) || (prev.y === currentPoint.y && currentPoint.y === next.y);
-      if (!sameLine) simplified.push(currentPoint);
-    }
-    simplified.push(collapsed[collapsed.length - 1]);
-    return simplified.map((point) => ({ x: snapToGrid(point.x), y: snapToGrid(point.y) }));
-  };
-
-  // Draft relationship routing uses the same orthogonal-grid obstacle strategy as committed lines.
-  // This keeps the in-progress arrow preview faithful to final path wrapping behavior.
   const routeDraftPath = (
     from: { x: number; y: number },
     fromOut: { x: number; y: number },
     cursor: { x: number; y: number },
     sourceNodeID: string,
-  ) => {
-    const { step, cols, rows, blocked } = relationshipRoutingGrid;
-    const toCell = (point: { x: number; y: number }) => ({
-      gx: clamp(Math.round(point.x / step), 0, cols - 1),
-      gy: clamp(Math.round(point.y / step), 0, rows - 1),
-    });
-    const toPoint = (gx: number, gy: number) => ({ x: gx * step, y: gy * step });
-    const key = (gx: number, gy: number) => gy * cols + gx;
-    const sourcePos = nodePositions[sourceNodeID];
-
-    const isBlocked = (gx: number, gy: number) => {
-      const idx = key(gx, gy);
-      if (!blocked[idx]) return false;
-      const worldX = gx * step;
-      const worldY = gy * step;
-      const isInsideSource = sourcePos && worldX >= sourcePos.x - step && worldX <= sourcePos.x + NODE_W + step && worldY >= sourcePos.y - step && worldY <= sourcePos.y + NODE_H + step;
-      if (isInsideSource) return false;
-      return true;
-    };
-
-    const start = toCell(fromOut);
-    const goal = toCell(cursor);
-    const startKey = key(start.gx, start.gy);
-    const goalKey = key(goal.gx, goal.gy);
-    const queue = [startKey];
-    const cameFrom = new Int32Array(cols * rows).fill(-1);
-    const visited = new Uint8Array(cols * rows);
-    visited[startKey] = 1;
-    let found = false;
-
-    for (let pointer = 0; pointer < queue.length; pointer += 1) {
-      const current = queue[pointer];
-      if (current === goalKey) {
-        found = true;
-        break;
-      }
-      const gx = current % cols;
-      const gy = Math.floor(current / cols);
-      const neighbors = [
-        { gx: gx + 1, gy },
-        { gx: gx - 1, gy },
-        { gx, gy: gy + 1 },
-        { gx, gy: gy - 1 },
-      ];
-      for (const next of neighbors) {
-        if (next.gx < 0 || next.gx >= cols || next.gy < 0 || next.gy >= rows) continue;
-        const nextKey = key(next.gx, next.gy);
-        if (visited[nextKey]) continue;
-        if (isBlocked(next.gx, next.gy) && nextKey !== goalKey) continue;
-        visited[nextKey] = 1;
-        cameFrom[nextKey] = current;
-        queue.push(nextKey);
-      }
-    }
-
-    const snappedCursor = { x: snapToGrid(cursor.x), y: snapToGrid(cursor.y) };
-    const fallback = [from, fromOut, { x: snappedCursor.x, y: fromOut.y }, snappedCursor];
-    if (!found) return fallback;
-
-    const cells: number[] = [];
-    let current = goalKey;
-    while (current !== -1) {
-      cells.push(current);
-      if (current === startKey) break;
-      current = cameFrom[current];
-    }
-    cells.reverse();
-    const routed = cells.map((cell) => toPoint(cell % cols, Math.floor(cell / cols)));
-    const collapsed = [from, fromOut, ...routed, snappedCursor].filter((point, index, list) => {
-      if (index === 0) return true;
-      const prev = list[index - 1];
-      return prev.x !== point.x || prev.y !== point.y;
-    });
-
-    const simplified = [collapsed[0]];
-    for (let i = 1; i < collapsed.length - 1; i += 1) {
-      const prev = simplified[simplified.length - 1];
-      const currentPoint = collapsed[i];
-      const next = collapsed[i + 1];
-      const sameLine = (prev.x === currentPoint.x && currentPoint.x === next.x) || (prev.y === currentPoint.y && currentPoint.y === next.y);
-      if (!sameLine) simplified.push(currentPoint);
-    }
-    simplified.push(collapsed[collapsed.length - 1]);
-    return simplified.map((point) => ({ x: snapToGrid(point.x), y: snapToGrid(point.y) }));
-  };
-
+  ) => routeNodeMapDraftPath({
+    from,
+    fromOut,
+    cursor,
+    sourceNodeID,
+    nodePositions,
+    routingGrid: relationshipRoutingGrid,
+  });
   const connectionPaths = useMemo(() => {
     return relationships
       .filter((rel) => nodeByID[rel.node_id_a] && nodeByID[rel.node_id_b] && nodePositions[rel.node_id_a] && nodePositions[rel.node_id_b])
@@ -1460,10 +1108,31 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     selection.addRange(range);
   }, [editingNodeTitleNodeID]);
 
+  const viewportHandlers = useNodeMapViewportHandlers({
+    viewportRef,
+    pan,
+    zoom,
+    worldWidth: WORLD_W,
+    worldHeight: WORLD_H,
+    relationshipDraft,
+    selectedNodeIDs,
+    selectedRelationshipIDs,
+    startNodeMapMultiSelect,
+    setCanvasActive,
+    setContextMenu,
+    setNodeContextMenu,
+    setRelationshipContextMenu,
+    setRelationshipDraft,
+    setZoom,
+    setPan,
+    setPanState,
+  });
+
   return (
     <div style={{ fontSize: 11, height: "100%", color: panelText }}>
       <div
         ref={viewportRef}
+        data-node-map-viewport="true"
         style={{
           position: "relative",
           overflow: "hidden",
@@ -1471,65 +1140,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           width: "100%",
           backgroundColor: "transparent",
         }}
-        onContextMenu={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          setCanvasActive(true);
-          setNodeContextMenu(null);
-          setRelationshipContextMenu(null);
-          if (!viewportRef.current) return;
-          const bounds = viewportRef.current.getBoundingClientRect();
-          const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
-          const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
-          const worldX = clamp((localX - pan.x) / zoom, 0, WORLD_W);
-          const worldY = clamp((localY - pan.y) / zoom, 0, WORLD_H);
-          const menuWidth = 232;
-          const menuHeight = 188;
-          const clampedX = clamp(localX, 8, Math.max(8, bounds.width - menuWidth - 8));
-          const clampedY = clamp(localY, 8, Math.max(8, bounds.height - menuHeight - 8));
-          setContextMenu({ x: clampedX, y: clampedY, worldX, worldY });
-        }}
-        onWheel={(event) => {
-          event.preventDefault();
-          if (!viewportRef.current) return;
-          const bounds = viewportRef.current.getBoundingClientRect();
-          const cursorX = event.clientX - bounds.left;
-          const cursorY = event.clientY - bounds.top;
-          const worldX = (cursorX - pan.x) / zoom;
-          const worldY = (cursorY - pan.y) / zoom;
-          const delta = event.deltaY < 0 ? 1.1 : 0.9;
-          const nextZoom = clamp(zoom * delta, 0.45, 2.7);
-          setZoom(nextZoom);
-          setPan({ x: cursorX - worldX * nextZoom, y: cursorY - worldY * nextZoom });
-        }}
-        onPointerDown={(event) => {
-          if (!viewportRef.current) return;
-          setCanvasActive(true);
-          setContextMenu(null);
-          setNodeContextMenu(null);
-          setRelationshipContextMenu(null);
-          const bounds = viewportRef.current.getBoundingClientRect();
-          const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
-          const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
-
-          if (event.ctrlKey || event.shiftKey) {
-            event.preventDefault();
-            event.stopPropagation();
-            startNodeMapMultiSelect(event.pointerId, event.clientX, event.clientY, true);
-            return;
-          }
-
-          if (relationshipDraft) setRelationshipDraft(null);
-          const clearSelectionOnClick = selectedNodeIDs.size > 1 || selectedRelationshipIDs.size > 0;
-          setPanState({
-            pointerID: event.pointerId,
-            startMouseX: event.clientX,
-            startMouseY: event.clientY,
-            startPanX: pan.x,
-            startPanY: pan.y,
-            clearSelectionOnClick,
-          });
-        }}
+        {...viewportHandlers}
       >
         <div
           style={{
@@ -1547,386 +1158,79 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
             ref={relationshipCanvasRef}
             style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 1 }}
           />
-          <svg
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "auto", zIndex: 2 }}
-            viewBox={`0 0 ${WORLD_W} ${WORLD_H}`}
-          >
-            {connectionPaths.map((path) => (
-              <polyline
-                key={path.id}
-                points={path.points.map((point) => `${point.x},${point.y}`).join(" ")}
-                fill="none"
-                stroke="transparent"
-                strokeWidth={14}
-                style={{ cursor: "pointer" }}
-                onPointerDown={(event) => {
-                  event.stopPropagation();
-                  setCanvasActive(true);
-                  setRelationshipContextMenu(null);
-                  if (event.ctrlKey || event.shiftKey) {
-                    event.preventDefault();
-                    suppressNextRelationshipLineClickRef.current = true;
-                    startNodeMapMultiSelect(event.pointerId, event.clientX, event.clientY, true);
-                  }
-                }}
-                onClick={(event) => {
-                  if (suppressNextRelationshipLineClickRef.current) {
-                    suppressNextRelationshipLineClickRef.current = false;
-                    return;
-                  }
-                  event.stopPropagation();
-                  setRelationshipDraft(null);
-                  setRelationshipContextMenu(null);
-                  setError("");
-                  if (event.shiftKey || event.ctrlKey) {
-                    setSelectedRelationshipIDs((previous) => {
-                      const next = new Set(previous);
-                      if (next.has(path.id)) next.delete(path.id);
-                      else next.add(path.id);
-                      return next;
-                    });
-                    return;
-                  }
-                  setSelectedNodeIDs(new Set());
-                  setSelectedNodeID("");
-                  setSelectedRelationshipIDs(new Set([path.id]));
-                }}
-                onDoubleClick={(event) => {
-                  event.stopPropagation();
-                  setRelationshipDraft(null);
-                  setRelationshipContextMenu(null);
-                  void deleteRelationships([path.id]);
-                }}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (!viewportRef.current) return;
-                  const bounds = viewportRef.current.getBoundingClientRect();
-                  const localX = clamp(event.clientX - bounds.left, 0, bounds.width);
-                  const localY = clamp(event.clientY - bounds.top, 0, bounds.height);
-                  const menuWidth = 188;
-                  const menuHeight = 56;
-                  const clampedX = clamp(localX, 8, Math.max(8, bounds.width - menuWidth - 8));
-                  const clampedY = clamp(localY, 8, Math.max(8, bounds.height - menuHeight - 8));
-                  setCanvasActive(true);
-                  setRelationshipDraft(null);
-                  setContextMenu(null);
-                  setNodeContextMenu(null);
-                  setSelectedNodeIDs(new Set());
-                  setSelectedNodeID("");
-                  setSelectedRelationshipIDs((previous) => {
-                    if (previous.has(path.id)) return previous;
-                    return new Set([path.id]);
-                  });
-                  setRelationshipContextMenu({ x: clampedX, y: clampedY, relationshipID: path.id });
-                }}
-              />
-            ))}
-          </svg>
+          <NodeMapRelationshipHitLines
+            worldWidth={WORLD_W}
+            worldHeight={WORLD_H}
+            paths={connectionPaths}
+            viewportRef={viewportRef}
+            suppressNextRelationshipLineClickRef={suppressNextRelationshipLineClickRef}
+            onStartMultiSelect={startNodeMapMultiSelect}
+            onDeleteRelationships={(relationshipIDs) => {
+              void deleteRelationships(relationshipIDs);
+            }}
+            onSetCanvasActive={setCanvasActive}
+            onSetContextMenu={setContextMenu}
+            onSetNodeContextMenu={setNodeContextMenu}
+            onSetRelationshipContextMenu={setRelationshipContextMenu}
+            onSetRelationshipDraft={setRelationshipDraft}
+            onSetError={setError}
+            onSetSelectedNodeID={setSelectedNodeID}
+            onSetSelectedNodeIDs={setSelectedNodeIDs}
+            onSetSelectedRelationshipIDs={setSelectedRelationshipIDs}
+          />
 
-          {visibleNodes.map((node) => {
-            const position = nodePositions[node.node_id] ?? { x: 120, y: 120 };
-            const size = nodeSizes[node.node_id] ?? { w: NODE_W, h: NODE_H };
-            const isSelected = selectedNodeIDs.has(node.node_id);
-            const isPrimary = node.node_id === selectedNodeID;
-
-            return (
-              <div
-                key={node.node_id}
-                data-node-card="true"
-                style={{
-                  position: "absolute",
-                  left: position.x,
-                  top: position.y,
-                  width: size.w,
-                  height: size.h,
-                  borderRadius: 8,
-                  border: `1px solid ${isSelected ? SELECTION_CYAN : nodeCardBorder}`,
-                  background: isSelected ? nodeCardSelectedBackground : nodeCardBackground,
-                  outline: isSelected ? `2px solid ${SELECTION_CYAN}` : "none",
-                  outlineOffset: isSelected ? 1 : 0,
-                  display: "grid",
-                  gridTemplateRows: "1fr",
-                  boxShadow: isSelected ? "0 0 0 3px rgba(0,233,255,0.35), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
-                  userSelect: "none",
-                  color: nodeCardText,
-                  cursor: editingNodeTitleNodeID === node.node_id ? "text" : (dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab"),
-                  zIndex: isPrimary ? 5 : 4,
-                  overflow: "visible",
-                }}
-                onDoubleClick={(event) => {
-                  event.stopPropagation();
-                  // legacy details popup removed
-                }}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setCanvasActive(true);
-                  setSelectedRelationshipIDs(new Set());
-                  setRelationshipContextMenu(null);
-                  const bounds = viewportRef.current?.getBoundingClientRect();
-                  if (!bounds) return;
-                  const nextIDs = selectedNodeIDs.has(node.node_id) ? Array.from(selectedNodeIDs) : [node.node_id];
-                  setSelectedNodeID(node.node_id);
-                  setSelectedNodeIDs(new Set(nextIDs));
-                  setContextMenu(null);
-                  setNodeContextMenu({
-                    x: clamp(event.clientX - bounds.left, 0, bounds.width),
-                    y: clamp(event.clientY - bounds.top, 0, bounds.height),
-                    nodeID: node.node_id,
-                  });
-                }}
-                onPointerDown={(event) => {
-                  if (event.button !== 0) return;
-                  event.stopPropagation();
-                  if (event.ctrlKey || event.shiftKey) {
-                    event.preventDefault();
-                    const nextSelection = resolveNodeMapPointerSelection({ selectedNodeIDs, nodeID: node.node_id, additive: true });
-                    setSelectedNodeIDs(nextSelection.selectedNodeIDs);
-                    setSelectedNodeID(nextSelection.selectedNodeID);
-                    return;
-                  }
-                  setContextMenu(null);
-                  setNodeContextMenu(null);
-                  setRelationshipContextMenu(null);
-                  setSelectedRelationshipIDs(new Set());
-                  const bounds = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
-
-                  const nextSelection = resolveNodeMapDragStartSelection({ selectedNodeIDs, selectedNodeID, nodeID: node.node_id });
-                  const nextIDs = nextSelection.dragNodeIDs;
-                  setSelectedNodeID(nextSelection.selectedNodeID);
-                  setSelectedNodeIDs(nextSelection.selectedNodeIDs);
-
-                  const offsets: Record<string, { x: number; y: number }> = {};
-                  for (const id of nextIDs) {
-                    const pos = nodePositions[id] ?? { x: 0, y: 0 };
-                    const pointerWorldX = (event.clientX - bounds.left) / zoom + position.x;
-                    const pointerWorldY = (event.clientY - bounds.top) / zoom + position.y;
-                    offsets[id] = { x: pointerWorldX - pos.x, y: pointerWorldY - pos.y };
-                  }
-                  setDragState({
-                    nodeIDs: nextIDs,
-                    pointerID: event.pointerId,
-                    offsets,
-                    startMouseX: event.clientX,
-                    startMouseY: event.clientY,
-                    clearSelectionOnClick: nextSelection.clearSelectionOnClick,
-                  });
-                }}
-              >
-                <div
-                  style={{
-                    display: "grid",
-                    placeItems: "center",
-                    width: "100%",
-                    height: "100%",
-                    textAlign: "center",
-                    padding: "10px",
-                  }}
-                >
-                  {/* Latency-obsession alignment: keep node-card render minimal.
-                      We only render the title so no extra metadata fetch/render churn appears on the hot canvas path. */}
-                  {editingNodeTitleNodeID === node.node_id ? (
-                    <div
-                      ref={editingNodeTitleElementRef}
-                      contentEditable
-                      suppressContentEditableWarning
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onInput={(event) => {
-                        editingNodeTitleDraftRef.current = event.currentTarget.textContent ?? "";
-                      }}
-                      onBlur={() => {
-                        void updateNodeTitle(node.node_id, editingNodeTitleDraftRef.current);
-                        setEditingNodeTitleNodeID(null);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void updateNodeTitle(node.node_id, editingNodeTitleDraftRef.current);
-                          setEditingNodeTitleNodeID(null);
-                        }
-                        if (event.key === "Escape") {
-                          event.preventDefault();
-                          if (editingNodeTitleElementRef.current) editingNodeTitleElementRef.current.textContent = getNodeTitle(node);
-                          setEditingNodeTitleNodeID(null);
-                        }
-                      }}
-                      /*
-                        Gold-standard inline edit behavior: keep exact read-mode typography and box
-                        metrics so only the caret appears when entering title edit mode.
-                      */
-                      style={{
-                        whiteSpace: "normal",
-                        overflowWrap: "anywhere",
-                        wordBreak: "break-word",
-                        overflow: "hidden",
-                        width: "100%",
-                        maxWidth: "100%",
-                        textOverflow: "ellipsis",
-                        display: "-webkit-box",
-                        WebkitLineClamp: 3,
-                        WebkitBoxOrient: "vertical",
-                        cursor: "text",
-                        textAlign: "center",
-                        fontSize: 18,
-                        fontWeight: 800,
-                        lineHeight: 1.15,
-                        letterSpacing: "0.03em",
-                        fontFamily: "'IBM Plex Mono', monospace",
-                        outline: "none",
-                      }}
-                    >
-                      {getNodeTitle(node)}
-                    </div>
-                  ) : (
-                    <div
-                      style={{
-                        whiteSpace: "normal",
-                        overflowWrap: "anywhere",
-                        wordBreak: "break-word",
-                        overflow: "hidden",
-                        maxWidth: "100%",
-                        textOverflow: "ellipsis",
-                        display: "-webkit-box",
-                        WebkitLineClamp: 3,
-                        WebkitBoxOrient: "vertical",
-                        fontSize: 18,
-                        fontWeight: 800,
-                        lineHeight: 1.15,
-                        letterSpacing: "0.03em",
-                        fontFamily: "'IBM Plex Mono', monospace",
-                      }}
-                    >
-                      {getNodeTitle(node)}
-                    </div>
-                  )}
-                </div>
-                {isSelected && (
-                  <div style={{ position: "absolute", top: 6, right: 6, width: 12, height: 12, borderRadius: 999, background: SELECTION_CYAN, opacity: 0.92 }} />
-                )}
-
-                {([
-                  ["left", { left: -12, top: "50%", transform: "translate(-50%, -50%)", flexDirection: "column" }],
-                  ["right", { right: -12, top: "50%", transform: "translate(50%, -50%)", flexDirection: "column" }],
-                  ["top", { top: -12, left: "50%", transform: "translate(-50%, -50%)", flexDirection: "row" }],
-                  ["bottom", { bottom: -12, left: "50%", transform: "translate(-50%, 50%)", flexDirection: "row" }],
-                ] as const).map(([direction, sideStyle]) => {
-                  const isDrafting = !!relationshipDraft;
-                  const isSource = relationshipDraft?.sourceNodeID === node.node_id && relationshipDraft.sourceSide === direction;
-                  return (
-                    <div
-                      key={direction}
-                      style={{
-                        position: "absolute",
-                        ...sideStyle,
-                        display: isPrimary || isDrafting ? "flex" : "none",
-                        gap: 4,
-                      }}
-                    >
-                      <button
-                        title={`Create ${direction} node`}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setError("");
-                          setRelationshipDraft(null);
-                          void createLinkedNode(node.node_id, direction);
-                        }}
-                        style={{
-                          width: 20,
-                          height: 20,
-                          borderRadius: 4,
-                          border: `1px solid ${accent}`,
-                          background: panelSurface,
-                          color: accent,
-                          display: isDrafting ? "none" : "grid",
-                          placeItems: "center",
-                          fontSize: 14,
-                          lineHeight: 1,
-                          cursor: "pointer",
-                          padding: 0,
-                        }}
-                      >
-                        +
-                      </button>
-                      <button
-                        title={isDrafting ? `Attach relationship on ${direction}` : `Create relationship from ${direction}`}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setError("");
-                          if (relationshipDraft) {
-                            if (relationshipDraft.sourceNodeID === node.node_id) return;
-                            if (!isLegalRelationshipSidePair(relationshipDraft.sourceSide, direction)) {
-                              setError("illegal_relationship_pair");
-                              return;
-                            }
-                            void commitRelationshipBetweenNodes(relationshipDraft.sourceNodeID, relationshipDraft.sourceSide, node.node_id, direction);
-                            setRelationshipDraft(null);
-                            return;
-                          }
-                          const start = getAnchorPoint(node.node_id, direction);
-                          if (!start) return;
-                          setSelectedRelationshipIDs(new Set());
-                          setRelationshipDraft({ sourceNodeID: node.node_id, sourceSide: direction, cursor: start });
-                        }}
-                        style={{
-                          width: 20,
-                          height: 20,
-                          borderRadius: 4,
-                          border: `1px solid ${accent}`,
-                          background: isSource ? accent : panelSurface,
-                          color: isSource ? "#ffffff" : accent,
-                          display: "grid",
-                          placeItems: "center",
-                          cursor: relationshipDraft?.sourceNodeID === node.node_id || (relationshipDraft && !isLegalRelationshipSidePair(relationshipDraft.sourceSide, direction)) ? "not-allowed" : "pointer",
-                          opacity: relationshipDraft && !isLegalRelationshipSidePair(relationshipDraft.sourceSide, direction) ? 0.35 : 1,
-                          padding: 0,
-                        }}
-                      >
-                        {isDrafting ? (
-                          <svg aria-hidden="true" width="12" height="13" viewBox="0 0 17 19" style={{ display: "block" }}>
-                            <polygon points="8.5,1.5 15.5,5.5 15.5,13.5 8.5,17.5 1.5,13.5 1.5,5.5" fill="none" stroke={isSource ? "#ffffff" : accent} strokeWidth="1.8" />
-                          </svg>
-                        ) : (direction === "top" ? "↑" : direction === "right" ? "→" : direction === "bottom" ? "↓" : "←")}
-                      </button>
-                    </div>
-                  );
-                })}
-                {[
-                  { key: "tl", edges: { left: true, top: true }, cursor: "nwse-resize", style: { left: -6, top: -6, width: 12, height: 12 } },
-                  { key: "tr", edges: { right: true, top: true }, cursor: "nesw-resize", style: { right: -6, top: -6, width: 12, height: 12 } },
-                  { key: "bl", edges: { left: true, bottom: true }, cursor: "nesw-resize", style: { left: -6, bottom: -6, width: 12, height: 12 } },
-                  { key: "br", edges: { right: true, bottom: true }, cursor: "nwse-resize", style: { right: -6, bottom: -6, width: 12, height: 12 } },
-                  { key: "l", edges: { left: true }, cursor: "ew-resize", style: { left: -4, top: 12, bottom: 12, width: 8 } },
-                  { key: "r", edges: { right: true }, cursor: "ew-resize", style: { right: -4, top: 12, bottom: 12, width: 8 } },
-                  { key: "t", edges: { top: true }, cursor: "ns-resize", style: { top: -4, left: 12, right: 12, height: 8 } },
-                  { key: "b", edges: { bottom: true }, cursor: "ns-resize", style: { bottom: -4, left: 12, right: 12, height: 8 } },
-                ].map((handle) => (
-                  <div
-                    key={handle.key}
-                    onPointerDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setDragState(null);
-                      setNodeResizeState({
-                        nodeID: node.node_id,
-                        pointerID: event.pointerId,
-                        startMouseX: event.clientX,
-                        startMouseY: event.clientY,
-                        startX: position.x,
-                        startY: position.y,
-                        startW: size.w,
-                        startH: size.h,
-                        edges: handle.edges,
-                      });
-                    }}
-                    style={{ position: "absolute", ...handle.style, cursor: handle.cursor, zIndex: 9 }}
-                  />
-                ))}
-              </div>
-            );
-          })}
+          {visibleNodes.map((node) => (
+            <NodeMapNodeCard
+              key={node.node_id}
+              node={node}
+              position={nodePositions[node.node_id] ?? { x: 120, y: 120 }}
+              size={nodeSizes[node.node_id] ?? { w: NODE_W, h: NODE_H }}
+              selectedNodeID={selectedNodeID}
+              selectedNodeIDs={selectedNodeIDs}
+              editingNodeTitleNodeID={editingNodeTitleNodeID}
+              editingNodeTitleElementRef={editingNodeTitleElementRef}
+              editingNodeTitleDraftRef={editingNodeTitleDraftRef}
+              dragState={dragState}
+              relationshipDraft={relationshipDraft}
+              nodePositions={nodePositions}
+              zoom={zoom}
+              accent={accent}
+              panelSurface={panelSurface}
+              nodeCardBackground={nodeCardBackground}
+              nodeCardSelectedBackground={nodeCardSelectedBackground}
+              nodeCardBorder={nodeCardBorder}
+              nodeCardText={nodeCardText}
+              selectionColor={SELECTION_CYAN}
+              onSetCanvasActive={setCanvasActive}
+              onSetContextMenu={setContextMenu}
+              onSetNodeContextMenu={setNodeContextMenu}
+              onSetRelationshipContextMenu={setRelationshipContextMenu}
+              onSetSelectedRelationshipIDs={setSelectedRelationshipIDs}
+              onSetSelectedNodeID={setSelectedNodeID}
+              onSetSelectedNodeIDs={setSelectedNodeIDs}
+              onSetDragState={setDragState}
+              onSetRelationshipDraft={setRelationshipDraft}
+              onSetEditingNodeTitleNodeID={setEditingNodeTitleNodeID}
+              onSetError={setError}
+              onCreateLinkedNode={createLinkedNode}
+              onCommitRelationshipBetweenNodes={commitRelationshipBetweenNodes}
+              onUpdateNodeTitle={updateNodeTitle}
+              onGetAnchorPoint={getAnchorPoint}
+              onStartResize={(nodeID, pointerID, startMouseX, startMouseY, startX, startY, startW, startH, edges) => {
+                setNodeResizeState({
+                  nodeID,
+                  pointerID,
+                  startMouseX,
+                  startMouseY,
+                  startX,
+                  startY,
+                  startW,
+                  startH,
+                  edges,
+                });
+              }}
+            />
+          ))}
         </div>
 
         {selectionBox.active && (
@@ -1945,270 +1249,62 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           />
         )}
 
-        {contextMenu && (
-          <div
-            style={{
-              position: "absolute",
-              left: contextMenu.x,
-              top: contextMenu.y,
-              background: panelSurface,
-              border: `1px solid ${accent}`,
-              borderRadius: 8,
-              padding: 8,
-              width: 232,
-              boxSizing: "border-box",
-              display: "grid",
-              gap: 0,
-              zIndex: 40,
-              boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <button
-              style={{
-                width: "100%",
-                border: "1px solid rgba(0,0,0,0.16)",
-                background: panelSubtleSurface,
-                cursor: "pointer",
-                fontSize: 11,
-                fontWeight: 700,
-                padding: "7px 8px",
-                textAlign: "left",
-                color: panelText,
-                borderRadius: 0,
-              }}
-              onClick={() => {
-                const title = trimOrEmpty(newNodeTitle) || "new node";
-                void createNode(title, { x: contextMenu.worldX, y: contextMenu.worldY });
-                if (!trimOrEmpty(newNodeTitle)) setNewNodeTitle("");
-                setContextMenu(null);
-              }}
-            >
-              Create new node
-            </button>
-            <button
-              style={{
-                width: "100%",
-                border: "1px solid rgba(0,0,0,0.16)",
-                background: panelSubtleSurface,
-                cursor: "pointer",
-                fontSize: 11,
-                fontWeight: 700,
-                padding: "7px 8px",
-                textAlign: "left",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 6,
-                color: panelText,
-                borderRadius: 0,
-              }}
-              onClick={() => setRelationshipColorsEnabled((previous) => !previous)}
-            >
-              <span>Enable relationship colors</span>
-              <span
-                aria-hidden="true"
-                style={{
-                  width: 28,
-                  height: 18,
-                  borderRadius: 999,
-                  background: relationshipColorsEnabled ? "#34c759" : "#b7c0c7",
-                  boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.12)",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: relationshipColorsEnabled ? "flex-end" : "flex-start",
-                  padding: 2,
-                  boxSizing: "border-box",
-                  flexShrink: 0,
-                  transition: "background 120ms ease",
-                }}
-              >
-                <span
-                  style={{
-                    width: 14,
-                    height: 14,
-                    borderRadius: "50%",
-                    background: panelSurface,
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
-                  }}
-                />
-              </span>
-            </button>
-            <div
-              style={{
-                display: "grid",
-                marginLeft: 16,
-                gap: 0,
-                opacity: relationshipColorsEnabled ? 1 : 0.68,
-              }}
-            >
-              {([
-                ["Parent", "parent"],
-                ["Peer", "peer"],
-                ["Child", "child"],
-              ] as const).map(([label, key], index) => (
-                <label
-                  key={key}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr auto",
-                    alignItems: "center",
-                    columnGap: 8,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    padding: "6px 8px",
-                    border: "1px solid rgba(0,0,0,0.16)",
-                    borderTop: index === 0 ? "1px solid rgba(0,0,0,0.16)" : "0",
-                    borderRadius: 0,
-                    background: panelSubtleSurface,
-                  }}
-                >
-                  <span>{label}</span>
-                  <input
-                    type="color"
-                    value={relationshipRoleColors[key]}
-                    onChange={(event) => setRelationshipRoleColors((previous) => ({ ...previous, [key]: event.target.value }))}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {nodeContextMenu && (
-          <div
-            style={{
-              position: "absolute",
-              left: nodeContextMenu.x,
-              top: nodeContextMenu.y,
-              transform: "translate(8px, 8px)",
-              background: panelSurface,
-              border: `1px solid ${accent}`,
-              borderRadius: 8,
-              padding: 4,
-              zIndex: 41,
-              boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
-              display: "grid",
-              gap: 2,
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <button style={contextMenuButtonStyle} onClick={() => {
-              const ids = selectedNodeIDs.has(nodeContextMenu.nodeID) ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID];
-              requestFindNodesOnCompanyExplorer(ids);
-              setNodeContextMenu(null);
-            }}>
-              Find on Company Explorer
-            </button>
-            <button style={contextMenuButtonStyle} onClick={() => {
-              const current = nodes.find((node) => node.node_id === nodeContextMenu.nodeID);
-              editingNodeTitleDraftRef.current = current ? getNodeTitle(current) : "new node";
-              setEditingNodeTitleNodeID(nodeContextMenu.nodeID);
-              setNodeContextMenu(null);
-            }}>
-              Rename node
-            </button>
-            <button style={contextMenuDangerButtonStyle} onClick={() => { const ids = selectedNodeIDs.size > 0 ? Array.from(selectedNodeIDs) : [nodeContextMenu.nodeID]; setConfirmDelete({ nodeIDs: ids, relationshipIDs: [] }); setNodeContextMenu(null); }}>
-              Delete node
-            </button>
-          </div>
-        )}
-
-        {relationshipContextMenu && (
-          <div
-            style={{
-              position: "absolute",
-              left: relationshipContextMenu.x,
-              top: relationshipContextMenu.y,
-              transform: "translate(8px, 8px)",
-              background: panelSurface,
-              border: `1px solid ${accent}`,
-              borderRadius: 8,
-              padding: 4,
-              zIndex: 41,
-              boxShadow: "0 8px 22px rgba(0,0,0,0.16)",
-              display: "grid",
-              gap: 2,
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <button
-              style={contextMenuDangerButtonStyle}
-              onClick={() => {
-                const relationshipIDs = selectedRelationshipIDs.has(relationshipContextMenu.relationshipID)
-                  ? Array.from(selectedRelationshipIDs)
-                  : [relationshipContextMenu.relationshipID];
-                void deleteRelationships(relationshipIDs);
-                setRelationshipContextMenu(null);
-              }}
-            >
-              Delete relationship{selectedRelationshipIDs.size > 1 ? "s" : ""}
-            </button>
-          </div>
-        )}
-
-
-
-        {selectedNodeIDs.size > 1 && !selectionBox.active && (
-          <div
-            style={{
-              position: "absolute",
-              bottom: 10,
-              left: 10,
-              zIndex: 30,
-              background: "rgba(0,0,0,0.75)",
-              color: "#fff",
-              padding: "4px 8px",
-              borderRadius: 6,
-              fontSize: 10,
-            }}
-          >
-            Group selected: {selectedNodeIDs.size}
-          </div>
-        )}
-
-        {(statusMessage || error) && (
-          <div
-            style={{
-              position: "absolute",
-              bottom: selectedNodeIDs.size > 1 && !selectionBox.active ? 40 : 10,
-              left: 10,
-              zIndex: 31,
-              maxWidth: 420,
-              borderRadius: 8,
-              padding: "6px 8px",
-              fontSize: 11,
-              fontFamily: "'JetBrains Mono', monospace",
-              background: error ? "rgba(178, 0, 32, 0.9)" : "rgba(0, 0, 0, 0.78)",
-              color: "#ffffff",
-              boxShadow: "0 6px 18px rgba(0,0,0,0.22)",
-            }}
-          >
-            {error ? `Error: ${error}` : statusMessage}
-          </div>
-        )}
-
-        {confirmDelete && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-            <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: panelSurface, color: panelText, padding: 12, display: "grid", gap: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700 }}>
-                Are you sure you want to delete {confirmDelete.nodeIDs.length} node{confirmDelete.nodeIDs.length === 1 ? "" : "s"}
-                {confirmDelete.relationshipIDs.length > 0 ? ` and ${confirmDelete.relationshipIDs.length} relationship line${confirmDelete.relationshipIDs.length === 1 ? "" : "s"}` : ""}?
-              </div>
-              <div style={{ fontSize: 11, lineHeight: 1.35, color: panelMutedText }}>
-                This removes the selected node data immediately. Use Undo (Ctrl/Cmd + Z) if this was accidental.
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <button onClick={() => {
-                  if (confirmDelete.relationshipIDs.length > 0) void deleteRelationships(confirmDelete.relationshipIDs);
-                  if (confirmDelete.nodeIDs.length > 0) void deleteNodes(confirmDelete.nodeIDs);
-                  setConfirmDelete(null);
-                }} style={{ border: "1px solid rgba(0,233,255,0.45)", background: dialogButtonBackground, color: dialogPrimaryButtonText, cursor: "pointer", fontWeight: 700 }}>Yes</button>
-                <button onClick={() => setConfirmDelete(null)} style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: dialogCancelButtonText, background: dialogButtonBackground, cursor: "pointer", fontWeight: 700 }}>No</button>
-              </div>
-            </div>
-          </div>
-        )}
+        <NodeMapContextMenus
+          contextMenu={contextMenu}
+          nodeContextMenu={nodeContextMenu}
+          relationshipContextMenu={relationshipContextMenu}
+          confirmDelete={confirmDelete}
+          accent={accent}
+          panelSurface={panelSurface}
+          panelSubtleSurface={panelSubtleSurface}
+          panelText={panelText}
+          panelMutedText={panelMutedText}
+          dialogButtonBackground={dialogButtonBackground}
+          dialogPrimaryButtonText={dialogPrimaryButtonText}
+          dialogCancelButtonText={dialogCancelButtonText}
+          relationshipColorsEnabled={relationshipColorsEnabled}
+          relationshipRoleColors={relationshipRoleColors}
+          selectedNodeIDs={selectedNodeIDs}
+          selectedRelationshipIDs={selectedRelationshipIDs}
+          contextMenuButtonStyle={contextMenuButtonStyle}
+          contextMenuDangerButtonStyle={contextMenuDangerButtonStyle}
+          selectionBoxActive={selectionBox.active}
+          statusMessage={statusMessage}
+          error={error}
+          onCreateNodeAtContext={(worldX, worldY) => {
+            const title = trimOrEmpty(newNodeTitle) || "new node";
+            void createNode(title, { x: worldX, y: worldY });
+            if (!trimOrEmpty(newNodeTitle)) setNewNodeTitle("");
+            setContextMenu(null);
+          }}
+          onToggleRelationshipColors={() => setRelationshipColorsEnabled((previous) => !previous)}
+          onRelationshipRoleColorChange={(role, color) => setRelationshipRoleColors((previous) => ({ ...previous, [role]: color }))}
+          onFindNodeSelection={(nodeID) => {
+            const ids = selectedNodeIDs.has(nodeID) ? Array.from(selectedNodeIDs) : [nodeID];
+            requestFindNodesOnCompanyExplorer(ids);
+            setNodeContextMenu(null);
+          }}
+          onRenameNode={(nodeID) => {
+            const current = nodes.find((node) => node.node_id === nodeID);
+            editingNodeTitleDraftRef.current = current ? getNodeTitle(current) : "new node";
+            setEditingNodeTitleNodeID(nodeID);
+            setNodeContextMenu(null);
+          }}
+          onRequestDeleteNodes={(nodeIDs) => {
+            setConfirmDelete({ nodeIDs, relationshipIDs: [] });
+            setNodeContextMenu(null);
+          }}
+          onDeleteRelationships={(relationshipIDs) => {
+            void deleteRelationships(relationshipIDs);
+            setRelationshipContextMenu(null);
+          }}
+          onConfirmDelete={() => {
+            if (confirmDelete?.relationshipIDs.length) void deleteRelationships(confirmDelete.relationshipIDs);
+            if (confirmDelete?.nodeIDs.length) void deleteNodes(confirmDelete.nodeIDs);
+            setConfirmDelete(null);
+          }}
+          onCancelDelete={() => setConfirmDelete(null)}
+        />
       </div>
     </div>
   );

@@ -104,6 +104,24 @@ Payload:
 
 `cardID` is kept for old single-card payload compatibility. `cardIDs` is the selected-card batch and is moved together in visual order.
 
+## Command Boundary
+Durable Kanban workflows that used to live directly in `KanbanContent.tsx` now route through `frontend/src/modules/kanban/kanbanCommands.ts`.
+
+The command file is the shared action boundary for:
+- creating a column with the default layout contract,
+- renaming, resizing, recoloring, deleting, and reordering columns,
+- moving one or more selected cards with the same sparse-position plan as drag/drop,
+- adding Explorer node rows to a column through idempotent card upserts,
+- deleting one or more board cards.
+
+The UI still owns visual state, selection authority, confirmation modals, drag state, and optimistic rendering. The command layer owns API call shape, request de-duping, bounded write plans, and injectable API clients for Node-based tests or future headless callers.
+
+Headless agents should use the same endpoint semantics:
+- create or update columns through the column endpoints,
+- compute sparse card or column positions before writing,
+- use `POST /v1/kanban/cards` for idempotent node card placement,
+- page reads through the existing board/column/card list endpoints instead of loading company-wide card sets.
+
 ## Backend/API Contract
 Kanban board is API-first so future agents can operate boards without rendering React.
 
