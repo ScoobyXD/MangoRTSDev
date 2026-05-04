@@ -5,6 +5,12 @@ import (
 )
 
 const KanbanMaxCardsLimit = 500
+const KanbanMaxBoardsLimit = 200
+
+type KanbanBoardQuery struct {
+	AfterPosition int
+	Limit         int
+}
 
 type KanbanCardQuery struct {
 	ColumnID      string
@@ -28,6 +34,16 @@ type KanbanCardMoveInput struct {
 	CardID    string
 	ColumnID  string
 	Position  int
+}
+
+func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {
+	if query.AfterPosition < 0 {
+		query.AfterPosition = 0
+	}
+	if query.Limit <= 0 || query.Limit > KanbanMaxBoardsLimit {
+		query.Limit = 100
+	}
+	return query
 }
 
 func NormalizeKanbanCardQuery(query KanbanCardQuery) KanbanCardQuery {

@@ -2,13 +2,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveDirectLinkedTargets } from "../linkingGraph";
 import { emitDashboardEvent, EVENT_EXPLORER_CONTEXT_UPDATED } from "../node-map/eventbus";
-import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
-import { createKanbanColumn, deleteKanbanCard, deleteKanbanColumn, listKanbanCards, listKanbanColumns, moveKanbanCard, updateKanbanColumn, upsertKanbanCard } from "./kanbanApi";
+import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
+import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
+import { createKanbanBoard, createKanbanColumn, deleteKanbanCard, deleteKanbanColumn, listKanbanBoards, listKanbanCards, listKanbanColumns, moveKanbanCard, updateKanbanColumn, upsertKanbanCard } from "./kanbanApi";
 import {
   EXPLORER_ENTITY_DRAG_MIME,
   KANBAN_CARD_DRAG_MIME,
   KANBAN_COLUMN_DRAG_MIME,
   KANBAN_COLUMN_TITLE_TEXT_TRANSFORM,
+  KANBAN_DEFAULT_BOARD_TITLE,
   KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
   KANBAN_DEFAULT_COLUMN_WIDTH_PX,
   KANBAN_MODULE_TOP_CLEARANCE_PX,
@@ -20,6 +22,8 @@ import {
   clampColumnWidth,
   getColumnHeight,
   getColumnWidth,
+  getKanbanBoardDisplayTitle,
+  getKanbanCardColorRailStyle,
   getKanbanConditionalColor,
   getOrderedKanbanCardIDs,
   groupCardsByColumn,
@@ -31,6 +35,8 @@ import {
   parseKanbanCardDragPayload,
   parseKanbanColumnDragPayload,
   sortColumns,
+  sortKanbanBoards,
+  type KanbanBoard,
   type KanbanCard,
   type KanbanCardDropPlacement,
   type KanbanColumn,
@@ -136,11 +142,16 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
 export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
-  const boardID = widgetId?.trim() ? widgetId : "global-kanban";
+  const frameBoardID = widgetId?.trim() ? widgetId : "global-kanban";
+  const [activeBoardID, setActiveBoardID] = useState(frameBoardID);
+  const [activeTab, setActiveTab] = useState<"board" | "boards">("board");
+  const [boards, setBoards] = useState<KanbanBoard[]>([]);
+  const [boardsLoading, setBoardsLoading] = useState(false);
   const [columns, setColumns] = useState<KanbanColumn[]>([]);
   const [cards, setCards] = useState<KanbanCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const boardID = activeBoardID;
   const [highlightedEntity, setHighlightedEntity] = useState<HighlightedEntity>(() => readLinkedExplorerSelection(companyID, boardID));
   const [editingColumnID, setEditingColumnID] = useState("");
   const [draggingColumnID, setDraggingColumnID] = useState("");
@@ -165,9 +176,67 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const laneShadow = isDark ? "none" : "0 4px 12px rgba(16,24,40,0.08)";
   const cardBackground = isDark ? "#101418" : "#ffffff";
 
+  useEffect(() => {
+    setActiveBoardID(frameBoardID);
+  }, [frameBoardID]);
+
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
   const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, normalizeKanbanColumnItemColor(column.item_color)])), [orderedColumns]);
   const cardsByColumn = useMemo(() => groupCardsByColumn(cards), [cards]);
+  const orderedBoards = useMemo(() => sortKanbanBoards(boards), [boards]);
+  const activeBoard = useMemo(() => orderedBoards.find((board) => board.board_id === boardID) ?? null, [boardID, orderedBoards]);
+  const activeBoardTitle = activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : KANBAN_DEFAULT_BOARD_TITLE;
+  const boardRows = useMemo<KanbanBoard[]>(() => {
+    if (activeBoard) return orderedBoards;
+    return [{
+      company_id: companyID,
+      board_id: boardID,
+      title: `${KANBAN_DEFAULT_BOARD_TITLE} (unsaved)`,
+      position: 0,
+      created_timestamp: "",
+      updated_timestamp: "",
+    }, ...orderedBoards];
+  }, [activeBoard, boardID, companyID, orderedBoards]);
+
+  const refreshBoards = useCallback(async () => {
+    setBoardsLoading(true);
+    try {
+      const nextBoards = await listKanbanBoards(apiBase, companyID, 100);
+      setBoards(sortKanbanBoards(nextBoards));
+    } catch {
+      setError("Kanban board list API unavailable");
+    } finally {
+      setBoardsLoading(false);
+    }
+  }, [apiBase, companyID]);
+
+  const saveCurrentBoardView = useCallback(async () => {
+    setError("");
+    try {
+      const title = activeBoard?.title || KANBAN_DEFAULT_BOARD_TITLE;
+      const saved = await createKanbanBoard(apiBase, companyID, title, boardID);
+      setBoards((previous) => sortKanbanBoards([
+        ...previous.filter((board) => board.board_id !== saved.board_id),
+        saved,
+      ]));
+    } catch {
+      setError("Kanban board save failed");
+    }
+  }, [activeBoard?.title, apiBase, boardID, companyID]);
+
+  const createNewBoardView = useCallback(async () => {
+    setError("");
+    try {
+      const created = await createKanbanBoard(apiBase, companyID, "New Kanban board");
+      setBoards((previous) => sortKanbanBoards([...previous, created]));
+      setSelectedCardIDs(new Set());
+      setSelectionAnchorCardID("");
+      setActiveBoardID(created.board_id);
+      setActiveTab("board");
+    } catch {
+      setError("Kanban board create failed");
+    }
+  }, [apiBase, companyID]);
 
   const clearCardSelection = useCallback(() => {
     setSelectedCardIDs(new Set());
@@ -196,6 +265,31 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   useEffect(() => {
     refreshBoard();
   }, [refreshBoard]);
+
+  useEffect(() => {
+    refreshBoards();
+  }, [refreshBoards]);
+
+  const syncCardTitlesFromNodeGraph = useCallback(() => {
+    const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+    const titleByNodeID = new Map((snapshot.nodes ?? []).map((node) => [node.node_id, getNodeTitle(node)]));
+    if (titleByNodeID.size === 0) return;
+    setCards((previous) => {
+      let changed = false;
+      const next = previous.map((card) => {
+        const title = titleByNodeID.get(card.node_id);
+        if (!title || title === card.node_title) return card;
+        changed = true;
+        return { ...card, node_title: title };
+      });
+      return changed ? next : previous;
+    });
+  }, [apiBase, companyID]);
+
+  useEffect(() => {
+    syncCardTitlesFromNodeGraph();
+    return subscribeNodeRelationshipGraph(apiBase, companyID, syncCardTitlesFromNodeGraph);
+  }, [apiBase, companyID, syncCardTitlesFromNodeGraph]);
 
   useEffect(() => {
     const refreshSelection = () => setHighlightedEntity(readLinkedExplorerSelection(companyID, boardID));
@@ -231,10 +325,11 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       );
       setColumns((previous) => [...previous, column].sort((a, b) => a.position - b.position));
       setEditingColumnID(column.column_id);
+      void refreshBoards();
     } catch {
       setError("Column create failed");
     }
-  }, [apiBase, boardID, columns, companyID]);
+  }, [apiBase, boardID, columns, companyID, refreshBoards]);
 
   const commitColumnTitle = useCallback(async (columnID: string, title: string) => {
     const cleanTitle = title.trim();
@@ -589,14 +684,15 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           void reorderCards(cardPayload.cardIDs, card.column_id, card.card_id, cardDropPlacement(event));
         }}
         style={{
+          position: "relative",
           border: `1px solid ${selected ? color : (highlighted ? accent : line)}`,
-          borderLeft: `5px solid ${color}`,
           background: cardBackground,
           color: text,
-          padding: "8px 9px",
+          padding: "8px 9px 8px 13px",
           minHeight: 58,
           cursor: "grab",
           outline: "none",
+          overflow: "hidden",
           boxShadow: [
             selected ? `0 0 0 1px ${color}, 0 0 12px ${hexToRgba(color, 0.28)}, inset 0 0 0 1px ${hexToRgba(color, 0.16)}` : "",
             highlighted && !selected ? `0 0 0 1px ${accent} inset` : "",
@@ -605,6 +701,8 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           ].filter(Boolean).join(", ") || undefined,
         }}
       >
+        {/* The color rail is a separate layer so selection border changes cannot erase it. */}
+        <span aria-hidden="true" style={getKanbanCardColorRailStyle(color)} />
         <div style={{ display: "grid", gridTemplateColumns: "16px minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
           <span title="Node" style={{ width: 16, height: 16, marginTop: 1, display: "grid", placeItems: "center" }}>
             <NodeDocumentIcon color={color} />
@@ -630,7 +728,72 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       style={{ position: "relative", width: "100%", height: "100%", boxSizing: "border-box", paddingTop: KANBAN_MODULE_TOP_CLEARANCE_PX, background: surface, color: text, overflow: "hidden" }}
     >
       <div style={{ position: "absolute", top: KANBAN_MODULE_TOP_CLEARANCE_PX - 1, left: 0, right: 0, borderBottom: `1px solid ${line}`, pointerEvents: "none" }} />
-      <div style={{ height: "100%", overflow: "auto", padding: "12px 12px 14px", boxSizing: "border-box" }}>
+      <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "flex", alignItems: "center", gap: 6, paddingLeft: 106, zIndex: 3, pointerEvents: "auto" }}>
+        {(["board", "boards"] as const).map((tab) => {
+          const selected = activeTab === tab;
+          return (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => {
+                setActiveTab(tab);
+                if (tab === "boards") void refreshBoards();
+              }}
+              style={{ border: `1px solid ${selected ? accent : line}`, background: selected ? (isDark ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.98)") : (isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)"), color: text, fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 10px", borderRadius: 4, cursor: "pointer" }}
+            >
+              {tab === "board" ? "Board" : "Boards"}
+            </button>
+          );
+        })}
+        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: subtext, fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+          {activeBoardTitle}
+        </span>
+      </div>
+      {activeTab === "boards" && (
+        <section style={{ position: "absolute", top: KANBAN_MODULE_TOP_CLEARANCE_PX + 8, left: 12, width: "min(390px, calc(100% - 24px))", maxHeight: "calc(100% - 58px)", display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", border: `1px solid ${line}`, background: isDark ? "rgba(17,22,27,0.98)" : "rgba(255,255,255,0.98)", boxShadow: isDark ? "0 14px 30px rgba(0,0,0,0.36)" : "0 14px 30px rgba(16,24,40,0.16)", zIndex: 4 }}>
+          <div style={{ padding: "9px 10px", borderBottom: `1px solid ${line}`, fontSize: 10, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>
+            Saved Kanban Boards
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 8, borderBottom: `1px solid ${line}` }}>
+            <button type="button" onClick={() => void saveCurrentBoardView()} style={{ border: `1px solid ${accent}`, background: "transparent", color: text, cursor: "pointer", fontSize: 11, fontWeight: 800, padding: "6px 8px" }}>
+              Save current
+            </button>
+            <button type="button" onClick={() => void createNewBoardView()} style={{ border: `1px solid ${accent}`, background: "transparent", color: text, cursor: "pointer", fontSize: 11, fontWeight: 800, padding: "6px 8px" }}>
+              New board
+            </button>
+          </div>
+          <div className="company-explorer-scroll" style={{ overflowY: "auto", overflowX: "hidden", minHeight: 0, ["--company-explorer-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--company-explorer-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)" }}>
+            {boardsLoading && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>Loading boards...</div>}
+            {!boardsLoading && boardRows.length === 0 && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>No saved boards</div>}
+            {boardRows.map((board) => {
+              const selected = board.board_id === boardID;
+              return (
+                <button
+                  key={board.board_id}
+                  type="button"
+                  title={board.board_id}
+                  onClick={() => {
+                    setSelectedCardIDs(new Set());
+                    setSelectionAnchorCardID("");
+                    setActiveBoardID(board.board_id);
+                    setActiveTab("board");
+                  }}
+                  style={{ width: "100%", display: "grid", gridTemplateColumns: "18px minmax(0, 1fr)", alignItems: "center", gap: 7, minHeight: 30, padding: "5px 9px", border: "none", borderBottom: `1px solid ${isDark ? "rgba(255,255,255,0.08)" : "rgba(3,25,30,0.06)"}`, background: selected ? (isDark ? "rgba(0,233,255,0.2)" : "rgba(0, 233, 255, 0.28)") : "transparent", color: text, cursor: "pointer", textAlign: "left" }}
+                >
+                  <span aria-hidden="true" style={{ width: 14, height: 14, border: `1px solid ${accent}`, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, padding: 2 }}>
+                    <span style={{ background: accent, opacity: 0.8 }} />
+                    <span style={{ background: subtext, opacity: 0.55 }} />
+                  </span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 800 : 700 }}>
+                    {getKanbanBoardDisplayTitle(board)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+      <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#c62828", fontSize: 11, fontWeight: 700 }}>{error}</div>}
         {loading && <div style={{ color: subtext, fontSize: 12 }}>Loading board...</div>}
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX + 18, paddingBottom: 16 }}>

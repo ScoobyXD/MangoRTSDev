@@ -1,4 +1,4 @@
-import type { KanbanCard, KanbanColumn } from "./shared";
+import type { KanbanBoard, KanbanCard, KanbanColumn } from "./shared";
 
 type FetchJSONOptions = {
   method?: string;
@@ -30,6 +30,26 @@ export async function listKanbanColumns(apiBase: string, companyID: string, boar
   const params = query({ company_id: companyID, board_id: boardID });
   const payload = await fetchJSON<{ columns?: KanbanColumn[] }>(apiBase, `/v1/kanban/columns?${params}`);
   return payload.columns ?? [];
+}
+
+export async function listKanbanBoards(apiBase: string, companyID: string, limit = 100, afterPosition = 0): Promise<KanbanBoard[]> {
+  const params = query({ company_id: companyID, limit, after_position: afterPosition > 0 ? afterPosition : undefined });
+  const payload = await fetchJSON<{ boards?: KanbanBoard[] }>(apiBase, `/v1/kanban/boards?${params}`);
+  return payload.boards ?? [];
+}
+
+export async function createKanbanBoard(apiBase: string, companyID: string, title: string, boardID = "", position?: number): Promise<KanbanBoard> {
+  return fetchJSON<KanbanBoard>(apiBase, "/v1/kanban/boards", {
+    method: "POST",
+    body: { company_id: companyID, board_id: boardID, title, position },
+  });
+}
+
+export async function updateKanbanBoard(apiBase: string, companyID: string, boardID: string, title: string, position?: number): Promise<KanbanBoard> {
+  return fetchJSON<KanbanBoard>(apiBase, `/v1/kanban/boards/${encodeURIComponent(boardID)}`, {
+    method: "PUT",
+    body: { company_id: companyID, title, position },
+  });
 }
 
 export async function createKanbanColumn(apiBase: string, companyID: string, boardID: string, title: string, position?: number, widthPx?: number, heightPx?: number, itemColor?: string): Promise<KanbanColumn> {

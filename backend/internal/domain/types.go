@@ -136,6 +136,15 @@ type Operation struct {
 	EndTimestamp   *time.Time `json:"end_timestamp,omitempty"`
 }
 
+type KanbanBoard struct {
+	CompanyID        string    `json:"company_id"`
+	BoardID          string    `json:"board_id"`
+	Title            string    `json:"title"`
+	Position         int       `json:"position"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
 type KanbanColumn struct {
 	CompanyID        string    `json:"company_id"`
 	BoardID          string    `json:"board_id"`

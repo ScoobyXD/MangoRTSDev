@@ -49,6 +49,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/logic-gate-relationships/", s.handleLogicGateRelationshipByID)
 	mux.HandleFunc("/v1/operations", s.handleOperations)
 	mux.HandleFunc("/v1/operations/", s.handleOperationByID)
+	mux.HandleFunc("/v1/kanban/boards", s.handleKanbanBoards)
+	mux.HandleFunc("/v1/kanban/boards/", s.handleKanbanBoardByID)
 	mux.HandleFunc("/v1/kanban/columns", s.handleKanbanColumns)
 	mux.HandleFunc("/v1/kanban/columns/", s.handleKanbanColumnByID)
 	mux.HandleFunc("/v1/kanban/cards", s.handleKanbanCards)
@@ -1312,6 +1314,27 @@ func parsePositiveLimit(raw string, fallback int, maximum int) (int, bool) {
 	return value, true
 }
 
+func parseKanbanBoardQueryParams(r *http.Request) (store.KanbanBoardQuery, bool, string) {
+	limit, ok := parsePositiveLimit(r.URL.Query().Get("limit"), 100, store.KanbanMaxBoardsLimit)
+	if !ok {
+		return store.KanbanBoardQuery{}, false, "invalid_limit"
+	}
+	query := store.KanbanBoardQuery{Limit: limit}
+	for key := range r.URL.Query() {
+		if key != "company_id" && key != "limit" && key != "after_position" {
+			return store.KanbanBoardQuery{}, false, "unsupported_kanban_board_query_param"
+		}
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("after_position")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			return store.KanbanBoardQuery{}, false, "invalid_after_position"
+		}
+		query.AfterPosition = parsed
+	}
+	return query, true, ""
+}
+
 func parseKanbanCardQueryParams(r *http.Request) (store.KanbanCardQuery, bool, string) {
 	limit, ok := parsePositiveLimit(r.URL.Query().Get("limit"), 200, store.KanbanMaxCardsLimit)
 	if !ok {
@@ -1334,6 +1357,99 @@ func parseKanbanCardQueryParams(r *http.Request) (store.KanbanCardQuery, bool, s
 		query.AfterPosition = parsed
 	}
 	return query, true, ""
+}
+
+func (s *Server) handleKanbanBoards(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		query, ok, errCode := parseKanbanBoardQueryParams(r)
+		if !ok {
+			writeError(w, http.StatusBadRequest, errCode)
+			return
+		}
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		items, err := s.repo.ListKanbanBoards(companyID, query)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_boards")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"boards": items})
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		CompanyID string `json:"company_id"`
+		BoardID   string `json:"board_id"`
+		Title     string `json:"title"`
+		Position  int    `json:"position"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	req.CompanyID = strings.TrimSpace(req.CompanyID)
+	req.BoardID = strings.TrimSpace(req.BoardID)
+	req.Title = strings.TrimSpace(req.Title)
+	if req.CompanyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	item, err := s.repo.CreateKanbanBoard(req.CompanyID, req.BoardID, req.Title, req.Position)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_create_kanban_board")
+		return
+	}
+	s.publishWorkspaceEvent(req.CompanyID, "kanban_board_saved", map[string]any{"board_id": item.BoardID, "board": item})
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) handleKanbanBoardByID(w http.ResponseWriter, r *http.Request) {
+	boardID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/kanban/boards/"))
+	if boardID == "" || strings.Contains(boardID, "/") {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		CompanyID string `json:"company_id"`
+		Title     string `json:"title"`
+		Position  int    `json:"position"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	req.CompanyID = strings.TrimSpace(req.CompanyID)
+	req.Title = strings.TrimSpace(req.Title)
+	if req.CompanyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	if req.Title == "" && req.Position <= 0 {
+		writeError(w, http.StatusBadRequest, "kanban_board_update_required")
+		return
+	}
+	item, err := s.repo.UpdateKanbanBoard(req.CompanyID, boardID, req.Title, req.Position)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "kanban_board_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_update_kanban_board")
+		return
+	}
+	s.publishWorkspaceEvent(req.CompanyID, "kanban_board_updated", map[string]any{"board_id": item.BoardID, "board": item})
+	writeJSON(w, http.StatusOK, item)
 }
 
 func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {

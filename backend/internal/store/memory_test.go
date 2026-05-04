@@ -143,6 +143,40 @@ func TestMemoryRepo_DeleteNode_RemovesKanbanCardsAndKeepsOperations(t *testing.T
 	}
 }
 
+func TestMemoryRepo_UpdateNodeTitleRefreshesKanbanCardSnapshots(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+	boardID := "board-node-title-sync"
+
+	node, err := repo.CreateNode(companyID, "Old node title")
+	if err != nil {
+		t.Fatalf("CreateNode failed: %v", err)
+	}
+	column, err := repo.CreateKanbanColumn(companyID, boardID, "Ready", 0, 260, 240, "#2f7d62")
+	if err != nil {
+		t.Fatalf("CreateKanbanColumn failed: %v", err)
+	}
+	if _, err := repo.UpsertKanbanCard(KanbanCardMutationInput{
+		CompanyID: companyID,
+		BoardID:   boardID,
+		ColumnID:  column.ColumnID,
+		NodeID:    node.NodeID,
+		NodeTitle: "stale title from caller",
+	}); err != nil {
+		t.Fatalf("UpsertKanbanCard failed: %v", err)
+	}
+	if _, err := repo.UpdateNodeTitle(companyID, node.NodeID, "New node title"); err != nil {
+		t.Fatalf("UpdateNodeTitle failed: %v", err)
+	}
+	cards, err := repo.ListKanbanCards(companyID, boardID, KanbanCardQuery{Limit: 20})
+	if err != nil {
+		t.Fatalf("ListKanbanCards failed: %v", err)
+	}
+	if len(cards) != 1 || cards[0].NodeTitle != "New node title" {
+		t.Fatalf("kanban card snapshots = %+v, want renamed title", cards)
+	}
+}
+
 func TestMemoryRepo_AddLogicGateInformation_ProjectionKeyStaysStableAndHistoryAppends(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"

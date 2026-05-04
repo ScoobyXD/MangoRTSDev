@@ -1,3 +1,5 @@
+import type React from "react";
+
 export const EXPLORER_ENTITY_DRAG_MIME = "application/x-mango-explorer-entity";
 export const KANBAN_CARD_DRAG_MIME = "application/x-mango-kanban-card";
 export const KANBAN_COLUMN_DRAG_MIME = "application/x-mango-kanban-column";
@@ -10,6 +12,7 @@ export const KANBAN_DEFAULT_COLUMN_HEIGHT_PX = 240;
 export const KANBAN_MIN_COLUMN_HEIGHT_PX = 160;
 export const KANBAN_MAX_COLUMN_HEIGHT_PX = 720;
 export const KANBAN_DEFAULT_COLUMN_ITEM_COLOR = "#2f7d62";
+export const KANBAN_DEFAULT_BOARD_TITLE = "Kanban board";
 
 export type KanbanDragPreviewItem = {
   label: string;
@@ -28,6 +31,15 @@ export type ExplorerEntityDragPayload = {
 } | {
   itemType: "node_batch";
   nodes: ExplorerEntityDragItem[];
+};
+
+export type KanbanBoard = {
+  company_id: string;
+  board_id: string;
+  title: string;
+  position: number;
+  created_timestamp: string;
+  updated_timestamp: string;
 };
 
 export type KanbanColumn = {
@@ -95,6 +107,17 @@ export function isKanbanColumnItemColor(value: unknown): value is string {
 
 export function normalizeKanbanColumnItemColor(value: unknown): string {
   return isKanbanColumnItemColor(value) ? value.trim() : KANBAN_DEFAULT_COLUMN_ITEM_COLOR;
+}
+
+export function getKanbanBoardDisplayTitle(board: Pick<KanbanBoard, "board_id" | "title">): string {
+  const title = board.title.trim();
+  if (title) return title;
+  const boardID = board.board_id.trim();
+  return boardID || KANBAN_DEFAULT_BOARD_TITLE;
+}
+
+export function sortKanbanBoards(boards: KanbanBoard[]): KanbanBoard[] {
+  return [...boards].sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp) || a.board_id.localeCompare(b.board_id));
 }
 
 export function hexToRgba(hex: string, alpha: number): string {
@@ -535,4 +558,16 @@ export function getKanbanConditionalColor(card: KanbanCard, columnColorByID: Map
     hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
   }
   return palette[hash % palette.length];
+}
+
+export function getKanbanCardColorRailStyle(color: string): React.CSSProperties {
+  return {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: 5,
+    background: isKanbanColumnItemColor(color) ? color : KANBAN_DEFAULT_COLUMN_ITEM_COLOR,
+    pointerEvents: "none",
+  };
 }

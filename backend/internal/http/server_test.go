@@ -704,6 +704,18 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 		t.Fatalf("created card column = %q, want %q", createdCard.ColumnID, todoColumnID)
 	}
 
+	renameNodeBody, _ := json.Marshal(map[string]string{
+		"company_id": companyID,
+		"title":      "customer onboarding renamed",
+	})
+	renameNodeReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(renameNodeBody))
+	renameNodeReq.Header.Set("Content-Type", "application/json")
+	renameNodeRec := httptest.NewRecorder()
+	handler.ServeHTTP(renameNodeRec, renameNodeReq)
+	if renameNodeRec.Code != http.StatusOK {
+		t.Fatalf("PUT node title before kanban upsert status = %d, want %d body=%s", renameNodeRec.Code, http.StatusOK, renameNodeRec.Body.String())
+	}
+
 	upsertCardBody, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
 		"board_id":   boardID,
@@ -767,6 +779,28 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	if len(listPayload.Cards) != 1 {
 		t.Fatalf("kanban card count = %d, want 1 node card", len(listPayload.Cards))
 	}
+	if listPayload.Cards[0].NodeTitle != "customer onboarding renamed" {
+		t.Fatalf("listed card node_title = %q, want renamed node title", listPayload.Cards[0].NodeTitle)
+	}
+
+	listBoardsReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/boards?company_id="+companyID+"&limit=50", nil)
+	listBoardsRec := httptest.NewRecorder()
+	handler.ServeHTTP(listBoardsRec, listBoardsReq)
+	if listBoardsRec.Code != http.StatusOK {
+		t.Fatalf("GET kanban boards status = %d, want %d body=%s", listBoardsRec.Code, http.StatusOK, listBoardsRec.Body.String())
+	}
+	var listBoardsPayload struct {
+		Boards []struct {
+			BoardID string `json:"board_id"`
+			Title   string `json:"title"`
+		} `json:"boards"`
+	}
+	if err := json.NewDecoder(listBoardsRec.Body).Decode(&listBoardsPayload); err != nil {
+		t.Fatalf("decode boards: %v", err)
+	}
+	if len(listBoardsPayload.Boards) != 1 || listBoardsPayload.Boards[0].BoardID != boardID {
+		t.Fatalf("kanban boards = %+v, want implicit board metadata for %q", listBoardsPayload.Boards, boardID)
+	}
 
 	filterReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/cards?company_id="+companyID+"&board_id="+boardID+"&status=Done&limit=50", nil)
 	filterRec := httptest.NewRecorder()
@@ -799,6 +833,73 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	handler.ServeHTTP(deleteRec, deleteReq)
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("DELETE kanban column status = %d, want %d body=%s", deleteRec.Code, http.StatusOK, deleteRec.Body.String())
+	}
+}
+
+func TestKanbanBoardAPIFlow(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "11111111-1111-4111-8111-333333333333"
+	boardID := "ops-kanban-board"
+
+	saveBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"board_id":   boardID,
+		"title":      "Operations board",
+	})
+	saveReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/boards", bytes.NewReader(saveBody))
+	saveReq.Header.Set("Content-Type", "application/json")
+	saveRec := httptest.NewRecorder()
+	handler.ServeHTTP(saveRec, saveReq)
+	if saveRec.Code != http.StatusCreated {
+		t.Fatalf("POST kanban board status = %d, want %d body=%s", saveRec.Code, http.StatusCreated, saveRec.Body.String())
+	}
+	var saved struct {
+		BoardID  string `json:"board_id"`
+		Title    string `json:"title"`
+		Position int    `json:"position"`
+	}
+	if err := json.NewDecoder(saveRec.Body).Decode(&saved); err != nil {
+		t.Fatalf("decode saved board: %v", err)
+	}
+	if saved.BoardID != boardID || saved.Title != "Operations board" || saved.Position <= 0 {
+		t.Fatalf("saved board = %+v, want durable named board", saved)
+	}
+
+	updateBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"title":      "Operations board renamed",
+		"position":   777,
+	})
+	updateReq := httptest.NewRequest(http.MethodPut, "/v1/kanban/boards/"+boardID, bytes.NewReader(updateBody))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRec := httptest.NewRecorder()
+	handler.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("PUT kanban board status = %d, want %d body=%s", updateRec.Code, http.StatusOK, updateRec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/boards?company_id="+companyID+"&after_position=700&limit=50", nil)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET kanban boards status = %d, want %d body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	var listPayload struct {
+		Boards []struct {
+			BoardID  string `json:"board_id"`
+			Title    string `json:"title"`
+			Position int    `json:"position"`
+		} `json:"boards"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode board list: %v", err)
+	}
+	if len(listPayload.Boards) != 1 || listPayload.Boards[0].BoardID != boardID || listPayload.Boards[0].Title != "Operations board renamed" || listPayload.Boards[0].Position != 777 {
+		t.Fatalf("listed boards = %+v, want updated paged board", listPayload.Boards)
 	}
 }
 

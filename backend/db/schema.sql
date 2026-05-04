@@ -205,6 +205,17 @@ create table if not exists operations (
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
 );
 
+create table if not exists kanban_boards (
+  company_id uuid not null,
+  board_id text not null,
+  title text not null,
+  position integer not null,
+  created_timestamp timestamptz not null,
+  updated_timestamp timestamptz not null,
+  constraint kanban_boards_title_nonblank_chk check (btrim(title) <> ''),
+  primary key (company_id, board_id)
+);
+
 create table if not exists kanban_columns (
   company_id uuid not null,
   board_id text not null,
@@ -250,6 +261,7 @@ create index if not exists idx_logic_gate_relationships_a on logic_gate_relation
 create index if not exists idx_logic_gate_relationships_b on logic_gate_relationships(company_id, logic_gate_id_b);
 create index if not exists idx_operations_node on operations(company_id, node_id);
 create index if not exists idx_operations_logic_gate on operations(company_id, logic_gate_id);
+create index if not exists idx_kanban_boards_company_position on kanban_boards(company_id, position, board_id);
 create index if not exists idx_kanban_columns_board_position on kanban_columns(company_id, board_id, position);
 create index if not exists idx_kanban_cards_column_position on kanban_cards(company_id, board_id, column_id, position);
 create unique index if not exists idx_kanban_cards_unique_node on kanban_cards(company_id, board_id, node_id);
