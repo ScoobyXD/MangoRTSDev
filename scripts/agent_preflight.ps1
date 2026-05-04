@@ -5,6 +5,7 @@ param(
 . (Join-Path $PSScriptRoot "parallel_agent_common.ps1")
 
 Assert-AgentCommand -Name git
+Assert-AgentCommand -Name rg
 
 $repoRoot = Resolve-AgentPath -Path $Root
 $safeDirectory = ConvertTo-AgentSafeDirectory -Path $repoRoot

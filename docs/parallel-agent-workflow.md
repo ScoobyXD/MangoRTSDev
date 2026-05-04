@@ -5,11 +5,12 @@ This is the practical operating guide for running many Codex workers against Man
 Read this with:
 
 ```text
+docs/agents/README.md
 docs/parallel-agent-refactor-handoff.md
 docs/parallel-agent-architecture.md
 ```
 
-The handoff remains the full source of truth. This file is the copy/paste workflow surface.
+`docs/agents/README.md` is the current one-stop shop for orchestration, worker, merge-agent, naming, lifecycle, and handoff decisions. The handoff remains the historical source of truth. This file is the copy/paste workflow surface.
 
 ## Operating Rule
 
@@ -25,6 +26,26 @@ main
 ```
 
 No script in this workflow pushes.
+
+## Prerequisites
+
+Required local commands:
+
+```text
+git
+rg
+node
+npm
+go
+```
+
+On Windows, install `ripgrep` for the `rg` command before running the parallel-agent scripts:
+
+```powershell
+winget install BurntSushi.ripgrep.MSVC
+```
+
+`rg` is used by the conflict-marker scan and fast verification gates. `agent_preflight.ps1` fails early if `git` or `rg` is missing.
 
 ## Windows Safe Directory
 
