@@ -204,6 +204,9 @@ These tables store the latest shared Node Map and Logic Gate Map positions by co
 - `PUT /v1/map-layout`
 - `POST /v1/operations`
 - `GET /v1/operations/{operation_id}?company_id={uuid}`
+- `GET /v1/kanban/boards?company_id={uuid}&after_position=0&limit=100`
+- `POST /v1/kanban/boards`
+- `PUT /v1/kanban/boards/{board_id}`
 - `GET /v1/kanban/columns?company_id={uuid}&board_id={board_id}`
 - `POST /v1/kanban/columns`
 - `PUT /v1/kanban/columns/{column_id}`
@@ -307,6 +310,10 @@ curl -X POST http://localhost:8080/v1/operations \
 Create a Kanban column and place a node card:
 
 ```bash
+curl -X POST http://localhost:8080/v1/kanban/boards \
+  -H 'content-type: application/json' \
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","title":"Customer onboarding board"}'
+
 curl -X POST http://localhost:8080/v1/kanban/columns \
   -H 'content-type: application/json' \
   -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","title":"Ready","width_px":260,"height_px":240,"item_color":"#245c9f"}'
@@ -323,6 +330,7 @@ curl "http://localhost:8080/v1/kanban/cards?company_id=11111111-1111-1111-1111-1
 ```
 
 Kanban cards are intentionally node-only and minimal: `node_id`, `node_title`, optional `description_snapshot`, position, and timestamps. Keep the hot path bounded with `company_id`, `board_id`, optional `column_id`, `after_position`, and `limit`. The previous grouped/filter query endpoint and card metadata columns were removed so filtering can be rebuilt deliberately one capability at a time.
+Saved Kanban boards are metadata rows. Board contents and settings remain in the column/card APIs so UI users and headless agents operate the same model.
 
 Kanban cards are node-only through the API. Logic gates should stay in Logic Gate Map and Company Explorer workflows, not Kanban boards.
 

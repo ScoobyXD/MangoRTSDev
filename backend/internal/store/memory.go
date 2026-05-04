@@ -54,6 +54,9 @@ type Repository interface {
 	UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error)
 	CreateOperation(in CreateOperationInput) (domain.Operation, error)
 	GetOperation(companyID, operationID string) (domain.Operation, error)
+	ListKanbanBoards(companyID string, query KanbanBoardQuery) ([]domain.KanbanBoard, error)
+	CreateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error)
+	UpdateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error)
 	ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error)
 	CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int, heightPx int, itemColor string) (domain.KanbanColumn, error)
 	UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int, itemColor string) (domain.KanbanColumn, error)
@@ -88,6 +91,7 @@ type MemoryRepo struct {
 	nodeMapPositions  map[string]domain.NodeMapPosition
 	logicMapPositions map[string]domain.LogicGateMapPosition
 	operations        map[string]domain.Operation
+	kanbanBoards      map[string]domain.KanbanBoard
 	kanbanColumns     map[string][]domain.KanbanColumn
 	kanbanCards       map[string][]domain.KanbanCard
 }
@@ -107,6 +111,7 @@ func NewMemoryRepo() *MemoryRepo {
 		nodeMapPositions:  map[string]domain.NodeMapPosition{},
 		logicMapPositions: map[string]domain.LogicGateMapPosition{},
 		operations:        map[string]domain.Operation{},
+		kanbanBoards:      map[string]domain.KanbanBoard{},
 		kanbanColumns:     map[string][]domain.KanbanColumn{},
 		kanbanCards:       map[string][]domain.KanbanCard{},
 	}
@@ -144,6 +149,16 @@ func (r *MemoryRepo) UpdateNodeTitle(companyID, nodeID, title string) (domain.No
 	}
 	node.Title = title
 	r.nodes[key] = node
+	for boardKey, cards := range r.kanbanCards {
+		for index, card := range cards {
+			if card.CompanyID != companyID || card.NodeID != nodeID {
+				continue
+			}
+			card.NodeTitle = title
+			card.UpdatedTimestamp = time.Now().UTC()
+			r.kanbanCards[boardKey][index] = card
+		}
+	}
 	return node, nil
 }
 
@@ -387,6 +402,18 @@ func boardKey(companyID, boardID string) string {
 	return companyID + ":" + boardID
 }
 
+func sortKanbanBoards(items []domain.KanbanBoard) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Position == items[j].Position {
+			if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+				return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+			}
+			return items[i].BoardID < items[j].BoardID
+		}
+		return items[i].Position < items[j].Position
+	})
+}
+
 func sortKanbanColumns(items []domain.KanbanColumn) {
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Position == items[j].Position {
@@ -405,6 +432,19 @@ func sortKanbanCards(items []domain.KanbanCard) {
 	})
 }
 
+func nextKanbanBoardPosition(boards map[string]domain.KanbanBoard, companyID string) int {
+	next := 1000
+	for _, board := range boards {
+		if board.CompanyID != companyID {
+			continue
+		}
+		if board.Position >= next {
+			next = board.Position + 1000
+		}
+	}
+	return next
+}
+
 func nextKanbanColumnPosition(columns []domain.KanbanColumn) int {
 	next := 1000
 	for _, column := range columns {
@@ -413,6 +453,18 @@ func nextKanbanColumnPosition(columns []domain.KanbanColumn) int {
 		}
 	}
 	return next
+}
+
+func normalizeKanbanBoardTitle(boardID, title string) string {
+	title = strings.TrimSpace(title)
+	if title != "" {
+		return title
+	}
+	boardID = strings.TrimSpace(boardID)
+	if boardID != "" {
+		return boardID
+	}
+	return "Kanban board"
 }
 
 func normalizeKanbanColumnWidth(widthPx int) int {
@@ -546,6 +598,98 @@ func (r *MemoryRepo) kanbanColumnTitleLocked(companyID, boardID, columnID string
 	return "", false
 }
 
+func (r *MemoryRepo) ensureKanbanBoardLocked(companyID, boardID, title string) domain.KanbanBoard {
+	k := boardKey(companyID, boardID)
+	if board, ok := r.kanbanBoards[k]; ok {
+		return board
+	}
+	now := time.Now().UTC()
+	board := domain.KanbanBoard{
+		CompanyID:        companyID,
+		BoardID:          boardID,
+		Title:            normalizeKanbanBoardTitle(boardID, title),
+		Position:         nextKanbanBoardPosition(r.kanbanBoards, companyID),
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	r.kanbanBoards[k] = board
+	return board
+}
+
+func (r *MemoryRepo) ListKanbanBoards(companyID string, query KanbanBoardQuery) ([]domain.KanbanBoard, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	query = NormalizeKanbanBoardQuery(query)
+	items := make([]domain.KanbanBoard, 0, min(query.Limit, len(r.kanbanBoards)))
+	for _, board := range r.kanbanBoards {
+		if board.CompanyID != companyID {
+			continue
+		}
+		if query.AfterPosition > 0 && board.Position <= query.AfterPosition {
+			continue
+		}
+		items = append(items, board)
+	}
+	sortKanbanBoards(items)
+	if len(items) > query.Limit {
+		items = items[:query.Limit]
+	}
+	return items, nil
+}
+
+func (r *MemoryRepo) CreateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if boardID == "" {
+		boardID = newUUIDv7String()
+	}
+	k := boardKey(companyID, boardID)
+	if existing, ok := r.kanbanBoards[k]; ok {
+		if strings.TrimSpace(title) != "" {
+			existing.Title = normalizeKanbanBoardTitle(boardID, title)
+		}
+		if position > 0 {
+			existing.Position = position
+		}
+		existing.UpdatedTimestamp = time.Now().UTC()
+		r.kanbanBoards[k] = existing
+		return existing, nil
+	}
+	if position <= 0 {
+		position = nextKanbanBoardPosition(r.kanbanBoards, companyID)
+	}
+	now := time.Now().UTC()
+	item := domain.KanbanBoard{
+		CompanyID:        companyID,
+		BoardID:          boardID,
+		Title:            normalizeKanbanBoardTitle(boardID, title),
+		Position:         position,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	r.kanbanBoards[k] = item
+	return item, nil
+}
+
+func (r *MemoryRepo) UpdateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := boardKey(companyID, boardID)
+	item, ok := r.kanbanBoards[k]
+	if !ok {
+		return domain.KanbanBoard{}, ErrNotFound
+	}
+	if strings.TrimSpace(title) != "" {
+		item.Title = normalizeKanbanBoardTitle(boardID, title)
+	}
+	if position > 0 {
+		item.Position = position
+	}
+	item.UpdatedTimestamp = time.Now().UTC()
+	r.kanbanBoards[k] = item
+	return item, nil
+}
+
 func (r *MemoryRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -558,6 +702,7 @@ func (r *MemoryRepo) CreateKanbanColumn(companyID, boardID, title string, positi
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	k := boardKey(companyID, boardID)
+	r.ensureKanbanBoardLocked(companyID, boardID, boardID)
 	if position <= 0 {
 		position = nextKanbanColumnPosition(r.kanbanColumns[k])
 	}
@@ -652,6 +797,9 @@ func (r *MemoryRepo) ListKanbanCards(companyID, boardID string, query KanbanCard
 		if query.AfterPosition > 0 && card.Position <= query.AfterPosition {
 			continue
 		}
+		if node, ok := r.nodes[key(companyID, card.NodeID)]; ok && strings.TrimSpace(node.Title) != "" {
+			card.NodeTitle = node.Title
+		}
 		items = append(items, card)
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -682,13 +830,14 @@ func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.Kan
 		return domain.KanbanCard{}, ErrNotFound
 	}
 	k := boardKey(input.CompanyID, input.BoardID)
+	r.ensureKanbanBoardLocked(input.CompanyID, input.BoardID, input.BoardID)
 	if input.Position <= 0 {
 		input.Position = nextKanbanCardPosition(r.kanbanCards[k], input.ColumnID)
 	}
 	now := time.Now().UTC()
-	nodeTitle := strings.TrimSpace(input.NodeTitle)
-	if nodeTitle == "" {
-		nodeTitle = input.NodeID
+	nodeTitle := r.nodes[key(input.CompanyID, input.NodeID)].Title
+	if strings.TrimSpace(nodeTitle) == "" {
+		nodeTitle = normalizeKanbanBoardTitle(input.NodeID, input.NodeTitle)
 	}
 	description := strings.TrimSpace(input.DescriptionSnapshot)
 	for index, card := range r.kanbanCards[k] {
@@ -739,6 +888,9 @@ func (r *MemoryRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCar
 		}
 		now := time.Now().UTC()
 		card.ColumnID = input.ColumnID
+		if node, ok := r.nodes[key(input.CompanyID, card.NodeID)]; ok && strings.TrimSpace(node.Title) != "" {
+			card.NodeTitle = node.Title
+		}
 		card.Position = input.Position
 		card.UpdatedTimestamp = now
 		r.kanbanCards[k][index] = card

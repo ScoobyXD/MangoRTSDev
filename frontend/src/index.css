@@ -60,6 +60,40 @@ button, input, textarea {
   background: transparent;
 }
 
+/* Kanban board uses the same thin scrollbars as Editor and Company Explorer, including horizontal overflow. */
+.kanban-board-scroll {
+  --kanban-board-scroll-accent: #00b8cc;
+  --kanban-board-scroll-track: transparent;
+  scrollbar-width: thin;
+  scrollbar-color: var(--kanban-board-scroll-accent) transparent;
+}
+
+.kanban-board-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.kanban-board-scroll::-webkit-scrollbar-track {
+  background: var(--kanban-board-scroll-track);
+  border-radius: 999px;
+}
+
+.kanban-board-scroll::-webkit-scrollbar-thumb {
+  min-height: 40px;
+  background: var(--kanban-board-scroll-accent);
+  background-clip: content-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+
+.kanban-board-scroll::-webkit-scrollbar-thumb:hover {
+  border-width: 1px;
+}
+
+.kanban-board-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* Hover is visual-only; real selection stays click/key/API driven. */
 .company-explorer-row:hover {
   background: var(--company-explorer-hover-bg, rgba(0, 233, 255, 0.13));

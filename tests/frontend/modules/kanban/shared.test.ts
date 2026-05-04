@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, clampColumnHeight, clampColumnWidth, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, sanitizeExplorerEntityDragPayload, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, clampColumnHeight, clampColumnWidth, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, sanitizeExplorerEntityDragPayload, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
 
 function card(overrides: Partial<KanbanCard>): KanbanCard {
   return {
@@ -28,6 +28,18 @@ function column(overrides: Partial<KanbanColumn>): KanbanColumn {
     width_px: 260,
     height_px: 240,
     item_color: "#2f7d62",
+    created_timestamp: "2026-05-01T00:00:00.000Z",
+    updated_timestamp: "2026-05-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function board(overrides: Partial<KanbanBoard>): KanbanBoard {
+  return {
+    company_id: "c",
+    board_id: "board",
+    title: KANBAN_DEFAULT_BOARD_TITLE,
+    position: 1000,
     created_timestamp: "2026-05-01T00:00:00.000Z",
     updated_timestamp: "2026-05-01T00:00:00.000Z",
     ...overrides,
@@ -163,6 +175,25 @@ test("kanban card helpers color node cards without view-query state", () => {
 
   assert.equal(getKanbanConditionalColor(cards[0], new Map([["done", "#123abc"]])), "#123abc");
   assert.equal(normalizeKanbanColumnItemColor("not-a-color"), KANBAN_DEFAULT_COLUMN_ITEM_COLOR);
+});
+
+test("kanban board helpers keep saved board list stable and titled", () => {
+  const boards = [
+    board({ board_id: "later", title: "Later", position: 2000, created_timestamp: "2026-05-01T00:00:02.000Z" }),
+    board({ board_id: "first", title: "First", position: 1000, created_timestamp: "2026-05-01T00:00:01.000Z" }),
+    board({ board_id: "fallback", title: "  ", position: 3000 }),
+  ];
+
+  assert.deepEqual(sortKanbanBoards(boards).map((item) => item.board_id), ["first", "later", "fallback"]);
+  assert.equal(getKanbanBoardDisplayTitle(boards[2]), "fallback");
+});
+
+test("kanban card color rail is independent from selection border styling", () => {
+  const style = getKanbanCardColorRailStyle("#123abc");
+  assert.equal(style.left, 0);
+  assert.equal(style.width, 5);
+  assert.equal(style.background, "#123abc");
+  assert.equal(getKanbanCardColorRailStyle("bad-color").background, KANBAN_DEFAULT_COLUMN_ITEM_COLOR);
 });
 
 test("card reorder helper moves cards vertically with bounded position writes", () => {

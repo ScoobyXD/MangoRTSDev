@@ -4,6 +4,9 @@
 Kanban board is a module for placing `node` work items into titled columns.
 
 Users can:
+- switch between saved Kanban board views from the header Boards tab,
+- save the current board view into the company-wide board list,
+- create a new saved board view,
 - add columns,
 - rename column titles inline,
 - delete columns,
@@ -33,7 +36,8 @@ Users can:
 - Cards do not show a top-right expand/collapse control. Card titles and optional descriptions render directly.
 - Drag previews for Explorer-to-Kanban node batches and Kanban card batches show the selected batch, not just the row under the cursor.
 - The module reserves top clearance for the frame title plate and linked-module hexagon so column headers do not bleed into frame chrome.
-- The top clearance remains empty for now. It belongs to frame tabs/title/link state; board controls should not be rebuilt below the divider.
+- The top clearance owns the Kanban tabs. `Board` shows the active board and `Boards` opens the saved-board list window.
+- The main board viewport uses the same thin horizontal/vertical scrollbar treatment as Editor and Company Explorer.
 
 ## Linkable Frame Behavior
 Kanban board is a linkable frame kind (`kanban`).
@@ -100,6 +104,11 @@ Payload:
 Kanban board is API-first so future agents can operate boards without rendering React.
 
 Endpoints:
+- `GET /v1/kanban/boards?company_id=...&after_position=0&limit=100`
+- `POST /v1/kanban/boards`
+  - `{ company_id, board_id?, title?, position? }`
+- `PUT /v1/kanban/boards/:board_id`
+  - `{ company_id, title?, position? }`
 - `GET /v1/kanban/columns?company_id=...&board_id=...`
 - `POST /v1/kanban/columns`
   - `{ company_id, board_id, title, position?, width_px?, height_px?, item_color? }`
@@ -116,11 +125,13 @@ Endpoints:
 `POST /v1/kanban/cards` is idempotent per board and node. If the same node is dropped again, the existing card moves instead of duplicating.
 `PUT /v1/kanban/cards/:card_id` is also used for vertical card reordering and selected-card batch moves by writing new sparse `position` values.
 The card write API has no item-type field; Kanban board cards are node-only.
+Saved board rows are metadata only. Columns/cards remain the source of board contents, column order, dimensions, colors, and card positions.
 
 The removed `/v1/kanban/query` endpoint should stay removed until a specific filter or grouping capability is designed again. Headless agents should currently use the same bounded column/card APIs as the UI.
 
 ## Hot Path Rules
 - Reads are scoped by `company_id` and `board_id`.
+- Saved board lists are paged by `after_position` and capped by `limit`; never load every company board into React.
 - Cards are fetched with an explicit limit; the UI reads a bounded first window and agents should page with `after_position`.
 - Backend tables keep board/column position indexes for fast interactive reads. Extra filter indexes were removed with the old query surface.
 - Column reorder usually writes only the moved column position. Rare position compaction is scoped to visible board columns.
@@ -128,6 +139,7 @@ The removed `/v1/kanban/query` endpoint should stay removed until a specific fil
 - Card batch reorder writes only the moved selected cards when there is sparse-position room. Rare position compaction is scoped to the visible target column.
 - Column width, height, and item color are stored on the column row so UI users and headless agents share the same layout contract.
 - Card rows store `node_title` to avoid requiring a details lookup on every board render.
+- Node rename writes update Kanban card title snapshots. The frontend also listens to the shared node graph cache so linked Explorer/Editor renames show immediately.
 - Card rows intentionally do not store item type, logic-gate ID, status age, work type, or assignment metadata until a specific product/API need returns.
 - Node IDs remain the source of truth; `node_title` is display-only.
 
