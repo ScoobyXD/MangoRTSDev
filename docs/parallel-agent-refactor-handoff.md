@@ -1093,6 +1093,66 @@ Risks:
 Next recommended prompt:
 ```
 
+### 2026-05-04 - Phase 1 Workflow Rails Implemented
+
+Phase: Phase 1.
+
+Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoOSDev-conflict-fixer`.
+
+Files changed:
+
+```text
+docs/parallel-agent-refactor-handoff.md
+docs/parallel-agent-workflow.md
+docs/parallel-agent-architecture.md
+scripts/parallel_agent_common.ps1
+scripts/check_conflict_markers.ps1
+scripts/agent_preflight.ps1
+scripts/create_worker_worktree.ps1
+scripts/create_integration_worktree.ps1
+scripts/integrate_worker_branch.ps1
+scripts/batch_integrate_worker_branches.ps1
+scripts/fast_verify.ps1
+```
+
+Commands/checks run:
+
+```text
+git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer status --short --branch
+git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer fetch origin
+git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rebase origin/main
+rg -n "^(<<<<<<<|>>>>>>>|\|\|\|\|\|\|\|)( .*)?$|^=======$" .
+powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
+powershell -ExecutionPolicy Bypass -File .\scripts\agent_preflight.ps1 -Root .
+powershell -ExecutionPolicy Bypass -File .\scripts\fast_verify.ps1 -Root .
+```
+
+What changed:
+
+- Preserved the pre-Phase 1 handoff docs in a local docs commit before updating from `origin/main`.
+- Rebasing this branch onto latest `origin/main` completed without conflicts.
+- Added workflow docs with copy/paste commands for worker creation, integration worktrees, one-worker integration, batch integration, and verification tiers.
+- Added architecture docs documenting the operating principle, hot-file contract, module ownership targets, map-workspace ownership, and API/headless direction.
+- Added PowerShell scripts for conflict-marker scanning, preflight reporting, worker worktree creation, integration worktree creation, one-worker integration, batch integration, and fast affected verification.
+- Updated script examples to use per-process `powershell -ExecutionPolicy Bypass -File ...` because this Windows shell blocks direct `.ps1` execution.
+
+What was intentionally not changed:
+
+- No frontend hot-file splitting was started.
+- No backend API/headless refactor was started.
+- No global Git config was edited.
+- No push was performed.
+- The Phase 1 workflow scripts were not used to create or merge any new worker/integration worktrees during this implementation.
+
+Risks:
+
+- The integration scripts are intentionally conservative, but they should be exercised on a low-risk worker branch before relying on them for a large batch.
+- `fast_verify.ps1` runs full frontend/backend checks only when affected paths are detected or `-Full` is provided; integrators still need judgment for broad behavioral changes.
+
+Next recommended prompt:
+
+Use the "Prompt: Phase 2 Executor" section in this document from a fresh Codex instance after reviewing `docs/parallel-agent-workflow.md` and `docs/parallel-agent-architecture.md`.
+
 ### 2026-05-04 - Freshness Contract Added
 
 Phase: pre-Phase 1 planning.
