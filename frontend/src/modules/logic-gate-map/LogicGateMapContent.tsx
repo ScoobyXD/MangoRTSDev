@@ -7,7 +7,7 @@ import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceS
 import { summarizeRelationshipDeleteResults } from "../node-map/relationshipDeleteSummary";
 import { invalidateLogicGateRecordStoreCaches } from "./LogicGateRecordStore";
 import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapDragStartSelection, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
-import { filterLogicGateGraphToFolderScope, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
+import { filterLogicGateGraphToFolderScope, resolveMapSelectionAfterGraphLoad, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 
@@ -98,6 +98,8 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const [selectionPointerID, setSelectionPointerID] = useState<number | null>(null);
   const selectionBoxRef = useRef(selectionBox);
   const restoredSelectionRef = useRef<string>("");
+  const selectedNodeIDRef = useRef("");
+  const activeFolderIDRef = useRef("");
   const explorerContextRef = useRef<number>(0);
   const explorerSelectionOriginRef = useRef<ExplorerSelectionOrigin | null>(null);
   const suppressNextSelectionBroadcastRef = useRef(false);
@@ -179,6 +181,19 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     return resolveConnectedFrameTargets({ sourceFrameID: mapScope, edges, registry });
   };
 
+  const rememberLiveExplorerSelectionOrigin = (selection: LiveSelectionChange, selectedEntityID: string) => {
+    if (selection.sourceModule !== "company-explorer") {
+      explorerSelectionOriginRef.current = null;
+      return;
+    }
+    explorerSelectionOriginRef.current = {
+      sourceExplorerID: selection.sourceFrameID,
+      sourceExplorerContextSequence: selection.sequence,
+      sourceExplorerSelectedTreeID: selection.selectedTreeID ?? "",
+      selectedEntityID,
+    };
+  };
+
   const readCompanyExplorerFrameTargets = () => {
     const registry = readFrameRegistryFromStorage();
     return Object.entries(registry)
@@ -199,6 +214,14 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     });
   };
 
+  useEffect(() => {
+    selectedNodeIDRef.current = selectedNodeID;
+  }, [selectedNodeID]);
+
+  useEffect(() => {
+    activeFolderIDRef.current = activeFolderID;
+  }, [activeFolderID]);
+
   // Keep relationship projection derivation centralized so callers can reuse the exact same
   // filtering logic without triggering additional network calls.
   const projectVisibleRelationships = (snapshotNodes: NodeRecord[], snapshotRelationships: NodeRelationship[]) => {
@@ -211,7 +234,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     snapshotRelationships: NodeRelationship[],
     snapshotFolders: CompanyExplorerFolder[],
     snapshotFolderItems: CompanyExplorerFolderItem[],
-    folderID = activeFolderID,
+    folderID = activeFolderIDRef.current,
   ) => {
     const scoped = filterLogicGateGraphToFolderScope({
       nodes: snapshotNodes,
@@ -276,6 +299,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       setPan(cached.pan);
       setPanInitialized(true);
       restoredSelectionRef.current = cached.selectedNodeID;
+      selectedNodeIDRef.current = cached.selectedNodeID;
       setSelectedNodeID(cached.selectedNodeID);
       setSelectedNodeIDs(cached.selectedNodeID ? new Set([cached.selectedNodeID]) : new Set());
       setNodePositions(cached.nodePositions);
@@ -312,6 +336,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       }
       if (typeof parsed.selectedNodeID === "string") {
         restoredSelectionRef.current = parsed.selectedNodeID;
+        selectedNodeIDRef.current = parsed.selectedNodeID;
         setSelectedNodeID(parsed.selectedNodeID);
         setSelectedNodeIDs(parsed.selectedNodeID ? new Set([parsed.selectedNodeID]) : new Set());
       }
@@ -383,22 +408,21 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     try {
       await refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
       const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-      const nextNodes = applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? []);
+      const snapshotNodes = snapshot.nodes ?? [];
+      const nextNodes = applyFolderScope(snapshotNodes, snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? [], activeFolderIDRef.current);
       applyServerMapPositions(snapshot.logic_gate_map_positions ?? []);
 
-      const hasSelection = selectedNodeID && nextNodes.some((item) => item.node_id === selectedNodeID);
-      if (hasSelection) return;
-
-      const restoredSelection = restoredSelectionRef.current;
-      if (restoredSelection && nextNodes.some((item) => item.node_id === restoredSelection)) {
-        setSelectedNodeID(restoredSelection);
-        setSelectedNodeIDs(new Set([restoredSelection]));
-        return;
-      }
-
-      const fallback = nextNodes[0]?.node_id ?? "";
-      setSelectedNodeID(fallback);
-      setSelectedNodeIDs(fallback ? new Set([fallback]) : new Set());
+      const nextSelection = resolveMapSelectionAfterGraphLoad({
+        currentSelectedID: selectedNodeIDRef.current,
+        restoredSelectedID: restoredSelectionRef.current,
+        visibleItemIDs: nextNodes.map((item) => item.node_id),
+        knownItemIDs: snapshotNodes.map((item) => item.node_id),
+        explorerRequestedID: explorerSelectionOriginRef.current?.selectedEntityID,
+      });
+      if (nextSelection === null) return;
+      selectedNodeIDRef.current = nextSelection;
+      setSelectedNodeID(nextSelection);
+      setSelectedNodeIDs(nextSelection ? new Set([nextSelection]) : new Set());
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_load_logic_gates");
     } finally {
@@ -456,6 +480,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       explorerRequestedID: explorerSelectionOriginRef.current?.selectedEntityID,
     });
     if (fallback === null) return;
+    selectedNodeIDRef.current = fallback;
     setSelectedNodeID(fallback);
     setSelectedNodeIDs(fallback ? new Set([fallback]) : new Set());
   }, [knownGraphNodeIDSet, scopedNodeIDSet, selectedNodeID]);
@@ -695,10 +720,13 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         if (typeof parsed.ts !== "number" || parsed.ts <= explorerContextRef.current) return;
         explorerContextRef.current = parsed.ts;
         if (parsed.selectedFolderKind === "logic_gate") {
-          setActiveFolderID(typeof parsed.selectedFolderID === "string" ? parsed.selectedFolderID : "");
+          const nextFolderID = typeof parsed.selectedFolderID === "string" ? parsed.selectedFolderID : "";
+          activeFolderIDRef.current = nextFolderID;
+          setActiveFolderID(nextFolderID);
           setActiveFolderLabel(typeof parsed.selectedFolderLabel === "string" ? parsed.selectedFolderLabel : (typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : ""));
           const selected = parsed.selectedLogicGateID || parsed.selectedNodeID || "";
           rememberExplorerSelectionOrigin(parsed, selected);
+          selectedNodeIDRef.current = selected;
           if (selected) {
             // Explorer owns navigation intent. A map can momentarily have stale
             // all-node data during mode/scope switches, so accept the Explorer
@@ -715,15 +743,19 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         if (!selectedLogicGateID) {
           if (!hasExplicitExplorerSelectionContext(parsed)) return;
           rememberExplorerSelectionOrigin(parsed, "");
+          activeFolderIDRef.current = "";
           setActiveFolderID("");
           setActiveFolderLabel("");
+          selectedNodeIDRef.current = "";
           setSelectedNodeID("");
           setSelectedNodeIDs(new Set());
           return;
         }
         rememberExplorerSelectionOrigin(parsed, selectedLogicGateID);
+        activeFolderIDRef.current = "";
         setActiveFolderID("");
         setActiveFolderLabel("");
+        selectedNodeIDRef.current = selectedLogicGateID;
         setSelectedNodeID(selectedLogicGateID);
         setSelectedNodeIDs(new Set([selectedLogicGateID]));
       } catch {
@@ -744,10 +776,13 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       explorerContextRef.current = Math.max(explorerContextRef.current, selection.changedAt);
       suppressNextSelectionBroadcastRef.current = true;
       const nextFolderID = selection.folderKind === "logic_gate" || selection.entityKind === "folder" ? (selection.folderID ?? selection.entityID) : "";
+      activeFolderIDRef.current = nextFolderID;
       setActiveFolderID(nextFolderID);
       setActiveFolderLabel(nextFolderID ? (selection.folderLabel ?? selection.label) : "");
 
       const nextLogicGateID = selection.entityKind === "logic_gate" ? selection.entityID : "";
+      rememberLiveExplorerSelectionOrigin(selection, nextLogicGateID);
+      selectedNodeIDRef.current = nextLogicGateID;
       setSelectedNodeID(nextLogicGateID);
       setSelectedNodeIDs(nextLogicGateID ? new Set([nextLogicGateID]) : new Set());
     };

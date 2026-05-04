@@ -1,15 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { filterLogicGateGraphToFolderScope, filterNodeGraphToFolderScope, getFolderSubtreeIDs, resolveScopedMapSelectionFallback } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
+import { filterLogicGateGraphToFolderScope, filterNodeGraphToFolderScope, getFolderSubtreeIDs, resolveMapSelectionAfterGraphLoad, resolveScopedMapSelectionFallback } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
 
 const folders = [
   { company_id: "c", folder_id: "folder-parent", folder_kind: "node" as const, name: "Parent", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
   { company_id: "c", folder_id: "folder-child", parent_folder_id: "folder-parent", folder_kind: "node" as const, name: "Child", position: 1000, created_timestamp: "2", updated_timestamp: "2" },
+  { company_id: "c", folder_id: "bad-logic-child", parent_folder_id: "folder-parent", folder_kind: "logic_gate" as const, name: "Bad import", position: 1000, created_timestamp: "2", updated_timestamp: "2" },
   { company_id: "c", folder_id: "logic-parent", folder_kind: "logic_gate" as const, name: "Logic", position: 1000, created_timestamp: "3", updated_timestamp: "3" },
 ];
 
 test("folder subtree includes nested descendants", () => {
   assert.deepEqual(Array.from(getFolderSubtreeIDs(folders, "folder-parent")).sort(), ["folder-child", "folder-parent"]);
+});
+
+test("folder subtree traversal does not cross node and logic-gate hierarchies", () => {
+  assert.equal(getFolderSubtreeIDs(folders, "folder-parent").has("bad-logic-child"), false);
 });
 
 test("node folder scope keeps only nodes in selected folder subtree and their internal relationships", () => {
@@ -85,4 +90,39 @@ test("scoped map selection falls back only when selected item is gone", () => {
   });
 
   assert.equal(fallback, "parent-node-1");
+});
+
+test("graph load keeps a live Explorer selection instead of restoring stale cache", () => {
+  const nextSelection = resolveMapSelectionAfterGraphLoad({
+    currentSelectedID: "clicked-node",
+    restoredSelectedID: "old-cached-node",
+    visibleItemIDs: ["old-cached-node", "clicked-node"],
+    knownItemIDs: ["old-cached-node", "clicked-node"],
+    explorerRequestedID: "clicked-node",
+  });
+
+  assert.equal(nextSelection, null);
+});
+
+test("graph load keeps Explorer intent while snapshot projection is still behind", () => {
+  const nextSelection = resolveMapSelectionAfterGraphLoad({
+    currentSelectedID: "clicked-node",
+    restoredSelectedID: "old-cached-node",
+    visibleItemIDs: ["old-cached-node"],
+    knownItemIDs: ["old-cached-node"],
+    explorerRequestedID: "clicked-node",
+  });
+
+  assert.equal(nextSelection, null);
+});
+
+test("graph load restores cached selection only when there is no newer live selection", () => {
+  const nextSelection = resolveMapSelectionAfterGraphLoad({
+    currentSelectedID: "",
+    restoredSelectedID: "old-cached-node",
+    visibleItemIDs: ["first-node", "old-cached-node"],
+    knownItemIDs: ["first-node", "old-cached-node"],
+  });
+
+  assert.equal(nextSelection, "old-cached-node");
 });
