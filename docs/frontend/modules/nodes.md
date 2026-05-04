@@ -276,6 +276,7 @@ The projection object is **derived in memory** during render. It is not persiste
 - Folder scope is applied in memory from `folders` + `folder_items` in the workspace snapshot. When Company Explorer selects a node folder, Node Map renders nodes placed in that folder or descendant folders and only relationships whose endpoints are both visible.
 - When Company Explorer selects an individual node inside a folder, Node Map keeps the folder scope active and selects that node instead of expanding back to the all-node graph.
 - New nodes created while a folder scope is active are placed into that folder through `POST /v1/company-explorer/folder-items`, so UI-created nodes and agent-created nodes share the same API-backed placement model.
+- Moving a node to a different Company Explorer folder level through `POST /v1/company-explorer/folder-items` removes relationships touching that node. Node Map prunes those relationship lines from the local graph cache immediately and also consumes the backend `relationship_deleted` stream events.
 
 ---
 

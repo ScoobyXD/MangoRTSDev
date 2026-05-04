@@ -245,7 +245,7 @@ Use this checklist format and keep it complete.
   - logic gate relationship position-pair legality helper (Input/Output or Output/Input only)
   - logic gate create/read/information/relationship API flow
   - node and logic-gate information APIs reject blank/whitespace-only `information` so empty editor blurs do not persist rows
-  - Company Explorer folder APIs create nested folders, rename and move folders, reject cyclic folder moves, assign/reorder node placements, append new folders/items after mixed visible siblings, and include folder data in workspace snapshots
+  - Company Explorer folder APIs create nested folders, rename and move folders, reject cyclic folder moves, assign/reorder node placements, append new folders/items after mixed visible siblings, delete node/logic-gate relationships when folder-item moves cross folder levels, and include folder data in workspace snapshots
   - Kanban column create/rename and node card API flow
   - Kanban rejects logic-gate card creation through the headless card API
   - Kanban card APIs expose node-only card fields and keep the removed query endpoint at 404

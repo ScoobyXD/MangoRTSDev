@@ -372,7 +372,7 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 			writeError(w, http.StatusBadRequest, "company_folder_item_required")
 			return
 		}
-		item, err := s.repo.AssignCompanyExplorerFolderItem(req.CompanyID, req.FolderID, req.ItemType, req.ItemID, req.Position)
+		item, deletedRelationshipIDs, err := s.repo.AssignCompanyExplorerFolderItem(req.CompanyID, req.FolderID, req.ItemType, req.ItemID, req.Position)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "company_explorer_folder_or_item_not_found")
 			return
@@ -382,6 +382,13 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 			return
 		}
 		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_item": item})
+		for _, relationshipID := range deletedRelationshipIDs {
+			if req.ItemType == "node" {
+				s.publishWorkspaceEvent(req.CompanyID, "relationship_deleted", map[string]any{"node_relationship_id": relationshipID})
+			} else {
+				s.publishWorkspaceEvent(req.CompanyID, "logic_gate_relationship_deleted", map[string]any{"logic_gate_relationship_id": relationshipID})
+			}
+		}
 		writeJSON(w, http.StatusOK, item)
 		return
 	}

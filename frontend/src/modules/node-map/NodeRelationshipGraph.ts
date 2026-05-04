@@ -92,6 +92,21 @@ export function removeNodeRelationshipGraphNode(apiBase: string, companyID: stri
   notify(entry);
 }
 
+export function removeNodeRelationshipGraphRelationshipsForNode(apiBase: string, companyID: string, nodeID: string): void {
+  if (!nodeID) return;
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  const currentRelationships = entry.snapshot.relationships ?? [];
+  const nextRelationships = currentRelationships.filter((item) => item.node_id_a !== nodeID && item.node_id_b !== nodeID);
+  if (nextRelationships.length === currentRelationships.length) return;
+  entry.snapshot = {
+    ...entry.snapshot,
+    relationships: nextRelationships,
+    generated_at: new Date().toISOString(),
+  };
+  notify(entry);
+}
+
 export function upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase: string, companyID: string, item: CompanyExplorerFolderItem): void {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);

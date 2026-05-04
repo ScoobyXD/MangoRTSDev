@@ -590,6 +590,119 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	}
 }
 
+func TestCompanyExplorerFolderItemMovesBreakRelationships(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-folder-move-relationships-test"
+
+	createFolder := func(kind, name string) string {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{
+			"company_id":  companyID,
+			"folder_kind": kind,
+			"name":        name,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST folder %s status = %d, want %d body=%s", name, rec.Code, http.StatusCreated, rec.Body.String())
+		}
+		var payload struct {
+			FolderID string `json:"folder_id"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode folder %s: %v", name, err)
+		}
+		return payload.FolderID
+	}
+
+	assign := func(folderID, itemType, itemID string, position int) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{
+			"company_id": companyID,
+			"folder_id":  folderID,
+			"item_type":  itemType,
+			"item_id":    itemID,
+			"position":   position,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST folder item %s/%s status = %d, want %d body=%s", itemType, itemID, rec.Code, http.StatusOK, rec.Body.String())
+		}
+	}
+
+	nodeA, err := repo.CreateNode(companyID, "Node A")
+	if err != nil {
+		t.Fatalf("CreateNode A error = %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "Node B")
+	if err != nil {
+		t.Fatalf("CreateNode B error = %v", err)
+	}
+	nodeFolderA := createFolder("node", "Node Folder A")
+	nodeFolderB := createFolder("node", "Node Folder B")
+	assign(nodeFolderA, "node", nodeA.NodeID, 0)
+	assign(nodeFolderA, "node", nodeB.NodeID, 0)
+	if _, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeB.NodeID, "Peer", "Peer"); err != nil {
+		t.Fatalf("CreateNodeRelationship error = %v", err)
+	}
+
+	assign(nodeFolderB, "node", nodeA.NodeID, 0)
+	nodeRelationships, err := repo.ListNodeRelationships(companyID)
+	if err != nil {
+		t.Fatalf("ListNodeRelationships after move error = %v", err)
+	}
+	if len(nodeRelationships) != 0 {
+		t.Fatalf("node relationships after cross-folder move = %d, want 0", len(nodeRelationships))
+	}
+
+	assign(nodeFolderB, "node", nodeB.NodeID, 0)
+	if _, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeB.NodeID, "Parent", "Child"); err != nil {
+		t.Fatalf("CreateNodeRelationship same-folder error = %v", err)
+	}
+	assign(nodeFolderB, "node", nodeA.NodeID, 9000)
+	nodeRelationships, err = repo.ListNodeRelationships(companyID)
+	if err != nil {
+		t.Fatalf("ListNodeRelationships after reorder error = %v", err)
+	}
+	if len(nodeRelationships) != 1 {
+		t.Fatalf("node relationships after same-folder reorder = %d, want 1", len(nodeRelationships))
+	}
+
+	gateA, err := repo.CreateLogicGate(companyID, "Gate A")
+	if err != nil {
+		t.Fatalf("CreateLogicGate A error = %v", err)
+	}
+	gateB, err := repo.CreateLogicGate(companyID, "Gate B")
+	if err != nil {
+		t.Fatalf("CreateLogicGate B error = %v", err)
+	}
+	logicFolderA := createFolder("logic_gate", "Logic Folder A")
+	logicFolderB := createFolder("logic_gate", "Logic Folder B")
+	assign(logicFolderA, "logic_gate", gateA.LogicGateID, 0)
+	assign(logicFolderA, "logic_gate", gateB.LogicGateID, 0)
+	if _, err := repo.CreateLogicGateRelationship(companyID, gateA.LogicGateID, gateB.LogicGateID, "Input", "Output"); err != nil {
+		t.Fatalf("CreateLogicGateRelationship error = %v", err)
+	}
+
+	assign(logicFolderB, "logic_gate", gateA.LogicGateID, 0)
+	logicRelationships, err := repo.ListLogicGateRelationships(companyID)
+	if err != nil {
+		t.Fatalf("ListLogicGateRelationships after move error = %v", err)
+	}
+	if len(logicRelationships) != 0 {
+		t.Fatalf("logic-gate relationships after cross-folder move = %d, want 0", len(logicRelationships))
+	}
+}
+
 func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	t.Parallel()
 

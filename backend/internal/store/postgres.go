@@ -1412,11 +1412,11 @@ func (r *PostgresRepo) DeleteCompanyExplorerFolder(companyID, folderID string) e
 	return nil
 }
 
-func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, error) {
+func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return domain.CompanyExplorerFolderItem{}, err
+		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
 	defer tx.Rollback()
 
@@ -1428,12 +1428,12 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 		companyID, folderID,
 	).Scan(&folderKind); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return domain.CompanyExplorerFolderItem{}, ErrNotFound
+			return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
 		}
-		return domain.CompanyExplorerFolderItem{}, err
+		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
 	if folderKind != itemType {
-		return domain.CompanyExplorerFolderItem{}, ErrNotFound
+		return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
 	}
 
 	var exists bool
@@ -1443,13 +1443,13 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 	} else if itemType == "logic_gate" {
 		existsQuery = `select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`
 	} else {
-		return domain.CompanyExplorerFolderItem{}, ErrNotFound
+		return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
 	}
 	if err := tx.QueryRowContext(ctx, existsQuery, companyID, itemID).Scan(&exists); err != nil {
-		return domain.CompanyExplorerFolderItem{}, err
+		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
 	if !exists {
-		return domain.CompanyExplorerFolderItem{}, ErrNotFound
+		return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
 	}
 
 	var existingFolderID string
@@ -1463,7 +1463,7 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 		companyID, itemType, itemID,
 	).Scan(&existingFolderID, &existingPosition); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			return domain.CompanyExplorerFolderItem{}, err
+			return domain.CompanyExplorerFolderItem{}, nil, err
 		}
 	} else {
 		hasExisting = true
@@ -1474,7 +1474,7 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 	if position <= 0 {
 		position, err = nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, itemType, folderID)
 		if err != nil {
-			return domain.CompanyExplorerFolderItem{}, err
+			return domain.CompanyExplorerFolderItem{}, nil, err
 		}
 	}
 
@@ -1499,12 +1499,47 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
 	); err != nil {
-		return domain.CompanyExplorerFolderItem{}, err
+		return domain.CompanyExplorerFolderItem{}, nil, err
+	}
+	deletedRelationshipIDs := make([]string, 0)
+	if !hasExisting || existingFolderID != folderID {
+		var deleteRows *sql.Rows
+		if itemType == "node" {
+			deleteRows, err = tx.QueryContext(ctx,
+				`delete from node_relationships
+				 where company_id=$1 and (node_id_a=$2 or node_id_b=$2)
+				 returning node_relationship_id::text`,
+				companyID, itemID,
+			)
+		} else {
+			deleteRows, err = tx.QueryContext(ctx,
+				`delete from logic_gate_relationships
+				 where company_id=$1 and (logic_gate_id_a=$2 or logic_gate_id_b=$2)
+				 returning logic_gate_relationship_id::text`,
+				companyID, itemID,
+			)
+		}
+		if err != nil {
+			return domain.CompanyExplorerFolderItem{}, nil, err
+		}
+		for deleteRows.Next() {
+			var relationshipID string
+			if err := deleteRows.Scan(&relationshipID); err != nil {
+				deleteRows.Close()
+				return domain.CompanyExplorerFolderItem{}, nil, err
+			}
+			deletedRelationshipIDs = append(deletedRelationshipIDs, relationshipID)
+		}
+		if err := deleteRows.Err(); err != nil {
+			deleteRows.Close()
+			return domain.CompanyExplorerFolderItem{}, nil, err
+		}
+		deleteRows.Close()
 	}
 	if err := tx.Commit(); err != nil {
-		return domain.CompanyExplorerFolderItem{}, err
+		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
-	return item, nil
+	return item, deletedRelationshipIDs, nil
 }
 
 func (r *PostgresRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error) {

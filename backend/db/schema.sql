@@ -254,6 +254,8 @@ create table if not exists kanban_cards (
 create index if not exists idx_node_information_node on node_information(company_id, node_id);
 create index if not exists idx_node_projection_table_node_updated on node_projection_table(company_id, node_id, updated_timestamp desc);
 create index if not exists idx_node_map_positions_company_updated on node_map_positions(company_id, updated_timestamp desc);
+create index if not exists idx_node_relationships_a on node_relationships(company_id, node_id_a);
+create index if not exists idx_node_relationships_b on node_relationships(company_id, node_id_b);
 create index if not exists idx_logic_gate_information_logic_gate on logic_gate_information(company_id, logic_gate_id);
 create index if not exists idx_logic_gate_projection_table_logic_gate_updated on logic_gate_projection_table(company_id, logic_gate_id, updated_timestamp desc);
 create index if not exists idx_logic_gate_map_positions_company_updated on logic_gate_map_positions(company_id, updated_timestamp desc);

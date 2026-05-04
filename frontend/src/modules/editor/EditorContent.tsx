@@ -9,7 +9,7 @@ import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingle
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import type { NodeInformation } from "../node-map/shared";
-import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
+import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
 import { EDITOR_TAB_ITEMS, getEditorDocumentIsolationState, type EditorTabID } from "./editorTabs";
 import { classifyEditorInputType, createEditorUndoHistory, recordEditorUndoChange, redoEditorText, resetEditorUndoHistory, snapshotEditorText, snapshotEditorTextArea, undoEditorText, type EditorTextChangeKind, type EditorTextSnapshot } from "./editorUndoHistory";
 import { DEFAULT_EDITOR_OUTLINE_STYLE, EDITOR_TAB_TEXT, insertEditorEnterText, insertEditorTabText, isEditorOutlineStyleID, type EditorOutlineStyleID } from "./plainTextEditing";
@@ -32,6 +32,7 @@ type DocumentSaveRequest = {
 type LinkedSelection = {
   id: string;
   label: string;
+  selectionIntent?: SelectionIntent;
 };
 
 const EDITOR_AUTOSAVE_DELAY_MS = 550;
@@ -111,6 +112,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const saveInFlightRef = useRef(false);
   const lastSelectionRevisionRef = useRef(0);
   const lastLogicGateSelectionRevisionRef = useRef(0);
+  const shouldFocusEditorForSelectionRef = useRef(true);
   const editorUndoHistoryRef = useRef(createEditorUndoHistory());
   const lastEditorTextSnapshotRef = useRef<EditorTextSnapshot>(snapshotEditorText("", 0, 0));
   const pendingEditorInputKindRef = useRef<EditorTextChangeKind>("unknown");
@@ -411,7 +413,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     window.requestAnimationFrame(() => {
       restoringScrollRef.current = false;
     });
-    if (activeTabRef.current === "editor") focusEditorDocumentWithoutScrollJump(targetKey);
+    if (activeTabRef.current === "editor" && shouldFocusEditorForSelectionRef.current) focusEditorDocumentWithoutScrollJump(targetKey);
   }, [focusEditorDocumentWithoutScrollJump, resetEditorTextUndo, restoreEditorDocumentScroll, scheduleIndentGuideUpdate]);
 
   const readLinkedMapWidgetID = useCallback((): string => {
@@ -455,10 +457,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     try {
       const raw = localStorage.getItem(`${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
       if (!raw) return { id: "", label: "" };
-      const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedLabel?: string };
+      const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedLabel?: string; selectionIntent?: SelectionIntent };
       return {
         id: typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "",
         label: typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : "",
+        selectionIntent: parsed.selectionIntent,
       };
     } catch {
       return { id: "", label: "" };
@@ -469,10 +472,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     try {
       const raw = localStorage.getItem(`${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
       if (!raw) return { id: "", label: "" };
-      const parsed = JSON.parse(raw) as { selectedLogicGateID?: string; selectedNodeID?: string; selectedLabel?: string };
+      const parsed = JSON.parse(raw) as { selectedLogicGateID?: string; selectedNodeID?: string; selectedLabel?: string; selectionIntent?: SelectionIntent };
       return {
         id: typeof parsed.selectedLogicGateID === "string" ? parsed.selectedLogicGateID : (typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : ""),
         label: typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : "",
+        selectionIntent: parsed.selectionIntent,
       };
     } catch {
       return { id: "", label: "" };
@@ -513,7 +517,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     scheduleIndentGuideUpdate("");
   }, [resetEditorTextUndo, scheduleIndentGuideUpdate]);
 
-  const applyLinkedNode = useCallback((nodeID: string, label = "") => {
+  const applyLinkedNode = useCallback((nodeID: string, label = "", options: { focusEditor?: boolean } = {}) => {
+    const shouldFocusEditor = options.focusEditor !== false;
+    shouldFocusEditorForSelectionRef.current = shouldFocusEditor;
     const isSameEntity = linkedEntityKind === "node" && linkedNodeID === nodeID;
     if (!isSameEntity) {
       rememberCurrentDocumentScroll();
@@ -523,13 +529,15 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     setLinkedEntityKind(nodeID ? "node" : "");
     setLinkedNodeID(nodeID);
     setLinkedNodeTitle(nodeID ? (label || readNodeLabelFromGraph(nodeID)) : "");
-    if (nodeID && !isSameEntity) {
+    if (nodeID && !isSameEntity && shouldFocusEditor) {
       setActiveTab("editor");
       focusEditorDocumentWithoutScrollJump();
     }
   }, [clearVisibleDocumentForSelection, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, readNodeLabelFromGraph, rememberCurrentDocumentScroll]);
 
-  const applyLinkedLogicGate = useCallback((logicGateID: string, label = "") => {
+  const applyLinkedLogicGate = useCallback((logicGateID: string, label = "", options: { focusEditor?: boolean } = {}) => {
+    const shouldFocusEditor = options.focusEditor !== false;
+    shouldFocusEditorForSelectionRef.current = shouldFocusEditor;
     const isSameEntity = linkedEntityKind === "logic_gate" && linkedNodeID === logicGateID;
     if (!isSameEntity) {
       rememberCurrentDocumentScroll();
@@ -539,7 +547,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     setLinkedEntityKind(logicGateID ? "logic_gate" : "");
     setLinkedNodeID(logicGateID);
     setLinkedNodeTitle(logicGateID ? (label || readLogicGateLabelFromGraph(logicGateID)) : "");
-    if (logicGateID && !isSameEntity) {
+    if (logicGateID && !isSameEntity && shouldFocusEditor) {
       setActiveTab("editor");
       focusEditorDocumentWithoutScrollJump();
     }
@@ -623,12 +631,12 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       }
       const selectedFromExplorer = readSelectedNodeFromExplorerContext();
       if (selectedFromExplorer.id) {
-        applyLinkedNode(selectedFromExplorer.id, selectedFromExplorer.label);
+        applyLinkedNode(selectedFromExplorer.id, selectedFromExplorer.label, { focusEditor: selectedFromExplorer.selectionIntent !== "navigate" });
         return;
       }
       const selectedLogicFromExplorer = readSelectedLogicGateFromExplorerContext();
       if (selectedLogicFromExplorer.id) {
-        applyLinkedLogicGate(selectedLogicFromExplorer.id, selectedLogicFromExplorer.label);
+        applyLinkedLogicGate(selectedLogicFromExplorer.id, selectedLogicFromExplorer.label, { focusEditor: selectedLogicFromExplorer.selectionIntent !== "navigate" });
         return;
       }
       applyLinkedNode("");
@@ -638,15 +646,16 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     refresh();
     const applyLiveSelection = (selection: LiveSelectionChange) => {
       if (selection.companyID !== companyID || selection.sourceFrameID === scope) return;
+      const focusEditor = selection.selectionIntent !== "navigate";
       if (selection.entityKind === "node") {
-        applyLinkedNode(selection.entityID, selection.label);
+        applyLinkedNode(selection.entityID, selection.label, { focusEditor });
         return;
       }
       if (selection.entityKind === "logic_gate") {
-        applyLinkedLogicGate(selection.entityID, selection.label);
+        applyLinkedLogicGate(selection.entityID, selection.label, { focusEditor });
         return;
       }
-      applyLinkedNode("");
+      applyLinkedNode("", "", { focusEditor });
     };
     const liveSelection = readLiveSelectionForFrame(companyID, scope);
     if (liveSelection) applyLiveSelection(liveSelection);

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, trimOrEmpty } from "./shared";
-import { emitDashboardEvent, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
+import { emitDashboardEvent, EVENT_NODE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
@@ -94,6 +94,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const explorerContextRef = useRef<number>(0);
   const explorerSelectionOriginRef = useRef<ExplorerSelectionOrigin | null>(null);
   const suppressNextSelectionBroadcastRef = useRef(false);
+  const pendingFocusNodeIDRef = useRef("");
   const layoutPersistenceReadyRef = useRef(false);
   const lastPersistedNodePositionsRef = useRef<Record<string, NodePosition>>({});
   const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(false);
@@ -140,6 +141,24 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     x: clamp(snapToGrid((canvasSize.width / 2 - pan.x) / zoom - NODE_W / 2), 0, WORLD_W - NODE_W),
     y: clamp(snapToGrid((canvasSize.height / 2 - pan.y) / zoom - NODE_H / 2), 0, WORLD_H - NODE_H),
   }), [WORLD_H, WORLD_W, canvasSize.height, canvasSize.width, pan.x, pan.y, zoom]);
+
+  const centerNodeInViewport = (nodeID: string): boolean => {
+    const position = nodePositions[nodeID];
+    const isVisible = nodes.some((node) => node.node_id === nodeID);
+    const isKnown = isVisible || allNodes.some((node) => node.node_id === nodeID);
+    if (!nodeID || !isKnown || !isVisible || !position) return false;
+    const size = nodeSizes[nodeID] ?? { w: NODE_W, h: NODE_H };
+    pendingFocusNodeIDRef.current = "";
+    setSelectedRelationshipIDs(new Set());
+    setSelectedNodeID(nodeID);
+    setSelectedNodeIDs(new Set([nodeID]));
+    setPan({
+      x: canvasSize.width / 2 - (position.x + size.w / 2) * zoom,
+      y: canvasSize.height / 2 - (position.y + size.h / 2) * zoom,
+    });
+    setCanvasActive(true);
+    return true;
+  };
 
   const selectedNodeLabel = useMemo(() => {
     if (!selectedNodeID) return "";
@@ -205,6 +224,22 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     }
     layoutPersistenceReadyRef.current = true;
   };
+
+  useEffect(() => {
+    const pendingNodeID = pendingFocusNodeIDRef.current;
+    if (pendingNodeID) centerNodeInViewport(pendingNodeID);
+  }, [canvasSize.height, canvasSize.width, nodePositions, nodeSizes, nodes, allNodes, zoom]);
+
+  useEffect(() => {
+    const onFocusRequested = (event: Event) => {
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; nodeID?: string }>).detail;
+      if (!detail || detail.mapWidgetID !== mapScope || !detail.nodeID) return;
+      pendingFocusNodeIDRef.current = detail.nodeID;
+      centerNodeInViewport(detail.nodeID);
+    };
+    window.addEventListener(EVENT_NODE_MAP_FOCUS_REQUESTED, onFocusRequested);
+    return () => window.removeEventListener(EVENT_NODE_MAP_FOCUS_REQUESTED, onFocusRequested);
+  }, [canvasSize.height, canvasSize.width, mapScope, nodePositions, nodeSizes, nodes, allNodes, zoom]);
 
   useEffect(() => {
     const cached = SESSION_NODE_MAP_STATE.get(mapStateKey) ?? SESSION_NODE_MAP_STATE.get(fallbackMapStateKey);

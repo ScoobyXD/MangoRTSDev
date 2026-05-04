@@ -95,6 +95,21 @@ export function removeLogicGateRelationshipGraphNode(apiBase: string, companyID:
   notify(entry);
 }
 
+export function removeLogicGateRelationshipGraphRelationshipsForLogicGate(apiBase: string, companyID: string, logicGateID: string): void {
+  if (!logicGateID) return;
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  const currentRelationships = entry.snapshot.relationships ?? [];
+  const nextRelationships = currentRelationships.filter((item) => item.node_id_a !== logicGateID && item.node_id_b !== logicGateID);
+  if (nextRelationships.length === currentRelationships.length) return;
+  entry.snapshot = {
+    ...entry.snapshot,
+    relationships: nextRelationships,
+    generated_at: new Date().toISOString(),
+  };
+  notify(entry);
+}
+
 export function upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase: string, companyID: string, item: CompanyExplorerFolderItem): void {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);

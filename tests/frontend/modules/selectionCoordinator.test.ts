@@ -13,6 +13,7 @@ function selection(overrides: Partial<LiveSelectionChange> = {}): LiveSelectionC
     targetFrameIDs: ["editor-1"],
     sequence: 10,
     changedAt: 1000,
+    selectionIntent: "activate",
     ...overrides,
   };
 }
@@ -50,6 +51,26 @@ test("publishes selected entity directly to target frames without storing source
   assert.equal(editorSelection?.entityKind, "logic_gate");
   assert.equal(editorSelection?.entityID, "gate-1");
   assert.equal(editorSelection?.selectedTreeID, "logic-gate-gate-1");
+  assert.equal(editorSelection?.selectionIntent, "activate");
   assert.equal(isSelectionTargetForFrame(editorSelection!, "editor-1"), true);
   assert.equal(readLiveSelectionForFrame(companyID, "explorer-1"), null);
+});
+
+test("preserves navigation intent so targets can update context without taking focus", () => {
+  const companyID = "company-selection-intent-test";
+  publishLiveSelection({
+    companyID,
+    entityKind: "node",
+    entityID: "node-keyboard",
+    sourceFrameID: "explorer-1",
+    sourceModule: "company-explorer",
+    targetFrameIDs: ["editor-1"],
+    selectionIntent: "navigate",
+    changedAt: 4000,
+    sequence: 1,
+  });
+
+  const editorSelection = readLiveSelectionForFrame(companyID, "editor-1");
+  assert.equal(editorSelection?.entityID, "node-keyboard");
+  assert.equal(editorSelection?.selectionIntent, "navigate");
 });
