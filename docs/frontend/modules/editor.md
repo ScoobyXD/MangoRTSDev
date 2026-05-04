@@ -51,20 +51,23 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 - Typing schedules a debounced save. Blur, node switch, and unmount flush the latest pending value so edits do not wait for a manual save action.
 - Saves are serialized per editor instance. If a save is in flight, the editor queues only the latest follow-up value, preserving user-perceived order without flooding the API.
 - The editor surface owns the full frame height. This prevents the textarea viewport from collapsing to a thin strip and lets mouse-wheel scrolling behave like a regular text editor.
-- Metadata, Outline Styles, and History are isolated from the document body. The textarea stays mounted to preserve draft/autosave state, but it is hidden, removed from tab order, and made non-interactive whenever another tab owns the frame.
+- Metadata and History are isolated from the document body. The textarea stays mounted to preserve draft/autosave state, but it is hidden, removed from tab order, and made non-interactive whenever those tabs own the frame.
 - Switching away from the Editor tab flushes the same pending document save path used by blur. This keeps UI tabs and future headless API flows on the same persistence contract instead of adding tab-specific write behavior.
 - Selecting a new linked node or logic gate switches back to the Editor tab and focuses the document without forcing the document viewport to the bottom.
 - The editor remembers the last scroll offset per open document target in a small bounded in-memory cache. Returning to a node, logic gate, or the Editor tab restores that viewport; unseen documents start at the top.
-- Outline Styles has two input modes: `Automatic Numbering` and `Indent Guides`.
-- `Automatic Numbering` only affects new Enter presses after numbered lines such as `1. ` or `1.2. `. It inserts the next number at the same indentation and does not rewrite existing document text when the mode is selected.
-- `Indent Guides` keeps text input plain and draws lightweight vertical indentation guides only for actual indented lines. It must not use a document-wide repeating grid; guides open when a line is indented and close when indentation drops back. Tab still inserts five literal spaces.
+- The Format tab stays next to the Editor tab and keeps the document surface interactive. It exposes deterministic text commands for bold (`**text**`), underline (`<u>text</u>`), hyperlinks (`[text](url)`), and local document font size.
+- The Outline Styles header tab is a selectable dropdown with `Automatic Numbering` and `Indent Guides`. Picking a mode changes future input behavior only; it does not rewrite the existing document.
+- `Automatic Numbering` affects new Enter/Tab/Shift+Tab presses after outline markers. Enter continues the current marker family, Tab nests to the next marker family, and Shift+Tab returns to the parent flow. Marker families rotate by depth: decimal, alphabetic, roman, then repeat.
+- `Indent Guides` keeps text input plain and draws lightweight vertical indentation guides only for actual indented lines. It uses the same monospace document metrics as the textarea and places guides on VS Code-style indent boundaries instead of centered inside the space run.
+- In `Indent Guides`, Enter copies the current line indentation, Shift+Tab removes one indent level, and Backspace deletes a preceding tab-sized five-space run in one edit.
 - Clearing all text calls the projection delete API. This keeps reload behavior correct while preserving append-only nonblank history for audit and scale.
-- The same document APIs work for headless agents: agents can post latest document text with a stable `information_id`, read projections for sub-100ms hot paths, and delete a projection to clear the latest document value. The outline input helpers are pure frontend functions, so future agent-facing command APIs can reuse the same text-edit rules without needing a browser.
+- The same document APIs work for headless agents: agents can post latest document text with a stable `information_id`, read projections for sub-100ms hot paths, and delete a projection to clear the latest document value. The outline and inline-format helpers are pure frontend functions, so future agent-facing command APIs can reuse the same text-edit rules without needing a browser.
 
 ## Approved Editor Feel
 - Keep the editor feeling like this: a simple, fast, native text document surface with natural typing, preserved document viewport, vertical mouse-wheel scrolling, and projection-backed autosave.
 - Outline behavior must stay input-only. Switching outline modes must never scan and transform the whole existing document.
 - Tab is intentionally five literal spaces. This is UI-only text input behavior; the backend remains the same headless API contract for users and agents.
+- Formatting is intentionally represented as plain text tokens until the backend owns a richer document model. This keeps writes append-only, API-friendly, and cheap to serve through projection hot paths.
 
 ## Semantic vs layout persistence policy (2026-04-27)
 - Editor information values are persisted server-side and served through typed node/logic-gate projection rows for hot-path loads.

@@ -99,7 +99,8 @@ Use this checklist format and keep it complete.
   - dashboard undo/redo still routes when focus is outside editable text
   - Delete/Backspace do not steal text-editing delete keys
 - [x] `tests/frontend/modules/editor/editorTabs.test.ts`
-  - editor document is visible and interactive only on the Editor tab
+  - exposes Editor, Format, Outline Styles, Metadata, and History tabs
+  - editor document is visible and interactive on editing tabs
   - metadata and history tabs wall off the editor document surface
 - [x] `tests/frontend/modules/editor/editorUndoHistory.test.ts`
   - adjacent typing inside the group window undoes as one compact text group
@@ -113,6 +114,11 @@ Use this checklist format and keep it complete.
 - [x] `tests/frontend/modules/editor/plainTextEditing.test.ts`
   - editor Tab inserts exactly five plain spaces
   - editor Tab replaces selected text with five spaces and moves caret after them
+  - Enter continues the current indentation level in Indent Guides mode
+  - Shift+Tab removes one indentation level
+  - Backspace deletes a tab-sized five-space run in one edit
+  - Automatic Numbering nests and outdents between decimal, alphabetic, and roman marker families
+  - inline format commands produce deterministic text edits for UI and headless callers
 - [x] `frontend/src/modules/node-map/relationshipProjection.test.ts`
   - side -> role mapping
   - `+` linked top/bottom semantics
@@ -225,12 +231,15 @@ Use this checklist format and keep it complete.
   - computes bounded Kanban column reorder/swap and width/height resize values
   - locks the Kanban visual contract for preserving column title casing and clearing frame chrome
 - [x] `tests/frontend/modules/editor/editorTabs.test.ts`
-  - exposes Editor, Outline Styles, Metadata, and History tabs
-  - walls off the document textarea from pointer and keyboard access outside the Editor tab
+  - exposes Editor, Format, Outline Styles, Metadata, and History tabs
+  - keeps the document textarea active for Editor, Format, and Outline Styles
+  - walls off the document textarea from pointer and keyboard access in Metadata and History
 - [x] `tests/frontend/modules/editor/plainTextEditing.test.ts`
   - keeps Tab as five literal spaces
-  - continues automatic numbered and multilevel outline lines on new Enter presses only
-  - keeps Indent Guides mode as plain newline input
+  - continues automatic numbered, alphabetic, roman, and multilevel outline lines on new Enter presses only
+  - keeps Indent Guides mode as plain text while preserving indentation on Enter
+  - verifies Shift+Tab outdent and tab-sized Backspace behavior
+  - verifies deterministic bold, underline, and hyperlink text commands for UI/API reuse
 - [x] `tests/frontend/modules/editor/editorScroll.test.ts`
   - restores the last scroll viewport for a document target
   - bounds in-session scroll memory for long editing sessions

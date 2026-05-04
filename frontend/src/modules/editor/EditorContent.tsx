@@ -12,7 +12,7 @@ import type { NodeInformation } from "../node-map/shared";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
 import { EDITOR_TAB_ITEMS, getEditorDocumentIsolationState, type EditorTabID } from "./editorTabs";
 import { classifyEditorInputType, createEditorUndoHistory, recordEditorUndoChange, redoEditorText, resetEditorUndoHistory, snapshotEditorText, snapshotEditorTextArea, undoEditorText, type EditorTextChangeKind, type EditorTextSnapshot } from "./editorUndoHistory";
-import { DEFAULT_EDITOR_OUTLINE_STYLE, EDITOR_TAB_TEXT, insertEditorEnterText, insertEditorTabText, isEditorOutlineStyleID, type EditorOutlineStyleID } from "./plainTextEditing";
+import { applyEditorInlineFormat, DEFAULT_EDITOR_OUTLINE_STYLE, deleteEditorBackspaceText, EDITOR_TAB_TEXT, insertEditorEnterText, insertEditorTabText, isEditorOutlineStyleID, type EditorInlineFormatCommand, type EditorOutlineStyleID } from "./plainTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
 import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
 
@@ -66,12 +66,33 @@ const EDITOR_OUTLINE_STYLE_ITEMS: ReadonlyArray<{ id: EditorOutlineStyleID; labe
   { id: "indent-guides", label: "Indent Guides" },
 ];
 const EDITOR_DOCUMENT_FONT_SIZE_PX = 15;
+const EDITOR_DOCUMENT_MIN_FONT_SIZE_PX = 10;
+const EDITOR_DOCUMENT_MAX_FONT_SIZE_PX = 28;
 const EDITOR_DOCUMENT_LINE_HEIGHT = 1.55;
-const EDITOR_DOCUMENT_LINE_HEIGHT_PX = EDITOR_DOCUMENT_FONT_SIZE_PX * EDITOR_DOCUMENT_LINE_HEIGHT;
+const EDITOR_DOCUMENT_TOP_PX = 86;
+const EDITOR_FORMAT_DOCUMENT_TOP_PX = 122;
+
+function readStoredDocumentFontSize(storageKey: string): number {
+  try {
+    const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(storageKey);
+    const parsed = raw ? Number(raw) : EDITOR_DOCUMENT_FONT_SIZE_PX;
+    return Number.isFinite(parsed)
+      ? Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, Math.round(parsed)))
+      : EDITOR_DOCUMENT_FONT_SIZE_PX;
+  } catch {
+    return EDITOR_DOCUMENT_FONT_SIZE_PX;
+  }
+}
 
 function shouldReadStoredSelectionForEvent(hasGap: boolean, hasEventSelection: boolean): boolean {
   return hasGap && !hasEventSelection;
 }
+
+const EditorDisclosureIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style={{ display: "block" }}>
+    <path d="M3.25 4.55 6 7.3l2.75-2.75" fill="none" stroke={color} strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 
 // Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
@@ -79,6 +100,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const scope = widgetId?.trim() ? widgetId : "global";
   const outlineStyleStorageKey = `editor-outline-style-v1:${companyID}:${scope}`;
+  const documentFontSizeStorageKey = `editor-document-font-size-v1:${companyID}:${scope}`;
   const [linkedMapWidgetID, setLinkedMapWidgetID] = useState("");
   const [linkedLogicMapWidgetID, setLinkedLogicMapWidgetID] = useState("");
   const [linkedEntityKind, setLinkedEntityKind] = useState<"" | "node" | "logic_gate">("");
@@ -91,6 +113,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
   const [outlineStyle, setOutlineStyle] = useState<EditorOutlineStyleID>(() => readStoredOutlineStyle(outlineStyleStorageKey));
+  const [documentFontSize, setDocumentFontSize] = useState(() => readStoredDocumentFontSize(documentFontSizeStorageKey));
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -129,6 +152,15 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       // for headless agents even if browser storage is blocked.
     }
   }, [outlineStyle, outlineStyleStorageKey]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(documentFontSizeStorageKey, String(documentFontSize));
+    } catch {
+      // Font size is a local view preference; document text persistence does
+      // not depend on browser storage for users or future headless agents.
+    }
+  }, [documentFontSize, documentFontSizeStorageKey]);
 
   const scheduleIndentGuideUpdate = useCallback((text: string) => {
     if (indentGuideFrameRef.current !== null) {
@@ -371,15 +403,39 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     scheduleIndentGuideUpdate(snapshot.value);
   }, [scheduleDocumentSave, scheduleIndentGuideUpdate]);
 
+  const commitEditorPlainTextEdit = useCallback((element: HTMLTextAreaElement, edit: { value: string; selectionStart: number; selectionEnd: number }, kind: EditorTextChangeKind) => {
+    const before = snapshotEditorTextArea(element);
+    applyDocumentTextToEditor(edit.value);
+    element.setSelectionRange(edit.selectionStart, edit.selectionEnd);
+    recordEditorUndoChange(editorUndoHistoryRef.current, before, snapshotEditorTextArea(element), kind);
+    lastEditorTextSnapshotRef.current = snapshotEditorTextArea(element);
+    pendingEditorInputKindRef.current = "unknown";
+  }, [applyDocumentTextToEditor]);
+
+  const applyInlineFormatCommand = useCallback((command: EditorInlineFormatCommand) => {
+    const element = editorTextAreaRef.current;
+    if (!element) return;
+    const href = command === "hyperlink" ? window.prompt("Hyperlink URL", "https://") : undefined;
+    if (command === "hyperlink" && href === null) return;
+    const edit = applyEditorInlineFormat(element.value, element.selectionStart, element.selectionEnd, command, href ?? "https://");
+    commitEditorPlainTextEdit(element, edit, "typing");
+    element.focus({ preventScroll: true });
+  }, [commitEditorPlainTextEdit]);
+
+  const adjustDocumentFontSize = useCallback((delta: number) => {
+    setDocumentFontSize((current) => Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, current + delta)));
+  }, []);
+
   const selectTab = useCallback((tab: EditorTabID) => {
     rememberCurrentDocumentScroll();
     if (tab === activeTab) return;
-    if (activeTab === "editor" && tab !== "editor" && editorTextAreaRef.current) {
+    const nextDocumentIsVisible = getEditorDocumentIsolationState(tab).pointerEvents === "auto";
+    if (!nextDocumentIsVisible && editorTextAreaRef.current) {
       flushPendingDocumentSave(editorTextAreaRef.current.value);
       editorTextAreaRef.current.blur();
     }
     setActiveTab(tab);
-    if (tab === "editor") focusEditorDocumentWithoutScrollJump();
+    if (nextDocumentIsVisible) focusEditorDocumentWithoutScrollJump();
   }, [activeTab, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, rememberCurrentDocumentScroll]);
 
   useEffect(() => {
@@ -830,10 +886,14 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const panelBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 255, 255, 0.8)";
   const scrollbarAccent = theme === "light" ? "rgb(0, 233, 255)" : accent;
   const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)";
-  const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.12)" : "rgba(3,25,30,0.12)";
+  const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(3,25,30,0.2)";
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
   const hasLinkedDocument = linkedNodeID.trim().length > 0;
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
+  const showFormatToolbar = activeTab === "format";
+  const documentTopPx = showFormatToolbar ? EDITOR_FORMAT_DOCUMENT_TOP_PX : EDITOR_DOCUMENT_TOP_PX;
+  const documentLineHeightPx = documentFontSize * EDITOR_DOCUMENT_LINE_HEIGHT;
+  const documentFontFamily = "'IBM Plex Mono', 'Consolas', 'Liberation Mono', monospace";
 
   return (
     <div
@@ -848,8 +908,49 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           <div style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", gap: 6, paddingLeft: 106, overflowX: "auto", scrollbarWidth: "none", pointerEvents: "auto" }}>
             {EDITOR_TAB_ITEMS.map((tab) => {
               const selected = activeTab === tab.id;
+              const tabStyle: React.CSSProperties = {
+                flex: "0 0 auto",
+                whiteSpace: "nowrap",
+                border: `1px solid ${selected ? accent : strokeColor}`,
+                background: selected ? tabSelectedBackground : tabBackground,
+                color: surfaceText,
+                fontSize: 10,
+                fontWeight: 800,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                padding: "4px 10px",
+                borderRadius: 4,
+                cursor: "pointer",
+              };
+              if (tab.id === "outline-styles") {
+                return (
+                  <label key={tab.id} style={{ ...tabStyle, position: "relative", display: "inline-flex", alignItems: "center", gap: 6, paddingRight: 24 }}>
+                    <select
+                      aria-label="Outline styles"
+                      value={outlineStyle}
+                      onFocus={() => setActiveTab("outline-styles")}
+                      onChange={(event) => {
+                        setOutlineStyle(event.currentTarget.value as EditorOutlineStyleID);
+                        setActiveTab("outline-styles");
+                      }}
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        opacity: 0,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {EDITOR_OUTLINE_STYLE_ITEMS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                    </select>
+                    <span>{tab.label}</span>
+                    <span style={{ position: "absolute", right: 7, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
+                      <EditorDisclosureIcon color={surfaceText} />
+                    </span>
+                  </label>
+                );
+              }
               return (
-                <button key={tab.id} type="button" onClick={() => selectTab(tab.id)} style={{ flex: "0 0 auto", whiteSpace: "nowrap", border: `1px solid ${selected ? accent : strokeColor}`, background: selected ? tabSelectedBackground : tabBackground, color: surfaceText, fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", padding: "4px 10px", borderRadius: 4, cursor: "pointer" }}>
+                <button key={tab.id} type="button" onClick={() => selectTab(tab.id)} style={tabStyle}>
                   {tab.label}
                 </button>
               );
@@ -903,35 +1004,39 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             </div>
           )}
 
-          {activeTab === "outline-styles" && (
-            <section style={{ display: "grid", gap: 8, maxWidth: 620, pointerEvents: "auto" }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>Outline Styles</div>
-              <div role="radiogroup" aria-label="Outline styles" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {EDITOR_OUTLINE_STYLE_ITEMS.map((item) => {
-                  const selected = outlineStyle === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() => setOutlineStyle(item.id)}
-                      style={{
-                        border: `1px solid ${selected ? accent : strokeColor}`,
-                        background: selected ? tabSelectedBackground : panelBackground,
-                        color: surfaceText,
-                        borderRadius: 4,
-                        cursor: "pointer",
-                        fontSize: 11,
-                        fontWeight: 800,
-                        padding: "6px 8px",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {item.label}
-                    </button>
-                  );
-                })}
+          {showFormatToolbar && (
+            <section aria-label="Editor formatting" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", maxWidth: 720, pointerEvents: "auto" }}>
+              {([
+                { command: "bold" as const, label: "B", title: "Bold (Ctrl+B)", style: { fontWeight: 900 } },
+                { command: "underline" as const, label: "U", title: "Underline (Ctrl+U)", style: { textDecoration: "underline" } },
+                { command: "hyperlink" as const, label: "Link", title: "Hyperlink" },
+              ]).map((item) => (
+                <button
+                  key={item.command}
+                  type="button"
+                  title={item.title}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => applyInlineFormatCommand(item.command)}
+                  style={{
+                    minWidth: item.command === "hyperlink" ? 46 : 28,
+                    height: 26,
+                    border: `1px solid ${strokeColor}`,
+                    background: panelBackground,
+                    color: surfaceText,
+                    borderRadius: 4,
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontWeight: 800,
+                    ...item.style,
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+              <div aria-label="Font size" style={{ display: "inline-flex", alignItems: "center", height: 26, border: `1px solid ${strokeColor}`, background: panelBackground, borderRadius: 4, overflow: "hidden" }}>
+                <button type="button" title="Decrease font size" onMouseDown={(event) => event.preventDefault()} onClick={() => adjustDocumentFontSize(-1)} style={{ width: 28, height: "100%", border: 0, borderRight: `1px solid ${ruleColor}`, background: "transparent", color: surfaceText, cursor: "pointer", fontSize: 16, lineHeight: 1 }}>-</button>
+                <span style={{ minWidth: 34, textAlign: "center", fontSize: 12, fontWeight: 800 }}>{documentFontSize}</span>
+                <button type="button" title="Increase font size" onMouseDown={(event) => event.preventDefault()} onClick={() => adjustDocumentFontSize(1)} style={{ width: 28, height: "100%", border: 0, borderLeft: `1px solid ${ruleColor}`, background: "transparent", color: surfaceText, cursor: "pointer", fontSize: 15, lineHeight: 1 }}>+</button>
               </div>
             </section>
           )}
@@ -966,7 +1071,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             aria-hidden="true"
             style={{
               position: "absolute",
-              top: 86,
+              top: documentTopPx,
               right: 0,
               bottom: 0,
               left: 0,
@@ -976,9 +1081,10 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
               boxSizing: "border-box",
               overflow: "hidden",
               padding: "0 18px 24px 24px",
-              fontSize: EDITOR_DOCUMENT_FONT_SIZE_PX,
+              fontSize: documentFontSize,
               lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT,
-              fontFamily: "'Manrope', 'Helvetica Neue', sans-serif",
+              fontFamily: documentFontFamily,
+              letterSpacing: 0,
             }}
           >
             <div style={{ position: "relative", transform: `translateY(-${documentScrollTop}px)` }}>
@@ -987,9 +1093,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
                   key={`${segment.depth}-${segment.lineStart}-${segment.lineEnd}`}
                   style={{
                     position: "absolute",
-                    top: segment.lineStart * EDITOR_DOCUMENT_LINE_HEIGHT_PX,
-                    left: `calc(${segment.depth * EDITOR_TAB_TEXT.length}ch - ${EDITOR_TAB_TEXT.length / 2}ch)`,
-                    height: Math.max(EDITOR_DOCUMENT_LINE_HEIGHT_PX, (segment.lineEnd - segment.lineStart + 1) * EDITOR_DOCUMENT_LINE_HEIGHT_PX),
+                    top: segment.lineStart * documentLineHeightPx,
+                    left: `${(segment.depth - 1) * EDITOR_TAB_TEXT.length}ch`,
+                    height: Math.max(documentLineHeightPx, (segment.lineEnd - segment.lineStart + 1) * documentLineHeightPx),
                     borderLeft: `1px solid ${indentGuideColor}`,
                     opacity: 0.9,
                   }}
@@ -1044,20 +1150,28 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
               if (snapshot) applyEditorUndoSnapshot(event.currentTarget, snapshot);
               return;
             }
+            if (mod && !event.altKey && (key === "b" || key === "u")) {
+              event.preventDefault();
+              applyInlineFormatCommand(key === "b" ? "bold" : "underline");
+              return;
+            }
             if (event.key === "Escape") {
               event.preventDefault();
               event.currentTarget.blur();
               return;
             }
-            if (event.key === "Enter" && outlineStyle === "automatic-outline-numbering") {
+            if (event.key === "Backspace") {
+              const edit = deleteEditorBackspaceText(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
+              if (edit) {
+                event.preventDefault();
+                commitEditorPlainTextEdit(event.currentTarget, edit, "delete");
+                return;
+              }
+            }
+            if (event.key === "Enter") {
               event.preventDefault();
-              const before = snapshotEditorTextArea(event.currentTarget);
               const edit = insertEditorEnterText(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd, outlineStyle);
-              applyDocumentTextToEditor(edit.value);
-              event.currentTarget.setSelectionRange(edit.selectionStart, edit.selectionEnd);
-              recordEditorUndoChange(editorUndoHistoryRef.current, before, snapshotEditorTextArea(event.currentTarget), "lineBreak");
-              lastEditorTextSnapshotRef.current = snapshotEditorTextArea(event.currentTarget);
-              pendingEditorInputKindRef.current = "unknown";
+              commitEditorPlainTextEdit(event.currentTarget, edit, "lineBreak");
               return;
             }
             if (event.key !== "Tab") return;
@@ -1065,17 +1179,18 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             event.preventDefault();
             // Textareas normally use Tab to leave the field. Here it is an
             // isolated editor edit group so one undo removes only this Tab.
-            const before = snapshotEditorTextArea(event.currentTarget);
-            const edit = insertEditorTabText(event.currentTarget.value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
-            applyDocumentTextToEditor(edit.value);
-            event.currentTarget.setSelectionRange(edit.selectionStart, edit.selectionEnd);
-            recordEditorUndoChange(editorUndoHistoryRef.current, before, snapshotEditorTextArea(event.currentTarget), "tab");
-            lastEditorTextSnapshotRef.current = snapshotEditorTextArea(event.currentTarget);
-            pendingEditorInputKindRef.current = "unknown";
+            const edit = insertEditorTabText(
+              event.currentTarget.value,
+              event.currentTarget.selectionStart,
+              event.currentTarget.selectionEnd,
+              outlineStyle,
+              event.shiftKey ? "outdent" : "indent",
+            );
+            commitEditorPlainTextEdit(event.currentTarget, edit, "tab");
           }}
           style={{
             position: "absolute",
-            top: 86,
+            top: documentTopPx,
             right: 0,
             bottom: 0,
             left: 0,
@@ -1090,11 +1205,13 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             resize: "none",
             padding: "0 18px 24px 24px",
             outline: "none",
-            fontSize: EDITOR_DOCUMENT_FONT_SIZE_PX,
+            fontSize: documentFontSize,
             lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT,
-            fontFamily: "'Manrope', 'Helvetica Neue', sans-serif",
+            fontFamily: documentFontFamily,
             whiteSpace: "pre-wrap",
             tabSize: 2,
+            letterSpacing: 0,
+            fontVariantLigatures: "none",
             caretColor: accent,
             cursor: "text",
             overflowY: "auto",
