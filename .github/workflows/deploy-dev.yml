@@ -134,6 +134,10 @@ jobs:
           github_repository = $(json_string "$TF_GITHUB_REPOSITORY")
           github_branch = $(json_string "$TF_GITHUB_BRANCH")
           EOF
+          {
+            echo "Generated non-secret Terraform inputs:"
+            grep -E '^(aws_region|root_domain_name|vpc_id|public_subnet_ids|private_subnet_ids|create_private_ecs_subnets|ecs_private_subnet_cidrs|ecs_nat_gateway_mode|github_owner|github_repository|github_branch) =' ci.auto.tfvars
+          }
 
       - name: Terraform init
         working-directory: ${{ env.TF_DIR }}
