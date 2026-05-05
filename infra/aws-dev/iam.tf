@@ -81,6 +81,8 @@ data "aws_iam_policy_document" "github_deploy" {
       "cloudfront:*",
       "cognito-idp:*",
       "ec2:AuthorizeSecurityGroupIngress",
+      "ec2:CreateTags",
+      "ec2:DeleteTags",
       "ec2:Describe*",
       "ec2:GetManagedPrefixListEntries",
       "ec2:RevokeSecurityGroupIngress",
