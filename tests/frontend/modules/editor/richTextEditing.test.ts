@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, deserializeEditorDocumentHTML, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
+import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, deserializeEditorDocumentHTML, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
   assert.equal(EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, 20);
@@ -19,6 +19,11 @@ test("editor paste linkification preserves punctuation outside the URL", () => {
 
   assert.match(html, /href="https:\/\/example\.test\/path"/);
   assert.match(html, /<\/a>\./);
+});
+
+test("editor link href normalization supports appended URL characters", () => {
+  assert.equal(getEditorLinkHrefForText("www.example.test/path"), "https://www.example.test/path");
+  assert.equal(getEditorLinkHrefForText("not a link"), null);
 });
 
 test("plain stored editor documents are escaped before becoming rich HTML", () => {

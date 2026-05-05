@@ -9,6 +9,7 @@ import {
   type EditorOutlineStyleID,
 } from "./plainTextEditing";
 import {
+  getEditorLinkHrefForText,
   linkifyEditorPlainTextToHTML,
   readEditorDocumentText,
   serializeEditorDocumentHTML,
@@ -39,7 +40,6 @@ type UseEditorDocumentSurfaceHandlersOptions = {
   scrollMemoryRef: React.MutableRefObject<EditorScrollMemory>;
   pendingEditorFontSizeRef: React.MutableRefObject<number | null>;
   outlineStyle: EditorOutlineStyleID;
-  documentFontSize: number;
   setDocumentScrollTop: React.Dispatch<React.SetStateAction<number>>;
   scheduleDocumentSave: (nextText: string, immediate?: boolean) => void;
   scheduleIndentGuideUpdate: (text: string) => void;
@@ -182,6 +182,19 @@ function replaceDocumentWithPlainText(root: HTMLElement, text: string, selection
   setEditorSelectionByOffsets(root, selectionStart, selectionEnd);
 }
 
+function getPreviousEditableSiblingAnchor(root: HTMLElement, node: Node): HTMLAnchorElement | null {
+  let current: Node | null = node.previousSibling;
+  while (current) {
+    if (current.nodeType === Node.TEXT_NODE && (current.textContent ?? "").length === 0) {
+      current = current.previousSibling;
+      continue;
+    }
+    if (current instanceof HTMLAnchorElement && root.contains(current)) return current;
+    return null;
+  }
+  return null;
+}
+
 function getCollapsedAnchorAtSelectionEnd(root: HTMLElement): HTMLAnchorElement | null {
   const range = getEditorSelectionRange(root);
   if (!range || !range.collapsed) return null;
@@ -189,15 +202,32 @@ function getCollapsedAnchorAtSelectionEnd(root: HTMLElement): HTMLAnchorElement 
     ? range.startContainer as Element
     : range.startContainer.parentElement;
   const anchor = container?.closest("a[href]") as HTMLAnchorElement | null;
-  if (!anchor || !root.contains(anchor)) return null;
-  const afterRange = root.ownerDocument.createRange();
-  afterRange.selectNodeContents(anchor);
-  try {
-    afterRange.setStart(range.startContainer, range.startOffset);
-  } catch {
-    return null;
+  if (anchor && root.contains(anchor)) {
+    const afterRange = root.ownerDocument.createRange();
+    afterRange.selectNodeContents(anchor);
+    try {
+      afterRange.setStart(range.startContainer, range.startOffset);
+    } catch {
+      return null;
+    }
+    return afterRange.toString().length === 0 ? anchor : null;
   }
-  return afterRange.toString().length === 0 ? anchor : null;
+
+  if (range.startContainer.nodeType === Node.ELEMENT_NODE) {
+    const element = range.startContainer as Element;
+    const previousChild = range.startOffset > 0 ? element.childNodes.item(range.startOffset - 1) : null;
+    if (previousChild instanceof HTMLAnchorElement && root.contains(previousChild)) return previousChild;
+    if (previousChild?.nodeType === Node.TEXT_NODE && (previousChild.textContent ?? "").length === 0) {
+      return getPreviousEditableSiblingAnchor(root, previousChild);
+    }
+    if (previousChild) return null;
+  }
+
+  if (range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset === 0) {
+    return getPreviousEditableSiblingAnchor(root, range.startContainer);
+  }
+
+  return null;
 }
 
 function insertPlainTextAfterAnchor(root: HTMLElement, anchor: HTMLAnchorElement, text: string): boolean {
@@ -210,6 +240,35 @@ function insertPlainTextAfterAnchor(root: HTMLElement, anchor: HTMLAnchorElement
   selection?.removeAllRanges();
   selection?.addRange(range);
   return true;
+}
+
+function appendTextToAnchorEnd(root: HTMLElement, anchor: HTMLAnchorElement, text: string): boolean {
+  const currentHref = getEditorLinkHrefForText(anchor.textContent ?? "");
+  const shouldSyncHrefToText = currentHref !== null && anchor.href === currentHref;
+  const walker = root.ownerDocument.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+  let lastTextNode: Text | null = null;
+  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+    lastTextNode = node;
+  }
+  if (!lastTextNode) {
+    lastTextNode = root.ownerDocument.createTextNode("");
+    anchor.appendChild(lastTextNode);
+  }
+  lastTextNode.data += text;
+  const nextHref = shouldSyncHrefToText ? getEditorLinkHrefForText(anchor.textContent ?? "") : null;
+  if (nextHref) anchor.href = nextHref;
+
+  const range = root.ownerDocument.createRange();
+  range.setStart(lastTextNode, lastTextNode.data.length);
+  range.collapse(true);
+  const selection = root.ownerDocument.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  return true;
+}
+
+function isHyperlinkDividerText(text: string): boolean {
+  return /[ \t\r\n]/.test(text);
 }
 
 function scrollEditorToLineStart(root: HTMLElement) {
@@ -231,7 +290,6 @@ export function useEditorDocumentSurfaceHandlers({
   scrollMemoryRef,
   pendingEditorFontSizeRef,
   outlineStyle,
-  documentFontSize,
   setDocumentScrollTop,
   scheduleDocumentSave,
   scheduleIndentGuideUpdate,
@@ -242,13 +300,21 @@ export function useEditorDocumentSurfaceHandlers({
     onBeforeInput(event) {
       const inputEvent = event.nativeEvent as InputEvent;
       const pendingFontSize = pendingEditorFontSizeRef.current;
-      if (inputEvent.inputType === "insertText" && inputEvent.data === " ") {
+      if (
+        inputEvent.inputType === "insertText" &&
+        typeof inputEvent.data === "string" &&
+        inputEvent.data.length > 0
+      ) {
         const anchor = getCollapsedAnchorAtSelectionEnd(event.currentTarget);
         if (anchor) {
           event.preventDefault();
           pendingEditorFontSizeRef.current = null;
-          insertPlainTextAfterAnchor(event.currentTarget, anchor, " ");
-          commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          const inserted = isHyperlinkDividerText(inputEvent.data)
+            ? insertPlainTextAfterAnchor(event.currentTarget, anchor, inputEvent.data)
+            : appendTextToAnchorEnd(event.currentTarget, anchor, inputEvent.data);
+          if (inserted) {
+            commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          }
           return;
         }
       }
@@ -298,7 +364,7 @@ export function useEditorDocumentSurfaceHandlers({
       }
       event.preventDefault();
       event.stopPropagation();
-      window.open(anchor.href, "_blank", "noopener,noreferrer");
+      if (event.ctrlKey || event.metaKey) window.open(anchor.href, "_blank", "noopener,noreferrer");
     },
     onKeyUp() {
       // Keep a toolbar-chosen collapsed font size armed until real text input,
@@ -334,7 +400,11 @@ export function useEditorDocumentSurfaceHandlers({
         const currentText = readEditorDocumentText(event.currentTarget);
         const edit = insertEditorEnterText(currentText, offsets.start, offsets.end, outlineStyle);
         const insertedText = edit.value.slice(offsets.start, edit.selectionStart);
-        if (replaceSelectionWithText(event.currentTarget, insertedText)) {
+        const anchor = getCollapsedAnchorAtSelectionEnd(event.currentTarget);
+        const inserted = anchor
+          ? insertPlainTextAfterAnchor(event.currentTarget, anchor, insertedText)
+          : replaceSelectionWithText(event.currentTarget, insertedText);
+        if (inserted) {
           scrollEditorToLineStart(event.currentTarget);
           commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
         }
@@ -346,6 +416,12 @@ export function useEditorDocumentSurfaceHandlers({
       pendingEditorFontSizeRef.current = null;
       const offsets = getEditorSelectionOffsets(event.currentTarget);
       if (!offsets) return;
+      const anchor = !event.shiftKey ? getCollapsedAnchorAtSelectionEnd(event.currentTarget) : null;
+      if (anchor) {
+        insertPlainTextAfterAnchor(event.currentTarget, anchor, EDITOR_TAB_TEXT);
+        commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        return;
+      }
       const currentText = readEditorDocumentText(event.currentTarget);
       const edit = event.shiftKey
         ? insertEditorTabText(currentText, offsets.start, offsets.end, outlineStyle, "outdent")
@@ -361,7 +437,6 @@ export function useEditorDocumentSurfaceHandlers({
     },
   }), [
     currentDocumentTargetKeyRef,
-    documentFontSize,
     flushPendingDocumentSave,
     outlineStyle,
     pendingEditorFontSizeRef,

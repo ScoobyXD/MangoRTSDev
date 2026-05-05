@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   DEFAULT_EDITOR_OUTLINE_STYLE,
   isEditorOutlineStyleID,
@@ -25,21 +25,8 @@ function readStoredOutlineStyle(storageKey: string): EditorOutlineStyleID {
   }
 }
 
-function readStoredDocumentFontSize(storageKey: string): number {
-  try {
-    const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(storageKey);
-    const parsed = raw ? Number(raw) : EDITOR_DOCUMENT_FONT_SIZE_PX;
-    return Number.isFinite(parsed)
-      ? Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, Math.round(parsed)))
-      : EDITOR_DOCUMENT_FONT_SIZE_PX;
-  } catch {
-    return EDITOR_DOCUMENT_FONT_SIZE_PX;
-  }
-}
-
-export function useEditorPreferences(outlineStyleStorageKey: string, documentFontSizeStorageKey: string) {
+export function useEditorPreferences(outlineStyleStorageKey: string) {
   const [outlineStyle, setOutlineStyle] = useState<EditorOutlineStyleID>(() => readStoredOutlineStyle(outlineStyleStorageKey));
-  const [documentFontSize, setDocumentFontSize] = useState(() => readStoredDocumentFontSize(documentFontSizeStorageKey));
 
   useEffect(() => {
     try {
@@ -50,24 +37,8 @@ export function useEditorPreferences(outlineStyleStorageKey: string, documentFon
     }
   }, [outlineStyle, outlineStyleStorageKey]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(documentFontSizeStorageKey, String(documentFontSize));
-    } catch {
-      // Font size is a local view preference; document text persistence does
-      // not depend on browser storage for users or future headless agents.
-    }
-  }, [documentFontSize, documentFontSizeStorageKey]);
-
-  const adjustDocumentFontSize = useCallback((delta: number) => {
-    setDocumentFontSize((current) => Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, current + delta)));
-  }, []);
-
   return {
     outlineStyle,
     setOutlineStyle,
-    documentFontSize,
-    setDocumentFontSize,
-    adjustDocumentFontSize,
   };
 }

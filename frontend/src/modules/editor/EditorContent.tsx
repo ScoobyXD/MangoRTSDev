@@ -32,6 +32,7 @@ import {
   type LinkedSelection,
 } from "./editorTypes";
 import {
+  EDITOR_DOCUMENT_FONT_SIZE_PX,
   EDITOR_DOCUMENT_LINE_HEIGHT,
   EDITOR_DOCUMENT_TOP_PX,
   EDITOR_DOCUMENT_MAX_FONT_SIZE_PX,
@@ -77,7 +78,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const scope = widgetId?.trim() ? widgetId : "global";
   const outlineStyleStorageKey = `editor-outline-style-v1:${companyID}:${scope}`;
-  const documentFontSizeStorageKey = `editor-document-font-size-v1:${companyID}:${scope}`;
   const [linkedMapWidgetID, setLinkedMapWidgetID] = useState("");
   const [linkedLogicMapWidgetID, setLinkedLogicMapWidgetID] = useState("");
   const [linkedEntityKind, setLinkedEntityKind] = useState<"" | "node" | "logic_gate">("");
@@ -89,7 +89,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [documentInformationID, setDocumentInformationID] = useState("");
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
-  const { outlineStyle, setOutlineStyle, documentFontSize, setDocumentFontSize } = useEditorPreferences(outlineStyleStorageKey, documentFontSizeStorageKey);
+  const { outlineStyle, setOutlineStyle } = useEditorPreferences(outlineStyleStorageKey);
+  const documentFontSize = EDITOR_DOCUMENT_FONT_SIZE_PX;
+  const [selectionFontSize, setSelectionFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -216,7 +218,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     if (!element) return;
     const range = getSelectionRangeInsideElement(element);
     const nextFontSize = clampEditorSelectionFontSize(nextFontSizeInput);
-    setDocumentFontSize(nextFontSize);
+    setSelectionFontSize(nextFontSize);
 
     element.focus({ preventScroll: true });
     if (!range || range.collapsed) {
@@ -238,14 +240,14 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     pendingEditorFontSizeRef.current = null;
     scheduleDocumentSave(serializeEditorDocumentHTML(element));
     scheduleIndentGuideUpdate(readEditorDocumentText(element));
-  }, [scheduleDocumentSave, scheduleIndentGuideUpdate, setDocumentFontSize]);
+  }, [scheduleDocumentSave, scheduleIndentGuideUpdate]);
 
   const applyEditorSelectionFontSize = useCallback((delta: number) => {
     const element = editorDocumentRef.current;
     const range = element ? getSelectionRangeInsideElement(element) : null;
-    const currentFontSize = range ? readRangeFontSize(range, documentFontSize) : documentFontSize;
+    const currentFontSize = range ? readRangeFontSize(range, selectionFontSize) : selectionFontSize;
     applyEditorSelectionFontSizeValue(currentFontSize + delta);
-  }, [applyEditorSelectionFontSizeValue, documentFontSize]);
+  }, [applyEditorSelectionFontSizeValue, selectionFontSize]);
 
   const selectTab = useCallback((tab: EditorTabID) => {
     rememberCurrentDocumentScroll();
@@ -274,6 +276,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const targetKey = informationID ? documentTargetKey({ entityKind, entityID, informationID }) : `${entityKind}:${entityID}:`;
     currentDocumentTargetKeyRef.current = targetKey;
     persistedDocumentTargetKeyRef.current = targetKey;
+    setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
+    pendingEditorFontSizeRef.current = null;
     const element = editorDocumentRef.current;
     restoringScrollRef.current = true;
     const restoredScrollTop = scrollMemoryRef.current.read(targetKey) ?? 0;
@@ -384,6 +388,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     pendingSaveRef.current = null;
     setDocumentInformationID("");
     pendingEditorFontSizeRef.current = null;
+    setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
     restoringScrollRef.current = false;
     if (editorDocumentRef.current) {
       editorDocumentRef.current.innerHTML = "";
@@ -663,6 +668,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       pendingSaveRef.current = null;
       setDocumentInformationID("");
       pendingEditorFontSizeRef.current = null;
+      setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
       if (editorDocumentRef.current) {
         editorDocumentRef.current.innerHTML = "";
         editorDocumentRef.current.scrollTop = 0;
@@ -756,7 +762,6 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     scrollMemoryRef,
     pendingEditorFontSizeRef,
     outlineStyle,
-    documentFontSize,
     setDocumentScrollTop,
     scheduleDocumentSave,
     scheduleIndentGuideUpdate,
@@ -785,7 +790,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             outlineMenuAccent={scrollbarAccent}
             onSelectTab={selectTab}
             onAdjustSelectionFontSize={applyEditorSelectionFontSize}
-            documentFontSize={documentFontSize}
+            documentFontSize={selectionFontSize}
             onSetSelectionFontSize={applyEditorSelectionFontSizeValue}
             onOutlineStyleFocus={() => setActiveTab("outline-styles")}
             onOutlineStyleChange={(nextOutlineStyle) => {

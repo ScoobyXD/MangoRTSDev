@@ -38,6 +38,10 @@ function normalizeEditorURL(value: string): string | null {
   }
 }
 
+export function getEditorLinkHrefForText(value: string): string | null {
+  return normalizeEditorURL(value);
+}
+
 function editorLinkHTML(label: string, href: string): string {
   return `<a href="${escapeEditorAttribute(href)}" target="_blank" rel="noopener noreferrer" style="color: ${EDITOR_LINK_COLOR}; text-decoration: underline; cursor: pointer;">${escapeEditorHTML(label)}</a>`;
 }
