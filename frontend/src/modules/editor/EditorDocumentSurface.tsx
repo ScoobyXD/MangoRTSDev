@@ -5,12 +5,13 @@ import { EDITOR_TAB_TEXT } from "./plainTextEditing";
 import { EDITOR_DOCUMENT_LINE_HEIGHT } from "./useEditorPreferences";
 
 export type EditorDocumentSurfaceProps = {
-  textAreaRef: React.RefObject<HTMLTextAreaElement>;
+  documentRef: React.RefObject<HTMLDivElement>;
   documentIsolation: EditorDocumentIsolationState;
   documentTopPx: number;
   documentFontSize: number;
   documentLineHeightPx: number;
   documentFontFamily: string;
+  documentBottomBufferPx: number;
   documentScrollTop: number;
   showIndentGuides: boolean;
   indentGuideSegments: EditorIndentGuideSegment[];
@@ -19,26 +20,27 @@ export type EditorDocumentSurfaceProps = {
   accent: string;
   scrollbarAccent: string;
   scrollbarTrack: string;
-  onBeforeInput: React.FormEventHandler<HTMLTextAreaElement>;
-  onPaste: React.ClipboardEventHandler<HTMLTextAreaElement>;
-  onDrop: React.DragEventHandler<HTMLTextAreaElement>;
-  onChange: React.ChangeEventHandler<HTMLTextAreaElement>;
-  onSelect: React.ReactEventHandler<HTMLTextAreaElement>;
-  onClick: React.MouseEventHandler<HTMLTextAreaElement>;
-  onKeyUp: React.KeyboardEventHandler<HTMLTextAreaElement>;
-  onBlur: React.FocusEventHandler<HTMLTextAreaElement>;
-  onScroll: React.UIEventHandler<HTMLTextAreaElement>;
-  onWheel: React.WheelEventHandler<HTMLTextAreaElement>;
-  onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement>;
+  onBeforeInput: React.FormEventHandler<HTMLDivElement>;
+  onPaste: React.ClipboardEventHandler<HTMLDivElement>;
+  onDrop: React.DragEventHandler<HTMLDivElement>;
+  onInput: React.FormEventHandler<HTMLDivElement>;
+  onSelect: React.ReactEventHandler<HTMLDivElement>;
+  onClick: React.MouseEventHandler<HTMLDivElement>;
+  onKeyUp: React.KeyboardEventHandler<HTMLDivElement>;
+  onBlur: React.FocusEventHandler<HTMLDivElement>;
+  onScroll: React.UIEventHandler<HTMLDivElement>;
+  onWheel: React.WheelEventHandler<HTMLDivElement>;
+  onKeyDown: React.KeyboardEventHandler<HTMLDivElement>;
 };
 
 export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
-  textAreaRef,
+  documentRef,
   documentIsolation,
   documentTopPx,
   documentFontSize,
   documentLineHeightPx,
   documentFontFamily,
+  documentBottomBufferPx,
   documentScrollTop,
   showIndentGuides,
   indentGuideSegments,
@@ -50,7 +52,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
   onBeforeInput,
   onPaste,
   onDrop,
-  onChange,
+  onInput,
   onSelect,
   onClick,
   onKeyUp,
@@ -74,7 +76,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
           pointerEvents: "none",
           boxSizing: "border-box",
           overflow: "hidden",
-          padding: "0 18px 24px 24px",
+          padding: `0 18px ${documentBottomBufferPx}px 24px`,
           fontSize: documentFontSize,
           lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT,
           fontFamily: documentFontFamily,
@@ -99,17 +101,21 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
       </div>
     )}
 
-    <textarea
-      ref={textAreaRef}
+    <div
+      ref={documentRef}
       className="editor-document-scroll"
+      role="textbox"
       aria-label="Linked document editor"
+      aria-multiline="true"
       aria-hidden={documentIsolation.ariaHidden}
       tabIndex={documentIsolation.tabIndex}
+      contentEditable={documentIsolation.pointerEvents === "auto"}
+      suppressContentEditableWarning
       spellCheck
       onBeforeInput={onBeforeInput}
       onPaste={onPaste}
       onDrop={onDrop}
-      onChange={onChange}
+      onInput={onInput}
       onSelect={onSelect}
       onClick={onClick}
       onKeyUp={onKeyUp}
@@ -131,20 +137,19 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
         visibility: documentIsolation.visibility,
         pointerEvents: documentIsolation.pointerEvents,
         boxSizing: "border-box",
-        resize: "none",
-        padding: "0 18px 24px 24px",
+        padding: `0 18px ${documentBottomBufferPx}px 24px`,
         outline: "none",
         fontSize: documentFontSize,
         lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT,
         fontFamily: documentFontFamily,
-        whiteSpace: "pre-wrap",
+        whiteSpace: "pre",
         tabSize: 2,
         letterSpacing: 0,
         fontVariantLigatures: "none",
         caretColor: accent,
         cursor: "text",
         overflowY: "auto",
-        overflowX: "hidden",
+        overflowX: "auto",
         scrollbarGutter: "stable",
         ["--editor-document-scroll-accent" as string]: scrollbarAccent,
         ["--editor-document-scroll-track" as string]: scrollbarTrack,

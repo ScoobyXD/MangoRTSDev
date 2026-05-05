@@ -35,7 +35,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   onUpdateTitle,
 }) => (
   <>
-    {activeTab === "editor" && (
+    {(activeTab === "editor" || activeTab === "outline-styles") && (
       <div style={{ display: "grid", gap: 8, pointerEvents: "auto" }}>
         <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "0.12em", color: accent, cursor: "text" }}>
           <span style={{ textTransform: "uppercase" }}>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>&nbsp;

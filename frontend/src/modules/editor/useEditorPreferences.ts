@@ -15,7 +15,6 @@ export const EDITOR_DOCUMENT_MIN_FONT_SIZE_PX = 10;
 export const EDITOR_DOCUMENT_MAX_FONT_SIZE_PX = 28;
 export const EDITOR_DOCUMENT_LINE_HEIGHT = 1.55;
 export const EDITOR_DOCUMENT_TOP_PX = 86;
-export const EDITOR_FORMAT_DOCUMENT_TOP_PX = 122;
 
 function readStoredOutlineStyle(storageKey: string): EditorOutlineStyleID {
   try {
