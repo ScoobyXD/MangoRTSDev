@@ -51,7 +51,10 @@ const App: React.FC = () => {
   const [headerTextColor, setHeaderTextColor] = useState(() => initialSettingsRef.current.headerTextColor || UI_THEME.text);
   const [tabBgColor, setTabBgColor] = useState(() => initialSettingsRef.current.tabBgColor || "#ffffff");
   const [tabTextColor, setTabTextColor] = useState(() => initialSettingsRef.current.tabTextColor || "#08343a");
-  const [frameLinks, setFrameLinks] = useState<FrameLinkEdge[]>(() => loadFrameLinks());
+  const [frameLinks, setFrameLinks] = useState<FrameLinkEdge[]>(() => {
+    const loadedFrameIDs = new Set(loaded.tabs.flatMap((tab) => tab.frames.map((frame) => frame.id)));
+    return loadFrameLinks().filter((edge) => loadedFrameIDs.has(edge.a) && loadedFrameIDs.has(edge.b));
+  });
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [frameRightClickMenu, setFrameRightClickMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -299,6 +302,11 @@ const App: React.FC = () => {
     if (signature === lastFrameRegistrySignatureRef.current) return;
     lastFrameRegistrySignatureRef.current = signature;
     persistFrameRegistry(registry);
+    frameLinkRevisionRef.current += 1;
+    emitDashboardEvent(EVENT_FRAME_LINK_GRAPH_UPDATED, {
+      revision: frameLinkRevisionRef.current,
+      changedAt: Date.now(),
+    });
   }, [frames]);
 
   const confirmDeleteFrameSelection = useCallback((frameIDs: string[]) => {
@@ -415,20 +423,26 @@ const App: React.FC = () => {
 
   const openDefaultNodeView = useCallback((tabID: string) => {
     const framesForView = createDefaultNodeViewFrames();
+    const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
     setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Default Node View", frames: framesForView } : tab)));
-    setFrameLinks((previous) => mergeLinkPlan(previous, computeLinkPlan(framesForView)));
+    setFrameLinks((previous) => mergeLinkPlan(previous.filter((edge) => !replacedFrameIDs.has(edge.a) && !replacedFrameIDs.has(edge.b)), computeLinkPlan(framesForView)));
     setActiveTabId(tabID);
     setEditMode(true);
-  }, []);
+  }, [tabs]);
 
   const saveCurrentAsTemplate = useCallback((tabID: string) => {
     const source = tabs.find((tab) => tab.id === tabID);
     if (!source) return;
     const id = createTabId();
+    const frameIDMap = new Map(source.frames.map((frame) => [frame.id, createFrameId()]));
     const templateTab: ViewTab = {
       id,
       name: `${source.name} Template`,
-      frames: source.frames.map((frame) => ({ ...frame, id: createFrameId() })),
+      frames: source.frames.map((frame) => ({
+        ...frame,
+        id: frameIDMap.get(frame.id) ?? createFrameId(),
+        parentId: frame.parentId ? frameIDMap.get(frame.parentId) : undefined,
+      })),
     };
     setTabs((previous) => [...previous, templateTab]);
     setActiveTabId(id);
