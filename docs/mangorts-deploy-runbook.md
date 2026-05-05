@@ -54,7 +54,7 @@ Optional variables have workflow defaults: `TF_STATE_KEY`, `TF_STATE_REGION`, `T
 
 ## Normal Deploy
 
-The workflow `.github/workflows/deploy-dev.yml` runs on `main` and manually through `workflow_dispatch`.
+The workflow `.github/workflows/deploy-dev.yml` currently runs manually through `workflow_dispatch` only. This is intentional while the first AWS dev deploy is being stabilized. Re-enable `push` deploys only after repeated dev deploys are boring and reliable.
 
 It performs:
 
@@ -69,6 +69,14 @@ It performs:
 9. Build the frontend with Cognito and API env vars.
 10. Sync `frontend/dist` to S3.
 11. Invalidate CloudFront.
+
+## Current Dev Shortcuts
+
+- Dev deploys are manual-only for now: `Actions -> Deploy MangoRTS Dev -> Run workflow`.
+- The dev site is still protected by temporary CloudFront basic auth. The password is stored as GitHub secret `DEV_BASIC_AUTH_PASSWORD` and Terraform variable `dev_basic_auth_password`.
+- The dev company ID is intentionally hardcoded as `11111111-1111-1111-1111-111111111111` until tenant onboarding and company selection exist.
+- Before real company onboarding, seed Cognito user membership against the hardcoded dev company ID so authenticated API calls pass company authorization.
+- Replace the hardcoded dev company flow with backend-driven tenant discovery before onboarding external companies.
 
 ## Smoke Tests
 
