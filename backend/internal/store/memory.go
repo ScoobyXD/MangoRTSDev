@@ -23,6 +23,9 @@ type MemoryRepo struct {
 	kanbanBoards      map[string]domain.KanbanBoard
 	kanbanColumns     map[string][]domain.KanbanColumn
 	kanbanCards       map[string][]domain.KanbanCard
+	users             map[string]domain.User
+	companies         map[string]domain.Company
+	memberships       map[string]domain.CompanyMembership
 }
 
 func NewMemoryRepo() *MemoryRepo {
@@ -43,6 +46,9 @@ func NewMemoryRepo() *MemoryRepo {
 		kanbanBoards:      map[string]domain.KanbanBoard{},
 		kanbanColumns:     map[string][]domain.KanbanColumn{},
 		kanbanCards:       map[string][]domain.KanbanCard{},
+		users:             map[string]domain.User{},
+		companies:         map[string]domain.Company{},
+		memberships:       map[string]domain.CompanyMembership{},
 	}
 }
 
@@ -56,4 +62,8 @@ func folderItemKey(companyID, itemType, itemID string) string {
 
 func boardKey(companyID, boardID string) string {
 	return companyID + ":" + boardID
+}
+
+func membershipKey(companyID, userID string) string {
+	return companyID + ":" + userID
 }

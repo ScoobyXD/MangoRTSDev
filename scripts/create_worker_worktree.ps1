@@ -17,7 +17,7 @@ Assert-AgentCleanStatus -RepoPath $mainRoot -Context "main worktree"
 
 $slug = ConvertTo-AgentSlug -Name $Name
 $branchName = "codex/$slug"
-$workerPath = Get-AgentSiblingPath -MainPath $mainRoot -LeafName "MangoOSDev-$slug"
+$workerPath = Get-AgentSiblingPath -MainPath $mainRoot -LeafName "MangoRTSDev-$slug"
 
 if (Test-AgentBranchExists -RepoPath $mainRoot -BranchName $branchName) {
   throw "Branch '$branchName' already exists."

@@ -1,0 +1,96 @@
+name: Deploy MangoRTS Dev
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-west-1' }}
+  TF_DIR: infra/aws-dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEV_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Backend tests
+        working-directory: backend
+        run: go test ./...
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init
+
+      - name: Terraform validate
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate
+
+      - name: Read image repository output
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          echo "ECR_REPOSITORY_URL=$(terraform output -raw backend_ecr_repository_url)" >> "$GITHUB_ENV"
+
+      - name: Login to ECR
+        run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${ECR_REPOSITORY_URL%/*}"
+
+      - name: Build and push backend image
+        env:
+          IMAGE_URI: ${{ env.ECR_REPOSITORY_URL }}:${{ github.sha }}
+        run: |
+          docker build -t "$IMAGE_URI" -f backend/Dockerfile backend
+          docker push "$IMAGE_URI"
+          echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
+
+      - name: Terraform plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -out=tfplan -var "backend_image_uri=${IMAGE_URI}"
+
+      - name: Terraform apply
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -auto-approve tfplan
+
+      - name: Read Terraform outputs
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          {
+            echo "APP_URL=$(terraform output -raw app_url)"
+            echo "COGNITO_DOMAIN=$(terraform output -raw cognito_domain)"
+            echo "COGNITO_CLIENT_ID=$(terraform output -raw cognito_spa_client_id)"
+            echo "DEV_COMPANY_ID=$(terraform output -raw dev_company_id)"
+            echo "FRONTEND_BUCKET=$(terraform output -raw frontend_bucket)"
+            echo "CLOUDFRONT_DISTRIBUTION_ID=$(terraform output -raw cloudfront_distribution_id)"
+          } >> "$GITHUB_ENV"
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: ${{ env.APP_URL }}
+          VITE_AUTH_MODE: cognito
+          VITE_COGNITO_DOMAIN: ${{ env.COGNITO_DOMAIN }}
+          VITE_COGNITO_CLIENT_ID: ${{ env.COGNITO_CLIENT_ID }}
+          VITE_COGNITO_REDIRECT_URI: ${{ env.APP_URL }}
+          VITE_COGNITO_LOGOUT_URI: ${{ env.APP_URL }}
+          VITE_COGNITO_SCOPES: openid email profile
+          VITE_COMPANY_ID: ${{ env.DEV_COMPANY_ID }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Publish frontend
+        run: |
+          aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}" --delete
+          aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths "/*"

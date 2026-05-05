@@ -1,0 +1,39 @@
+aws_region  = "us-west-1"
+project_name = "mangorts"
+environment  = "dev"
+
+root_domain_name = "example.com"
+app_subdomain    = "dev"
+api_subdomain    = "api.dev"
+origin_subdomain = "origin.dev"
+
+# Use the VPC/subnets that can already reach the existing dev PostgreSQL/Aurora DB.
+vpc_id             = "vpc-0123456789abcdef0"
+public_subnet_ids  = ["subnet-aaaaaaaaaaaaaaaaa", "subnet-bbbbbbbbbbbbbbbbb"]
+private_subnet_ids = ["subnet-ccccccccccccccccc", "subnet-ddddddddddddddddd"]
+
+existing_db_host                = "dev-db.cluster-xxxxxxxx.us-west-1.rds.amazonaws.com"
+existing_db_port                = 5432
+existing_db_name                = "mangorts"
+existing_db_user                = "mangorts_app"
+existing_db_password_secret_arn = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/dev/db-password"
+existing_db_security_group_id   = "sg-0123456789abcdef0"
+
+# First apply can use a bootstrap image. CI should move this to a git-SHA tag.
+backend_image_uri = "123456789012.dkr.ecr.us-west-1.amazonaws.com/mangorts-dev-backend:bootstrap"
+
+dev_company_id = "11111111-1111-1111-1111-111111111111"
+
+cognito_domain_prefix = "mangorts-dev-example"
+
+dev_basic_auth_username = "mangorts-dev"
+dev_basic_auth_password = "replace-with-a-temporary-dev-password"
+
+github_owner      = "your-github-owner"
+github_repository = "MangoRTSDev"
+github_branch     = "main"
+
+extra_tags = {
+  owner = "you"
+  team  = "platform"
+}

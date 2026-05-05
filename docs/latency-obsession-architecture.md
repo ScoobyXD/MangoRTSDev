@@ -92,7 +92,7 @@ These are the currently implemented mechanisms that keep the client workspace ca
 ### Graph $ Projection Table
 
 ### Cross-Module Sync Architecture Contract (Locked)
-To scale linked workflows across Node Map, Company Explorer, Editor, Logic Gates, Operations, Messages/Email, and KPI surfaces, MangoOS adopts this synchronization contract.
+To scale linked workflows across Node Map, Company Explorer, Editor, Logic Gates, Operations, Messages/Email, and KPI surfaces, MangoRTS adopts this synchronization contract.
 
 Current frontend implementation note (2026-05-03):
 - Same-tab interactive selection is owned by `selectionCoordinator.ts`.
@@ -154,7 +154,7 @@ Junior engineer note:
 
 ### Event Log + Projection Architecture (Required; events table alone is insufficient)
 
-To be explicit: an `events` table by itself is **not** sufficient to meet MangoOS hot-path latency targets at projected scale.
+To be explicit: an `events` table by itself is **not** sufficient to meet MangoRTS hot-path latency targets at projected scale.
 
 Required companion architecture:
 
@@ -273,7 +273,7 @@ For Node/Explorer/Editor/Logic Gate canvases:
 
 ### Hot-path cache hierarchy contract (locked)
 
-To keep hot-path interactions deterministic under high concurrency, MangoOS uses this layered contract:
+To keep hot-path interactions deterministic under high concurrency, MangoRTS uses this layered contract:
 
 1. **L1 module state cache (per-frame render state).**
    - Immediate paint data for active component tree.
@@ -473,7 +473,7 @@ Any such change must include:
 
 **Why this entry exists (explicit):**
 - Cross-module synchronization discussions converged on event-driven semantics, but there was risk of interpreting an events table as a complete solution.
-- At MangoOS scale targets, hot reads cannot depend on raw event-history scans.
+- At MangoRTS scale targets, hot reads cannot depend on raw event-history scans.
 
 **What was defined (explicit):**
 - Added a locked architecture section stating that `events` is write/history authority only.

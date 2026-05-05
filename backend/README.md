@@ -1,4 +1,6 @@
-# MiraeOpus Backend (Canonical Aurora MVP)
+# MangoRTS Backend (Canonical Aurora MVP)
+
+The Go module and binary still use the older `miraeopus` internal name. The product name and AWS resource naming are MangoRTS.
 
 This backend now targets the canonical Aurora PostgreSQL schema (`nodes`, `node_information`, `logic_gates`, `operations`, etc.).
 
@@ -84,6 +86,22 @@ Required DB env vars when using PostgreSQL:
 - `DB_PASSWORD`
 - `DB_NAME` (default `postgres`)
 - `DB_SSLMODE` (default `require`)
+
+## Auth mode
+
+Local development leaves auth disabled unless explicitly configured.
+
+For AWS dev:
+
+```text
+AUTH_MODE=cognito
+AWS_REGION=<db/app region>
+COGNITO_USER_POOL_ID=<user pool id>
+COGNITO_CLIENT_ID=<spa app client id>
+COGNITO_TOKEN_USE=access
+```
+
+When Cognito auth is enabled, `/healthz` remains public and `/v1/*` requires a valid Cognito access token. Requests with `company_id` are allowed only when the authenticated Cognito subject has a row in `company_memberships` for that company.
 
 `DB_HOST` must be the raw Aurora endpoint hostname (not prefixed with `host=`).
 

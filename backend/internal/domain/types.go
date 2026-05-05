@@ -2,6 +2,29 @@ package domain
 
 import "time"
 
+type User struct {
+	UserID           string    `json:"user_id"`
+	CognitoSubject   string    `json:"cognito_subject"`
+	Email            string    `json:"email"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type Company struct {
+	CompanyID        string    `json:"company_id"`
+	Name             string    `json:"name"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type CompanyMembership struct {
+	CompanyID        string    `json:"company_id"`
+	UserID           string    `json:"user_id"`
+	Role             string    `json:"role"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
 type Node struct {
 	CompanyID string `json:"company_id"`
 	NodeID    string `json:"node_id"`

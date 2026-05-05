@@ -11,4 +11,8 @@ backend/api-dev.log
 backend/api-dev.err.log
 frontend/vite-dev.log
 frontend/vite-dev.err.log
+**/.terraform/
+**/terraform.tfstate
+**/terraform.tfstate.backup
+**/*.tfplan
 

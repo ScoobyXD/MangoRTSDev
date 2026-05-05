@@ -180,8 +180,8 @@ React 18 · TypeScript strict · Vite · Zero deps beyond React
 
 ## UI Rules (Text Editing)
 
-- All text editing interactions in MangoOS must be visually seamless.
-- The current Editor inline title editing interaction is the gold-standard reference behavior for MangoOS.
+- All text editing interactions in MangoRTS must be visually seamless.
+- The current Editor inline title editing interaction is the gold-standard reference behavior for MangoRTS.
 - Clicking into editable text should only reveal the insertion caret at the text edge.
 - Users must be able to click anywhere in the text zone (prefix text, title text, or trailing row space) and immediately enter edit mode with a caret.
 - Entering edit mode must not introduce a bordered box, background fill, typography shrink, or layout jump.

@@ -13,6 +13,8 @@ var (
 )
 
 type Repository interface {
+	UpsertAuthUser(cognitoSubject, email string) (domain.User, error)
+	UserHasCompanyAccess(cognitoSubject, companyID string) (bool, error)
 	CreateNode(companyID, title string) (domain.Node, error)
 	UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error)
 	ListNodes(companyID string) ([]domain.Node, error)

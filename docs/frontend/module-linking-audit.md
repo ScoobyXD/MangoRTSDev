@@ -11,11 +11,11 @@ This note explains how context linking currently works across frames/modules in 
 ## 2) Broadcast channels
 
 Shared event names:
-- `mangoos:frame-link-graph-updated`
-- `mangoos:selection-coordinator-updated`
-- `mangoos:node-map-selection-updated`
-- `mangoos:logic-gate-map-selection-updated`
-- `mangoos:explorer-context-updated`
+- `mangorts:frame-link-graph-updated`
+- `mangorts:selection-coordinator-updated`
+- `mangorts:node-map-selection-updated`
+- `mangorts:logic-gate-map-selection-updated`
+- `mangorts:explorer-context-updated`
 
 These are dispatched with `emitDashboardEvent(...)` as typed `CustomEvent`s.
 
@@ -66,7 +66,7 @@ This design makes view selection topology-aware (via links), scoped (via frame I
 Logic Gate Map participates through the unified `map` kind for new frames. Legacy saved frames using `logic-map` still resolve as logic-gate maps.
 
 - Logic Gate Map writes scoped selection state to `logic-gate-map-state-v1:<companyID>:<mapWidgetID>`.
-- Logic Gate Map emits `mangoos:logic-gate-map-selection-updated`.
+- Logic Gate Map emits `mangorts:logic-gate-map-selection-updated`.
 - Company Explorer writes logic-gate context to `logic-gate-map-explorer-context-v1:<companyID>:<targetFrameID>`.
 - Editor prefers direct linked-map selection first, then Explorer fallback context.
 - The unified Map chooses node vs logic-gate rendering from the newest Explorer context key for its frame.

@@ -10,7 +10,7 @@ $BackendDir = Join-Path $RootDir "backend"
 $TfDir = Join-Path $RootDir "infra/terraform"
 
 $AwsRegion = if ($env:AWS_REGION) { $env:AWS_REGION } else { "us-west-1" }
-$ProjectName = if ($env:PROJECT_NAME) { $env:PROJECT_NAME } else { "mangoos" }
+$ProjectName = if ($env:PROJECT_NAME) { $env:PROJECT_NAME } else { "mangorts" }
 $EnvironmentName = if ($env:ENVIRONMENT) { $env:ENVIRONMENT } else { "staging" }
 $ImageTag = if ($env:IMAGE_TAG) { $env:IMAGE_TAG } else { "latest" }
 

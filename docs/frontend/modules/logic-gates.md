@@ -112,7 +112,7 @@ Junior engineer note:
 Frame linking uses the existing `frame-module-links-v1` graph. New frames use the unified `map` kind; legacy saved layouts may still use `logic-map`.
 
 Linked behavior:
-- Logic Gate Map publishes `mangoos:logic-gate-map-selection-updated`.
+- Logic Gate Map publishes `mangorts:logic-gate-map-selection-updated`.
 - Company Explorer shows real logic gates under the Logic Gates tree and can drive linked Logic Gate Map selection.
 - Editor follows linked Logic Gate Map selection and labels the header `Logic Gate:` instead of `Node:`.
 - When the unified Map receives logic-gate Explorer context, it renders this logic-gate path and writes `logic-gate-map-state-v1:<companyID>:<mapWidgetID>` using the same frame ID.

@@ -1,3 +1,9 @@
+# Historical: Legacy MangoOS AWS One-Shot Bootstrap
+
+This folder is not the canonical MangoRTS dev infrastructure. Use `infra/aws-dev` and the docs in `docs/mangorts-*.md` for current work.
+
+The notes below are retained only as historical reference.
+
 # MangoOS AWS One-Shot Bootstrap (ECS + Aurora + S3 + SQS)
 
 Need the shortest path? See `docs/deploy-staging-step-by-step.md` for a simplified checklist and

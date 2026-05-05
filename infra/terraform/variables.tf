@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "project_name" {
   description = "Project slug used in resource names."
   type        = string
-  default     = "mangoos"
+  default     = "mangorts"
 }
 
 variable "environment" {
@@ -77,7 +77,7 @@ variable "search_api_desired_count" {
 variable "aurora_database_name" {
   description = "Initial Aurora database name."
   type        = string
-  default     = "mangoos"
+  default     = "mangorts"
 }
 
 variable "create_aurora" {

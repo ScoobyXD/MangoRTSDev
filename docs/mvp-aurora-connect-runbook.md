@@ -1,3 +1,7 @@
+# Historical: MVP Runbook For Existing Aurora
+
+This document predates the MangoRTS dev platform plan. Use `docs/mangorts-database.md` and `docs/mangorts-deploy-runbook.md` for current database and deploy guidance.
+
 # MVP Runbook: Connect App to Existing Aurora PostgreSQL (**Windows-first**)
 
 You are on **Windows**. These instructions are written for Windows PowerShell first.

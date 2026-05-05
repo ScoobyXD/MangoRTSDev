@@ -21,7 +21,7 @@ BACKEND_DIR="${ROOT_DIR}/backend"
 TF_DIR="${ROOT_DIR}/infra/terraform"
 
 AWS_REGION="${AWS_REGION:-us-west-1}"
-PROJECT_NAME="${PROJECT_NAME:-mangoos}"
+PROJECT_NAME="${PROJECT_NAME:-mangorts}"
 ENVIRONMENT="${ENVIRONMENT:-staging}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 

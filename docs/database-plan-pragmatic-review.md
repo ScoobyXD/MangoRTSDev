@@ -1,3 +1,7 @@
+# Historical: Database Plan Pragmatic Review
+
+This document is retained as historical analysis. For current MangoRTS dev database setup, use `docs/mangorts-database.md`.
+
 # Database Plan Pragmatic Review (Latency-Obsession Aligned)
 
 ## Why this review exists

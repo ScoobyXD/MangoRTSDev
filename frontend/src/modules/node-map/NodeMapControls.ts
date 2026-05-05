@@ -6,7 +6,7 @@ export type NodeMapScreenRect = { minX: number; maxX: number; minY: number; maxY
 
 const EPSILON = 0.000001;
 const CLICK_DRAG_THRESHOLD_PX = 4;
-export const NODE_MAP_CLIPBOARD_STORAGE_KEY = "mangoos:node-map-clipboard-v1";
+export const NODE_MAP_CLIPBOARD_STORAGE_KEY = "mangorts:node-map-clipboard-v1";
 
 const pointInRect = (point: NodeMapScreenPoint, rect: NodeMapScreenRect) => (
   point.x >= rect.minX && point.x <= rect.maxX && point.y >= rect.minY && point.y <= rect.maxY

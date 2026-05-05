@@ -1,3 +1,7 @@
+# Historical: Two Week Plan
+
+This document is retained as product and planning history. For current MangoRTS AWS dev platform work, start at `docs/README.md`.
+
 # Two Week Plan
 
 ## Objective

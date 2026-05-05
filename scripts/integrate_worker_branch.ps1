@@ -71,7 +71,7 @@ if ([string]::IsNullOrWhiteSpace($IntegrationSlug)) {
 
 $safeSlug = ConvertTo-AgentSlug -Name $IntegrationSlug
 $integrationBranch = "integration/$safeSlug"
-$integrationPath = Get-AgentSiblingPath -MainPath $mainRoot -LeafName "MangoOSDev-integration-$safeSlug"
+$integrationPath = Get-AgentSiblingPath -MainPath $mainRoot -LeafName "MangoRTSDev-integration-$safeSlug"
 
 if (Test-AgentBranchExists -RepoPath $mainRoot -BranchName $integrationBranch) {
   throw "Branch '$integrationBranch' already exists."

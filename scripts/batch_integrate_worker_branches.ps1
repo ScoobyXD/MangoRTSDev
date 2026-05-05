@@ -27,7 +27,7 @@ Assert-AgentCleanStatus -RepoPath $mainRoot -Context "main worktree"
 
 $safeBatch = ConvertTo-AgentSlug -Name $BatchName
 $integrationBranch = "integration/$safeBatch"
-$integrationPath = Get-AgentSiblingPath -MainPath $mainRoot -LeafName "MangoOSDev-integration-$safeBatch"
+$integrationPath = Get-AgentSiblingPath -MainPath $mainRoot -LeafName "MangoRTSDev-integration-$safeBatch"
 
 if (Test-AgentBranchExists -RepoPath $mainRoot -BranchName $integrationBranch) {
   throw "Branch '$integrationBranch' already exists."

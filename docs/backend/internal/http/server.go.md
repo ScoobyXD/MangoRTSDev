@@ -1,6 +1,6 @@
 # This is the main doc related to server.go
 ## Golden Rules:
-Design the MangoOS hot-path architecture for:
+Design the MangoRTS hot-path architecture for:
 - 100000s of UI elements and simultaneous background operations per active workspace
 - 100000s of companies
 - 1000000s of users and ai agency

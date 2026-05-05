@@ -1,19 +1,30 @@
 package httpapi
 
 import (
+	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/store"
 	"net/http"
 )
 
 type Server struct {
-	repo store.Repository
-	hub  *workspaceEventHub
+	repo          store.Repository
+	hub           *workspaceEventHub
+	authValidator *auth.Validator
+}
+
+type ServerOptions struct {
+	AuthValidator *auth.Validator
 }
 
 func NewServer(repo store.Repository) *Server {
+	return NewServerWithOptions(repo, ServerOptions{})
+}
+
+func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server {
 	return &Server{
-		repo: repo,
-		hub:  newWorkspaceEventHub(),
+		repo:          repo,
+		hub:           newWorkspaceEventHub(),
+		authValidator: options.AuthValidator,
 	}
 }
 
@@ -42,7 +53,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/kanban/columns/", s.handleKanbanColumnByID)
 	mux.HandleFunc("/v1/kanban/cards", s.handleKanbanCards)
 	mux.HandleFunc("/v1/kanban/cards/", s.handleKanbanCardByID)
-	return mux
+	return s.withAuth(mux)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

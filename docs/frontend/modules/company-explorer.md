@@ -187,7 +187,7 @@ Folder runtime update (2026-05-02):
 - Selecting a logic-gate folder broadcasts `selectedFolderID`/`selectedFolderKind=logic_gate`; linked Logic Gate Map applies the same folder-scope rule for gates.
 - Selecting an individual node or logic gate inside a folder keeps that folder scope in the broadcast, so linked maps can select the item without expanding back to the whole company.
 - Relationships are displayed only when both endpoints are inside the active folder scope. Existing cross-folder relationships are hidden in scoped map views; moving a node or logic gate to a different Explorer folder level through the `POST /v1/company-explorer/folder-items` API deletes relationships touching that entity, and local graph caches prune those edges immediately so the map matches the new folder context.
-- Node Map and Logic Gate Map can emit `mangoos:company-explorer-find-requested`
+- Node Map and Logic Gate Map can emit `mangorts:company-explorer-find-requested`
   with `{ companyID, targetFrameIDs, entities: [{ kind, id }] }`. Explorer
   applies that local API by selecting every matching node/logic-gate row,
   expanding the containing folder path from `company_explorer_folder_items` and

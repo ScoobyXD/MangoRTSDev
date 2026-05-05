@@ -1,4 +1,4 @@
-export const EVENT_SELECTION_COORDINATOR_UPDATED = "mangoos:selection-coordinator-updated";
+export const EVENT_SELECTION_COORDINATOR_UPDATED = "mangorts:selection-coordinator-updated";
 
 export type SelectionEntityKind = "node" | "logic_gate" | "folder" | "kanban";
 

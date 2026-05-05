@@ -1,3 +1,7 @@
+# Historical: Backend Configuration Notes
+
+This document predates the MangoRTS dev platform plan. Use `docs/mangorts-dev-platform.md`, `docs/mangorts-auth.md`, `docs/mangorts-infra-state.md`, and `docs/mangorts-database.md` for current AWS/backend guidance.
+
 # Backend Configuration: Professional Pattern (Startup/Enterprise)
 
 This is the recommended configuration model for a real startup environment.
