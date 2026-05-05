@@ -13,6 +13,9 @@ const LOGIC_GATE_SIDE_CONTROLS: Array<{ direction: NodeDirection; style: React.C
   { direction: "top", style: { top: -12, left: "50%", transform: "translate(-50%, -50%)", flexDirection: "row" } },
   { direction: "bottom", style: { bottom: -12, left: "50%", transform: "translate(-50%, 50%)", flexDirection: "row" } },
 ];
+const AND_GATE_VIEWBOX_WIDTH = 148;
+const AND_GATE_VIEWBOX_HEIGHT = 96;
+const AND_GATE_PATH = "M1 1H100A47 47 0 0 1 100 95H1Z";
 
 type LogicGateMapNodeCardProps = {
   node: NodeRecord;
@@ -102,6 +105,11 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
   const isSelected = selectedNodeIDs.has(node.node_id);
   const isPrimary = node.node_id === selectedNodeID;
   const isEditingTitle = editingNodeTitleNodeID === node.node_id;
+  const gateFill = isSelected ? nodeCardSelectedBackground : nodeCardBackground;
+  const gateStroke = isSelected ? selectionColor : nodeCardBorder;
+  const gateShadow = isSelected
+    ? "drop-shadow(0 0 4px rgba(0,233,255,0.45)) drop-shadow(0 8px 20px rgba(0,0,0,0.2))"
+    : "drop-shadow(0 4px 12px rgba(0,0,0,0.12))";
 
   return (
     <div
@@ -112,14 +120,12 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
         top: position.y,
         width: size.w,
         height: size.h,
-        borderRadius: 8,
-        border: `1px solid ${isSelected ? selectionColor : nodeCardBorder}`,
-        background: isSelected ? nodeCardSelectedBackground : nodeCardBackground,
-        outline: isSelected ? `2px solid ${selectionColor}` : "none",
-        outlineOffset: isSelected ? 1 : 0,
+        border: "none",
+        background: "transparent",
+        outline: "none",
         display: "grid",
         gridTemplateRows: "1fr",
-        boxShadow: isSelected ? "0 0 0 3px rgba(0,233,255,0.35), 0 8px 20px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.12)",
+        boxShadow: "none",
         userSelect: "none",
         color: nodeCardText,
         cursor: isEditingTitle ? "text" : (dragState?.nodeIDs.includes(node.node_id) ? "grabbing" : "grab"),
@@ -186,14 +192,39 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
         });
       }}
     >
+      <svg
+        aria-hidden="true"
+        viewBox={`0 0 ${AND_GATE_VIEWBOX_WIDTH} ${AND_GATE_VIEWBOX_HEIGHT}`}
+        preserveAspectRatio="none"
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          overflow: "visible",
+          pointerEvents: "none",
+          zIndex: 0,
+          filter: gateShadow,
+        }}
+      >
+        <path
+          d={AND_GATE_PATH}
+          fill={gateFill}
+          stroke={gateStroke}
+          strokeWidth={isSelected ? 2.4 : 1.4}
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
       <div
         style={{
+          position: "relative",
+          zIndex: 1,
           display: "grid",
           placeItems: "center",
           width: "100%",
           height: "100%",
           textAlign: "center",
-          padding: "10px",
+          padding: "10px 22px 10px 10px",
         }}
       >
         {/* Latency-obsession alignment: keep node-card render minimal.
@@ -274,7 +305,7 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
         )}
       </div>
       {isSelected && (
-        <div style={{ position: "absolute", top: 6, right: 6, width: 12, height: 12, borderRadius: 999, background: selectionColor, opacity: 0.92 }} />
+        <div style={{ position: "absolute", top: 8, right: 18, width: 12, height: 12, borderRadius: 999, background: selectionColor, opacity: 0.92, zIndex: 2 }} />
       )}
 
       {LOGIC_GATE_SIDE_CONTROLS.map(({ direction, style: sideStyle }) => {

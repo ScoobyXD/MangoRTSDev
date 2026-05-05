@@ -87,6 +87,8 @@ export const INFO_TYPES = [
 export const NODE_W = 148;
 export const NODE_H = 96;
 export const MINI_GRID = 12;
+export const NODE_MAP_MIN_ZOOM = 0.08;
+export const NODE_MAP_MAX_ZOOM = 2.7;
 export const SESSION_NODE_MAP_STATE = new Map<string, NodeMapState>();
 export const PANEL_MIN_WIDTH = 300;
 export const PANEL_MIN_HEIGHT = 220;
@@ -115,6 +117,60 @@ export function clamp(value: number, minimum: number, maximum: number): number {
 
 export function snapToGrid(value: number): number {
   return Math.round(value / MINI_GRID) * MINI_GRID;
+}
+
+function positionKey(position: NodePosition): string {
+  return `${snapToGrid(position.x)}:${snapToGrid(position.y)}`;
+}
+
+export function resolveOpenNodeMapPosition(input: {
+  desired: NodePosition;
+  occupied: Record<string, NodePosition>;
+  worldWidth: number;
+  worldHeight: number;
+  nodeWidth: number;
+  nodeHeight: number;
+  ignoreID?: string;
+}): NodePosition {
+  const clampPosition = (position: NodePosition) => ({
+    x: clamp(snapToGrid(position.x), 0, input.worldWidth - input.nodeWidth),
+    y: clamp(snapToGrid(position.y), 0, input.worldHeight - input.nodeHeight),
+  });
+  const occupiedKeys = new Set<string>();
+  for (const [id, position] of Object.entries(input.occupied)) {
+    if (id === input.ignoreID || !Number.isFinite(position.x) || !Number.isFinite(position.y)) continue;
+    occupiedKeys.add(positionKey(position));
+  }
+
+  const base = clampPosition(input.desired);
+  if (!occupiedKeys.has(positionKey(base))) return base;
+
+  const stepX = Math.max(MINI_GRID, snapToGrid(input.nodeWidth + MINI_GRID * 3));
+  const stepY = Math.max(MINI_GRID, snapToGrid(input.nodeHeight + MINI_GRID * 3));
+  const maxRadius = Math.max(
+    1,
+    Math.ceil(input.worldWidth / stepX),
+    Math.ceil(input.worldHeight / stepY),
+  );
+
+  for (let radius = 1; radius <= maxRadius; radius += 1) {
+    const candidates = [
+      { x: base.x + stepX * radius, y: base.y },
+      { x: base.x, y: base.y + stepY * radius },
+      { x: base.x - stepX * radius, y: base.y },
+      { x: base.x, y: base.y - stepY * radius },
+      { x: base.x + stepX * radius, y: base.y + stepY * radius },
+      { x: base.x - stepX * radius, y: base.y + stepY * radius },
+      { x: base.x + stepX * radius, y: base.y - stepY * radius },
+      { x: base.x - stepX * radius, y: base.y - stepY * radius },
+    ];
+    for (const candidate of candidates) {
+      const position = clampPosition(candidate);
+      if (!occupiedKeys.has(positionKey(position))) return position;
+    }
+  }
+
+  return base;
 }
 
 function formatGridNumber(value: number): string {
@@ -228,10 +284,14 @@ export function reconcileNodeMapPositions<T extends { node_id: string }>(input: 
     const y = snapToGrid(Math.floor(placementIndex / perRow) * (input.nodeHeight + 26) + baseY);
     missingIndex += 1;
     ensureWritable();
-    next[node.node_id] = {
-      x: clamp(x, 0, input.worldWidth - input.nodeWidth),
-      y: clamp(y, 0, input.worldHeight - input.nodeHeight),
-    };
+    next[node.node_id] = resolveOpenNodeMapPosition({
+      desired: { x, y },
+      occupied: next,
+      worldWidth: input.worldWidth,
+      worldHeight: input.worldHeight,
+      nodeWidth: input.nodeWidth,
+      nodeHeight: input.nodeHeight,
+    });
   }
 
   return next;

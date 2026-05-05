@@ -1,5 +1,5 @@
 import type React from "react";
-import { clamp, type NodeDirection } from "./shared";
+import { NODE_MAP_MAX_ZOOM, NODE_MAP_MIN_ZOOM, clamp, type NodeDirection } from "./shared";
 import type { NodeMapPanState } from "./NodeMapControls";
 import type {
   NodeMapCanvasContextMenuState,
@@ -80,7 +80,7 @@ export function useNodeMapViewportHandlers({
       const worldX = (cursorX - pan.x) / zoom;
       const worldY = (cursorY - pan.y) / zoom;
       const delta = event.deltaY < 0 ? 1.1 : 0.9;
-      const nextZoom = clamp(zoom * delta, 0.45, 2.7);
+      const nextZoom = clamp(zoom * delta, NODE_MAP_MIN_ZOOM, NODE_MAP_MAX_ZOOM);
       setZoom(nextZoom);
       setPan({ x: cursorX - worldX * nextZoom, y: cursorY - worldY * nextZoom });
     },
