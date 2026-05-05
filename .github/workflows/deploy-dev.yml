@@ -166,6 +166,7 @@ jobs:
         run: |
           {
             echo "APP_URL=$(terraform output -raw app_url)"
+            echo "API_URL=$(terraform output -raw api_url)"
             echo "COGNITO_DOMAIN=$(terraform output -raw cognito_domain)"
             echo "COGNITO_CLIENT_ID=$(terraform output -raw cognito_spa_client_id)"
             echo "DEV_COMPANY_ID=$(terraform output -raw dev_company_id)"
@@ -176,7 +177,7 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         env:
-          VITE_API_BASE_URL: ${{ env.APP_URL }}
+          VITE_API_BASE_URL: ${{ env.API_URL }}
           VITE_AUTH_MODE: cognito
           VITE_COGNITO_DOMAIN: ${{ env.COGNITO_DOMAIN }}
           VITE_COGNITO_CLIENT_ID: ${{ env.COGNITO_CLIENT_ID }}
