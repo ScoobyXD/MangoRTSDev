@@ -32,15 +32,22 @@ export const MapContent: React.FC<MapProps> = ({ initialMode = "node", ...props 
   const logicGateContextKey = `${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
   const [mode, setMode] = useState<MapMode>(initialMode);
 
-  const applyLiveSelectionMode = (selection: LiveSelectionChange) => {
-    if (selection.companyID !== companyID) return;
+  const applyLiveSelectionMode = (selection: LiveSelectionChange): boolean => {
+    if (selection.companyID !== companyID) return false;
+    const latestExplorerContextTimestamp = Math.max(
+      contextTimestamp(localStorage.getItem(nodeContextKey)),
+      contextTimestamp(localStorage.getItem(logicGateContextKey)),
+    );
+    if (latestExplorerContextTimestamp > 0 && selection.changedAt < latestExplorerContextTimestamp) return false;
     if (selection.entityKind === "logic_gate" || selection.folderKind === "logic_gate") {
       setMode("logic_gate");
-      return;
+      return true;
     }
     if (selection.entityKind === "node" || selection.folderKind === "node") {
       setMode("node");
+      return true;
     }
+    return false;
   };
 
   useEffect(() => {
@@ -53,8 +60,8 @@ export const MapContent: React.FC<MapProps> = ({ initialMode = "node", ...props 
     const refreshModeFromExplorerContext = () => {
       const liveSelection = readLiveSelectionForFrame(companyID, scope);
       if (liveSelection) {
-        applyLiveSelectionMode(liveSelection);
-        return;
+        const liveSelectionApplied = applyLiveSelectionMode(liveSelection);
+        if (liveSelectionApplied) return;
       }
       const nodeTs = contextTimestamp(localStorage.getItem(nodeContextKey));
       const logicGateTs = contextTimestamp(localStorage.getItem(logicGateContextKey));

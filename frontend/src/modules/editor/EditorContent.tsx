@@ -111,6 +111,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const saveInFlightRef = useRef(false);
   const lastSelectionRevisionRef = useRef(0);
   const lastLogicGateSelectionRevisionRef = useRef(0);
+  const lastAppliedSelectionChangedAtRef = useRef(0);
   const shouldFocusEditorForSelectionRef = useRef(true);
   const pendingEditorFontSizeRef = useRef<number | null>(null);
 
@@ -428,6 +429,13 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [clearVisibleDocumentForSelection, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, readLogicGateLabelFromGraph, rememberCurrentDocumentScroll]);
 
+  const shouldApplySelectionChangedAt = useCallback((changedAt?: number): boolean => {
+    if (typeof changedAt !== "number" || !Number.isFinite(changedAt) || changedAt <= 0) return true;
+    if (changedAt < lastAppliedSelectionChangedAtRef.current) return false;
+    lastAppliedSelectionChangedAtRef.current = changedAt;
+    return true;
+  }, []);
+
   const updateNodeTitle = useCallback(async (nextTitle: string) => {
     const value = nextTitle.trim();
     if (!linkedNodeID || !value) return;
@@ -493,24 +501,26 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [readLinkedLogicMapWidgetID, readLinkedMapWidgetID]);
 
   useEffect(() => {
-    const applyLiveSelection = (selection: LiveSelectionChange) => {
-      if (selection.companyID !== companyID || selection.sourceFrameID === scope) return;
+    const applyLiveSelection = (selection: LiveSelectionChange): boolean => {
+      if (selection.companyID !== companyID || selection.sourceFrameID === scope) return false;
+      if (!shouldApplySelectionChangedAt(selection.changedAt)) return false;
       const focusEditor = selection.selectionIntent !== "navigate";
       if (selection.entityKind === "node") {
         applyLinkedNode(selection.entityID, selection.label, { focusEditor });
-        return;
+        return true;
       }
       if (selection.entityKind === "logic_gate") {
         applyLinkedLogicGate(selection.entityID, selection.label, { focusEditor });
-        return;
+        return true;
       }
       applyLinkedNode("", "", { focusEditor });
+      return true;
     };
     const refresh = () => {
       const liveSelection = readLiveSelectionForFrame(companyID, scope);
       if (liveSelection) {
-        applyLiveSelection(liveSelection);
-        return;
+        const liveSelectionApplied = applyLiveSelection(liveSelection);
+        if (liveSelectionApplied) return;
       }
       const selectedFromExplorer = readSelectedNodeFromExplorerContext();
       const selectedLogicFromExplorer = readSelectedLogicGateFromExplorerContext();
@@ -526,9 +536,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           selectedLogicFromExplorerIsFresh
           && (!selectedFromExplorerIsFresh || (selectedLogicFromExplorer.changedAt ?? 0) >= (selectedFromExplorer.changedAt ?? 0))
         ) {
+          if (!shouldApplySelectionChangedAt(selectedLogicFromExplorer.changedAt)) return;
           applyLinkedLogicGate(selectedLogicFromExplorer.id, selectedLogicFromExplorer.label, { focusEditor: selectedLogicFromExplorer.selectionIntent !== "navigate" });
           return;
         }
+        if (!shouldApplySelectionChangedAt(selectedFromExplorer.changedAt)) return;
         applyLinkedNode(selectedFromExplorer.id, selectedFromExplorer.label, { focusEditor: selectedFromExplorer.selectionIntent !== "navigate" });
         return;
       }
@@ -556,8 +568,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     // below so the editor does not open a stale peer localStorage snapshot.
     refresh();
     const onMapStateUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; revision?: number; changedAt?: number; sourceExplorerID?: string; envelope?: ContextMutationEnvelope }>).detail;
       if (!detail || detail.mapWidgetID !== linkedMapWidgetID) return;
+      if (detail.sourceExplorerID) return;
       const revision = readIncomingSequence(detail);
       if (revision > 0 && !isNewerSequence(lastSelectionRevisionRef.current, revision)) return;
       const eventSelectedNodeID = typeof detail.selectedNodeID === "string" ? detail.selectedNodeID : null;
@@ -565,15 +578,17 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (revision > 0 && shouldReadStoredSelectionForEvent(hasSequenceGap(lastSelectionRevisionRef.current, revision), eventHasSelection)) refresh();
       if (revision > 0) lastSelectionRevisionRef.current = revision;
       if (eventSelectedNodeID !== null) {
+        if (!shouldApplySelectionChangedAt(detail.changedAt)) return;
         applyLinkedNode(eventSelectedNodeID);
         return;
       }
       refresh();
     };
     const onLogicMapStateUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; selectedLogicGateID?: string; revision?: number; envelope?: ContextMutationEnvelope }>).detail;
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string; selectedLogicGateID?: string; revision?: number; changedAt?: number; sourceExplorerID?: string; envelope?: ContextMutationEnvelope }>).detail;
       const logicContextFrameID = linkedLogicMapWidgetID || linkedMapWidgetID;
       if (!detail || detail.mapWidgetID !== logicContextFrameID) return;
+      if (detail.sourceExplorerID) return;
       const revision = readIncomingSequence(detail);
       if (revision > 0 && !isNewerSequence(lastLogicGateSelectionRevisionRef.current, revision)) return;
       const eventSelectedLogicGateID = typeof detail.selectedLogicGateID === "string"
@@ -583,6 +598,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (revision > 0 && shouldReadStoredSelectionForEvent(hasSequenceGap(lastLogicGateSelectionRevisionRef.current, revision), eventHasSelection)) refresh();
       if (revision > 0) lastLogicGateSelectionRevisionRef.current = revision;
       if (eventSelectedLogicGateID !== null) {
+        if (!shouldApplySelectionChangedAt(detail.changedAt)) return;
         applyLinkedLogicGate(eventSelectedLogicGateID);
         return;
       }
@@ -596,7 +612,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       window.removeEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapStateUpdated);
       window.removeEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapStateUpdated);
     };
-  }, [applyLinkedLogicGate, applyLinkedNode, companyID, linkedLogicMapWidgetID, linkedMapWidgetID, readSelectedLogicGateFromExplorerContext, readSelectedLogicGateFromMap, readSelectedNodeFromExplorerContext, readSelectedNodeFromMap, scope]);
+  }, [applyLinkedLogicGate, applyLinkedNode, companyID, linkedLogicMapWidgetID, linkedMapWidgetID, readSelectedLogicGateFromExplorerContext, readSelectedLogicGateFromMap, readSelectedNodeFromExplorerContext, readSelectedNodeFromMap, scope, shouldApplySelectionChangedAt]);
 
   useEffect(() => {
     if (!linkedNodeID || linkedEntityKind !== "node") return;

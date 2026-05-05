@@ -465,6 +465,18 @@ export function shouldAcceptMapSelectionAfterExplorerSelection(input: {
   return input.now - input.localSelectionChangedAt > staleWindowMs;
 }
 
+export function shouldAcceptClearedMapSelectionAfterExplorerSelection(input: {
+  currentDomain: ExplorerSelectionDomain;
+  localSelectionChangedAt: number;
+  incomingChangedAt?: number;
+  now: number;
+  staleWindowMs?: number;
+}): boolean {
+  if (input.localSelectionChangedAt <= 0 || input.currentDomain === "root") return true;
+  if (typeof input.incomingChangedAt === "number" && input.incomingChangedAt > 0 && input.incomingChangedAt <= input.localSelectionChangedAt) return false;
+  return input.now - input.localSelectionChangedAt > (input.staleWindowMs ?? 750);
+}
+
 export function getExplorerScrollTopForRow(input: {
   rowIndex: number;
   rowHeight: number;

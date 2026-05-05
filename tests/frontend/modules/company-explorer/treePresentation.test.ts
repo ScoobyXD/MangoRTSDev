@@ -16,6 +16,7 @@ import {
   resolveExplorerPublishedSelection,
   resolveExplorerRenameTarget,
   resolveExplorerRootDropTarget,
+  shouldAcceptClearedMapSelectionAfterExplorerSelection,
   shouldAcceptMapSelectionAfterExplorerSelection,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
 import { buildCompanyExplorerTreeRows } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
@@ -423,6 +424,27 @@ run("stale opposite-map selections do not override recent Explorer domain change
       localSelectionChangedAt: 2000,
       incomingChangedAt: 2500,
       now: 2600,
+    }),
+    true,
+  );
+});
+
+run("fresh cleared map selections do not erase a recent Explorer click", () => {
+  assert.equal(
+    shouldAcceptClearedMapSelectionAfterExplorerSelection({
+      currentDomain: "node",
+      localSelectionChangedAt: 2000,
+      incomingChangedAt: 2050,
+      now: 2100,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAcceptClearedMapSelectionAfterExplorerSelection({
+      currentDomain: "node",
+      localSelectionChangedAt: 2000,
+      incomingChangedAt: 2050,
+      now: 3000,
     }),
     true,
   );
