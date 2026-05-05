@@ -1,4 +1,4 @@
-# MangoRTS Dev Platform
+# MangoRTS Dev Platform V2
 
 MangoRTS dev is a production-shaped AWS environment for development and demos. It is not the official production site.
 

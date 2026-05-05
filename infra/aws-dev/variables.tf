@@ -86,8 +86,9 @@ variable "existing_db_security_group_id" {
 }
 
 variable "backend_image_uri" {
-  description = "Initial backend image URI. CI should update ECS task definitions to immutable git-SHA image tags."
+  description = "Backend image URI. Leave empty for phase-1 bootstrap before ECR contains an image."
   type        = string
+  default     = ""
 }
 
 variable "container_port" {

@@ -31,9 +31,92 @@ jobs:
         working-directory: backend
         run: go test ./...
 
+      - name: Write Terraform backend config
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_STATE_KEY: ${{ vars.TF_STATE_KEY || 'mangorts/dev/terraform.tfstate' }}
+          TF_STATE_REGION: ${{ vars.TF_STATE_REGION || vars.AWS_REGION || 'us-west-1' }}
+        run: |
+          : "${TF_STATE_BUCKET:?Set GitHub variable TF_STATE_BUCKET}"
+          cat > backend.hcl <<EOF
+          bucket  = "${TF_STATE_BUCKET}"
+          key     = "${TF_STATE_KEY}"
+          region  = "${TF_STATE_REGION}"
+          encrypt = true
+          EOF
+
+      - name: Write Terraform input vars
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_ROOT_DOMAIN_NAME: ${{ vars.TF_ROOT_DOMAIN_NAME }}
+          TF_APP_SUBDOMAIN: ${{ vars.TF_APP_SUBDOMAIN || 'dev' }}
+          TF_API_SUBDOMAIN: ${{ vars.TF_API_SUBDOMAIN || 'api.dev' }}
+          TF_ORIGIN_SUBDOMAIN: ${{ vars.TF_ORIGIN_SUBDOMAIN || 'origin.dev' }}
+          TF_VPC_ID: ${{ vars.TF_VPC_ID }}
+          TF_PUBLIC_SUBNET_IDS: ${{ vars.TF_PUBLIC_SUBNET_IDS }}
+          TF_PRIVATE_SUBNET_IDS: ${{ vars.TF_PRIVATE_SUBNET_IDS }}
+          TF_EXISTING_DB_HOST: ${{ vars.TF_EXISTING_DB_HOST }}
+          TF_EXISTING_DB_PORT: ${{ vars.TF_EXISTING_DB_PORT || '5432' }}
+          TF_EXISTING_DB_NAME: ${{ vars.TF_EXISTING_DB_NAME }}
+          TF_EXISTING_DB_USER: ${{ vars.TF_EXISTING_DB_USER }}
+          TF_EXISTING_DB_PASSWORD_SECRET_ARN: ${{ vars.TF_EXISTING_DB_PASSWORD_SECRET_ARN }}
+          TF_EXISTING_DB_SECURITY_GROUP_ID: ${{ vars.TF_EXISTING_DB_SECURITY_GROUP_ID }}
+          TF_DEV_COMPANY_ID: ${{ vars.TF_DEV_COMPANY_ID }}
+          TF_COGNITO_DOMAIN_PREFIX: ${{ vars.TF_COGNITO_DOMAIN_PREFIX }}
+          TF_DEV_BASIC_AUTH_USERNAME: ${{ vars.TF_DEV_BASIC_AUTH_USERNAME || 'mangorts-dev' }}
+          TF_DEV_BASIC_AUTH_PASSWORD: ${{ secrets.DEV_BASIC_AUTH_PASSWORD }}
+          TF_GITHUB_OWNER: ${{ vars.TF_GITHUB_OWNER || github.repository_owner }}
+          TF_GITHUB_REPOSITORY: ${{ vars.TF_GITHUB_REPOSITORY || github.event.repository.name }}
+          TF_GITHUB_BRANCH: ${{ vars.TF_GITHUB_BRANCH || 'main' }}
+        run: |
+          : "${TF_ROOT_DOMAIN_NAME:?Set GitHub variable TF_ROOT_DOMAIN_NAME}"
+          : "${TF_VPC_ID:?Set GitHub variable TF_VPC_ID}"
+          : "${TF_PUBLIC_SUBNET_IDS:?Set GitHub variable TF_PUBLIC_SUBNET_IDS as a JSON array}"
+          : "${TF_PRIVATE_SUBNET_IDS:?Set GitHub variable TF_PRIVATE_SUBNET_IDS as a JSON array}"
+          : "${TF_EXISTING_DB_HOST:?Set GitHub variable TF_EXISTING_DB_HOST}"
+          : "${TF_EXISTING_DB_NAME:?Set GitHub variable TF_EXISTING_DB_NAME}"
+          : "${TF_EXISTING_DB_USER:?Set GitHub variable TF_EXISTING_DB_USER}"
+          : "${TF_EXISTING_DB_PASSWORD_SECRET_ARN:?Set GitHub variable TF_EXISTING_DB_PASSWORD_SECRET_ARN}"
+          : "${TF_EXISTING_DB_SECURITY_GROUP_ID:?Set GitHub variable TF_EXISTING_DB_SECURITY_GROUP_ID}"
+          : "${TF_DEV_COMPANY_ID:?Set GitHub variable TF_DEV_COMPANY_ID}"
+          : "${TF_COGNITO_DOMAIN_PREFIX:?Set GitHub variable TF_COGNITO_DOMAIN_PREFIX}"
+          : "${TF_DEV_BASIC_AUTH_PASSWORD:?Set GitHub secret DEV_BASIC_AUTH_PASSWORD}"
+          jq -e 'type == "array" and all(.[]; type == "string")' <<< "$TF_PUBLIC_SUBNET_IDS" >/dev/null
+          jq -e 'type == "array" and all(.[]; type == "string")' <<< "$TF_PRIVATE_SUBNET_IDS" >/dev/null
+          json_string() {
+            jq -Rn --arg value "$1" '$value'
+          }
+          cat > ci.auto.tfvars <<EOF
+          aws_region = $(json_string "$AWS_REGION")
+          project_name = "mangorts"
+          environment = "dev"
+          root_domain_name = $(json_string "$TF_ROOT_DOMAIN_NAME")
+          app_subdomain = $(json_string "$TF_APP_SUBDOMAIN")
+          api_subdomain = $(json_string "$TF_API_SUBDOMAIN")
+          origin_subdomain = $(json_string "$TF_ORIGIN_SUBDOMAIN")
+          vpc_id = $(json_string "$TF_VPC_ID")
+          public_subnet_ids = $TF_PUBLIC_SUBNET_IDS
+          private_subnet_ids = $TF_PRIVATE_SUBNET_IDS
+          existing_db_host = $(json_string "$TF_EXISTING_DB_HOST")
+          existing_db_port = $TF_EXISTING_DB_PORT
+          existing_db_name = $(json_string "$TF_EXISTING_DB_NAME")
+          existing_db_user = $(json_string "$TF_EXISTING_DB_USER")
+          existing_db_password_secret_arn = $(json_string "$TF_EXISTING_DB_PASSWORD_SECRET_ARN")
+          existing_db_security_group_id = $(json_string "$TF_EXISTING_DB_SECURITY_GROUP_ID")
+          backend_image_uri = ""
+          dev_company_id = $(json_string "$TF_DEV_COMPANY_ID")
+          cognito_domain_prefix = $(json_string "$TF_COGNITO_DOMAIN_PREFIX")
+          dev_basic_auth_username = $(json_string "$TF_DEV_BASIC_AUTH_USERNAME")
+          dev_basic_auth_password = $(json_string "$TF_DEV_BASIC_AUTH_PASSWORD")
+          github_owner = $(json_string "$TF_GITHUB_OWNER")
+          github_repository = $(json_string "$TF_GITHUB_REPOSITORY")
+          github_branch = $(json_string "$TF_GITHUB_BRANCH")
+          EOF
+
       - name: Terraform init
         working-directory: ${{ env.TF_DIR }}
-        run: terraform init
+        run: terraform init -backend-config=backend.hcl
 
       - name: Terraform validate
         working-directory: ${{ env.TF_DIR }}

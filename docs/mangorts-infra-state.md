@@ -1,4 +1,4 @@
-# MangoRTS Infra State
+# MangoRTS Infra State V2
 
 ## Current Live Terraform Root
 
@@ -19,6 +19,7 @@ The old `infra/terraform` root is historical reference. Do not apply it for Mang
 - Route 53 records under the root hosted zone.
 - ACM certificates for CloudFront and ALB.
 - GitHub OIDC deploy role.
+- Terraform uses an S3 backend configured outside source control through `infra/aws-dev/backend.hcl`.
 
 The dev GitHub deploy role is intentionally broad enough to run Terraform for this stack. It is scoped by GitHub owner, repository, and branch in the OIDC trust policy. Tighten it before reusing this pattern for production.
 
@@ -37,6 +38,7 @@ Do not manually edit resources Terraform owns unless recovering from an incident
 Allowed manual actions:
 
 - register the domain in Route 53,
+- create and configure the Terraform state S3 bucket before the first Terraform run,
 - create/invite Cognito dev users,
 - seed company membership rows,
 - rotate the DB secret using the agreed runbook,

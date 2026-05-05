@@ -1,4 +1,5 @@
 // Node relationship graph cache/sync plane for Node Map + Company Explorer.
+import { connectAuthenticatedSse, SseConnection } from "../../auth/authenticatedSse";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { NodeRecord, NodeRelationship, PersistedMapPosition } from "./shared";
 
@@ -16,7 +17,7 @@ type CacheEntry = {
   snapshot: NodeRelationshipGraphSnapshot;
   subscribers: Set<Subscriber>;
   loading: boolean;
-  source?: EventSource;
+  source?: SseConnection;
   etag?: string;
 };
 
@@ -405,28 +406,29 @@ function ensureStream(apiBase: string, companyID: string): void {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
   if (entry.source) return;
-  const source = new EventSource(`${apiBase}/v1/workspace/stream?company_id=${encodeURIComponent(companyID)}`);
-  source.addEventListener("workspace", (event) => {
-    const payload = (event as MessageEvent).data;
-    if (typeof payload !== "string" || payload.length === 0) {
+  entry.source = connectAuthenticatedSse(`${apiBase}/v1/workspace/stream?company_id=${encodeURIComponent(companyID)}`, {
+    onEvent(event) {
+      if (event.event !== "workspace") return;
+      const payload = event.data;
+      if (payload.length === 0) {
+        void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+        return;
+      }
+      try {
+        const envelope = JSON.parse(payload) as NodeRelationshipGraphStreamEnvelope;
+        if (envelope.company_id !== companyID) return;
+        if (isNonGraphWorkspaceEvent(envelope.type)) return;
+        const applied = applyNodeRelationshipGraphDelta(entry, envelope);
+        if (applied) notify(entry);
+        else void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+      } catch {
+        void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+      }
+    },
+    onError() {
       void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
-      return;
-    }
-    try {
-      const envelope = JSON.parse(payload) as NodeRelationshipGraphStreamEnvelope;
-      if (envelope.company_id !== companyID) return;
-      if (isNonGraphWorkspaceEvent(envelope.type)) return;
-      const applied = applyNodeRelationshipGraphDelta(entry, envelope);
-      if (applied) notify(entry);
-      else void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
-    } catch {
-      void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
-    }
+    },
   });
-  source.onerror = () => {
-    // Browser will auto-retry EventSource; keep current source reference.
-  };
-  entry.source = source;
 }
 
 // Public subscription API used by UI modules for workspace snapshot updates.
@@ -442,6 +444,10 @@ export function subscribeNodeRelationshipGraph(apiBase: string, companyID: strin
     const current = nodeRelationshipGraphCache.get(key);
     if (!current) return;
     current.subscribers.delete(subscriber);
+    if (current.subscribers.size === 0) {
+      current.source?.close();
+      current.source = undefined;
+    }
   };
 }
 

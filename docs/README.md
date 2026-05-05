@@ -1,6 +1,8 @@
-# MangoRTS Docs
+# MangoRTS Docs V2
 
 This folder contains both current docs and older project history. For backend, auth, AWS, deployment, and database setup, future agents must start with the canonical MangoRTS docs below.
+
+V2 means the `infra/aws-dev` platform: Cognito auth, ECS Fargate backend, S3 + CloudFront frontend, Route 53, WAF, the existing AWS PostgreSQL/Aurora database, and GitHub Actions OIDC deploys.
 
 ## Canonical Docs
 

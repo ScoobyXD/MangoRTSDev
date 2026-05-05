@@ -71,7 +71,7 @@ Using PowerShell exports is fine for quick local runs, but not how you should ru
 - **Staging/Production**: keep secrets in a managed secret store, grant access via IAM task role, rotate credentials, and avoid manual terminal exports.
 
 This repo already follows that production pattern in Terraform task definitions (environment + secrets).
-See `infra/terraform/ecs.tf` and `docs/backend-production-config.md` for the exact approach.
+See `infra/aws-dev/ecs_alb.tf` and `docs/mangorts-dev-platform.md` for the current AWS dev approach.
 
 ## Database mode and safety behavior
 

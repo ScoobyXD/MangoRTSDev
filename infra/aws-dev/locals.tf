@@ -7,6 +7,10 @@ locals {
 
   basic_auth_header = "Basic ${base64encode("${var.dev_basic_auth_username}:${var.dev_basic_auth_password}")}"
 
+  backend_service_enabled    = trimspace(var.backend_image_uri) != ""
+  origin_verify_header_name  = "x-mangorts-origin-verify"
+  origin_verify_header_value = sha256("${local.name_prefix}:${var.dev_basic_auth_password}")
+
   tags = merge(
     {
       project     = var.project_name

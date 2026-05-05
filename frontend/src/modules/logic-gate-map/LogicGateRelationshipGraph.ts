@@ -2,6 +2,7 @@ import type {
   CompanyExplorerFolder,
   CompanyExplorerFolderItem,
 } from "../folders/companyExplorerFolders";
+import { connectAuthenticatedSse, SseConnection } from "../../auth/authenticatedSse";
 import {
   LogicGateRecord,
   LogicGateRelationship,
@@ -28,7 +29,7 @@ type CacheEntry = {
   snapshot: LogicGateRelationshipGraphSnapshot;
   subscribers: Set<Subscriber>;
   loading: boolean;
-  source?: EventSource;
+  source?: SseConnection;
   etag?: string;
 };
 
@@ -394,29 +395,30 @@ function ensureStream(apiBase: string, companyID: string): void {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
   if (entry.source) return;
-  const source = new EventSource(`${apiBase}/v1/workspace/stream?company_id=${encodeURIComponent(companyID)}`);
-  source.addEventListener("workspace", (event) => {
-    const payload = (event as MessageEvent).data;
-    if (typeof payload !== "string" || payload.length === 0) {
+  entry.source = connectAuthenticatedSse(`${apiBase}/v1/workspace/stream?company_id=${encodeURIComponent(companyID)}`, {
+    onEvent(event) {
+      if (event.event !== "workspace") return;
+      const payload = event.data;
+      if (payload.length === 0) {
+        void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+        return;
+      }
+      try {
+        const envelope = JSON.parse(payload) as WorkspaceStreamEnvelope;
+        if (envelope.company_id !== companyID) return;
+        if (isNonLogicGateGraphWorkspaceEvent(envelope.type)) return;
+        if (!envelope.type.startsWith("logic_gate_") && !envelope.type.startsWith("company_explorer_folder_")) return;
+        const applied = applyLogicGateRelationshipGraphDelta(entry, envelope);
+        if (applied) notify(entry);
+        else void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+      } catch {
+        void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+      }
+    },
+    onError() {
       void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-      return;
-    }
-    try {
-      const envelope = JSON.parse(payload) as WorkspaceStreamEnvelope;
-      if (envelope.company_id !== companyID) return;
-      if (isNonLogicGateGraphWorkspaceEvent(envelope.type)) return;
-      if (!envelope.type.startsWith("logic_gate_") && !envelope.type.startsWith("company_explorer_folder_")) return;
-      const applied = applyLogicGateRelationshipGraphDelta(entry, envelope);
-      if (applied) notify(entry);
-      else void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-    } catch {
-      void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-    }
+    },
   });
-  source.onerror = () => {
-    // Browser EventSource reconnects by itself; keep this source reference stable.
-  };
-  entry.source = source;
 }
 
 export function subscribeLogicGateRelationshipGraph(apiBase: string, companyID: string, subscriber: Subscriber): () => void {
@@ -431,6 +433,10 @@ export function subscribeLogicGateRelationshipGraph(apiBase: string, companyID: 
     const current = logicGateRelationshipGraphCache.get(key);
     if (!current) return;
     current.subscribers.delete(subscriber);
+    if (current.subscribers.size === 0) {
+      current.source?.close();
+      current.source = undefined;
+    }
   };
 }
 

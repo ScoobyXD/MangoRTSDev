@@ -30,7 +30,7 @@ output "ecs_cluster_name" {
 
 output "ecs_service_name" {
   description = "Backend ECS service name."
-  value       = aws_ecs_service.backend.name
+  value       = try(aws_ecs_service.backend[0].name, "")
 }
 
 output "cognito_user_pool_id" {

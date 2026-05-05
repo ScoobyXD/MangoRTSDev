@@ -1,4 +1,4 @@
-# MangoRTS Auth
+# MangoRTS Auth V2
 
 MangoRTS dev uses Amazon Cognito User Pools for human login.
 

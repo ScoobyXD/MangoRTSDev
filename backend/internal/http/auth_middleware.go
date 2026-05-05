@@ -21,6 +21,10 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 
 		claims, err := s.authValidator.Validate(r.Context(), bearerToken(r.Header.Get("Authorization")))
 		if err != nil {

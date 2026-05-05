@@ -35,8 +35,30 @@ resource "aws_lb_listener" "https" {
   certificate_arn   = aws_acm_certificate_validation.alb.certificate_arn
 
   default_action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "forbidden"
+      status_code  = "403"
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "cloudfront_to_backend" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 100
+
+  action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.backend.arn
+  }
+
+  condition {
+    http_header {
+      http_header_name = local.origin_verify_header_name
+      values           = [local.origin_verify_header_value]
+    }
   }
 }
 
@@ -50,6 +72,8 @@ resource "aws_ecs_cluster" "main" {
 }
 
 resource "aws_ecs_task_definition" "backend" {
+  count = local.backend_service_enabled ? 1 : 0
+
   family                   = "${local.name_prefix}-backend"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
@@ -100,9 +124,11 @@ resource "aws_ecs_task_definition" "backend" {
 }
 
 resource "aws_ecs_service" "backend" {
+  count = local.backend_service_enabled ? 1 : 0
+
   name            = "${local.name_prefix}-backend"
   cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.backend.arn
+  task_definition = aws_ecs_task_definition.backend[0].arn
   desired_count   = var.backend_desired_count
   launch_type     = "FARGATE"
 
@@ -118,5 +144,5 @@ resource "aws_ecs_service" "backend" {
     container_port   = var.container_port
   }
 
-  depends_on = [aws_lb_listener.https]
+  depends_on = [aws_lb_listener_rule.cloudfront_to_backend]
 }

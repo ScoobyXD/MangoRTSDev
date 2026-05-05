@@ -19,8 +19,8 @@ existing_db_user                = "mangorts_app"
 existing_db_password_secret_arn = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/dev/db-password"
 existing_db_security_group_id   = "sg-0123456789abcdef0"
 
-# First apply can use a bootstrap image. CI should move this to a git-SHA tag.
-backend_image_uri = "123456789012.dkr.ecr.us-west-1.amazonaws.com/mangorts-dev-backend:bootstrap"
+# Phase-1 bootstrap should keep this empty. CI sets an immutable git-SHA image URI after ECR exists.
+backend_image_uri = ""
 
 dev_company_id = "11111111-1111-1111-1111-111111111111"
 

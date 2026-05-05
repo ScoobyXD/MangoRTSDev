@@ -122,6 +122,41 @@ func TestAuthMiddlewareChecksBodyCompanyBeforeQueryCompany(t *testing.T) {
 	}
 }
 
+func TestAuthMiddlewareRejectsMalformedJSONBodySafely(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "cognito-user-1"
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+	}).Routes()
+	req := httptest.NewRequest(http.MethodPost, "/v1/nodes?company_id=11111111-1111-1111-1111-111111111111", strings.NewReader(`{"company_id":`))
+	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, "dev@example.com"))
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", res.Code, http.StatusBadRequest)
+	}
+}
+
+func TestAuthMiddlewareBypassesOptionsPreflight(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", mustRSAKey(t)),
+	}).Routes()
+	req := httptest.NewRequest(http.MethodOptions, "/v1/nodes?company_id=11111111-1111-1111-1111-111111111111", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", res.Code, http.StatusNoContent)
+	}
+}
+
 func mustRSAKey(t *testing.T) *rsa.PrivateKey {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)

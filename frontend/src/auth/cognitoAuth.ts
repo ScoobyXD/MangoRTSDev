@@ -55,14 +55,22 @@ export function installAuthenticatedFetch(): void {
   };
 }
 
+export async function getApiAccessToken(): Promise<string> {
+  const config = readConfig();
+  if (!config.enabled) return "";
+  return getAccessToken(config);
+}
+
 function readConfig(): CognitoConfig {
-  const mode = (import.meta.env.VITE_AUTH_MODE as string | undefined)?.trim().toLowerCase();
-  const domain = normalizeDomain(import.meta.env.VITE_COGNITO_DOMAIN as string | undefined);
-  const clientID = (import.meta.env.VITE_COGNITO_CLIENT_ID as string | undefined)?.trim() ?? "";
-  const redirectURI = (import.meta.env.VITE_COGNITO_REDIRECT_URI as string | undefined)?.trim() || window.location.origin;
-  const logoutURI = (import.meta.env.VITE_COGNITO_LOGOUT_URI as string | undefined)?.trim() || window.location.origin;
-  const scopes = (import.meta.env.VITE_COGNITO_SCOPES as string | undefined)?.trim() || "openid email profile";
-  const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || window.location.origin;
+  const env = import.meta.env ?? {};
+  const browserOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  const mode = (env.VITE_AUTH_MODE as string | undefined)?.trim().toLowerCase();
+  const domain = normalizeDomain(env.VITE_COGNITO_DOMAIN as string | undefined);
+  const clientID = (env.VITE_COGNITO_CLIENT_ID as string | undefined)?.trim() ?? "";
+  const redirectURI = (env.VITE_COGNITO_REDIRECT_URI as string | undefined)?.trim() || browserOrigin;
+  const logoutURI = (env.VITE_COGNITO_LOGOUT_URI as string | undefined)?.trim() || browserOrigin;
+  const scopes = (env.VITE_COGNITO_SCOPES as string | undefined)?.trim() || "openid email profile";
+  const apiBase = (env.VITE_API_BASE_URL as string | undefined)?.trim() || browserOrigin;
   return {
     enabled: mode === "cognito",
     domain,

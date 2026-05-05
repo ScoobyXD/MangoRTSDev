@@ -46,6 +46,9 @@ function handler(event) {
   var request = event.request;
   var expected = "${local.basic_auth_header}";
   var auth = request.headers.authorization ? request.headers.authorization.value : "";
+  if (request.uri.indexOf("/v1/") === 0 && request.method === "OPTIONS") {
+    return request;
+  }
   if (request.uri.indexOf("/v1/") === 0 && auth.indexOf("Bearer ") === 0) {
     return request;
   }
@@ -85,6 +88,11 @@ resource "aws_cloudfront_distribution" "app" {
   origin {
     origin_id   = "backend-alb"
     domain_name = local.origin_host
+
+    custom_header {
+      name  = local.origin_verify_header_name
+      value = local.origin_verify_header_value
+    }
 
     custom_origin_config {
       http_port              = 80

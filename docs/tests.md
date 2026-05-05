@@ -291,7 +291,7 @@ Use this checklist format and keep it complete.
 ### Integration tests
 - [ ] None committed yet (to be added)
 - [ ] Node Map title-only node-card surface + card resize affordance integration test (temporarily blocked: no browser harness in repo that can assert rendered node-card text content and interactive resize behavior)
-- [ ] Node relationship graph create-node anti-refetch loop integration test (temporarily blocked: no existing browser/session harness to simulate EventSource + component lifecycle churn deterministically)
+- [ ] Node relationship graph create-node anti-refetch loop integration test (fetch-SSE parser/reconnect coverage exists; component lifecycle request-count coverage is still blocked on a browser/session harness)
 - [ ] Node Map + Editor duplicate-details-request suppression integration test (runtime now uses single-flight NodeRecordStore reads; automated browser-level request-count assertion still temporarily blocked: no browser harness asserting per-action network request counts)
 - [ ] Editor text-box blur-save stale-state regression integration test (temporarily blocked: no browser harness asserting typed-value persistence across linked-node switches)
 - [ ] Editor blank-title keyboard routing regression test (temporarily blocked: no browser harness in repo to assert contentEditable key events do not trigger canvas `onKeyDown` textbox creation paths)
