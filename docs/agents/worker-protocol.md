@@ -9,6 +9,7 @@ Every worker prompt must include:
 - The sacred text from `docs/agents/sacred-text.md`.
 - The statement that the worker is one of potentially up to 20 agents.
 - The project objective.
+- The project branch and worker branch.
 - The worker task.
 - Recommended primary files/directories.
 - The scope freedom rule.
@@ -33,13 +34,15 @@ Primary file scope is recommended to reduce merge conflicts. It is not a hard si
 6. Add or update tests when behavior changes, or explain why tests are blocked.
 7. Run conflict scan.
 8. Run focused checks and `fast_verify.ps1`.
-9. Commit the worker branch if instructed by the orchestrator.
+9. Commit the worker branch if instructed by the project manager.
 10. Write a final report and exit.
 
 ## What Workers Should Not Do
 
 - Do not push.
 - Do not merge to `main`.
+- Do not merge to the batch branch.
+- Do not merge to the project branch. The project manager owns worker integration.
 - Do not edit global Git config.
 - Do not expand into unrelated product areas.
 - Do not hide outside-scope edits.
@@ -49,12 +52,15 @@ Primary file scope is recommended to reduce merge conflicts. It is not a hard si
 
 ```text
 Worker:
-worker<id>
+<ProjectName>Worker<worker-number>-project<project-id>-worker<worker-id>
 
 Branch:
-worker<id>
+<ProjectName>Worker<worker-number>-project<project-id>-worker<worker-id>
 
 Project:
+<ProjectName>Project-project<id>
+
+Project branch:
 <ProjectName>Project-project<id>
 
 Primary scope:

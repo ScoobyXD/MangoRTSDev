@@ -15,7 +15,7 @@ Project branch:
 created from batch_base_commit, even if the batch branch later moves.
 
 Initial workers:
-created from that project's project branch.
+created from that project's project branch by the project manager.
 
 Follow-up workers after manual QA finds issues:
 created from the same project branch the human tested.
@@ -40,20 +40,26 @@ User gives orchestrator one batch with two project prompts.
 
 Orchestrator:
 - records batch_base_commit from main
-- creates BatchName-batch0000007
+- creates Batch0000154-batch0000154
 - creates FixKanbanBoardCardsUIProject-project0001005 from batch_base_commit
 - creates EditorTextStyleChangesProject-project0001006 from batch_base_commit
+- writes project manager prompt files
+- starts or opens one project manager session per project
 
 Workers for Kanban:
+- created by FixKanbanBoardCardsUIManager-project0001005
+- use names such as FixKanbanBoardCardsUIWorker1-project0001005-worker0095348
 - branch from FixKanbanBoardCardsUIProject-project0001005
 - merge back into FixKanbanBoardCardsUIProject-project0001005
 
 Workers for Editor:
+- created by EditorTextStyleChangesManager-project0001006
+- use names such as EditorTextStyleChangesWorker1-project0001006-worker0095354
 - branch from EditorTextStyleChangesProject-project0001006
 - merge back into EditorTextStyleChangesProject-project0001006
 
 Human approves Kanban:
-- FixKanbanBoardCardsUIProject-project0001005 merges into BatchName-batch0000007
+- FixKanbanBoardCardsUIProject-project0001005 merges into Batch0000154-batch0000154
 
 Human rejects Editor hard:
 - EditorTextStyleChangesProject-project0001006 rolls back to batch_base_commit, not BatchName-batch0000007 HEAD
@@ -68,7 +74,7 @@ Project branches are independently testable product candidates. Follow-up work s
 ## When A Worker Finishes
 
 ```text
-worker exits
+project-attached worker exits
 project manager merges it into the project branch
 project manager may spawn another worker from the updated project branch
 ```

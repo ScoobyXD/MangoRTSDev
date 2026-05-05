@@ -544,6 +544,8 @@ Worker branches must reconcile with latest `origin/main` before task work and be
 
 Integration branches are required because freshness alone does not prove that the worker merges cleanly with the current batch of work:
 
+For the current batch orchestration model, worker branch names are project-attached, for example `FixKanbanBoardCardsUIWorker1-project0001005-worker0095348`. Older `codex/<worker>` examples are legacy script examples, not the naming rule for new batches.
+
 ```text
 codex/<worker> + latest origin/main -> integration/<worker-or-batch> -> clean gates -> main
 ```

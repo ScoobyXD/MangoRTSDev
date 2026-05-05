@@ -8,14 +8,14 @@ Use small batch trains instead of an endless project pipeline. A batch should no
 
 ```text
 main
-  -> BatchName-batch0000007
+  -> Batch0000154-batch0000154
       -> FixKanbanBoardCardsUIProject-project0001005
-          -> worker0095348
-          -> worker0095349
-          -> worker0095350
+          -> FixKanbanBoardCardsUIWorker1-project0001005-worker0095348
+          -> FixKanbanBoardCardsUIWorker2-project0001005-worker0095349
+          -> FixKanbanBoardCardsUIWorker3-project0001005-worker0095350
       -> EditorTextStyleChangesProject-project0001006
-          -> worker0095351
-          -> worker0095352
+          -> EditorTextStyleChangesWorker1-project0001006-worker0095354
+          -> EditorTextStyleChangesWorker2-project0001006-worker0095355
 ```
 
 The batch branch is the shared candidate for a related group of projects. Each project branch is independently testable before it is merged into the batch branch.
@@ -32,7 +32,7 @@ orchestrator agent
   owns batch setup, ledger, project creation, project approvals, batch QA state, and main merge only when explicitly asked
 
 project manager agent
-  owns one project branch, worker prompts, worker merges, project checks, project QA report, project rollback
+  owns one project branch, worker creation, worker prompts, worker launches, worker merges, project checks, project QA report, project rollback
 
 worker agent
   owns one bounded implementation task
@@ -63,14 +63,14 @@ After project 2 is rebuilt and approved, it merges into the current batch branch
 Create both a branch and a matching Git worktree for every batch, project, and worker:
 
 ```text
-BatchName-batch0000007
-C:\Users\Jonat\MangoOSDev-BatchName-batch0000007
+Batch0000154-batch0000154
+C:\Users\Jonat\MangoOSDev-Batch0000154-batch0000154
 
 FixKanbanBoardCardsUIProject-project0001005
 C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005
 
-worker0095348
-C:\Users\Jonat\MangoOSDev-worker0095348
+FixKanbanBoardCardsUIWorker1-project0001005-worker0095348
+C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIWorker1-project0001005-worker0095348
 ```
 
 Use this Git shape:
@@ -88,19 +88,20 @@ Do not manually create low-level Git tree objects. Git creates tree objects inte
 2. Orchestrator records batch_base_commit.
 3. Orchestrator creates one batch branch and worktree.
 4. Orchestrator creates one project branch and worktree per project from batch_base_commit.
-5. Orchestrator starts one visible PowerShell terminal per project manager worktree.
+5. Orchestrator writes project manager prompts and starts or opens one project manager session per project worktree.
 6. Each project manager splits its project into worker tasks.
-7. Each worker gets its own branch/worktree and visible PowerShell terminal.
-8. Workers commit and report.
-9. Project manager merges workers into the project branch one at a time.
-10. Project manager runs checks and reports project ready for human QA.
-11. Human tests the project branch.
-12. Human chooses good, fix, or rollback for the project.
-13. Approved project branches merge into the batch branch.
-14. Human tests the combined batch branch.
-15. Human chooses good, fix, or rollback for the batch.
-16. Orchestrator merges batch to main only after explicit approval.
-17. Human pushes main.
+7. Each project manager creates project-attached worker branches/worktrees from its project branch.
+8. Each project manager writes worker prompt files and starts or opens visible worker sessions in waves.
+9. Workers commit and report.
+10. Project manager merges workers into the project branch one at a time.
+11. Project manager runs checks and reports project ready for human QA.
+12. Human tests the project branch.
+13. Human chooses good, fix, or rollback for the project.
+14. Approved project branches merge into the batch branch.
+15. Human tests the combined batch branch.
+16. Human chooses good, fix, or rollback for the batch.
+17. Orchestrator merges batch to main only after explicit approval.
+18. Human pushes main.
 ```
 
 ## Project QA Outcomes
@@ -147,8 +148,15 @@ Database changes require extra reporting:
 - Project managers must include exact schema commands in the QA report.
 - The orchestrator must check migration filename collisions before project-to-batch merges.
 
-## Terminal Visibility Rule
+## Agent Launch Rule
 
 Every new agent worktree should get a visible PowerShell terminal opened at that worktree path.
 
-If the runtime supports direct agent spawning, the orchestrator may spawn the agent and also open the visible terminal. If direct spawning is unavailable, the orchestrator opens the terminal and prints the exact prompt for the human to paste there.
+Opening PowerShell alone does not start an agent. The normal scalable path is the local Codex harness:
+
+1. Write an exact prompt file under `.agent-state/prompts/`.
+2. Open a visible terminal in the matching worktree.
+3. If the local Codex CLI command and prompt-file flags are verified, launch Codex from that terminal/process.
+4. If CLI launch is not verified, report the prompt file for the human to run manually.
+
+The ChatGPT internal `spawn_agent` tool is optional. Do not make startup depend on spawning every project manager and worker through one chat session. If a runtime cap is reached, record the cap in the ledger and continue with local prompt files, terminals, and worker waves.

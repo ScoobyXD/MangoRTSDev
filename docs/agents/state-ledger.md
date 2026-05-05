@@ -69,7 +69,7 @@ Use separate numeric counters:
   "base_commit": "<same as batch_base_commit>",
   "status": "workers-active",
   "workers": [
-    "worker0095348"
+    "FixKanbanBoardCardsUIWorker1-project0001005-worker0095348"
   ],
   "manager_agent": "FixKanbanBoardCardsUIManager-project0001005",
   "qa_status": "not-ready",
@@ -83,10 +83,17 @@ Use separate numeric counters:
 ```json
 {
   "worker_id": "worker0095348",
+  "worker_number": 1,
+  "worker_name": "FixKanbanBoardCardsUIWorker1-project0001005-worker0095348",
   "project_id": "FixKanbanBoardCardsUIProject-project0001005",
-  "branch": "worker0095348",
-  "worktree": "C:\\Users\\Jonat\\MangoOSDev-worker0095348",
+  "branch": "FixKanbanBoardCardsUIWorker1-project0001005-worker0095348",
+  "worktree": "C:\\Users\\Jonat\\MangoOSDev-FixKanbanBoardCardsUIWorker1-project0001005-worker0095348",
   "base_branch": "FixKanbanBoardCardsUIProject-project0001005",
+  "prompt_file": "C:\\Users\\Jonat\\MangoOSDev\\.agent-state\\prompts\\FixKanbanBoardCardsUIWorker1-project0001005-worker0095348.txt",
+  "agent_launch_mode": "local-codex-cli",
+  "agent_launch_command": "<recorded local command or null>",
+  "terminal_opened": true,
+  "terminal_title": "FixKanbanBoardCardsUIWorker1-project0001005-worker0095348",
   "primary_scope": [
     "frontend/src/modules/kanban/KanbanContent.tsx",
     "frontend/src/modules/kanban/KanbanBoardSidebar.tsx"
@@ -110,7 +117,7 @@ Use separate numeric counters:
   "project_branch": "FixKanbanBoardCardsUIProject-project0001005",
   "status": "ready-for-human-qa",
   "merged_worker_branches": [
-    "worker0095348"
+    "FixKanbanBoardCardsUIWorker1-project0001005-worker0095348"
   ],
   "skipped_worker_branches": [],
   "checks": [

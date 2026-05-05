@@ -12,6 +12,8 @@ docs/parallel-agent-architecture.md
 
 `docs/agents/README.md` is the current one-stop shop for orchestration, worker, merge-agent, naming, lifecycle, and handoff decisions. The handoff remains the historical source of truth. This file is the copy/paste workflow surface.
 
+Important: the current batch orchestration model in `docs/agents/` supersedes the older `codex/<worker>` examples in this file. New batch workers must use project-attached names such as `FixKanbanBoardCardsUIWorker1-project0001005-worker0095348`.
+
 ## Operating Rule
 
 Always update from latest `origin/main` before meaningful work, and integrate worker branches through temporary integration branches. Never merge a dirty or stale worker branch directly into `main`.

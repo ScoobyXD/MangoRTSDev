@@ -1,6 +1,6 @@
 # Prompt Templates
 
-These are implementation templates for future script/plugin automation. Human-facing prompts live in `docs/agents/copy-paste-prompts.md`.
+These templates are for scripts and local harness automation. Human-facing prompts live in `docs/agents/copy-paste-prompts.md`.
 
 Keep the sacred text verbatim.
 
@@ -19,20 +19,32 @@ Project branch:
 <ProjectName>Project-project<project-id>
 
 Project worktree:
-<absolute path>
+<absolute project worktree path>
 
 Batch base commit:
 <batch_base_commit>
+
+Ledger files:
+<absolute .agent-state/orchestration.json path>
+<absolute project ledger path>
+<absolute manager ledger path>
 
 Project objective:
 <full project prompt>
 
 Your job:
+- Own this project branch.
 - Split this project into focused worker tasks.
-- Create worker branches/worktrees from the project branch.
-- Open a visible PowerShell terminal for every worker worktree.
-- Spawn workers directly if the runtime supports it. If not, print exact worker prompts for the human to paste.
-- Merge worker branches back into the project branch one at a time.
+- Allocate worker names through the ledger/script path using docs/agents/naming-conventions.md.
+- Worker names must include project, worker number, project ID, and worker ID, for example:
+  <ProjectName>Worker1-project<project-id>-worker<worker-id>
+- Create worker branches/worktrees from this project branch.
+- Use:
+  git worktree add -b <WorkerBranchName> <AbsoluteWorkerWorktreePath> <ProjectBranch>
+- Write exact worker prompt files under .agent-state/prompts/.
+- Start local Codex worker sessions if the CLI command and prompt-file flags are verified.
+- If local CLI launch is not verified or a concurrency cap is hit, open visible PowerShell terminals in worker worktrees and report exact prompt file paths.
+- Merge worker branches back into the project branch one at a time after workers commit.
 - Run required checks.
 - Stop with a ready-for-human-QA project branch.
 
@@ -54,6 +66,7 @@ Rules:
 - Do not push.
 - Do not merge to main.
 - Do not merge to the batch branch until the human approves project QA.
+- Do not create bare worker branches such as worker0095348.
 - Primary worker file scope is recommended to reduce merge conflicts. It is not a hard silo.
 - Workers may edit adjacent files when necessary, but they must report outside-scope edits.
 - Preserve existing behavior outside the requested project.
@@ -71,6 +84,9 @@ Final project QA report must include:
 - project id
 - project branch
 - project worktree
+- worker branches created
+- worker prompt files
+- worker launch modes
 - merged worker branches
 - skipped/blocked worker branches
 - files changed
@@ -85,13 +101,22 @@ Final project QA report must include:
 ## Worker Template
 
 ```text
-You are worker<worker-id> for MangoRTS.
+You are <ProjectName>Worker<worker-number>-project<project-id>-worker<worker-id> for MangoRTS.
 
 Batch:
 <BatchName-batch0000000>
 
 Project:
 <ProjectName>Project-project<project-id>
+
+Project branch:
+<ProjectName>Project-project<project-id>
+
+Worker branch:
+<ProjectName>Worker<worker-number>-project<project-id>-worker<worker-id>
+
+Worker worktree:
+<absolute worker worktree path>
 
 Project objective:
 <relevant top-level user prompt or focused excerpt>
@@ -123,23 +148,32 @@ Find the simplest solution possible. Only increase complexity when needed.
 Write code in an architecture where it would be possible for 20 agents to develop on this app simultaneously. (We have already been making efforts in this)
 
 Rules:
+- Work only in the worker worktree listed above.
+- Confirm the current branch exactly matches the worker branch before editing.
 - Do not push.
 - Do not merge to main.
 - Do not merge to the batch branch.
+- Do not merge to the project branch. The project manager owns worker integration.
 - Do not edit global Git config.
 - Do not leave conflict markers.
 - Preserve existing behavior outside the requested change.
 - Add/update tests for behavior changes or explain why tests are blocked.
 - Update docs/tests.md and relevant docs when behavior changes.
 
+Before editing:
+- run git branch --show-current
+- run git status --short --branch
+- run powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
+
 Before final:
 - run powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
 - run powershell -ExecutionPolicy Bypass -File .\scripts\fast_verify.ps1 -Root .
-- commit your worker branch if instructed by the project manager
+- commit your worker branch if code or test/docs files changed
 - report files changed
 - report outside-scope edits and why
 - report hot files touched and why
 - report schema/migration files changed
+- report commit SHA
 ```
 
 ## Project-To-Batch Merge Template
@@ -201,4 +235,3 @@ Required final report:
 - final git status
 - reminder that the human pushes main
 ```
-

@@ -2,7 +2,7 @@
 
 The orchestrator is the coordinator. It receives the user's batch request, decomposes it into projects and project manager assignments, manages the ledger, and decides what agents should exist next.
 
-The orchestrator should not personally do all implementation or all merges. It should delegate implementation to workers and project-level integration to project manager agents. The orchestrator owns the batch branch and should normally perform project-to-batch merges.
+The orchestrator should not personally do all implementation, worker spawning, or project-level merges. It should delegate implementation and worker lifecycle to project manager agents. The orchestrator owns the batch branch and should normally perform project-to-batch merges.
 
 ## Inputs
 
@@ -36,23 +36,26 @@ Each top-level prompt becomes one project.
    - orchestrator ID
    - project IDs
    - manager IDs
-   - worker IDs
 7. Create or update the batch ledger.
 8. Record `batch_base_commit` from approved `main`.
 9. Create one batch branch and matching Git worktree from `batch_base_commit`.
 10. Create one project branch and matching Git worktree per project from `batch_base_commit`.
 11. Record every branch/worktree mapping in the ledger.
-12. Start one visible PowerShell terminal per project manager worktree.
-13. Spawn or prompt one project manager per project.
-14. Project managers split each project into worker assignments.
-15. Project managers create worker branches and matching Git worktrees from their project branch.
-16. Project managers spawn workers with the sacred text, project objective, recommended primary file scope, and scope freedom rule.
+12. Write one project manager prompt file per project under `.agent-state/prompts/`.
+13. Start or open one project manager session per project worktree.
+14. Record the project manager launch mode: local Codex CLI, visible-terminal prompt, or internal spawn.
+15. Project managers split each project into worker assignments.
+16. Project managers allocate project-attached worker IDs through the ledger/script path.
+17. Project managers create worker branches and matching Git worktrees from their project branch.
+18. Project managers write worker prompts and start or open worker sessions in waves.
 
 ## Decomposition Rule
 
 Decompose by likely file ownership and merge collision risk, not by forcing tiny tasks.
 
 Workers should receive recommended primary files/directories. The orchestrator does not need to solve the whole implementation before delegation. Workers are expected to make local engineering decisions within their assignment.
+
+Worker branch/worktree names must be project-attached and follow `docs/agents/naming-conventions.md`; do not create bare worker branches such as `worker0095348`.
 
 ## Authority
 
@@ -63,7 +66,7 @@ The orchestrator owns:
 - Batch creation.
 - Project creation.
 - Project manager creation.
-- Deciding when to create replacement workers.
+- Providing counter allocation and scripts for replacement workers.
 - Project-to-batch merge ownership unless explicitly delegated through a ledger lock.
 - Final batch-to-main merge only after explicit human approval.
 - Deciding when to recreate itself.
@@ -72,13 +75,16 @@ The orchestrator does not own:
 
 - Product acceptance. The human owns this.
 - Worker implementation details. Workers own their assigned implementation tasks.
+- Initial worker decomposition, branch creation, prompts, and launches. Project managers own these unless the human explicitly asks for static worker preallocation.
 - Project-level worker merges. Project managers own these.
 - Default merge to `main`. This requires explicit human approval.
 - Push to GitHub. This is human action unless explicitly requested.
 
 ## When To Spawn New Workers
 
-Initial workers are spawned by the project manager from the project branch after the project branch/worktree is created.
+Initial workers are created and launched by the project manager from the project branch after the project branch/worktree is created.
+
+Use the local Codex harness in `docs/agents/local-codex-harness.md` for scale. The internal `spawn_agent` tool is optional and may have a low concurrency cap. If a cap is reached, record it and continue with prompt files, visible terminals, and worker waves.
 
 Spawn follow-up workers from the latest project branch after:
 
@@ -107,7 +113,7 @@ A fresh orchestrator resumes from:
 .agent-state/orchestration.json
 .agent-state/counters.json
 git worktree list
-git branch --list *batch* *project* worker*
+git branch --list *batch* *project* *Worker*
 git status for main and active worktrees
 ```
 

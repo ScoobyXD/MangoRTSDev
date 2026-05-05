@@ -20,9 +20,9 @@ Project worktree:
 C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005
 
 Worker branches:
-- worker0095348
-- worker0095349
-- worker0095350
+- FixKanbanBoardCardsUIWorker1-project0001005-worker0095348
+- FixKanbanBoardCardsUIWorker2-project0001005-worker0095349
+- FixKanbanBoardCardsUIWorker3-project0001005-worker0095350
 ```
 
 ## Responsibilities

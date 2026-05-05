@@ -40,8 +40,11 @@ winget install BurntSushi.ripgrep.MSVC
 - Each project branch/worktree is created from `batch_base_commit`, not from the moving batch branch.
 - The orchestrator creates one project manager agent for each project.
 - Each project manager creates workers for its project.
+- Worker branch/worktree names must be project-attached and human-readable, for example `FixKanbanBoardCardsUIWorker1-project0001005-worker0095348`. Bare worker names such as `worker0095348` are no longer acceptable for this workflow.
 - Each project manager merges that project's worker branches into that project's project branch.
 - Each project manager runs checks and reports a testable worktree path plus exact backend, frontend, and schema commands.
+- The orchestrator should not spawn every worker in the batch by default. It starts project managers; project managers create and launch workers in waves.
+- Prefer a local Codex harness for scale: generate prompt files, open visible terminals in the correct worktrees, and launch verified local Codex CLI sessions when available. The ChatGPT internal `spawn_agent` harness is optional and may have a low concurrency cap.
 - The human manually tests each project branch and chooses good, fix, or rollback.
 - Approved projects merge into the batch branch.
 - The human manually tests the final batch branch and chooses good, fix, or rollback.
@@ -55,6 +58,7 @@ winget install BurntSushi.ripgrep.MSVC
 - Scope is not a hard silo.
 - Workers can edit adjacent files when correctness requires it.
 - Workers must report all outside-scope edits and why they were needed.
+- Project managers own worker decomposition and worker creation. The orchestrator may allocate counter ranges or provide scripts, but it should not pre-create all workers unless the human explicitly asks for static preallocation.
 - Avoid hard limits like maximum lines changed, maximum one task, or maximum one hot file touched.
 - The approved integration-batch guardrail is: one broad architectural change per project batch.
 
