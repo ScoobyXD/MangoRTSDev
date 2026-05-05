@@ -37,6 +37,7 @@ type UseNodeMapGraphPersistenceInput = {
   setRestoredViewport: React.Dispatch<React.SetStateAction<boolean>>;
   restoredSelectionRef: React.MutableRefObject<string>;
   selectedNodeIDRef: React.MutableRefObject<string>;
+  suppressNextSelectionBroadcastRef: React.MutableRefObject<boolean>;
   setSelectedNodeID: React.Dispatch<React.SetStateAction<string>>;
   setSelectedNodeIDs: React.Dispatch<React.SetStateAction<Set<string>>>;
   setNodePositions: React.Dispatch<React.SetStateAction<Record<string, NodePosition>>>;
@@ -67,6 +68,7 @@ export function useNodeMapGraphPersistence({
   setRestoredViewport,
   restoredSelectionRef,
   selectedNodeIDRef,
+  suppressNextSelectionBroadcastRef,
   setSelectedNodeID,
   setSelectedNodeIDs,
   setNodePositions,
@@ -99,6 +101,7 @@ export function useNodeMapGraphPersistence({
       setPanInitialized(true);
       restoredSelectionRef.current = cached.selectedNodeID;
       selectedNodeIDRef.current = cached.selectedNodeID;
+      suppressNextSelectionBroadcastRef.current = true;
       setSelectedNodeID(cached.selectedNodeID);
       setSelectedNodeIDs(cached.selectedNodeID ? new Set([cached.selectedNodeID]) : new Set());
       setNodePositions(cached.nodePositions);
@@ -137,6 +140,7 @@ export function useNodeMapGraphPersistence({
       if (typeof parsed.selectedNodeID === "string") {
         restoredSelectionRef.current = parsed.selectedNodeID;
         selectedNodeIDRef.current = parsed.selectedNodeID;
+        suppressNextSelectionBroadcastRef.current = true;
         setSelectedNodeID(parsed.selectedNodeID);
         setSelectedNodeIDs(parsed.selectedNodeID ? new Set([parsed.selectedNodeID]) : new Set());
       }
@@ -173,6 +177,7 @@ export function useNodeMapGraphPersistence({
     mapStateKey,
     restoredSelectionRef,
     selectedNodeIDRef,
+    suppressNextSelectionBroadcastRef,
     setNodePositions,
     setPan,
     setPanInitialized,

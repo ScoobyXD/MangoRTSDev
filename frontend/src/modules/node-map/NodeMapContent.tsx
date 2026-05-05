@@ -328,6 +328,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     setRestoredViewport,
     restoredSelectionRef,
     selectedNodeIDRef,
+    suppressNextSelectionBroadcastRef,
     setSelectedNodeID,
     setSelectedNodeIDs,
     setNodePositions,
@@ -346,6 +347,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     restoredSelectionRef,
     selectedNodeIDRef,
     explorerSelectionOriginRef,
+    suppressNextSelectionBroadcastRef,
     allNodes,
     folders,
     folderItems,
@@ -379,6 +381,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       explorerRequestedID: explorerSelectionOriginRef.current?.selectedEntityID,
     });
     if (fallback === null) return;
+    suppressNextSelectionBroadcastRef.current = true;
     selectedNodeIDRef.current = fallback;
     setSelectedNodeID(fallback);
     setSelectedNodeIDs(fallback ? new Set([fallback]) : new Set());
@@ -454,6 +457,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       suppressNextSelectionBroadcastRef.current = false;
       return;
     }
+    if (!selectedNodeID) return;
     const explorerKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${mapScope}`;
     if (hasPendingContextStorageUpdate(localStorage.getItem(explorerKey), explorerContextRef.current)) return;
     const contextID = `active_node_selection:${companyID}:${mapScope}`;
@@ -556,6 +560,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           setActiveFolderLabel(typeof parsed.selectedFolderLabel === "string" ? parsed.selectedFolderLabel : (typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : ""));
           const selected = typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "";
           rememberExplorerSelectionOrigin(parsed, selected);
+          suppressNextSelectionBroadcastRef.current = true;
           selectedNodeIDRef.current = selected;
           if (selected) {
             // Explorer is the navigation authority. Trust its selected ID even
@@ -572,6 +577,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
         if (!parsed.selectedNodeID) {
           if (!hasExplicitExplorerSelectionContext(parsed)) return;
           rememberExplorerSelectionOrigin(parsed, "");
+          suppressNextSelectionBroadcastRef.current = true;
           activeFolderIDRef.current = "";
           setActiveFolderID("");
           setActiveFolderLabel("");
@@ -581,6 +587,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           return;
         }
         rememberExplorerSelectionOrigin(parsed, parsed.selectedNodeID);
+        suppressNextSelectionBroadcastRef.current = true;
         activeFolderIDRef.current = "";
         setActiveFolderID("");
         setActiveFolderLabel("");
