@@ -29,6 +29,12 @@ START_AFTER="${DB_MIGRATION_START_AFTER:-}"
 
 psql_base=(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME")
 
+sql_literal() {
+  local value="$1"
+  value="${value//\'/\'\'}"
+  printf "'%s'" "$value"
+}
+
 "${psql_base[@]}" -v ON_ERROR_STOP=1 \
   -c "create table if not exists schema_migrations (version text primary key, applied_at timestamptz not null default now());"
 
@@ -84,8 +90,9 @@ for migration in "${pending[@]}"; do
   name="$(basename "$migration")"
   echo "Applying $name..."
   "${psql_base[@]}" -v ON_ERROR_STOP=1 --single-transaction -f "$migration"
-  "${psql_base[@]}" -v ON_ERROR_STOP=1 -v "version=$name" \
-    -c "insert into schema_migrations(version) values (:'version') on conflict (version) do nothing;"
+  version_literal="$(sql_literal "$name")"
+  "${psql_base[@]}" -v ON_ERROR_STOP=1 \
+    -c "insert into schema_migrations(version) values ($version_literal) on conflict (version) do nothing;"
 done
 
 echo "Database migrations applied."

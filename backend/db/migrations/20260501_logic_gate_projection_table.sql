@@ -20,29 +20,95 @@ create index if not exists idx_logic_gate_projection_table_logic_gate_updated
 
 -- Backfill existing current-value rows from the pre-projection contract. This is
 -- safe to re-run and only moves the projection forward when source data is newer.
-insert into logic_gate_projection_table (
-  company_id,
-  logic_gate_id,
-  information_id,
-  type,
-  information,
-  created_timestamp,
-  updated_timestamp
-)
-select distinct on (company_id, logic_gate_id, information_id)
-  company_id,
-  logic_gate_id,
-  information_id,
-  type,
-  information,
-  created_timestamp,
-  updated_timestamp
-from logic_gate_information
-where btrim(information) <> ''
-order by company_id, logic_gate_id, information_id, updated_timestamp desc
-on conflict (company_id, logic_gate_id, information_id)
-do update set
-  type = excluded.type,
-  information = excluded.information,
-  updated_timestamp = excluded.updated_timestamp
-where logic_gate_projection_table.updated_timestamp <= excluded.updated_timestamp;
+do $$
+begin
+  if to_regclass('public.idx_logic_gate_projection_table_one_text_box') is not null then
+    execute $sql$
+      insert into logic_gate_projection_table (
+        company_id,
+        logic_gate_id,
+        information_id,
+        type,
+        information,
+        created_timestamp,
+        updated_timestamp
+      )
+      select distinct on (company_id, logic_gate_id, type)
+        company_id,
+        logic_gate_id,
+        information_id,
+        type,
+        information,
+        created_timestamp,
+        updated_timestamp
+      from logic_gate_information
+      where btrim(information) <> ''
+        and type = 'Text box'::information_type
+      order by company_id, logic_gate_id, type, updated_timestamp desc, created_timestamp desc, information_id desc
+      on conflict (company_id, logic_gate_id, type) where type = 'Text box'::information_type
+      do update set
+        information = excluded.information,
+        updated_timestamp = excluded.updated_timestamp
+      where logic_gate_projection_table.updated_timestamp <= excluded.updated_timestamp
+    $sql$;
+
+    execute $sql$
+      insert into logic_gate_projection_table (
+        company_id,
+        logic_gate_id,
+        information_id,
+        type,
+        information,
+        created_timestamp,
+        updated_timestamp
+      )
+      select distinct on (company_id, logic_gate_id, information_id)
+        company_id,
+        logic_gate_id,
+        information_id,
+        type,
+        information,
+        created_timestamp,
+        updated_timestamp
+      from logic_gate_information
+      where btrim(information) <> ''
+        and type <> 'Text box'::information_type
+      order by company_id, logic_gate_id, information_id, updated_timestamp desc
+      on conflict (company_id, logic_gate_id, information_id)
+      do update set
+        type = excluded.type,
+        information = excluded.information,
+        updated_timestamp = excluded.updated_timestamp
+      where logic_gate_projection_table.updated_timestamp <= excluded.updated_timestamp
+    $sql$;
+  else
+    execute $sql$
+      insert into logic_gate_projection_table (
+        company_id,
+        logic_gate_id,
+        information_id,
+        type,
+        information,
+        created_timestamp,
+        updated_timestamp
+      )
+      select distinct on (company_id, logic_gate_id, information_id)
+        company_id,
+        logic_gate_id,
+        information_id,
+        type,
+        information,
+        created_timestamp,
+        updated_timestamp
+      from logic_gate_information
+      where btrim(information) <> ''
+      order by company_id, logic_gate_id, information_id, updated_timestamp desc
+      on conflict (company_id, logic_gate_id, information_id)
+      do update set
+        type = excluded.type,
+        information = excluded.information,
+        updated_timestamp = excluded.updated_timestamp
+      where logic_gate_projection_table.updated_timestamp <= excluded.updated_timestamp
+    $sql$;
+  end if;
+end $$;

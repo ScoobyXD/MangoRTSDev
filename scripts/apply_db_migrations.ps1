@@ -29,6 +29,11 @@ function Invoke-Psql {
   }
 }
 
+function ConvertTo-SqlLiteral {
+  param([string]$Value)
+  return "'" + $Value.Replace("'", "''") + "'"
+}
+
 Invoke-Psql -Arguments @(
   "-v", "ON_ERROR_STOP=1",
   "-c", "create table if not exists schema_migrations (version text primary key, applied_at timestamptz not null default now());"
@@ -78,10 +83,10 @@ if ($DryRun) {
 foreach ($migration in $pending) {
   Write-Host "Applying $($migration.Name)..."
   Invoke-Psql -Arguments @("-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", $migration.FullName)
+  $versionLiteral = ConvertTo-SqlLiteral -Value $migration.Name
   Invoke-Psql -Arguments @(
     "-v", "ON_ERROR_STOP=1",
-    "-v", "version=$($migration.Name)",
-    "-c", "insert into schema_migrations(version) values (:'version') on conflict (version) do nothing;"
+    "-c", "insert into schema_migrations(version) values ($versionLiteral) on conflict (version) do nothing;"
   )
 }
 

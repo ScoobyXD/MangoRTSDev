@@ -78,6 +78,10 @@ It performs:
 - Before real company onboarding, seed Cognito user membership against the hardcoded dev company ID so authenticated API calls pass company authorization.
 - Replace the hardcoded dev company flow with backend-driven tenant discovery before onboarding external companies.
 
+## Dev Database Drift Note
+
+The current AWS dev database predates the `schema_migrations` table and has also had schema changes made through earlier manual/app-driven work. Because of that, the first migration reconciliation may replay older migrations against a partially current schema. Prefer making migrations idempotent and compatible with the existing dev schema over manually marking migrations as applied. Only baseline `schema_migrations` by hand after validating that the live schema matches the expected application schema.
+
 ## Smoke Tests
 
 After deploy:

@@ -5,9 +5,20 @@ create index if not exists idx_kanban_cards_node_cleanup
   on kanban_cards(company_id, node_id)
   where node_id is not null;
 
-create index if not exists idx_kanban_cards_logic_gate_cleanup
-  on kanban_cards(company_id, logic_gate_id)
-  where logic_gate_id is not null;
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'kanban_cards'
+      and column_name = 'logic_gate_id'
+  ) then
+    execute 'create index if not exists idx_kanban_cards_logic_gate_cleanup
+      on kanban_cards(company_id, logic_gate_id)
+      where logic_gate_id is not null';
+  end if;
+end $$;
 
 do $$
 begin
@@ -38,7 +49,13 @@ begin
       drop constraint kanban_cards_company_id_logic_gate_id_fkey;
   end if;
 
-  if not exists (
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'kanban_cards'
+      and column_name = 'logic_gate_id'
+  ) and not exists (
     select 1 from pg_constraint
     where conname = 'kanban_cards_logic_gate_fk'
   ) then

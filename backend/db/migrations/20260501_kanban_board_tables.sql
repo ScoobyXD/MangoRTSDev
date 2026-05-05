@@ -44,6 +44,17 @@ create unique index if not exists idx_kanban_cards_unique_node
   on kanban_cards(company_id, board_id, node_id)
   where node_id is not null;
 
-create unique index if not exists idx_kanban_cards_unique_logic_gate
-  on kanban_cards(company_id, board_id, logic_gate_id)
-  where logic_gate_id is not null;
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'kanban_cards'
+      and column_name = 'logic_gate_id'
+  ) then
+    execute 'create unique index if not exists idx_kanban_cards_unique_logic_gate
+      on kanban_cards(company_id, board_id, logic_gate_id)
+      where logic_gate_id is not null';
+  end if;
+end $$;
