@@ -210,7 +210,7 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 		for _, relationshipID := range deletedRelationshipIDs {
 			if req.ItemType == "node" {
 				s.publishWorkspaceEvent(req.CompanyID, "relationship_deleted", map[string]any{"node_relationship_id": relationshipID})
-			} else {
+			} else if req.ItemType == "logic_gate" {
 				s.publishWorkspaceEvent(req.CompanyID, "logic_gate_relationship_deleted", map[string]any{"logic_gate_relationship_id": relationshipID})
 			}
 		}

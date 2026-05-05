@@ -89,11 +89,10 @@ export type ExplorerCreationTargets = {
   logicGateParentFolderID: string;
 };
 
-export const EXPLORER_DEFAULT_EXPANDED_ROW_IDS = ["folder-root"] as const;
-export const EXPLORER_ROOT_ROW_ORDER = ["folder-root"] as const;
-export const EXPLORER_ROOT_ROW_LABELS = {
-  "folder-root": "Company",
-} as const;
+export const EXPLORER_INTERNAL_ROOT_ROW_ID = "folder-root";
+export const EXPLORER_DEFAULT_EXPANDED_ROW_IDS = [] as const;
+export const EXPLORER_ROOT_ROW_ORDER = [] as const;
+export const EXPLORER_ROOT_ROW_LABELS = {} as const;
 
 export function formatExplorerFolderLabel(name: string): string {
   return name;
@@ -363,7 +362,12 @@ export function resolveExplorerKeyboardNavigation(input: {
   const { rows, selectedTreeID, expandedIDs, key } = input;
   if (!["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft"].includes(key)) return { handled: false };
 
-  const currentIndex = Math.max(0, rows.findIndex((row) => row.id === selectedTreeID));
+  const selectedIndex = rows.findIndex((row) => row.id === selectedTreeID);
+  if (selectedIndex < 0) {
+    if ((key === "ArrowDown" || key === "ArrowUp") && rows[0]) return { handled: true, selectedTreeID: rows[0].id };
+    return { handled: false };
+  }
+  const currentIndex = selectedIndex;
   const current = rows[currentIndex];
   if (!current) return { handled: false };
 
@@ -459,4 +463,27 @@ export function shouldAcceptMapSelectionAfterExplorerSelection(input: {
     return input.incomingChangedAt > input.localSelectionChangedAt;
   }
   return input.now - input.localSelectionChangedAt > staleWindowMs;
+}
+
+export function getExplorerScrollTopForRow(input: {
+  rowIndex: number;
+  rowHeight: number;
+  rowsTopOffset: number;
+  currentScrollTop: number;
+  viewportHeight: number;
+  maxScrollTop?: number;
+  bottomPadding?: number;
+}): number {
+  const rowTop = input.rowsTopOffset + input.rowIndex * input.rowHeight;
+  const rowBottom = rowTop + input.rowHeight;
+  const currentTop = input.currentScrollTop;
+  const bottomPadding = Math.max(0, input.bottomPadding ?? 0);
+  const currentBottom = currentTop + input.viewportHeight - bottomPadding;
+  let nextScrollTop = currentTop;
+
+  if (rowTop < currentTop) nextScrollTop = rowTop;
+  else if (rowBottom > currentBottom) nextScrollTop = rowBottom - input.viewportHeight + bottomPadding;
+
+  const maxScrollTop = Math.max(0, input.maxScrollTop ?? Number.POSITIVE_INFINITY);
+  return Math.min(maxScrollTop, Math.max(0, Math.round(nextScrollTop)));
 }

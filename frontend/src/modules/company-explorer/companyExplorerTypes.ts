@@ -1,4 +1,4 @@
-import type { CompanyExplorerFolderKind, CompanyExplorerItemType } from "../folders/companyExplorerFolders";
+import type { CompanyExplorerFolderKind, CompanyExplorerItemType } from "../folders/companyExplorerFolders.js";
 import type {
   ExplorerCreationTargets,
   ExplorerDropPayload,
@@ -7,7 +7,7 @@ import type {
   ExplorerSelectionDomain,
   resolveExplorerDeleteTarget,
   resolveExplorerRenameTarget,
-} from "./treePresentation";
+} from "./treePresentation.js";
 
 export type ExplorerTreeNode = {
   id: string;

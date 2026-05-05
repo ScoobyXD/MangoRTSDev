@@ -415,30 +415,34 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 				 returning node_relationship_id::text`,
 				companyID, itemID,
 			)
-		} else {
+		} else if itemType == "logic_gate" {
 			deleteRows, err = tx.QueryContext(ctx,
 				`delete from logic_gate_relationships
 				 where company_id=$1 and (logic_gate_id_a=$2 or logic_gate_id_b=$2)
 				 returning logic_gate_relationship_id::text`,
 				companyID, itemID,
 			)
+		} else {
+			deleteRows = nil
 		}
 		if err != nil {
 			return domain.CompanyExplorerFolderItem{}, nil, err
 		}
-		for deleteRows.Next() {
-			var relationshipID string
-			if err := deleteRows.Scan(&relationshipID); err != nil {
+		if deleteRows != nil {
+			for deleteRows.Next() {
+				var relationshipID string
+				if err := deleteRows.Scan(&relationshipID); err != nil {
+					deleteRows.Close()
+					return domain.CompanyExplorerFolderItem{}, nil, err
+				}
+				deletedRelationshipIDs = append(deletedRelationshipIDs, relationshipID)
+			}
+			if err := deleteRows.Err(); err != nil {
 				deleteRows.Close()
 				return domain.CompanyExplorerFolderItem{}, nil, err
 			}
-			deletedRelationshipIDs = append(deletedRelationshipIDs, relationshipID)
-		}
-		if err := deleteRows.Err(); err != nil {
 			deleteRows.Close()
-			return domain.CompanyExplorerFolderItem{}, nil, err
 		}
-		deleteRows.Close()
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolderItem{}, nil, err

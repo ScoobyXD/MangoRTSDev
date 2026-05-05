@@ -72,7 +72,7 @@ type CompanyExplorerTreeRowProps = {
   reorderExplorerRows: (source: ExplorerTreeNode, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => Promise<boolean>;
   placeExplorerFolderAtTarget: (source: ExplorerTreeNode, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => Promise<boolean>;
   placeExplorerItemsAtTarget: (payload: ExplorerDragPayload | null, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => Promise<boolean>;
-  moveFolder: (folderID: string, parentFolderID: string | undefined, options?: { position?: number; expandTarget?: boolean; parentProvided?: boolean }) => Promise<void>;
+  moveFolder: (folderID: string, parentFolderID: string | undefined, options?: { position?: number; expandTarget?: boolean; parentProvided?: boolean; targetExpanded?: boolean }) => Promise<void>;
   assignExplorerPayloadItemsToFolder: (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => Promise<void>;
 };
 
@@ -237,7 +237,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         if (!dropTarget || !payload) return;
         event.preventDefault();
         if (payload.kind === "folder" && payload.folderID) {
-          void moveFolder(payload.folderID, dropTarget.folderID);
+          void moveFolder(payload.folderID, dropTarget.folderID, { targetExpanded: expanded.has(dropTarget.treeID) });
           return;
         }
         void assignExplorerPayloadItemsToFolder(dropTarget.folderID, getExplorerDropPayloadItemType(payload) ?? dropTarget.folderKind, payload);

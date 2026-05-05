@@ -1,17 +1,17 @@
 import type { DragEvent } from "react";
-import type { CompanyExplorerFolder, CompanyExplorerFolderKind, CompanyExplorerItemType } from "../folders/companyExplorerFolders";
+import type { CompanyExplorerFolder, CompanyExplorerFolderKind, CompanyExplorerItemType } from "../folders/companyExplorerFolders.js";
 import {
   EXPLORER_DEFAULT_EXPANDED_ROW_IDS,
   getExplorerDropPayloadItemType,
   getExplorerDropPayloadItems,
-} from "./treePresentation";
+} from "./treePresentation.js";
 import type {
   ExplorerDragPayload,
   ExplorerFindTarget,
   ExplorerRowDropPlacement,
   ExplorerSelectionDomain,
   ExplorerTreeNode,
-} from "./companyExplorerTypes";
+} from "./companyExplorerTypes.js";
 
 export const EXPLORER_DRAG_MIME = "application/x-mangoos-company-explorer-row";
 export const TREE_INDENT_PX = 16;

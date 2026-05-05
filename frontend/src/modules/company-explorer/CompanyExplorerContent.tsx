@@ -9,7 +9,7 @@ import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type Compan
 import { createKanbanBoard, deleteKanbanBoard, listKanbanBoards, updateKanbanBoard } from "../kanban/kanbanApi";
 import { type ExplorerEntityDragItem, type KanbanBoard } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
-import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
+import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
 import { CompanyExplorerTree } from "./CompanyExplorerTree";
 import {
@@ -332,7 +332,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         // Moving between folder levels starts a new local context. Drop stale
         // edges immediately; the API performs the same cleanup canonically.
         if (itemType === "node") removeNodeRelationshipGraphRelationshipsForNode(apiBase, companyID, itemID);
-        else removeLogicGateRelationshipGraphRelationshipsForLogicGate(apiBase, companyID, itemID);
+        else if (itemType === "logic_gate") removeLogicGateRelationshipGraphRelationshipsForLogicGate(apiBase, companyID, itemID);
       }
       if (options.expandTarget) {
         setExpanded((previous) => {
@@ -551,7 +551,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [apiBase, companyID, renaming, requestJSON]);
 
-  const moveFolder = useCallback(async (folderID: string, parentFolderID: string | undefined, options: { position?: number; expandTarget?: boolean; parentProvided?: boolean } = {}) => {
+  const moveFolder = useCallback(async (folderID: string, parentFolderID: string | undefined, options: { position?: number; expandTarget?: boolean; parentProvided?: boolean; targetExpanded?: boolean } = {}) => {
     if (!folderID || folderID === parentFolderID) return;
     setError("");
     try {
@@ -563,7 +563,15 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         body: JSON.stringify(body),
       });
       setFolders((previous) => previous.map((item) => (item.folder_id === folder.folder_id ? folder : item)));
-      if (options.expandTarget) {
+      if (typeof options.targetExpanded === "boolean") {
+        setExpanded((previous) => {
+          const next = new Set(previous);
+          const targetTreeID = parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root";
+          if (options.targetExpanded) next.add(targetTreeID);
+          else next.delete(targetTreeID);
+          return next;
+        });
+      } else if (options.expandTarget) {
         setExpanded((previous) => {
           const next = new Set(previous);
           next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
@@ -686,14 +694,18 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     const index = treeRows.findIndex((row) => row.id === rowID);
     const viewport = treeViewportRef.current;
     if (index < 0 || !viewport) return;
-    const rowTop = index * COMPANY_EXPLORER_TREE_ROW_HEIGHT;
-    const rowBottom = rowTop + COMPANY_EXPLORER_TREE_ROW_HEIGHT;
+    const rowsStart = viewport.querySelector<HTMLElement>('[data-company-explorer-tree-rows-start="true"]');
     const currentTop = viewport.scrollTop;
-    const currentBottom = currentTop + treeViewportHeight;
-    let nextScrollTop = currentTop;
-    if (rowTop < currentTop) nextScrollTop = rowTop;
-    else if (rowBottom > currentBottom) nextScrollTop = rowBottom - treeViewportHeight;
-    nextScrollTop = Math.max(0, nextScrollTop);
+    const viewportHeight = viewport.clientHeight || treeViewportHeight;
+    const nextScrollTop = getExplorerScrollTopForRow({
+      rowIndex: index,
+      rowHeight: COMPANY_EXPLORER_TREE_ROW_HEIGHT,
+      rowsTopOffset: rowsStart?.offsetTop ?? 0,
+      currentScrollTop: currentTop,
+      viewportHeight,
+      maxScrollTop: Math.max(0, viewport.scrollHeight - viewportHeight),
+      bottomPadding: COMPANY_EXPLORER_TREE_ROW_HEIGHT,
+    });
     if (nextScrollTop === currentTop) return;
     viewport.scrollTop = nextScrollTop;
     setTreeScrollTop(nextScrollTop);
@@ -929,13 +941,18 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const assignExplorerPayloadItemsToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => {
     const items = getExplorerDropPayloadItems(payload).filter((item) => item.itemType === itemType);
     if (!targetFolderID || items.length === 0) return;
-    const existingRows = treeRows.filter((row) => getExplorerRowContainerID(row) === targetFolderID && getExplorerRowOrderKind(row) === itemType);
+    const targetFolderKind = folders.find((folder) => folder.folder_id === targetFolderID)?.folder_kind ?? (itemType === "logic_gate" ? "logic_gate" : "node");
+    const existingRows = treeRows.filter((row) => {
+      if (getExplorerRowContainerID(row) !== targetFolderID) return false;
+      const rowKind = getExplorerRowOrderKind(row);
+      return rowKind === targetFolderKind || rowKind === "kanban";
+    });
     let position = existingRows.reduce((max, row) => Math.max(max, row.position || 0), 0);
     for (const item of items) {
       position += TREE_ROW_POSITION_STEP;
       await assignItemToFolder(targetFolderID, itemType, item.itemID, { position, expandTarget: true });
     }
-  }, [assignItemToFolder, treeRows]);
+  }, [assignItemToFolder, folders, treeRows]);
 
   const requestMapFind = useCallback((target: ExplorerFindTarget) => {
     if (target.kind === "node") {

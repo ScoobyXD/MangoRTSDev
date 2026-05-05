@@ -39,39 +39,36 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
     <FrameRightClickMenu x={menu.x} y={menu.y} onClose={onClose}>
       {menu.canCreateBothFolderTypes ? (
         <>
-          <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder("node", menu.targets.nodeFolderParentID)}>
-            Create node folder
+          <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID)}>
+            Create New Folder
           </button>
           <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateNode(menu.targets.nodeParentFolderID)}>
-            Create node
-          </button>
-          <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder("logic_gate", menu.targets.logicGateFolderParentID)}>
-            Create logic gate folder
+            Create Node
           </button>
           <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateLogicGate(menu.targets.logicGateParentFolderID)}>
-            Create logic gate
+            Create Logic Gate
           </button>
-          <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateKanban("")}>
-            Create new kanban
+          <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateKanban(menu.kanbanParentFolderID)}>
+            Create New Kanban Board
           </button>
         </>
       ) : (
         <>
           <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID)}>
-            Create folder
+            Create New Folder
           </button>
           {menu.contextKind !== "logic_gate" && (
             <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateNode(menu.targets.nodeParentFolderID)}>
-              Create node
+              Create Node
             </button>
           )}
           {menu.contextKind !== "node" && (
             <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateLogicGate(menu.targets.logicGateParentFolderID)}>
-              Create logic gate
+              Create Logic Gate
             </button>
           )}
           <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateKanban(menu.kanbanParentFolderID)}>
-            Create new kanban
+            Create New Kanban Board
           </button>
         </>
       )}

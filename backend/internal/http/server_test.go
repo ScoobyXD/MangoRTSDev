@@ -1112,6 +1112,38 @@ func TestKanbanBoardAPIFlow(t *testing.T) {
 		t.Fatalf("POST kanban explorer folder item status = %d, want %d body=%s", assignRec.Code, http.StatusOK, assignRec.Body.String())
 	}
 
+	logicFolderBody, _ := json.Marshal(map[string]any{
+		"company_id":  companyID,
+		"folder_kind": "logic_gate",
+		"name":        "Release gates",
+	})
+	logicFolderReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(logicFolderBody))
+	logicFolderReq.Header.Set("Content-Type", "application/json")
+	logicFolderRec := httptest.NewRecorder()
+	handler.ServeHTTP(logicFolderRec, logicFolderReq)
+	if logicFolderRec.Code != http.StatusCreated {
+		t.Fatalf("POST logic explorer folder status = %d, want %d body=%s", logicFolderRec.Code, http.StatusCreated, logicFolderRec.Body.String())
+	}
+	var logicFolder struct {
+		FolderID string `json:"folder_id"`
+	}
+	if err := json.NewDecoder(logicFolderRec.Body).Decode(&logicFolder); err != nil {
+		t.Fatalf("decode logic folder: %v", err)
+	}
+	moveKanbanBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"folder_id":  logicFolder.FolderID,
+		"item_type":  "kanban",
+		"item_id":    boardID,
+	})
+	moveKanbanReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items", bytes.NewReader(moveKanbanBody))
+	moveKanbanReq.Header.Set("Content-Type", "application/json")
+	moveKanbanRec := httptest.NewRecorder()
+	handler.ServeHTTP(moveKanbanRec, moveKanbanReq)
+	if moveKanbanRec.Code != http.StatusOK {
+		t.Fatalf("POST kanban explorer item into logic folder status = %d, want %d body=%s", moveKanbanRec.Code, http.StatusOK, moveKanbanRec.Body.String())
+	}
+
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/kanban/boards/"+boardID+"?company_id="+companyID, nil)
 	deleteRec := httptest.NewRecorder()
 	handler.ServeHTTP(deleteRec, deleteReq)
