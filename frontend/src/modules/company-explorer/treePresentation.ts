@@ -451,14 +451,18 @@ export function shouldAcceptMapSelectionAfterExplorerSelection(input: {
   localSelectionChangedAt: number;
   incomingChangedAt?: number;
   now: number;
+  localIntentHoldMs?: number;
   staleWindowMs?: number;
 }): boolean {
+  const localIntentHoldMs = input.localIntentHoldMs ?? 180;
   const staleWindowMs = input.staleWindowMs ?? 750;
-  if (input.currentDomain === input.incomingDomain || input.currentDomain === "folder" || input.currentDomain === "root") return true;
   if (input.localSelectionChangedAt <= 0) return true;
+  if (input.now - input.localSelectionChangedAt <= localIntentHoldMs) return false;
 
-  // Map selection events are asynchronous. If Explorer just crossed between
-  // node and logic-gate domains, older map events are echoes, not new intent.
+  // Map selection events are asynchronous. After any local Explorer click,
+  // older map events are echoes, even when they are in the same node/gate
+  // domain. This keeps rapid Explorer navigation from briefly reselecting the
+  // previous map item.
   if (typeof input.incomingChangedAt === "number" && input.incomingChangedAt > 0) {
     return input.incomingChangedAt > input.localSelectionChangedAt;
   }
