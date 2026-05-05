@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, deserializeEditorDocumentHTML, linkifyEditorPlainTextToHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
+import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, deserializeEditorDocumentHTML, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
   assert.equal(EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, 20);
@@ -26,4 +26,10 @@ test("plain stored editor documents are escaped before becoming rich HTML", () =
 
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(html, /<a href="https:\/\/example\.test\/"/);
+});
+
+test("editor sanitizer collapses nested font-size wrappers to the final size", () => {
+  const html = sanitizeEditorDocumentHTML('<span style="font-size: 14px;"><span style="font-size: 15px;"><span style="font-size: 16px;">nice</span></span></span>');
+
+  assert.equal(html, '<span style="font-size: 16px;">nice</span>');
 });

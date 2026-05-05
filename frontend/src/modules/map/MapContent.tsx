@@ -51,6 +51,11 @@ export const MapContent: React.FC<MapProps> = ({ initialMode = "node", ...props 
 
   useEffect(() => {
     const refreshModeFromExplorerContext = () => {
+      const liveSelection = readLiveSelectionForFrame(companyID, scope);
+      if (liveSelection) {
+        applyLiveSelectionMode(liveSelection);
+        return;
+      }
       const nodeTs = contextTimestamp(localStorage.getItem(nodeContextKey));
       const logicGateTs = contextTimestamp(localStorage.getItem(logicGateContextKey));
       if (logicGateTs <= 0 && nodeTs <= 0) return;

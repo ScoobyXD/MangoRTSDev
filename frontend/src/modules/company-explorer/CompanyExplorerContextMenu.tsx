@@ -12,7 +12,7 @@ type CompanyExplorerContextMenuProps = {
   menu: CompanyExplorerContextMenuState | null;
   buttonStyle: React.CSSProperties;
   onClose: () => void;
-  onCreateFolder: (folderKind: CompanyExplorerFolderKind, parentFolderID: string) => void;
+  onCreateFolder: (folderKind: CompanyExplorerFolderKind, parentFolderID: string, position?: number) => void;
   onCreateNode: (parentFolderID: string) => void;
   onCreateLogicGate: (parentFolderID: string) => void;
   onCreateKanban: (parentFolderID: string) => void;
@@ -39,7 +39,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
     <FrameRightClickMenu x={menu.x} y={menu.y} onClose={onClose}>
       {menu.canCreateBothFolderTypes ? (
         <>
-          <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID)}>
+          <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID, menu.createFolderPosition)}>
             Create New Folder
           </button>
           <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateNode(menu.targets.nodeParentFolderID)}>
@@ -54,7 +54,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
         </>
       ) : (
         <>
-          <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID)}>
+          <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID, menu.createFolderPosition)}>
             Create New Folder
           </button>
           {menu.contextKind !== "logic_gate" && (

@@ -3,7 +3,12 @@
 
 export type ExplorerSelectionState = {
   selectedNodeID: string;
+  selectedLogicGateID?: string;
+  selectedKanbanBoardID?: string;
+  selectedFolderID?: string;
+  selectedFolderKind?: string;
   selectedTreeID: string;
+  selectedTreeIDs?: string[];
 };
 
 // Map-originated selection should only apply when it actually changes explorer state.
@@ -17,7 +22,13 @@ export function shouldApplyMapSelection(current: ExplorerSelectionState, nextNod
 // Explorer should only broadcast semantic selection changes.
 // This scopes event fan-out to real user-intent transitions and avoids churn.
 export function shouldBroadcastSelection(previous: ExplorerSelectionState, next: ExplorerSelectionState): boolean {
-  return previous.selectedNodeID !== next.selectedNodeID || previous.selectedTreeID !== next.selectedTreeID;
+  return previous.selectedNodeID !== next.selectedNodeID
+    || (previous.selectedLogicGateID ?? "") !== (next.selectedLogicGateID ?? "")
+    || (previous.selectedKanbanBoardID ?? "") !== (next.selectedKanbanBoardID ?? "")
+    || (previous.selectedFolderID ?? "") !== (next.selectedFolderID ?? "")
+    || (previous.selectedFolderKind ?? "") !== (next.selectedFolderKind ?? "")
+    || previous.selectedTreeID !== next.selectedTreeID
+    || (previous.selectedTreeIDs ?? []).join("\u001f") !== (next.selectedTreeIDs ?? []).join("\u001f");
 }
 
 // Map state is written through a small debounce, while selection events are

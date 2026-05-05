@@ -121,6 +121,27 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
     tabIndex={0}
     onKeyDown={onTreeKeyDown}
     onScroll={(event) => onScrollTopChange((event.currentTarget as HTMLDivElement).scrollTop)}
+    onDragOver={(event) => {
+      if (!dragPayload) return;
+      const viewport = event.currentTarget as HTMLDivElement;
+      const bounds = viewport.getBoundingClientRect();
+      const edgeSize = 42;
+      const step = 18;
+      const y = event.clientY - bounds.top;
+      if (y < edgeSize) {
+        const next = Math.max(0, viewport.scrollTop - step);
+        if (next !== viewport.scrollTop) {
+          viewport.scrollTop = next;
+          onScrollTopChange(next);
+        }
+      } else if (y > bounds.height - edgeSize) {
+        const next = Math.min(viewport.scrollHeight - bounds.height, viewport.scrollTop + step);
+        if (next !== viewport.scrollTop) {
+          viewport.scrollTop = next;
+          onScrollTopChange(next);
+        }
+      }
+    }}
     onMouseEnter={() => {
       treeKeyboardActiveRef.current = true;
     }}

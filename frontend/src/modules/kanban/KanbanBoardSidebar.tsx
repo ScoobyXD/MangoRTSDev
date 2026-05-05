@@ -68,9 +68,10 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
 }) => {
   const headerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLElement>(null);
+  const boardPickerOpen = allBoardsOpen || boardSearchQuery.trim().length > 0;
 
   useEffect(() => {
-    if (!allBoardsOpen) return;
+    if (!boardPickerOpen) return;
     const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node | null;
       if (!target) return;
@@ -87,11 +88,11 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
       window.removeEventListener("mousedown", onPointerDown, true);
       window.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [allBoardsOpen, onCloseAllBoards]);
+  }, [boardPickerOpen, onCloseAllBoards]);
 
   return (
   <>
-    <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 4, left: 12, right: 12, display: "grid", gridTemplateColumns: "minmax(150px, 270px) minmax(140px, 1fr) auto", alignItems: "center", gap: 8, paddingLeft: 128, zIndex: 6, pointerEvents: "auto" }}>
+    <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 4, left: 12, right: 12, display: "grid", gridTemplateColumns: "minmax(150px, 270px) minmax(140px, 1fr) auto", alignItems: "center", gap: 8, paddingLeft: 162, zIndex: 6, pointerEvents: "auto" }}>
       {editingBoardTitle ? (
         <input
           value={boardTitleDraft}
@@ -147,7 +148,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
         All Boards
       </button>
     </div>
-    {allBoardsOpen && (
+    {boardPickerOpen && (
       <section ref={popoverRef} data-frame-interactive="true" style={{ position: "absolute", top: KANBAN_MODULE_TOP_CLEARANCE_PX + 2, right: 12, width: "min(360px, calc(100% - 24px))", maxHeight: "min(360px, calc(100% - 52px))", display: "grid", gridTemplateRows: "minmax(0, 1fr)", border: isDark ? "1px solid rgba(255,255,255,0.16)" : "1px solid #e0e0e0", borderRadius: 10, background: isDark ? "rgba(17,22,27,0.98)" : "#ffffff", boxShadow: isDark ? "0 12px 28px rgba(0,0,0,0.42)" : "0 6px 24px rgba(0,0,0,0.12)", padding: "4px 0", zIndex: 8, overflow: "hidden" }}>
         <div className="company-explorer-scroll" style={{ overflowY: "auto", overflowX: "hidden", minHeight: 0, ["--company-explorer-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--company-explorer-scroll-track" as string]: "transparent" }}>
           {boardsLoading && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>Loading boards...</div>}
@@ -167,7 +168,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
                     onClick={() => onSelectBoard(board.board_id)}
                     style={{ width: "100%", display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, minHeight: 30, padding: "5px 12px 5px 24px", border: "none", background: selected ? (isDark ? "rgba(0,233,255,0.2)" : "rgba(0, 233, 255, 0.22)") : "transparent", color: text, cursor: "pointer", textAlign: "left" }}
                   >
-                    <span aria-hidden="true" style={{ width: 14, height: 14, border: "1px solid #050505", background: "#050505", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1, padding: 2 }}>
+                    <span aria-hidden="true" style={{ width: 14, height: 14, border: "1px solid #050505", background: "#ffffff", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1, padding: 2 }}>
                       <span style={{ background: "#ff1744" }} />
                       <span style={{ background: "#ffea00" }} />
                       <span style={{ background: "rgb(0, 233, 255)" }} />

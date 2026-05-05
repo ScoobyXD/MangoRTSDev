@@ -29,6 +29,7 @@ run("broadcasts only when semantic selection changes", () => {
   const changed: SelectionState = { selectedNodeID: "node-3", selectedTreeID: "node-node-3" };
   assert.equal(shouldBroadcastSelection(previous, unchanged), false);
   assert.equal(shouldBroadcastSelection(previous, changed), true);
+  assert.equal(shouldBroadcastSelection({ ...previous, selectedLogicGateID: "gate-1" }, { ...previous, selectedLogicGateID: "gate-2" }), true);
 });
 
 run("uses event payload instead of stale debounced map state during gap recovery", () => {

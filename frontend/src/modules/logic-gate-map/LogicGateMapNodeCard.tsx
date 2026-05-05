@@ -145,7 +145,9 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
         const bounds = (event.currentTarget.closest("[data-node-map-viewport='true']") as HTMLDivElement | null)?.getBoundingClientRect();
         if (!bounds) return;
         const nextIDs = selectedNodeIDs.has(node.node_id) ? Array.from(selectedNodeIDs) : [node.node_id];
-        onSetSelectedNodeID(node.node_id);
+        if (!(selectedNodeIDs.size > 1 && selectedNodeIDs.has(node.node_id))) {
+          onSetSelectedNodeID(node.node_id);
+        }
         onSetSelectedNodeIDs(new Set(nextIDs));
         onSetContextMenu(null);
         onSetNodeContextMenu({
@@ -305,7 +307,7 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
         )}
       </div>
       {isSelected && (
-        <div style={{ position: "absolute", top: 8, right: 18, width: 12, height: 12, borderRadius: 999, background: selectionColor, opacity: 0.92, zIndex: 2 }} />
+        <div style={{ position: "absolute", top: 8, left: 8, width: 12, height: 12, borderRadius: 999, background: selectionColor, opacity: 0.92, zIndex: 2 }} />
       )}
 
       {LOGIC_GATE_SIDE_CONTROLS.map(({ direction, style: sideStyle }) => {
@@ -400,8 +402,10 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
       {[
         { key: "tl", edges: { left: true, top: true }, cursor: "nwse-resize", style: { left: -6, top: -6, width: 12, height: 12 } },
         { key: "tr", edges: { right: true, top: true }, cursor: "nesw-resize", style: { right: -6, top: -6, width: 12, height: 12 } },
+        { key: "tr-curve", edges: { right: true, top: true }, cursor: "nesw-resize", style: { left: "calc(67.5% - 6px)", top: -6, width: 18, height: 14 } },
         { key: "bl", edges: { left: true, bottom: true }, cursor: "nesw-resize", style: { left: -6, bottom: -6, width: 12, height: 12 } },
         { key: "br", edges: { right: true, bottom: true }, cursor: "nwse-resize", style: { right: -6, bottom: -6, width: 12, height: 12 } },
+        { key: "br-curve", edges: { right: true, bottom: true }, cursor: "nwse-resize", style: { left: "calc(67.5% - 6px)", bottom: -6, width: 18, height: 14 } },
         { key: "l", edges: { left: true }, cursor: "ew-resize", style: { left: -4, top: 12, bottom: 12, width: 8 } },
         { key: "r", edges: { right: true }, cursor: "ew-resize", style: { right: -4, top: 12, bottom: 12, width: 8 } },
         { key: "t", edges: { top: true }, cursor: "ns-resize", style: { top: -4, left: 12, right: 12, height: 8 } },

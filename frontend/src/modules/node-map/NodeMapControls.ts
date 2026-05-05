@@ -6,6 +6,7 @@ export type NodeMapScreenRect = { minX: number; maxX: number; minY: number; maxY
 
 const EPSILON = 0.000001;
 const CLICK_DRAG_THRESHOLD_PX = 4;
+export const NODE_MAP_CLIPBOARD_STORAGE_KEY = "mangoos:node-map-clipboard-v1";
 
 const pointInRect = (point: NodeMapScreenPoint, rect: NodeMapScreenRect) => (
   point.x >= rect.minX && point.x <= rect.maxX && point.y >= rect.minY && point.y <= rect.maxY
@@ -118,6 +119,101 @@ export type NodeMapRelationshipPath = {
   points: Array<{ x: number; y: number }>;
 };
 
+export type NodeMapClipboardKind = "node" | "logic_gate";
+
+export type NodeMapClipboardPayload = {
+  kind: NodeMapClipboardKind;
+  nodes: Array<{ oldID: string; title: string; x: number; y: number; w: number; h: number }>;
+  relationships: Array<{
+    oldID: string;
+    nodeIDA: string;
+    nodeIDB: string;
+    aPosition: string;
+    bPosition: string;
+    anchor?: { from: NodeDirection; to: NodeDirection };
+  }>;
+};
+
+export function buildNodeMapClipboardPayload<TNode extends { node_id: string; title?: string; header?: string }, TRelationship extends { node_relationship_id: string; node_id_a: string; node_id_b: string; a_position: string; b_position: string }>(input: {
+  kind: NodeMapClipboardKind;
+  nodes: TNode[];
+  relationships: TRelationship[];
+  nodePositions: Record<string, NodePosition>;
+  nodeSizes: Record<string, { w: number; h: number }>;
+  relationshipAnchors: Record<string, { from: NodeDirection; to: NodeDirection }>;
+  selectedNodeID: string;
+  selectedNodeIDs: Set<string>;
+}): NodeMapClipboardPayload | null {
+  const selectedIDs = input.selectedNodeIDs.size > 0
+    ? new Set(input.selectedNodeIDs)
+    : (input.selectedNodeID ? new Set([input.selectedNodeID]) : new Set<string>());
+  if (selectedIDs.size === 0) return null;
+
+  const copiedNodes = input.nodes
+    .filter((node) => selectedIDs.has(node.node_id))
+    .map((node) => {
+      const position = input.nodePositions[node.node_id] ?? { x: 0, y: 0 };
+      const size = input.nodeSizes[node.node_id] ?? { w: 148, h: 96 };
+      return {
+        oldID: node.node_id,
+        title: (node.title || node.header || node.node_id).trim() || node.node_id,
+        x: snapToGrid(position.x),
+        y: snapToGrid(position.y),
+        w: snapToGrid(size.w),
+        h: snapToGrid(size.h),
+      };
+    });
+  if (copiedNodes.length === 0) return null;
+
+  const copiedIDSet = new Set(copiedNodes.map((node) => node.oldID));
+  const copiedRelationships = input.relationships
+    .filter((relationship) => copiedIDSet.has(relationship.node_id_a) && copiedIDSet.has(relationship.node_id_b))
+    .map((relationship) => ({
+      oldID: relationship.node_relationship_id,
+      nodeIDA: relationship.node_id_a,
+      nodeIDB: relationship.node_id_b,
+      aPosition: relationship.a_position,
+      bPosition: relationship.b_position,
+      anchor: input.relationshipAnchors[relationship.node_relationship_id],
+    }));
+
+  return { kind: input.kind, nodes: copiedNodes, relationships: copiedRelationships };
+}
+
+export function parseNodeMapClipboardPayload(raw: string | null | undefined): NodeMapClipboardPayload | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as NodeMapClipboardPayload;
+    if (parsed.kind !== "node" && parsed.kind !== "logic_gate") return null;
+    if (!Array.isArray(parsed.nodes) || parsed.nodes.length === 0 || !Array.isArray(parsed.relationships)) return null;
+    const nodes = parsed.nodes
+      .map((node) => ({
+        oldID: typeof node.oldID === "string" ? node.oldID.trim() : "",
+        title: typeof node.title === "string" ? node.title.trim() : "",
+        x: Number(node.x),
+        y: Number(node.y),
+        w: Number(node.w),
+        h: Number(node.h),
+      }))
+      .filter((node) => node.oldID && node.title && Number.isFinite(node.x) && Number.isFinite(node.y) && Number.isFinite(node.w) && Number.isFinite(node.h));
+    if (nodes.length === 0) return null;
+    const nodeIDs = new Set(nodes.map((node) => node.oldID));
+    const relationships = parsed.relationships
+      .map((relationship) => ({
+        oldID: typeof relationship.oldID === "string" ? relationship.oldID.trim() : "",
+        nodeIDA: typeof relationship.nodeIDA === "string" ? relationship.nodeIDA.trim() : "",
+        nodeIDB: typeof relationship.nodeIDB === "string" ? relationship.nodeIDB.trim() : "",
+        aPosition: typeof relationship.aPosition === "string" ? relationship.aPosition.trim() : "",
+        bPosition: typeof relationship.bPosition === "string" ? relationship.bPosition.trim() : "",
+        anchor: relationship.anchor,
+      }))
+      .filter((relationship) => relationship.oldID && nodeIDs.has(relationship.nodeIDA) && nodeIDs.has(relationship.nodeIDB) && relationship.aPosition && relationship.bPosition);
+    return { kind: parsed.kind, nodes, relationships };
+  } catch {
+    return null;
+  }
+}
+
 export function beginNodeMapMultiSelectSession(
   viewportElement: HTMLDivElement | null,
   pointerID: number,
@@ -208,7 +304,7 @@ export function resolveNodeMapDragStartSelection(input: {
       selectedNodeIDs: new Set(input.selectedNodeIDs),
       selectedNodeID: input.selectedNodeID || dragNodeIDs[0] || input.nodeID,
       dragNodeIDs,
-      clearSelectionOnClick: true,
+      clearSelectionOnClick: false,
     };
   }
 
@@ -335,8 +431,8 @@ export function useNodeMapMultiSelectControls(input: {
       const mergedRelationshipIDs = mergeNodeMapMultiSelect(input.selectedRelationshipIDs, multiSelectResult.selectedRelationshipIDs, activeBox.additive);
       input.setSelectedNodeIDs(mergedNodeIDs);
       input.setSelectedRelationshipIDs(mergedRelationshipIDs);
-      const [firstSelectedNodeID] = multiSelectResult.selectedNodeIDs;
-      input.setSelectedNodeID(firstSelectedNodeID ?? (activeBox.additive ? input.selectedNodeID : ""));
+      const [firstSelectedNodeID] = mergedNodeIDs;
+      input.setSelectedNodeID(mergedNodeIDs.size === 1 && mergedRelationshipIDs.size === 0 ? firstSelectedNodeID ?? "" : "");
       input.setSelectionPointerID(null);
       const idleBox = { ...activeBox, active: false, additive: false };
       input.multiSelectBoxRef.current = idleBox;
@@ -515,7 +611,8 @@ export function useNodeMapDeleteKeyboardControl(input: {
       if (!hasSelection) return;
 
       const target = event.target as HTMLElement | null;
-      if (shouldIgnoreMapDeleteKeyTarget(target)) return;
+      const hasBatchSelection = current.selectedNodeIDs.size > 1 || current.selectedRelationshipIDs.size > 0;
+      if (!hasBatchSelection && shouldIgnoreMapDeleteKeyTarget(target)) return;
       event.preventDefault();
       event.stopPropagation();
       current.setConfirmDelete({ nodeIDs, relationshipIDs });

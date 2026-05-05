@@ -145,7 +145,14 @@ function replaceSelectionWithHTML(root: HTMLElement, html: string): boolean {
   const lastChild = fragment.lastChild;
   range.deleteContents();
   range.insertNode(fragment);
-  if (lastChild) range.setStartAfter(lastChild);
+  const lastAnchor = lastChild instanceof HTMLAnchorElement
+    ? lastChild
+    : (lastChild instanceof HTMLElement ? lastChild.querySelector("a[href]:last-of-type") as HTMLAnchorElement | null : null);
+  if (lastAnchor?.lastChild) {
+    range.setStart(lastAnchor.lastChild, lastAnchor.lastChild.textContent?.length ?? 0);
+  } else if (lastChild) {
+    range.setStartAfter(lastChild);
+  }
   range.collapse(true);
   const selection = root.ownerDocument.getSelection();
   selection?.removeAllRanges();
@@ -175,6 +182,43 @@ function replaceDocumentWithPlainText(root: HTMLElement, text: string, selection
   setEditorSelectionByOffsets(root, selectionStart, selectionEnd);
 }
 
+function getCollapsedAnchorAtSelectionEnd(root: HTMLElement): HTMLAnchorElement | null {
+  const range = getEditorSelectionRange(root);
+  if (!range || !range.collapsed) return null;
+  const container = range.startContainer.nodeType === Node.ELEMENT_NODE
+    ? range.startContainer as Element
+    : range.startContainer.parentElement;
+  const anchor = container?.closest("a[href]") as HTMLAnchorElement | null;
+  if (!anchor || !root.contains(anchor)) return null;
+  const afterRange = root.ownerDocument.createRange();
+  afterRange.selectNodeContents(anchor);
+  try {
+    afterRange.setStart(range.startContainer, range.startOffset);
+  } catch {
+    return null;
+  }
+  return afterRange.toString().length === 0 ? anchor : null;
+}
+
+function insertPlainTextAfterAnchor(root: HTMLElement, anchor: HTMLAnchorElement, text: string): boolean {
+  const textNode = root.ownerDocument.createTextNode(text);
+  anchor.after(textNode);
+  const range = root.ownerDocument.createRange();
+  range.setStart(textNode, textNode.data.length);
+  range.collapse(true);
+  const selection = root.ownerDocument.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  return true;
+}
+
+function scrollEditorToLineStart(root: HTMLElement) {
+  root.scrollLeft = 0;
+  window.requestAnimationFrame(() => {
+    root.scrollLeft = 0;
+  });
+}
+
 function commitEditorDocument(root: HTMLElement, scheduleDocumentSave: (nextText: string, immediate?: boolean) => void, scheduleIndentGuideUpdate: (text: string) => void, immediate = false) {
   const plainText = readEditorDocumentText(root);
   scheduleDocumentSave(serializeEditorDocumentHTML(root), immediate);
@@ -198,6 +242,16 @@ export function useEditorDocumentSurfaceHandlers({
     onBeforeInput(event) {
       const inputEvent = event.nativeEvent as InputEvent;
       const pendingFontSize = pendingEditorFontSizeRef.current;
+      if (inputEvent.inputType === "insertText" && inputEvent.data === " ") {
+        const anchor = getCollapsedAnchorAtSelectionEnd(event.currentTarget);
+        if (anchor) {
+          event.preventDefault();
+          pendingEditorFontSizeRef.current = null;
+          insertPlainTextAfterAnchor(event.currentTarget, anchor, " ");
+          commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          return;
+        }
+      }
       if (
         pendingFontSize !== null &&
         inputEvent.inputType === "insertText" &&
@@ -247,7 +301,8 @@ export function useEditorDocumentSurfaceHandlers({
       window.open(anchor.href, "_blank", "noopener,noreferrer");
     },
     onKeyUp() {
-      pendingEditorFontSizeRef.current = null;
+      // Keep a toolbar-chosen collapsed font size armed until real text input,
+      // selection movement, blur, or Escape consumes/cancels it.
     },
     onBlur(event) {
       pendingEditorFontSizeRef.current = null;
@@ -280,6 +335,7 @@ export function useEditorDocumentSurfaceHandlers({
         const edit = insertEditorEnterText(currentText, offsets.start, offsets.end, outlineStyle);
         const insertedText = edit.value.slice(offsets.start, edit.selectionStart);
         if (replaceSelectionWithText(event.currentTarget, insertedText)) {
+          scrollEditorToLineStart(event.currentTarget);
           commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
         }
         return;

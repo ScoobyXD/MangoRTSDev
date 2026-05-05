@@ -16,6 +16,7 @@ export type DocumentSaveRequest = {
 export type LinkedSelection = {
   id: string;
   label: string;
+  changedAt?: number;
   selectionIntent?: SelectionIntent;
 };
 
