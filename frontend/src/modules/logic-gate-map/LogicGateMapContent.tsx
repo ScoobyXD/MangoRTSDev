@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LOGIC_GATE_MAP_STATE_KEY_PREFIX, LogicGateRecord, LogicGateRelationship, MINI_GRID, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, toLogicGateCanvasRecord, toLogicGateCanvasRelationship, trimOrEmpty } from "./shared";
+import { INFO_TYPES, LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LOGIC_GATE_MAP_STATE_KEY_PREFIX, LogicGateRecord, LogicGateRelationship, MINI_GRID, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, PersistedMapPosition, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, toLogicGateCanvasRecord, toLogicGateCanvasRelationship, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "./LogicGateRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, canStartRelationshipFromSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "../node-map/relationshipDeleteSummary";
-import { invalidateLogicGateRecordStoreCaches } from "./LogicGateRecordStore";
+import { invalidateLogicGateRecordStoreCaches, primeLogicGateRecordStoreCaches } from "./LogicGateRecordStore";
+import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
 import { NODE_MAP_CLIPBOARD_STORAGE_KEY, beginNodeMapMultiSelectSession, buildNodeMapClipboardPayload, parseNodeMapClipboardPayload, shouldIgnoreMapDeleteKeyTarget, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapDragStartSelection, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
 import { filterLogicGateGraphToFolderScope, resolveMapSelectionAfterGraphLoad, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
@@ -16,6 +17,14 @@ import { LogicGateMapRelationshipHitLines } from "./LogicGateMapRelationshipHitL
 import { buildLogicGateMapRelationshipRoutingGrid, getLogicGateMapAnchorPoint, routeLogicGateMapDraftPath, routeLogicGateMapOrthogonalPath } from "./logicGateMapRouting";
 import { useLogicGateMapGraphPersistence } from "./useLogicGateMapGraphPersistence";
 import { useLogicGateMapViewportHandlers } from "./useLogicGateMapViewportHandlers";
+
+type LogicGateMapEntityBatchResponse = {
+  entity_mappings?: Array<{ client_id: string; entity_id: string }>;
+  logic_gates?: LogicGateRecord[];
+  logic_gate_relationships?: LogicGateRelationship[];
+  folder_items?: CompanyExplorerFolderItem[];
+  logic_gate_map_positions?: PersistedMapPosition[];
+};
 
 type ExplorerSelectionOrigin = {
   sourceExplorerID: string;
@@ -737,6 +746,33 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     return () => window.removeEventListener(eventName, onCreate as EventListener);
   }, [widgetId]);
 
+  const rememberPersistedLogicGateMapPositions = (positions: PersistedMapPosition[] | undefined) => {
+    const savedPositions = persistedMapPositionsToNodePositions({
+      positions,
+      worldWidth: WORLD_W,
+      worldHeight: WORLD_H,
+      nodeWidth: NODE_W,
+      nodeHeight: NODE_H,
+    });
+    if (Object.keys(savedPositions).length > 0) {
+      lastPersistedNodePositionsRef.current = { ...lastPersistedNodePositionsRef.current, ...savedPositions };
+    }
+  };
+
+  const primeCreatedLogicGateRecords = (createdLogicGates: LogicGateRecord[], createdRelationships: LogicGateRelationship[]) => {
+    primeLogicGateRecordStoreCaches(apiBase, companyID, createdLogicGates.map((logicGate) => ({
+      logicGate,
+      relationships: createdRelationships.filter((relationship) => relationship.logic_gate_id_a === logicGate.logic_gate_id || relationship.logic_gate_id_b === logicGate.logic_gate_id),
+    })));
+  };
+
+  const applyCreatedLogicGateBatchSideEffects = (response: LogicGateMapEntityBatchResponse, createdRecords: LogicGateRecord[], createdRelationships: LogicGateRelationship[]) => {
+    for (const record of createdRecords) upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(record));
+    for (const folderItem of response.folder_items ?? []) upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, folderItem);
+    rememberPersistedLogicGateMapPositions(response.logic_gate_map_positions);
+    primeCreatedLogicGateRecords(createdRecords, createdRelationships);
+  };
+
   const createNode = async (title: string, worldPos?: { x: number; y: number }): Promise<NodeRecord | null> => {
     const value = trimOrEmpty(title);
     if (!value) return null;
@@ -744,36 +780,35 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     const desiredPosition = worldPos
       ? { x: worldPos.x - NODE_W / 2, y: worldPos.y - NODE_H / 2 }
       : visibleInsertionPosition;
+    const position = resolveOpenNodeMapPosition({
+      desired: desiredPosition,
+      occupied: nodePositions,
+      worldWidth: WORLD_W,
+      worldHeight: WORLD_H,
+      nodeWidth: NODE_W,
+      nodeHeight: NODE_H,
+    });
     try {
-      const created = await requestJSON<LogicGateRecord>("/v1/logic-gates", {
-        method: "POST",
-        body: JSON.stringify({ company_id: companyID, header: value }),
+      const response = await createMapEntityBatchCommand<LogicGateMapEntityBatchResponse>({
+        companyID,
+        entityKind: "logic_gate",
+        folderID: activeFolderID,
+        items: [{
+          client_id: createMapEntityBatchClientID("logic-gate"),
+          title: value,
+          x: position.x,
+          y: position.y,
+        }],
+        requestJSON,
       });
+      const created = response.logic_gates?.[0];
+      if (!created) throw new Error("logic_gate_batch_create_missing_gate");
       const node = toLogicGateCanvasRecord(created);
       setNodePositions((previous) => ({
         ...previous,
-        [node.node_id]: resolveOpenNodeMapPosition({
-          desired: desiredPosition,
-          occupied: previous,
-          worldWidth: WORLD_W,
-          worldHeight: WORLD_H,
-          nodeWidth: NODE_W,
-          nodeHeight: NODE_H,
-        }),
+        [node.node_id]: position,
       }));
-      // Hot-path rule: avoid full snapshot refetch on create.
-      // Apply optimistic logic-gate insertion through the shared graph cache so subscribers
-      // get immediate convergence without issuing a snapshot GET.
-      upsertLogicGateRelationshipGraphNode(apiBase, companyID, node);
-      if (activeFolderID) {
-        const folderItem = await requestJSON<CompanyExplorerFolderItem>("/v1/company-explorer/folder-items", {
-          method: "POST",
-          body: JSON.stringify({ company_id: companyID, folder_id: activeFolderID, item_type: "logic_gate", item_id: node.node_id }),
-        });
-        // Folder placement is durable API state, not local UI state. Updating the
-        // cache here keeps folder-filtered maps responsive after creation.
-        upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, folderItem);
-      }
+      applyCreatedLogicGateBatchSideEffects(response, [created], response.logic_gate_relationships ?? []);
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       return node;
@@ -802,33 +837,55 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       y: origin.y + shift.y,
     };
 
-    const node = await createNode("new logic gate", { x: linkedPosition.x + NODE_W / 2, y: linkedPosition.y + NODE_H / 2 });
-    if (!node) return;
-
     try {
       const payload = buildLinkedNodePayloadFromSourceSide(direction);
-      const createdRelationship = await requestJSON<LogicGateRelationship>("/v1/logic-gate-relationships", {
-        method: "POST",
-        body: JSON.stringify({
-          company_id: companyID,
-          logic_gate_id_a: sourceNodeID,
-          logic_gate_id_b: node.node_id,
+      const position = resolveOpenNodeMapPosition({
+        desired: linkedPosition,
+        occupied: nodePositions,
+        worldWidth: WORLD_W,
+        worldHeight: WORLD_H,
+        nodeWidth: NODE_W,
+        nodeHeight: NODE_H,
+      });
+      const clientID = createMapEntityBatchClientID("linked-logic-gate");
+      const response = await createMapEntityBatchCommand<LogicGateMapEntityBatchResponse>({
+        companyID,
+        entityKind: "logic_gate",
+        folderID: activeFolderID,
+        items: [{
+          client_id: clientID,
+          title: "new logic gate",
+          x: position.x,
+          y: position.y,
+        }],
+        relationships: [{
+          entity_id_a: sourceNodeID,
+          client_id_b: clientID,
           a_position: payload.a_position,
           b_position: payload.b_position,
-        }),
+        }],
+        requestJSON,
       });
-      const relationship = toLogicGateCanvasRelationship(createdRelationship);
+      const created = response.logic_gates?.[0];
+      if (!created) throw new Error("logic_gate_batch_create_missing_gate");
+      const node = toLogicGateCanvasRecord(created);
+      const createdRelationship = response.logic_gate_relationships?.[0];
+      const relationship = createdRelationship ? toLogicGateCanvasRelationship(createdRelationship) : null;
 
-      setRelationshipAnchors((previous) => ({
-        ...previous,
-        [relationship.node_relationship_id]: payload.anchor,
-      }));
-      setRelationships((previous) => (
-        previous.some((item) => item.node_relationship_id === relationship.node_relationship_id)
-          ? previous
-          : [...previous, relationship]
-      ));
+      setNodePositions((previous) => ({ ...previous, [node.node_id]: position }));
+      if (relationship) {
+        setRelationshipAnchors((previous) => ({
+          ...previous,
+          [relationship.node_relationship_id]: payload.anchor,
+        }));
+        setRelationships((previous) => (
+          previous.some((item) => item.node_relationship_id === relationship.node_relationship_id)
+            ? previous
+            : [...previous, relationship]
+        ));
+      }
 
+      applyCreatedLogicGateBatchSideEffects(response, [created], response.logic_gate_relationships ?? []);
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       setDetailsPanelNodeID(node.node_id);
@@ -914,51 +971,77 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     const minX = Math.min(...payload.nodes.map((node) => node.x));
     const minY = Math.min(...payload.nodes.map((node) => node.y));
     const offset = { x: visibleInsertionPosition.x - minX, y: visibleInsertionPosition.y - minY };
-    const nextIDByOldID = new Map<string, string>();
-    const createdNodes: NodeRecord[] = [];
+    const clientIDByOldID = new Map<string, string>();
     const createdPositions: Record<string, NodePosition> = {};
+    const batchItems = payload.nodes.map((copied, index) => {
+      const clientID = createMapEntityBatchClientID("paste-logic-gate", index);
+      clientIDByOldID.set(copied.oldID, clientID);
+      return {
+        client_id: clientID,
+        title: copied.title,
+        x: clamp(snapToGrid(copied.x + offset.x), 0, WORLD_W - NODE_W),
+        y: clamp(snapToGrid(copied.y + offset.y), 0, WORLD_H - NODE_H),
+      };
+    });
+    const batchRelationships = payload.relationships
+      .map((copied) => {
+        const clientIDA = clientIDByOldID.get(copied.nodeIDA);
+        const clientIDB = clientIDByOldID.get(copied.nodeIDB);
+        if (!clientIDA || !clientIDB) return null;
+        return {
+          client_id_a: clientIDA,
+          client_id_b: clientIDB,
+          a_position: copied.aPosition,
+          b_position: copied.bPosition,
+        };
+      })
+      .filter((relationship): relationship is { client_id_a: string; client_id_b: string; a_position: string; b_position: string } => !!relationship);
     setError("");
     try {
+      const response = await createMapEntityBatchCommand<LogicGateMapEntityBatchResponse>({
+        companyID,
+        entityKind: "logic_gate",
+        folderID: activeFolderID,
+        items: batchItems,
+        relationships: batchRelationships,
+        requestJSON,
+      });
+      const createdRecords = response.logic_gates ?? [];
+      if (createdRecords.length === 0) return;
+      const createdNodes = createdRecords.map(toLogicGateCanvasRecord);
+      const idByClientID = new Map((response.entity_mappings ?? []).map((mapping) => [mapping.client_id, mapping.entity_id]));
       for (const copied of payload.nodes) {
-        const node = await createNode(copied.title, {
-          x: copied.x + offset.x + copied.w / 2,
-          y: copied.y + offset.y + copied.h / 2,
-        });
-        if (!node) continue;
-        nextIDByOldID.set(copied.oldID, node.node_id);
-        createdNodes.push(node);
-        createdPositions[node.node_id] = {
+        const clientID = clientIDByOldID.get(copied.oldID);
+        const nodeID = clientID ? idByClientID.get(clientID) : "";
+        if (!nodeID) continue;
+        createdPositions[nodeID] = {
           x: clamp(snapToGrid(copied.x + offset.x), 0, WORLD_W - NODE_W),
           y: clamp(snapToGrid(copied.y + offset.y), 0, WORLD_H - NODE_H),
         };
-        setNodeSizes((previous) => ({ ...previous, [node.node_id]: { w: copied.w, h: copied.h } }));
       }
-      if (createdNodes.length === 0) return;
       setNodePositions((previous) => ({ ...previous, ...createdPositions }));
-      const createdRelationships: NodeRelationship[] = [];
+      setNodeSizes((previous) => {
+        const next = { ...previous };
+        for (const copied of payload.nodes) {
+          const clientID = clientIDByOldID.get(copied.oldID);
+          const nodeID = clientID ? idByClientID.get(clientID) : "";
+          if (nodeID) next[nodeID] = { w: copied.w, h: copied.h };
+        }
+        return next;
+      });
+      const createdRelationships = (response.logic_gate_relationships ?? []).map(toLogicGateCanvasRelationship);
       const createdAnchors: Record<string, RelationshipAnchor> = {};
       for (const copied of payload.relationships) {
-        const nodeIDA = nextIDByOldID.get(copied.nodeIDA);
-        const nodeIDB = nextIDByOldID.get(copied.nodeIDB);
-        if (!nodeIDA || !nodeIDB) continue;
-        const createdRelationship = await requestJSON<LogicGateRelationship>("/v1/logic-gate-relationships", {
-          method: "POST",
-          body: JSON.stringify({
-            company_id: companyID,
-            logic_gate_id_a: nodeIDA,
-            logic_gate_id_b: nodeIDB,
-            a_position: copied.aPosition,
-            b_position: copied.bPosition,
-          }),
-        });
-        const relationship = toLogicGateCanvasRelationship(createdRelationship);
-        createdRelationships.push(relationship);
-        if (copied.anchor) createdAnchors[relationship.node_relationship_id] = copied.anchor;
+        const nodeIDA = idByClientID.get(clientIDByOldID.get(copied.nodeIDA) ?? "");
+        const nodeIDB = idByClientID.get(clientIDByOldID.get(copied.nodeIDB) ?? "");
+        const relationship = createdRelationships.find((item) => item.node_id_a === nodeIDA && item.node_id_b === nodeIDB && item.a_position === copied.aPosition && item.b_position === copied.bPosition);
+        if (relationship && copied.anchor) createdAnchors[relationship.node_relationship_id] = copied.anchor;
       }
       if (createdRelationships.length > 0) {
         setRelationships((previous) => [...previous, ...createdRelationships]);
         setRelationshipAnchors((previous) => ({ ...previous, ...createdAnchors }));
       }
+      applyCreatedLogicGateBatchSideEffects(response, createdRecords, response.logic_gate_relationships ?? []);
       const createdIDs = createdNodes.map((node) => node.node_id);
       setSelectedNodeID(createdIDs.length === 1 ? createdIDs[0] : "");
       setSelectedNodeIDs(new Set(createdIDs));
@@ -985,7 +1068,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [canvasActive, nodePositions, nodeSizes, nodes, relationships, relationshipAnchors, selectedNodeID, selectedNodeIDs, visibleInsertionPosition]);
+  }, [activeFolderID, canvasActive, nodePositions, nodeSizes, nodes, relationships, relationshipAnchors, selectedNodeID, selectedNodeIDs, visibleInsertionPosition]);
 
   // Delete-node action with selection/context cleanup and snapshot refresh.
   const deleteNode = async (nodeID: string) => {

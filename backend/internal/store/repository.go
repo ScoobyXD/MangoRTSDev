@@ -51,6 +51,7 @@ type Repository interface {
 	UpsertNodeMapPositions(companyID string, positions []domain.NodeMapPosition) ([]domain.NodeMapPosition, error)
 	ListLogicGateMapPositions(companyID string) ([]domain.LogicGateMapPosition, error)
 	UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error)
+	CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityBatchResult, error)
 	CreateOperation(in CreateOperationInput) (domain.Operation, error)
 	GetOperation(companyID, operationID string) (domain.Operation, error)
 	ListKanbanBoards(companyID string, query KanbanBoardQuery) ([]domain.KanbanBoard, error)
@@ -65,6 +66,52 @@ type Repository interface {
 	UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error)
 	MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error)
 	DeleteKanbanCard(companyID, boardID, cardID string) error
+}
+
+const MapEntityBatchMaxItems = 200
+
+const MapEntityBatchMaxRelationships = 500
+
+type MapEntityBatchItemInput struct {
+	ClientID string
+	Title    string
+	X        float64
+	Y        float64
+}
+
+type MapEntityBatchRelationshipInput struct {
+	EntityIDA string
+	EntityIDB string
+	ClientIDA string
+	ClientIDB string
+	APosition string
+	BPosition string
+}
+
+type MapEntityBatchInput struct {
+	CompanyID     string
+	EntityKind    string
+	FolderID      string
+	Items         []MapEntityBatchItemInput
+	Relationships []MapEntityBatchRelationshipInput
+}
+
+type MapEntityBatchEntityMapping struct {
+	ClientID string `json:"client_id"`
+	EntityID string `json:"entity_id"`
+}
+
+type MapEntityBatchResult struct {
+	CompanyID              string                             `json:"company_id"`
+	EntityKind             string                             `json:"entity_kind"`
+	EntityMappings         []MapEntityBatchEntityMapping      `json:"entity_mappings"`
+	Nodes                  []domain.Node                      `json:"nodes,omitempty"`
+	LogicGates             []domain.LogicGate                 `json:"logic_gates,omitempty"`
+	Relationships          []domain.NodeRelationship          `json:"relationships,omitempty"`
+	LogicGateRelationships []domain.LogicGateRelationship     `json:"logic_gate_relationships,omitempty"`
+	FolderItems            []domain.CompanyExplorerFolderItem `json:"folder_items,omitempty"`
+	NodeMapPositions       []domain.NodeMapPosition           `json:"node_map_positions,omitempty"`
+	LogicGateMapPositions  []domain.LogicGateMapPosition      `json:"logic_gate_map_positions,omitempty"`
 }
 
 type CreateOperationInput struct {

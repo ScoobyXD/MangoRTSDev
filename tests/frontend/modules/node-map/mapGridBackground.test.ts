@@ -8,30 +8,29 @@ test("adaptivePlusGridWorldStep keeps plus grid detail readable across zoom leve
   assert.equal(adaptivePlusGridWorldStep(2.7), 12);
 });
 
-test("buildPlusGridBackgroundStyle uses repeated gradients instead of per-cell DOM", () => {
+test("buildPlusGridBackgroundStyle uses repeated SVG plus tiles instead of per-cell DOM", () => {
   const style = buildPlusGridBackgroundStyle({ zoom: 1, accent: "#00aabb", theme: "light" });
 
   assert.equal(style.backgroundRepeat, "repeat, repeat");
-  assert.equal(style.backgroundSize, "192px 192px, 192px 192px");
-  assert.equal(style.backgroundPosition, "24px 24px, 24px 24px");
-  assert.match(String(style.backgroundImage), /linear-gradient\(to right/);
-  assert.match(String(style.backgroundImage), /linear-gradient\(to bottom/);
+  assert.equal(style.backgroundSize, "48px 48px, 192px 192px");
+  assert.equal(style.backgroundPosition, "0 0, -72px -72px");
+  assert.match(String(style.backgroundImage), /data:image\/svg\+xml/);
+  assert.match(String(style.backgroundImage), /%3Csvg/);
 });
 
-test("buildPlusGridBackgroundStyle anchors square lines to the old plus centers", () => {
+test("buildPlusGridBackgroundStyle aligns major pluses with minor plus axes", () => {
   const style = buildPlusGridBackgroundStyle({ zoom: 1, accent: "#00aabb", theme: "light" });
-  const [horizontalSize, verticalSize] = String(style.backgroundSize).split(", ").map((value) => Number.parseFloat(value));
-  const [horizontalPosition, verticalPosition] = String(style.backgroundPosition).split(", ");
+  const [minorSize, majorSize] = String(style.backgroundSize).split(", ").map((value) => Number.parseFloat(value));
+  const [, majorPosition] = String(style.backgroundPosition).split(", ");
+  const majorOffset = Number.parseFloat(majorPosition);
 
-  assert.equal(horizontalSize, verticalSize);
-  assert.equal(Number.parseFloat(horizontalPosition), 24);
-  assert.equal(Number.parseFloat(verticalPosition), 24);
+  assert.equal(majorOffset + majorSize / 2, minorSize / 2);
 });
 
 test("buildPlusGridBackgroundStyle coarsens background tiles when zoomed out", () => {
   const style = buildPlusGridBackgroundStyle({ zoom: 0.45, accent: "#00aabb", theme: "dark" });
 
-  assert.equal(style.backgroundSize, "384px 384px, 384px 384px");
-  assert.equal(style.backgroundPosition, "48px 48px, 48px 48px");
+  assert.equal(style.backgroundSize, "96px 96px, 384px 384px");
+  assert.equal(style.backgroundPosition, "0 0, -144px -144px");
   assert.match(String(style.backgroundColor), /rgba/);
 });

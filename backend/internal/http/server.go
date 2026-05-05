@@ -41,6 +41,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/company-explorer/folders/", s.handleCompanyExplorerFolderByID)
 	mux.HandleFunc("/v1/company-explorer/folder-items", s.handleCompanyExplorerFolderItems)
 	mux.HandleFunc("/v1/map-layout", s.handleMapLayout)
+	mux.HandleFunc("/v1/map-entity-batches", s.handleMapEntityBatches)
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
 	mux.HandleFunc("/v1/logic-gates/", s.handleLogicGateSubresource)
 	mux.HandleFunc("/v1/logic-gate-relationships", s.handleLogicGateRelationships)

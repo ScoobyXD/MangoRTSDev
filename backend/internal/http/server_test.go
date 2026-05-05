@@ -1459,3 +1459,122 @@ func TestMapLayoutPositionAPIAndWorkspaceSnapshot(t *testing.T) {
 		t.Fatalf("snapshot logic_gate_map_positions = %+v, want saved logic gate position", snapshot.LogicGateMapPositions)
 	}
 }
+
+func TestMapEntityBatchCreatesNodesRelationshipsAndPositions(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	companyID := "company-map-batch-node-test"
+
+	body := []byte(`{
+		"company_id":"` + companyID + `",
+		"entity_kind":"node",
+		"items":[
+			{"client_id":"copied-a","title":"Copied A","x":120,"y":240},
+			{"client_id":"copied-b","title":"Copied B","x":320,"y":240}
+		],
+		"relationships":[
+			{"client_id_a":"copied-a","client_id_b":"copied-b","a_position":"Peer","b_position":"Peer"}
+		]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/map-entity-batches", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST map-entity-batches status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+
+	var payload struct {
+		EntityMappings []struct {
+			ClientID string `json:"client_id"`
+			EntityID string `json:"entity_id"`
+		} `json:"entity_mappings"`
+		Nodes []struct {
+			NodeID string `json:"node_id"`
+			Title  string `json:"title"`
+		} `json:"nodes"`
+		Relationships []struct {
+			NodeIDA string `json:"node_id_a"`
+			NodeIDB string `json:"node_id_b"`
+		} `json:"relationships"`
+		NodeMapPositions []struct {
+			NodeID string  `json:"node_id"`
+			X      float64 `json:"x"`
+			Y      float64 `json:"y"`
+		} `json:"node_map_positions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode map entity batch response: %v", err)
+	}
+	if len(payload.EntityMappings) != 2 || len(payload.Nodes) != 2 || len(payload.Relationships) != 1 || len(payload.NodeMapPositions) != 2 {
+		t.Fatalf("unexpected batch response counts: mappings=%d nodes=%d relationships=%d positions=%d", len(payload.EntityMappings), len(payload.Nodes), len(payload.Relationships), len(payload.NodeMapPositions))
+	}
+	if payload.Relationships[0].NodeIDA == "" || payload.Relationships[0].NodeIDB == "" || payload.Relationships[0].NodeIDA == payload.Relationships[0].NodeIDB {
+		t.Fatalf("relationship did not resolve client ids: %+v", payload.Relationships[0])
+	}
+}
+
+func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	companyID := "company-map-batch-logic-test"
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Logic folder")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder failed: %v", err)
+	}
+	source, err := repo.CreateLogicGate(companyID, "Existing source")
+	if err != nil {
+		t.Fatalf("CreateLogicGate failed: %v", err)
+	}
+
+	body := []byte(`{
+		"company_id":"` + companyID + `",
+		"entity_kind":"logic_gate",
+		"folder_id":"` + folder.FolderID + `",
+		"items":[{"client_id":"new-gate","header":"New gate","x":480,"y":360}],
+		"relationships":[{"entity_id_a":"` + source.LogicGateID + `","client_id_b":"new-gate","a_position":"Input","b_position":"Output"}]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/map-entity-batches", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST map-entity-batches status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+
+	var payload struct {
+		LogicGates []struct {
+			LogicGateID string `json:"logic_gate_id"`
+			Header      string `json:"header"`
+		} `json:"logic_gates"`
+		LogicGateRelationships []struct {
+			LogicGateIDA string `json:"logic_gate_id_a"`
+			LogicGateIDB string `json:"logic_gate_id_b"`
+		} `json:"logic_gate_relationships"`
+		FolderItems []struct {
+			FolderID string `json:"folder_id"`
+			ItemType string `json:"item_type"`
+			ItemID   string `json:"item_id"`
+		} `json:"folder_items"`
+		LogicGateMapPositions []struct {
+			LogicGateID string  `json:"logic_gate_id"`
+			X           float64 `json:"x"`
+			Y           float64 `json:"y"`
+		} `json:"logic_gate_map_positions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode map entity batch response: %v", err)
+	}
+	if len(payload.LogicGates) != 1 || len(payload.LogicGateRelationships) != 1 || len(payload.FolderItems) != 1 || len(payload.LogicGateMapPositions) != 1 {
+		t.Fatalf("unexpected logic batch response counts: gates=%d relationships=%d folder_items=%d positions=%d", len(payload.LogicGates), len(payload.LogicGateRelationships), len(payload.FolderItems), len(payload.LogicGateMapPositions))
+	}
+	createdID := payload.LogicGates[0].LogicGateID
+	if payload.LogicGateRelationships[0].LogicGateIDA != source.LogicGateID || payload.LogicGateRelationships[0].LogicGateIDB != createdID {
+		t.Fatalf("relationship did not connect existing source to created gate: %+v created=%s", payload.LogicGateRelationships[0], createdID)
+	}
+	if payload.FolderItems[0].FolderID != folder.FolderID || payload.FolderItems[0].ItemType != "logic_gate" || payload.FolderItems[0].ItemID != createdID {
+		t.Fatalf("folder item did not place created gate: %+v created=%s", payload.FolderItems[0], createdID)
+	}
+}
