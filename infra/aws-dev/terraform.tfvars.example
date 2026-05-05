@@ -7,10 +7,21 @@ app_subdomain    = "dev"
 api_subdomain    = "api.dev"
 origin_subdomain = "origin.dev"
 
-# Use the VPC/subnets that can already reach the existing dev PostgreSQL/Aurora DB.
-vpc_id             = "vpc-0123456789abcdef0"
-public_subnet_ids  = ["subnet-aaaaaaaaaaaaaaaaa", "subnet-bbbbbbbbbbbbbbbbb"]
-private_subnet_ids = ["subnet-ccccccccccccccccc", "subnet-ddddddddddddddddd"]
+# Use the VPC that contains the existing dev PostgreSQL/Aurora DB.
+vpc_id = "vpc-0123456789abcdef0"
+
+# Existing public subnets for ALB and NAT placement.
+public_subnet_ids = ["subnet-aaaaaaaaaaaaaaaaa", "subnet-bbbbbbbbbbbbbbbbb"]
+
+# Preferred when the existing VPC does not already have private app subnets.
+create_private_ecs_subnets = true
+ecs_private_subnet_cidrs   = ["172.31.128.0/20", "172.31.144.0/20"]
+ecs_nat_gateway_mode       = "single"
+private_subnet_ids         = []
+
+# If you already have private subnets with NAT/VPC-endpoint egress, use this instead:
+# create_private_ecs_subnets = false
+# private_subnet_ids = ["subnet-ccccccccccccccccc", "subnet-ddddddddddddddddd"]
 
 existing_db_host                = "dev-db.cluster-xxxxxxxx.us-west-1.rds.amazonaws.com"
 existing_db_port                = 5432

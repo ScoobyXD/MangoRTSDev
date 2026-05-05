@@ -33,6 +33,16 @@ output "ecs_service_name" {
   value       = try(aws_ecs_service.backend[0].name, "")
 }
 
+output "ecs_subnet_ids" {
+  description = "Private subnet IDs used by ECS tasks."
+  value       = local.ecs_subnet_ids
+}
+
+output "managed_nat_gateway_ids" {
+  description = "NAT gateways created for managed ECS private subnets."
+  value       = aws_nat_gateway.ecs[*].id
+}
+
 output "cognito_user_pool_id" {
   description = "Cognito User Pool ID."
   value       = aws_cognito_user_pool.main.id

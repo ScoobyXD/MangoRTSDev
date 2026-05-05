@@ -50,8 +50,32 @@ variable "public_subnet_ids" {
 }
 
 variable "private_subnet_ids" {
-  description = "Existing private subnet IDs for ECS Fargate tasks."
+  description = "Existing private subnet IDs for ECS Fargate tasks. Leave empty when create_private_ecs_subnets is true."
   type        = list(string)
+  default     = []
+}
+
+variable "create_private_ecs_subnets" {
+  description = "Create private subnets and NAT egress for ECS tasks inside the existing VPC."
+  type        = bool
+  default     = false
+}
+
+variable "ecs_private_subnet_cidrs" {
+  description = "CIDR blocks for Terraform-managed ECS private subnets. Required when create_private_ecs_subnets is true."
+  type        = list(string)
+  default     = []
+}
+
+variable "ecs_nat_gateway_mode" {
+  description = "NAT gateway mode for Terraform-managed ECS private subnets. Use single for lower dev cost or per_az for AZ-local egress."
+  type        = string
+  default     = "single"
+
+  validation {
+    condition     = contains(["single", "per_az"], var.ecs_nat_gateway_mode)
+    error_message = "ecs_nat_gateway_mode must be single or per_az."
+  }
 }
 
 variable "existing_db_host" {

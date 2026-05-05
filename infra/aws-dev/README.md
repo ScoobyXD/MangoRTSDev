@@ -23,4 +23,6 @@ Phase 1 creates ECR, Cognito, S3/CloudFront, ALB, Route 53, ACM, WAF, IAM/OIDC, 
 
 The stack expects an existing VPC and existing dev database. ECS tasks run in the provided private subnets, so those subnets need outbound access through NAT or VPC endpoints for ECR, CloudWatch Logs, Secrets Manager, and Cognito JWKS fetches.
 
+If the existing VPC only has public/default subnets, keep those subnets in `public_subnet_ids`, set `create_private_ecs_subnets = true`, and provide non-overlapping CIDRs in `ecs_private_subnet_cidrs`. Terraform will create private ECS subnets, route tables, and NAT egress in the existing VPC.
+
 After first apply, copy the `github_deploy_role_arn` output into the GitHub secret `AWS_DEV_DEPLOY_ROLE_ARN`.
