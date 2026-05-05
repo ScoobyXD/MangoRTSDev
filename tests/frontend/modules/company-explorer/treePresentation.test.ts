@@ -429,6 +429,60 @@ run("stale opposite-map selections do not override recent Explorer domain change
   );
 });
 
+run("stale same-domain map selections do not override rapid Explorer navigation", () => {
+  assert.equal(
+    shouldAcceptMapSelectionAfterExplorerSelection({
+      incomingDomain: "node",
+      currentDomain: "node",
+      localSelectionChangedAt: 2000,
+      incomingChangedAt: 2050,
+      now: 2060,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAcceptMapSelectionAfterExplorerSelection({
+      incomingDomain: "node",
+      currentDomain: "node",
+      localSelectionChangedAt: 2000,
+      incomingChangedAt: 1990,
+      now: 2010,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAcceptMapSelectionAfterExplorerSelection({
+      incomingDomain: "node",
+      currentDomain: "node",
+      localSelectionChangedAt: 2000,
+      incomingChangedAt: 2200,
+      now: 2210,
+    }),
+    true,
+  );
+});
+
+run("untimestamped map selections wait out recent Explorer intent", () => {
+  assert.equal(
+    shouldAcceptMapSelectionAfterExplorerSelection({
+      incomingDomain: "node",
+      currentDomain: "folder",
+      localSelectionChangedAt: 2000,
+      now: 2100,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAcceptMapSelectionAfterExplorerSelection({
+      incomingDomain: "node",
+      currentDomain: "folder",
+      localSelectionChangedAt: 2000,
+      now: 3000,
+    }),
+    true,
+  );
+});
+
 run("fresh cleared map selections do not erase a recent Explorer click", () => {
   assert.equal(
     shouldAcceptClearedMapSelectionAfterExplorerSelection({
