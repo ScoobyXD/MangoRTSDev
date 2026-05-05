@@ -506,17 +506,19 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       timestamp: new Date().toISOString(),
       user_action_type: "logic_gate_selection_changed",
     };
-    publishLiveSelection({
-      companyID,
-      entityKind: "logic_gate",
-      entityID: selectedNodeID,
-      label: selectedNodeLabel,
-      sourceFrameID: mapScope,
-      sourceModule: "logic-gate-map",
-      targetFrameIDs: readLiveSelectionTargets(),
-      changedAt: Date.now(),
-      sequence,
-    });
+    if (!echoedExplorerSelection) {
+      publishLiveSelection({
+        companyID,
+        entityKind: "logic_gate",
+        entityID: selectedNodeID,
+        label: selectedNodeLabel,
+        sourceFrameID: mapScope,
+        sourceModule: "logic-gate-map",
+        targetFrameIDs: readLiveSelectionTargets(),
+        changedAt: Date.now(),
+        sequence,
+      });
+    }
     emitDashboardEvent(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, {
       mapWidgetID: mapScope,
       selectedNodeID,

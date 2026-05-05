@@ -18,6 +18,7 @@ import { shouldApplyMapSelection, shouldBroadcastSelection, shouldIgnoreSelfOrig
 import { getExplorerSelectionDomain } from "./companyExplorerDragDrop";
 import {
   resolveExplorerPublishedSelection,
+  shouldAcceptClearedMapSelectionAfterExplorerSelection,
   shouldAcceptMapSelectionAfterExplorerSelection,
   type ExplorerFindEntity,
 } from "./treePresentation";
@@ -155,6 +156,8 @@ export function useCompanyExplorerSelectionBridge({
   useEffect(() => {
     const applyLiveSelection = (selection: LiveSelectionChange) => {
       if (selection.companyID !== companyID || selection.sourceFrameID === scope) return;
+      const localSelection = lastLocalExplorerSelectionRef.current;
+      if (localSelection.changedAt > 0 && selection.changedAt > 0 && selection.changedAt < localSelection.changedAt) return;
 
       const applyTreeSelection = (treeID: string, treeIDs: string[] = [treeID]) => {
         const cleanTreeIDs = Array.from(new Set(treeIDs.map((id) => id.trim()).filter(Boolean)));
@@ -177,6 +180,12 @@ export function useCompanyExplorerSelectionBridge({
 
       if (selection.entityKind === "node") {
         if (!selection.entityID) {
+          if (selection.sourceModule === "node-map" && !shouldAcceptClearedMapSelectionAfterExplorerSelection({
+            currentDomain: latestExplorerDomainRef.current,
+            localSelectionChangedAt: localSelection.changedAt,
+            incomingChangedAt: selection.changedAt,
+            now: Date.now(),
+          })) return;
           suppressNextExplorerBroadcastRef.current = true;
           setSelectedNodeID("");
           setSelectedLogicGateID("");
@@ -184,7 +193,6 @@ export function useCompanyExplorerSelectionBridge({
           applyTreeSelection(selection.selectedTreeID || "folder-root");
           return;
         }
-        const localSelection = lastLocalExplorerSelectionRef.current;
         if (!shouldAcceptMapSelectionAfterExplorerSelection({
           incomingDomain: "node",
           currentDomain: latestExplorerDomainRef.current,
@@ -206,6 +214,12 @@ export function useCompanyExplorerSelectionBridge({
 
       if (selection.entityKind === "logic_gate") {
         if (!selection.entityID) {
+          if (selection.sourceModule === "logic-gate-map" && !shouldAcceptClearedMapSelectionAfterExplorerSelection({
+            currentDomain: latestExplorerDomainRef.current,
+            localSelectionChangedAt: localSelection.changedAt,
+            incomingChangedAt: selection.changedAt,
+            now: Date.now(),
+          })) return;
           suppressNextExplorerBroadcastRef.current = true;
           setSelectedLogicGateID("");
           setSelectedNodeID("");
@@ -213,7 +227,6 @@ export function useCompanyExplorerSelectionBridge({
           applyTreeSelection(selection.selectedTreeID || "folder-root");
           return;
         }
-        const localSelection = lastLocalExplorerSelectionRef.current;
         if (!shouldAcceptMapSelectionAfterExplorerSelection({
           incomingDomain: "logic_gate",
           currentDomain: latestExplorerDomainRef.current,

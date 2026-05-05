@@ -467,17 +467,19 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       timestamp: new Date().toISOString(),
       user_action_type: "node_selection_changed",
     };
-    publishLiveSelection({
-      companyID,
-      entityKind: "node",
-      entityID: selectedNodeID,
-      label: selectedNodeLabel,
-      sourceFrameID: mapScope,
-      sourceModule: "node-map",
-      targetFrameIDs: readLiveSelectionTargets(),
-      changedAt: Date.now(),
-      sequence,
-    });
+    if (!echoedExplorerSelection) {
+      publishLiveSelection({
+        companyID,
+        entityKind: "node",
+        entityID: selectedNodeID,
+        label: selectedNodeLabel,
+        sourceFrameID: mapScope,
+        sourceModule: "node-map",
+        targetFrameIDs: readLiveSelectionTargets(),
+        changedAt: Date.now(),
+        sequence,
+      });
+    }
     emitDashboardEvent(EVENT_NODE_MAP_SELECTION_UPDATED, {
       mapWidgetID: mapScope,
       selectedNodeID,
