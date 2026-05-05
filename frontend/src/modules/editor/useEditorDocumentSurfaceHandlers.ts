@@ -45,11 +45,14 @@ type UseEditorDocumentSurfaceHandlersOptions = {
   scheduleIndentGuideUpdate: (text: string) => void;
   rememberCurrentDocumentScroll: () => void;
   flushPendingDocumentSave: (fallbackText?: string) => void;
+  onSelectionFontSizeChange: (fontSize: number) => void;
 };
 
 function clampEditorFontSize(value: number): number {
   return Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, Math.round(value)));
 }
+
+const PENDING_FONT_SIZE_CANCEL_KEYS = new Set(["ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "Backspace", "Delete", "End", "Home", "PageDown", "PageUp"]);
 
 function rootContainsRange(root: HTMLElement, range: Range): boolean {
   const container = range.commonAncestorContainer;
@@ -136,6 +139,30 @@ function replaceSelectionWithText(root: HTMLElement, text: string): boolean {
   return true;
 }
 
+function setCollapsedSelectionInTextNode(root: HTMLElement, textNode: Text, offset: number) {
+  const range = root.ownerDocument.createRange();
+  range.setStart(textNode, Math.max(0, Math.min(textNode.data.length, offset)));
+  range.collapse(true);
+  const selection = root.ownerDocument.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+function readInlineFontSize(element: HTMLElement): number | null {
+  const parsed = Number.parseFloat(element.style.fontSize.trim());
+  return Number.isFinite(parsed) ? clampEditorFontSize(parsed) : null;
+}
+
+function findMatchingFontSizeSpan(root: HTMLElement, node: Node, fontSize: number): HTMLSpanElement | null {
+  let current: Node | null = node.nodeType === Node.ELEMENT_NODE ? node : node.parentNode;
+  const targetFontSize = clampEditorFontSize(fontSize);
+  while (current && current !== root) {
+    if (current instanceof HTMLSpanElement && root.contains(current) && readInlineFontSize(current) === targetFontSize) return current;
+    current = current.parentNode;
+  }
+  return null;
+}
+
 function replaceSelectionWithHTML(root: HTMLElement, html: string): boolean {
   const range = getEditorSelectionRange(root);
   if (!range) return false;
@@ -163,8 +190,17 @@ function replaceSelectionWithHTML(root: HTMLElement, html: string): boolean {
 function replaceSelectionWithStyledText(root: HTMLElement, text: string, fontSize: number): boolean {
   const range = getEditorSelectionRange(root);
   if (!range) return false;
+  const nextFontSize = clampEditorFontSize(fontSize);
+  if (range.collapsed && range.startContainer.nodeType === Node.TEXT_NODE) {
+    const textNode = range.startContainer as Text;
+    if (findMatchingFontSizeSpan(root, textNode, nextFontSize)) {
+      textNode.insertData(range.startOffset, text);
+      setCollapsedSelectionInTextNode(root, textNode, range.startOffset + text.length);
+      return true;
+    }
+  }
   const span = root.ownerDocument.createElement("span");
-  span.style.fontSize = `${clampEditorFontSize(fontSize)}px`;
+  span.style.fontSize = `${nextFontSize}px`;
   const textNode = root.ownerDocument.createTextNode(text);
   span.appendChild(textNode);
   range.deleteContents();
@@ -284,6 +320,30 @@ function commitEditorDocument(root: HTMLElement, scheduleDocumentSave: (nextText
   scheduleIndentGuideUpdate(plainText);
 }
 
+function getFontSizeElementForNode(root: HTMLElement, node: Node | null): Element {
+  if (!node) return root;
+  if (node.nodeType === Node.TEXT_NODE) return node.parentElement ?? root;
+  return node instanceof Element ? node : root;
+}
+
+function getRangeFontSizeElement(root: HTMLElement, range: Range): Element {
+  if (range.startContainer.nodeType !== Node.ELEMENT_NODE) return getFontSizeElementForNode(root, range.startContainer);
+  const element = range.startContainer as Element;
+  const nextChild = element.childNodes.item(range.startOffset);
+  const previousChild = range.startOffset > 0 ? element.childNodes.item(range.startOffset - 1) : null;
+  return getFontSizeElementForNode(root, nextChild ?? previousChild ?? element);
+}
+
+function syncSelectionFontSize(root: HTMLElement, onSelectionFontSizeChange: (fontSize: number) => void) {
+  const range = getEditorSelectionRange(root);
+  if (!range) return;
+  const view = root.ownerDocument.defaultView;
+  if (!view) return;
+  const element = getRangeFontSizeElement(root, range);
+  const parsed = Number.parseFloat(view.getComputedStyle(element).fontSize);
+  if (Number.isFinite(parsed)) onSelectionFontSizeChange(clampEditorFontSize(parsed));
+}
+
 export function useEditorDocumentSurfaceHandlers({
   restoringScrollRef,
   currentDocumentTargetKeyRef,
@@ -295,6 +355,7 @@ export function useEditorDocumentSurfaceHandlers({
   scheduleIndentGuideUpdate,
   rememberCurrentDocumentScroll,
   flushPendingDocumentSave,
+  onSelectionFontSizeChange,
 }: UseEditorDocumentSurfaceHandlersOptions): EditorDocumentSurfaceHandlers {
   return useMemo(() => ({
     onBeforeInput(event) {
@@ -305,6 +366,15 @@ export function useEditorDocumentSurfaceHandlers({
         typeof inputEvent.data === "string" &&
         inputEvent.data.length > 0
       ) {
+        if (pendingFontSize !== null) {
+          event.preventDefault();
+          if (replaceSelectionWithStyledText(event.currentTarget, inputEvent.data, pendingFontSize)) {
+            onSelectionFontSizeChange(pendingFontSize);
+            commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          }
+          return;
+        }
+
         const anchor = getCollapsedAnchorAtSelectionEnd(event.currentTarget);
         if (anchor) {
           event.preventDefault();
@@ -316,18 +386,6 @@ export function useEditorDocumentSurfaceHandlers({
             commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
           }
           return;
-        }
-      }
-      if (
-        pendingFontSize !== null &&
-        inputEvent.inputType === "insertText" &&
-        typeof inputEvent.data === "string" &&
-        inputEvent.data.length > 0
-      ) {
-        event.preventDefault();
-        if (replaceSelectionWithStyledText(event.currentTarget, inputEvent.data, pendingFontSize)) {
-          pendingEditorFontSizeRef.current = null;
-          commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
         }
       }
     },
@@ -352,23 +410,36 @@ export function useEditorDocumentSurfaceHandlers({
     },
     onInput(event) {
       commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+      syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
     },
-    onSelect() {
-      pendingEditorFontSizeRef.current = null;
-    },
-    onClick(event) {
-      const anchor = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
-      if (!anchor) {
+    onSelect(event) {
+      const range = getEditorSelectionRange(event.currentTarget);
+      if (range && !range.collapsed) {
         pendingEditorFontSizeRef.current = null;
+        syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
         return;
       }
+      if (pendingEditorFontSizeRef.current !== null) {
+        onSelectionFontSizeChange(pendingEditorFontSizeRef.current);
+        return;
+      }
+      syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
+    },
+    onClick(event) {
+      pendingEditorFontSizeRef.current = null;
+      syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
+      const anchor = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!anchor) return;
       event.preventDefault();
       event.stopPropagation();
       if (event.ctrlKey || event.metaKey) window.open(anchor.href, "_blank", "noopener,noreferrer");
     },
-    onKeyUp() {
-      // Keep a toolbar-chosen collapsed font size armed until real text input,
-      // selection movement, blur, or Escape consumes/cancels it.
+    onKeyUp(event) {
+      if (pendingEditorFontSizeRef.current !== null) {
+        onSelectionFontSizeChange(pendingEditorFontSizeRef.current);
+        return;
+      }
+      syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
     },
     onBlur(event) {
       pendingEditorFontSizeRef.current = null;
@@ -391,6 +462,8 @@ export function useEditorDocumentSurfaceHandlers({
         event.currentTarget.blur();
         return;
       }
+
+      if (PENDING_FONT_SIZE_CANCEL_KEYS.has(event.key)) pendingEditorFontSizeRef.current = null;
 
       if (event.key === "Enter") {
         event.preventDefault();
@@ -438,6 +511,7 @@ export function useEditorDocumentSurfaceHandlers({
   }), [
     currentDocumentTargetKeyRef,
     flushPendingDocumentSave,
+    onSelectionFontSizeChange,
     outlineStyle,
     pendingEditorFontSizeRef,
     rememberCurrentDocumentScroll,
