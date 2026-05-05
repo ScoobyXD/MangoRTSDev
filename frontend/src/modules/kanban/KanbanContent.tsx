@@ -22,6 +22,7 @@ import { KanbanCardView } from "./KanbanCardView";
 import { KanbanColumnView } from "./KanbanColumnView";
 import {
   EXPLORER_ENTITY_DRAG_MIME,
+  EVENT_KANBAN_BOARDS_UPDATED,
   KANBAN_CARD_DRAG_MIME,
   KANBAN_COLUMN_DRAG_MIME,
   KANBAN_DEFAULT_BOARD_TITLE,
@@ -308,6 +309,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         ...previous.filter((board) => board.board_id !== saved.board_id),
         saved,
       ]));
+      window.dispatchEvent(new CustomEvent(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, board: saved } }));
       setEditingBoardTitle(false);
     } catch {
       setError("Kanban board rename failed");
@@ -769,7 +771,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           setAllBoardsOpen((open) => !open);
           void refreshBoards();
         }}
-        onCloseAllBoards={() => setAllBoardsOpen(false)}
+        onCloseAllBoards={() => {
+          setAllBoardsOpen(false);
+          setBoardSearchQuery("");
+        }}
         onCommitBoardTitle={(title) => void commitBoardTitle(title)}
         onRefreshBoards={() => void refreshBoards()}
         onSaveCurrentBoardView={() => void saveCurrentBoardView()}
@@ -779,6 +784,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           setSelectionAnchorCardID("");
           setActiveBoardID(nextBoardID);
           setAllBoardsOpen(false);
+          setBoardSearchQuery("");
         }}
       />
       <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)" }}>

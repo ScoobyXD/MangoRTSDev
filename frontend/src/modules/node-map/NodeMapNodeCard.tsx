@@ -132,7 +132,9 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
         const bounds = (event.currentTarget.closest("[data-node-map-viewport='true']") as HTMLDivElement | null)?.getBoundingClientRect();
         if (!bounds) return;
         const nextIDs = selectedNodeIDs.has(node.node_id) ? Array.from(selectedNodeIDs) : [node.node_id];
-        onSetSelectedNodeID(node.node_id);
+        if (!(selectedNodeIDs.size > 1 && selectedNodeIDs.has(node.node_id))) {
+          onSetSelectedNodeID(node.node_id);
+        }
         onSetSelectedNodeIDs(new Set(nextIDs));
         onSetContextMenu(null);
         onSetNodeContextMenu({
@@ -267,7 +269,7 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
         )}
       </div>
       {isSelected && (
-        <div style={{ position: "absolute", top: 6, right: 6, width: 12, height: 12, borderRadius: 999, background: selectionColor, opacity: 0.92 }} />
+        <div style={{ position: "absolute", top: 6, left: 6, width: 12, height: 12, borderRadius: 999, background: selectionColor, opacity: 0.92 }} />
       )}
 
       {([

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { EDITOR_TAB_ITEMS, type EditorTabID } from "./editorTabs";
 import type { EditorOutlineStyleID } from "./plainTextEditing";
-import { EDITOR_OUTLINE_STYLE_ITEMS } from "./useEditorPreferences";
+import { EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, EDITOR_OUTLINE_STYLE_ITEMS } from "./useEditorPreferences";
 
 const EditorDisclosureIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style={{ display: "block" }}>
@@ -61,6 +61,8 @@ type EditorTabBarProps = {
   tabSelectedBackground: string;
   onSelectTab: (tab: EditorTabID) => void;
   onAdjustSelectionFontSize: (delta: number) => void;
+  documentFontSize: number;
+  onSetSelectionFontSize: (fontSize: number) => void;
   onOutlineStyleFocus: () => void;
   onOutlineStyleChange: (outlineStyle: EditorOutlineStyleID) => void;
 };
@@ -76,14 +78,30 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   tabSelectedBackground,
   onSelectTab,
   onAdjustSelectionFontSize,
+  documentFontSize,
+  onSetSelectionFontSize,
   onOutlineStyleFocus,
   onOutlineStyleChange,
 }) => {
   const [outlineMenuOpen, setOutlineMenuOpen] = useState(false);
   const [hoveredOutlineStyle, setHoveredOutlineStyle] = useState<EditorOutlineStyleID | null>(null);
+  const [fontSizeDraft, setFontSizeDraft] = useState(String(documentFontSize));
   const outlineMenuRef = useRef<HTMLDivElement | null>(null);
   const outlineHoverBackground = colorWithAlpha(outlineMenuAccent, 0.14);
   const outlineSelectedBackground = colorWithAlpha(outlineMenuAccent, 0.2);
+
+  useEffect(() => {
+    setFontSizeDraft(String(documentFontSize));
+  }, [documentFontSize]);
+
+  const commitFontSizeDraft = () => {
+    const parsed = Number.parseInt(fontSizeDraft, 10);
+    if (!Number.isFinite(parsed)) {
+      setFontSizeDraft(String(documentFontSize));
+      return;
+    }
+    onSetSelectionFontSize(Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, parsed)));
+  };
 
   useEffect(() => {
     if (!outlineMenuOpen) return;
@@ -130,10 +148,28 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                   event.stopPropagation();
                   onAdjustSelectionFontSize(-1);
                 }}
-                style={{ width: 30, height: 24, border: 0, borderRight: `1px solid ${strokeColor}`, background: "transparent", color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer" }}
+                style={{ width: 30, height: 24, border: 0, borderRight: `1px solid ${strokeColor}`, background: "transparent", color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 17, lineHeight: 1 }}
               >
-                <FontSizeIcon color={surfaceText} direction="decrease" />
+                -
               </button>
+              <input
+                aria-label="Font size value"
+                value={fontSizeDraft}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.currentTarget.select()}
+                onChange={(event) => setFontSizeDraft(event.target.value.replace(/[^\d]/g, "").slice(0, 2))}
+                onBlur={commitFontSizeDraft}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if (event.key === "Enter") event.currentTarget.blur();
+                  if (event.key === "Escape") {
+                    setFontSizeDraft(String(documentFontSize));
+                    event.currentTarget.blur();
+                  }
+                }}
+                style={{ width: 34, height: 24, border: 0, borderRight: `1px solid ${strokeColor}`, background: "transparent", color: surfaceText, textAlign: "center", outline: "none", font: "inherit", fontSize: 10, fontWeight: 800, padding: 0 }}
+              />
               <button
                 type="button"
                 aria-label="Increase font size"
@@ -143,9 +179,9 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                   event.stopPropagation();
                   onAdjustSelectionFontSize(1);
                 }}
-                style={{ width: 30, height: 24, border: 0, background: "transparent", color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer" }}
+                style={{ width: 30, height: 24, border: 0, background: "transparent", color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 17, lineHeight: 1 }}
               >
-                <FontSizeIcon color={surfaceText} direction="increase" />
+                +
               </button>
             </div>
           );

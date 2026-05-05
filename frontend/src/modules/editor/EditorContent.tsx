@@ -89,7 +89,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [documentInformationID, setDocumentInformationID] = useState("");
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
-  const { outlineStyle, setOutlineStyle, documentFontSize } = useEditorPreferences(outlineStyleStorageKey, documentFontSizeStorageKey);
+  const { outlineStyle, setOutlineStyle, documentFontSize, setDocumentFontSize } = useEditorPreferences(outlineStyleStorageKey, documentFontSizeStorageKey);
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -210,12 +210,12 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     invalidateDocumentTargetCaches,
   });
 
-  const applyEditorSelectionFontSize = useCallback((delta: number) => {
+  const applyEditorSelectionFontSizeValue = useCallback((nextFontSizeInput: number) => {
     const element = editorDocumentRef.current;
     if (!element) return;
     const range = getSelectionRangeInsideElement(element);
-    const currentFontSize = range ? readRangeFontSize(range, documentFontSize) : documentFontSize;
-    const nextFontSize = clampEditorSelectionFontSize(currentFontSize + delta);
+    const nextFontSize = clampEditorSelectionFontSize(nextFontSizeInput);
+    setDocumentFontSize(nextFontSize);
 
     element.focus({ preventScroll: true });
     if (!range || range.collapsed) {
@@ -223,15 +223,28 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       return;
     }
 
+    const fragment = range.extractContents();
+    const stripFontSizes = (node: Node) => {
+      if (node instanceof HTMLElement && node.tagName.toLowerCase() === "span") node.style.fontSize = "";
+      node.childNodes.forEach(stripFontSizes);
+    };
+    fragment.childNodes.forEach(stripFontSizes);
     const span = element.ownerDocument.createElement("span");
     span.style.fontSize = `${nextFontSize}px`;
-    span.appendChild(range.extractContents());
+    span.appendChild(fragment);
     range.insertNode(span);
     selectElementContents(span);
     pendingEditorFontSizeRef.current = null;
     scheduleDocumentSave(serializeEditorDocumentHTML(element));
     scheduleIndentGuideUpdate(readEditorDocumentText(element));
-  }, [documentFontSize, scheduleDocumentSave, scheduleIndentGuideUpdate]);
+  }, [scheduleDocumentSave, scheduleIndentGuideUpdate, setDocumentFontSize]);
+
+  const applyEditorSelectionFontSize = useCallback((delta: number) => {
+    const element = editorDocumentRef.current;
+    const range = element ? getSelectionRangeInsideElement(element) : null;
+    const currentFontSize = range ? readRangeFontSize(range, documentFontSize) : documentFontSize;
+    applyEditorSelectionFontSizeValue(currentFontSize + delta);
+  }, [applyEditorSelectionFontSizeValue, documentFontSize]);
 
   const selectTab = useCallback((tab: EditorTabID) => {
     rememberCurrentDocumentScroll();
@@ -318,10 +331,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     try {
       const raw = localStorage.getItem(`${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
       if (!raw) return { id: "", label: "" };
-      const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedLabel?: string; selectionIntent?: SelectionIntent };
+      const parsed = JSON.parse(raw) as { selectedNodeID?: string; selectedLabel?: string; selectionIntent?: SelectionIntent; ts?: number };
       return {
         id: typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : "",
         label: typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : "",
+        changedAt: typeof parsed.ts === "number" && Number.isFinite(parsed.ts) ? parsed.ts : 0,
         selectionIntent: parsed.selectionIntent,
       };
     } catch {
@@ -333,10 +347,11 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     try {
       const raw = localStorage.getItem(`${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
       if (!raw) return { id: "", label: "" };
-      const parsed = JSON.parse(raw) as { selectedLogicGateID?: string; selectedNodeID?: string; selectedLabel?: string; selectionIntent?: SelectionIntent };
+      const parsed = JSON.parse(raw) as { selectedLogicGateID?: string; selectedNodeID?: string; selectedLabel?: string; selectionIntent?: SelectionIntent; ts?: number };
       return {
         id: typeof parsed.selectedLogicGateID === "string" ? parsed.selectedLogicGateID : (typeof parsed.selectedNodeID === "string" ? parsed.selectedNodeID : ""),
         label: typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : "",
+        changedAt: typeof parsed.ts === "number" && Number.isFinite(parsed.ts) ? parsed.ts : 0,
         selectionIntent: parsed.selectionIntent,
       };
     } catch {
@@ -497,6 +512,26 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         applyLiveSelection(liveSelection);
         return;
       }
+      const selectedFromExplorer = readSelectedNodeFromExplorerContext();
+      const selectedLogicFromExplorer = readSelectedLogicGateFromExplorerContext();
+      const freshExplorerSelectionWindowMs = 30_000;
+      const selectedFromExplorerIsFresh = !!selectedFromExplorer.id
+        && !!selectedFromExplorer.changedAt
+        && Date.now() - selectedFromExplorer.changedAt < freshExplorerSelectionWindowMs;
+      const selectedLogicFromExplorerIsFresh = !!selectedLogicFromExplorer.id
+        && !!selectedLogicFromExplorer.changedAt
+        && Date.now() - selectedLogicFromExplorer.changedAt < freshExplorerSelectionWindowMs;
+      if (selectedFromExplorerIsFresh || selectedLogicFromExplorerIsFresh) {
+        if (
+          selectedLogicFromExplorerIsFresh
+          && (!selectedFromExplorerIsFresh || (selectedLogicFromExplorer.changedAt ?? 0) >= (selectedFromExplorer.changedAt ?? 0))
+        ) {
+          applyLinkedLogicGate(selectedLogicFromExplorer.id, selectedLogicFromExplorer.label, { focusEditor: selectedLogicFromExplorer.selectionIntent !== "navigate" });
+          return;
+        }
+        applyLinkedNode(selectedFromExplorer.id, selectedFromExplorer.label, { focusEditor: selectedFromExplorer.selectionIntent !== "navigate" });
+        return;
+      }
       const selectedFromMap = readSelectedNodeFromMap(linkedMapWidgetID);
       if (selectedFromMap) {
         applyLinkedNode(selectedFromMap);
@@ -507,12 +542,10 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         applyLinkedLogicGate(selectedFromLogicMap);
         return;
       }
-      const selectedFromExplorer = readSelectedNodeFromExplorerContext();
       if (selectedFromExplorer.id) {
         applyLinkedNode(selectedFromExplorer.id, selectedFromExplorer.label, { focusEditor: selectedFromExplorer.selectionIntent !== "navigate" });
         return;
       }
-      const selectedLogicFromExplorer = readSelectedLogicGateFromExplorerContext();
       if (selectedLogicFromExplorer.id) {
         applyLinkedLogicGate(selectedLogicFromExplorer.id, selectedLogicFromExplorer.label, { focusEditor: selectedLogicFromExplorer.selectionIntent !== "navigate" });
         return;
@@ -736,6 +769,8 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             outlineMenuAccent={scrollbarAccent}
             onSelectTab={selectTab}
             onAdjustSelectionFontSize={applyEditorSelectionFontSize}
+            documentFontSize={documentFontSize}
+            onSetSelectionFontSize={applyEditorSelectionFontSizeValue}
             onOutlineStyleFocus={() => setActiveTab("outline-styles")}
             onOutlineStyleChange={(nextOutlineStyle) => {
               setOutlineStyle(nextOutlineStyle);

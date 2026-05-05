@@ -37,7 +37,7 @@ export function useCompanyExplorerTreeModel({
     [expanded, nodes, logicGates, kanbanBoards, folders, folderItems, rootRowOrder],
   );
 
-  const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID) ?? treeRows[0], [selectedTreeID, treeRows]);
+  const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID), [selectedTreeID, treeRows]);
   const rowByID = useMemo(() => new Map(treeRows.map((row) => [row.id, row])), [treeRows]);
   const virtualizedTree = useCompanyExplorerVirtualTree(treeRows, treeViewportHeight, treeScrollTop);
 

@@ -7,7 +7,7 @@ import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGrap
 import { type ExplorerSelectionState } from "./explorerSync";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerItemType } from "../folders/companyExplorerFolders";
 import { createKanbanBoard, deleteKanbanBoard, listKanbanBoards, updateKanbanBoard } from "../kanban/kanbanApi";
-import { type ExplorerEntityDragItem, type KanbanBoard } from "../kanban/shared";
+import { EVENT_KANBAN_BOARDS_UPDATED, type ExplorerEntityDragItem, type KanbanBoard } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
@@ -165,6 +165,26 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     void refreshKanbanBoards();
   }, [refreshKanbanBoards]);
 
+  useEffect(() => {
+    const onKanbanBoardsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ companyID?: string; board?: KanbanBoard }>).detail;
+      if (detail?.companyID && detail.companyID !== companyID) return;
+      if (detail?.board) {
+        setKanbanBoards((previous) => {
+          const next = [
+            ...previous.filter((board) => board.board_id !== detail.board!.board_id),
+            detail.board!,
+          ];
+          return next.sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp) || a.board_id.localeCompare(b.board_id));
+        });
+        return;
+      }
+      void refreshKanbanBoards();
+    };
+    window.addEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
+    return () => window.removeEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
+  }, [companyID, refreshKanbanBoards]);
+
   const {
     treeRows,
     selectedTree,
@@ -250,9 +270,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   }, [rootOrderStorageKey, rootRowOrder]);
 
   useEffect(() => {
-    if (!treeViewportRef.current || treeScrollTop <= 0) return;
-    treeViewportRef.current.scrollTop = treeScrollTop;
-  }, [treeScrollTop]);
+    const viewport = treeViewportRef.current;
+    if (!viewport) return;
+    const nextScrollTop = Math.max(0, Math.round(treeScrollTop));
+    if (Math.abs(viewport.scrollTop - nextScrollTop) > 1) viewport.scrollTop = nextScrollTop;
+  }, [treeRows.length, treeScrollTop]);
 
   const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const headers = new Headers(init?.headers);
@@ -271,10 +293,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     return response.json() as Promise<T>;
   }, [apiBase]);
 
-  const createFolder = useCallback(async (folderKind: CompanyExplorerFolderKind, parentFolderID: string) => {
+  const createFolder = useCallback(async (folderKind: CompanyExplorerFolderKind, parentFolderID: string, position?: number) => {
     setError("");
     try {
-      const folder = await requestJSON<CompanyExplorerFolder>("/v1/company-explorer/folders", {
+      let folder = await requestJSON<CompanyExplorerFolder>("/v1/company-explorer/folders", {
         method: "POST",
         body: JSON.stringify({
           company_id: companyID,
@@ -283,6 +305,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           name: "New Folder",
         }),
       });
+      if (position && position > 0) {
+        folder = await requestJSON<CompanyExplorerFolder>(`/v1/company-explorer/folders/${folder.folder_id}`, {
+          method: "PUT",
+          body: JSON.stringify({ company_id: companyID, position }),
+        });
+      }
       setFolders((previous) => previous.some((item) => item.folder_id === folder.folder_id) ? previous : [...previous, folder]);
       setExpanded((previous) => {
         const next = new Set(previous);
@@ -704,7 +732,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       currentScrollTop: currentTop,
       viewportHeight,
       maxScrollTop: Math.max(0, viewport.scrollHeight - viewportHeight),
-      bottomPadding: COMPANY_EXPLORER_TREE_ROW_HEIGHT,
+      bottomPadding: COMPANY_EXPLORER_TREE_ROW_HEIGHT * 2,
     });
     if (nextScrollTop === currentTop) return;
     viewport.scrollTop = nextScrollTop;
@@ -970,16 +998,39 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     });
   }, [linkedLogicMapFrameID, linkedMapFrameID, scope]);
 
+  const getContextCreateFolderPosition = useCallback((row: ExplorerTreeNode | null | undefined, event: React.MouseEvent, folderKind: CompanyExplorerFolderKind): number => {
+    if (!row) return 0;
+    if (row.kind === "folder") return 0;
+    const targetContainer = getExplorerRowContainerID(row);
+    if (targetContainer == null) return 0;
+    const siblingRows = treeRows.filter((candidate) => {
+      if (getExplorerRowContainerID(candidate) !== targetContainer) return false;
+      const rowKind = getExplorerRowOrderKind(candidate);
+      return rowKind === folderKind || rowKind === "kanban";
+    });
+    const targetIndex = siblingRows.findIndex((candidate) => candidate.id === row.id);
+    if (targetIndex < 0) return 0;
+    const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect?.();
+    const placement: ExplorerRowDropPlacement = bounds && event.clientY > bounds.top + bounds.height / 2 ? "after" : "before";
+    const previousRow = placement === "before" ? siblingRows[targetIndex - 1] : siblingRows[targetIndex];
+    const nextRow = placement === "before" ? siblingRows[targetIndex] : siblingRows[targetIndex + 1];
+    if (previousRow && nextRow && nextRow.position - previousRow.position > 1) return Math.floor((previousRow.position + nextRow.position) / 2);
+    if (previousRow) return previousRow.position + TREE_ROW_POSITION_STEP;
+    if (nextRow) return Math.max(1, nextRow.position - TREE_ROW_POSITION_STEP);
+    return 0;
+  }, [treeRows]);
+
   const openExplorerContextMenu = useCallback((event: React.MouseEvent, row?: ExplorerTreeNode | null) => {
     event.preventDefault();
     event.stopPropagation();
     if (row) selectTreeRow(row, event, { selectionIntent: "navigate" });
     const contextKind: CompanyExplorerFolderKind | null = row?.folderKind ?? (row?.kind === "node" ? "node" : row?.kind === "logic_gate" ? "logic_gate" : null);
     const kanbanParentFolderID = row?.folderKind && row.folderID ? row.folderID : "";
+    const targets = resolveExplorerCreationTargets(row ?? null);
     setExplorerContextMenu({
       x: event.clientX,
       y: event.clientY,
-      targets: resolveExplorerCreationTargets(row ?? null),
+      targets,
       deleteTarget: resolveExplorerDeleteTarget(row ?? null),
       renameTarget: resolveExplorerRenameTarget(row ?? null),
       findTarget: getExplorerFindTarget(row ?? null),
@@ -987,9 +1038,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       renameLabel: row?.label ?? "",
       contextKind,
       kanbanParentFolderID,
+      createFolderPosition: getContextCreateFolderPosition(row, event, targets.preferredFolderKind),
       canCreateBothFolderTypes: !contextKind,
     });
-  }, [selectTreeRow]);
+  }, [getContextCreateFolderPosition, selectTreeRow]);
 
   // Kanban accepts node cards only. A mixed Explorer selection is still valid
   // for navigation, but the drag payload intentionally exports node rows only.
@@ -1131,8 +1183,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         menu={explorerContextMenu}
         buttonStyle={explorerMenuButtonStyle}
         onClose={() => setExplorerContextMenu(null)}
-        onCreateFolder={(folderKind, parentFolderID) => {
-          void createFolder(folderKind, parentFolderID);
+        onCreateFolder={(folderKind, parentFolderID, position) => {
+          void createFolder(folderKind, parentFolderID, position);
           setExplorerContextMenu(null);
         }}
         onCreateNode={(parentFolderID) => {

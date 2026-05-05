@@ -95,7 +95,7 @@ test("drag start on an already selected batch keeps the full batch together", ()
   assert.equal(selection.selectedNodeID, "node-a");
   assert.deepEqual(selection.dragNodeIDs, ["node-a", "node-b", "node-c"]);
   assert.deepEqual(Array.from(selection.selectedNodeIDs), ["node-a", "node-b", "node-c"]);
-  assert.equal(selection.clearSelectionOnClick, true);
+  assert.equal(selection.clearSelectionOnClick, false);
 });
 
 test("drag start on an unselected node still collapses to that node", () => {

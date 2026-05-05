@@ -51,6 +51,7 @@ export type CompanyExplorerContextMenuState = {
   renameLabel: string;
   contextKind: CompanyExplorerFolderKind | null;
   kanbanParentFolderID: string;
+  createFolderPosition: number;
   canCreateBothFolderTypes: boolean;
 };
 

@@ -479,7 +479,15 @@ export function useCompanyExplorerSelectionBridge({
   ]);
 
   useEffect(() => {
-    const nextSelection = { selectedNodeID, selectedTreeID };
+    const nextSelection: ExplorerSelectionState = {
+      selectedNodeID,
+      selectedLogicGateID,
+      selectedKanbanBoardID,
+      selectedFolderID,
+      selectedFolderKind,
+      selectedTreeID,
+      selectedTreeIDs: Array.from(selectedTreeIDs),
+    };
     if (!shouldBroadcastSelection(previousBroadcastSelectionRef.current, nextSelection)) return;
     previousBroadcastSelectionRef.current = nextSelection;
 

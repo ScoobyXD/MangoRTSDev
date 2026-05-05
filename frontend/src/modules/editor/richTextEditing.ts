@@ -39,7 +39,7 @@ function normalizeEditorURL(value: string): string | null {
 }
 
 function editorLinkHTML(label: string, href: string): string {
-  return `<a href="${escapeEditorAttribute(href)}" target="_blank" rel="noopener noreferrer" style="color: ${EDITOR_LINK_COLOR}; text-decoration: underline;">${escapeEditorHTML(label)}</a>`;
+  return `<a href="${escapeEditorAttribute(href)}" target="_blank" rel="noopener noreferrer" style="color: ${EDITOR_LINK_COLOR}; text-decoration: underline; cursor: pointer;">${escapeEditorHTML(label)}</a>`;
 }
 
 export function linkifyEditorPlainTextToHTML(value: string): string {
@@ -99,6 +99,7 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
     anchor.rel = "noopener noreferrer";
     anchor.style.color = EDITOR_LINK_COLOR;
     anchor.style.textDecoration = "underline";
+    anchor.style.cursor = "pointer";
     appendSanitizedChildren(element, anchor, ownerDocument);
     target.appendChild(anchor);
     return;
@@ -128,13 +129,62 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
   appendSanitizedChildren(element, target, ownerDocument);
 }
 
+function hasSafeFontSize(element: HTMLElement): boolean {
+  const parsed = Number.parseFloat(element.style.fontSize.trim());
+  return Number.isFinite(parsed) && parsed >= 6 && parsed <= 96;
+}
+
+function isEmptyTextNode(node: Node): boolean {
+  return node.nodeType === Node.TEXT_NODE && !(node.textContent ?? "").trim();
+}
+
+function collapseRedundantFontSizeSpans(root: HTMLElement) {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const spans = Array.from(root.querySelectorAll("span")) as HTMLSpanElement[];
+    for (const span of spans) {
+      if (!hasSafeFontSize(span)) continue;
+      const meaningfulChildren = Array.from(span.childNodes).filter((child) => !isEmptyTextNode(child));
+      if (meaningfulChildren.length !== 1) continue;
+      const onlyChild = meaningfulChildren[0];
+      if (!(onlyChild instanceof HTMLSpanElement) || !hasSafeFontSize(onlyChild)) continue;
+      span.replaceWith(onlyChild);
+      changed = true;
+    }
+  }
+}
+
+function normalizeSafeFontSizeValue(value: string): string {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < 6 || parsed > 96) return "";
+  return Number.isInteger(parsed) ? String(parsed) : String(parsed);
+}
+
+function collapseRedundantFontSizeSpanHTML(html: string): string {
+  const nestedFontSpan = /<span\s+style=(["'])font-size:\s*([0-9]+(?:\.[0-9]+)?)px;?\1>\s*<span\s+style=(["'])font-size:\s*([0-9]+(?:\.[0-9]+)?)px;?\3>((?:(?!<span\b|<\/span>)[\s\S])*)<\/span>\s*<\/span>/gi;
+  let next = html;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    next = next.replace(nestedFontSpan, (match, _outerQuote: string, _outerSize: string, _innerQuote: string, innerSize: string, content: string) => {
+      const safeInnerSize = normalizeSafeFontSizeValue(innerSize);
+      if (!safeInnerSize) return match;
+      changed = true;
+      return `<span style="font-size: ${safeInnerSize}px;">${content}</span>`;
+    });
+  }
+  return next;
+}
+
 export function sanitizeEditorDocumentHTML(html: string): string {
-  if (typeof document === "undefined") return html;
+  if (typeof document === "undefined") return collapseRedundantFontSizeSpanHTML(html);
   const template = document.createElement("template");
   template.innerHTML = html;
   const clean = document.createElement("div");
   appendSanitizedChildren(template.content, clean, document);
-  return clean.innerHTML;
+  collapseRedundantFontSizeSpans(clean);
+  return collapseRedundantFontSizeSpanHTML(clean.innerHTML);
 }
 
 export function deserializeEditorDocumentHTML(storedDocument: string): string {

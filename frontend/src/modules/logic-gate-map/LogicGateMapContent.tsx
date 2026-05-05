@@ -6,7 +6,7 @@ import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGrap
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, canStartRelationshipFromSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "../node-map/relationshipDeleteSummary";
 import { invalidateLogicGateRecordStoreCaches } from "./LogicGateRecordStore";
-import { beginNodeMapMultiSelectSession, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapDragStartSelection, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
+import { NODE_MAP_CLIPBOARD_STORAGE_KEY, beginNodeMapMultiSelectSession, buildNodeMapClipboardPayload, parseNodeMapClipboardPayload, shouldIgnoreMapDeleteKeyTarget, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapDragStartSelection, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
 import { filterLogicGateGraphToFolderScope, resolveMapSelectionAfterGraphLoad, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
@@ -42,8 +42,8 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const [panInitialized, setPanInitialized] = useState(false);
   const [restoredViewport, setRestoredViewport] = useState(false);
 
-  const WORLD_W = 6400;
-  const WORLD_H = 4400;
+  const WORLD_W = 12800;
+  const WORLD_H = 8800;
 
   const [nodePositions, setNodePositions] = useState<Record<string, NodePosition>>({});
   const [nodeSizes, setNodeSizes] = useState<Record<string, { w: number; h: number }>>({});
@@ -875,6 +875,107 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         : [...previous, relationship]
     ));
   };
+
+  const copySelectedMapEntities = () => {
+    const payload = buildNodeMapClipboardPayload({
+      kind: "logic_gate",
+      nodes,
+      relationships,
+      nodePositions,
+      nodeSizes,
+      relationshipAnchors,
+      selectedNodeID,
+      selectedNodeIDs,
+    });
+    if (!payload) return;
+    const serialized = JSON.stringify(payload);
+    try {
+      localStorage.setItem(NODE_MAP_CLIPBOARD_STORAGE_KEY, serialized);
+    } catch {
+      // Clipboard is best-effort UI state.
+    }
+    void navigator.clipboard?.writeText(serialized).catch(() => undefined);
+    setStatusMessage(`Copied ${payload.nodes.length} logic gate${payload.nodes.length === 1 ? "" : "s"} and ${payload.relationships.length} relationship line${payload.relationships.length === 1 ? "" : "s"}.`);
+  };
+
+  const pasteCopiedMapEntities = async () => {
+    const payload = parseNodeMapClipboardPayload(localStorage.getItem(NODE_MAP_CLIPBOARD_STORAGE_KEY));
+    if (!payload || payload.kind !== "logic_gate") return;
+    const minX = Math.min(...payload.nodes.map((node) => node.x));
+    const minY = Math.min(...payload.nodes.map((node) => node.y));
+    const offset = { x: visibleInsertionPosition.x - minX, y: visibleInsertionPosition.y - minY };
+    const nextIDByOldID = new Map<string, string>();
+    const createdNodes: NodeRecord[] = [];
+    const createdPositions: Record<string, NodePosition> = {};
+    setError("");
+    try {
+      for (const copied of payload.nodes) {
+        const node = await createNode(copied.title, {
+          x: copied.x + offset.x + copied.w / 2,
+          y: copied.y + offset.y + copied.h / 2,
+        });
+        if (!node) continue;
+        nextIDByOldID.set(copied.oldID, node.node_id);
+        createdNodes.push(node);
+        createdPositions[node.node_id] = {
+          x: clamp(snapToGrid(copied.x + offset.x), 0, WORLD_W - NODE_W),
+          y: clamp(snapToGrid(copied.y + offset.y), 0, WORLD_H - NODE_H),
+        };
+        setNodeSizes((previous) => ({ ...previous, [node.node_id]: { w: copied.w, h: copied.h } }));
+      }
+      if (createdNodes.length === 0) return;
+      setNodePositions((previous) => ({ ...previous, ...createdPositions }));
+      const createdRelationships: NodeRelationship[] = [];
+      const createdAnchors: Record<string, RelationshipAnchor> = {};
+      for (const copied of payload.relationships) {
+        const nodeIDA = nextIDByOldID.get(copied.nodeIDA);
+        const nodeIDB = nextIDByOldID.get(copied.nodeIDB);
+        if (!nodeIDA || !nodeIDB) continue;
+        const createdRelationship = await requestJSON<LogicGateRelationship>("/v1/logic-gate-relationships", {
+          method: "POST",
+          body: JSON.stringify({
+            company_id: companyID,
+            logic_gate_id_a: nodeIDA,
+            logic_gate_id_b: nodeIDB,
+            a_position: copied.aPosition,
+            b_position: copied.bPosition,
+          }),
+        });
+        const relationship = toLogicGateCanvasRelationship(createdRelationship);
+        createdRelationships.push(relationship);
+        if (copied.anchor) createdAnchors[relationship.node_relationship_id] = copied.anchor;
+      }
+      if (createdRelationships.length > 0) {
+        setRelationships((previous) => [...previous, ...createdRelationships]);
+        setRelationshipAnchors((previous) => ({ ...previous, ...createdAnchors }));
+      }
+      const createdIDs = createdNodes.map((node) => node.node_id);
+      setSelectedNodeID(createdIDs.length === 1 ? createdIDs[0] : "");
+      setSelectedNodeIDs(new Set(createdIDs));
+      setSelectedRelationshipIDs(new Set());
+      setStatusMessage(`Pasted ${createdNodes.length} logic gate${createdNodes.length === 1 ? "" : "s"}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_paste_logic_gates");
+    }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if ((!event.ctrlKey && !event.metaKey) || (key !== "c" && key !== "v")) return;
+      if (shouldIgnoreMapDeleteKeyTarget(event.target as HTMLElement | null)) return;
+      if (!canvasActive) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (key === "c") {
+        copySelectedMapEntities();
+        return;
+      }
+      void pasteCopiedMapEntities();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [canvasActive, nodePositions, nodeSizes, nodes, relationships, relationshipAnchors, selectedNodeID, selectedNodeIDs, visibleInsertionPosition]);
 
   // Delete-node action with selection/context cleanup and snapshot refresh.
   const deleteNode = async (nodeID: string) => {
