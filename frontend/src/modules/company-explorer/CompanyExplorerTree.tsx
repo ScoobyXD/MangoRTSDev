@@ -1,6 +1,7 @@
 import type React from "react";
 import type { CompanyExplorerItemType } from "../folders/companyExplorerFolders";
 import type { ExplorerEntityDragItem } from "../kanban/shared";
+import { ExplorerRowIcon } from "./CompanyExplorerIcons";
 import { CompanyExplorerTreeRow } from "./CompanyExplorerTreeRow";
 import type {
   ExplorerDragPayload,
@@ -31,6 +32,9 @@ type CompanyExplorerTreeProps = {
   expanded: Set<string>;
   selectedTreeID: string;
   selectedTreeIDs: Set<string>;
+  explorerSearchQuery: string;
+  explorerSearchResults: ExplorerTreeNode[];
+  explorerSearchOpen: boolean;
   draggingTreeID: string;
   dragOverTreeID: string;
   dragOverPlacement: ExplorerRowDropPlacement | null;
@@ -42,6 +46,9 @@ type CompanyExplorerTreeProps = {
   onScrollTopChange: (scrollTop: number) => void;
   onCloseContextMenu: () => void;
   onOpenContextMenu: (event: React.MouseEvent, row?: ExplorerTreeNode | null) => void;
+  onSetExplorerSearchQuery: React.Dispatch<React.SetStateAction<string>>;
+  onSetExplorerSearchFocused: React.Dispatch<React.SetStateAction<boolean>>;
+  onSelectExplorerSearchResult: (row: ExplorerTreeNode) => void;
   onSelectTreeRow: (row: ExplorerTreeNode, event?: React.MouseEvent, options?: { selectionIntent?: "activate" | "navigate" }) => void;
   onStartRenamingRow: (row: ExplorerTreeNode) => void;
   onCommitRename: (draft?: ExplorerRenameDraft) => Promise<void>;
@@ -84,6 +91,9 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   expanded,
   selectedTreeID,
   selectedTreeIDs,
+  explorerSearchQuery,
+  explorerSearchResults,
+  explorerSearchOpen,
   draggingTreeID,
   dragOverTreeID,
   dragOverPlacement,
@@ -95,6 +105,9 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   onScrollTopChange,
   onCloseContextMenu,
   onOpenContextMenu,
+  onSetExplorerSearchQuery,
+  onSetExplorerSearchFocused,
+  onSelectExplorerSearchResult,
   onSelectTreeRow,
   onStartRenamingRow,
   onCommitRename,
@@ -153,7 +166,55 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
     onContextMenu={(event) => onOpenContextMenu(event)}
     style={{ overflowY: "auto", overflowX: "hidden", minWidth: 0, outline: "none", scrollbarGutter: "stable", ["--company-explorer-scroll-accent" as string]: scrollbarAccent, ["--company-explorer-scroll-track" as string]: scrollbarTrack }}
   >
-    <div style={{ padding: "9px 10px", borderBottom: `1px solid ${ruleColor}`, fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Company Explorer</div>
+    <div style={{ position: "sticky", top: 0, zIndex: 5, padding: "7px 10px 8px", borderBottom: `1px solid ${ruleColor}`, background: surfaceBackground, display: "grid", gap: 7 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Company Explorer</div>
+      <div data-frame-interactive="true" style={{ position: "relative", display: "block", minWidth: 0, height: 25 }}>
+        <input
+          aria-label="Search Company Explorer"
+          value={explorerSearchQuery}
+          onFocus={() => onSetExplorerSearchFocused(true)}
+          onBlur={() => window.setTimeout(() => onSetExplorerSearchFocused(false), 120)}
+          onChange={(event) => onSetExplorerSearchQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onSetExplorerSearchQuery("");
+              onSetExplorerSearchFocused(false);
+              event.currentTarget.blur();
+            }
+            if (event.key === "Enter" && explorerSearchResults[0]) {
+              event.preventDefault();
+              onSelectExplorerSearchResult(explorerSearchResults[0]);
+            }
+          }}
+          placeholder="Search Company Explorer"
+          style={{ width: "100%", height: "100%", boxSizing: "border-box", border: `1px solid ${ruleColor}`, background: isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.94)", color: surfaceText, fontSize: 11, fontWeight: 700, padding: "0 28px 0 8px", outline: "none" }}
+        />
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ position: "absolute", right: 8, top: 5, color: folderToggleColor, pointerEvents: "none" }}>
+          <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+        {explorerSearchOpen && (
+          <section style={{ position: "absolute", top: 29, left: 0, right: 0, maxHeight: 260, overflowY: "auto", border: `1px solid ${ruleColor}`, borderRadius: 8, background: surfaceBackground, boxShadow: isDarkTheme ? "0 12px 28px rgba(0,0,0,0.42)" : "0 6px 20px rgba(0,0,0,0.14)", padding: "4px 0", zIndex: 8 }}>
+            {explorerSearchResults.length === 0 ? (
+              <div style={{ padding: "8px 10px", color: folderToggleColor, fontSize: 11, fontWeight: 700 }}>No matches</div>
+            ) : explorerSearchResults.map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onSelectExplorerSearchResult(row)}
+                style={{ width: "100%", minHeight: 30, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr) auto", alignItems: "center", gap: 7, border: "none", background: row.id === selectedTreeID ? selectedRowBackground : "transparent", color: surfaceText, cursor: "pointer", padding: "5px 9px", textAlign: "left" }}
+              >
+                <ExplorerRowIcon kind={row.kind} />
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 700 }}>{row.label}</span>
+                <span style={{ color: folderToggleColor, fontSize: 9, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase" }}>{row.kind === "logic_gate" ? "Logic" : row.kind}</span>
+              </button>
+            ))}
+          </section>
+        )}
+      </div>
+    </div>
     {error && <div style={{ padding: "7px 10px", borderBottom: `1px solid ${ruleColor}`, color: "#b00020", fontSize: 11, fontWeight: 700 }}>Error: {error}</div>}
     <div data-company-explorer-tree-rows-start="true" style={{ height: virtualizedTree.topSpacer }} />
     {virtualizedTree.rows.map((row) => (

@@ -45,6 +45,7 @@ export type CompanyExplorerContextMenuState = {
   y: number;
   targets: ExplorerCreationTargets;
   deleteTarget: ExplorerDeleteTarget | null;
+  deleteTargets: ExplorerDeleteTarget[];
   renameTarget: ExplorerRenameTarget | null;
   findTarget: ExplorerFindTarget | null;
   renameTreeID: string;

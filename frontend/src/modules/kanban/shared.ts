@@ -43,6 +43,12 @@ export type KanbanBoard = {
   updated_timestamp: string;
 };
 
+export type KanbanBoardsUpdatedDetail = {
+  companyID?: string;
+  board?: KanbanBoard;
+  deletedBoardID?: string;
+};
+
 export type KanbanColumn = {
   company_id: string;
   board_id: string;

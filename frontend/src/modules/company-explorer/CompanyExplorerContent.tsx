@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type NodeRecord } from "../node-map/shared";
 import { LogicGateRecord as LogicGateApiRecord, NodeRecord as LogicGateRecord, toLogicGateCanvasRecord } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_FOCUS_REQUESTED } from "../node-map/eventbus";
@@ -7,8 +7,9 @@ import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGrap
 import { type ExplorerSelectionState } from "./explorerSync";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerItemType } from "../folders/companyExplorerFolders";
 import { createKanbanBoard, deleteKanbanBoard, listKanbanBoards, updateKanbanBoard } from "../kanban/kanbanApi";
-import { EVENT_KANBAN_BOARDS_UPDATED, type ExplorerEntityDragItem, type KanbanBoard } from "../kanban/shared";
+import { EVENT_KANBAN_BOARDS_UPDATED, type ExplorerEntityDragItem, type KanbanBoard, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
+import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
 import { CompanyExplorerTree } from "./CompanyExplorerTree";
@@ -40,6 +41,13 @@ import { useCompanyExplorerKeyboard } from "./useCompanyExplorerKeyboard";
 import { useCompanyExplorerSelectionBridge } from "./useCompanyExplorerSelectionBridge";
 import { useCompanyExplorerTreeModel } from "./useCompanyExplorerTreeModel";
 import { COMPANY_EXPLORER_TREE_ROW_HEIGHT } from "./useCompanyExplorerVirtualTree";
+import { buildCompanyExplorerTreeRows } from "./companyExplorerTreeRows";
+
+type WorkspaceStreamEnvelope = {
+  company_id: string;
+  type: string;
+  data?: Record<string, unknown>;
+};
 
 // Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
 export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
@@ -81,6 +89,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [dragOverPlacement, setDragOverPlacement] = useState<ExplorerRowDropPlacement | null>(null);
   const [dragPayload, setDragPayload] = useState<ExplorerDragPayload | null>(null);
   const [explorerContextMenu, setExplorerContextMenu] = useState<CompanyExplorerContextMenuState | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ targets: ExplorerDeleteTarget[] } | null>(null);
+  const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
+  const [explorerSearchFocused, setExplorerSearchFocused] = useState(false);
   const [linkRevision, setLinkRevision] = useState(0);
   const [linkedMapFrameID, setLinkedMapFrameID] = useState("");
   const [linkedLogicMapFrameID, setLinkedLogicMapFrameID] = useState("");
@@ -167,8 +178,13 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   useEffect(() => {
     const onKanbanBoardsUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ companyID?: string; board?: KanbanBoard }>).detail;
+      const detail = (event as CustomEvent<KanbanBoardsUpdatedDetail>).detail;
       if (detail?.companyID && detail.companyID !== companyID) return;
+      if (detail?.deletedBoardID) {
+        setKanbanBoards((previous) => previous.filter((board) => board.board_id !== detail.deletedBoardID));
+        setFolderItems((previous) => previous.filter((item) => item.item_type !== "kanban" || item.item_id !== detail.deletedBoardID));
+        return;
+      }
       if (detail?.board) {
         setKanbanBoards((previous) => {
           const next = [
@@ -184,6 +200,39 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     window.addEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
     return () => window.removeEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
   }, [companyID, refreshKanbanBoards]);
+
+  useEffect(() => {
+    return subscribeWorkspaceStream(apiBase, companyID, {
+      onEvent(event) {
+        if (event.event !== "workspace" || event.data.length === 0) return;
+        try {
+          const envelope = JSON.parse(event.data) as WorkspaceStreamEnvelope;
+          if (envelope.company_id !== companyID) return;
+          const data = envelope.data ?? {};
+          if (envelope.type === "kanban_board_saved" || envelope.type === "kanban_board_updated") {
+            const board = data.board as KanbanBoard | undefined;
+            if (!board || typeof board.board_id !== "string") return;
+            setKanbanBoards((previous) => {
+              const next = [
+                ...previous.filter((item) => item.board_id !== board.board_id),
+                board,
+              ];
+              return next.sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp) || a.board_id.localeCompare(b.board_id));
+            });
+            return;
+          }
+          if (envelope.type === "kanban_board_deleted") {
+            const boardID = typeof data.board_id === "string" ? data.board_id : "";
+            if (!boardID) return;
+            setKanbanBoards((previous) => previous.filter((board) => board.board_id !== boardID));
+            setFolderItems((previous) => previous.filter((item) => item.item_type !== "kanban" || item.item_id !== boardID));
+          }
+        } catch {
+          // The stream is best-effort UI sync; the explicit refresh path remains available.
+        }
+      },
+    });
+  }, [apiBase, companyID]);
 
   const {
     treeRows,
@@ -206,6 +255,39 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     treeViewportHeight,
     treeScrollTop,
   });
+
+  const explorerSearchResults = useMemo(() => {
+    const query = explorerSearchQuery.trim().toLowerCase();
+    if (!query) return [];
+    const expandedForSearch = new Set<string>(["folder-root"]);
+    for (const folder of folders) expandedForSearch.add(`workspace-folder-${folder.folder_id}`);
+    const rows = buildCompanyExplorerTreeRows({
+      expanded: expandedForSearch,
+      nodes,
+      logicGates,
+      kanbanBoards,
+      folders,
+      folderItems,
+      rootRowOrder,
+    });
+    const matches: ExplorerTreeNode[] = [];
+    for (const row of rows) {
+      const identity = [
+        row.label,
+        row.kind,
+        row.nodeID ?? "",
+        row.logicGateID ?? "",
+        row.kanbanBoardID ?? "",
+        row.folderID ?? "",
+        row.folderLabel ?? "",
+      ].join(" ").toLowerCase();
+      if (!identity.includes(query)) continue;
+      matches.push(row);
+      if (matches.length >= 16) break;
+    }
+    return matches;
+  }, [explorerSearchQuery, folderItems, folders, kanbanBoards, logicGates, nodes, rootRowOrder]);
+  const explorerSearchOpen = explorerSearchFocused && explorerSearchQuery.trim().length > 0;
 
   useEffect(() => {
     selectedTreeIDRef.current = selectedTreeID;
@@ -440,6 +522,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     try {
       const board = await createKanbanBoard(apiBase, companyID, "New Kanban board");
       setKanbanBoards((previous) => previous.some((item) => item.board_id === board.board_id) ? previous : [...previous, board]);
+      window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, board } }));
       if (parentFolderID) await assignItemToFolder(parentFolderID, "kanban", board.board_id, { expandTarget: true });
       setExpanded((previous) => {
         const next = new Set(previous);
@@ -506,6 +589,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         await deleteKanbanBoard(apiBase, companyID, target.id);
         setKanbanBoards((previous) => previous.filter((board) => board.board_id !== target.id));
         setFolderItems((previous) => previous.filter((item) => item.item_type !== "kanban" || item.item_id !== target.id));
+        window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, deletedBoardID: target.id } }));
         lastLocalExplorerSelectionRef.current = { domain: "root", changedAt: Date.now() };
         setSelectedTreeID("folder-root");
         setSelectedTreeIDs(new Set(["folder-root"]));
@@ -532,6 +616,52 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setError(err instanceof Error ? err.message : `failed_to_delete_${target.kind}`);
     }
   }, [apiBase, companyID, folders, requestJSON]);
+
+  const getDeleteTargetsForRows = useCallback((rows: ExplorerTreeNode[]): ExplorerDeleteTarget[] => {
+    const selectedFolderIDs = new Set(rows.filter((row) => row.kind === "folder" && row.folderID).map((row) => row.folderID!));
+    const isCoveredBySelectedAncestor = (row: ExplorerTreeNode): boolean => {
+      if (row.kind !== "folder" || !row.parentFolderID) return false;
+      let currentFolderID = row.parentFolderID;
+      const seen = new Set<string>();
+      while (currentFolderID && !seen.has(currentFolderID)) {
+        if (selectedFolderIDs.has(currentFolderID)) return true;
+        seen.add(currentFolderID);
+        currentFolderID = folders.find((folder) => folder.folder_id === currentFolderID)?.parent_folder_id ?? "";
+      }
+      return false;
+    };
+    const targets: ExplorerDeleteTarget[] = [];
+    const seenTargets = new Set<string>();
+    for (const row of rows) {
+      if (isCoveredBySelectedAncestor(row)) continue;
+      const target = resolveExplorerDeleteTarget(row);
+      if (!target) continue;
+      const key = `${target.kind}:${target.id}`;
+      if (seenTargets.has(key)) continue;
+      seenTargets.add(key);
+      targets.push(target);
+    }
+    return targets;
+  }, [folders]);
+
+  const requestDeleteTargets = useCallback((targets: ExplorerDeleteTarget[]) => {
+    if (targets.length === 0) return;
+    setExplorerContextMenu(null);
+    setDeleteConfirmation({ targets });
+  }, []);
+
+  const requestDeleteSelection = useCallback(() => {
+    if (deleteConfirmation) return;
+    const selectedRows = treeRows.filter((row) => selectedTreeIDs.has(row.id));
+    const targets = getDeleteTargetsForRows(selectedRows.length > 0 ? selectedRows : (selectedTree ? [selectedTree] : []));
+    requestDeleteTargets(targets);
+  }, [deleteConfirmation, getDeleteTargetsForRows, requestDeleteTargets, selectedTree, selectedTreeIDs, treeRows]);
+
+  const deleteExplorerTargets = useCallback(async (targets: ExplorerDeleteTarget[]) => {
+    for (const target of targets) {
+      await deleteExplorerTarget(target);
+    }
+  }, [deleteExplorerTarget]);
 
   const commitRename = useCallback(async (draft?: ExplorerRenameDraft) => {
     const activeRename = draft ?? renaming;
@@ -570,6 +700,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       } else {
         const board = await updateKanbanBoard(apiBase, companyID, activeRename.target.id, value);
         setKanbanBoards((previous) => previous.map((item) => (item.board_id === board.board_id ? board : item)));
+        window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, board } }));
       }
       setRenaming((current) => (current?.treeID === activeRename.treeID ? null : current));
     } catch (err) {
@@ -761,12 +892,27 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     if (plan.primaryEntity.kind === "node") {
       setSelectedNodeID(plan.primaryEntity.id);
       setSelectedLogicGateID("");
+      setSelectedKanbanBoardID("");
     } else {
       setSelectedLogicGateID(plan.primaryEntity.id);
       setSelectedNodeID("");
+      setSelectedKanbanBoardID("");
     }
     pendingScrollTreeIDRef.current = plan.primaryTreeID;
   }, [folderItems, folders, logicGates, nodes]);
+
+  const selectExplorerSearchResult = useCallback((row: ExplorerTreeNode) => {
+    setExplorerSearchQuery("");
+    setExplorerSearchFocused(false);
+    treeKeyboardActiveRef.current = true;
+    treeViewportRef.current?.focus({ preventScroll: true });
+    expandTreeIDs([row.id]);
+    setSelectedTreeID(row.id);
+    setSelectedTreeIDs(new Set([row.id]));
+    setSelectionAnchorTreeID(row.id);
+    focusTreeRow(row, { selectionIntent: "activate" });
+    pendingScrollTreeIDRef.current = row.id;
+  }, [expandTreeIDs, focusTreeRow]);
 
   useEffect(() => {
     const rowID = pendingScrollTreeIDRef.current;
@@ -784,6 +930,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     setExpanded,
     selectSingleTreeRow,
     scrollTreeRowIntoView,
+    onRequestDeleteSelection: requestDeleteSelection,
   });
 
   const getExplorerItemRowsForPayload = useCallback((payload: ExplorerDragPayload | null): ExplorerTreeNode[] => {
@@ -1027,11 +1174,14 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     const contextKind: CompanyExplorerFolderKind | null = row?.folderKind ?? (row?.kind === "node" ? "node" : row?.kind === "logic_gate" ? "logic_gate" : null);
     const kanbanParentFolderID = row?.folderKind && row.folderID ? row.folderID : "";
     const targets = resolveExplorerCreationTargets(row ?? null);
+    const deleteRows = row ? (selectedTreeIDs.has(row.id) ? treeRows.filter((candidate) => selectedTreeIDs.has(candidate.id)) : [row]) : [];
+    const deleteTargets = getDeleteTargetsForRows(deleteRows);
     setExplorerContextMenu({
       x: event.clientX,
       y: event.clientY,
       targets,
-      deleteTarget: resolveExplorerDeleteTarget(row ?? null),
+      deleteTarget: deleteTargets[0] ?? resolveExplorerDeleteTarget(row ?? null),
+      deleteTargets,
       renameTarget: resolveExplorerRenameTarget(row ?? null),
       findTarget: getExplorerFindTarget(row ?? null),
       renameTreeID: row?.id ?? "",
@@ -1041,7 +1191,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       createFolderPosition: getContextCreateFolderPosition(row, event, targets.preferredFolderKind),
       canCreateBothFolderTypes: !contextKind,
     });
-  }, [getContextCreateFolderPosition, selectTreeRow]);
+  }, [getContextCreateFolderPosition, getDeleteTargetsForRows, selectTreeRow, selectedTreeIDs, treeRows]);
 
   // Kanban accepts node cards only. A mixed Explorer selection is still valid
   // for navigation, but the drag payload intentionally exports node rows only.
@@ -1147,6 +1297,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         expanded={expanded}
         selectedTreeID={selectedTreeID}
         selectedTreeIDs={selectedTreeIDs}
+        explorerSearchQuery={explorerSearchQuery}
+        explorerSearchResults={explorerSearchResults}
+        explorerSearchOpen={explorerSearchOpen}
         draggingTreeID={draggingTreeID}
         dragOverTreeID={dragOverTreeID}
         dragOverPlacement={dragOverPlacement}
@@ -1158,6 +1311,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         onScrollTopChange={setTreeScrollTop}
         onCloseContextMenu={() => setExplorerContextMenu(null)}
         onOpenContextMenu={openExplorerContextMenu}
+        onSetExplorerSearchQuery={setExplorerSearchQuery}
+        onSetExplorerSearchFocused={setExplorerSearchFocused}
+        onSelectExplorerSearchResult={selectExplorerSearchResult}
         onSelectTreeRow={selectTreeRow}
         onStartRenamingRow={startRenamingRow}
         onCommitRename={commitRename}
@@ -1211,11 +1367,41 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           setSelectionAnchorTreeID(treeID);
           setRenaming({ treeID, target, value });
         }}
-        onDeleteTarget={(target) => {
-          setExplorerContextMenu(null);
-          void deleteExplorerTarget(target);
-        }}
+        onDeleteTargets={requestDeleteTargets}
       />
+
+      {deleteConfirmation && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
+          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700 }}>
+              Are you sure you want to delete {deleteConfirmation.targets.length} thing{deleteConfirmation.targets.length === 1 ? "" : "s"}?
+            </div>
+            <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#b8c4cc" : "#2e2e2e" }}>
+              This removes the selected Company Explorer object{deleteConfirmation.targets.length === 1 ? "" : "s"} immediately.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  const targets = deleteConfirmation.targets;
+                  setDeleteConfirmation(null);
+                  void deleteExplorerTargets(targets);
+                }}
+                style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", color: "#111111", cursor: "pointer", fontWeight: 700 }}
+              >
+                Yes
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmation(null)}
+                style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#fff", cursor: "pointer", fontWeight: 700 }}
+              >
+                No
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

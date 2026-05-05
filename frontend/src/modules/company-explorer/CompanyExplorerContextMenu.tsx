@@ -18,7 +18,7 @@ type CompanyExplorerContextMenuProps = {
   onCreateKanban: (parentFolderID: string) => void;
   onFindTarget: (target: ExplorerFindTarget) => void;
   onRenameTarget: (treeID: string, target: ExplorerRenameTarget, value: string) => void;
-  onDeleteTarget: (target: ExplorerDeleteTarget) => void;
+  onDeleteTargets: (targets: ExplorerDeleteTarget[]) => void;
 };
 
 export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProps> = ({
@@ -31,7 +31,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   onCreateKanban,
   onFindTarget,
   onRenameTarget,
-  onDeleteTarget,
+  onDeleteTargets,
 }) => {
   if (!menu) return null;
 
@@ -88,8 +88,8 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
           Rename
         </button>
       )}
-      {menu.deleteTarget && (
-        <button style={{ ...buttonStyle, color: "#c62828" }} onClick={() => onDeleteTarget(menu.deleteTarget!)}>
+      {(menu.deleteTargets.length > 0 || menu.deleteTarget) && (
+        <button style={{ ...buttonStyle, color: "#c62828" }} onClick={() => onDeleteTargets(menu.deleteTargets.length > 0 ? menu.deleteTargets : [menu.deleteTarget!])}>
           Delete
         </button>
       )}

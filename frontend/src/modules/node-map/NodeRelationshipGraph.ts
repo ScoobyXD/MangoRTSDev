@@ -50,7 +50,7 @@ function notify(entry: CacheEntry): void {
 // Some graph events are intentionally non-relationship mutations (e.g. node information writes).
 // For those, refreshing the graph snapshot is unnecessary and adds avoidable hot-path GET load.
 function isNonGraphWorkspaceEvent(eventType: string): boolean {
-  return eventType === "node_information_created" || eventType.startsWith("logic_gate_");
+  return eventType === "node_information_created" || eventType.startsWith("logic_gate_") || eventType.startsWith("kanban_");
 }
 
 // Local mutation helper: lets hot-path UI actions apply immediate cache updates without
