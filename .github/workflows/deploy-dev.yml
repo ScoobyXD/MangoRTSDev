@@ -2,13 +2,14 @@ name: Deploy MangoRTS Dev
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
   id-token: write
+
+concurrency:
+  group: mangorts-dev-deploy
+  cancel-in-progress: false
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-west-1' }}
@@ -165,7 +166,14 @@ jobs:
             echo "Backend image already exists: $IMAGE_URI"
           else
             docker build -t "$IMAGE_URI" -f backend/Dockerfile backend
-            docker push "$IMAGE_URI"
+            if docker push "$IMAGE_URI"; then
+              echo "Pushed backend image: $IMAGE_URI"
+            elif aws ecr describe-images --repository-name "$REPOSITORY_NAME" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
+              echo "Backend image appeared during push; continuing with existing image: $IMAGE_URI"
+            else
+              echo "Backend image push failed and image does not exist: $IMAGE_URI" >&2
+              exit 1
+            fi
           fi
           echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
 
