@@ -93,7 +93,7 @@ resource "aws_ecs_task_definition" "backend" {
         protocol      = "tcp"
       }]
       environment = [
-        { name = "APP_ENV", value = "dev" },
+        { name = "APP_ENV", value = "staging" },
         { name = "ALLOW_INMEMORY_FALLBACK", value = "false" },
         { name = "AUTH_MODE", value = "cognito" },
         { name = "AWS_REGION", value = var.aws_region },
