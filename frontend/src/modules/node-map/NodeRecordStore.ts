@@ -1,4 +1,4 @@
-import { NodeDetails } from "./shared";
+import { NodeDetails, NodeRecord, NodeRelationship } from "./shared";
 
 export type NodeProjectionItem = {
   company_id: string;
@@ -39,6 +39,22 @@ export function invalidateNodeRecordStoreCaches(apiBase: string, companyID: stri
   const cacheKey = key(apiBase, companyID, nodeID);
   detailsCache.delete(cacheKey);
   projectionCache.delete(cacheKey);
+}
+
+export function primeNodeRecordStoreCaches(apiBase: string, companyID: string, entries: Array<{
+  node: NodeRecord;
+  relationships?: NodeRelationship[];
+  projections?: NodeProjectionItem[];
+}>): void {
+  for (const entry of entries) {
+    const cacheKey = key(apiBase, companyID, entry.node.node_id);
+    detailsCache.set(cacheKey, {
+      node: entry.node,
+      information: [],
+      relationships: entry.relationships ?? [],
+    });
+    projectionCache.set(cacheKey, entry.projections ?? []);
+  }
 }
 
 export async function getNodeRecordSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<NodeDetails> {

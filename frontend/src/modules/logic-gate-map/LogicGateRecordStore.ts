@@ -1,4 +1,4 @@
-import { LogicGateDetails } from "./shared";
+import { LogicGateDetails, LogicGateRecord, LogicGateRelationship } from "./shared";
 
 export type LogicGateProjectionItem = {
   company_id: string;
@@ -39,6 +39,22 @@ export function invalidateLogicGateRecordStoreCaches(apiBase: string, companyID:
   const cacheKey = key(apiBase, companyID, logicGateID);
   detailsCache.delete(cacheKey);
   projectionCache.delete(cacheKey);
+}
+
+export function primeLogicGateRecordStoreCaches(apiBase: string, companyID: string, entries: Array<{
+  logicGate: LogicGateRecord;
+  relationships?: LogicGateRelationship[];
+  projections?: LogicGateProjectionItem[];
+}>): void {
+  for (const entry of entries) {
+    const cacheKey = key(apiBase, companyID, entry.logicGate.logic_gate_id);
+    detailsCache.set(cacheKey, {
+      logic_gate: entry.logicGate,
+      information: [],
+      relationships: entry.relationships ?? [],
+    });
+    projectionCache.set(cacheKey, entry.projections ?? []);
+  }
 }
 
 export async function getLogicGateRecordSingleFlight(apiBase: string, companyID: string, logicGateID: string): Promise<LogicGateDetails> {

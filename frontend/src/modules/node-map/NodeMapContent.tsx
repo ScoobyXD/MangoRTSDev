@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, buildPlusGridBackgroundStyle, clamp, divider, getNodeTitle, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, trimOrEmpty } from "./shared";
+import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, PersistedMapPosition, RelationshipAnchor, buildPlusGridBackgroundStyle, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_NODE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
-import { deleteNodeMapRelationshipsCommand, normalizeNodeMapRelationshipIDs } from "./nodeMapCommands";
-import { invalidateNodeRecordStoreCaches } from "./NodeRecordStore";
+import { createMapEntityBatchClientID, createMapEntityBatchCommand, deleteNodeMapRelationshipsCommand, normalizeNodeMapRelationshipIDs } from "./nodeMapCommands";
+import { invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches } from "./NodeRecordStore";
 import { NODE_MAP_CLIPBOARD_STORAGE_KEY, beginNodeMapMultiSelectSession, buildNodeMapClipboardPayload, parseNodeMapClipboardPayload, shouldIgnoreMapDeleteKeyTarget, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
 import { NodeMapContextMenus, type NodeMapCanvasContextMenuState, type NodeMapDeleteConfirmationState, type NodeMapNodeContextMenuState, type NodeMapRelationshipContextMenuState, type NodeMapRelationshipRole } from "./NodeMapContextMenus";
 import { NodeMapNodeCard } from "./NodeMapNodeCard";
@@ -17,6 +17,14 @@ import { useNodeMapViewportHandlers } from "./useNodeMapViewportHandlers";
 import { filterNodeGraphToFolderScope, resolveMapSelectionAfterGraphLoad, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
+
+type NodeMapEntityBatchResponse = {
+  entity_mappings?: Array<{ client_id: string; entity_id: string }>;
+  nodes?: NodeRecord[];
+  relationships?: NodeRelationship[];
+  folder_items?: CompanyExplorerFolderItem[];
+  node_map_positions?: PersistedMapPosition[];
+};
 
 type ExplorerSelectionOrigin = {
   sourceExplorerID: string;
@@ -695,6 +703,33 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     return () => window.removeEventListener(eventName, onCreate as EventListener);
   }, [widgetId]);
 
+  const rememberPersistedNodeMapPositions = (positions: PersistedMapPosition[] | undefined) => {
+    const savedPositions = persistedMapPositionsToNodePositions({
+      positions,
+      worldWidth: WORLD_W,
+      worldHeight: WORLD_H,
+      nodeWidth: NODE_W,
+      nodeHeight: NODE_H,
+    });
+    if (Object.keys(savedPositions).length > 0) {
+      lastPersistedNodePositionsRef.current = { ...lastPersistedNodePositionsRef.current, ...savedPositions };
+    }
+  };
+
+  const primeCreatedNodeRecords = (createdNodes: NodeRecord[], createdRelationships: NodeRelationship[]) => {
+    primeNodeRecordStoreCaches(apiBase, companyID, createdNodes.map((node) => ({
+      node,
+      relationships: createdRelationships.filter((relationship) => relationship.node_id_a === node.node_id || relationship.node_id_b === node.node_id),
+    })));
+  };
+
+  const applyCreatedNodeBatchSideEffects = (response: NodeMapEntityBatchResponse, createdNodes: NodeRecord[], createdRelationships: NodeRelationship[]) => {
+    for (const node of createdNodes) upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+    for (const folderItem of response.folder_items ?? []) upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, folderItem);
+    rememberPersistedNodeMapPositions(response.node_map_positions);
+    primeCreatedNodeRecords(createdNodes, createdRelationships);
+  };
+
   const createNode = async (title: string, worldPos?: { x: number; y: number }): Promise<NodeRecord | null> => {
     const value = trimOrEmpty(title);
     if (!value) return null;
@@ -702,35 +737,34 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     const desiredPosition = worldPos
       ? { x: worldPos.x - NODE_W / 2, y: worldPos.y - NODE_H / 2 }
       : visibleInsertionPosition;
+    const position = resolveOpenNodeMapPosition({
+      desired: desiredPosition,
+      occupied: nodePositions,
+      worldWidth: WORLD_W,
+      worldHeight: WORLD_H,
+      nodeWidth: NODE_W,
+      nodeHeight: NODE_H,
+    });
     try {
-      const node = await requestJSON<NodeRecord>("/v1/nodes", {
-        method: "POST",
-        body: JSON.stringify({ company_id: companyID, title: value }),
+      const response = await createMapEntityBatchCommand<NodeMapEntityBatchResponse>({
+        companyID,
+        entityKind: "node",
+        folderID: activeFolderID,
+        items: [{
+          client_id: createMapEntityBatchClientID("node"),
+          title: value,
+          x: position.x,
+          y: position.y,
+        }],
+        requestJSON,
       });
+      const node = response.nodes?.[0];
+      if (!node) throw new Error("node_batch_create_missing_node");
       setNodePositions((previous) => ({
         ...previous,
-        [node.node_id]: resolveOpenNodeMapPosition({
-          desired: desiredPosition,
-          occupied: previous,
-          worldWidth: WORLD_W,
-          worldHeight: WORLD_H,
-          nodeWidth: NODE_W,
-          nodeHeight: NODE_H,
-        }),
+        [node.node_id]: position,
       }));
-      // Hot-path rule: avoid full snapshot refetch on create.
-      // Apply optimistic node insertion via NodeRelationshipGraph so all subscribers (Node Map + Explorer)
-      // get immediate convergence without issuing a snapshot GET.
-      upsertNodeRelationshipGraphNode(apiBase, companyID, node);
-      if (activeFolderID) {
-        const folderItem = await requestJSON<CompanyExplorerFolderItem>("/v1/company-explorer/folder-items", {
-          method: "POST",
-          body: JSON.stringify({ company_id: companyID, folder_id: activeFolderID, item_type: "node", item_id: node.node_id }),
-        });
-        // Folder placement is a separate API row so agents can move items headlessly.
-        // Updating the graph cache here keeps filtered folder maps responsive.
-        upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, folderItem);
-      }
+      applyCreatedNodeBatchSideEffects(response, [node], response.relationships ?? []);
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       return node;
@@ -758,28 +792,53 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       y: origin.y + shift.y,
     };
 
-    const node = await createNode("new node", { x: linkedPosition.x + NODE_W / 2, y: linkedPosition.y + NODE_H / 2 });
-    if (!node) return;
-
     try {
       const payload = buildLinkedNodePayloadFromSourceSide(direction);
-      const relationship = await requestJSON<NodeRelationship>("/v1/node-relationships", {
-        method: "POST",
-        body: JSON.stringify({
-          company_id: companyID,
-          node_id_a: sourceNodeID,
-          node_id_b: node.node_id,
+      const position = resolveOpenNodeMapPosition({
+        desired: linkedPosition,
+        occupied: nodePositions,
+        worldWidth: WORLD_W,
+        worldHeight: WORLD_H,
+        nodeWidth: NODE_W,
+        nodeHeight: NODE_H,
+      });
+      const clientID = createMapEntityBatchClientID("linked-node");
+      const response = await createMapEntityBatchCommand<NodeMapEntityBatchResponse>({
+        companyID,
+        entityKind: "node",
+        folderID: activeFolderID,
+        items: [{
+          client_id: clientID,
+          title: "new node",
+          x: position.x,
+          y: position.y,
+        }],
+        relationships: [{
+          entity_id_a: sourceNodeID,
+          client_id_b: clientID,
           a_position: payload.a_position,
           b_position: payload.b_position,
-        }),
+        }],
+        requestJSON,
       });
+      const node = response.nodes?.[0];
+      if (!node) throw new Error("node_batch_create_missing_node");
+      const relationship = response.relationships?.[0];
 
-      setRelationshipAnchors((previous) => ({
-        ...previous,
-        [relationship.node_relationship_id]: payload.anchor,
-      }));
+      setNodePositions((previous) => ({ ...previous, [node.node_id]: position }));
+      if (relationship) {
+        setRelationshipAnchors((previous) => ({
+          ...previous,
+          [relationship.node_relationship_id]: payload.anchor,
+        }));
+        setRelationships((previous) => (
+          previous.some((item) => item.node_relationship_id === relationship.node_relationship_id)
+            ? previous
+            : [...previous, relationship]
+        ));
+      }
 
-      loadGraphRelationshipsFromSnapshot([...nodes, node]);
+      applyCreatedNodeBatchSideEffects(response, [node], response.relationships ?? []);
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
       setDetailsPanelNodeID(node.node_id);
@@ -859,50 +918,76 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     const minX = Math.min(...payload.nodes.map((node) => node.x));
     const minY = Math.min(...payload.nodes.map((node) => node.y));
     const offset = { x: visibleInsertionPosition.x - minX, y: visibleInsertionPosition.y - minY };
-    const nextIDByOldID = new Map<string, string>();
-    const createdNodes: NodeRecord[] = [];
+    const clientIDByOldID = new Map<string, string>();
     const createdPositions: Record<string, NodePosition> = {};
+    const batchItems = payload.nodes.map((copied, index) => {
+      const clientID = createMapEntityBatchClientID("paste-node", index);
+      clientIDByOldID.set(copied.oldID, clientID);
+      return {
+        client_id: clientID,
+        title: copied.title,
+        x: clamp(snapToGrid(copied.x + offset.x), 0, WORLD_W - NODE_W),
+        y: clamp(snapToGrid(copied.y + offset.y), 0, WORLD_H - NODE_H),
+      };
+    });
+    const batchRelationships = payload.relationships
+      .map((copied) => {
+        const clientIDA = clientIDByOldID.get(copied.nodeIDA);
+        const clientIDB = clientIDByOldID.get(copied.nodeIDB);
+        if (!clientIDA || !clientIDB) return null;
+        return {
+          client_id_a: clientIDA,
+          client_id_b: clientIDB,
+          a_position: copied.aPosition,
+          b_position: copied.bPosition,
+        };
+      })
+      .filter((relationship): relationship is { client_id_a: string; client_id_b: string; a_position: string; b_position: string } => !!relationship);
     setError("");
     try {
+      const response = await createMapEntityBatchCommand<NodeMapEntityBatchResponse>({
+        companyID,
+        entityKind: "node",
+        folderID: activeFolderID,
+        items: batchItems,
+        relationships: batchRelationships,
+        requestJSON,
+      });
+      const createdNodes = response.nodes ?? [];
+      if (createdNodes.length === 0) return;
+      const idByClientID = new Map((response.entity_mappings ?? []).map((mapping) => [mapping.client_id, mapping.entity_id]));
       for (const copied of payload.nodes) {
-        const node = await createNode(copied.title, {
-          x: copied.x + offset.x + copied.w / 2,
-          y: copied.y + offset.y + copied.h / 2,
-        });
-        if (!node) continue;
-        nextIDByOldID.set(copied.oldID, node.node_id);
-        createdNodes.push(node);
-        createdPositions[node.node_id] = {
+        const clientID = clientIDByOldID.get(copied.oldID);
+        const nodeID = clientID ? idByClientID.get(clientID) : "";
+        if (!nodeID) continue;
+        createdPositions[nodeID] = {
           x: clamp(snapToGrid(copied.x + offset.x), 0, WORLD_W - NODE_W),
           y: clamp(snapToGrid(copied.y + offset.y), 0, WORLD_H - NODE_H),
         };
-        setNodeSizes((previous) => ({ ...previous, [node.node_id]: { w: copied.w, h: copied.h } }));
       }
-      if (createdNodes.length === 0) return;
       setNodePositions((previous) => ({ ...previous, ...createdPositions }));
-      const createdRelationships: NodeRelationship[] = [];
+      setNodeSizes((previous) => {
+        const next = { ...previous };
+        for (const copied of payload.nodes) {
+          const clientID = clientIDByOldID.get(copied.oldID);
+          const nodeID = clientID ? idByClientID.get(clientID) : "";
+          if (nodeID) next[nodeID] = { w: copied.w, h: copied.h };
+        }
+        return next;
+      });
+      const createdRelationships = response.relationships ?? [];
       const createdAnchors: Record<string, RelationshipAnchor> = {};
       for (const copied of payload.relationships) {
-        const nodeIDA = nextIDByOldID.get(copied.nodeIDA);
-        const nodeIDB = nextIDByOldID.get(copied.nodeIDB);
-        if (!nodeIDA || !nodeIDB) continue;
-        const relationship = await requestJSON<NodeRelationship>("/v1/node-relationships", {
-          method: "POST",
-          body: JSON.stringify({
-            company_id: companyID,
-            node_id_a: nodeIDA,
-            node_id_b: nodeIDB,
-            a_position: copied.aPosition,
-            b_position: copied.bPosition,
-          }),
-        });
-        createdRelationships.push(relationship);
-        if (copied.anchor) createdAnchors[relationship.node_relationship_id] = copied.anchor;
+        const nodeIDA = idByClientID.get(clientIDByOldID.get(copied.nodeIDA) ?? "");
+        const nodeIDB = idByClientID.get(clientIDByOldID.get(copied.nodeIDB) ?? "");
+        const relationship = createdRelationships.find((item) => item.node_id_a === nodeIDA && item.node_id_b === nodeIDB && item.a_position === copied.aPosition && item.b_position === copied.bPosition);
+        if (relationship && copied.anchor) createdAnchors[relationship.node_relationship_id] = copied.anchor;
       }
       if (createdRelationships.length > 0) {
         setRelationships((previous) => [...previous, ...createdRelationships]);
         setRelationshipAnchors((previous) => ({ ...previous, ...createdAnchors }));
       }
+      applyCreatedNodeBatchSideEffects(response, createdNodes, createdRelationships);
       const createdIDs = createdNodes.map((node) => node.node_id);
       setSelectedNodeID(createdIDs.length === 1 ? createdIDs[0] : "");
       setSelectedNodeIDs(new Set(createdIDs));
@@ -929,7 +1014,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [canvasActive, nodePositions, nodeSizes, nodes, relationships, relationshipAnchors, selectedNodeID, selectedNodeIDs, visibleInsertionPosition]);
+  }, [activeFolderID, canvasActive, nodePositions, nodeSizes, nodes, relationships, relationshipAnchors, selectedNodeID, selectedNodeIDs, visibleInsertionPosition]);
 
   // Delete-node action with selection/context cleanup and snapshot refresh.
   const deleteNode = async (nodeID: string) => {

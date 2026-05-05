@@ -228,6 +228,7 @@ This keeps append-only information history, deletes duplicate hot `Text box` pro
 - `DELETE /v1/company-explorer/folder-items?company_id={uuid}&item_type=node|logic_gate&item_id={uuid}`
 - `GET /v1/map-layout?company_id={uuid}&map_type=node|logic_gate`
 - `PUT /v1/map-layout`
+- `POST /v1/map-entity-batches` (create node/logic-gate map entities with optional folder placement, relationships, and positions in one command)
 - `POST /v1/operations`
 - `GET /v1/operations/{operation_id}?company_id={uuid}`
 - `GET /v1/kanban/boards?company_id={uuid}&after_position=0&limit=100`
@@ -379,3 +380,19 @@ curl -X PUT http://localhost:8080/v1/map-layout \
 ```
 
 Use `map_type:"logic_gate"` with `entity_id:"<logic_gate_id>"` for Logic Gate Map positions. Writes are intentionally bulk and capped per request so clients can debounce drag interactions and agents can batch operations without forcing full-map rewrites.
+
+Create a map batch:
+
+```bash
+curl -X POST http://localhost:8080/v1/map-entity-batches \
+  -H 'content-type: application/json' \
+  -d '{
+    "company_id":"11111111-1111-1111-1111-111111111111",
+    "entity_kind":"logic_gate",
+    "folder_id":"<optional_logic_gate_folder_id>",
+    "items":[{"client_id":"gate-a","title":"Validate intake","x":240,"y":360}],
+    "relationships":[{"entity_id_a":"<existing_gate_id>","client_id_b":"gate-a","a_position":"Input","b_position":"Output"}]
+  }'
+```
+
+`client_id` is request-local only. The response returns `entity_mappings`, created entities, created relationships, optional folder-item rows, and saved map positions so UI clients and headless agents can apply one durable command without follow-up layout or Explorer assignment writes.
