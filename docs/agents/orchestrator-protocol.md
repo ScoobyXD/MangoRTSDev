@@ -29,21 +29,24 @@ Each top-level prompt becomes one project.
 1. Read `docs/agents/sacred-text.md`.
 2. Read `docs/agents/current-decisions.md`.
 3. Run preflight and inspect current repo/worktree state.
-4. Allocate IDs from the ledger:
+4. Confirm startup is running from `C:\Users\Jonat\MangoOSDev` on branch `main`.
+5. Confirm the main worktree is clean and conflict-marker scan passes.
+6. Allocate IDs from the ledger:
    - batch ID
    - orchestrator ID
    - project IDs
    - manager IDs
    - worker IDs
-5. Create or update the batch ledger.
-6. Record `batch_base_commit` from approved `main`.
-7. Create one batch branch/worktree from `batch_base_commit`.
-8. Create one project branch/worktree per project from `batch_base_commit`.
-9. Start one visible PowerShell terminal per project manager worktree.
-10. Spawn or prompt one project manager per project.
-11. Project managers split each project into worker assignments.
-12. Project managers create worker branches/worktrees from their project branch.
-13. Project managers spawn workers with the sacred text, project objective, recommended primary file scope, and scope freedom rule.
+7. Create or update the batch ledger.
+8. Record `batch_base_commit` from approved `main`.
+9. Create one batch branch and matching Git worktree from `batch_base_commit`.
+10. Create one project branch and matching Git worktree per project from `batch_base_commit`.
+11. Record every branch/worktree mapping in the ledger.
+12. Start one visible PowerShell terminal per project manager worktree.
+13. Spawn or prompt one project manager per project.
+14. Project managers split each project into worker assignments.
+15. Project managers create worker branches and matching Git worktrees from their project branch.
+16. Project managers spawn workers with the sacred text, project objective, recommended primary file scope, and scope freedom rule.
 
 ## Decomposition Rule
 

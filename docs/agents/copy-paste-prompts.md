@@ -6,7 +6,7 @@ Fill in the bracketed sections before pasting. The live ledger is the source of 
 
 ## Start Batch Prompt
 
-Paste this into a fresh Codex instance from the main MangoRTS worktree, normally:
+Paste this into a fresh Codex instance opened from the main MangoRTS worktree:
 
 ```text
 C:\Users\Jonat\MangoOSDev
@@ -33,6 +33,15 @@ Read first:
 Repo:
 C:\Users\Jonat\MangoOSDev
 
+Starting location requirement:
+This prompt is intended to be run from the main MangoRTS worktree. Before doing anything else, verify:
+- current directory is C:\Users\Jonat\MangoOSDev
+- current Git branch is main
+- main worktree is clean
+- conflict marker scan passes
+
+If any of those checks fail, stop and report the exact issue instead of creating branches.
+
 Batch name:
 <BatchName>
 
@@ -50,13 +59,25 @@ PROJECT 3, optional:
 <ProjectName>
 <Paste the full project description and required changes here>
 
+PROJECT 4, optional:
+<ProjectName>
+<Paste the full project description and required changes here>
+
+
 Rules:
 - Use the small-batch workflow.
 - Use my naming convention from docs/agents/naming-conventions.md.
-- Create a batch branch from current approved main and record batch_base_commit.
-- Create every project branch from batch_base_commit, not from the moving batch branch.
+- Run startup checks:
+  powershell -ExecutionPolicy Bypass -File .\scripts\agent_preflight.ps1 -Root .
+  powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
+- Record batch_base_commit from current approved main before creating any batch/project branches.
+- Create a batch branch and matching Git worktree from batch_base_commit.
+- Create every project branch and matching Git worktree from batch_base_commit, not from the moving batch branch.
+- For every batch, project, and worker branch, create a matching Git worktree folder and record the branch/worktree mapping in the ledger.
+- Use git worktree creation shape:
+  git worktree add -b <BranchName> <AbsoluteWorktreePath> <BaseCommitOrBranch>
 - Create or update the .agent-state ledger before creating branches.
-- Open a visible PowerShell terminal for every project manager and worker worktree.
+- Open a visible PowerShell terminal for every project manager and worker worktree, with the terminal starting inside that worktree.
 - If direct Codex agent spawning is available, spawn project managers and workers. If not, open the terminals and print exact prompts for me to paste into them.
 - Project managers may split projects into workers, but worker scope is recommended, not a hard silo.
 - Do not push.
@@ -72,6 +93,7 @@ At the end of startup, report:
 - batch worktree
 - project ids and branches
 - project worktrees
+- exact branch/worktree mappings
 - project manager prompts or spawned agent ids
 - worker plan per project
 - visible PowerShell terminals opened
@@ -258,4 +280,3 @@ Rules:
 - Report all branches/worktrees that are now abandoned or still active.
 - Report exact cleanup commands separately; do not run destructive cleanup unless I explicitly approve.
 ```
-

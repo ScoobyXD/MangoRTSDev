@@ -20,6 +20,8 @@ main
 
 The batch branch is the shared candidate for a related group of projects. Each project branch is independently testable before it is merged into the batch branch.
 
+Every branch in the workflow must have a matching Git worktree. Agents work in worktree folders, not in bare branch names.
+
 ## Roles
 
 ```text
@@ -55,6 +57,29 @@ Every project branch in the batch is created from `batch_base_commit`, not from 
 This matters when one project succeeds and another fails. If project 1 is merged into the batch branch, and project 2 later needs a full rollback, project 2 resets to `batch_base_commit`, not to the current batch branch that already contains project 1.
 
 After project 2 is rebuilt and approved, it merges into the current batch branch. Any conflict with project 1 is resolved at that project-to-batch merge point.
+
+## Branch And Worktree Rule
+
+Create both a branch and a matching Git worktree for every batch, project, and worker:
+
+```text
+BatchName-batch0000007
+C:\Users\Jonat\MangoOSDev-BatchName-batch0000007
+
+FixKanbanBoardCardsUIProject-project0001005
+C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005
+
+worker0095348
+C:\Users\Jonat\MangoOSDev-worker0095348
+```
+
+Use this Git shape:
+
+```powershell
+git worktree add -b <BranchName> <AbsoluteWorktreePath> <BaseCommitOrBranch>
+```
+
+Do not manually create low-level Git tree objects. Git creates tree objects internally when commits are made.
 
 ## Normal Flow
 
