@@ -1,0 +1,156 @@
+export const EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES = 20;
+export const EDITOR_RICH_TEXT_PREFIX = "<!-- mango-editor-html-v1 -->";
+export const EDITOR_LINK_COLOR = "rgb(0, 86, 214)";
+
+const URL_PATTERN = /\b((?:https?:\/\/|www\.)[^\s<>"']+)/gi;
+const TRAILING_URL_PUNCTUATION = /[),.;:!?]+$/;
+
+function escapeEditorHTML(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeEditorAttribute(value: string): string {
+  return escapeEditorHTML(value).replace(/`/g, "&#96;");
+}
+
+function splitURLTrailingPunctuation(value: string): { urlText: string; trailingText: string } {
+  const match = TRAILING_URL_PUNCTUATION.exec(value);
+  if (!match || !match.index) return { urlText: value, trailingText: "" };
+  return {
+    urlText: value.slice(0, match.index),
+    trailingText: value.slice(match.index),
+  };
+}
+
+function normalizeEditorURL(value: string): string | null {
+  const withProtocol = value.toLowerCase().startsWith("www.") ? `https://${value}` : value;
+  try {
+    const parsed = new URL(withProtocol);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+function editorLinkHTML(label: string, href: string): string {
+  return `<a href="${escapeEditorAttribute(href)}" target="_blank" rel="noopener noreferrer" style="color: ${EDITOR_LINK_COLOR}; text-decoration: underline;">${escapeEditorHTML(label)}</a>`;
+}
+
+export function linkifyEditorPlainTextToHTML(value: string): string {
+  URL_PATTERN.lastIndex = 0;
+  let output = "";
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = URL_PATTERN.exec(value)) !== null) {
+    const matchedText = match[0];
+    const matchIndex = match.index;
+    const { urlText, trailingText } = splitURLTrailingPunctuation(matchedText);
+    const href = normalizeEditorURL(urlText);
+    output += escapeEditorHTML(value.slice(lastIndex, matchIndex));
+    output += href ? editorLinkHTML(urlText, href) : escapeEditorHTML(urlText);
+    output += escapeEditorHTML(trailingText);
+    lastIndex = matchIndex + matchedText.length;
+  }
+  output += escapeEditorHTML(value.slice(lastIndex));
+  return output;
+}
+
+function applySafeFontSize(source: HTMLElement, target: HTMLElement) {
+  const fontSize = source.style.fontSize.trim();
+  if (!fontSize) return;
+  const parsed = Number.parseFloat(fontSize);
+  if (!Number.isFinite(parsed) || parsed < 6 || parsed > 96) return;
+  target.style.fontSize = `${Math.round(parsed)}px`;
+}
+
+function appendSanitizedChildren(source: Node, target: Node, ownerDocument: Document) {
+  source.childNodes.forEach((child) => appendSanitizedNode(child, target, ownerDocument));
+}
+
+function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document) {
+  if (source.nodeType === Node.TEXT_NODE) {
+    target.appendChild(ownerDocument.createTextNode(source.textContent ?? ""));
+    return;
+  }
+  if (source.nodeType !== Node.ELEMENT_NODE) return;
+
+  const element = source as HTMLElement;
+  const tagName = element.tagName.toLowerCase();
+  if (tagName === "br") {
+    target.appendChild(ownerDocument.createElement("br"));
+    return;
+  }
+
+  if (tagName === "a") {
+    const href = normalizeEditorURL(element.getAttribute("href") ?? "");
+    if (!href) {
+      appendSanitizedChildren(element, target, ownerDocument);
+      return;
+    }
+    const anchor = ownerDocument.createElement("a");
+    anchor.href = href;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    anchor.style.color = EDITOR_LINK_COLOR;
+    anchor.style.textDecoration = "underline";
+    appendSanitizedChildren(element, anchor, ownerDocument);
+    target.appendChild(anchor);
+    return;
+  }
+
+  if (tagName === "span") {
+    const span = ownerDocument.createElement("span");
+    applySafeFontSize(element, span);
+    appendSanitizedChildren(element, span, ownerDocument);
+    target.appendChild(span);
+    return;
+  }
+
+  if (tagName === "b" || tagName === "strong" || tagName === "u" || tagName === "i" || tagName === "em") {
+    const inline = ownerDocument.createElement(tagName);
+    appendSanitizedChildren(element, inline, ownerDocument);
+    target.appendChild(inline);
+    return;
+  }
+
+  if (tagName === "div" || tagName === "p") {
+    appendSanitizedChildren(element, target, ownerDocument);
+    target.appendChild(ownerDocument.createTextNode("\n"));
+    return;
+  }
+
+  appendSanitizedChildren(element, target, ownerDocument);
+}
+
+export function sanitizeEditorDocumentHTML(html: string): string {
+  if (typeof document === "undefined") return html;
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const clean = document.createElement("div");
+  appendSanitizedChildren(template.content, clean, document);
+  return clean.innerHTML;
+}
+
+export function deserializeEditorDocumentHTML(storedDocument: string): string {
+  if (!storedDocument) return "";
+  if (storedDocument.startsWith(EDITOR_RICH_TEXT_PREFIX)) {
+    return sanitizeEditorDocumentHTML(storedDocument.slice(EDITOR_RICH_TEXT_PREFIX.length));
+  }
+  return linkifyEditorPlainTextToHTML(storedDocument);
+}
+
+export function readEditorDocumentText(root: HTMLElement): string {
+  return root.textContent ?? "";
+}
+
+export function serializeEditorDocumentHTML(root: HTMLElement): string {
+  const html = sanitizeEditorDocumentHTML(root.innerHTML);
+  if (!readEditorDocumentText(root).trim() && !html.trim()) return "";
+  return `${EDITOR_RICH_TEXT_PREFIX}${html}`;
+}

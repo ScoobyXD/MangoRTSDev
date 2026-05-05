@@ -18,7 +18,7 @@ export type EditorDocumentIsolationState = {
 export function getEditorDocumentIsolationState(activeTab: EditorTabID): EditorDocumentIsolationState {
   const editorIsActive = activeTab === "editor" || activeTab === "format" || activeTab === "outline-styles";
 
-  // Keep the textarea mounted so draft text and autosave refs stay intact, but
+  // Keep the editable document mounted so draft text and autosave refs stay intact, but
   // make it invisible and unreachable when metadata/history own the frame.
   return {
     ariaHidden: !editorIsActive,

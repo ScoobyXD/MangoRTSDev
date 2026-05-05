@@ -145,6 +145,9 @@ button, input, textarea {
 .editor-document-scroll::-webkit-scrollbar-track {
   background: var(--editor-document-scroll-track);
   border-radius: 999px;
+}
+
+.editor-document-scroll::-webkit-scrollbar-track:vertical {
   margin: 0 0 24px;
 }
 

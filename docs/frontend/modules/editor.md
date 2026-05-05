@@ -10,7 +10,7 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 - Read the currently selected logic gate from linked Logic Gate Map local state.
 - Load selected node details and latest `Text box` projection rows.
 - Load selected node/logic-gate projection rows for latest text-box values.
-- Render a single native document editor surface that supports normal click-to-place caret, blinking insertion point, typing, spacing, tabs, and scroll overflow.
+- Render a single rich document editor surface that supports normal click-to-place caret, blinking insertion point, typing, spacing, tabs, links, per-selection font sizing, and scroll overflow.
 - Persist document edits back to backend node/logic-gate information APIs with a stable `information_id`.
 - Clear a document by deleting its latest projection row instead of writing blank history rows.
 - Surface node context from the same selected node (metadata summary, history timeline, and non-text info preview).
@@ -43,31 +43,30 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 - Blank/whitespace-only editor contents are never sent as information writes; old blank logic-gate text rows are ignored when choosing the document to display.
 - This keeps UI and headless API behavior equivalent: agents can create/edit logic-gate notes without needing the visual editor.
 
-## Document Editing Reliability Update (2026-05-03)
-- The body editor uses a styled native `textarea`, not raw `contentEditable`, so browser-native caret drawing, insertion point movement, text input, and scrollbars remain reliable inside frame wrappers.
-- While focus is inside the document textarea, `Ctrl/Cmd + Z`, `Ctrl/Cmd + Shift + Z`, and `Ctrl/Cmd + Y` use the editor's bounded local text undo/redo stack. Dashboard frame undo only runs when focus is outside editable text.
-- Editor undo stores compact changed ranges, not full document snapshots per step. It is capped per mounted editor and reset when a different node or logic-gate document is loaded.
-- Editor undo is UI-local only. It does not add rows, columns, or undo payloads to `node_information`, `logic_gate_information`, or projection tables.
+## Document Editing Reliability Update (2026-05-04)
+- The body editor uses a constrained rich `contentEditable` surface so selected text can carry inline formatting while the frame still owns scroll, autosave, and document context.
+- While focus is inside the rich document, browser-native rich text shortcuts such as `Ctrl/Cmd + B`, `Ctrl/Cmd + U`, undo, and redo stay inside the editor. Dashboard frame shortcuts only run when focus is outside editable text.
+- Rich documents are stored in `Text box` information with a `mango-editor-html-v1` marker. Existing plain text documents load as escaped text and pasted URLs are converted into safe blue underlined links.
 - Typing schedules a debounced save. Blur, node switch, and unmount flush the latest pending value so edits do not wait for a manual save action.
 - Saves are serialized per editor instance. If a save is in flight, the editor queues only the latest follow-up value, preserving user-perceived order without flooding the API.
-- The editor surface owns the full frame height. This prevents the textarea viewport from collapsing to a thin strip and lets mouse-wheel scrolling behave like a regular text editor.
-- Metadata and History are isolated from the document body. The textarea stays mounted to preserve draft/autosave state, but it is hidden, removed from tab order, and made non-interactive whenever those tabs own the frame.
+- The editor surface owns the full frame height. It keeps a 20-line bottom buffer, allows blank Enter-created lines to extend the scroll range, and uses horizontal overflow for long lines instead of wrapping at the right edge.
+- Metadata and History are isolated from the document body. The rich document stays mounted to preserve draft/autosave state, but it is hidden, removed from tab order, and made non-interactive whenever those tabs own the frame.
 - Switching away from the Editor tab flushes the same pending document save path used by blur. This keeps UI tabs and future headless API flows on the same persistence contract instead of adding tab-specific write behavior.
 - Selecting a new linked node or logic gate switches back to the Editor tab and focuses the document without forcing the document viewport to the bottom.
 - The editor remembers the last scroll offset per open document target in a small bounded in-memory cache. Returning to a node, logic gate, or the Editor tab restores that viewport; unseen documents start at the top.
-- The Format tab stays next to the Editor tab and keeps the document surface interactive. It exposes deterministic text commands for bold (`**text**`), underline (`<u>text</u>`), hyperlinks (`[text](url)`), and local document font size.
-- The Outline Styles header tab is a selectable dropdown with `Automatic Numbering` and `Indent Guides`. Picking a mode changes future input behavior only; it does not rewrite the existing document.
+- The Format tab stays next to the Editor tab as an icon-only font size control. A selection keeps its selection while repeated plus/minus clicks resize that text; a collapsed caret sets the font size for the next typed character.
+- The Outline Styles header tab is a themed popover with `Automatic Numbering` and `Indent Guides`, hover highlighting, and a check mark for the active mode. Picking a mode changes future input behavior only; it does not rewrite the existing document or hide the node title.
 - `Automatic Numbering` affects new Enter/Tab/Shift+Tab presses after outline markers. Enter continues the current marker family, Tab nests to the next marker family, and Shift+Tab returns to the parent flow. Marker families rotate by depth: decimal, alphabetic, roman, then repeat.
-- `Indent Guides` keeps text input plain and draws lightweight vertical indentation guides only for actual indented lines. It uses the same monospace document metrics as the textarea and places guides on VS Code-style indent boundaries instead of centered inside the space run.
+- `Indent Guides` keeps text input plain and draws lightweight vertical indentation guides only for actual indented lines. It uses the same monospace document metrics as the rich editor and places guides on VS Code-style indent boundaries instead of centered inside the space run.
 - In `Indent Guides`, Enter copies the current line indentation, Shift+Tab removes one indent level, and Backspace deletes a preceding tab-sized five-space run in one edit.
 - Clearing all text calls the projection delete API. This keeps reload behavior correct while preserving append-only nonblank history for audit and scale.
-- The same document APIs work for headless agents: agents can post latest document text with a stable `information_id`, read projections for sub-100ms hot paths, and delete a projection to clear the latest document value. The outline and inline-format helpers are pure frontend functions, so future agent-facing command APIs can reuse the same text-edit rules without needing a browser.
+- The same document APIs work for headless agents: agents can post latest document content with a stable `information_id`, read projections for sub-100ms hot paths, and delete a projection to clear the latest document value. Outline helpers remain pure frontend functions so future agent-facing command APIs can reuse the same text-edit rules without needing a browser.
 
 ## Approved Editor Feel
-- Keep the editor feeling like this: a simple, fast, native text document surface with natural typing, preserved document viewport, vertical mouse-wheel scrolling, and projection-backed autosave.
+- Keep the editor feeling like this: a simple, fast, rich document surface with natural typing, preserved document viewport, vertical and horizontal scrolling, and projection-backed autosave.
 - Outline behavior must stay input-only. Switching outline modes must never scan and transform the whole existing document.
 - Tab is intentionally five literal spaces. This is UI-only text input behavior; the backend remains the same headless API contract for users and agents.
-- Formatting is intentionally represented as plain text tokens until the backend owns a richer document model. This keeps writes append-only, API-friendly, and cheap to serve through projection hot paths.
+- Rich formatting is intentionally kept inline and sanitized at the document boundary. This keeps writes append-only, API-friendly, and cheap to serve through projection hot paths while allowing document-level formatting in the UI.
 
 ## Semantic vs layout persistence policy (2026-04-27)
 - Editor information values are persisted server-side and served through typed node/logic-gate projection rows for hot-path loads.
@@ -80,7 +79,7 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 - Node map selection sync now consumes semantic selection events (with revision metadata) rather than high-frequency full map-state event fanout.
 
 ## Editor persistence + reload correctness update (2026-04-26)
-- Text box blur-save now commits the current textarea value directly, preventing stale state snapshots that could previously persist blank/old text and then rehydrate incorrectly after node switches.
+- Text box blur-save now commits the current document value directly, preventing stale state snapshots that could previously persist blank/old text and then rehydrate incorrectly after node switches.
 - Blur-save now short-circuits when document text has not changed, and also skips creating a brand-new projection row for empty content. This prevents accidental blank projection/history rows when a node is selected but never edited.
 - Empty double-click box creation no longer writes an immediate blank persistence row; persistence starts once there is user-entered content or subsequent geometry/text save action.
 - Semantic event precedence update: when map/explorer selection events arrive, Editor applies selected-node IDs directly from event context instead of waiting for debounced map-state storage reads, preventing stale-node display during explorer-driven selection changes.
@@ -92,7 +91,7 @@ The Editor module is the linked document workspace for MangoOS. It gives the sel
 - Logic-gate text boxes follow the same contract with `logic_gate_information` history rows and `logic_gate_projection_table` latest rows.
 - This prevents textbox duplication after refresh caused by projection-key drift during rapid save/blur sequences.
 - The current Editor has one document surface per node or logic gate. `Text box` projections are canonicalized to one current row per entity; duplicate text-box projection IDs are collapsed by the backend read/write path and cleanup migration.
-- Multiple non-text projection rows can still exist for distinct future attachments/fields, but they must not be loaded into the single editor document textarea.
+- Multiple non-text projection rows can still exist for distinct future attachments/fields, but they must not be loaded into the single editor document surface.
 
 ## Blank-title inline-edit continuity fix (2026-04-29)
 - Editor now keeps the node-title header visible whenever a node is selected, even if the node title is currently blank.

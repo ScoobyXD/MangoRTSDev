@@ -63,6 +63,8 @@
     "../modules/editor/editorUndoHistory.test.ts",
     "../../../frontend/src/modules/editor/plainTextEditing.ts",
     "../modules/editor/plainTextEditing.test.ts",
+    "../../../frontend/src/modules/editor/richTextEditing.ts",
+    "../modules/editor/richTextEditing.test.ts",
     "../../../frontend/src/modules/editor/editorScroll.ts",
     "../modules/editor/editorScroll.test.ts",
     "../../../frontend/src/modules/editor/editorIndentGuides.ts",
