@@ -1,6 +1,6 @@
 // Node relationship graph cache/sync plane for Node Map + Company Explorer.
-import { connectAuthenticatedSse, SseConnection } from "../../auth/authenticatedSse";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
+import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import { NodeRecord, NodeRelationship, PersistedMapPosition } from "./shared";
 
 export type NodeRelationshipGraphSnapshot = {
@@ -17,7 +17,8 @@ type CacheEntry = {
   snapshot: NodeRelationshipGraphSnapshot;
   subscribers: Set<Subscriber>;
   loading: boolean;
-  source?: SseConnection;
+  unsubscribeStream?: () => void;
+  refreshAfterStreamReconnect?: boolean;
   etag?: string;
 };
 
@@ -405,9 +406,16 @@ export async function refreshNodeRelationshipGraphSnapshot(apiBase: string, comp
 function ensureStream(apiBase: string, companyID: string): void {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
-  if (entry.source) return;
-  entry.source = connectAuthenticatedSse(`${apiBase}/v1/workspace/stream?company_id=${encodeURIComponent(companyID)}`, {
+  if (entry.unsubscribeStream) return;
+  entry.unsubscribeStream = subscribeWorkspaceStream(apiBase, companyID, {
     onEvent(event) {
+      if (event.event === "ready") {
+        if (entry.refreshAfterStreamReconnect) {
+          entry.refreshAfterStreamReconnect = false;
+          void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+        }
+        return;
+      }
       if (event.event !== "workspace") return;
       const payload = event.data;
       if (payload.length === 0) {
@@ -426,7 +434,7 @@ function ensureStream(apiBase: string, companyID: string): void {
       }
     },
     onError() {
-      void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+      entry.refreshAfterStreamReconnect = true;
     },
   });
 }
@@ -445,8 +453,8 @@ export function subscribeNodeRelationshipGraph(apiBase: string, companyID: strin
     if (!current) return;
     current.subscribers.delete(subscriber);
     if (current.subscribers.size === 0) {
-      current.source?.close();
-      current.source = undefined;
+      current.unsubscribeStream?.();
+      current.unsubscribeStream = undefined;
     }
   };
 }

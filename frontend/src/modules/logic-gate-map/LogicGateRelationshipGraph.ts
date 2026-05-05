@@ -2,7 +2,7 @@ import type {
   CompanyExplorerFolder,
   CompanyExplorerFolderItem,
 } from "../folders/companyExplorerFolders";
-import { connectAuthenticatedSse, SseConnection } from "../../auth/authenticatedSse";
+import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import {
   LogicGateRecord,
   LogicGateRelationship,
@@ -29,7 +29,8 @@ type CacheEntry = {
   snapshot: LogicGateRelationshipGraphSnapshot;
   subscribers: Set<Subscriber>;
   loading: boolean;
-  source?: SseConnection;
+  unsubscribeStream?: () => void;
+  refreshAfterStreamReconnect?: boolean;
   etag?: string;
 };
 
@@ -394,9 +395,16 @@ export async function refreshLogicGateRelationshipGraphSnapshot(apiBase: string,
 function ensureStream(apiBase: string, companyID: string): void {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
-  if (entry.source) return;
-  entry.source = connectAuthenticatedSse(`${apiBase}/v1/workspace/stream?company_id=${encodeURIComponent(companyID)}`, {
+  if (entry.unsubscribeStream) return;
+  entry.unsubscribeStream = subscribeWorkspaceStream(apiBase, companyID, {
     onEvent(event) {
+      if (event.event === "ready") {
+        if (entry.refreshAfterStreamReconnect) {
+          entry.refreshAfterStreamReconnect = false;
+          void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+        }
+        return;
+      }
       if (event.event !== "workspace") return;
       const payload = event.data;
       if (payload.length === 0) {
@@ -416,7 +424,7 @@ function ensureStream(apiBase: string, companyID: string): void {
       }
     },
     onError() {
-      void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+      entry.refreshAfterStreamReconnect = true;
     },
   });
 }
@@ -434,8 +442,8 @@ export function subscribeLogicGateRelationshipGraph(apiBase: string, companyID: 
     if (!current) return;
     current.subscribers.delete(subscriber);
     if (current.subscribers.size === 0) {
-      current.source?.close();
-      current.source = undefined;
+      current.unsubscribeStream?.();
+      current.unsubscribeStream = undefined;
     }
   };
 }
