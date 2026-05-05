@@ -135,7 +135,9 @@ func withCORS(next http.Handler) http.Handler {
 		// Keep CORS allow-list aligned with hot-path API verbs used by frontend modules.
 		// Node title updates use PUT and require successful preflight to avoid browser fetch failures.
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,Cache-Control,If-None-Match,Last-Event-ID")
+		w.Header().Set("Access-Control-Expose-Headers", "ETag")
+		w.Header().Set("Access-Control-Max-Age", "600")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

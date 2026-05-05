@@ -122,7 +122,6 @@ export function connectAuthenticatedSse(url: string, options: ConnectAuthenticat
       const token = await getAccessToken();
       const headers = new Headers({
         Accept: "text/event-stream",
-        "Cache-Control": "no-cache",
       });
       if (token) headers.set("Authorization", `Bearer ${token}`);
       const response = await fetchImpl(url, {

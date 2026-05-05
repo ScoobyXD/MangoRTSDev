@@ -21,6 +21,8 @@
     "../../../frontend/src/auth/cognitoAuth.ts",
     "../../../frontend/src/auth/authenticatedSse.ts",
     "../auth/authenticatedSse.test.ts",
+    "../../../frontend/src/modules/workspace/workspaceStream.ts",
+    "../modules/workspace/workspaceStream.test.ts",
     "../../../frontend/src/hooks/keyboardShortcutRouting.ts",
     "../hooks/keyboardShortcutRouting.test.ts",
     "../../../frontend/src/app/frameLinking.ts",

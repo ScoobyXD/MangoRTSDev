@@ -31,6 +31,7 @@ test("joins multi-line SSE data fields", () => {
 test("fetch SSE sends bearer token and reconnects after a closed stream", async () => {
   const events: SseEvent[] = [];
   const authorizationHeaders: Array<string | null> = [];
+  const cacheControlHeaders: Array<string | null> = [];
   let fetchCalls = 0;
   let connection: ReturnType<typeof connectAuthenticatedSse> | null = null;
 
@@ -39,7 +40,9 @@ test("fetch SSE sends bearer token and reconnects after a closed stream", async 
       getAccessToken: async () => `token-${fetchCalls + 1}`,
       fetchImpl: async (_input, init) => {
         fetchCalls += 1;
-        authorizationHeaders.push(new Headers(init?.headers).get("Authorization"));
+        const headers = new Headers(init?.headers);
+        authorizationHeaders.push(headers.get("Authorization"));
+        cacheControlHeaders.push(headers.get("Cache-Control"));
         const data = fetchCalls === 1 ? "one" : "two";
         return new Response(streamFrom([`event: workspace\ndata: ${data}\n\n`]), {
           status: 200,
@@ -67,6 +70,7 @@ test("fetch SSE sends bearer token and reconnects after a closed stream", async 
 
   assert.equal(fetchCalls, 2);
   assert.deepEqual(authorizationHeaders, ["Bearer token-1", "Bearer token-2"]);
+  assert.deepEqual(cacheControlHeaders, [null, null]);
   assert.deepEqual(events.map((event) => event.data), ["one", "two"]);
 });
 
