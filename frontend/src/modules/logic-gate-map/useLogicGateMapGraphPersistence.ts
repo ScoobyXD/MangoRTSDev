@@ -2,6 +2,8 @@ import type React from "react";
 import { useCallback, useEffect } from "react";
 import {
   NODE_H,
+  NODE_MAP_MAX_ZOOM,
+  NODE_MAP_MIN_ZOOM,
   NODE_W,
   type NodeMapState,
   type NodePosition,
@@ -92,7 +94,7 @@ export function useLogicGateMapGraphPersistence({
   useEffect(() => {
     const cached = SESSION_NODE_MAP_STATE.get(mapStateKey) ?? SESSION_NODE_MAP_STATE.get(fallbackMapStateKey);
     if (cached) {
-      setZoom(clamp(cached.zoom, 0.45, 2.7));
+      setZoom(clamp(cached.zoom, NODE_MAP_MIN_ZOOM, NODE_MAP_MAX_ZOOM));
       setPan(cached.pan);
       setPanInitialized(true);
       restoredSelectionRef.current = cached.selectedNodeID;
@@ -125,7 +127,7 @@ export function useLogicGateMapGraphPersistence({
         relationshipRoleColors?: { input?: string; output?: string };
       };
       if (typeof parsed.zoom === "number" && Number.isFinite(parsed.zoom)) {
-        setZoom(clamp(parsed.zoom, 0.45, 2.7));
+        setZoom(clamp(parsed.zoom, NODE_MAP_MIN_ZOOM, NODE_MAP_MAX_ZOOM));
       }
       if (parsed.pan && typeof parsed.pan.x === "number" && typeof parsed.pan.y === "number") {
         setPan({ x: parsed.pan.x, y: parsed.pan.y });

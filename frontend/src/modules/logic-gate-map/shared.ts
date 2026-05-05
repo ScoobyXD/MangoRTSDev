@@ -2,6 +2,8 @@ import type { NodeDirection, NodePosition, PersistedMapPosition, RelationshipAnc
 import {
   INFO_TYPES,
   MINI_GRID,
+  NODE_MAP_MAX_ZOOM,
+  NODE_MAP_MIN_ZOOM,
   NODE_DOC_MIN_H,
   NODE_DOC_MIN_W,
   NODE_H,
@@ -17,6 +19,7 @@ import {
   persistedMapPositionsToNodePositions,
   panelResizeHandles,
   reconcileNodeMapPositions,
+  resolveOpenNodeMapPosition,
   shouldIgnoreCanvasKeydownTarget,
   snapToGrid,
   trimOrEmpty,
@@ -25,6 +28,8 @@ import {
 export {
   INFO_TYPES,
   MINI_GRID,
+  NODE_MAP_MAX_ZOOM,
+  NODE_MAP_MIN_ZOOM,
   NODE_DOC_MIN_H,
   NODE_DOC_MIN_W,
   NODE_H,
@@ -40,6 +45,7 @@ export {
   persistedMapPositionsToNodePositions,
   panelResizeHandles,
   reconcileNodeMapPositions,
+  resolveOpenNodeMapPosition,
   shouldIgnoreCanvasKeydownTarget,
   snapToGrid,
   trimOrEmpty,

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { changedPersistedMapPositions, persistedMapPositionsToNodePositions, reconcileNodeMapPositions } from "../../../../frontend/src/modules/node-map/shared.js";
+import { changedPersistedMapPositions, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition } from "../../../../frontend/src/modules/node-map/shared.js";
 
 test("reconcileNodeMapPositions preserves hidden node positions across scoped folder views", () => {
   const previous = {
@@ -51,6 +51,37 @@ test("reconcileNodeMapPositions places newly created map items near the visible 
 
   assert.deepEqual(next.existing, { x: 240, y: 360 });
   assert.deepEqual(next.new, { x: 3024, y: 2112 });
+});
+
+test("resolveOpenNodeMapPosition offsets a new item from an occupied snapped position", () => {
+  const next = resolveOpenNodeMapPosition({
+    desired: { x: 240, y: 360 },
+    occupied: {
+      existing: { x: 240, y: 360 },
+    },
+    worldWidth: 6400,
+    worldHeight: 4400,
+    nodeWidth: 148,
+    nodeHeight: 96,
+  });
+
+  assert.notDeepEqual(next, { x: 240, y: 360 });
+});
+
+test("reconcileNodeMapPositions avoids stacking missing nodes on an occupied viewport insertion point", () => {
+  const next = reconcileNodeMapPositions({
+    previous: { existing: { x: 3024, y: 2112 } },
+    nodes: [{ node_id: "existing" }, { node_id: "new" }],
+    canvasWidth: 1000,
+    worldWidth: 6400,
+    worldHeight: 4400,
+    nodeWidth: 148,
+    nodeHeight: 96,
+    defaultPosition: { x: 3024, y: 2112 },
+  });
+
+  assert.deepEqual(next.existing, { x: 3024, y: 2112 });
+  assert.notDeepEqual(next.new, { x: 3024, y: 2112 });
 });
 
 test("reconcileNodeMapPositions uses stable grid when many nodes are missing after remount", () => {

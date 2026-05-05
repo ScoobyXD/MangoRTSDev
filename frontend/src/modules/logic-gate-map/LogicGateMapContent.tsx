@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LOGIC_GATE_MAP_STATE_KEY_PREFIX, LogicGateRecord, LogicGateRelationship, MINI_GRID, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, snapToGrid, toLogicGateCanvasRecord, toLogicGateCanvasRelationship, trimOrEmpty } from "./shared";
+import { INFO_TYPES, LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LOGIC_GATE_MAP_STATE_KEY_PREFIX, LogicGateRecord, LogicGateRelationship, MINI_GRID, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, toLogicGateCanvasRecord, toLogicGateCanvasRelationship, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "./LogicGateRelationshipGraph";
@@ -731,12 +731,26 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     const value = trimOrEmpty(title);
     if (!value) return null;
     setError("");
+    const desiredPosition = worldPos
+      ? { x: worldPos.x - NODE_W / 2, y: worldPos.y - NODE_H / 2 }
+      : visibleInsertionPosition;
     try {
       const created = await requestJSON<LogicGateRecord>("/v1/logic-gates", {
         method: "POST",
         body: JSON.stringify({ company_id: companyID, header: value }),
       });
       const node = toLogicGateCanvasRecord(created);
+      setNodePositions((previous) => ({
+        ...previous,
+        [node.node_id]: resolveOpenNodeMapPosition({
+          desired: desiredPosition,
+          occupied: previous,
+          worldWidth: WORLD_W,
+          worldHeight: WORLD_H,
+          nodeWidth: NODE_W,
+          nodeHeight: NODE_H,
+        }),
+      }));
       // Hot-path rule: avoid full snapshot refetch on create.
       // Apply optimistic logic-gate insertion through the shared graph cache so subscribers
       // get immediate convergence without issuing a snapshot GET.
@@ -752,15 +766,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       }
       setSelectedNodeID(node.node_id);
       setSelectedNodeIDs(new Set([node.node_id]));
-      if (worldPos) {
-        setNodePositions((previous) => ({
-          ...previous,
-          [node.node_id]: {
-            x: clamp(snapToGrid(worldPos.x - NODE_W / 2), 0, WORLD_W - NODE_W),
-            y: clamp(snapToGrid(worldPos.y - NODE_H / 2), 0, WORLD_H - NODE_H),
-          },
-        }));
-      }
       return node;
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_logic_gate");
@@ -773,7 +778,21 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     const sourceNode = nodes.find((node) => node.node_id === sourceNodeID);
     if (!sourceNode) return;
 
-    const node = await createNode("new logic gate");
+    const origin = nodePositions[sourceNodeID] ?? { x: 120, y: 120 };
+    const linkedNodeClearance = MINI_GRID * 4;
+    const horizontalGap = NODE_W + linkedNodeClearance;
+    const verticalGap = NODE_H + linkedNodeClearance;
+    const shift =
+      direction === "left" ? { x: -horizontalGap, y: 0 }
+        : direction === "right" ? { x: horizontalGap, y: 0 }
+          : direction === "top" ? { x: 0, y: -verticalGap }
+            : { x: 0, y: verticalGap };
+    const linkedPosition = {
+      x: origin.x + shift.x,
+      y: origin.y + shift.y,
+    };
+
+    const node = await createNode("new logic gate", { x: linkedPosition.x + NODE_W / 2, y: linkedPosition.y + NODE_H / 2 });
     if (!node) return;
 
     try {
@@ -789,24 +808,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         }),
       });
       const relationship = toLogicGateCanvasRelationship(createdRelationship);
-
-      const origin = nodePositions[sourceNodeID] ?? { x: 120, y: 120 };
-      const linkedNodeClearance = MINI_GRID * 4;
-      const horizontalGap = NODE_W + linkedNodeClearance;
-      const verticalGap = NODE_H + linkedNodeClearance;
-      const shift =
-        direction === "left" ? { x: -horizontalGap, y: 0 }
-          : direction === "right" ? { x: horizontalGap, y: 0 }
-            : direction === "top" ? { x: 0, y: -verticalGap }
-              : { x: 0, y: verticalGap };
-
-      setNodePositions((previous) => ({
-        ...previous,
-        [node.node_id]: {
-          x: clamp(snapToGrid(origin.x + shift.x), 0, WORLD_W - NODE_W),
-          y: clamp(snapToGrid(origin.y + shift.y), 0, WORLD_H - NODE_H),
-        },
-      }));
 
       setRelationshipAnchors((previous) => ({
         ...previous,
