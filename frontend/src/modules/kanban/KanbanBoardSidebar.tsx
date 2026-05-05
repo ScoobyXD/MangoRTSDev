@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type React from "react";
 import {
   KANBAN_MODULE_TOP_CLEARANCE_PX,
@@ -30,6 +31,7 @@ type KanbanBoardSidebarProps = {
   onSetBoardSearchQuery: React.Dispatch<React.SetStateAction<string>>;
   onSetEditingBoardTitle: React.Dispatch<React.SetStateAction<boolean>>;
   onToggleAllBoards: () => void;
+  onCloseAllBoards: () => void;
   onCommitBoardTitle: (title: string) => void;
   onRefreshBoards: () => void;
   onSaveCurrentBoardView: () => void;
@@ -57,14 +59,39 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
   onSetBoardSearchQuery,
   onSetEditingBoardTitle,
   onToggleAllBoards,
+  onCloseAllBoards,
   onCommitBoardTitle,
   onRefreshBoards,
-  onSaveCurrentBoardView,
-  onCreateNewBoardView,
+  onSaveCurrentBoardView: _onSaveCurrentBoardView,
+  onCreateNewBoardView: _onCreateNewBoardView,
   onSelectBoard,
-}) => (
+}) => {
+  const headerRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!allBoardsOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (headerRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
+      onCloseAllBoards();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCloseAllBoards();
+    };
+    const timer = window.setTimeout(() => window.addEventListener("mousedown", onPointerDown, true), 0);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("mousedown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [allBoardsOpen, onCloseAllBoards]);
+
+  return (
   <>
-    <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gridTemplateColumns: "minmax(120px, 240px) minmax(140px, 1fr) auto", alignItems: "center", gap: 8, paddingLeft: 106, zIndex: 3, pointerEvents: "auto" }}>
+    <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 4, left: 12, right: 12, display: "grid", gridTemplateColumns: "minmax(150px, 270px) minmax(140px, 1fr) auto", alignItems: "center", gap: 8, paddingLeft: 128, zIndex: 6, pointerEvents: "auto" }}>
       {editingBoardTitle ? (
         <input
           value={boardTitleDraft}
@@ -121,24 +148,13 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
       </button>
     </div>
     {allBoardsOpen && (
-      <section style={{ position: "absolute", top: KANBAN_MODULE_TOP_CLEARANCE_PX + 8, left: 114, width: "min(430px, calc(100% - 126px))", maxHeight: "calc(100% - 58px)", display: "grid", gridTemplateRows: "auto auto minmax(0, 1fr)", border: `1px solid ${line}`, background: isDark ? "rgba(17,22,27,0.98)" : "rgba(255,255,255,0.98)", boxShadow: isDark ? "0 14px 30px rgba(0,0,0,0.36)" : "0 14px 30px rgba(16,24,40,0.16)", zIndex: 4 }}>
-        <div style={{ padding: "9px 10px", borderBottom: `1px solid ${line}`, fontSize: 10, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>
-          Saved Kanban Boards
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 8, borderBottom: `1px solid ${line}` }}>
-          <button type="button" onClick={onSaveCurrentBoardView} style={{ border: `1px solid ${accent}`, background: "transparent", color: text, cursor: "pointer", fontSize: 11, fontWeight: 800, padding: "6px 8px" }}>
-            Save current
-          </button>
-          <button type="button" onClick={onCreateNewBoardView} style={{ border: `1px solid ${accent}`, background: "transparent", color: text, cursor: "pointer", fontSize: 11, fontWeight: 800, padding: "6px 8px" }}>
-            New board
-          </button>
-        </div>
-        <div className="company-explorer-scroll" style={{ overflowY: "auto", overflowX: "hidden", minHeight: 0, ["--company-explorer-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--company-explorer-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)" }}>
+      <section ref={popoverRef} data-frame-interactive="true" style={{ position: "absolute", top: KANBAN_MODULE_TOP_CLEARANCE_PX + 2, right: 12, width: "min(360px, calc(100% - 24px))", maxHeight: "min(360px, calc(100% - 52px))", display: "grid", gridTemplateRows: "minmax(0, 1fr)", border: isDark ? "1px solid rgba(255,255,255,0.16)" : "1px solid #e0e0e0", borderRadius: 10, background: isDark ? "rgba(17,22,27,0.98)" : "#ffffff", boxShadow: isDark ? "0 12px 28px rgba(0,0,0,0.42)" : "0 6px 24px rgba(0,0,0,0.12)", padding: "4px 0", zIndex: 8, overflow: "hidden" }}>
+        <div className="company-explorer-scroll" style={{ overflowY: "auto", overflowX: "hidden", minHeight: 0, ["--company-explorer-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--company-explorer-scroll-track" as string]: "transparent" }}>
           {boardsLoading && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>Loading boards...</div>}
           {!boardsLoading && filteredBoardRowsLength === 0 && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>No saved boards</div>}
           {filteredBoardGroups.map((group) => (
             <div key={group.folderLabel}>
-              <div style={{ padding: "7px 10px 4px", color: subtext, fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              <div style={{ padding: "8px 12px 4px", color: subtext, fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
                 {group.folderLabel}
               </div>
               {group.items.map((board) => {
@@ -149,12 +165,12 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
                     type="button"
                     title={board.board_id}
                     onClick={() => onSelectBoard(board.board_id)}
-                    style={{ width: "100%", display: "grid", gridTemplateColumns: "30px minmax(0, 1fr)", alignItems: "center", gap: 7, minHeight: 32, padding: "5px 9px 5px 18px", border: "none", borderBottom: `1px solid ${isDark ? "rgba(255,255,255,0.08)" : "rgba(3,25,30,0.06)"}`, background: selected ? (isDark ? "rgba(0,233,255,0.2)" : "rgba(0, 233, 255, 0.28)") : "transparent", color: text, cursor: "pointer", textAlign: "left" }}
+                    style={{ width: "100%", display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, minHeight: 30, padding: "5px 12px 5px 24px", border: "none", background: selected ? (isDark ? "rgba(0,233,255,0.2)" : "rgba(0, 233, 255, 0.22)") : "transparent", color: text, cursor: "pointer", textAlign: "left" }}
                   >
-                    <span aria-hidden="true" style={{ width: 14, height: 14, border: `1px solid ${accent}`, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1, padding: 2 }}>
-                      <span style={{ background: accent, opacity: 0.8 }} />
-                      <span style={{ background: subtext, opacity: 0.55 }} />
-                      <span style={{ background: accent, opacity: 0.45 }} />
+                    <span aria-hidden="true" style={{ width: 14, height: 14, border: "1px solid #050505", background: "#050505", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1, padding: 2 }}>
+                      <span style={{ background: "#ff1744" }} />
+                      <span style={{ background: "#ffea00" }} />
+                      <span style={{ background: "rgb(0, 233, 255)" }} />
                     </span>
                     <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 800 : 700 }}>
                       {getKanbanBoardDisplayTitle(board)}
@@ -168,4 +184,5 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
       </section>
     )}
   </>
-);
+  );
+};

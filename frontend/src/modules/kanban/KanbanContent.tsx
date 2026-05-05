@@ -769,6 +769,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           setAllBoardsOpen((open) => !open);
           void refreshBoards();
         }}
+        onCloseAllBoards={() => setAllBoardsOpen(false)}
         onCommitBoardTitle={(title) => void commitBoardTitle(title)}
         onRefreshBoards={() => void refreshBoards()}
         onSaveCurrentBoardView={() => void saveCurrentBoardView()}
@@ -884,17 +885,6 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       )}
       {contextCard && cardContextMenu && (
         <FrameRightClickMenu x={cardContextMenu.x} y={cardContextMenu.y} onClose={() => setCardContextMenu(null)}>
-          <button
-            type="button"
-            style={contextMenuButtonStyle}
-            onClick={() => {
-              publishKanbanSelectionToLinkedFrames(companyID, frameID, contextCard.node_id, contextCard.node_title, [contextCard.node_id]);
-              setCardContextMenu(null);
-            }}
-            {...contextMenuHoverHandlers}
-          >
-            Find on company explorer
-          </button>
           <button
             type="button"
             style={{ ...contextMenuButtonStyle, color: "#c62828" }}

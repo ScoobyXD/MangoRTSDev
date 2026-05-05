@@ -21,11 +21,11 @@ export const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"] }> = ({ 
   if (kind === "kanban") {
     return (
       <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
-        <rect x="1.6" y="2.2" width="12.8" height="11.6" rx="1.1" fill="#fffaf0" stroke="#7a5b12" strokeWidth="1.15" />
-        <path d="M5.6 2.2v11.6M10.4 2.2v11.6" stroke="#7a5b12" strokeWidth="1" />
-        <rect x="2.8" y="4" width="1.8" height="3.1" fill="#f2c94c" />
-        <rect x="6.8" y="4" width="2" height="5.1" fill="#2f7d62" />
-        <rect x="11.2" y="4" width="1.9" height="2.4" fill="#245c9f" />
+        <rect x="1.45" y="2.1" width="13.1" height="11.8" rx="1.15" fill="#050505" stroke="#050505" strokeWidth="1.1" />
+        <path d="M5.6 2.75v10.5M10.4 2.75v10.5" stroke="#ffffff" strokeOpacity="0.26" strokeWidth="0.8" />
+        <rect x="2.65" y="3.75" width="2" height="8.45" rx="0.35" fill="#ff1744" />
+        <rect x="7" y="3.75" width="2" height="8.45" rx="0.35" fill="#ffea00" />
+        <rect x="11.35" y="3.75" width="2" height="8.45" rx="0.35" fill="rgb(0, 233, 255)" />
       </svg>
     );
   }

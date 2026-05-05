@@ -5,6 +5,7 @@ import {
   KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
   getColumnHeight,
   getColumnWidth,
+  normalizeKanbanColumnItemColor,
   type KanbanCard,
   type KanbanCardDropPlacement,
   type KanbanColumn,
@@ -173,8 +174,9 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
         </button>
       </div>
       <div
+        className="kanban-column-scroll"
         onMouseDown={onBlankMouseDown}
-        style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 8, padding: 8 }}
+        style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 8, padding: 8, ["--kanban-column-scroll-accent" as string]: normalizeKanbanColumnItemColor(column.item_color), ["--kanban-column-scroll-track" as string]: "transparent" }}
       >
         {renderedCards}
       </div>

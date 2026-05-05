@@ -94,6 +94,36 @@ button, input, textarea {
   background: transparent;
 }
 
+/* Individual Kanban columns use slimmer color-matched scrollbars for card lanes. */
+.kanban-column-scroll {
+  --kanban-column-scroll-accent: #2f7d62;
+  --kanban-column-scroll-track: transparent;
+  scrollbar-width: thin;
+  scrollbar-color: var(--kanban-column-scroll-accent) transparent;
+}
+
+.kanban-column-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.kanban-column-scroll::-webkit-scrollbar-track {
+  background: var(--kanban-column-scroll-track);
+  border-radius: 999px;
+}
+
+.kanban-column-scroll::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  background: var(--kanban-column-scroll-accent);
+  background-clip: content-box;
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+
+.kanban-column-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* Hover is visual-only; real selection stays click/key/API driven. */
 .company-explorer-row:hover {
   background: var(--company-explorer-hover-bg, rgba(0, 233, 255, 0.13));
