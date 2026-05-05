@@ -1,4 +1,5 @@
 import type React from "react";
+import { KanbanBoardIcon } from "../kanban/KanbanBoardIcon";
 import type { ExplorerTreeNode } from "./companyExplorerTypes";
 
 export const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"] }> = ({ kind }) => {
@@ -19,15 +20,7 @@ export const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"] }> = ({ 
     );
   }
   if (kind === "kanban") {
-    return (
-      <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
-        <rect x="1.45" y="2.1" width="13.1" height="11.8" rx="1.15" fill="#ffffff" stroke="#050505" strokeWidth="1.1" />
-        <path d="M5.6 2.75v10.5M10.4 2.75v10.5" stroke="#050505" strokeOpacity="0.36" strokeWidth="0.8" />
-        <rect x="2.65" y="3.75" width="2" height="8.45" rx="0.35" fill="#ff1744" />
-        <rect x="7" y="3.75" width="2" height="8.45" rx="0.35" fill="#ffea00" />
-        <rect x="11.35" y="3.75" width="2" height="8.45" rx="0.35" fill="rgb(0, 233, 255)" />
-      </svg>
-    );
+    return <KanbanBoardIcon />;
   }
   return (
     <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>

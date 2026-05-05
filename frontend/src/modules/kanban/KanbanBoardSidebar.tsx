@@ -5,6 +5,7 @@ import {
   getKanbanBoardDisplayTitle,
   type KanbanBoard,
 } from "./shared";
+import { KanbanBoardIcon } from "./KanbanBoardIcon";
 
 type KanbanBoardGroup = {
   folderLabel: string;
@@ -168,11 +169,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
                     onClick={() => onSelectBoard(board.board_id)}
                     style={{ width: "100%", display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, minHeight: 30, padding: "5px 12px 5px 24px", border: "none", background: selected ? (isDark ? "rgba(0,233,255,0.2)" : "rgba(0, 233, 255, 0.22)") : "transparent", color: text, cursor: "pointer", textAlign: "left" }}
                   >
-                    <span aria-hidden="true" style={{ width: 14, height: 14, border: "1px solid #050505", background: "#ffffff", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1, padding: 2 }}>
-                      <span style={{ background: "#ff1744" }} />
-                      <span style={{ background: "#ffea00" }} />
-                      <span style={{ background: "rgb(0, 233, 255)" }} />
-                    </span>
+                    <KanbanBoardIcon />
                     <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 800 : 700 }}>
                       {getKanbanBoardDisplayTitle(board)}
                     </span>

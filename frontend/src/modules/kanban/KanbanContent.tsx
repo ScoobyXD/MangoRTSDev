@@ -5,6 +5,7 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folder
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
+import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import { createKanbanBoard, listKanbanBoards, listKanbanCards, listKanbanColumns, updateKanbanBoard } from "./kanbanApi";
 import {
   addExplorerNodesToKanbanColumnCommand,
@@ -43,6 +44,7 @@ import {
   sortColumns,
   sortKanbanBoards,
   type KanbanBoard,
+  type KanbanBoardsUpdatedDetail,
   type KanbanCard,
   type KanbanCardDropPlacement,
   type KanbanColumn,
@@ -51,6 +53,12 @@ import {
 } from "./shared";
 
 type HighlightedEntity = { nodeID: string } | null;
+
+type WorkspaceStreamEnvelope = {
+  company_id: string;
+  type: string;
+  data?: Record<string, unknown>;
+};
 
 type ColumnResizeState = {
   axis: "width" | "height";
@@ -123,6 +131,29 @@ function publishKanbanSelectionToLinkedFrames(companyID: string, sourceFrameID: 
   }
 }
 
+function publishKanbanBoardSelectionToLinkedFrames(companyID: string, sourceFrameID: string, boardID: string, boardTitle: string): void {
+  if (!boardID) return;
+  try {
+    const edges = readFrameLinksFromStorage();
+    const registry = readFrameRegistryFromStorage();
+    const targetFrameIDs = resolveConnectedFrameTargets({ sourceFrameID, edges, registry });
+    publishLiveSelection({
+      companyID,
+      entityKind: "kanban",
+      entityID: boardID,
+      label: boardTitle,
+      sourceFrameID,
+      sourceModule: "kanban",
+      targetFrameIDs,
+      selectedTreeID: `kanban-${boardID}`,
+      selectedTreeIDs: [`kanban-${boardID}`],
+      selectedEntityIDs: [boardID],
+    });
+  } catch {
+    // Board selection should not depend on link graph storage.
+  }
+}
+
 function dataTransferIncludes(event: React.DragEvent, mime: string): boolean {
   return Array.from(event.dataTransfer.types).includes(mime);
 }
@@ -171,6 +202,11 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [deleteColumnConfirmation, setDeleteColumnConfirmation] = useState<{ columnID: string; title: string } | null>(null);
   const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
   const resizeRef = useRef<ColumnResizeState | null>(null);
+  const activeBoardIDRef = useRef(activeBoardID);
+  const frameBoardIDRef = useRef(frameBoardID);
+  const boardsRef = useRef<KanbanBoard[]>([]);
+  const boardRefreshRequestRef = useRef(0);
+  const lastLocalBoardSelectionChangedAtRef = useRef(0);
 
   const isDark = theme === "dark";
   const surface = isDark ? "#11161b" : "#ffffff";
@@ -185,6 +221,18 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   useEffect(() => {
     setActiveBoardID(frameBoardID);
   }, [frameBoardID]);
+
+  useEffect(() => {
+    activeBoardIDRef.current = activeBoardID;
+  }, [activeBoardID]);
+
+  useEffect(() => {
+    frameBoardIDRef.current = frameBoardID;
+  }, [frameBoardID]);
+
+  useEffect(() => {
+    boardsRef.current = boards;
+  }, [boards]);
 
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
   const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, normalizeKanbanColumnItemColor(column.item_color)])), [orderedColumns]);
@@ -241,6 +289,29 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     return Array.from(groups, ([folderLabel, items]) => ({ folderLabel, items }));
   }, [boardFolderLabelByID, filteredBoardRows]);
 
+  const upsertBoardInList = useCallback((board: KanbanBoard) => {
+    const next = sortKanbanBoards([
+      ...boardsRef.current.filter((item) => item.board_id !== board.board_id),
+      board,
+    ]);
+    boardsRef.current = next;
+    setBoards(next);
+  }, []);
+
+  const removeBoardFromList = useCallback((deletedBoardID: string) => {
+    if (!deletedBoardID) return;
+    const next = sortKanbanBoards(boardsRef.current.filter((board) => board.board_id !== deletedBoardID));
+    boardsRef.current = next;
+    setBoards(next);
+    setExplorerFolderItems((previous) => previous.filter((item) => item.item_type !== "kanban" || item.item_id !== deletedBoardID));
+    if (activeBoardIDRef.current === deletedBoardID) {
+      setSelectedCardIDs(new Set());
+      setSelectionAnchorCardID("");
+      setHighlightedEntity(null);
+      setActiveBoardID(next[0]?.board_id ?? frameBoardIDRef.current);
+    }
+  }, []);
+
   const refreshBoards = useCallback(async () => {
     setBoardsLoading(true);
     try {
@@ -249,7 +320,9 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         fetch(`${apiBase}/v1/company-explorer/folders?company_id=${encodeURIComponent(companyID)}`),
         fetch(`${apiBase}/v1/company-explorer/folder-items?company_id=${encodeURIComponent(companyID)}&item_type=kanban`),
       ]);
-      setBoards(sortKanbanBoards(nextBoards));
+      const sortedBoards = sortKanbanBoards(nextBoards);
+      boardsRef.current = sortedBoards;
+      setBoards(sortedBoards);
       if (folderPayload.ok) {
         const parsed = await folderPayload.json() as { folders?: CompanyExplorerFolder[] };
         setExplorerFolders(parsed.folders ?? []);
@@ -270,28 +343,30 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     try {
       const title = activeBoard?.title || KANBAN_DEFAULT_BOARD_TITLE;
       const saved = await createKanbanBoard(apiBase, companyID, title, boardID);
-      setBoards((previous) => sortKanbanBoards([
-        ...previous.filter((board) => board.board_id !== saved.board_id),
-        saved,
-      ]));
+      upsertBoardInList(saved);
+      window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, board: saved } }));
     } catch {
       setError("Kanban board save failed");
     }
-  }, [activeBoard?.title, apiBase, boardID, companyID]);
+  }, [activeBoard?.title, apiBase, boardID, companyID, upsertBoardInList]);
 
   const createNewBoardView = useCallback(async () => {
     setError("");
     try {
       const created = await createKanbanBoard(apiBase, companyID, "New Kanban board");
-      setBoards((previous) => sortKanbanBoards([...previous, created]));
+      upsertBoardInList(created);
       setSelectedCardIDs(new Set());
       setSelectionAnchorCardID("");
+      setHighlightedEntity(null);
+      lastLocalBoardSelectionChangedAtRef.current = Date.now();
       setActiveBoardID(created.board_id);
       setAllBoardsOpen(false);
+      publishKanbanBoardSelectionToLinkedFrames(companyID, frameID, created.board_id, getKanbanBoardDisplayTitle(created));
+      window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, board: created } }));
     } catch {
       setError("Kanban board create failed");
     }
-  }, [apiBase, companyID]);
+  }, [apiBase, companyID, frameID, upsertBoardInList]);
 
   const commitBoardTitle = useCallback(async (title: string) => {
     const cleanTitle = title.trim();
@@ -299,24 +374,23 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setEditingBoardTitle(false);
       return;
     }
-    setBoards((previous) => previous.map((board) => (board.board_id === boardID ? { ...board, title: cleanTitle } : board)));
+    const optimisticBoards = boardsRef.current.map((board) => (board.board_id === boardID ? { ...board, title: cleanTitle } : board));
+    boardsRef.current = optimisticBoards;
+    setBoards(optimisticBoards);
     setError("");
     try {
       const saved = activeBoard
         ? await updateKanbanBoard(apiBase, companyID, boardID, cleanTitle)
         : await createKanbanBoard(apiBase, companyID, cleanTitle, boardID);
-      setBoards((previous) => sortKanbanBoards([
-        ...previous.filter((board) => board.board_id !== saved.board_id),
-        saved,
-      ]));
-      window.dispatchEvent(new CustomEvent(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, board: saved } }));
+      upsertBoardInList(saved);
+      window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, board: saved } }));
       setEditingBoardTitle(false);
     } catch {
       setError("Kanban board rename failed");
       setEditingBoardTitle(false);
       void refreshBoards();
     }
-  }, [activeBoard, apiBase, boardID, companyID, refreshBoards]);
+  }, [activeBoard, apiBase, boardID, companyID, refreshBoards, upsertBoardInList]);
 
   const clearCardSelection = useCallback(() => {
     setSelectedCardIDs(new Set());
@@ -324,21 +398,26 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, []);
 
   const refreshBoard = useCallback(async () => {
+    const requestID = boardRefreshRequestRef.current + 1;
+    boardRefreshRequestRef.current = requestID;
+    const requestedBoardID = boardID;
     setLoading(true);
     setError("");
     try {
       const [nextColumns, nextCards] = await Promise.all([
-        listKanbanColumns(apiBase, companyID, boardID),
+        listKanbanColumns(apiBase, companyID, requestedBoardID),
         // The UI renders a bounded first window. Headless agents should page by
         // column through the cards API instead of loading company-scale boards.
-        listKanbanCards(apiBase, companyID, boardID, "", 500),
+        listKanbanCards(apiBase, companyID, requestedBoardID, "", 500),
       ]);
+      if (boardRefreshRequestRef.current !== requestID || activeBoardIDRef.current !== requestedBoardID) return;
       setColumns(sortColumns(nextColumns));
       setCards(nextCards);
     } catch {
+      if (boardRefreshRequestRef.current !== requestID) return;
       setError("Kanban board API unavailable");
     } finally {
-      setLoading(false);
+      if (boardRefreshRequestRef.current === requestID) setLoading(false);
     }
   }, [apiBase, boardID, companyID]);
 
@@ -349,6 +428,65 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   useEffect(() => {
     refreshBoards();
   }, [refreshBoards]);
+
+  useEffect(() => {
+    const onKanbanBoardsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<KanbanBoardsUpdatedDetail>).detail;
+      if (detail?.companyID && detail.companyID !== companyID) return;
+      if (detail?.deletedBoardID) {
+        removeBoardFromList(detail.deletedBoardID);
+        return;
+      }
+      if (detail?.board) {
+        upsertBoardInList(detail.board);
+        return;
+      }
+      void refreshBoards();
+    };
+    window.addEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
+    return () => window.removeEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
+  }, [companyID, refreshBoards, removeBoardFromList, upsertBoardInList]);
+
+  useEffect(() => {
+    return subscribeWorkspaceStream(apiBase, companyID, {
+      onEvent(event) {
+        if (event.event !== "workspace" || event.data.length === 0) return;
+        try {
+          const envelope = JSON.parse(event.data) as WorkspaceStreamEnvelope;
+          if (envelope.company_id !== companyID) return;
+          const data = envelope.data ?? {};
+          if (envelope.type === "kanban_board_saved" || envelope.type === "kanban_board_updated") {
+            const board = data.board as KanbanBoard | undefined;
+            if (!board || typeof board.board_id !== "string") return;
+            upsertBoardInList(board);
+            return;
+          }
+          if (envelope.type === "kanban_board_deleted") {
+            const boardID = typeof data.board_id === "string" ? data.board_id : "";
+            if (boardID) removeBoardFromList(boardID);
+            return;
+          }
+          if (envelope.type === "company_explorer_folder_item_assigned") {
+            const folderItem = data.folder_item as CompanyExplorerFolderItem | undefined;
+            if (!folderItem || folderItem.item_type !== "kanban") return;
+            setExplorerFolderItems((previous) => previous.some((item) => item.item_type === "kanban" && item.item_id === folderItem.item_id)
+              ? previous.map((item) => (item.item_type === "kanban" && item.item_id === folderItem.item_id ? folderItem : item))
+              : [...previous, folderItem]);
+            return;
+          }
+          if (envelope.type === "company_explorer_folder_item_removed") {
+            const itemType = typeof data.item_type === "string" ? data.item_type : "";
+            const itemID = typeof data.item_id === "string" ? data.item_id : "";
+            if (itemType === "kanban" && itemID) {
+              setExplorerFolderItems((previous) => previous.filter((item) => item.item_type !== "kanban" || item.item_id !== itemID));
+            }
+          }
+        } catch {
+          // The list can still be manually refreshed from the header.
+        }
+      },
+    });
+  }, [apiBase, companyID, removeBoardFromList, upsertBoardInList]);
 
   const syncCardTitlesFromNodeGraph = useCallback(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
@@ -375,6 +513,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const applyLiveSelection = (selection: LiveSelectionChange) => {
       if (selection.companyID !== companyID || selection.sourceFrameID === frameID) return;
       if (selection.entityKind === "kanban" && selection.entityID.trim()) {
+        if (lastLocalBoardSelectionChangedAtRef.current > 0 && selection.changedAt > 0 && selection.changedAt < lastLocalBoardSelectionChangedAtRef.current) return;
         setSelectedCardIDs(new Set());
         setSelectionAnchorCardID("");
         setHighlightedEntity(null);
@@ -782,9 +921,13 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         onSelectBoard={(nextBoardID) => {
           setSelectedCardIDs(new Set());
           setSelectionAnchorCardID("");
+          setHighlightedEntity(null);
+          lastLocalBoardSelectionChangedAtRef.current = Date.now();
           setActiveBoardID(nextBoardID);
           setAllBoardsOpen(false);
           setBoardSearchQuery("");
+          const selectedBoard = boardRows.find((board) => board.board_id === nextBoardID);
+          publishKanbanBoardSelectionToLinkedFrames(companyID, frameID, nextBoardID, selectedBoard ? getKanbanBoardDisplayTitle(selectedBoard) : nextBoardID);
         }}
       />
       <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)" }}>

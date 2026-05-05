@@ -13,6 +13,7 @@ type UseCompanyExplorerKeyboardInput = {
   setExpanded: React.Dispatch<React.SetStateAction<Set<string>>>;
   selectSingleTreeRow: (row: ExplorerTreeNode) => void;
   scrollTreeRowIntoView: (rowID: string) => void;
+  onRequestDeleteSelection: () => void;
 };
 
 export function useCompanyExplorerKeyboard({
@@ -24,9 +25,15 @@ export function useCompanyExplorerKeyboard({
   setExpanded,
   selectSingleTreeRow,
   scrollTreeRowIntoView,
+  onRequestDeleteSelection,
 }: UseCompanyExplorerKeyboardInput) {
   const handleTreeKeyCommand = useCallback((event: React.KeyboardEvent<HTMLDivElement> | KeyboardEvent) => {
     if (isExplorerTextInputTarget(event.target) && event.target instanceof Node && treeViewportRef.current?.contains(event.target)) return;
+    if (event.key === "Delete") {
+      event.preventDefault();
+      onRequestDeleteSelection();
+      return;
+    }
     const activeTreeRows = treeRowsRef.current;
     const result = resolveExplorerKeyboardNavigation({
       rows: activeTreeRows.map((row) => ({ id: row.id, kind: row.kind })),
@@ -47,7 +54,7 @@ export function useCompanyExplorerKeyboard({
       selectSingleTreeRow(next);
       scrollTreeRowIntoView(next.id);
     }
-  }, [expandedRef, scrollTreeRowIntoView, selectSingleTreeRow, selectedTreeIDRef, setExpanded, treeRowsRef, treeViewportRef]);
+  }, [expandedRef, onRequestDeleteSelection, scrollTreeRowIntoView, selectSingleTreeRow, selectedTreeIDRef, setExpanded, treeRowsRef, treeViewportRef]);
 
   const handleTreeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     handleTreeKeyCommand(event);
