@@ -329,6 +329,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     setRestoredViewport,
     restoredSelectionRef,
     selectedNodeIDRef,
+    suppressNextSelectionBroadcastRef,
     setSelectedNodeID,
     setSelectedNodeIDs,
     setNodePositions,
@@ -356,8 +357,10 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         visibleItemIDs: nextNodes.map((item) => item.node_id),
         knownItemIDs: snapshotNodes.map((item) => item.node_id),
         explorerRequestedID: explorerSelectionOriginRef.current?.selectedEntityID,
+        hasExplorerNavigationIntent: !!explorerSelectionOriginRef.current,
       });
       if (nextSelection === null) return;
+      suppressNextSelectionBroadcastRef.current = true;
       selectedNodeIDRef.current = nextSelection;
       setSelectedNodeID(nextSelection);
       setSelectedNodeIDs(nextSelection ? new Set([nextSelection]) : new Set());
@@ -418,6 +421,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       explorerRequestedID: explorerSelectionOriginRef.current?.selectedEntityID,
     });
     if (fallback === null) return;
+    suppressNextSelectionBroadcastRef.current = true;
     selectedNodeIDRef.current = fallback;
     setSelectedNodeID(fallback);
     setSelectedNodeIDs(fallback ? new Set([fallback]) : new Set());
@@ -493,6 +497,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       suppressNextSelectionBroadcastRef.current = false;
       return;
     }
+    if (!selectedNodeID) return;
     const explorerKey = `${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${mapScope}`;
     if (hasPendingContextStorageUpdate(localStorage.getItem(explorerKey), explorerContextRef.current)) return;
     const contextID = `active_logic_gate_selection:${companyID}:${mapScope}`;
@@ -596,6 +601,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           setActiveFolderLabel(typeof parsed.selectedFolderLabel === "string" ? parsed.selectedFolderLabel : (typeof parsed.selectedLabel === "string" ? parsed.selectedLabel : ""));
           const selected = parsed.selectedLogicGateID || parsed.selectedNodeID || "";
           rememberExplorerSelectionOrigin(parsed, selected);
+          suppressNextSelectionBroadcastRef.current = true;
           selectedNodeIDRef.current = selected;
           if (selected) {
             // Explorer owns navigation intent. A map can momentarily have stale
@@ -613,6 +619,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
         if (!selectedLogicGateID) {
           if (!hasExplicitExplorerSelectionContext(parsed)) return;
           rememberExplorerSelectionOrigin(parsed, "");
+          suppressNextSelectionBroadcastRef.current = true;
           activeFolderIDRef.current = "";
           setActiveFolderID("");
           setActiveFolderLabel("");
@@ -622,6 +629,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           return;
         }
         rememberExplorerSelectionOrigin(parsed, selectedLogicGateID);
+        suppressNextSelectionBroadcastRef.current = true;
         activeFolderIDRef.current = "";
         setActiveFolderID("");
         setActiveFolderLabel("");

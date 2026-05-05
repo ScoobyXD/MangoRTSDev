@@ -116,6 +116,18 @@ test("graph load keeps Explorer intent while snapshot projection is still behind
   assert.equal(nextSelection, null);
 });
 
+test("graph load keeps Explorer folder navigation instead of selecting the first visible item", () => {
+  const nextSelection = resolveMapSelectionAfterGraphLoad({
+    currentSelectedID: "",
+    restoredSelectedID: "",
+    visibleItemIDs: ["top-visible-node"],
+    knownItemIDs: ["top-visible-node"],
+    hasExplorerNavigationIntent: true,
+  });
+
+  assert.equal(nextSelection, null);
+});
+
 test("graph load restores cached selection only when there is no newer live selection", () => {
   const nextSelection = resolveMapSelectionAfterGraphLoad({
     currentSelectedID: "",

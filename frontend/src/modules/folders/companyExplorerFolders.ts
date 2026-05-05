@@ -141,6 +141,7 @@ export function resolveMapSelectionAfterGraphLoad(args: {
   visibleItemIDs: Iterable<string>;
   knownItemIDs: Iterable<string>;
   explorerRequestedID?: string;
+  hasExplorerNavigationIntent?: boolean;
 }): string | null {
   const visibleItemIDs = args.visibleItemIDs instanceof Set ? args.visibleItemIDs : new Set(args.visibleItemIDs);
   const knownItemIDs = args.knownItemIDs instanceof Set ? args.knownItemIDs : new Set(args.knownItemIDs);
@@ -152,6 +153,8 @@ export function resolveMapSelectionAfterGraphLoad(args: {
   if (currentSelectedID && (knownItemIDs.has(currentSelectedID) || args.explorerRequestedID === currentSelectedID)) {
     return null;
   }
+
+  if (args.hasExplorerNavigationIntent) return null;
 
   const restoredSelectedID = args.restoredSelectedID.trim();
   if (restoredSelectedID && visibleItemIDs.has(restoredSelectedID)) return restoredSelectedID;

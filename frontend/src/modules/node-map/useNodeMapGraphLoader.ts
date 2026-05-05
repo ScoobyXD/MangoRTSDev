@@ -19,6 +19,7 @@ type UseNodeMapGraphLoaderArgs = {
   restoredSelectionRef: React.MutableRefObject<string>;
   selectedNodeIDRef: React.MutableRefObject<string>;
   explorerSelectionOriginRef: ExplorerSelectionOriginRef;
+  suppressNextSelectionBroadcastRef: React.MutableRefObject<boolean>;
   allNodes: NodeRecord[];
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
@@ -46,6 +47,7 @@ export function useNodeMapGraphLoader({
   restoredSelectionRef,
   selectedNodeIDRef,
   explorerSelectionOriginRef,
+  suppressNextSelectionBroadcastRef,
   allNodes,
   folders,
   folderItems,
@@ -74,8 +76,10 @@ export function useNodeMapGraphLoader({
         visibleItemIDs: nextNodes.map((item) => item.node_id),
         knownItemIDs: snapshotNodes.map((item) => item.node_id),
         explorerRequestedID: explorerSelectionOriginRef.current?.selectedEntityID,
+        hasExplorerNavigationIntent: !!explorerSelectionOriginRef.current,
       });
       if (nextSelection === null) return;
+      suppressNextSelectionBroadcastRef.current = true;
       selectedNodeIDRef.current = nextSelection;
       setSelectedNodeID(nextSelection);
       setSelectedNodeIDs(nextSelection ? new Set([nextSelection]) : new Set());
