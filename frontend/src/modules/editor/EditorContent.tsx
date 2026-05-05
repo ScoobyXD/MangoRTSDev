@@ -55,11 +55,23 @@ function getSelectionRangeInsideElement(element: HTMLElement): Range | null {
 }
 
 function readRangeFontSize(range: Range, fallbackFontSize: number): number {
+  const elementForNode = (node: Node | null): Element | null => {
+    if (!node) return null;
+    if (node.nodeType === Node.TEXT_NODE) return node.parentElement;
+    return node instanceof Element ? node : null;
+  };
   const container = range.startContainer.nodeType === Node.ELEMENT_NODE
-    ? range.startContainer as Element
-    : range.startContainer.parentElement;
+    ? (() => {
+      const element = range.startContainer as Element;
+      const nextChild = element.childNodes.item(range.startOffset);
+      const previousChild = range.startOffset > 0 ? element.childNodes.item(range.startOffset - 1) : null;
+      return elementForNode(nextChild ?? previousChild ?? element);
+    })()
+    : elementForNode(range.startContainer);
   if (!container) return fallbackFontSize;
-  const parsed = Number.parseFloat(window.getComputedStyle(container).fontSize);
+  const view = container.ownerDocument.defaultView;
+  if (!view) return fallbackFontSize;
+  const parsed = Number.parseFloat(view.getComputedStyle(container).fontSize);
   return Number.isFinite(parsed) ? parsed : fallbackFontSize;
 }
 
@@ -242,10 +254,16 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     scheduleIndentGuideUpdate(readEditorDocumentText(element));
   }, [scheduleDocumentSave, scheduleIndentGuideUpdate]);
 
+  const updateSelectionFontSize = useCallback((nextFontSize: number) => {
+    setSelectionFontSize(clampEditorSelectionFontSize(nextFontSize));
+  }, []);
+
   const applyEditorSelectionFontSize = useCallback((delta: number) => {
     const element = editorDocumentRef.current;
     const range = element ? getSelectionRangeInsideElement(element) : null;
-    const currentFontSize = range ? readRangeFontSize(range, selectionFontSize) : selectionFontSize;
+    const currentFontSize = range?.collapsed && pendingEditorFontSizeRef.current !== null
+      ? pendingEditorFontSizeRef.current
+      : (range ? readRangeFontSize(range, selectionFontSize) : selectionFontSize);
     applyEditorSelectionFontSizeValue(currentFontSize + delta);
   }, [applyEditorSelectionFontSizeValue, selectionFontSize]);
 
@@ -767,6 +785,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     scheduleIndentGuideUpdate,
     rememberCurrentDocumentScroll,
     flushPendingDocumentSave,
+    onSelectionFontSizeChange: updateSelectionFontSize,
   });
 
   return (
