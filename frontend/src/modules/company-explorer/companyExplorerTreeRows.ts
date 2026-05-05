@@ -1,14 +1,12 @@
-import { getNodeTitle, type NodeRecord } from "../node-map/shared";
-import { getNodeTitle as getLogicGateTitle, type NodeRecord as LogicGateRecord } from "../logic-gate-map/shared";
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
-import { getKanbanBoardDisplayTitle, type KanbanBoard } from "../kanban/shared";
+import { getNodeTitle, type NodeRecord } from "../node-map/shared.js";
+import { getNodeTitle as getLogicGateTitle, type NodeRecord as LogicGateRecord } from "../logic-gate-map/shared.js";
+import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind } from "../folders/companyExplorerFolders.js";
+import { getKanbanBoardDisplayTitle, type KanbanBoard } from "../kanban/shared.js";
 import {
-  EXPLORER_ROOT_ROW_LABELS,
-  EXPLORER_ROOT_ROW_ORDER,
   formatExplorerFolderLabel,
-} from "./treePresentation";
-import { sortExplorerRowsByPosition, TREE_ROW_POSITION_STEP } from "./companyExplorerDragDrop";
-import type { ExplorerTreeNode } from "./companyExplorerTypes";
+} from "./treePresentation.js";
+import { sortExplorerRowsByPosition, TREE_ROW_POSITION_STEP } from "./companyExplorerDragDrop.js";
+import type { ExplorerTreeNode } from "./companyExplorerTypes.js";
 
 type BuildCompanyExplorerTreeRowsInput = {
   expanded: Set<string>;
@@ -174,19 +172,11 @@ export function buildCompanyExplorerTreeRows({
     }
   };
 
-  for (const rootRowID of EXPLORER_ROOT_ROW_ORDER) {
-    if (rootRowID === "folder-root") {
-      rows.push({ id: "folder-root", label: EXPLORER_ROOT_ROW_LABELS["folder-root"], depth: 0, kind: "folder", scopeLevel: 0, position: 0, createdTimestamp: "" });
-    }
-  }
-
-  if (!expanded.has("folder-root")) return rows;
-
   // Durable folders/items share sparse positions inside each parent folder.
   // Unplaced root entities use local view positions until a folder placement
   // row exists, because their order is personal UI state rather than graph data.
-  pushFolderBranch("node", "", 1);
-  pushFolderBranch("logic_gate", "", 1);
+  pushFolderBranch("node", "", 0);
+  pushFolderBranch("logic_gate", "", 0);
   let syntheticBoardPosition = 0;
   for (const board of kanbanBoards) {
     if (assignedKanbanBoards.has(board.board_id)) continue;
@@ -195,7 +185,7 @@ export function buildCompanyExplorerTreeRows({
     rows.push({
       id: rowID,
       label: getKanbanBoardDisplayTitle(board),
-      depth: 1,
+      depth: 0,
       kind: "kanban",
       kanbanBoardID: board.board_id,
       folderID: "",

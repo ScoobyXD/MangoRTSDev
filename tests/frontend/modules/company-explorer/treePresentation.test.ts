@@ -7,6 +7,7 @@ import {
   buildExplorerRowBatchReorderPlan,
   buildExplorerRowReorderPlan,
   formatExplorerFolderLabel,
+  getExplorerScrollTopForRow,
   resolveExplorerClickSelection,
   resolveExplorerCreationTargets,
   resolveExplorerDeleteTarget,
@@ -17,6 +18,7 @@ import {
   resolveExplorerRootDropTarget,
   shouldAcceptMapSelectionAfterExplorerSelection,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
+import { buildCompanyExplorerTreeRows } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
 
 function run(name: string, fn: () => void): void {
   try {
@@ -28,17 +30,43 @@ function run(name: string, fn: () => void): void {
   }
 }
 
-run("root presentation uses one collapsible company row and excludes virtual category rows", () => {
-  assert.deepEqual([...EXPLORER_ROOT_ROW_ORDER], ["folder-root"]);
+run("root presentation has no visible default company row", () => {
+  assert.deepEqual([...EXPLORER_ROOT_ROW_ORDER], []);
   assert.equal((EXPLORER_ROOT_ROW_ORDER as readonly string[]).includes("folder-notes"), false);
   assert.equal((EXPLORER_ROOT_ROW_ORDER as readonly string[]).includes("folder-logic"), false);
   assert.equal((EXPLORER_ROOT_ROW_ORDER as readonly string[]).includes("folder-nodes"), false);
-  assert.deepEqual([...EXPLORER_DEFAULT_EXPANDED_ROW_IDS], ["folder-root"]);
+  assert.deepEqual([...EXPLORER_DEFAULT_EXPANDED_ROW_IDS], []);
+  assert.equal(Object.prototype.hasOwnProperty.call(EXPLORER_ROOT_ROW_LABELS, "folder-root"), false);
 });
 
 run("folder labels do not display counts", () => {
-  assert.equal(EXPLORER_ROOT_ROW_LABELS["folder-root"], "Company");
   assert.equal(formatExplorerFolderLabel("Invoices"), "Invoices");
+});
+
+run("tree rows render a blank root when the workspace is empty", () => {
+  assert.deepEqual(buildCompanyExplorerTreeRows({
+    expanded: new Set(),
+    nodes: [],
+    logicGates: [],
+    kanbanBoards: [],
+    folders: [],
+    folderItems: [],
+    rootRowOrder: {},
+  }), []);
+});
+
+run("tree rows render root content without a synthetic Company folder", () => {
+  const rows = buildCompanyExplorerTreeRows({
+    expanded: new Set(),
+    nodes: [{ company_id: "c", node_id: "node-a", title: "Alpha", created_timestamp: "1" }],
+    logicGates: [],
+    kanbanBoards: [],
+    folders: [],
+    folderItems: [],
+    rootRowOrder: {},
+  });
+  assert.deepEqual(rows.map((row) => row.id), ["node-node-a"]);
+  assert.equal(rows[0]?.depth, 0);
 });
 
 run("context creation targets nested logic gate folders", () => {
@@ -139,7 +167,7 @@ run("drop targets resolve item rows to their containing folder", () => {
   );
 });
 
-run("folder drops can target the Company root", () => {
+run("folder drops can target the internal root", () => {
   assert.deepEqual(
     resolveExplorerRootDropTarget(
       { kind: "folder" },
@@ -301,14 +329,13 @@ run("published folder selection targets the matching map domain", () => {
 
 run("keyboard navigation moves selection and expands folders without DOM focus assumptions", () => {
   const rows = [
-    { id: "folder-root", kind: "folder" as const },
     { id: "node-a", kind: "node" as const },
     { id: "workspace-folder-1", kind: "folder" as const },
   ];
   const down = resolveExplorerKeyboardNavigation({
     rows,
     selectedTreeID: "folder-root",
-    expandedIDs: new Set(["folder-root"]),
+    expandedIDs: new Set(),
     key: "ArrowDown",
   });
   assert.equal(down.handled, true);
@@ -317,11 +344,23 @@ run("keyboard navigation moves selection and expands folders without DOM focus a
   const expand = resolveExplorerKeyboardNavigation({
     rows,
     selectedTreeID: "workspace-folder-1",
-    expandedIDs: new Set(["folder-root"]),
+    expandedIDs: new Set(),
     key: "ArrowRight",
   });
   assert.equal(expand.handled, true);
-  assert.deepEqual([...(expand.expandedIDs ?? new Set())], ["folder-root", "workspace-folder-1"]);
+  assert.deepEqual([...(expand.expandedIDs ?? new Set())], ["workspace-folder-1"]);
+});
+
+run("find scrolling accounts for the Explorer header and keeps the target above the bottom edge", () => {
+  assert.equal(getExplorerScrollTopForRow({
+    rowIndex: 20,
+    rowHeight: 30,
+    rowsTopOffset: 31,
+    currentScrollTop: 360,
+    viewportHeight: 300,
+    bottomPadding: 30,
+    maxScrollTop: 1000,
+  }), 391);
 });
 
 run("find selection expands ancestor folders and highlights every requested entity", () => {
