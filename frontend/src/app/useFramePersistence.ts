@@ -1,6 +1,6 @@
 import type { FrameDataModel } from "../types";
 import { FRAME_REGISTRY_KEY } from "../modules/linkingGraph";
-import { createDefaultNodeViewFrames } from "./DefaultViews";
+import { createDefaultNodeViewFrames, LEGACY_DEFAULT_NODE_VIEW_FRAME_IDS } from "./DefaultViews";
 import {
   FRAME_LINKS_KEY,
   sanitizeFrameLinks,
@@ -10,6 +10,7 @@ import {
   COLORWAYS,
   MIN_H,
   MIN_W,
+  createFrameId,
   snapToHalfStep,
   type ColorwayKey,
   type ViewTab,
@@ -17,6 +18,7 @@ import {
 
 const VIEWS_KEY = "grid-dashboard-views-v1";
 const SETTINGS_KEY = "grid-dashboard-settings";
+const LEGACY_DEFAULT_NODE_VIEW_FRAME_ID_SET = new Set<string>(Object.values(LEGACY_DEFAULT_NODE_VIEW_FRAME_IDS));
 
 export interface DashboardSettings {
   bgColor?: string;
@@ -79,6 +81,41 @@ function sanitizeFrames(value: unknown): FrameDataModel[] {
   return cleaned;
 }
 
+function createUniqueFrameID(usedFrameIDs: Set<string>): string {
+  let nextID = createFrameId();
+  while (usedFrameIDs.has(nextID) || LEGACY_DEFAULT_NODE_VIEW_FRAME_ID_SET.has(nextID)) {
+    nextID = createFrameId();
+  }
+  return nextID;
+}
+
+function ensureGloballyUniqueFrameIDs(tabs: ViewTab[]): ViewTab[] {
+  const usedFrameIDs = new Set<string>();
+  return tabs.map((tab) => {
+    const frameIDMap = new Map<string, string>();
+    const tabFrameIDs = new Set<string>();
+
+    for (const frame of tab.frames) {
+      const shouldRemap = usedFrameIDs.has(frame.id) || LEGACY_DEFAULT_NODE_VIEW_FRAME_ID_SET.has(frame.id);
+      const nextID = shouldRemap ? createUniqueFrameID(usedFrameIDs) : frame.id;
+      frameIDMap.set(frame.id, nextID);
+      usedFrameIDs.add(nextID);
+      tabFrameIDs.add(nextID);
+    }
+
+    const frames = tab.frames.map((frame) => {
+      const id = frameIDMap.get(frame.id) ?? frame.id;
+      const parentId = frame.parentId ? frameIDMap.get(frame.parentId) : undefined;
+      return {
+        ...frame,
+        id,
+        parentId: parentId && tabFrameIDs.has(parentId) ? parentId : undefined,
+      };
+    });
+    return { ...tab, frames };
+  });
+}
+
 export function loadFrameLinks(): FrameLinkEdge[] {
   try {
     const raw = localStorage.getItem(FRAME_LINKS_KEY);
@@ -111,8 +148,9 @@ export function loadViews(): { tabs: ViewTab[]; activeId: string } {
       .filter((tab): tab is ViewTab => !!tab);
 
     if (tabs.length === 0) return fallback;
+    const normalizedTabs = ensureGloballyUniqueFrameIDs(tabs);
     const activeId = tabs.some((tab) => tab.id === parsed.activeId) ? parsed.activeId : tabs[0].id;
-    return { tabs, activeId };
+    return { tabs: normalizedTabs, activeId };
   } catch {
     return fallback;
   }
