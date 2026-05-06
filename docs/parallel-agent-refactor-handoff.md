@@ -210,7 +210,7 @@ This repo often appears as dubious ownership because the normal Windows user own
 Use per-command safe directory:
 
 ```powershell
-git -c safe.directory=C:/Users/Jonat/MangoOSDev -C C:/Users/Jonat/MangoOSDev status --short --branch
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev -C C:/Users/Jonat/MangoRTSDev status --short --branch
 ```
 
 Do not run:
@@ -282,14 +282,14 @@ Inputs:
 
 ```text
 -Name "Company Explorer Drag Drop"
--MainPath "C:\Users\Jonat\MangoOSDev"
+-MainPath "C:\Users\Jonat\MangoRTSDev"
 ```
 
 Rules:
 
 - Slug the name: lowercase, spaces to hyphens, remove unsafe Git/path characters.
 - Branch name: `codex/<slug>`
-- Path: `..\MangoOSDev-<slug>`
+- Path: `..\MangoRTSDev-<slug>`
 - Fast-forward `main` from `origin/main` before creating.
 - Start a visible PowerShell window in the new worktree.
 - Do not run full tests during spin-up.
@@ -302,13 +302,13 @@ Inputs:
 
 ```text
 -Slug "company-explorer-drag-drop"
--MainPath "C:\Users\Jonat\MangoOSDev"
+-MainPath "C:\Users\Jonat\MangoRTSDev"
 ```
 
 Rules:
 
 - Branch name: `integration/<slug>`
-- Path: `..\MangoOSDev-integration-<slug>`
+- Path: `..\MangoRTSDev-integration-<slug>`
 - Base: latest local `main` after fast-forward from `origin/main`
 
 #### `scripts/integrate_worker_branch.ps1`
@@ -319,7 +319,7 @@ Inputs:
 
 ```text
 -WorkerBranch "codex/company-explorer-drag-drop"
--MainPath "C:\Users\Jonat\MangoOSDev"
+-MainPath "C:\Users\Jonat\MangoRTSDev"
 ```
 
 Rules:
@@ -792,7 +792,7 @@ These prompts are intentionally detailed so the user can paste them into new Cod
 ### Prompt: Phase 1 Executor
 
 ```text
-You are a fresh Codex instance working in MangoOSDev.
+You are a fresh Codex instance working in MangoRTSDev.
 
 Read this file first:
 docs/parallel-agent-refactor-handoff.md
@@ -922,8 +922,8 @@ Use this workflow:
    - git pull --ff-only origin main
 5. Create the worktree:
    - branch name: codex/<slug>
-   - path: ..\MangoOSDev-<slug>
-   - command: git worktree add -b "codex/<slug>" "..\MangoOSDev-<slug>" main
+   - path: ..\MangoRTSDev-<slug>
+   - command: git worktree add -b "codex/<slug>" "..\MangoRTSDev-<slug>" main
 6. Start a new visible PowerShell window from that new worktree.
 7. Print the worker prompt to paste into that new Codex instance.
 
@@ -984,7 +984,7 @@ Workflow:
    - confirm worker branch is clean again
 8. Create integration branch/worktree from latest main:
    - branch: integration/<branch-slug>
-   - path: ..\MangoOSDev-integration-<branch-slug>
+   - path: ..\MangoRTSDev-integration-<branch-slug>
 9. In integration worktree:
    - git merge --no-ff codex/<branch-slug> -m "Integrate codex/<branch-slug>"
 10. Resolve straightforward conflicts only.
@@ -1046,7 +1046,7 @@ Workflow:
    - git merge --ff-only origin/main
 2. Create:
    - branch: integration/<batch-name>
-   - path: ..\MangoOSDev-integration-<batch-name>
+   - path: ..\MangoRTSDev-integration-<batch-name>
 3. For each worker branch:
    - inspect worker status
    - commit worker changes if needed
@@ -1078,7 +1078,7 @@ Final response must include:
 ### Prompt: Phase 2 Executor
 
 ```text
-You are a fresh Codex instance working in MangoOSDev.
+You are a fresh Codex instance working in MangoRTSDev.
 
 Read this file first:
 docs/parallel-agent-refactor-handoff.md
@@ -1130,7 +1130,7 @@ Final response must include:
 ### Prompt: Phase 2C Executor
 
 ```text
-You are a fresh Codex instance working in MangoOSDev on branch codex/conflict-fixer.
+You are a fresh Codex instance working in MangoRTSDev on branch codex/conflict-fixer.
 
 Phase 1, Phase 2A, and Phase 2B were already implemented locally on this branch and were not pushed.
 
@@ -1150,22 +1150,22 @@ Do not merge this branch into main just to continue.
 
 Before editing:
 1. Inspect:
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer status --short --branch
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer log --oneline --decorate --max-count=5
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer status --short --branch
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer log --oneline --decorate --max-count=5
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
 
 2. Fetch origin:
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer fetch origin
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer fetch origin
 
 3. Re-check freshness:
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
 
 4. If the branch is behind origin/main, bring it up to date before Phase 2C:
    preferred because this branch is local/unpushed:
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rebase origin/main
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rebase origin/main
 
    fallback only if rebase is unsafe:
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer merge --no-ff origin/main
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer merge --no-ff origin/main
 
 5. Resolve conflicts conservatively if any.
 
@@ -1245,10 +1245,10 @@ Final response must include:
 ### Prompt: Phase 2D Backend Hot-File Split Executor
 
 ```text
-You are a fresh Codex instance working in MangoOSDev on branch codex/conflict-fixer.
+You are a fresh Codex instance working in MangoRTSDev on branch codex/conflict-fixer.
 
 Workspace:
-C:\Users\Jonat\MangoOSDev-conflict-fixer
+C:\Users\Jonat\MangoRTSDev-conflict-fixer
 
 Read first:
 docs/parallel-agent-refactor-handoff.md
@@ -1267,16 +1267,16 @@ Do not revert existing uncommitted Phase 2 work.
 
 Before editing:
 1. Inspect:
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer status --short --branch
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer log --oneline --decorate --max-count=5
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer status --short --branch
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer log --oneline --decorate --max-count=5
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
 
 2. Fetch origin:
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer fetch origin
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer fetch origin
 
 3. Re-check freshness:
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer merge-base origin/main HEAD
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer merge-base origin/main HEAD
 
 4. Merge-compatibility decision:
    - If the left/right count is 0 N and merge-base equals origin/main, current origin/main is already the base for this branch; do not merge.
@@ -1351,10 +1351,10 @@ Final response must include:
 ### Prompt: Phase 3 Executor
 
 ```text
-You are a fresh Codex instance working in MangoOSDev on branch codex/conflict-fixer.
+You are a fresh Codex instance working in MangoRTSDev on branch codex/conflict-fixer.
 
 Workspace:
-C:\Users\Jonat\MangoOSDev-conflict-fixer
+C:\Users\Jonat\MangoRTSDev-conflict-fixer
 
 Read first:
 docs/parallel-agent-refactor-handoff.md
@@ -1394,16 +1394,16 @@ Start by inspecting:
 
 Before editing, apply the phase freshness contract:
 1. Inspect:
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer status --short --branch
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer log --oneline --decorate --max-count=5
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer status --short --branch
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer log --oneline --decorate --max-count=5
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
 
 2. Fetch origin:
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer fetch origin
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer fetch origin
 
 3. Re-check freshness:
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
-   git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer merge-base origin/main HEAD
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+   git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer merge-base origin/main HEAD
 
 4. Merge-compatibility decision:
    - If the left/right count is 0 N and merge-base equals origin/main, current origin/main is already the base for this branch; do not merge.
@@ -1437,7 +1437,7 @@ Rules:
 Before final:
   powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
   npm.cmd run build
-  git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer diff --check
+  git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer diff --check
   powershell -ExecutionPolicy Bypass -File .\scripts\fast_verify.ps1 -Root .
   node scripts\run_all_tests.mjs
 
@@ -1465,16 +1465,16 @@ Use these when scripts are not available yet.
 Create an integration branch for one worker:
 
 ```powershell
-cd C:\Users\Jonat\MangoOSDev
-git -c safe.directory=C:/Users/Jonat/MangoOSDev status --short --branch
-git -c safe.directory=C:/Users/Jonat/MangoOSDev fetch origin
-git -c safe.directory=C:/Users/Jonat/MangoOSDev merge --ff-only origin/main
+cd C:\Users\Jonat\MangoRTSDev
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev status --short --branch
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev fetch origin
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev merge --ff-only origin/main
 
 $slug = "company-explorer-refactor"
 $integration = "integration/$slug"
-$path = "..\MangoOSDev-integration-$slug"
+$path = "..\MangoRTSDev-integration-$slug"
 
-git -c safe.directory=C:/Users/Jonat/MangoOSDev worktree add -b $integration $path main
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev worktree add -b $integration $path main
 cd $path
 git -c safe.directory=$((Resolve-Path .).Path.Replace('\','/')) merge --no-ff "codex/$slug" -m "Integrate codex/$slug"
 rg -n "^(<<<<<<<|>>>>>>>|\|\|\|\|\|\|\|)( .*)?$|^=======$" .
@@ -1484,9 +1484,9 @@ node scripts\run_all_tests.mjs
 Merge clean integration into main:
 
 ```powershell
-cd C:\Users\Jonat\MangoOSDev
-git -c safe.directory=C:/Users/Jonat/MangoOSDev merge --no-ff "integration/company-explorer-refactor" -m "Merge integration/company-explorer-refactor"
-git -c safe.directory=C:/Users/Jonat/MangoOSDev status --short --branch
+cd C:\Users\Jonat\MangoRTSDev
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev merge --no-ff "integration/company-explorer-refactor" -m "Merge integration/company-explorer-refactor"
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev status --short --branch
 ```
 
 ## Branch And Worktree Naming
@@ -1495,11 +1495,11 @@ Use predictable names:
 
 ```text
 Worker branch:       codex/<slug>
-Worker worktree:     ..\MangoOSDev-<slug>
+Worker worktree:     ..\MangoRTSDev-<slug>
 Integration branch:  integration/<slug>
-Integration tree:    ..\MangoOSDev-integration-<slug>
+Integration tree:    ..\MangoRTSDev-integration-<slug>
 Batch branch:        integration/<domain>-batch
-Batch tree:          ..\MangoOSDev-integration-<domain>-batch
+Batch tree:          ..\MangoRTSDev-integration-<domain>-batch
 ```
 
 Slug rule:
@@ -1565,7 +1565,7 @@ Next recommended prompt:
 
 Phase: Phase 1.
 
-Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoOSDev-conflict-fixer`.
+Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoRTSDev-conflict-fixer`.
 
 Files changed:
 
@@ -1586,9 +1586,9 @@ scripts/fast_verify.ps1
 Commands/checks run:
 
 ```text
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer status --short --branch
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer fetch origin
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rebase origin/main
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer status --short --branch
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer fetch origin
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rebase origin/main
 rg -n "^(<<<<<<<|>>>>>>>|\|\|\|\|\|\|\|)( .*)?$|^=======$" .
 powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
 powershell -ExecutionPolicy Bypass -File .\scripts\agent_preflight.ps1 -Root .
@@ -1625,7 +1625,7 @@ Use the "Prompt: Phase 2 Executor" section in this document from a fresh Codex i
 
 Phase: Phase 2A.
 
-Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoOSDev-conflict-fixer`.
+Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoRTSDev-conflict-fixer`.
 
 Files changed:
 
@@ -1651,10 +1651,10 @@ frontend/src/modules/node-map/nodeMapRouting.ts
 Commands/checks run:
 
 ```text
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer status --short --branch
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer log --oneline --decorate --max-count=5
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer fetch origin
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer status --short --branch
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer log --oneline --decorate --max-count=5
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer fetch origin
 powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
 npm.cmd install
 powershell -ExecutionPolicy Bypass -File .\scripts\fast_verify.ps1 -Root .
@@ -1691,7 +1691,7 @@ Use the "Prompt: Phase 2C Executor" section in this document if Phase 2B has alr
 
 Phase: Phase 2B.
 
-Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoOSDev-conflict-fixer`.
+Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoRTSDev-conflict-fixer`.
 
 Files changed:
 
@@ -1714,7 +1714,7 @@ Commands/checks run:
 
 ```text
 npm.cmd run build
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer diff --check
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer diff --check
 powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
 powershell -ExecutionPolicy Bypass -File .\scripts\fast_verify.ps1 -Root .
 node scripts\run_all_tests.mjs
@@ -1752,7 +1752,7 @@ Use the "Prompt: Phase 2C Executor" section in this document from a fresh Codex 
 
 Phase: Phase 2 planning.
 
-Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoOSDev-conflict-fixer`.
+Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoRTSDev-conflict-fixer`.
 
 Files changed:
 
@@ -1795,7 +1795,7 @@ Use the "Prompt: Phase 2C Executor" section in this document from a fresh Codex 
 
 Phase: Phase 2C.
 
-Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoOSDev-conflict-fixer`.
+Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoRTSDev-conflict-fixer`.
 
 Files changed:
 
@@ -1817,14 +1817,14 @@ frontend/src/modules/node-map/useNodeMapGraphPersistence.ts
 Commands/checks run:
 
 ```text
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer status --short --branch
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer log --oneline --decorate --max-count=5
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer fetch origin
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer status --short --branch
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer log --oneline --decorate --max-count=5
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer fetch origin
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
 powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
 npm.cmd run build
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer diff --check
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer diff --check
 powershell -ExecutionPolicy Bypass -File .\scripts\fast_verify.ps1 -Root .
 node scripts\run_all_tests.mjs
 ```
@@ -1860,7 +1860,7 @@ Run one more narrow Phase 2 split before Phase 3 if the next worker batch will k
 
 Phase: Phase 2 planning.
 
-Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoOSDev-conflict-fixer`.
+Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoRTSDev-conflict-fixer`.
 
 Files changed:
 
@@ -1872,12 +1872,12 @@ docs/parallel-agent-refactor-handoff.md
 Commands/checks run:
 
 ```text
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer status --short --branch
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer log --oneline --decorate --max-count=5
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer fetch origin
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer merge-base origin/main HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer status --short --branch
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer log --oneline --decorate --max-count=5
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer fetch origin
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer merge-base origin/main HEAD
 powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
 ```
 
@@ -1910,7 +1910,7 @@ Use the "Prompt: Phase 2D Backend Hot-File Split Executor" section in this docum
 
 Phase: Phase 2D.
 
-Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoOSDev-conflict-fixer`.
+Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoRTSDev-conflict-fixer`.
 
 Files changed:
 
@@ -1947,12 +1947,12 @@ docs/parallel-agent-refactor-handoff.md
 Commands/checks run:
 
 ```text
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer status --short --branch
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer log --oneline --decorate --max-count=5
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer fetch origin
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer merge-base origin/main HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer status --short --branch
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer log --oneline --decorate --max-count=5
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer fetch origin
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer merge-base origin/main HEAD
 powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
 go test ./...
 go test ./... from backend module root
@@ -1997,7 +1997,7 @@ Use the "Prompt: Phase 2E Remaining Frontend Hot-File Split Executor" section fr
 
 Phase: Phase 2E.
 
-Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoOSDev-conflict-fixer`.
+Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoRTSDev-conflict-fixer`.
 
 Hot frontend files touched:
 
@@ -2037,16 +2037,16 @@ docs/parallel-agent-refactor-handoff.md
 Commands/checks run:
 
 ```text
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer status --short --branch
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer log --oneline --decorate --max-count=5
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer fetch origin
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer merge-base origin/main HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer status --short --branch
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer log --oneline --decorate --max-count=5
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer fetch origin
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer merge-base origin/main HEAD
 powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
 npm.cmd run build
 npm.cmd run build after each non-trivial host split
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer diff --check
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer diff --check
 powershell -ExecutionPolicy Bypass -File .\scripts\fast_verify.ps1 -Root .
 node scripts\run_all_tests.mjs
 ```
@@ -2097,7 +2097,7 @@ Phase 3 API/headless command boundary refactor.
 
 Phase: Phase 3.
 
-Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoOSDev-conflict-fixer`.
+Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoRTSDev-conflict-fixer`.
 
 Files changed:
 
@@ -2120,16 +2120,16 @@ tests/frontend/modules/node-map/nodeMapCommands.test.ts
 Commands/checks run:
 
 ```text
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer status --short --branch
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer log --oneline --decorate --max-count=5
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer fetch origin
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer merge-base origin/main HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer status --short --branch
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer log --oneline --decorate --max-count=5
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer fetch origin
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer rev-list --left-right --count origin/main...HEAD
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer merge-base origin/main HEAD
 powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
 npm.cmd run test:node-relationships from the frontend module root
 npm.cmd run build from the frontend module root
-git -c safe.directory=C:/Users/Jonat/MangoOSDev-conflict-fixer diff --check
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev-conflict-fixer diff --check
 powershell -ExecutionPolicy Bypass -File .\scripts\fast_verify.ps1 -Root .
 node scripts\run_all_tests.mjs
 ```
@@ -2178,7 +2178,7 @@ Run a narrow follow-up Phase 3 pass for Logic Gate Map command parity with Node 
 
 Phase: Phase 3 preparation.
 
-Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoOSDev-conflict-fixer`.
+Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoRTSDev-conflict-fixer`.
 
 Files changed:
 
@@ -2209,7 +2209,7 @@ Use the updated "Prompt: Phase 3 Executor" section in this document.
 
 Phase: pre-Phase 1 planning.
 
-Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoOSDev-conflict-fixer`.
+Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoRTSDev-conflict-fixer`.
 
 Files changed:
 
@@ -2249,7 +2249,7 @@ Use the "Prompt: Phase 1 Executor" section in this document after this branch/wo
 
 Phase: pre-Phase 1 planning.
 
-Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoOSDev-conflict-fixer`.
+Branch/worktree: `codex/conflict-fixer` in `C:\Users\Jonat\MangoRTSDev-conflict-fixer`.
 
 Files changed:
 

@@ -49,7 +49,7 @@ Use separate numeric counters:
   "base_branch": "main",
   "batch_base_commit": "<main sha at batch start>",
   "batch_branch": "BatchName-batch0000007",
-  "batch_worktree": "C:\\Users\\Jonat\\MangoOSDev-BatchName-batch0000007",
+  "batch_worktree": "C:\\Users\\Jonat\\MangoRTSDev-BatchName-batch0000007",
   "batch_merge_lock": null,
   "projects": [
     "FixKanbanBoardCardsUIProject-project0001005"
@@ -65,7 +65,7 @@ Use separate numeric counters:
   "batch_id": "BatchName-batch0000007",
   "user_prompt_title": "Fix Kanban Board Cards UI",
   "project_branch": "FixKanbanBoardCardsUIProject-project0001005",
-  "project_worktree": "C:\\Users\\Jonat\\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005",
+  "project_worktree": "C:\\Users\\Jonat\\MangoRTSDev-FixKanbanBoardCardsUIProject-project0001005",
   "base_commit": "<same as batch_base_commit>",
   "status": "workers-active",
   "workers": [
@@ -87,9 +87,9 @@ Use separate numeric counters:
   "worker_name": "FixKanbanBoardCardsUIWorker1-project0001005-worker0095348",
   "project_id": "FixKanbanBoardCardsUIProject-project0001005",
   "branch": "FixKanbanBoardCardsUIWorker1-project0001005-worker0095348",
-  "worktree": "C:\\Users\\Jonat\\MangoOSDev-FixKanbanBoardCardsUIWorker1-project0001005-worker0095348",
+  "worktree": "C:\\Users\\Jonat\\MangoRTSDev-FixKanbanBoardCardsUIWorker1-project0001005-worker0095348",
   "base_branch": "FixKanbanBoardCardsUIProject-project0001005",
-  "prompt_file": "C:\\Users\\Jonat\\MangoOSDev\\.agent-state\\prompts\\FixKanbanBoardCardsUIWorker1-project0001005-worker0095348.txt",
+  "prompt_file": "C:\\Users\\Jonat\\MangoRTSDev\\.agent-state\\prompts\\FixKanbanBoardCardsUIWorker1-project0001005-worker0095348.txt",
   "agent_launch_mode": "local-codex-cli",
   "agent_launch_command": "<recorded local command or null>",
   "terminal_opened": true,

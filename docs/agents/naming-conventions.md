@@ -76,22 +76,22 @@ Avoid branch prefixes like `codex/` for this workflow unless a script requires t
 Batch worktree:
 
 ```text
-C:\Users\Jonat\MangoOSDev-Batch0000154-batch0000154
+C:\Users\Jonat\MangoRTSDev-Batch0000154-batch0000154
 ```
 
 Project worktrees:
 
 ```text
-C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005
-C:\Users\Jonat\MangoOSDev-EditorTextStyleChangesProject-project0001006
+C:\Users\Jonat\MangoRTSDev-FixKanbanBoardCardsUIProject-project0001005
+C:\Users\Jonat\MangoRTSDev-EditorTextStyleChangesProject-project0001006
 ```
 
 Worker worktrees:
 
 ```text
-C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIWorker1-project0001005-worker0095348
-C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIWorker2-project0001005-worker0095349
-C:\Users\Jonat\MangoOSDev-EditorTextStyleChangesWorker1-project0001006-worker0095354
+C:\Users\Jonat\MangoRTSDev-FixKanbanBoardCardsUIWorker1-project0001005-worker0095348
+C:\Users\Jonat\MangoRTSDev-FixKanbanBoardCardsUIWorker2-project0001005-worker0095349
+C:\Users\Jonat\MangoRTSDev-EditorTextStyleChangesWorker1-project0001006-worker0095354
 ```
 
 ## Slug Rules
