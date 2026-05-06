@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createLogicGateArenaFrames } from "../../../frontend/src/app/DefaultViews.js";
 import { buildLinkModulesLabel, buildLinkPool, classifyFrameKind, computeLinkPlan, delinkForPool, deriveLegacyMapLinks, mergeLinkPlan } from "../../../frontend/src/app/frameLinking.js";
 import type { FrameDataModel } from "../../../frontend/src/types.js";
 
@@ -63,4 +64,12 @@ test("deriveLegacyMapLinks resolves indirect editor/explorer links through the g
   );
   assert.deepEqual(linked.editorLinks, { "editor-1": "map-1" });
   assert.deepEqual(linked.explorerLinks, { "explorer-1": "map-1" });
+});
+
+test("Logic Gate Arena template creates three linked root modules", () => {
+  const frames = createLogicGateArenaFrames();
+  assert.deepEqual(frames.map((frame) => frame.kind), ["company-explorer", "editor", "kanban"]);
+  assert.equal(frames.every((frame) => !frame.parentId), true);
+  const plan = computeLinkPlan(frames);
+  assert.equal(plan?.edges.length, 3);
 });

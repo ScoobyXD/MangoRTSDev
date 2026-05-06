@@ -6,6 +6,7 @@ import {
   deleteKanbanCardsCommand,
   reorderKanbanCardsCommand,
   reorderKanbanColumnsCommand,
+  toggleKanbanCardIssueCommand,
   type KanbanCommandClient,
   type KanbanCommandContext,
 } from "../../../../frontend/src/modules/kanban/kanbanCommands.js";
@@ -103,8 +104,9 @@ function createClient(): {
       calls.moveCard.push(args);
       return card({
         card_id: args.cardID,
-        column_id: args.columnID,
-        position: args.position,
+        column_id: args.columnID ?? "todo",
+        is_issue: args.isIssue ?? false,
+        position: args.position ?? 1000,
       });
     },
     async upsertCard(args) {
@@ -219,6 +221,24 @@ test("addExplorerNodesToKanbanColumnCommand dedupes drag rows before API upserts
   assert.equal(calls.upsertCard.length, 2);
   assert.deepEqual(result.savedCards.map((item) => item.node_id), ["node-1", "node-2"]);
   assert.deepEqual(Array.from(result.nodeIDs), ["node-1", "node-2"]);
+});
+
+test("toggleKanbanCardIssueCommand persists issue status without moving the card", async () => {
+  const { client, calls } = createClient();
+  const result = await toggleKanbanCardIssueCommand({
+    context,
+    card: card({ card_id: "card-issue", column_id: "doing", position: 4000 }),
+    isIssue: true,
+    client,
+  });
+  assert.equal(result.is_issue, true);
+  assert.deepEqual(calls.moveCard[0], {
+    apiBase: context.apiBase,
+    companyID: context.companyID,
+    boardID: context.boardID,
+    cardID: "card-issue",
+    isIssue: true,
+  });
 });
 
 test("deleteKanbanCardsCommand trims and dedupes card API deletes", async () => {

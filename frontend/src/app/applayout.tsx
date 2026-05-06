@@ -7,7 +7,7 @@ import type { FrameDataModel, DragState } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { emitDashboardEvent, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
 import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, mergeLinkPlan, type FrameLinkEdge } from "./frameLinking";
-import { createDefaultNodeViewFrames } from "./DefaultViews";
+import { createDefaultNodeViewFrames, createLogicGateArenaFrames } from "./DefaultViews";
 import { FrameCard, GridCrosses, PlacementSplash } from "./FrameChrome";
 import {
   CELL_SIZE,
@@ -257,6 +257,13 @@ const App: React.FC = () => {
     if (!frameRightClickMenu) return null;
     return frames.find((frame) => frame.id === frameRightClickMenu.id) ?? null;
   }, [frameRightClickMenu, frames]);
+  const canAttachSelectedFrames = useMemo(() => {
+    if (!frameInContextMenu || !selectedFrameIds.has(frameInContextMenu.id) || selectedFrameIds.size !== 2) return false;
+    const otherID = Array.from(selectedFrameIds).find((id) => id !== frameInContextMenu.id);
+    const parent = otherID ? frames.find((frame) => frame.id === otherID) : null;
+    if (!parent || parent.parentId) return false;
+    return !frames.some((frame) => frame.parentId === frameInContextMenu.id);
+  }, [frameInContextMenu, frames, selectedFrameIds]);
 
   useEffect(() => {
     const frameIDs = new Set(tabs.flatMap((tab) => tab.frames.map((frame) => frame.id)));
@@ -315,6 +322,26 @@ const App: React.FC = () => {
     const uniqueFrameIDs = Array.from(new Set(frameIDs));
     setFrameDeleteConfirmation({ frameIDs: uniqueFrameIDs });
   }, []);
+
+  const attachSelectedFrames = useCallback(() => {
+    if (!frameInContextMenu || !selectedFrameIds.has(frameInContextMenu.id) || selectedFrameIds.size !== 2) return;
+    const childID = frameInContextMenu.id;
+    const parentID = Array.from(selectedFrameIds).find((id) => id !== childID) ?? "";
+    updateActiveFrames((previous) => {
+      const child = previous.find((frame) => frame.id === childID);
+      const parent = previous.find((frame) => frame.id === parentID);
+      if (!child || !parent || parent.parentId) return previous;
+      if (previous.some((frame) => frame.parentId === child.id)) return previous;
+      const oldParent = child.parentId ? previous.find((frame) => frame.id === child.parentId) : null;
+      const childAbsoluteX = oldParent ? oldParent.x + child.x : child.x;
+      const childAbsoluteY = oldParent ? oldParent.y + child.y : child.y;
+      const childX = clampToRangeWithInset(childAbsoluteX - parent.x, 0, Math.max(0, parent.w - child.w), CHILD_EDGE_GAP);
+      const childY = clampToRangeWithInset(childAbsoluteY - parent.y, 0, Math.max(0, parent.h - child.h), CHILD_EDGE_GAP);
+      return previous.map((frame) => (frame.id === childID ? { ...frame, parentId: parentID, x: childX, y: childY } : frame));
+    });
+    setSelectedFrameId(childID);
+    setSelectedFrameIds(new Set([childID]));
+  }, [frameInContextMenu, selectedFrameIds, updateActiveFrames]);
 
   const deleteSelectedFrame = useCallback(() => {
     const ids = selectedFrameIds.size > 0 ? selectedFrameIds : (selectedFrameId ? new Set([selectedFrameId]) : new Set<string>());
@@ -425,6 +452,15 @@ const App: React.FC = () => {
     const framesForView = createDefaultNodeViewFrames();
     const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
     setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Default Node View", frames: framesForView } : tab)));
+    setFrameLinks((previous) => mergeLinkPlan(previous.filter((edge) => !replacedFrameIDs.has(edge.a) && !replacedFrameIDs.has(edge.b)), computeLinkPlan(framesForView)));
+    setActiveTabId(tabID);
+    setEditMode(true);
+  }, [tabs]);
+
+  const openLogicGateArena = useCallback((tabID: string) => {
+    const framesForView = createLogicGateArenaFrames();
+    const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Logic Gate Arena", frames: framesForView } : tab)));
     setFrameLinks((previous) => mergeLinkPlan(previous.filter((edge) => !replacedFrameIDs.has(edge.a) && !replacedFrameIDs.has(edge.b)), computeLinkPlan(framesForView)));
     setActiveTabId(tabID);
     setEditMode(true);
@@ -696,6 +732,7 @@ const App: React.FC = () => {
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
           <button style={menuBtnBase} onClick={() => { openDefaultNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Default Node View</button>
+          <button style={menuBtnBase} onClick={() => { openLogicGateArena(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Logic Gate Arena</button>
           <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>
         </FrameRightClickMenu>
       )}
@@ -719,6 +756,14 @@ const App: React.FC = () => {
               Detach Child Frame
             </button>
           )}
+          <button
+            style={{ ...menuBtnBase, color: canAttachSelectedFrames ? "#111" : "#999" }}
+            disabled={!canAttachSelectedFrames}
+            onClick={() => { attachSelectedFrames(); closeMenus(); }}
+            {...hoverHandlers}
+          >
+            Attach frames
+          </button>
           <button
             style={{ ...menuBtnBase, color: linkPlan ? "#111" : "#999" }}
             disabled={!linkPlan}

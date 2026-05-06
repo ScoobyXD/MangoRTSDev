@@ -26,6 +26,7 @@ type KanbanCardViewProps = {
   accent: string;
   onMouseDown: React.MouseEventHandler<HTMLElement>;
   onClick: React.MouseEventHandler<HTMLElement>;
+  onDoubleClick: React.MouseEventHandler<HTMLElement>;
   onContextMenu: React.MouseEventHandler<HTMLElement>;
   onDragStart: React.DragEventHandler<HTMLElement>;
   onDragEnd: React.DragEventHandler<HTMLElement>;
@@ -48,6 +49,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   accent,
   onMouseDown,
   onClick,
+  onDoubleClick,
   onContextMenu,
   onDragStart,
   onDragEnd,
@@ -56,6 +58,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   onDrop,
 }) => {
   const description = (card.description_snapshot ?? "").trim();
+  const isIssue = card.is_issue === true;
 
   return (
     <article
@@ -63,6 +66,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
       tabIndex={0}
       onMouseDown={onMouseDown}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -72,8 +76,8 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
       style={{
         position: "relative",
         border: `1px solid ${selected || highlighted ? color : line}`,
-        background: cardBackground,
-        color: text,
+        background: isIssue ? "#fff2a6" : cardBackground,
+        color: isIssue ? "#111111" : text,
         padding: "8px 9px 8px 13px",
         minHeight: 58,
         cursor: "grab",
@@ -96,7 +100,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
         <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.node_title}</div>
       </div>
       {description && (
-        <div style={{ marginTop: 7, color: subtext, fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere" }}>
+        <div style={{ marginTop: 7, color: isIssue ? "#3b2d00" : subtext, fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere" }}>
           {description}
         </div>
       )}

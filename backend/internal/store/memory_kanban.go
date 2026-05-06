@@ -88,20 +88,73 @@ func (r *MemoryRepo) kanbanColumnTitleLocked(companyID, boardID, columnID string
 }
 
 func (r *MemoryRepo) ensureKanbanBoardLocked(companyID, boardID, title string) domain.KanbanBoard {
+	return r.ensureKanbanBoardLockedWithLogicGate(companyID, boardID, title, nil)
+}
+
+func (r *MemoryRepo) ensureKanbanBoardLockedWithLogicGate(companyID, boardID, title string, logicGateID *string) domain.KanbanBoard {
 	k := boardKey(companyID, boardID)
 	if board, ok := r.kanbanBoards[k]; ok {
+		if logicGateID != nil && (board.LogicGateID == nil || *board.LogicGateID != *logicGateID) {
+			copied := *logicGateID
+			board.LogicGateID = &copied
+			board.UpdatedTimestamp = time.Now().UTC()
+			r.kanbanBoards[k] = board
+		}
 		return board
 	}
 	now := time.Now().UTC()
+	var copiedLogicGateID *string
+	if logicGateID != nil {
+		value := *logicGateID
+		copiedLogicGateID = &value
+	}
 	board := domain.KanbanBoard{
 		CompanyID:        companyID,
 		BoardID:          boardID,
+		LogicGateID:      copiedLogicGateID,
 		Title:            normalizeKanbanBoardTitle(boardID, title),
 		Position:         nextKanbanBoardPosition(r.kanbanBoards, companyID),
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
 	r.kanbanBoards[k] = board
+	return board
+}
+
+func (r *MemoryRepo) ensureLogicGateKanbanBoardLocked(companyID, logicGateID, title string) domain.KanbanBoard {
+	boardID := LogicGateKanbanBoardID(logicGateID)
+	logicGateIDCopy := logicGateID
+	board := r.ensureKanbanBoardLockedWithLogicGate(companyID, boardID, title, &logicGateIDCopy)
+	defaults := []struct {
+		title string
+		color string
+	}{
+		{title: "Pending", color: KanbanDefaultPendingColor},
+		{title: "In Progress", color: KanbanDefaultInProgressColor},
+		{title: "Done", color: KanbanDefaultDoneColor},
+	}
+	existing := map[string]bool{}
+	for _, column := range r.kanbanColumns[boardKey(companyID, boardID)] {
+		existing[strings.ToLower(strings.TrimSpace(column.Title))] = true
+	}
+	for index, column := range defaults {
+		if existing[strings.ToLower(column.title)] {
+			continue
+		}
+		now := time.Now().UTC()
+		r.kanbanColumns[boardKey(companyID, boardID)] = append(r.kanbanColumns[boardKey(companyID, boardID)], domain.KanbanColumn{
+			CompanyID:        companyID,
+			BoardID:          boardID,
+			ColumnID:         newUUIDv7String(),
+			Title:            column.title,
+			Position:         (index + 1) * 1000,
+			WidthPx:          normalizeKanbanColumnWidth(0),
+			HeightPx:         normalizeKanbanColumnHeight(0),
+			ItemColor:        column.color,
+			CreatedTimestamp: now,
+			UpdatedTimestamp: now,
+		})
+	}
 	return board
 }
 
@@ -112,6 +165,9 @@ func (r *MemoryRepo) ListKanbanBoards(companyID string, query KanbanBoardQuery) 
 	items := make([]domain.KanbanBoard, 0, min(query.Limit, len(r.kanbanBoards)))
 	for _, board := range r.kanbanBoards {
 		if board.CompanyID != companyID {
+			continue
+		}
+		if query.LogicGateID != "" && (board.LogicGateID == nil || *board.LogicGateID != query.LogicGateID) {
 			continue
 		}
 		if query.AfterPosition > 0 && board.Position <= query.AfterPosition {
@@ -151,6 +207,7 @@ func (r *MemoryRepo) CreateKanbanBoard(companyID, boardID, title string, positio
 	item := domain.KanbanBoard{
 		CompanyID:        companyID,
 		BoardID:          boardID,
+		LogicGateID:      nil,
 		Title:            normalizeKanbanBoardTitle(boardID, title),
 		Position:         position,
 		CreatedTimestamp: now,
@@ -183,8 +240,12 @@ func (r *MemoryRepo) DeleteKanbanBoard(companyID, boardID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	k := boardKey(companyID, boardID)
-	if _, ok := r.kanbanBoards[k]; !ok {
+	board, ok := r.kanbanBoards[k]
+	if !ok {
 		return ErrNotFound
+	}
+	if board.LogicGateID != nil {
+		return ErrInvalid
 	}
 	delete(r.kanbanBoards, k)
 	delete(r.kanbanColumns, k)
@@ -333,7 +394,19 @@ func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.Kan
 		return domain.KanbanCard{}, ErrNotFound
 	}
 	k := boardKey(input.CompanyID, input.BoardID)
-	r.ensureKanbanBoardLocked(input.CompanyID, input.BoardID, input.BoardID)
+	board := r.ensureKanbanBoardLocked(input.CompanyID, input.BoardID, input.BoardID)
+	if board.LogicGateID != nil {
+		for boardKeyValue, cards := range r.kanbanCards {
+			nextCards := cards[:0]
+			for _, card := range cards {
+				if card.CompanyID == input.CompanyID && card.NodeID == input.NodeID && card.LogicGateID != nil && card.BoardID != input.BoardID {
+					continue
+				}
+				nextCards = append(nextCards, card)
+			}
+			r.kanbanCards[boardKeyValue] = nextCards
+		}
+	}
 	if input.Position <= 0 {
 		input.Position = nextKanbanCardPosition(r.kanbanCards[k], input.ColumnID)
 	}
@@ -350,6 +423,10 @@ func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.Kan
 		// A drop is a command, not append-only history. Moving the existing card keeps
 		// repeated UI drops and retrying agents idempotent.
 		card.ColumnID = input.ColumnID
+		if board.LogicGateID != nil {
+			value := *board.LogicGateID
+			card.LogicGateID = &value
+		}
 		card.NodeTitle = nodeTitle
 		card.Position = input.Position
 		if description != "" || card.DescriptionSnapshot == "" {
@@ -365,11 +442,17 @@ func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.Kan
 		CardID:              newUUIDv7String(),
 		ColumnID:            input.ColumnID,
 		NodeID:              input.NodeID,
+		LogicGateID:         nil,
 		NodeTitle:           nodeTitle,
 		DescriptionSnapshot: description,
+		IsIssue:             false,
 		Position:            input.Position,
 		CreatedTimestamp:    now,
 		UpdatedTimestamp:    now,
+	}
+	if board.LogicGateID != nil {
+		value := *board.LogicGateID
+		card.LogicGateID = &value
 	}
 	r.kanbanCards[k] = append(r.kanbanCards[k], card)
 	return card, nil
@@ -378,11 +461,11 @@ func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.Kan
 func (r *MemoryRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.kanbanColumnExistsLocked(input.CompanyID, input.BoardID, input.ColumnID) {
+	if input.ColumnID != "" && !r.kanbanColumnExistsLocked(input.CompanyID, input.BoardID, input.ColumnID) {
 		return domain.KanbanCard{}, ErrNotFound
 	}
 	k := boardKey(input.CompanyID, input.BoardID)
-	if input.Position <= 0 {
+	if input.ColumnID != "" && input.Position <= 0 {
 		input.Position = nextKanbanCardPosition(r.kanbanCards[k], input.ColumnID)
 	}
 	for index, card := range r.kanbanCards[k] {
@@ -390,11 +473,18 @@ func (r *MemoryRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCar
 			continue
 		}
 		now := time.Now().UTC()
-		card.ColumnID = input.ColumnID
+		if input.ColumnID != "" {
+			card.ColumnID = input.ColumnID
+		}
 		if node, ok := r.nodes[key(input.CompanyID, card.NodeID)]; ok && strings.TrimSpace(node.Title) != "" {
 			card.NodeTitle = node.Title
 		}
-		card.Position = input.Position
+		if input.Position > 0 {
+			card.Position = input.Position
+		}
+		if input.IsIssue != nil {
+			card.IsIssue = *input.IsIssue
+		}
 		card.UpdatedTimestamp = now
 		r.kanbanCards[k][index] = card
 		return card, nil

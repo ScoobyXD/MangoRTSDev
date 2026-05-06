@@ -35,27 +35,68 @@ func (r *MemoryRepo) CreateNode(companyID, title string) (domain.Node, error) {
 	return n, nil
 }
 
-func (r *MemoryRepo) UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error) {
+func (r *MemoryRepo) deriveNodeStatusLocked(companyID, nodeID string) *string {
+	for _, cards := range r.kanbanCards {
+		for _, card := range cards {
+			if card.CompanyID != companyID || card.NodeID != nodeID || card.LogicGateID == nil {
+				continue
+			}
+			status := ""
+			if card.IsIssue {
+				status = "Issue"
+			} else if title, ok := r.kanbanColumnTitleLocked(companyID, card.BoardID, card.ColumnID); ok {
+				status = title
+			}
+			if status == "" {
+				status = "Unknown"
+			}
+			return &status
+		}
+	}
+	return nil
+}
+
+func (r *MemoryRepo) withDerivedNodeStatusLocked(node domain.Node) domain.Node {
+	node.Status = r.deriveNodeStatusLocked(node.CompanyID, node.NodeID)
+	return node
+}
+
+func (r *MemoryRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	key := companyID + ":" + nodeID
-	node, ok := r.nodes[key]
+	k := key(input.CompanyID, input.NodeID)
+	node, ok := r.nodes[k]
 	if !ok {
 		return domain.Node{}, ErrNotFound
 	}
-	node.Title = title
-	r.nodes[key] = node
-	for boardKey, cards := range r.kanbanCards {
-		for index, card := range cards {
-			if card.CompanyID != companyID || card.NodeID != nodeID {
-				continue
+	if input.TitleSet {
+		node.Title = input.Title
+		for boardKey, cards := range r.kanbanCards {
+			for index, card := range cards {
+				if card.CompanyID != input.CompanyID || card.NodeID != input.NodeID {
+					continue
+				}
+				card.NodeTitle = input.Title
+				card.UpdatedTimestamp = time.Now().UTC()
+				r.kanbanCards[boardKey][index] = card
 			}
-			card.NodeTitle = title
-			card.UpdatedTimestamp = time.Now().UTC()
-			r.kanbanCards[boardKey][index] = card
 		}
 	}
-	return node, nil
+	if input.DueDateSet {
+		node.DueDate = input.DueDate
+	}
+	if input.PrioritySet {
+		node.Priority = input.Priority
+	}
+	if input.AssigneeUserIDSet {
+		node.AssigneeUserID = input.AssigneeUserID
+	}
+	r.nodes[k] = node
+	return r.withDerivedNodeStatusLocked(node), nil
+}
+
+func (r *MemoryRepo) UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error) {
+	return r.UpdateNode(UpdateNodeInput{CompanyID: companyID, NodeID: nodeID, Title: title, TitleSet: true})
 }
 
 func (r *MemoryRepo) ListNodes(companyID string) ([]domain.Node, error) {
@@ -65,7 +106,7 @@ func (r *MemoryRepo) ListNodes(companyID string) ([]domain.Node, error) {
 	items := make([]domain.Node, 0)
 	for _, node := range r.nodes {
 		if node.CompanyID == companyID {
-			items = append(items, node)
+			items = append(items, r.withDerivedNodeStatusLocked(node))
 		}
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -82,7 +123,7 @@ func (r *MemoryRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	if !ok {
 		return domain.Node{}, ErrNotFound
 	}
-	return n, nil
+	return r.withDerivedNodeStatusLocked(n), nil
 }
 
 func (r *MemoryRepo) ListNodeRelationships(companyID string) ([]domain.NodeRelationship, error) {

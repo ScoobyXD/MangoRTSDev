@@ -30,6 +30,10 @@ type Node struct {
 	NodeID    string `json:"node_id"`
 	// Title is the canonical public API field name for node text labels.
 	Title            string    `json:"title"`
+	Status           *string   `json:"status"`
+	DueDate          *string   `json:"due_date"`
+	Priority         *int      `json:"priority"`
+	AssigneeUserID   *string   `json:"assignee_user_id"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
@@ -162,6 +166,7 @@ type Operation struct {
 type KanbanBoard struct {
 	CompanyID        string    `json:"company_id"`
 	BoardID          string    `json:"board_id"`
+	LogicGateID      *string   `json:"logic_gate_id"`
 	Title            string    `json:"title"`
 	Position         int       `json:"position"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
@@ -187,8 +192,10 @@ type KanbanCard struct {
 	CardID              string    `json:"card_id"`
 	ColumnID            string    `json:"column_id"`
 	NodeID              string    `json:"node_id"`
+	LogicGateID         *string   `json:"logic_gate_id"`
 	NodeTitle           string    `json:"node_title"`
 	DescriptionSnapshot string    `json:"description_snapshot"`
+	IsIssue             bool      `json:"is_issue"`
 	Position            int       `json:"position"`
 	CreatedTimestamp    time.Time `json:"created_timestamp"`
 	UpdatedTimestamp    time.Time `json:"updated_timestamp"`

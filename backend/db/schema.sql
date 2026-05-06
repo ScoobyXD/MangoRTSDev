@@ -77,8 +77,13 @@ create table if not exists nodes (
   company_id uuid not null,
   node_id uuid not null,
   title text not null,
+  due_date date,
+  priority smallint,
+  assignee_user_id uuid,
   created_timestamp timestamptz not null,
-  primary key (company_id, node_id)
+  constraint nodes_priority_chk check (priority is null or priority between 1 and 5),
+  primary key (company_id, node_id),
+  foreign key (assignee_user_id) references users (user_id)
 );
 
 create table if not exists node_relationships (
@@ -243,12 +248,14 @@ create table if not exists operations (
 create table if not exists kanban_boards (
   company_id uuid not null,
   board_id text not null,
+  logic_gate_id uuid,
   title text not null,
   position integer not null,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   constraint kanban_boards_title_nonblank_chk check (btrim(title) <> ''),
-  primary key (company_id, board_id)
+  primary key (company_id, board_id),
+  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade
 );
 
 create table if not exists kanban_columns (
@@ -275,16 +282,108 @@ create table if not exists kanban_cards (
   card_id uuid not null,
   column_id uuid not null,
   node_id uuid not null,
+  logic_gate_id uuid,
   node_title text not null,
   description_snapshot text not null default '',
+  is_issue boolean not null default false,
   position integer not null,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   constraint kanban_cards_node_title_nonblank_chk check (btrim(node_title) <> ''),
   primary key (company_id, board_id, card_id),
   foreign key (company_id, board_id, column_id) references kanban_columns (company_id, board_id, column_id) on delete cascade,
+  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade,
   constraint kanban_cards_company_id_node_id_fkey foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade
 );
+
+insert into kanban_boards (
+  company_id,
+  board_id,
+  logic_gate_id,
+  title,
+  position,
+  created_timestamp,
+  updated_timestamp
+)
+select
+  lg.company_id,
+  'logic-gate:' || lg.logic_gate_id::text,
+  lg.logic_gate_id,
+  coalesce(nullif(btrim(lg.header), ''), 'Logic Gate Kanban'),
+  coalesce((
+    select max(existing.position)
+    from kanban_boards existing
+    where existing.company_id = lg.company_id
+  ), 0) + row_number() over (partition by lg.company_id order by lg.created_timestamp, lg.logic_gate_id) * 1000,
+  now(),
+  now()
+from logic_gates lg
+on conflict (company_id, board_id)
+do update set
+  logic_gate_id = excluded.logic_gate_id,
+  title = excluded.title,
+  updated_timestamp = now();
+
+insert into kanban_columns (
+  company_id,
+  board_id,
+  column_id,
+  title,
+  position,
+  width_px,
+  height_px,
+  item_color,
+  created_timestamp,
+  updated_timestamp
+)
+select
+  lg.company_id,
+  'logic-gate:' || lg.logic_gate_id::text,
+  md5((lg.company_id::text || ':logic-gate:' || lg.logic_gate_id::text || ':' || defaults.title))::uuid,
+  defaults.title,
+  defaults.position,
+  260,
+  240,
+  defaults.color,
+  now(),
+  now()
+from logic_gates lg
+cross join (
+  values
+    ('Pending', 1000, '#808080'),
+    ('In Progress', 2000, '#ff9500'),
+    ('Done', 3000, '#39ff14')
+) as defaults(title, position, color)
+where exists (
+  select 1
+  from kanban_boards kb
+  where kb.company_id = lg.company_id
+    and kb.board_id = 'logic-gate:' || lg.logic_gate_id::text
+)
+on conflict (company_id, board_id, column_id) do nothing;
+
+update kanban_cards card
+set logic_gate_id = board.logic_gate_id
+from kanban_boards board
+where card.company_id = board.company_id
+  and card.board_id = board.board_id
+  and board.logic_gate_id is not null
+  and card.logic_gate_id is distinct from board.logic_gate_id;
+
+with ranked_logic_gate_cards as (
+  select
+    ctid,
+    row_number() over (
+      partition by company_id, node_id
+      order by updated_timestamp desc, created_timestamp desc, card_id desc
+    ) as rn
+  from kanban_cards
+  where logic_gate_id is not null
+)
+delete from kanban_cards target
+using ranked_logic_gate_cards ranked
+where target.ctid = ranked.ctid
+  and ranked.rn > 1;
 
 create index if not exists idx_node_information_node on node_information(company_id, node_id);
 create index if not exists idx_node_projection_table_node_updated on node_projection_table(company_id, node_id, updated_timestamp desc);
@@ -327,9 +426,15 @@ create index if not exists idx_logic_gate_relationships_b on logic_gate_relation
 create index if not exists idx_operations_node on operations(company_id, node_id);
 create index if not exists idx_operations_logic_gate on operations(company_id, logic_gate_id);
 create index if not exists idx_kanban_boards_company_position on kanban_boards(company_id, position, board_id);
+create unique index if not exists idx_kanban_boards_logic_gate
+  on kanban_boards(company_id, logic_gate_id)
+  where logic_gate_id is not null;
 create index if not exists idx_kanban_columns_board_position on kanban_columns(company_id, board_id, position);
 create index if not exists idx_kanban_cards_column_position on kanban_cards(company_id, board_id, column_id, position);
 create unique index if not exists idx_kanban_cards_unique_node on kanban_cards(company_id, board_id, node_id);
+create unique index if not exists idx_kanban_cards_one_logic_gate_card_per_node
+  on kanban_cards(company_id, node_id)
+  where logic_gate_id is not null;
 
 create table if not exists company_explorer_folders (
   company_id uuid not null,

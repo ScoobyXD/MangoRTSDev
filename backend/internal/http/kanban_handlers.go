@@ -31,10 +31,11 @@ func parseKanbanBoardQueryParams(r *http.Request) (store.KanbanBoardQuery, bool,
 	}
 	query := store.KanbanBoardQuery{Limit: limit}
 	for key := range r.URL.Query() {
-		if key != "company_id" && key != "limit" && key != "after_position" {
+		if key != "company_id" && key != "limit" && key != "after_position" && key != "logic_gate_id" {
 			return store.KanbanBoardQuery{}, false, "unsupported_kanban_board_query_param"
 		}
 	}
+	query.LogicGateID = strings.TrimSpace(r.URL.Query().Get("logic_gate_id"))
 	if raw := strings.TrimSpace(r.URL.Query().Get("after_position")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 0 {
@@ -135,6 +136,10 @@ func (s *Server) handleKanbanBoardByID(w http.ResponseWriter, r *http.Request) {
 		err := s.repo.DeleteKanbanBoard(companyID, boardID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "kanban_board_not_found")
+			return
+		}
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusConflict, "attached_kanban_board_cannot_be_deleted")
 			return
 		}
 		if err != nil {
@@ -398,10 +403,11 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPut {
 		var req struct {
-			CompanyID string `json:"company_id"`
-			BoardID   string `json:"board_id"`
-			ColumnID  string `json:"column_id"`
-			Position  int    `json:"position"`
+			CompanyID string  `json:"company_id"`
+			BoardID   string  `json:"board_id"`
+			ColumnID  *string `json:"column_id"`
+			Position  int     `json:"position"`
+			IsIssue   *bool   `json:"is_issue"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
@@ -409,17 +415,25 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 		}
 		req.CompanyID = strings.TrimSpace(req.CompanyID)
 		req.BoardID = strings.TrimSpace(req.BoardID)
-		req.ColumnID = strings.TrimSpace(req.ColumnID)
-		if req.CompanyID == "" || req.BoardID == "" || req.ColumnID == "" {
-			writeError(w, http.StatusBadRequest, "company_board_and_column_required")
+		columnID := ""
+		if req.ColumnID != nil {
+			columnID = strings.TrimSpace(*req.ColumnID)
+		}
+		if req.CompanyID == "" || req.BoardID == "" {
+			writeError(w, http.StatusBadRequest, "company_and_board_required")
+			return
+		}
+		if columnID == "" && req.IsIssue == nil {
+			writeError(w, http.StatusBadRequest, "kanban_card_update_required")
 			return
 		}
 		item, err := s.repo.MoveKanbanCard(store.KanbanCardMoveInput{
 			CompanyID: req.CompanyID,
 			BoardID:   req.BoardID,
 			CardID:    cardID,
-			ColumnID:  req.ColumnID,
+			ColumnID:  columnID,
 			Position:  req.Position,
+			IsIssue:   req.IsIssue,
 		})
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "kanban_card_or_column_not_found")

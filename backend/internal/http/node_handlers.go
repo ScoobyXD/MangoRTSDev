@@ -5,7 +5,9 @@ import (
 	"errors"
 	"miraeopus/backend/internal/store"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +53,67 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 }
 
+func normalizeNodeDueDate(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", true
+	}
+	for _, layout := range []string{"2006-01-02", "01/02/2006"} {
+		parsed, err := time.Parse(layout, raw)
+		if err == nil {
+			return parsed.Format("2006-01-02"), true
+		}
+	}
+	return "", false
+}
+
+func parseOptionalStringField(fields map[string]json.RawMessage, key string) (*string, bool, bool) {
+	raw, ok := fields[key]
+	if !ok {
+		return nil, false, true
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		value := ""
+		return &value, true, true
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, true, false
+	}
+	value = strings.TrimSpace(value)
+	return &value, true, true
+}
+
+func parseOptionalPriorityField(fields map[string]json.RawMessage) (*int, bool, bool) {
+	raw, ok := fields["priority"]
+	if !ok {
+		return nil, false, true
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return nil, true, true
+	}
+	var numeric int
+	if err := json.Unmarshal(raw, &numeric); err == nil {
+		if numeric == 0 {
+			return nil, true, true
+		}
+		return &numeric, true, numeric >= 1 && numeric <= 5
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return nil, true, false
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, true, true
+	}
+	parsed, err := strconv.Atoi(text)
+	if err != nil {
+		return nil, true, false
+	}
+	return &parsed, true, parsed >= 1 && parsed <= 5
+}
+
 func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.TrimPrefix(r.URL.Path, "/v1/nodes/")
 	parts := strings.Split(trimmed, "/")
@@ -62,19 +125,59 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 
 	if len(parts) == 1 {
 		if r.Method == http.MethodPut {
-			var req struct {
-				CompanyID string `json:"company_id"`
-				Title     string `json:"title"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var fields map[string]json.RawMessage
+			if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid_json")
 				return
 			}
-			if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Title) == "" {
-				writeError(w, http.StatusBadRequest, "company_id_and_title_required")
+			companyIDField, companyIDSet, ok := parseOptionalStringField(fields, "company_id")
+			if !ok || !companyIDSet || companyIDField == nil || strings.TrimSpace(*companyIDField) == "" {
+				writeError(w, http.StatusBadRequest, "company_id_required")
 				return
 			}
-			item, err := s.repo.UpdateNodeTitle(req.CompanyID, nodeID, strings.TrimSpace(req.Title))
+			input := store.UpdateNodeInput{CompanyID: strings.TrimSpace(*companyIDField), NodeID: nodeID}
+			if title, set, ok := parseOptionalStringField(fields, "title"); !ok {
+				writeError(w, http.StatusBadRequest, "invalid_title")
+				return
+			} else if set {
+				if title == nil || strings.TrimSpace(*title) == "" {
+					writeError(w, http.StatusBadRequest, "title_required")
+					return
+				}
+				input.Title = strings.TrimSpace(*title)
+				input.TitleSet = true
+			}
+			if dueDate, set, ok := parseOptionalStringField(fields, "due_date"); !ok {
+				writeError(w, http.StatusBadRequest, "invalid_due_date")
+				return
+			} else if set {
+				normalized, valid := normalizeNodeDueDate(*dueDate)
+				if !valid {
+					writeError(w, http.StatusBadRequest, "invalid_due_date")
+					return
+				}
+				input.DueDate = &normalized
+				input.DueDateSet = true
+			}
+			if priority, set, ok := parseOptionalPriorityField(fields); !ok {
+				writeError(w, http.StatusBadRequest, "invalid_priority")
+				return
+			} else if set {
+				input.Priority = priority
+				input.PrioritySet = true
+			}
+			if assigneeUserID, set, ok := parseOptionalStringField(fields, "assignee_user_id"); !ok {
+				writeError(w, http.StatusBadRequest, "invalid_assignee_user_id")
+				return
+			} else if set {
+				input.AssigneeUserID = assigneeUserID
+				input.AssigneeUserIDSet = true
+			}
+			if !input.TitleSet && !input.DueDateSet && !input.PrioritySet && !input.AssigneeUserIDSet {
+				writeError(w, http.StatusBadRequest, "node_update_required")
+				return
+			}
+			item, err := s.repo.UpdateNode(input)
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "node_not_found")
 				return
@@ -83,7 +186,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed_to_update_node")
 				return
 			}
-			s.publishWorkspaceEvent(req.CompanyID, "node_updated", map[string]any{"node_id": nodeID, "node": item})
+			s.publishWorkspaceEvent(input.CompanyID, "node_updated", map[string]any{"node_id": nodeID, "node": item})
 			writeJSON(w, http.StatusOK, item)
 			return
 		}

@@ -975,7 +975,14 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 	if err := json.NewDecoder(listBoardsRec.Body).Decode(&listBoardsPayload); err != nil {
 		t.Fatalf("decode boards: %v", err)
 	}
-	if len(listBoardsPayload.Boards) != 1 || listBoardsPayload.Boards[0].BoardID != boardID {
+	foundImplicitBoard := false
+	for _, board := range listBoardsPayload.Boards {
+		if board.BoardID == boardID {
+			foundImplicitBoard = true
+			break
+		}
+	}
+	if !foundImplicitBoard {
 		t.Fatalf("kanban boards = %+v, want implicit board metadata for %q", listBoardsPayload.Boards, boardID)
 	}
 
@@ -1326,6 +1333,139 @@ func TestUpdateNodeTitleViaPut(t *testing.T) {
 	}
 	if details.Node.Title != "new title" {
 		t.Fatalf("node title = %q, want %q", details.Node.Title, "new title")
+	}
+}
+
+func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "11111111-1111-4111-8111-333333333333"
+
+	logicGate, err := repo.CreateLogicGate(companyID, "Fulfillment Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate() error = %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Invoice node")
+	if err != nil {
+		t.Fatalf("CreateNode() error = %v", err)
+	}
+	boardID := store.LogicGateKanbanBoardID(logicGate.LogicGateID)
+
+	listBoardsReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/boards?company_id="+companyID+"&logic_gate_id="+logicGate.LogicGateID, nil)
+	listBoardsRec := httptest.NewRecorder()
+	handler.ServeHTTP(listBoardsRec, listBoardsReq)
+	if listBoardsRec.Code != http.StatusOK {
+		t.Fatalf("GET logic-gate boards status = %d body=%s", listBoardsRec.Code, listBoardsRec.Body.String())
+	}
+	var boardsPayload struct {
+		Boards []struct {
+			BoardID     string  `json:"board_id"`
+			LogicGateID *string `json:"logic_gate_id"`
+		} `json:"boards"`
+	}
+	if err := json.NewDecoder(listBoardsRec.Body).Decode(&boardsPayload); err != nil {
+		t.Fatalf("decode boards: %v", err)
+	}
+	if len(boardsPayload.Boards) != 1 || boardsPayload.Boards[0].BoardID != boardID || boardsPayload.Boards[0].LogicGateID == nil || *boardsPayload.Boards[0].LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("logic-gate boards = %+v, want attached board", boardsPayload.Boards)
+	}
+
+	columns, err := repo.ListKanbanColumns(companyID, boardID)
+	if err != nil {
+		t.Fatalf("ListKanbanColumns() error = %v", err)
+	}
+	columnID := ""
+	for _, column := range columns {
+		if column.Title == "In Progress" {
+			columnID = column.ColumnID
+			break
+		}
+	}
+	if columnID == "" {
+		t.Fatalf("attached board columns = %+v, want In Progress", columns)
+	}
+
+	addCardBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"board_id":   boardID,
+		"column_id":  columnID,
+		"node_id":    node.NodeID,
+		"node_title": node.Title,
+	})
+	addCardReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/cards", bytes.NewReader(addCardBody))
+	addCardReq.Header.Set("Content-Type", "application/json")
+	addCardRec := httptest.NewRecorder()
+	handler.ServeHTTP(addCardRec, addCardReq)
+	if addCardRec.Code != http.StatusCreated {
+		t.Fatalf("POST logic-gate card status = %d body=%s", addCardRec.Code, addCardRec.Body.String())
+	}
+	var createdCard struct {
+		CardID      string  `json:"card_id"`
+		LogicGateID *string `json:"logic_gate_id"`
+		IsIssue     bool    `json:"is_issue"`
+	}
+	if err := json.NewDecoder(addCardRec.Body).Decode(&createdCard); err != nil {
+		t.Fatalf("decode card: %v", err)
+	}
+	if createdCard.LogicGateID == nil || *createdCard.LogicGateID != logicGate.LogicGateID || createdCard.IsIssue {
+		t.Fatalf("created logic-gate card = %+v", createdCard)
+	}
+
+	issueBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"board_id":   boardID,
+		"is_issue":   true,
+	})
+	issueReq := httptest.NewRequest(http.MethodPut, "/v1/kanban/cards/"+createdCard.CardID, bytes.NewReader(issueBody))
+	issueReq.Header.Set("Content-Type", "application/json")
+	issueRec := httptest.NewRecorder()
+	handler.ServeHTTP(issueRec, issueReq)
+	if issueRec.Code != http.StatusOK {
+		t.Fatalf("PUT issue card status = %d body=%s", issueRec.Code, issueRec.Body.String())
+	}
+	var issueCard struct {
+		ColumnID string `json:"column_id"`
+		IsIssue  bool   `json:"is_issue"`
+	}
+	if err := json.NewDecoder(issueRec.Body).Decode(&issueCard); err != nil {
+		t.Fatalf("decode issue card: %v", err)
+	}
+	if !issueCard.IsIssue || issueCard.ColumnID != columnID {
+		t.Fatalf("issue card = %+v, want issue without move", issueCard)
+	}
+
+	updateNodeBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"due_date":   "05/06/2026",
+		"priority":   4,
+	})
+	updateNodeReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(updateNodeBody))
+	updateNodeReq.Header.Set("Content-Type", "application/json")
+	updateNodeRec := httptest.NewRecorder()
+	handler.ServeHTTP(updateNodeRec, updateNodeReq)
+	if updateNodeRec.Code != http.StatusOK {
+		t.Fatalf("PUT node metadata status = %d body=%s", updateNodeRec.Code, updateNodeRec.Body.String())
+	}
+	var updatedNode struct {
+		Status   *string `json:"status"`
+		DueDate  *string `json:"due_date"`
+		Priority *int    `json:"priority"`
+	}
+	if err := json.NewDecoder(updateNodeRec.Body).Decode(&updatedNode); err != nil {
+		t.Fatalf("decode node: %v", err)
+	}
+	if updatedNode.Status == nil || *updatedNode.Status != "Issue" || updatedNode.DueDate == nil || *updatedNode.DueDate != "2026-05-06" || updatedNode.Priority == nil || *updatedNode.Priority != 4 {
+		t.Fatalf("updated node = %+v, want derived status and metadata", updatedNode)
+	}
+
+	deleteBoardReq := httptest.NewRequest(http.MethodDelete, "/v1/kanban/boards/"+boardID+"?company_id="+companyID, nil)
+	deleteBoardRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteBoardRec, deleteBoardReq)
+	if deleteBoardRec.Code != http.StatusConflict {
+		t.Fatalf("DELETE attached board status = %d, want %d body=%s", deleteBoardRec.Code, http.StatusConflict, deleteBoardRec.Body.String())
 	}
 }
 

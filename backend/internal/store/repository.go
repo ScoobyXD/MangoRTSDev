@@ -16,6 +16,7 @@ type Repository interface {
 	UpsertAuthUser(cognitoSubject, email string) (domain.User, error)
 	UserHasCompanyAccess(cognitoSubject, companyID string) (bool, error)
 	CreateNode(companyID, title string) (domain.Node, error)
+	UpdateNode(input UpdateNodeInput) (domain.Node, error)
 	UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error)
 	ListNodes(companyID string) ([]domain.Node, error)
 	ListNodeRelationships(companyID string) ([]domain.NodeRelationship, error)
@@ -127,9 +128,14 @@ const KanbanMaxCardsLimit = 500
 
 const KanbanMaxBoardsLimit = 200
 
+const KanbanDefaultPendingColor = "#808080"
+const KanbanDefaultInProgressColor = "#ff9500"
+const KanbanDefaultDoneColor = "#39ff14"
+
 type KanbanBoardQuery struct {
 	AfterPosition int
 	Limit         int
+	LogicGateID   string
 }
 
 type KanbanCardQuery struct {
@@ -154,9 +160,24 @@ type KanbanCardMoveInput struct {
 	CardID    string
 	ColumnID  string
 	Position  int
+	IsIssue   *bool
+}
+
+type UpdateNodeInput struct {
+	CompanyID         string
+	NodeID            string
+	Title             string
+	TitleSet          bool
+	DueDate           *string
+	DueDateSet        bool
+	Priority          *int
+	PrioritySet       bool
+	AssigneeUserID    *string
+	AssigneeUserIDSet bool
 }
 
 func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {
+	query.LogicGateID = strings.TrimSpace(query.LogicGateID)
 	if query.AfterPosition < 0 {
 		query.AfterPosition = 0
 	}
@@ -164,6 +185,14 @@ func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {
 		query.Limit = 100
 	}
 	return query
+}
+
+func LogicGateKanbanBoardID(logicGateID string) string {
+	return "logic-gate:" + strings.TrimSpace(logicGateID)
+}
+
+func IsLogicGateKanbanBoardID(boardID string) bool {
+	return strings.HasPrefix(strings.TrimSpace(boardID), "logic-gate:")
 }
 
 func NormalizeKanbanCardQuery(query KanbanCardQuery) KanbanCardQuery {

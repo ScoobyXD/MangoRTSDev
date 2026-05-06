@@ -81,9 +81,9 @@ export function useFrameDragResize({
           const target = prev.find((frame) => frame.id === d.id);
           if (!target) return prev;
 
-          let next = prev.map((w) => {
+          const next = prev.map((w) => {
             if (w.id !== d.id) return w;
-            if (d.mode === "drag" && !d.parentId) return w;
+            if (!d.parentId) return w;
             const siblingOverlaps = prev.some((candidate) => {
               if (candidate.id === w.id) return false;
               const sameParent = (candidate.parentId ?? "") === (w.parentId ?? "");
@@ -94,17 +94,6 @@ export function useFrameDragResize({
               ? { ...w, x: d.origX, y: d.origY }
               : { ...w, x: d.origX, y: d.origY, w: d.origW, h: d.origH };
           });
-
-          if (d.mode !== "drag" || d.parentId) return next;
-          const moved = next.find((frame) => frame.id === d.id);
-          if (!moved) return next;
-          const host = next
-            .filter((frame) => !frame.parentId && frame.id !== moved.id)
-            .find((frame) => framesOverlap(frame, moved));
-          if (!host) return next;
-          const childX = clampToRangeWithInset(moved.x - host.x, 0, Math.max(0, host.w - moved.w), CHILD_EDGE_GAP);
-          const childY = clampToRangeWithInset(moved.y - host.y, 0, Math.max(0, host.h - moved.h), CHILD_EDGE_GAP);
-          next = next.map((frame) => (frame.id === moved.id ? { ...frame, parentId: host.id, x: childX, y: childY } : frame));
           return next;
         });
       }

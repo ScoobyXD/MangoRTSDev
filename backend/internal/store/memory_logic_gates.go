@@ -32,6 +32,7 @@ func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate
 		CreatedTimestamp: time.Now().UTC(),
 	}
 	r.logicGates[key(companyID, item.LogicGateID)] = item
+	r.ensureLogicGateKanbanBoardLocked(companyID, item.LogicGateID, item.Header)
 	return item, nil
 }
 
@@ -45,6 +46,12 @@ func (r *MemoryRepo) UpdateLogicGateHeader(companyID, logicGateID, header string
 	}
 	item.Header = header
 	r.logicGates[k] = item
+	boardKeyValue := boardKey(companyID, LogicGateKanbanBoardID(logicGateID))
+	if board, ok := r.kanbanBoards[boardKeyValue]; ok && board.LogicGateID != nil {
+		board.Title = normalizeKanbanBoardTitle(board.BoardID, header)
+		board.UpdatedTimestamp = time.Now().UTC()
+		r.kanbanBoards[boardKeyValue] = board
+	}
 	return item, nil
 }
 
@@ -87,6 +94,11 @@ func (r *MemoryRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	delete(r.logicGateText, k)
 	delete(r.folderItems, folderItemKey(companyID, "logic_gate", logicGateID))
 	delete(r.logicMapPositions, k)
+	boardID := LogicGateKanbanBoardID(logicGateID)
+	delete(r.kanbanCards, boardKey(companyID, boardID))
+	delete(r.kanbanColumns, boardKey(companyID, boardID))
+	delete(r.kanbanBoards, boardKey(companyID, boardID))
+	delete(r.folderItems, folderItemKey(companyID, "kanban", boardID))
 	for operationKey, operation := range r.operations {
 		if operation.CompanyID != companyID || operation.LogicGateID == nil || *operation.LogicGateID != logicGateID {
 			continue

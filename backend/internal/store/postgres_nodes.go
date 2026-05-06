@@ -5,24 +5,82 @@ import (
 	"database/sql"
 	"errors"
 	"miraeopus/backend/internal/domain"
+	"strings"
 )
+
+const nodeSelectColumns = `
+n.company_id,
+n.node_id,
+n.title,
+case
+  when card.is_issue then 'Issue'
+  else column_row.title
+end as status,
+n.due_date::text,
+n.priority,
+n.assignee_user_id::text,
+n.created_timestamp`
+
+const nodeStatusJoin = `
+left join kanban_cards card
+  on card.company_id = n.company_id
+ and card.node_id = n.node_id
+ and card.logic_gate_id is not null
+left join kanban_columns column_row
+  on column_row.company_id = card.company_id
+ and column_row.board_id = card.board_id
+ and column_row.column_id = card.column_id`
+
+func scanNode(row interface {
+	Scan(dest ...any) error
+}) (domain.Node, error) {
+	var item domain.Node
+	var status sql.NullString
+	var dueDate sql.NullString
+	var priority sql.NullInt64
+	var assigneeUserID sql.NullString
+	err := row.Scan(
+		&item.CompanyID,
+		&item.NodeID,
+		&item.Title,
+		&status,
+		&dueDate,
+		&priority,
+		&assigneeUserID,
+		&item.CreatedTimestamp,
+	)
+	if status.Valid {
+		item.Status = &status.String
+	}
+	if dueDate.Valid {
+		item.DueDate = &dueDate.String
+	}
+	if priority.Valid {
+		value := int(priority.Int64)
+		item.Priority = &value
+	}
+	if assigneeUserID.Valid {
+		item.AssigneeUserID = &assigneeUserID.String
+	}
+	return item, err
+}
 
 func (r *PostgresRepo) CreateNode(companyID, title string) (domain.Node, error) {
 	ctx := context.Background()
 	item := domain.Node{CompanyID: companyID, NodeID: newUUIDv7String(), Title: title}
-	err := r.db.QueryRowContext(ctx,
+	_, err := r.db.ExecContext(ctx,
 		`insert into nodes (company_id, node_id, title, created_timestamp)
 		 values ($1, $2, $3, now())
-		 returning company_id, node_id, title, created_timestamp`,
+		`,
 		item.CompanyID, item.NodeID, item.Title,
-	).Scan(&item.CompanyID, &item.NodeID, &item.Title, &item.CreatedTimestamp)
+	)
 	if err != nil {
 		return domain.Node{}, err
 	}
-	return item, nil
+	return r.GetNode(companyID, item.NodeID)
 }
 
-func (r *PostgresRepo) UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error) {
+func (r *PostgresRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -30,24 +88,56 @@ func (r *PostgresRepo) UpdateNodeTitle(companyID, nodeID, title string) (domain.
 	}
 	defer tx.Rollback()
 
-	var item domain.Node
-	if err := tx.QueryRowContext(ctx, `
+	dueDate := (*string)(nil)
+	if input.DueDate != nil {
+		value := strings.TrimSpace(*input.DueDate)
+		dueDate = &value
+	}
+	assigneeUserID := (*string)(nil)
+	if input.AssigneeUserID != nil {
+		value := strings.TrimSpace(*input.AssigneeUserID)
+		assigneeUserID = &value
+	}
+	_, err = tx.ExecContext(ctx, `
 update nodes
-set title = $3
-where company_id = $1 and node_id = $2
-returning company_id, node_id, title, created_timestamp
-`, companyID, nodeID, title).Scan(&item.CompanyID, &item.NodeID, &item.Title, &item.CreatedTimestamp); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.Node{}, ErrNotFound
-		}
+set title = case when $4 then $3 else title end,
+    due_date = case when $6 then nullif($5::text, '')::date else due_date end,
+    priority = case when $8 then $7::smallint else priority end,
+    assignee_user_id = case when $10 then nullif($9::text, '')::uuid else assignee_user_id end
+where company_id = $1 and node_id = $2`,
+		input.CompanyID,
+		input.NodeID,
+		input.Title,
+		input.TitleSet,
+		dueDate,
+		input.DueDateSet,
+		input.Priority,
+		input.PrioritySet,
+		assigneeUserID,
+		input.AssigneeUserIDSet,
+	)
+	if err != nil {
 		return domain.Node{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if input.TitleSet {
+		if _, err := tx.ExecContext(ctx, `
 update kanban_cards
 set node_title=$3,
     updated_timestamp=now()
 where company_id=$1 and node_id=$2
-`, companyID, nodeID, title); err != nil {
+`, input.CompanyID, input.NodeID, input.Title); err != nil {
+			return domain.Node{}, err
+		}
+	}
+	item, err := scanNode(tx.QueryRowContext(ctx, `
+select `+nodeSelectColumns+`
+from nodes n
+`+nodeStatusJoin+`
+where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Node{}, ErrNotFound
+	}
+	if err != nil {
 		return domain.Node{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -56,13 +146,18 @@ where company_id=$1 and node_id=$2
 	return item, nil
 }
 
+func (r *PostgresRepo) UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error) {
+	return r.UpdateNode(UpdateNodeInput{CompanyID: companyID, NodeID: nodeID, Title: title, TitleSet: true})
+}
+
 func (r *PostgresRepo) ListNodes(companyID string) ([]domain.Node, error) {
 	ctx := context.Background()
 	rows, err := r.db.QueryContext(ctx,
-		`select company_id, node_id, title, created_timestamp
-		 from nodes
-		 where company_id=$1
-		 order by created_timestamp asc`,
+		`select `+nodeSelectColumns+`
+		 from nodes n
+		 `+nodeStatusJoin+`
+		 where n.company_id=$1
+		 order by n.created_timestamp asc`,
 		companyID,
 	)
 	if err != nil {
@@ -72,8 +167,8 @@ func (r *PostgresRepo) ListNodes(companyID string) ([]domain.Node, error) {
 
 	items := make([]domain.Node, 0)
 	for rows.Next() {
-		var item domain.Node
-		if err := rows.Scan(&item.CompanyID, &item.NodeID, &item.Title, &item.CreatedTimestamp); err != nil {
+		item, err := scanNode(rows)
+		if err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -142,12 +237,13 @@ func (r *PostgresRepo) DeleteNodeRelationship(companyID, relationshipID string) 
 
 func (r *PostgresRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	ctx := context.Background()
-	var item domain.Node
-	err := r.db.QueryRowContext(ctx,
-		`select company_id, node_id, title, created_timestamp
-		 from nodes where company_id=$1 and node_id=$2`,
+	item, err := scanNode(r.db.QueryRowContext(ctx,
+		`select `+nodeSelectColumns+`
+		 from nodes n
+		 `+nodeStatusJoin+`
+		 where n.company_id=$1 and n.node_id=$2`,
 		companyID, nodeID,
-	).Scan(&item.CompanyID, &item.NodeID, &item.Title, &item.CreatedTimestamp)
+	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Node{}, ErrNotFound
 	}
