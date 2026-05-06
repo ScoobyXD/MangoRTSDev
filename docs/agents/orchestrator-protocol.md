@@ -29,7 +29,7 @@ Each top-level prompt becomes one project.
 1. Read `docs/agents/sacred-text.md`.
 2. Read `docs/agents/current-decisions.md`.
 3. Run preflight and inspect current repo/worktree state.
-4. Confirm startup is running from `C:\Users\Jonat\MangoOSDev` on branch `main`.
+4. Confirm startup is running from `C:\Users\Jonat\MangoRTSDev` on branch `main`.
 5. Confirm the main worktree is clean and conflict-marker scan passes.
 6. Allocate IDs from the ledger:
    - batch ID

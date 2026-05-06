@@ -9,7 +9,7 @@ Use these prompts when local automation is not ready or when a visible terminal 
 Open a fresh Codex session from the main MangoRTS worktree:
 
 ```text
-C:\Users\Jonat\MangoOSDev
+C:\Users\Jonat\MangoRTSDev
 ```
 
 Prompt:
@@ -45,11 +45,11 @@ Read first:
 - docs/tests.md
 
 Repo:
-C:\Users\Jonat\MangoOSDev
+C:\Users\Jonat\MangoRTSDev
 
 Starting location requirement:
 Before doing anything else, verify:
-- current directory is C:\Users\Jonat\MangoOSDev
+- current directory is C:\Users\Jonat\MangoRTSDev
 - current Git branch is main
 - main worktree is clean
 - startup preflight passes

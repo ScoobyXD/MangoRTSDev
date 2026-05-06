@@ -17,7 +17,7 @@ Project branch:
 FixKanbanBoardCardsUIProject-project0001005
 
 Project worktree:
-C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005
+C:\Users\Jonat\MangoRTSDev-FixKanbanBoardCardsUIProject-project0001005
 
 Worker branches:
 - FixKanbanBoardCardsUIWorker1-project0001005-worker0095348
@@ -67,7 +67,7 @@ Project branch:
 FixKanbanBoardCardsUIProject-project0001005
 
 Project worktree:
-C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005
+C:\Users\Jonat\MangoRTSDev-FixKanbanBoardCardsUIProject-project0001005
 
 Merged worker branches:
 <list>
@@ -81,15 +81,15 @@ Checks already run:
 - node scripts\run_all_tests.mjs passed
 
 Run backend:
-cd C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005\backend
+cd C:\Users\Jonat\MangoRTSDev-FixKanbanBoardCardsUIProject-project0001005\backend
 go run ./cmd/miraeopus-api
 
 Run frontend:
-cd C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005\frontend
+cd C:\Users\Jonat\MangoRTSDev-FixKanbanBoardCardsUIProject-project0001005\frontend
 npm run dev
 
 Apply schema:
-cd C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005
+cd C:\Users\Jonat\MangoRTSDev-FixKanbanBoardCardsUIProject-project0001005
 powershell -ExecutionPolicy Bypass -File .\scripts\apply_canonical_schema.ps1
 
 Schema/migration files changed:

@@ -64,13 +64,13 @@ Create both a branch and a matching Git worktree for every batch, project, and w
 
 ```text
 Batch0000154-batch0000154
-C:\Users\Jonat\MangoOSDev-Batch0000154-batch0000154
+C:\Users\Jonat\MangoRTSDev-Batch0000154-batch0000154
 
 FixKanbanBoardCardsUIProject-project0001005
-C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIProject-project0001005
+C:\Users\Jonat\MangoRTSDev-FixKanbanBoardCardsUIProject-project0001005
 
 FixKanbanBoardCardsUIWorker1-project0001005-worker0095348
-C:\Users\Jonat\MangoOSDev-FixKanbanBoardCardsUIWorker1-project0001005-worker0095348
+C:\Users\Jonat\MangoRTSDev-FixKanbanBoardCardsUIWorker1-project0001005-worker0095348
 ```
 
 Use this Git shape:

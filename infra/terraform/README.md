@@ -72,7 +72,7 @@ aws ecr create-repository --repository-name mangoos-staging-search-api --region 
 Build from backend source:
 
 ```bash
-cd /workspace/MangoOSDev/backend
+cd /workspace/MangoRTSDev/backend
 
 docker build -t mangoos-case-api:latest -f - . <<'DOCKERFILE'
 FROM golang:1.23 AS build
@@ -136,7 +136,7 @@ Keep `create_aurora = true` and set:
 ## 3) Configure Terraform variables
 
 ```bash
-cd /workspace/MangoOSDev/infra/terraform
+cd /workspace/MangoRTSDev/infra/terraform
 cp terraform.tfvars.example terraform.tfvars
 ```
 
@@ -180,7 +180,7 @@ Use your preferred migration strategy. Quick path with psql:
 # if needed, run from a temporary EC2 instance in the VPC.
 
 psql "host=<aurora_endpoint> port=5432 dbname=mangoos user=mango_admin sslmode=require" \
-  -f /workspace/MangoOSDev/backend/db/schema.sql
+  -f /workspace/MangoRTSDev/backend/db/schema.sql
 ```
 
 ---

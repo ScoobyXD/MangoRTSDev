@@ -54,7 +54,7 @@ winget install BurntSushi.ripgrep.MSVC
 This repo is often owned by the normal Windows user while Codex commands run as a sandbox user. Use per-command safe directory when Git asks for it:
 
 ```powershell
-git -c safe.directory=C:/Users/Jonat/MangoOSDev status --short --branch
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev status --short --branch
 ```
 
 Do not run global Git config changes for this workflow.
@@ -74,7 +74,7 @@ Create a worker from an up-to-date `main` worktree:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\create_worker_worktree.ps1 `
   -Name "Company Explorer Drag Drop" `
-  -MainPath "C:\Users\Jonat\MangoOSDev"
+  -MainPath "C:\Users\Jonat\MangoRTSDev"
 ```
 
 Create an integration worktree from an up-to-date `main` worktree:
@@ -82,7 +82,7 @@ Create an integration worktree from an up-to-date `main` worktree:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\create_integration_worktree.ps1 `
   -Slug "company-explorer-drag-drop" `
-  -MainPath "C:\Users\Jonat\MangoOSDev"
+  -MainPath "C:\Users\Jonat\MangoRTSDev"
 ```
 
 Integrate one worker branch through a temporary integration branch:
@@ -90,7 +90,7 @@ Integrate one worker branch through a temporary integration branch:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\integrate_worker_branch.ps1 `
   -WorkerBranch "codex/company-explorer-drag-drop" `
-  -MainPath "C:\Users\Jonat\MangoOSDev"
+  -MainPath "C:\Users\Jonat\MangoRTSDev"
 ```
 
 Integrate a related batch:
@@ -102,7 +102,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\batch_integrate_worker_branch
     "codex/company-explorer-selection",
     "codex/company-explorer-drag-drop"
   ) `
-  -MainPath "C:\Users\Jonat\MangoOSDev" `
+  -MainPath "C:\Users\Jonat\MangoRTSDev" `
   -RunFullVerification
 ```
 
@@ -217,7 +217,7 @@ Read first:
 - docs/parallel-agent-architecture.md
 
 Run:
-powershell -ExecutionPolicy Bypass -File .\scripts\integrate_worker_branch.ps1 -WorkerBranch "codex/<branch-slug>" -MainPath "C:\Users\Jonat\MangoOSDev"
+powershell -ExecutionPolicy Bypass -File .\scripts\integrate_worker_branch.ps1 -WorkerBranch "codex/<branch-slug>" -MainPath "C:\Users\Jonat\MangoRTSDev"
 
 Rules:
 - Do not push.
@@ -257,7 +257,7 @@ Run:
 powershell -ExecutionPolicy Bypass -File .\scripts\batch_integrate_worker_branches.ps1 `
   -BatchName "<batch-name>" `
   -WorkerBranches @("codex/<branch-1>", "codex/<branch-2>", "codex/<branch-3>") `
-  -MainPath "C:\Users\Jonat\MangoOSDev" `
+  -MainPath "C:\Users\Jonat\MangoRTSDev" `
   -RunFullVerification
 
 Rules:
@@ -282,16 +282,16 @@ Final response:
 If the scripts are unavailable, use the manual integration shape:
 
 ```powershell
-cd C:\Users\Jonat\MangoOSDev
-git -c safe.directory=C:/Users/Jonat/MangoOSDev status --short --branch
-git -c safe.directory=C:/Users/Jonat/MangoOSDev fetch origin
-git -c safe.directory=C:/Users/Jonat/MangoOSDev merge --ff-only origin/main
+cd C:\Users\Jonat\MangoRTSDev
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev status --short --branch
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev fetch origin
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev merge --ff-only origin/main
 
 $slug = "company-explorer-drag-drop"
 $integration = "integration/$slug"
-$path = "..\MangoOSDev-integration-$slug"
+$path = "..\MangoRTSDev-integration-$slug"
 
-git -c safe.directory=C:/Users/Jonat/MangoOSDev worktree add -b $integration $path main
+git -c safe.directory=C:/Users/Jonat/MangoRTSDev worktree add -b $integration $path main
 cd $path
 git -c safe.directory=$((Resolve-Path .).Path.Replace('\','/')) merge --no-ff "codex/$slug" -m "Integrate codex/$slug"
 powershell -ExecutionPolicy Bypass -File .\scripts\check_conflict_markers.ps1 -Root .
