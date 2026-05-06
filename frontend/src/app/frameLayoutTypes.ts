@@ -1,5 +1,5 @@
 import type React from "react";
-import type { FrameDataModel } from "../types";
+import type { FrameDataModel } from "../types.js";
 
 export const CELL_SIZE = 28;
 export const HEADER_H = 48;

@@ -14,6 +14,10 @@ export const KANBAN_MIN_COLUMN_HEIGHT_PX = 160;
 export const KANBAN_MAX_COLUMN_HEIGHT_PX = 720;
 export const KANBAN_DEFAULT_COLUMN_ITEM_COLOR = "#2f7d62";
 export const KANBAN_DEFAULT_BOARD_TITLE = "Kanban board";
+export const KANBAN_LOGIC_GATE_PENDING_COLOR = "#808080";
+export const KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR = "#ff9500";
+export const KANBAN_LOGIC_GATE_DONE_COLOR = "#39ff14";
+export const KANBAN_ISSUE_CARD_COLOR = "#ffd400";
 
 export type KanbanDragPreviewItem = {
   label: string;
@@ -37,6 +41,7 @@ export type ExplorerEntityDragPayload = {
 export type KanbanBoard = {
   company_id: string;
   board_id: string;
+  logic_gate_id?: string | null;
   title: string;
   position: number;
   created_timestamp: string;
@@ -68,8 +73,10 @@ export type KanbanCard = {
   card_id: string;
   column_id: string;
   node_id: string;
+  logic_gate_id?: string | null;
   node_title: string;
   description_snapshot: string;
+  is_issue?: boolean;
   position: number;
   created_timestamp: string;
   updated_timestamp: string;
@@ -121,6 +128,10 @@ export function getKanbanBoardDisplayTitle(board: Pick<KanbanBoard, "board_id" |
   if (title) return title;
   const boardID = board.board_id.trim();
   return boardID || KANBAN_DEFAULT_BOARD_TITLE;
+}
+
+export function logicGateKanbanBoardID(logicGateID: string): string {
+  return `logic-gate:${logicGateID.trim()}`;
 }
 
 export function sortKanbanBoards(boards: KanbanBoard[]): KanbanBoard[] {
@@ -555,6 +566,7 @@ export function buildKanbanCardSelectionUpdate(args: {
 }
 
 export function getKanbanConditionalColor(card: KanbanCard, columnColorByID: Map<string, string> = new Map()): string {
+  if (card.is_issue) return KANBAN_ISSUE_CARD_COLOR;
   const columnColor = columnColorByID.get(card.column_id);
   if (isKanbanColumnItemColor(columnColor)) return columnColor;
 

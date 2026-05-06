@@ -1,4 +1,4 @@
-import type { FrameDataModel } from "../types";
+import type { FrameDataModel } from "../types.js";
 import { createFrameId } from "./frameLayoutTypes.js";
 
 const WHITE_FRAME = { theme: "light" as const, color: "#ffffff", accent: "#111111" };
@@ -45,6 +45,45 @@ export function createDefaultNodeViewFrames(): FrameDataModel[] {
       w: 11,
       h: 27,
       title: "Editor",
+      ...WHITE_FRAME,
+    },
+  ];
+}
+
+export function createLogicGateArenaFrames(): FrameDataModel[] {
+  const explorerID = createFrameId();
+  const editorID = createFrameId();
+  const kanbanID = createFrameId();
+
+  return [
+    {
+      id: explorerID,
+      kind: "company-explorer",
+      x: 1,
+      y: 1,
+      w: 10,
+      h: 30,
+      title: "Company Explorer",
+      ...WHITE_FRAME,
+    },
+    {
+      id: editorID,
+      kind: "editor",
+      x: 12,
+      y: 1,
+      w: 16,
+      h: 30,
+      title: "Editor",
+      ...WHITE_FRAME,
+    },
+    {
+      id: kanbanID,
+      kind: "kanban",
+      x: 29,
+      y: 1,
+      w: 34,
+      h: 30,
+      title: "Logic Gate Kanban",
       ...WHITE_FRAME,
     },
   ];

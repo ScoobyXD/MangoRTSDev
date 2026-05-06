@@ -15,14 +15,52 @@ type kanbanBoardEnsurer interface {
 
 func ensureKanbanBoardSQL(ctx context.Context, exec kanbanBoardEnsurer, companyID, boardID, title string) error {
 	_, err := exec.ExecContext(ctx, `
-insert into kanban_boards (company_id, board_id, title, position, created_timestamp, updated_timestamp)
-select $1, $2, $3, coalesce(max(position), 0) + 1000, now(), now()
+insert into kanban_boards (company_id, board_id, logic_gate_id, title, position, created_timestamp, updated_timestamp)
+select $1, $2, null, $3, coalesce(max(position), 0) + 1000, now(), now()
 from kanban_boards
 where company_id=$1
 on conflict (company_id, board_id) do nothing`,
 		companyID, boardID, normalizeKanbanBoardTitle(boardID, title),
 	)
 	return err
+}
+
+func ensureLogicGateKanbanBoardSQL(ctx context.Context, exec kanbanBoardEnsurer, companyID, logicGateID, title string) error {
+	boardID := LogicGateKanbanBoardID(logicGateID)
+	if _, err := exec.ExecContext(ctx, `
+insert into kanban_boards (company_id, board_id, logic_gate_id, title, position, created_timestamp, updated_timestamp)
+select $1, $2, $3::uuid, $4, coalesce(max(position), 0) + 1000, now(), now()
+from kanban_boards
+where company_id=$1
+on conflict (company_id, board_id)
+do update set
+  logic_gate_id=excluded.logic_gate_id,
+  title=excluded.title,
+  updated_timestamp=now()`,
+		companyID, boardID, logicGateID, normalizeKanbanBoardTitle(boardID, title)); err != nil {
+		return err
+	}
+	defaults := []struct {
+		title string
+		color string
+	}{
+		{title: "Pending", color: KanbanDefaultPendingColor},
+		{title: "In Progress", color: KanbanDefaultInProgressColor},
+		{title: "Done", color: KanbanDefaultDoneColor},
+	}
+	for index, column := range defaults {
+		if _, err := exec.ExecContext(ctx, `
+insert into kanban_columns (company_id, board_id, column_id, title, position, width_px, height_px, item_color, created_timestamp, updated_timestamp)
+select $1, $2, md5(($1::text || ':' || $2 || ':' || $3))::uuid, $3, $4, 260, 240, $5, now(), now()
+where not exists (
+  select 1 from kanban_columns
+  where company_id=$1 and board_id=$2 and lower(btrim(title))=lower(btrim($3))
+)`,
+			companyID, boardID, column.title, (index+1)*1000, column.color); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func scanKanbanBoard(row interface {
@@ -32,6 +70,7 @@ func scanKanbanBoard(row interface {
 	err := row.Scan(
 		&item.CompanyID,
 		&item.BoardID,
+		&item.LogicGateID,
 		&item.Title,
 		&item.Position,
 		&item.CreatedTimestamp,
@@ -44,12 +83,13 @@ func (r *PostgresRepo) ListKanbanBoards(companyID string, query KanbanBoardQuery
 	ctx := context.Background()
 	query = NormalizeKanbanBoardQuery(query)
 	rows, err := r.db.QueryContext(ctx, `
-select company_id, board_id, title, position, created_timestamp, updated_timestamp
+select company_id, board_id, logic_gate_id::text, title, position, created_timestamp, updated_timestamp
 from kanban_boards
 where company_id=$1
   and ($2 = 0 or position > $2)
+  and ($3 = '' or logic_gate_id::text = $3)
 order by position asc, created_timestamp asc, board_id asc
-limit $3`, companyID, query.AfterPosition, query.Limit)
+limit $4`, companyID, query.AfterPosition, query.LogicGateID, query.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +128,7 @@ do update set
   title=excluded.title,
   position=case when $5 then excluded.position else kanban_boards.position end,
   updated_timestamp=now()
-returning company_id, board_id, title, position, created_timestamp, updated_timestamp`,
+returning company_id, board_id, logic_gate_id::text, title, position, created_timestamp, updated_timestamp`,
 		companyID, boardID, normalizeKanbanBoardTitle(boardID, title), position, positionWasProvided,
 	))
 	return item, err
@@ -101,7 +141,7 @@ set title=coalesce(nullif($3, ''), title),
     position=case when $4 > 0 then $4 else position end,
     updated_timestamp=now()
 where company_id=$1 and board_id=$2
-returning company_id, board_id, title, position, created_timestamp, updated_timestamp`,
+returning company_id, board_id, logic_gate_id::text, title, position, created_timestamp, updated_timestamp`,
 		companyID, boardID, strings.TrimSpace(title), position,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -117,6 +157,19 @@ func (r *PostgresRepo) DeleteKanbanBoard(companyID, boardID string) error {
 		return err
 	}
 	defer tx.Rollback()
+
+	var attachedLogicGateID sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+select logic_gate_id::text
+from kanban_boards
+where company_id=$1 and board_id=$2`, companyID, boardID).Scan(&attachedLogicGateID); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if attachedLogicGateID.Valid {
+		return ErrInvalid
+	}
 
 	if _, err := tx.ExecContext(ctx, `
 delete from company_explorer_folder_items
@@ -178,8 +231,10 @@ func scanKanbanCard(row interface {
 		&item.CardID,
 		&item.ColumnID,
 		&item.NodeID,
+		&item.LogicGateID,
 		&item.NodeTitle,
 		&item.DescriptionSnapshot,
+		&item.IsIssue,
 		&item.Position,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
@@ -188,8 +243,8 @@ func scanKanbanCard(row interface {
 }
 
 const kanbanCardSelectColumns = `
-company_id, board_id, card_id, column_id, node_id::text,
-node_title, description_snapshot, position, created_timestamp, updated_timestamp`
+company_id, board_id, card_id, column_id, node_id::text, logic_gate_id::text,
+node_title, description_snapshot, is_issue, position, created_timestamp, updated_timestamp`
 
 func (r *PostgresRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
 	ctx := context.Background()
@@ -336,6 +391,15 @@ func (r *PostgresRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.K
 		return domain.KanbanCard{}, err
 	}
 
+	var boardLogicGateID sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+select logic_gate_id::text
+from kanban_boards
+where company_id=$1 and board_id=$2`,
+		input.CompanyID, input.BoardID).Scan(&boardLogicGateID); err != nil {
+		return domain.KanbanCard{}, err
+	}
+
 	var columnExists bool
 	if err := tx.QueryRowContext(ctx, `
 select exists(select 1 from kanban_columns where company_id=$1 and board_id=$2 and column_id=$3)`,
@@ -372,18 +436,30 @@ where company_id=$1 and board_id=$2 and column_id=$3`, input.CompanyID, input.Bo
 		nodeTitle = normalizeKanbanBoardTitle(input.NodeID, input.NodeTitle)
 	}
 	descriptionSnapshot := strings.TrimSpace(input.DescriptionSnapshot)
+	if boardLogicGateID.Valid {
+		if _, err := tx.ExecContext(ctx, `
+delete from kanban_cards
+where company_id=$1
+  and node_id=$2
+  and board_id<>$3
+  and logic_gate_id is not null`,
+			input.CompanyID, input.NodeID, input.BoardID); err != nil {
+			return domain.KanbanCard{}, err
+		}
+	}
 
 	var item domain.KanbanCard
 	item, err = scanKanbanCard(tx.QueryRowContext(ctx, `
 update kanban_cards
 set column_id=$4,
-    node_title=$5,
-    description_snapshot=case when $6 <> '' then $6 else description_snapshot end,
-    position=$7,
+    logic_gate_id=$5::uuid,
+    node_title=$6,
+    description_snapshot=case when $7 <> '' then $7 else description_snapshot end,
+    position=$8,
     updated_timestamp=now()
 where company_id=$1 and board_id=$2 and node_id=$3
 returning `+kanbanCardSelectColumns,
-		input.CompanyID, input.BoardID, input.NodeID, input.ColumnID, nodeTitle, descriptionSnapshot, input.Position,
+		input.CompanyID, input.BoardID, input.NodeID, input.ColumnID, boardLogicGateID, nodeTitle, descriptionSnapshot, input.Position,
 	))
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return domain.KanbanCard{}, err
@@ -391,12 +467,12 @@ returning `+kanbanCardSelectColumns,
 	if errors.Is(err, sql.ErrNoRows) {
 		item, err = scanKanbanCard(tx.QueryRowContext(ctx, `
 insert into kanban_cards (
-  company_id, board_id, card_id, column_id, node_id, node_title,
-  description_snapshot, position, created_timestamp, updated_timestamp
-) values ($1,$2,$3,$4,$5,$6,$7,$8,now(),now())
+  company_id, board_id, card_id, column_id, node_id, logic_gate_id, node_title,
+  description_snapshot, is_issue, position, created_timestamp, updated_timestamp
+) values ($1,$2,$3,$4,$5,$6::uuid,$7,$8,false,$9,now(),now())
 returning `+kanbanCardSelectColumns,
 			input.CompanyID, input.BoardID, newUUIDv7String(), input.ColumnID,
-			input.NodeID, nodeTitle, descriptionSnapshot, input.Position,
+			input.NodeID, boardLogicGateID, nodeTitle, descriptionSnapshot, input.Position,
 		))
 		if err != nil {
 			return domain.KanbanCard{}, err
@@ -416,16 +492,18 @@ func (r *PostgresRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanC
 	}
 	defer tx.Rollback()
 
-	var columnExists bool
-	if err := tx.QueryRowContext(ctx, `
+	if input.ColumnID != "" {
+		var columnExists bool
+		if err := tx.QueryRowContext(ctx, `
 select exists(select 1 from kanban_columns where company_id=$1 and board_id=$2 and column_id=$3)`,
-		input.CompanyID, input.BoardID, input.ColumnID).Scan(&columnExists); err != nil {
-		return domain.KanbanCard{}, err
+			input.CompanyID, input.BoardID, input.ColumnID).Scan(&columnExists); err != nil {
+			return domain.KanbanCard{}, err
+		}
+		if !columnExists {
+			return domain.KanbanCard{}, ErrNotFound
+		}
 	}
-	if !columnExists {
-		return domain.KanbanCard{}, ErrNotFound
-	}
-	if input.Position <= 0 {
+	if input.ColumnID != "" && input.Position <= 0 {
 		if err := tx.QueryRowContext(ctx, `
 select coalesce(max(position), 0) + 1000
 from kanban_cards
@@ -434,15 +512,20 @@ where company_id=$1 and board_id=$2 and column_id=$3`, input.CompanyID, input.Bo
 		}
 	}
 
+	issueValue := false
+	if input.IsIssue != nil {
+		issueValue = *input.IsIssue
+	}
 	item, err := scanKanbanCard(tx.QueryRowContext(ctx, `
 update kanban_cards
-set column_id=$4,
+set column_id=coalesce(nullif($4, '')::uuid, column_id),
     node_title=coalesce((select title from nodes where company_id=$1 and node_id=kanban_cards.node_id), node_title),
-    position=$5,
+    position=case when $5 > 0 then $5 else position end,
+    is_issue=case when $6 then $7 else is_issue end,
     updated_timestamp=now()
 where company_id=$1 and board_id=$2 and card_id=$3
 returning `+kanbanCardSelectColumns,
-		input.CompanyID, input.BoardID, input.CardID, input.ColumnID, input.Position,
+		input.CompanyID, input.BoardID, input.CardID, input.ColumnID, input.Position, input.IsIssue != nil, issueValue,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.KanbanCard{}, ErrNotFound

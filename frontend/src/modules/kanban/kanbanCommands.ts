@@ -211,6 +211,7 @@ export async function addExplorerNodesToKanbanColumnCommand(args: {
     node_id: item.nodeID,
     node_title: item.label,
     description_snapshot: "",
+    is_issue: false,
     position: firstPosition + index * 1000,
     created_timestamp: timestamp,
     updated_timestamp: timestamp,
@@ -230,6 +231,22 @@ export async function addExplorerNodesToKanbanColumnCommand(args: {
   })));
 
   return { optimisticCards, optimisticCardIDs, nodeIDs, savedCards };
+}
+
+export async function toggleKanbanCardIssueCommand(args: {
+  context: KanbanCommandContext;
+  card: KanbanCard;
+  isIssue: boolean;
+  client?: KanbanCommandClient;
+}): Promise<KanbanCard> {
+  const { context, card, client = defaultKanbanCommandClient } = args;
+  return client.moveCard({
+    apiBase: context.apiBase,
+    companyID: context.companyID,
+    boardID: context.boardID,
+    cardID: card.card_id,
+    isIssue: args.isIssue,
+  });
 }
 
 export async function deleteKanbanCardsCommand(args: {

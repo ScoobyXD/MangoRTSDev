@@ -8,6 +8,10 @@ export type NodeRecord = {
   company_id: string;
   node_id: string;
   title: string;
+  status?: string | null;
+  due_date?: string | null;
+  priority?: number | null;
+  assignee_user_id?: string | null;
   created_timestamp: string;
 };
 

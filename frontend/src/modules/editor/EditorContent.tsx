@@ -84,8 +84,41 @@ function selectElementContents(element: HTMLElement) {
   selection.addRange(range);
 }
 
+function formatNodeDueDateForEditor(value: string | null | undefined): string {
+  const raw = (value ?? "").trim();
+  if (!raw) return "";
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return raw;
+  return `${Number(match[2])}/${Number(match[3])}/${match[1]}`;
+}
+
+function normalizeNodeDueDateDraft(value: string): string | null {
+  const raw = value.trim();
+  if (!raw) return "";
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return raw;
+  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!slash) return null;
+  const month = Number(slash[1]);
+  const day = Number(slash[2]);
+  const year = Number(slash[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) return null;
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+type EditorContentProps = {
+  accent: string;
+  widgetId?: string;
+  hideTopControls?: boolean;
+  theme?: "teal" | "light" | "dark";
+  forcedEntityKind?: "node" | "logic_gate";
+  forcedEntityID?: string;
+  forcedLabel?: string;
+};
+
 // Editor module: linked document canvas for node or logic-gate context.
-export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
+export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "teal", forcedEntityKind, forcedEntityID = "", forcedLabel = "" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -98,6 +131,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
   const [linkedNodeMetadataRows, setLinkedNodeMetadataRows] = useState<Array<{ label: string; value: string }>>([]);
   const [linkedNodeHistoryRows, setLinkedNodeHistoryRows] = useState<string[]>([]);
+  const [nodeStatus, setNodeStatus] = useState("");
+  const [nodePriorityDraft, setNodePriorityDraft] = useState("");
+  const [nodeDueDateDraft, setNodeDueDateDraft] = useState("");
   const [documentInformationID, setDocumentInformationID] = useState("");
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
@@ -398,6 +434,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     setLinkedNodeInfoPreview([]);
     setLinkedNodeMetadataRows([]);
     setLinkedNodeHistoryRows([]);
+    setNodeStatus("");
+    setNodePriorityDraft("");
+    setNodeDueDateDraft("");
     documentDraftRef.current = "";
     persistedDocumentRef.current = "";
     documentInformationIDRef.current = "";
@@ -452,6 +491,15 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [clearVisibleDocumentForSelection, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, readLogicGateLabelFromGraph, rememberCurrentDocumentScroll]);
 
+  useEffect(() => {
+    if (!forcedEntityKind || !forcedEntityID.trim()) return;
+    if (forcedEntityKind === "node") {
+      applyLinkedNode(forcedEntityID.trim(), forcedLabel, { focusEditor: false });
+      return;
+    }
+    applyLinkedLogicGate(forcedEntityID.trim(), forcedLabel, { focusEditor: false });
+  }, [applyLinkedLogicGate, applyLinkedNode, forcedEntityID, forcedEntityKind, forcedLabel]);
+
   const shouldApplySelectionChangedAt = useCallback((changedAt?: number): boolean => {
     if (typeof changedAt !== "number" || !Number.isFinite(changedAt) || changedAt <= 0) return true;
     if (changedAt < lastAppliedSelectionChangedAtRef.current) return false;
@@ -485,6 +533,47 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setError(err instanceof Error ? err.message : "failed_to_update_entity");
     }
   }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
+
+  const updateNodePresetPatch = useCallback(async (patch: Record<string, unknown>) => {
+    if (!linkedNodeID || linkedEntityKind !== "node") return;
+    setError("");
+    try {
+      const updated = await requestJSON<NodeRecord>(`/v1/nodes/${linkedNodeID}`, {
+        method: "PUT",
+        body: JSON.stringify({ company_id: companyID, ...patch }),
+      });
+      setNodeStatus(updated.status ?? "");
+      setNodePriorityDraft(updated.priority == null ? "" : String(updated.priority));
+      setNodeDueDateDraft(formatNodeDueDateForEditor(updated.due_date));
+      invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+      upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_update_node_fields");
+    }
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
+
+  const commitNodePriorityDraft = useCallback((draft: string) => {
+    const raw = draft.trim();
+    if (!raw) {
+      void updateNodePresetPatch({ priority: null });
+      return;
+    }
+    const parsed = Number(raw);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 5) {
+      setError("Priority must be 1 through 5");
+      return;
+    }
+    void updateNodePresetPatch({ priority: parsed });
+  }, [updateNodePresetPatch]);
+
+  const commitNodeDueDateDraft = useCallback((draft: string) => {
+    const normalized = normalizeNodeDueDateDraft(draft);
+    if (normalized === null) {
+      setError("Due date must use mm/dd/yyyy");
+      return;
+    }
+    void updateNodePresetPatch({ due_date: normalized });
+  }, [updateNodePresetPatch]);
 
   useEffect(() => {
     setIsEditingTitle(false);
@@ -524,6 +613,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [readLinkedLogicMapWidgetID, readLinkedMapWidgetID]);
 
   useEffect(() => {
+    if (forcedEntityKind && forcedEntityID.trim()) return;
     const applyLiveSelection = (selection: LiveSelectionChange): boolean => {
       if (selection.companyID !== companyID || selection.sourceFrameID === scope) return false;
       if (!shouldApplySelectionChangedAt(selection.changedAt)) return false;
@@ -635,7 +725,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       window.removeEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapStateUpdated);
       window.removeEventListener(EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, onLogicMapStateUpdated);
     };
-  }, [applyLinkedLogicGate, applyLinkedNode, companyID, linkedLogicMapWidgetID, linkedMapWidgetID, readSelectedLogicGateFromExplorerContext, readSelectedLogicGateFromMap, readSelectedNodeFromExplorerContext, readSelectedNodeFromMap, scope, shouldApplySelectionChangedAt]);
+  }, [applyLinkedLogicGate, applyLinkedNode, companyID, forcedEntityID, forcedEntityKind, linkedLogicMapWidgetID, linkedMapWidgetID, readSelectedLogicGateFromExplorerContext, readSelectedLogicGateFromMap, readSelectedNodeFromExplorerContext, readSelectedNodeFromMap, scope, shouldApplySelectionChangedAt]);
 
   useEffect(() => {
     if (!linkedNodeID || linkedEntityKind !== "node") return;
@@ -678,6 +768,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setLinkedNodeInfoPreview([]);
       setLinkedNodeMetadataRows([]);
       setLinkedNodeHistoryRows([]);
+      setNodeStatus("");
+      setNodePriorityDraft("");
+      setNodeDueDateDraft("");
       documentDraftRef.current = "";
       persistedDocumentRef.current = "";
       documentInformationIDRef.current = "";
@@ -705,6 +798,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
           ]);
           if (cancelled) return;
           setLinkedNodeTitle(getLogicGateTitle({ header: details.logic_gate.header, title: details.logic_gate.header }));
+          setNodeStatus("");
+          setNodePriorityDraft("");
+          setNodeDueDateDraft("");
           const nonText = details.information.filter((item) => item.type !== "Text box");
           const textBoxes = projections.filter((item) => item.type === "Text box");
           setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
@@ -731,6 +827,9 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
         ]);
         if (cancelled) return;
         setLinkedNodeTitle(getNodeTitle(details.node));
+        setNodeStatus(details.node.status ?? "");
+        setNodePriorityDraft(details.node.priority == null ? "" : String(details.node.priority));
+        setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
         const nonText = details.information.filter((item) => item.type !== "Text box");
         const textBoxes = projections.filter((item) => item.type === "Text box");
         setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
@@ -770,7 +869,7 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
   const hasLinkedDocument = linkedNodeID.trim().length > 0;
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
-  const documentTopPx = EDITOR_DOCUMENT_TOP_PX;
+  const documentTopPx = linkedEntityKind === "node" ? 150 : EDITOR_DOCUMENT_TOP_PX;
   const documentLineHeightPx = documentFontSize * EDITOR_DOCUMENT_LINE_HEIGHT;
   const documentBottomBufferPx = Math.round(documentLineHeightPx * EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES);
   const documentFontFamily = "'IBM Plex Mono', 'Consolas', 'Liberation Mono', monospace";
@@ -826,6 +925,12 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             linkedNodeInfoPreview={linkedNodeInfoPreview}
             linkedNodeMetadataRows={linkedNodeMetadataRows}
             linkedNodeHistoryRows={linkedNodeHistoryRows}
+            nodePresetFields={linkedEntityKind === "node" ? {
+              status: nodeStatus || "",
+              priorityDraft: nodePriorityDraft,
+              personInCharge: "Jonathan Kim",
+              dueDateDraft: nodeDueDateDraft,
+            } : null}
             isEditingTitle={isEditingTitle}
             editingTitleRef={editingTitleRef}
             editingTitleDraftRef={editingTitleDraftRef}
@@ -834,6 +939,10 @@ export const EditorContent: React.FC<{ accent: string; widgetId?: string; hideTo
             ruleColor={ruleColor}
             onSetIsEditingTitle={setIsEditingTitle}
             onUpdateTitle={updateNodeTitle}
+            onSetNodePriorityDraft={setNodePriorityDraft}
+            onCommitNodePriorityDraft={commitNodePriorityDraft}
+            onSetNodeDueDateDraft={setNodeDueDateDraft}
+            onCommitNodeDueDateDraft={commitNodeDueDateDraft}
           />
 
           </div>

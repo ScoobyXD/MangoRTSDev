@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
+import { EditorContent } from "../editor/EditorContent";
 import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
@@ -16,6 +17,7 @@ import {
   renameKanbanColumnCommand,
   reorderKanbanCardsCommand,
   reorderKanbanColumnsCommand,
+  toggleKanbanCardIssueCommand,
   type KanbanCommandContext,
 } from "./kanbanCommands";
 import { KanbanBoardSidebar } from "./KanbanBoardSidebar";
@@ -37,6 +39,7 @@ import {
   getKanbanConditionalColor,
   getOrderedKanbanCardIDs,
   groupCardsByColumn,
+  logicGateKanbanBoardID,
   normalizeKanbanColumnItemColor,
   parseExplorerEntityDragItems,
   parseKanbanCardDragPayload,
@@ -70,6 +73,35 @@ type ColumnResizeState = {
   currentWidth: number;
   currentHeight: number;
 };
+
+type NodeEditorOverlayState = {
+  nodeID: string;
+  nodeTitle: string;
+};
+
+type OverlayResizeState = {
+  edges: Partial<Record<"left" | "right" | "top" | "bottom", true>>;
+  startX: number;
+  startY: number;
+  startWidth: number;
+  startHeight: number;
+};
+
+const nodeEditorOverlayResizeHandles: Array<{
+  key: string;
+  edges: OverlayResizeState["edges"];
+  cursor: string;
+  style: React.CSSProperties;
+}> = [
+  { key: "top-left", edges: { top: true, left: true }, cursor: "nwse-resize", style: { top: -5, left: -5, width: 10, height: 10 } },
+  { key: "top-right", edges: { top: true, right: true }, cursor: "nesw-resize", style: { top: -5, right: -5, width: 10, height: 10 } },
+  { key: "bottom-left", edges: { bottom: true, left: true }, cursor: "nesw-resize", style: { bottom: -5, left: -5, width: 10, height: 10 } },
+  { key: "bottom-right", edges: { bottom: true, right: true }, cursor: "nwse-resize", style: { bottom: -5, right: -5, width: 10, height: 10 } },
+  { key: "top", edges: { top: true }, cursor: "ns-resize", style: { top: -4, left: 18, right: 18, height: 8 } },
+  { key: "bottom", edges: { bottom: true }, cursor: "ns-resize", style: { bottom: -4, left: 18, right: 18, height: 8 } },
+  { key: "left", edges: { left: true }, cursor: "ew-resize", style: { left: -4, top: 18, bottom: 18, width: 8 } },
+  { key: "right", edges: { right: true }, cursor: "ew-resize", style: { right: -4, top: 18, bottom: 18, width: 8 } },
+];
 
 const contextMenuButtonStyle: React.CSSProperties = {
   display: "flex",
@@ -174,6 +206,8 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const frameBoardID = widgetId?.trim() ? widgetId : "global-kanban";
   const [activeBoardID, setActiveBoardID] = useState(frameBoardID);
+  const [activeLogicGateID, setActiveLogicGateID] = useState("");
+  const [activeLogicGateLabel, setActiveLogicGateLabel] = useState("");
   const [allBoardsOpen, setAllBoardsOpen] = useState(false);
   const [boardSearchQuery, setBoardSearchQuery] = useState("");
   const [editingBoardTitle, setEditingBoardTitle] = useState(false);
@@ -199,9 +233,12 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [addColumnHover, setAddColumnHover] = useState(false);
   const [columnContextMenu, setColumnContextMenu] = useState<{ x: number; y: number; columnID: string } | null>(null);
   const [cardContextMenu, setCardContextMenu] = useState<{ x: number; y: number; cardID: string } | null>(null);
+  const [nodeEditorOverlay, setNodeEditorOverlay] = useState<NodeEditorOverlayState | null>(null);
+  const [nodeEditorOverlaySize, setNodeEditorOverlaySize] = useState({ width: 720, height: 520 });
   const [deleteColumnConfirmation, setDeleteColumnConfirmation] = useState<{ columnID: string; title: string } | null>(null);
   const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
   const resizeRef = useRef<ColumnResizeState | null>(null);
+  const nodeEditorOverlayResizeRef = useRef<OverlayResizeState | null>(null);
   const activeBoardIDRef = useRef(activeBoardID);
   const frameBoardIDRef = useRef(frameBoardID);
   const boardsRef = useRef<KanbanBoard[]>([]);
@@ -220,6 +257,9 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   useEffect(() => {
     setActiveBoardID(frameBoardID);
+    setActiveLogicGateID("");
+    setActiveLogicGateLabel("");
+    setNodeEditorOverlay(null);
   }, [frameBoardID]);
 
   useEffect(() => {
@@ -234,23 +274,53 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     boardsRef.current = boards;
   }, [boards]);
 
+  useEffect(() => {
+    const onMove = (event: MouseEvent) => {
+      const state = nodeEditorOverlayResizeRef.current;
+      if (!state) return;
+      event.preventDefault();
+      const dx = event.clientX - state.startX;
+      const dy = event.clientY - state.startY;
+      let width = state.startWidth;
+      let height = state.startHeight;
+      if (state.edges.right) width += dx;
+      if (state.edges.left) width -= dx;
+      if (state.edges.bottom) height += dy;
+      if (state.edges.top) height -= dy;
+      setNodeEditorOverlaySize({
+        width: Math.max(460, Math.min(Math.round(width), window.innerWidth - 80)),
+        height: Math.max(320, Math.min(Math.round(height), window.innerHeight - 120)),
+      });
+    };
+    const onEnd = () => {
+      nodeEditorOverlayResizeRef.current = null;
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onEnd);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onEnd);
+    };
+  }, []);
+
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
   const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, normalizeKanbanColumnItemColor(column.item_color)])), [orderedColumns]);
   const cardsByColumn = useMemo(() => groupCardsByColumn(cards), [cards]);
   const orderedBoards = useMemo(() => sortKanbanBoards(boards), [boards]);
   const activeBoard = useMemo(() => orderedBoards.find((board) => board.board_id === boardID) ?? null, [boardID, orderedBoards]);
-  const activeBoardTitle = activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : KANBAN_DEFAULT_BOARD_TITLE;
+  const activeBoardTitle = activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : (activeLogicGateLabel || KANBAN_DEFAULT_BOARD_TITLE);
   const boardRows = useMemo<KanbanBoard[]>(() => {
     if (activeBoard) return orderedBoards;
     return [{
       company_id: companyID,
       board_id: boardID,
-      title: `${KANBAN_DEFAULT_BOARD_TITLE} (unsaved)`,
+      logic_gate_id: activeLogicGateID || null,
+      title: activeLogicGateLabel || `${KANBAN_DEFAULT_BOARD_TITLE} (unsaved)`,
       position: 0,
       created_timestamp: "",
       updated_timestamp: "",
     }, ...orderedBoards];
-  }, [activeBoard, boardID, companyID, orderedBoards]);
+  }, [activeBoard, activeLogicGateID, activeLogicGateLabel, boardID, companyID, orderedBoards]);
   const filteredBoardRows = useMemo(() => {
     const query = boardSearchQuery.trim().toLowerCase();
     if (!query) return boardRows;
@@ -308,6 +378,9 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setSelectedCardIDs(new Set());
       setSelectionAnchorCardID("");
       setHighlightedEntity(null);
+      setActiveLogicGateID("");
+      setActiveLogicGateLabel("");
+      setNodeEditorOverlay(null);
       setActiveBoardID(next[0]?.board_id ?? frameBoardIDRef.current);
     }
   }, []);
@@ -358,6 +431,9 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setSelectedCardIDs(new Set());
       setSelectionAnchorCardID("");
       setHighlightedEntity(null);
+      setActiveLogicGateID("");
+      setActiveLogicGateLabel("");
+      setNodeEditorOverlay(null);
       lastLocalBoardSelectionChangedAtRef.current = Date.now();
       setActiveBoardID(created.board_id);
       setAllBoardsOpen(false);
@@ -517,7 +593,29 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         setSelectedCardIDs(new Set());
         setSelectionAnchorCardID("");
         setHighlightedEntity(null);
+        setActiveLogicGateID("");
+        setActiveLogicGateLabel("");
+        setNodeEditorOverlay(null);
         setActiveBoardID(selection.entityID.trim());
+        return;
+      }
+      if (selection.entityKind === "logic_gate" && selection.entityID.trim()) {
+        const logicGateID = selection.entityID.trim();
+        const nextBoardID = logicGateKanbanBoardID(logicGateID);
+        setSelectedCardIDs(new Set());
+        setSelectionAnchorCardID("");
+        setHighlightedEntity(null);
+        setActiveLogicGateID(logicGateID);
+        setActiveLogicGateLabel(selection.label?.trim() || "Logic Gate Kanban");
+        setNodeEditorOverlay(null);
+        setActiveBoardID(nextBoardID);
+        void listKanbanBoards(apiBase, companyID, 10, 0, logicGateID)
+          .then((nextBoards) => {
+            if (nextBoards.length > 0) upsertBoardInList(nextBoards[0]);
+          })
+          .catch(() => {
+            setError("Logic gate board API unavailable");
+          });
         return;
       }
       if (selection.entityKind === "node" && selection.entityID.trim()) {
@@ -535,7 +633,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const liveSelection = readLiveSelectionForFrame(companyID, frameID);
     if (liveSelection) applyLiveSelection(liveSelection);
     return subscribeLiveSelection(frameID, applyLiveSelection);
-  }, [cards, companyID, frameID]);
+  }, [apiBase, cards, companyID, frameID, upsertBoardInList]);
 
   const addColumn = useCallback(async () => {
     setError("");
@@ -732,6 +830,20 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     }
   }, [cards, kanbanCommandContext]);
 
+  const toggleCardIssue = useCallback(async (card: KanbanCard, isIssue: boolean) => {
+    const previousCards = cards;
+    setCards((current) => current.map((item) => (item.card_id === card.card_id ? { ...item, is_issue: isIssue } : item)));
+    setCardContextMenu(null);
+    setError("");
+    try {
+      const saved = await toggleKanbanCardIssueCommand({ context: kanbanCommandContext, card, isIssue });
+      setCards((current) => current.map((item) => (item.card_id === saved.card_id ? saved : item)));
+    } catch {
+      setError("Issue status update failed");
+      setCards(previousCards);
+    }
+  }, [cards, kanbanCommandContext]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (selectedCardIDs.size === 0 || isEditableKeyboardTarget(event.target)) return;
@@ -833,6 +945,11 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           event.stopPropagation();
           selectCard(card.card_id, event);
         }}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setNodeEditorOverlay({ nodeID: card.node_id, nodeTitle: card.node_title });
+        }}
         onContextMenu={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -922,11 +1039,14 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           setSelectedCardIDs(new Set());
           setSelectionAnchorCardID("");
           setHighlightedEntity(null);
+          setNodeEditorOverlay(null);
           lastLocalBoardSelectionChangedAtRef.current = Date.now();
           setActiveBoardID(nextBoardID);
           setAllBoardsOpen(false);
           setBoardSearchQuery("");
           const selectedBoard = boardRows.find((board) => board.board_id === nextBoardID);
+          setActiveLogicGateID(selectedBoard?.logic_gate_id ?? "");
+          setActiveLogicGateLabel(selectedBoard?.logic_gate_id ? getKanbanBoardDisplayTitle(selectedBoard) : "");
           publishKanbanBoardSelectionToLinkedFrames(companyID, frameID, nextBoardID, selectedBoard ? getKanbanBoardDisplayTitle(selectedBoard) : nextBoardID);
         }}
       />
@@ -1036,6 +1156,14 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         <FrameRightClickMenu x={cardContextMenu.x} y={cardContextMenu.y} onClose={() => setCardContextMenu(null)}>
           <button
             type="button"
+            style={contextMenuButtonStyle}
+            onClick={() => void toggleCardIssue(contextCard, !contextCard.is_issue)}
+            {...contextMenuHoverHandlers}
+          >
+            {contextCard.is_issue ? "Clear Issue" : "Mark Issue"}
+          </button>
+          <button
+            type="button"
             style={{ ...contextMenuButtonStyle, color: "#c62828" }}
             onClick={() => requestCardDelete(selectedCardIDs.has(contextCard.card_id) ? Array.from(selectedCardIDs) : [contextCard.card_id])}
             {...contextMenuHoverHandlers}
@@ -1043,6 +1171,83 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             Delete card
           </button>
         </FrameRightClickMenu>
+      )}
+      {nodeEditorOverlay && (
+        <div
+          data-frame-interactive="true"
+          onMouseDown={(event) => event.stopPropagation()}
+          onTouchStart={(event) => event.stopPropagation()}
+          style={{
+            position: "absolute",
+            zIndex: 40,
+            top: "9%",
+            left: "50%",
+            width: `min(${nodeEditorOverlaySize.width}px, calc(100% - 44px))`,
+            height: `min(${nodeEditorOverlaySize.height}px, calc(100% - 64px))`,
+            transform: "translateX(-50%)",
+            minWidth: 460,
+            minHeight: 320,
+            border: "2px solid #111111",
+            background: "#ffffff",
+            boxShadow: "0 18px 42px rgba(0,0,0,0.26)",
+            overflow: "hidden",
+            cursor: "default",
+          }}
+        >
+          <button
+            type="button"
+            title="Close node editor"
+            onClick={() => setNodeEditorOverlay(null)}
+            style={{
+              position: "absolute",
+              top: 7,
+              right: 8,
+              zIndex: 8,
+              width: 24,
+              height: 24,
+              border: "1px solid #8b0000",
+              background: "#ff1f1f",
+              color: "#ffffff",
+              fontSize: 16,
+              fontWeight: 900,
+              lineHeight: "20px",
+              cursor: "pointer",
+            }}
+          >
+            X
+          </button>
+          <EditorContent
+            accent={accent}
+            widgetId={`${frameID}:node-editor-overlay:${nodeEditorOverlay.nodeID}`}
+            theme={theme}
+            forcedEntityKind="node"
+            forcedEntityID={nodeEditorOverlay.nodeID}
+            forcedLabel={nodeEditorOverlay.nodeTitle}
+          />
+          {nodeEditorOverlayResizeHandles.map((handle) => (
+            <span
+              key={handle.key}
+              aria-hidden="true"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                nodeEditorOverlayResizeRef.current = {
+                  edges: handle.edges,
+                  startX: event.clientX,
+                  startY: event.clientY,
+                  startWidth: nodeEditorOverlaySize.width,
+                  startHeight: nodeEditorOverlaySize.height,
+                };
+              }}
+              style={{
+                position: "absolute",
+                zIndex: 9,
+                cursor: handle.cursor,
+                ...handle.style,
+              }}
+            />
+          ))}
+        </div>
       )}
       {deleteCardConfirmation && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>

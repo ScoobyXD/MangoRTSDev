@@ -1,6 +1,7 @@
 package store
 
 import (
+	"miraeopus/backend/internal/domain"
 	"testing"
 	"time"
 )
@@ -358,5 +359,164 @@ func TestMemoryRepo_DeleteLogicGate_KeepsOperations(t *testing.T) {
 	}
 	if storedOperation.LogicGateID != nil {
 		t.Fatalf("expected operation logic-gate pointer to be cleared, got %q", *storedOperation.LogicGateID)
+	}
+}
+
+func mustFindKanbanColumn(t *testing.T, columns []domain.KanbanColumn, title string) domain.KanbanColumn {
+	t.Helper()
+	for _, column := range columns {
+		if column.Title == title {
+			return column
+		}
+	}
+	t.Fatalf("expected column %q in %+v", title, columns)
+	return domain.KanbanColumn{}
+}
+
+func TestMemoryRepo_CreateLogicGateCreatesAttachedKanbanBoard(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+
+	logicGate, err := repo.CreateLogicGate(companyID, "Assembly Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate failed: %v", err)
+	}
+
+	boards, err := repo.ListKanbanBoards(companyID, KanbanBoardQuery{LogicGateID: logicGate.LogicGateID, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListKanbanBoards failed: %v", err)
+	}
+	if len(boards) != 1 {
+		t.Fatalf("expected one attached board, got %d", len(boards))
+	}
+	if boards[0].BoardID != LogicGateKanbanBoardID(logicGate.LogicGateID) {
+		t.Fatalf("board_id = %q, want attached board id", boards[0].BoardID)
+	}
+	if boards[0].LogicGateID == nil || *boards[0].LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("logic_gate_id = %+v, want %q", boards[0].LogicGateID, logicGate.LogicGateID)
+	}
+
+	columns, err := repo.ListKanbanColumns(companyID, boards[0].BoardID)
+	if err != nil {
+		t.Fatalf("ListKanbanColumns failed: %v", err)
+	}
+	pending := mustFindKanbanColumn(t, columns, "Pending")
+	inProgress := mustFindKanbanColumn(t, columns, "In Progress")
+	done := mustFindKanbanColumn(t, columns, "Done")
+	if pending.ItemColor != KanbanDefaultPendingColor || inProgress.ItemColor != KanbanDefaultInProgressColor || done.ItemColor != KanbanDefaultDoneColor {
+		t.Fatalf("default colors = %q/%q/%q", pending.ItemColor, inProgress.ItemColor, done.ItemColor)
+	}
+	if err := repo.DeleteKanbanBoard(companyID, boards[0].BoardID); err != ErrInvalid {
+		t.Fatalf("expected attached board delete to return ErrInvalid, got %v", err)
+	}
+}
+
+func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+
+	firstGate, err := repo.CreateLogicGate(companyID, "First Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate first failed: %v", err)
+	}
+	secondGate, err := repo.CreateLogicGate(companyID, "Second Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate second failed: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Tracked node")
+	if err != nil {
+		t.Fatalf("CreateNode failed: %v", err)
+	}
+
+	firstBoardID := LogicGateKanbanBoardID(firstGate.LogicGateID)
+	firstColumns, err := repo.ListKanbanColumns(companyID, firstBoardID)
+	if err != nil {
+		t.Fatalf("ListKanbanColumns first failed: %v", err)
+	}
+	pending := mustFindKanbanColumn(t, firstColumns, "Pending")
+	card, err := repo.UpsertKanbanCard(KanbanCardMutationInput{
+		CompanyID: companyID,
+		BoardID:   firstBoardID,
+		ColumnID:  pending.ColumnID,
+		NodeID:    node.NodeID,
+		NodeTitle: node.Title,
+	})
+	if err != nil {
+		t.Fatalf("UpsertKanbanCard first failed: %v", err)
+	}
+	loadedNode, err := repo.GetNode(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetNode failed: %v", err)
+	}
+	if loadedNode.Status == nil || *loadedNode.Status != "Pending" {
+		t.Fatalf("status = %+v, want Pending", loadedNode.Status)
+	}
+
+	issue := true
+	moved, err := repo.MoveKanbanCard(KanbanCardMoveInput{
+		CompanyID: companyID,
+		BoardID:   firstBoardID,
+		CardID:    card.CardID,
+		IsIssue:   &issue,
+	})
+	if err != nil {
+		t.Fatalf("MoveKanbanCard issue toggle failed: %v", err)
+	}
+	if !moved.IsIssue || moved.ColumnID != pending.ColumnID {
+		t.Fatalf("issue card = %+v, want issue in same column", moved)
+	}
+	loadedNode, err = repo.GetNode(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetNode after issue failed: %v", err)
+	}
+	if loadedNode.Status == nil || *loadedNode.Status != "Issue" {
+		t.Fatalf("status after issue = %+v, want Issue", loadedNode.Status)
+	}
+
+	secondBoardID := LogicGateKanbanBoardID(secondGate.LogicGateID)
+	secondColumns, err := repo.ListKanbanColumns(companyID, secondBoardID)
+	if err != nil {
+		t.Fatalf("ListKanbanColumns second failed: %v", err)
+	}
+	done := mustFindKanbanColumn(t, secondColumns, "Done")
+	if _, err := repo.UpsertKanbanCard(KanbanCardMutationInput{
+		CompanyID: companyID,
+		BoardID:   secondBoardID,
+		ColumnID:  done.ColumnID,
+		NodeID:    node.NodeID,
+		NodeTitle: node.Title,
+	}); err != nil {
+		t.Fatalf("UpsertKanbanCard second failed: %v", err)
+	}
+	firstCards, err := repo.ListKanbanCards(companyID, firstBoardID, KanbanCardQuery{Limit: 20})
+	if err != nil {
+		t.Fatalf("ListKanbanCards first failed: %v", err)
+	}
+	if len(firstCards) != 0 {
+		t.Fatalf("expected first logic-gate board placement to be superseded, got %+v", firstCards)
+	}
+	loadedNode, err = repo.GetNode(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetNode after supersede failed: %v", err)
+	}
+	if loadedNode.Status == nil || *loadedNode.Status != "Done" {
+		t.Fatalf("status after supersede = %+v, want Done", loadedNode.Status)
+	}
+
+	dueDate := "2026-05-06"
+	priority := 5
+	updated, err := repo.UpdateNode(UpdateNodeInput{
+		CompanyID:   companyID,
+		NodeID:      node.NodeID,
+		DueDate:     &dueDate,
+		DueDateSet:  true,
+		Priority:    &priority,
+		PrioritySet: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateNode failed: %v", err)
+	}
+	if updated.DueDate == nil || *updated.DueDate != dueDate || updated.Priority == nil || *updated.Priority != priority {
+		t.Fatalf("node metadata = due %+v priority %+v", updated.DueDate, updated.Priority)
 	}
 }

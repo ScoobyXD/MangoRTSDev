@@ -9,8 +9,14 @@ import (
 
 func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGate, error) {
 	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.LogicGate{}, err
+	}
+	defer tx.Rollback()
+
 	item := domain.LogicGate{CompanyID: companyID, LogicGateID: newUUIDv7String(), Header: header}
-	err := r.db.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		`insert into logic_gates (company_id, logic_gate_id, header, created_timestamp)
 		 values ($1, $2, $3, now())
 		 returning company_id, logic_gate_id, header, created_timestamp`,
@@ -19,10 +25,23 @@ func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGa
 	if err != nil {
 		return domain.LogicGate{}, err
 	}
+	if err := ensureLogicGateKanbanBoardSQL(ctx, tx, companyID, item.LogicGateID, item.Header); err != nil {
+		return domain.LogicGate{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.LogicGate{}, err
+	}
 	return item, nil
 }
 
 func (r *PostgresRepo) UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.LogicGate{}, err
+	}
+	defer tx.Rollback()
+
 	const q = `
 UPDATE logic_gates
 SET header = $3
@@ -30,10 +49,21 @@ WHERE company_id = $1 AND logic_gate_id = $2
 RETURNING company_id, logic_gate_id, header, created_timestamp
 `
 	var item domain.LogicGate
-	if err := r.db.QueryRow(q, companyID, logicGateID, header).Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp); err != nil {
+	if err := tx.QueryRowContext(ctx, q, companyID, logicGateID, header).Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.LogicGate{}, ErrNotFound
 		}
+		return domain.LogicGate{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+update kanban_boards
+set title=$3,
+    updated_timestamp=now()
+where company_id=$1 and logic_gate_id=$2::uuid`,
+		companyID, logicGateID, normalizeKanbanBoardTitle(LogicGateKanbanBoardID(logicGateID), header)); err != nil {
+		return domain.LogicGate{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return domain.LogicGate{}, err
 	}
 	return item, nil
@@ -100,6 +130,35 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 		`delete from company_explorer_folder_items
 		 where company_id=$1 and item_type='logic_gate' and item_id=$2`,
 		companyID, logicGateID,
+	); err != nil {
+		return err
+	}
+	boardID := LogicGateKanbanBoardID(logicGateID)
+	if _, err := tx.ExecContext(ctx,
+		`delete from company_explorer_folder_items
+		 where company_id=$1 and item_type='kanban' and item_id=$2`,
+		companyID, boardID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from kanban_cards
+		 where company_id=$1 and board_id=$2`,
+		companyID, boardID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from kanban_columns
+		 where company_id=$1 and board_id=$2`,
+		companyID, boardID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from kanban_boards
+		 where company_id=$1 and board_id=$2`,
+		companyID, boardID,
 	); err != nil {
 		return err
 	}

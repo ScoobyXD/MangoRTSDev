@@ -32,8 +32,8 @@ export async function listKanbanColumns(apiBase: string, companyID: string, boar
   return payload.columns ?? [];
 }
 
-export async function listKanbanBoards(apiBase: string, companyID: string, limit = 100, afterPosition = 0): Promise<KanbanBoard[]> {
-  const params = query({ company_id: companyID, limit, after_position: afterPosition > 0 ? afterPosition : undefined });
+export async function listKanbanBoards(apiBase: string, companyID: string, limit = 100, afterPosition = 0, logicGateID = ""): Promise<KanbanBoard[]> {
+  const params = query({ company_id: companyID, limit, after_position: afterPosition > 0 ? afterPosition : undefined, logic_gate_id: logicGateID });
   const payload = await fetchJSON<{ boards?: KanbanBoard[] }>(apiBase, `/v1/kanban/boards?${params}`);
   return payload.boards ?? [];
 }
@@ -129,8 +129,9 @@ export async function moveKanbanCard(args: {
   companyID: string;
   boardID: string;
   cardID: string;
-  columnID: string;
-  position: number;
+  columnID?: string;
+  position?: number;
+  isIssue?: boolean;
 }): Promise<KanbanCard> {
   return fetchJSON<KanbanCard>(args.apiBase, `/v1/kanban/cards/${encodeURIComponent(args.cardID)}`, {
     method: "PUT",
@@ -139,6 +140,7 @@ export async function moveKanbanCard(args: {
       board_id: args.boardID,
       column_id: args.columnID,
       position: args.position,
+      is_issue: args.isIssue,
     },
   });
 }
