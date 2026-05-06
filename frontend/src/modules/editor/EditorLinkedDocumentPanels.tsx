@@ -11,7 +11,7 @@ type EditorLinkedDocumentPanelsProps = {
   nodePresetFields: {
     status: string;
     priorityDraft: string;
-    personInCharge: string;
+    assigneeUserID: string;
     dueDateDraft: string;
   } | null;
   isEditingTitle: boolean;
@@ -24,9 +24,20 @@ type EditorLinkedDocumentPanelsProps = {
   onUpdateTitle: (nextTitle: string) => Promise<void>;
   onSetNodePriorityDraft: React.Dispatch<React.SetStateAction<string>>;
   onCommitNodePriorityDraft: (draft: string) => void;
+  onSetNodeAssigneeDraft: React.Dispatch<React.SetStateAction<string>>;
+  onCommitNodeAssigneeDraft: (draft: string) => void;
   onSetNodeDueDateDraft: React.Dispatch<React.SetStateAction<string>>;
   onCommitNodeDueDateDraft: (draft: string) => void;
 };
+
+const NODE_PRIORITY_OPTIONS = [
+  { value: "0", label: "0 Unassigned" },
+  { value: "1", label: "1 Low Priority" },
+  { value: "2", label: "2 Medium-Low Priority" },
+  { value: "3", label: "3 Medium Priority" },
+  { value: "4", label: "4 High Priority" },
+  { value: "5", label: "5 URGENT" },
+] as const;
 
 export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProps> = ({
   activeTab,
@@ -46,6 +57,8 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   onUpdateTitle,
   onSetNodePriorityDraft,
   onCommitNodePriorityDraft,
+  onSetNodeAssigneeDraft,
+  onCommitNodeAssigneeDraft,
   onSetNodeDueDateDraft,
   onCommitNodeDueDateDraft,
 }) => (
@@ -113,23 +126,41 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               <strong>Status:</strong>
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nodePresetFields.status || "None"}</span>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6 }}>
-              <strong>Person In Charge:</strong>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nodePresetFields.personInCharge}</span>
-            </div>
             <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
-              <strong>Priority:</strong>
+              <strong>Person In Charge:</strong>
               <input
-                value={nodePresetFields.priorityDraft}
-                onChange={(event) => onSetNodePriorityDraft(event.target.value.replace(/[^\d]/g, "").slice(0, 1))}
-                onBlur={(event) => onCommitNodePriorityDraft(event.currentTarget.value)}
+                value={nodePresetFields.assigneeUserID}
+                onChange={(event) => onSetNodeAssigneeDraft(event.target.value)}
+                onBlur={(event) => onCommitNodeAssigneeDraft(event.currentTarget.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") event.currentTarget.blur();
                 }}
-                inputMode="numeric"
-                aria-label="Priority"
-                style={{ width: 42, border: "1px solid transparent", background: "transparent", color: "inherit", font: "inherit", padding: 0, outline: "none" }}
+                placeholder="Unassigned"
+                aria-label="Person in charge"
+                style={{ width: "100%", minWidth: 0, border: "1px solid transparent", background: "transparent", color: "inherit", font: "inherit", padding: 0, outline: "none" }}
               />
+            </label>
+            <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+              <strong>Priority:</strong>
+              <span style={{ position: "relative", display: "inline-block", width: "min(100%, 220px)" }}>
+                <select
+                  value={nodePresetFields.priorityDraft || "0"}
+                  onChange={(event) => {
+                    onSetNodePriorityDraft(event.target.value);
+                    onCommitNodePriorityDraft(event.target.value);
+                  }}
+                  onBlur={(event) => onCommitNodePriorityDraft(event.currentTarget.value)}
+                  aria-label="Priority"
+                  style={{ width: "100%", appearance: "none", WebkitAppearance: "none", border: "1px solid transparent", background: "transparent", color: "inherit", font: "inherit", padding: "0 18px 0 0", outline: "none" }}
+                >
+                  {NODE_PRIORITY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <svg aria-hidden="true" width="10" height="7" viewBox="0 0 10 7" style={{ position: "absolute", right: 2, top: "50%", transform: "translateY(-45%)", pointerEvents: "none", color: "currentColor" }}>
+                  <path d="M1 1.25 5 5.25 9 1.25" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
             </label>
             <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
               <strong>Due Date:</strong>

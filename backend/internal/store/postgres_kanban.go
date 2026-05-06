@@ -125,7 +125,13 @@ insert into kanban_boards (company_id, board_id, title, position, created_timest
 values ($1, $2, $3, $4, now(), now())
 on conflict (company_id, board_id)
 do update set
-  title=excluded.title,
+  title=case
+    when kanban_boards.logic_gate_id is not null then coalesce((
+      select header from logic_gates
+      where company_id=kanban_boards.company_id and logic_gate_id=kanban_boards.logic_gate_id
+    ), kanban_boards.title)
+    else excluded.title
+  end,
   position=case when $5 then excluded.position else kanban_boards.position end,
   updated_timestamp=now()
 returning company_id, board_id, logic_gate_id::text, title, position, created_timestamp, updated_timestamp`,
@@ -137,7 +143,13 @@ returning company_id, board_id, logic_gate_id::text, title, position, created_ti
 func (r *PostgresRepo) UpdateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error) {
 	item, err := scanKanbanBoard(r.db.QueryRow(`
 update kanban_boards
-set title=coalesce(nullif($3, ''), title),
+set title=case
+      when logic_gate_id is not null then coalesce((
+        select header from logic_gates
+        where company_id=kanban_boards.company_id and logic_gate_id=kanban_boards.logic_gate_id
+      ), title)
+      else coalesce(nullif($3, ''), title)
+    end,
     position=case when $4 > 0 then $4 else position end,
     updated_timestamp=now()
 where company_id=$1 and board_id=$2

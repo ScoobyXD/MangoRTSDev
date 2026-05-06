@@ -178,6 +178,10 @@ function asNodeRecord(candidate: unknown): NodeRecord | null {
     company_id: value.company_id,
     node_id: value.node_id,
     title: value.title,
+    status: typeof value.status === "string" || value.status === null ? value.status : undefined,
+    due_date: typeof value.due_date === "string" || value.due_date === null ? value.due_date : undefined,
+    priority: typeof value.priority === "number" || value.priority === null ? value.priority : undefined,
+    assignee_user_id: typeof value.assignee_user_id === "string" || value.assignee_user_id === null ? value.assignee_user_id : undefined,
     created_timestamp: typeof value.created_timestamp === "string" ? value.created_timestamp : new Date().toISOString(),
   };
 }

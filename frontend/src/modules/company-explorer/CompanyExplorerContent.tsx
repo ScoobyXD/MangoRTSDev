@@ -7,7 +7,7 @@ import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGrap
 import { type ExplorerSelectionState } from "./explorerSync";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerItemType } from "../folders/companyExplorerFolders";
 import { createKanbanBoard, deleteKanbanBoard, listKanbanBoards, updateKanbanBoard } from "../kanban/kanbanApi";
-import { EVENT_KANBAN_BOARDS_UPDATED, type ExplorerEntityDragItem, type KanbanBoard, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
+import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntityDragItem, type KanbanBoard, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
@@ -601,9 +601,15 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       }
 
       await requestJSON<{ status: string }>(`/v1/logic-gates/${target.id}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+      const associatedBoardID = logicGateKanbanBoardID(target.id);
       setLogicGates((previous) => previous.filter((logicGate) => logicGate.logic_gate_id !== target.id));
-      setFolderItems((previous) => previous.filter((item) => item.item_type !== "logic_gate" || item.item_id !== target.id));
+      setKanbanBoards((previous) => previous.filter((board) => board.board_id !== associatedBoardID));
+      setFolderItems((previous) => previous.filter((item) =>
+        (item.item_type !== "logic_gate" || item.item_id !== target.id)
+        && (item.item_type !== "kanban" || item.item_id !== associatedBoardID)
+      ));
       removeLogicGateRelationshipGraphNode(apiBase, companyID, target.id);
+      window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, deletedBoardID: associatedBoardID } }));
       lastLocalExplorerSelectionRef.current = { domain: "root", changedAt: Date.now() };
       pendingExplorerSelectionIntentRef.current = "navigate";
       setSelectedTreeID("folder-root");

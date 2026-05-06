@@ -75,8 +75,8 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
       onDrop={onDrop}
       style={{
         position: "relative",
-        border: `1px solid ${selected || highlighted ? color : line}`,
-        background: isIssue ? "#fff2a6" : cardBackground,
+        border: `1px solid ${selected || highlighted ? color : hexToRgba(color, 0.58)}`,
+        background: isIssue ? "#fff2a6" : `linear-gradient(90deg, ${hexToRgba(color, 0.1)}, ${cardBackground} 42px)`,
         color: isIssue ? "#111111" : text,
         padding: "8px 9px 8px 13px",
         minHeight: 58,

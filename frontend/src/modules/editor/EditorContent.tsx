@@ -134,6 +134,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [nodeStatus, setNodeStatus] = useState("");
   const [nodePriorityDraft, setNodePriorityDraft] = useState("");
   const [nodeDueDateDraft, setNodeDueDateDraft] = useState("");
+  const [nodeAssigneeDraft, setNodeAssigneeDraft] = useState("");
   const [documentInformationID, setDocumentInformationID] = useState("");
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
@@ -437,6 +438,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setNodeStatus("");
     setNodePriorityDraft("");
     setNodeDueDateDraft("");
+    setNodeAssigneeDraft("");
     documentDraftRef.current = "";
     persistedDocumentRef.current = "";
     documentInformationIDRef.current = "";
@@ -492,12 +494,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [clearVisibleDocumentForSelection, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, readLogicGateLabelFromGraph, rememberCurrentDocumentScroll]);
 
   useEffect(() => {
-    if (!forcedEntityKind || !forcedEntityID.trim()) return;
+    if (!forcedEntityKind) return;
+    const forcedID = forcedEntityID.trim();
     if (forcedEntityKind === "node") {
-      applyLinkedNode(forcedEntityID.trim(), forcedLabel, { focusEditor: false });
+      applyLinkedNode(forcedID, forcedLabel, { focusEditor: false });
       return;
     }
-    applyLinkedLogicGate(forcedEntityID.trim(), forcedLabel, { focusEditor: false });
+    applyLinkedLogicGate(forcedID, forcedLabel, { focusEditor: false });
   }, [applyLinkedLogicGate, applyLinkedNode, forcedEntityID, forcedEntityKind, forcedLabel]);
 
   const shouldApplySelectionChangedAt = useCallback((changedAt?: number): boolean => {
@@ -545,6 +548,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodeStatus(updated.status ?? "");
       setNodePriorityDraft(updated.priority == null ? "" : String(updated.priority));
       setNodeDueDateDraft(formatNodeDueDateForEditor(updated.due_date));
+      setNodeAssigneeDraft(updated.assignee_user_id ?? "");
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
       upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
     } catch (err) {
@@ -554,7 +558,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   const commitNodePriorityDraft = useCallback((draft: string) => {
     const raw = draft.trim();
-    if (!raw) {
+    if (!raw || raw === "0") {
       void updateNodePresetPatch({ priority: null });
       return;
     }
@@ -573,6 +577,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       return;
     }
     void updateNodePresetPatch({ due_date: normalized });
+  }, [updateNodePresetPatch]);
+
+  const commitNodeAssigneeDraft = useCallback((draft: string) => {
+    const value = draft.trim();
+    if (value && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+      setError("Person in charge must be a user ID");
+      return;
+    }
+    void updateNodePresetPatch({ assignee_user_id: value || null });
   }, [updateNodePresetPatch]);
 
   useEffect(() => {
@@ -613,7 +626,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [readLinkedLogicMapWidgetID, readLinkedMapWidgetID]);
 
   useEffect(() => {
-    if (forcedEntityKind && forcedEntityID.trim()) return;
+    if (forcedEntityKind) return;
     const applyLiveSelection = (selection: LiveSelectionChange): boolean => {
       if (selection.companyID !== companyID || selection.sourceFrameID === scope) return false;
       if (!shouldApplySelectionChangedAt(selection.changedAt)) return false;
@@ -739,6 +752,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
         return nextTitle;
       });
+      setNodeStatus(node.status ?? "");
+      setNodePriorityDraft(node.priority == null ? "" : String(node.priority));
+      setNodeDueDateDraft(formatNodeDueDateForEditor(node.due_date));
+      setNodeAssigneeDraft(node.assignee_user_id ?? "");
     };
     syncTitleFromGraph();
     return subscribeNodeRelationshipGraph(apiBase, companyID, syncTitleFromGraph);
@@ -771,6 +788,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodeStatus("");
       setNodePriorityDraft("");
       setNodeDueDateDraft("");
+      setNodeAssigneeDraft("");
       documentDraftRef.current = "";
       persistedDocumentRef.current = "";
       documentInformationIDRef.current = "";
@@ -801,6 +819,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodeStatus("");
           setNodePriorityDraft("");
           setNodeDueDateDraft("");
+          setNodeAssigneeDraft("");
           const nonText = details.information.filter((item) => item.type !== "Text box");
           const textBoxes = projections.filter((item) => item.type === "Text box");
           setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
@@ -830,6 +849,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodeStatus(details.node.status ?? "");
         setNodePriorityDraft(details.node.priority == null ? "" : String(details.node.priority));
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
+        setNodeAssigneeDraft(details.node.assignee_user_id ?? "");
         const nonText = details.information.filter((item) => item.type !== "Text box");
         const textBoxes = projections.filter((item) => item.type === "Text box");
         setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
@@ -928,7 +948,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             nodePresetFields={linkedEntityKind === "node" ? {
               status: nodeStatus || "",
               priorityDraft: nodePriorityDraft,
-              personInCharge: "Jonathan Kim",
+              assigneeUserID: nodeAssigneeDraft,
               dueDateDraft: nodeDueDateDraft,
             } : null}
             isEditingTitle={isEditingTitle}
@@ -941,6 +961,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onUpdateTitle={updateNodeTitle}
             onSetNodePriorityDraft={setNodePriorityDraft}
             onCommitNodePriorityDraft={commitNodePriorityDraft}
+            onSetNodeAssigneeDraft={setNodeAssigneeDraft}
+            onCommitNodeAssigneeDraft={commitNodeAssigneeDraft}
             onSetNodeDueDateDraft={setNodeDueDateDraft}
             onCommitNodeDueDateDraft={commitNodeDueDateDraft}
           />

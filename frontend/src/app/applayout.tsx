@@ -30,6 +30,7 @@ import {
 } from "./frameLayoutTypes";
 import { loadFrameLinks, loadSettings, loadViews, persistFrameLinks, persistFrameRegistry, saveSettings, saveViews } from "./useFramePersistence";
 import { useFrameDragResize } from "./useFrameDragResize";
+import { LogicGateArenaPage } from "../pages/logic-gate-arena";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 
@@ -76,6 +77,7 @@ const App: React.FC = () => {
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId) ?? tabs[0], [tabs, activeTabId]);
   const frames = activeTab?.frames ?? [];
+  const isLogicGateArenaView = activeTab?.page === "logic-gate-arena";
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
   const childrenByParent = useMemo(() => {
     const grouped = new Map<string, FrameDataModel[]>();
@@ -451,7 +453,7 @@ const App: React.FC = () => {
   const openDefaultNodeView = useCallback((tabID: string) => {
     const framesForView = createDefaultNodeViewFrames();
     const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
-    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Default Node View", frames: framesForView } : tab)));
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Default Node View", page: undefined, frames: framesForView } : tab)));
     setFrameLinks((previous) => mergeLinkPlan(previous.filter((edge) => !replacedFrameIDs.has(edge.a) && !replacedFrameIDs.has(edge.b)), computeLinkPlan(framesForView)));
     setActiveTabId(tabID);
     setEditMode(true);
@@ -460,10 +462,10 @@ const App: React.FC = () => {
   const openLogicGateArena = useCallback((tabID: string) => {
     const framesForView = createLogicGateArenaFrames();
     const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
-    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Logic Gate Arena", frames: framesForView } : tab)));
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Logic Gate Arena", page: "logic-gate-arena", frames: framesForView } : tab)));
     setFrameLinks((previous) => mergeLinkPlan(previous.filter((edge) => !replacedFrameIDs.has(edge.a) && !replacedFrameIDs.has(edge.b)), computeLinkPlan(framesForView)));
     setActiveTabId(tabID);
-    setEditMode(true);
+    setEditMode(false);
   }, [tabs]);
 
   const saveCurrentAsTemplate = useCallback((tabID: string) => {
@@ -474,6 +476,7 @@ const App: React.FC = () => {
     const templateTab: ViewTab = {
       id,
       name: `${source.name} Template`,
+      page: source.page,
       frames: source.frames.map((frame) => ({
         ...frame,
         id: frameIDMap.get(frame.id) ?? createFrameId(),
@@ -591,7 +594,15 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <FrameCanvas style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }} onClick={() => { setSelectedFrameId(null); setSelectedFrameIds(new Set()); }} onContextMenu={(e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY, gridX: Math.floor(e.clientX / stepX), gridY: Math.floor((e.clientY - HEADER_H) / stepY) }); setHeaderMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}>
+      <FrameCanvas
+        style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }}
+        onClick={isLogicGateArenaView ? undefined : () => { setSelectedFrameId(null); setSelectedFrameIds(new Set()); }}
+        onContextMenu={isLogicGateArenaView ? (e) => e.preventDefault() : (e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY, gridX: Math.floor(e.clientX / stepX), gridY: Math.floor((e.clientY - HEADER_H) / stepY) }); setHeaderMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
+      >
+        {isLogicGateArenaView ? (
+          <LogicGateArenaPage frames={frames} updateFrames={updateActiveFrames} />
+        ) : (
+          <>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
         {editMode && draggingId && (() => {
           const activeFrame = frames.find((w) => w.id === draggingId);
@@ -725,6 +736,8 @@ const App: React.FC = () => {
             />
           </React.Fragment>
         ))}
+          </>
+        )}
       </FrameCanvas>
 
       {tabMenu && (

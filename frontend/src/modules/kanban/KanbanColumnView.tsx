@@ -5,6 +5,7 @@ import {
   KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
   getColumnHeight,
   getColumnWidth,
+  hexToRgba,
   normalizeKanbanColumnItemColor,
   type KanbanCard,
   type KanbanCardDropPlacement,
@@ -47,6 +48,7 @@ type KanbanColumnViewProps = {
   onCommitColumnTitle: (columnID: string, title: string) => void;
   onRefreshBoard: () => void;
   onRequestColumnDelete: (columnID: string) => void;
+  onCreateNodeInColumn: (columnID: string) => void;
   onDropColumn: (event: React.DragEvent<HTMLElement>, columnID: string) => void;
   dataTransferIncludes: (event: React.DragEvent, mime: string) => boolean;
 };
@@ -76,11 +78,13 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
   onCommitColumnTitle,
   onRefreshBoard,
   onRequestColumnDelete,
+  onCreateNodeInColumn,
   onDropColumn,
   dataTransferIncludes,
 }) => {
   const columnWidth = getColumnWidth(column);
   const columnHeight = getColumnHeight(column);
+  const columnColor = normalizeKanbanColumnItemColor(column.item_color);
   const columnDropActive = dragOverColumnID === column.column_id;
   const insertionShadow = columnDropActive ? `0 0 0 3px ${accent}` : "";
   const columnShadow = insertionShadow ? (laneShadow === "none" ? insertionShadow : `${insertionShadow}, ${laneShadow}`) : laneShadow;
@@ -107,8 +111,8 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
         flex: `0 0 ${columnWidth}px`,
         height: columnHeight,
         minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX / 2,
-        background: laneBackground,
-        border: `1px solid ${laneBorder}`,
+        background: `linear-gradient(180deg, ${hexToRgba(columnColor, 0.1)}, ${laneBackground} 78px)`,
+        border: `1px solid ${columnColor || laneBorder}`,
         boxShadow: columnShadow,
         display: "grid",
         gridTemplateRows: "42px minmax(0, 1fr)",
@@ -128,7 +132,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
           onSetDraggingColumnID("");
           onSetDragOverColumnID("");
         }}
-        style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${line}`, cursor: "default" }}
+        style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr) 28px 28px", alignItems: "center", borderBottom: `1px solid ${hexToRgba(columnColor, 0.72)}`, background: hexToRgba(columnColor, 0.12), cursor: "default" }}
       >
         <span aria-hidden="true" style={{ color: subtext, fontSize: 15, lineHeight: 1, textAlign: "center", cursor: editingColumnID === column.column_id ? "default" : "grab" }}>::</span>
         {editingColumnID === column.column_id ? (
@@ -164,6 +168,15 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
           </div>
         )}
         <button
+          title="Create node"
+          type="button"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={() => onCreateNodeInColumn(column.column_id)}
+          style={{ width: 28, height: 28, border: "none", background: "transparent", color: text, cursor: "pointer", fontSize: 20, lineHeight: 1 }}
+        >
+          +
+        </button>
+        <button
           title="Delete column"
           type="button"
           onMouseDown={(event) => event.stopPropagation()}
@@ -176,7 +189,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
       <div
         className="kanban-column-scroll"
         onMouseDown={onBlankMouseDown}
-        style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 8, padding: 8, ["--kanban-column-scroll-accent" as string]: normalizeKanbanColumnItemColor(column.item_color), ["--kanban-column-scroll-track" as string]: "transparent" }}
+        style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 8, padding: 8, ["--kanban-column-scroll-accent" as string]: columnColor, ["--kanban-column-scroll-track" as string]: "transparent" }}
       >
         {renderedCards}
       </div>
