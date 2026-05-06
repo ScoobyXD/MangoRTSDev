@@ -15,6 +15,7 @@ frontend/vite-dev.err.log
 **/terraform.tfstate
 **/terraform.tfstate.backup
 **/*.tfplan
+infra/aws-dev/tfplan
 infra/aws-dev/backend.hcl
 infra/aws-dev/terraform.tfvars
 infra/aws-dev/*.auto.tfvars
