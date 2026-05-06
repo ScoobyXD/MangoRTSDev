@@ -190,7 +190,11 @@ func (r *MemoryRepo) CreateKanbanBoard(companyID, boardID, title string, positio
 	}
 	k := boardKey(companyID, boardID)
 	if existing, ok := r.kanbanBoards[k]; ok {
-		if strings.TrimSpace(title) != "" {
+		if existing.LogicGateID != nil {
+			if logicGate, ok := r.logicGates[key(companyID, *existing.LogicGateID)]; ok {
+				existing.Title = normalizeKanbanBoardTitle(boardID, logicGate.Header)
+			}
+		} else if strings.TrimSpace(title) != "" {
 			existing.Title = normalizeKanbanBoardTitle(boardID, title)
 		}
 		if position > 0 {
@@ -225,7 +229,11 @@ func (r *MemoryRepo) UpdateKanbanBoard(companyID, boardID, title string, positio
 	if !ok {
 		return domain.KanbanBoard{}, ErrNotFound
 	}
-	if strings.TrimSpace(title) != "" {
+	if item.LogicGateID != nil {
+		if logicGate, ok := r.logicGates[key(companyID, *item.LogicGateID)]; ok {
+			item.Title = normalizeKanbanBoardTitle(boardID, logicGate.Header)
+		}
+	} else if strings.TrimSpace(title) != "" {
 		item.Title = normalizeKanbanBoardTitle(boardID, title)
 	}
 	if position > 0 {

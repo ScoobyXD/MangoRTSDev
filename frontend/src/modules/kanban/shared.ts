@@ -134,6 +134,12 @@ export function logicGateKanbanBoardID(logicGateID: string): string {
   return `logic-gate:${logicGateID.trim()}`;
 }
 
+export function logicGateIDFromKanbanBoardID(boardID: string): string {
+  const prefix = "logic-gate:";
+  const trimmed = boardID.trim();
+  return trimmed.startsWith(prefix) ? trimmed.slice(prefix.length).trim() : "";
+}
+
 export function sortKanbanBoards(boards: KanbanBoard[]): KanbanBoard[] {
   return [...boards].sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp) || a.board_id.localeCompare(b.board_id));
 }

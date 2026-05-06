@@ -81,6 +81,10 @@ function sanitizeFrames(value: unknown): FrameDataModel[] {
   return cleaned;
 }
 
+function sanitizePage(value: unknown): ViewTab["page"] {
+  return value === "logic-gate-arena" ? value : undefined;
+}
+
 function createUniqueFrameID(usedFrameIDs: Set<string>): string {
   let nextID = createFrameId();
   while (usedFrameIDs.has(nextID) || LEGACY_DEFAULT_NODE_VIEW_FRAME_ID_SET.has(nextID)) {
@@ -140,10 +144,11 @@ export function loadViews(): { tabs: ViewTab[]; activeId: string } {
     if (!isObject(parsed) || !Array.isArray(parsed.tabs) || typeof parsed.activeId !== "string") return fallback;
 
     const tabs = parsed.tabs
-      .map((tab) => {
+      .map((tab): ViewTab | null => {
         if (!isObject(tab) || typeof tab.id !== "string" || typeof tab.name !== "string") return null;
         const frames = sanitizeFrames((tab as { frames?: unknown; widgets?: unknown }).frames ?? tab.widgets);
-        return { id: tab.id, name: tab.name, frames } satisfies ViewTab;
+        const page = sanitizePage(tab.page);
+        return { id: tab.id, name: tab.name, ...(page ? { page } : {}), frames };
       })
       .filter((tab): tab is ViewTab => !!tab);
 

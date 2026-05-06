@@ -28,6 +28,9 @@ type KanbanBoardSidebarProps = {
   isDark: boolean;
   theme: "teal" | "light" | "dark";
   editingBoardTitle: boolean;
+  boardTitleReadOnly?: boolean;
+  headerLeftPaddingPx?: number;
+  topClearancePx?: number;
   onSetBoardTitleDraft: React.Dispatch<React.SetStateAction<string>>;
   onSetBoardSearchQuery: React.Dispatch<React.SetStateAction<string>>;
   onSetEditingBoardTitle: React.Dispatch<React.SetStateAction<boolean>>;
@@ -56,6 +59,9 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
   isDark,
   theme,
   editingBoardTitle,
+  boardTitleReadOnly = false,
+  headerLeftPaddingPx = 162,
+  topClearancePx = KANBAN_MODULE_TOP_CLEARANCE_PX,
   onSetBoardTitleDraft,
   onSetBoardSearchQuery,
   onSetEditingBoardTitle,
@@ -93,7 +99,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
 
   return (
   <>
-    <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 4, left: 12, right: 12, display: "grid", gridTemplateColumns: "minmax(150px, 270px) minmax(140px, 1fr) auto", alignItems: "center", gap: 8, paddingLeft: 162, zIndex: 6, pointerEvents: "auto" }}>
+    <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 4, left: 12, right: 12, display: "grid", gridTemplateColumns: "minmax(150px, 270px) minmax(140px, 1fr) auto", alignItems: "center", gap: 8, paddingLeft: headerLeftPaddingPx, zIndex: 6, pointerEvents: "auto" }}>
       {editingBoardTitle ? (
         <input
           value={boardTitleDraft}
@@ -113,12 +119,13 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
       ) : (
         <button
           type="button"
-          title="Rename Kanban board"
+          title={boardTitleReadOnly ? activeBoardTitle : "Rename Kanban board"}
           onClick={() => {
+            if (boardTitleReadOnly) return;
             onSetBoardTitleDraft(activeBoardTitle);
             onSetEditingBoardTitle(true);
           }}
-          style={{ minWidth: 0, height: 25, border: `1px solid ${line}`, background: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)", color: text, cursor: "text", fontSize: 12, fontWeight: 800, textAlign: "left", padding: "0 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          style={{ minWidth: 0, height: 25, border: `1px solid ${line}`, background: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)", color: text, cursor: boardTitleReadOnly ? "default" : "text", fontSize: 12, fontWeight: 800, textAlign: "left", padding: "0 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
         >
           {activeBoardTitle}
         </button>
@@ -150,7 +157,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
       </button>
     </div>
     {boardPickerOpen && (
-      <section ref={popoverRef} data-frame-interactive="true" style={{ position: "absolute", top: KANBAN_MODULE_TOP_CLEARANCE_PX + 2, right: 12, width: "min(360px, calc(100% - 24px))", maxHeight: "min(360px, calc(100% - 52px))", display: "grid", gridTemplateRows: "minmax(0, 1fr)", border: isDark ? "1px solid rgba(255,255,255,0.16)" : "1px solid #e0e0e0", borderRadius: 10, background: isDark ? "rgba(17,22,27,0.98)" : "#ffffff", boxShadow: isDark ? "0 12px 28px rgba(0,0,0,0.42)" : "0 6px 24px rgba(0,0,0,0.12)", padding: "4px 0", zIndex: 8, overflow: "hidden" }}>
+      <section ref={popoverRef} data-frame-interactive="true" style={{ position: "absolute", top: topClearancePx + 2, right: 12, width: "min(360px, calc(100% - 24px))", maxHeight: "min(360px, calc(100% - 52px))", display: "grid", gridTemplateRows: "minmax(0, 1fr)", border: isDark ? "1px solid rgba(255,255,255,0.16)" : "1px solid #e0e0e0", borderRadius: 10, background: isDark ? "rgba(17,22,27,0.98)" : "#ffffff", boxShadow: isDark ? "0 12px 28px rgba(0,0,0,0.42)" : "0 6px 24px rgba(0,0,0,0.12)", padding: "4px 0", zIndex: 8, overflow: "hidden" }}>
         <div className="company-explorer-scroll" style={{ overflowY: "auto", overflowX: "hidden", minHeight: 0, ["--company-explorer-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--company-explorer-scroll-track" as string]: "transparent" }}>
           {!boardsLoading && filteredBoardRowsLength === 0 && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>No saved boards</div>}
           {filteredBoardGroups.map((group) => (
