@@ -10,8 +10,13 @@ test("auth route guard sends unauthenticated app routes to login", () => {
 
 test("auth route guard sends authenticated login routes back to app", () => {
   assert.equal(nextPathForAuthState("/login", true), "/");
-  assert.equal(nextPathForAuthState("/signup", true), "/");
   assert.equal(nextPathForAuthState("/admin/users", true), "/admin/users");
+});
+
+test("signup is not an auth route", () => {
+  assert.equal(isAuthPath("/signup"), false);
+  assert.equal(nextPathForAuthState("/signup", false), "/login");
+  assert.equal(nextPathForAuthState("/signup", true), "/signup");
 });
 
 test("auth path detection normalizes trailing slash", () => {

@@ -70,6 +70,13 @@ export function hasStoredToken(): boolean {
   return readToken() !== null;
 }
 
+export function formatAuthError(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return `${fallback}: ${error.message.trim()}`;
+  }
+  return fallback;
+}
+
 export async function loginWithPassword(email: string, password: string): Promise<LoginResult> {
   const config = readAuthConfig();
   assertConfigured(config);
@@ -179,7 +186,7 @@ export async function apiFetchJSON<T>(path: string, init?: RequestInit): Promise
   const response = await fetch(`${config.apiBase}${path}`, { ...init, headers });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `api_${response.status}`);
+    throw new Error(apiErrorMessage(response, text));
   }
   return response.json() as Promise<T>;
 }
@@ -246,9 +253,110 @@ async function cognitoRequest<T>(config: CognitoConfig, action: string, payload:
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `cognito_${action}_${response.status}`);
+    throw new Error(cognitoErrorMessage(response, text, action));
   }
   return response.json() as Promise<T>;
+}
+
+function cognitoErrorMessage(response: Response, text: string, action: string): string {
+  const payload = parseErrorPayload(text);
+  const type = normalizeAwsErrorType(stringValue(payload?.__type) || response.headers.get("x-amzn-errortype") || "");
+  const rawMessage = stringValue(payload?.message) || stringValue(payload?.Message) || response.headers.get("x-amzn-errormessage")?.trim() || "";
+  const message = friendlyCognitoError(type, rawMessage);
+  if (message) return message;
+  if (type && rawMessage) return `${type}: ${rawMessage}`;
+  if (rawMessage) return rawMessage;
+  if (type) return type;
+  return `Cognito ${action} failed with HTTP ${response.status}.`;
+}
+
+function apiErrorMessage(response: Response, text: string): string {
+  const payload = parseErrorPayload(text);
+  const code = stringValue(payload?.error);
+  const rawMessage = stringValue(payload?.message);
+  const message = friendlyApiError(code);
+  if (message) return message;
+  if (rawMessage) return rawMessage;
+  if (code) return code;
+  if (text.trim()) return text.trim();
+  return `API request failed with HTTP ${response.status}.`;
+}
+
+function friendlyCognitoError(type: string, message: string): string {
+  const lowerMessage = message.toLowerCase();
+  if (lowerMessage.includes("invalid session for the user") && lowerMessage.includes("used once")) {
+    return "That Cognito invite session has already been used. Sign in with the new password, then paste the Mango invite token again.";
+  }
+  if (type === "NotAuthorizedException" && lowerMessage.includes("incorrect username or password")) {
+    return "Incorrect email or password.";
+  }
+  if (type === "NotAuthorizedException" && message) {
+    return message;
+  }
+  if (type === "UserNotFoundException") {
+    return "No Cognito user exists for that email. Ask an admin to resend the invite.";
+  }
+  if (type === "CodeMismatchException") {
+    return "The reset code is not valid.";
+  }
+  if (type === "ExpiredCodeException") {
+    return "The reset code has expired. Request a new reset code.";
+  }
+  if (type === "InvalidPasswordException" && message) {
+    return message;
+  }
+  if (type === "PasswordResetRequiredException") {
+    return "This account requires a password reset before signing in.";
+  }
+  if (type === "TooManyRequestsException") {
+    return "Too many attempts. Wait a bit, then try again.";
+  }
+  return "";
+}
+
+function friendlyApiError(code: string): string {
+  switch (code) {
+    case "failed_to_create_cognito_user":
+      return "Mango created the invite, but Cognito did not create the user. Check backend logs and AWS credentials, then create a fresh invite.";
+    case "invitation_email_mismatch":
+      return "This Mango invite token belongs to a different email address.";
+    case "invitation_not_found":
+      return "This Mango invite token was not found, has expired, or was already accepted.";
+    case "unauthorized":
+      return "You are not signed in. Sign in or complete the temporary password step first.";
+    case "company_admin_required":
+      return "You need company admin access for that company.";
+    case "dev_admin_required":
+      return "You need dev admin access.";
+    case "invalid_invitation":
+      return "The invite email, company, or role is invalid.";
+    case "company_not_found":
+      return "The selected company was not found.";
+    default:
+      return "";
+  }
+}
+
+function parseErrorPayload(text: string): Record<string, unknown> | null {
+  if (!text.trim()) return null;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeAwsErrorType(type: string): string {
+  const trimmed = type.trim();
+  if (!trimmed) return "";
+  const withoutNamespace = trimmed.includes("#") ? trimmed.slice(trimmed.lastIndexOf("#") + 1) : trimmed;
+  const withoutPackage = withoutNamespace.includes(".") ? withoutNamespace.slice(withoutNamespace.lastIndexOf(".") + 1) : withoutNamespace;
+  return withoutPackage.replace(/:+$/, "");
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function shouldAuthorizeRequest(config: CognitoConfig, input: RequestInfo | URL): boolean {

@@ -15,6 +15,7 @@ var (
 type Repository interface {
 	UpsertAuthUser(cognitoSubject, email string) (domain.User, error)
 	GetAuthUser(cognitoSubject string) (domain.User, error)
+	AuthUserEmailExists(email string) (bool, error)
 	ListUserMemberships(userID string) ([]domain.CompanyMembership, error)
 	UserHasCompanyAccess(cognitoSubject, companyID string) (bool, error)
 	CreateCompany(name string) (domain.Company, error)

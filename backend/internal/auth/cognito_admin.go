@@ -48,7 +48,19 @@ func (c *CognitoAdminClient) AdminCreateUser(ctx context.Context, email string) 
 	if c == nil || c.Region == "" || c.UserPoolID == "" || email == "" {
 		return ErrCognitoAdminUnavailable
 	}
-	body, err := json.Marshal(map[string]any{
+	userExists, err := c.adminCreateUser(ctx, email, "")
+	if err != nil {
+		return err
+	}
+	if !userExists {
+		return nil
+	}
+	_, err = c.adminCreateUser(ctx, email, "RESEND")
+	return err
+}
+
+func (c *CognitoAdminClient) adminCreateUser(ctx context.Context, email, messageAction string) (bool, error) {
+	payload := map[string]any{
 		"UserPoolId": c.UserPoolID,
 		"Username":   email,
 		"DesiredDeliveryMediums": []string{
@@ -58,18 +70,22 @@ func (c *CognitoAdminClient) AdminCreateUser(ctx context.Context, email string) 
 			{"Name": "email", "Value": email},
 			{"Name": "email_verified", "Value": "true"},
 		},
-	})
+	}
+	if messageAction != "" {
+		payload["MessageAction"] = messageAction
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return false, err
 	}
 	creds, err := c.credentials(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	endpoint := fmt.Sprintf("https://cognito-idp.%s.amazonaws.com/", c.Region)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return false, err
 	}
 	req.Header.Set("Content-Type", "application/x-amz-json-1.1")
 	req.Header.Set("X-Amz-Target", "AWSCognitoIdentityProviderService.AdminCreateUser")
@@ -81,20 +97,20 @@ func (c *CognitoAdminClient) AdminCreateUser(ctx context.Context, email string) 
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode >= 200 && res.StatusCode <= 299 {
-		return nil
+		return false, nil
 	}
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if strings.Contains(string(raw), "UsernameExistsException") || strings.Contains(res.Header.Get("X-Amzn-Errortype"), "UsernameExistsException") {
-		return nil
+		return true, nil
 	}
 	if detail := strings.TrimSpace(string(raw)); detail != "" {
-		return fmt.Errorf("cognito admin create user failed: status=%d body=%s", res.StatusCode, detail)
+		return false, fmt.Errorf("cognito admin create user failed: status=%d body=%s", res.StatusCode, detail)
 	}
-	return fmt.Errorf("cognito admin create user failed: status=%d", res.StatusCode)
+	return false, fmt.Errorf("cognito admin create user failed: status=%d", res.StatusCode)
 }
 
 func (c *CognitoAdminClient) credentials(ctx context.Context) (awsCredentials, error) {

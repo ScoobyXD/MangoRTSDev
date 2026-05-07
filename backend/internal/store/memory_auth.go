@@ -53,6 +53,23 @@ func (r *MemoryRepo) GetAuthUser(cognitoSubject string) (domain.User, error) {
 	return user, nil
 }
 
+func (r *MemoryRepo) AuthUserEmailExists(email string) (bool, error) {
+	email = normalizeEmail(email)
+	if email == "" {
+		return false, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, user := range r.users {
+		if normalizeEmail(user.Email) == email {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *MemoryRepo) ListUserMemberships(userID string) ([]domain.CompanyMembership, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {

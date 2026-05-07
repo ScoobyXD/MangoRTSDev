@@ -52,6 +52,24 @@ func (r *PostgresRepo) GetAuthUser(cognitoSubject string) (domain.User, error) {
 	return user, err
 }
 
+func (r *PostgresRepo) AuthUserEmailExists(email string) (bool, error) {
+	email = normalizeEmail(email)
+	if email == "" {
+		return false, ErrInvalid
+	}
+
+	var ok bool
+	err := r.db.QueryRow(
+		`select exists(
+		   select 1
+		   from users
+		   where lower(email) = $1
+		 )`,
+		email,
+	).Scan(&ok)
+	return ok, err
+}
+
 func (r *PostgresRepo) ListUserMemberships(userID string) ([]domain.CompanyMembership, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {

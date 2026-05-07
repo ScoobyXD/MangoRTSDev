@@ -6,6 +6,7 @@ import {
   apiFetchJSON,
   completeNewPassword,
   fetchCurrentUser,
+  formatAuthError,
   forgotPassword,
   hasStoredToken,
   isAuthEnabled,
@@ -127,10 +128,10 @@ export default function AuthGate() {
   if (!authEnabled) return <AppLayout />;
   if (loading) return <AuthPanel title="MangoRTS" error={error}><div>Loading</div></AuthPanel>;
 
-  const normalizedPath = path === "/signup" ? "/accept-invite" : path;
+  const normalizedPath = path;
   if (!me || isAuthPath(normalizedPath)) {
     if (normalizedPath === "/accept-invite") {
-      return <AcceptInvitePage pendingChallenge={pendingChallenge} onAuthenticated={loadMe} onNavigate={navigate} />;
+      return <AcceptInvitePage pendingChallenge={pendingChallenge} onChallenge={setPendingChallenge} onAuthenticated={loadMe} onNavigate={navigate} />;
     }
     if (normalizedPath === "/forgot-password") {
       return <ForgotPasswordPage onNavigate={navigate} />;
@@ -154,14 +155,22 @@ export default function AuthGate() {
 }
 
 function formatLoginError(error: unknown): string {
-  if (error instanceof Error && error.message) {
-    return `Login failed: ${error.message}`;
-  }
-  return "Login failed";
+  return formatAuthError(error, "Login failed");
 }
 
 function normalizeEmailInput(email: string): string {
   return email.trim().toLowerCase();
+}
+
+function inviteStatusMessage(status?: string): string {
+  switch (status) {
+    case "sent":
+      return "Cognito temporary password email sent.";
+    case "existing_mango_user":
+      return "Existing Mango user. Share this Mango invite token; no Cognito temp-password email was sent.";
+    default:
+      return "Mango invite created, but Cognito email was not configured.";
+  }
 }
 
 function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
@@ -202,7 +211,7 @@ function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: 
   );
 }
 
-function AcceptInvitePage({ pendingChallenge, onAuthenticated, onNavigate }: { pendingChallenge: PendingChallenge; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
+function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNavigate }: { pendingChallenge: PendingChallenge; onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
   const params = new URLSearchParams(window.location.search);
   const [token, setToken] = useState(params.get("token") ?? "");
   const [email, setEmail] = useState(pendingChallenge?.username ?? "");
@@ -210,6 +219,8 @@ function AcceptInvitePage({ pendingChallenge, onAuthenticated, onNavigate }: { p
   const [newPassword, setNewPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [passwordStepComplete, setPasswordStepComplete] = useState(() => hasStoredToken());
+  const showPasswordStep = !passwordStepComplete && !hasStoredToken();
   return (
     <AuthPanel title="Accept Invite" error={error}>
       <form style={{ display: "grid", gap: 10 }} onSubmit={async (event) => {
@@ -217,27 +228,50 @@ function AcceptInvitePage({ pendingChallenge, onAuthenticated, onNavigate }: { p
         setBusy(true);
         setError("");
         try {
-          if (pendingChallenge) {
-            await completeNewPassword(pendingChallenge.username, pendingChallenge.session, newPassword);
-          } else if (temporaryPassword) {
-            const result = await loginWithPassword(email, temporaryPassword);
-            if (result.status === "new_password_required") {
-              await completeNewPassword(result.username, result.session, newPassword);
+          if (!token.trim()) {
+            throw new Error("Enter the Mango invite token.");
+          }
+          if (hasStoredToken()) {
+            onChallenge(null);
+            setPasswordStepComplete(true);
+          } else {
+            if (pendingChallenge) {
+              if (!newPassword.trim()) {
+                throw new Error("Enter a new password.");
+              }
+              await completeNewPassword(pendingChallenge.username, pendingChallenge.session, newPassword);
+            } else {
+              if (!email.trim()) {
+                throw new Error("Enter the invited email address.");
+              }
+              if (!temporaryPassword.trim()) {
+                throw new Error("Enter the Cognito temporary password from the invite email, or your current password if you already changed it.");
+              }
+              const result = await loginWithPassword(email, temporaryPassword);
+              if (result.status === "new_password_required") {
+                if (!newPassword.trim()) {
+                  throw new Error("Enter a new password.");
+                }
+                await completeNewPassword(result.username, result.session, newPassword);
+              }
             }
+            onChallenge(null);
+            setPasswordStepComplete(true);
           }
           await acceptInvitation(token);
           await onAuthenticated();
           onNavigate("/");
-        } catch {
-          setError("Invite acceptance failed");
+        } catch (inviteError) {
+          console.error("Invite acceptance failed", inviteError);
+          setError(formatAuthError(inviteError, "Invite acceptance failed"));
         } finally {
           setBusy(false);
         }
       }}>
         <input style={inputStyle} value={token} onChange={(event) => setToken(event.target.value)} placeholder="Invite token" autoComplete="off" />
-        {!pendingChallenge && <input style={inputStyle} value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email" autoComplete="email" />}
-        {!pendingChallenge && <input style={inputStyle} value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} type="password" placeholder="Temporary password" autoComplete="current-password" />}
-        <input style={inputStyle} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />
+        {showPasswordStep && !pendingChallenge && <input style={inputStyle} value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email" autoComplete="email" />}
+        {showPasswordStep && !pendingChallenge && <input style={inputStyle} value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} type="password" placeholder="Temporary or current password" autoComplete="current-password" />}
+        {showPasswordStep && <input style={inputStyle} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />}
         <button style={buttonStyle} disabled={busy}>{busy ? "Accepting" : "Accept invite"}</button>
       </form>
       <button style={linkButtonStyle} onClick={() => onNavigate("/login")}>Back to login</button>
@@ -257,8 +291,8 @@ function ForgotPasswordPage({ onNavigate }: { onNavigate: (path: string) => void
         try {
           await forgotPassword(email);
           setMessage("Reset code sent");
-        } catch {
-          setError("Password reset request failed");
+        } catch (resetRequestError) {
+          setError(formatAuthError(resetRequestError, "Password reset request failed"));
         }
       }}>
         <input style={inputStyle} value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email" autoComplete="email" />
@@ -283,8 +317,8 @@ function ResetPasswordPage({ onNavigate }: { onNavigate: (path: string) => void 
         try {
           await resetPassword(email, code, password);
           onNavigate("/login");
-        } catch {
-          setError("Password reset failed");
+        } catch (resetError) {
+          setError(formatAuthError(resetError, "Password reset failed"));
         }
       }}>
         <input style={inputStyle} value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email" autoComplete="email" />
@@ -312,6 +346,7 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("company_user");
   const [inviteToken, setInviteToken] = useState("");
+  const [inviteMessage, setInviteMessage] = useState("");
   const [newCompanyName, setNewCompanyName] = useState("");
   const [assignmentUserID, setAssignmentUserID] = useState("");
   const [resourceType, setResourceType] = useState("node");
@@ -370,17 +405,25 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
           <form style={{ display: "grid", gap: 8 }} onSubmit={async (event) => {
             event.preventDefault();
             const normalizedInviteEmail = normalizeEmailInput(inviteEmail);
+            setError("");
+            setInviteMessage("");
             if (!normalizedInviteEmail) {
               setError("Email required");
               return;
             }
-            const payload = await apiFetchJSON<{ invitation: { token?: string } }>("/v1/invitations", {
-              method: "POST",
-              body: JSON.stringify({ company_id: companyID, email: normalizedInviteEmail, role: inviteRole }),
-            });
-            setInviteToken(payload.invitation.token ?? "");
-            setInviteEmail("");
-            await load();
+            try {
+              const payload = await apiFetchJSON<{ invitation: { token?: string }; cognito_invite_status?: string }>("/v1/invitations", {
+                method: "POST",
+                body: JSON.stringify({ company_id: companyID, email: normalizedInviteEmail, role: inviteRole }),
+              });
+              setInviteToken(payload.invitation.token ?? "");
+              setInviteMessage(inviteStatusMessage(payload.cognito_invite_status));
+              setInviteEmail("");
+              await load();
+            } catch (inviteError) {
+              console.error("Invite failed", inviteError);
+              setError(formatAuthError(inviteError, "Invite failed"));
+            }
           }}>
             <input style={inputStyle} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value.toLowerCase())} type="email" placeholder="Email" />
             <select style={inputStyle} value={inviteRole} onChange={(event) => setInviteRole(event.target.value)}>
@@ -391,6 +434,7 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
             <button style={buttonStyle}>Invite user</button>
           </form>
           {inviteToken && <div style={{ overflowWrap: "anywhere", fontSize: 12 }}>Invite token: {inviteToken}</div>}
+          {inviteMessage && <div style={{ fontSize: 12 }}>{inviteMessage}</div>}
         </section>
         <section style={sectionStyle}>
           <h2 style={sectionTitleStyle}>Assign</h2>

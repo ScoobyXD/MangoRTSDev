@@ -48,7 +48,7 @@ function Export-AwsCredentialEnvironment {
     [string]$Profile
   )
 
-  $args = @("configure", "export-credentials", "--format", "json")
+  $args = @("configure", "export-credentials", "--format", "process")
   if (-not [string]::IsNullOrWhiteSpace($Profile)) {
     $args += @("--profile", $Profile.Trim())
   }
