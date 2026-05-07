@@ -66,6 +66,35 @@ import { getActiveCompanyID } from "../../auth/currentCompany";
 
 type HighlightedEntity = { nodeID: string } | null;
 
+type CompanyUser = {
+  user_id: string;
+  email?: string;
+  display_name?: string;
+};
+
+type ArenaGroupField = "status" | "person" | "priority" | "due_date" | "work_type" | "none";
+
+const ARENA_GROUP_FIELDS: Array<{ value: ArenaGroupField; label: string }> = [
+  { value: "status", label: "Status" },
+  { value: "person", label: "Person" },
+  { value: "priority", label: "Priority" },
+  { value: "due_date", label: "Due Date" },
+  { value: "work_type", label: "Work Type" },
+  { value: "none", label: "None" },
+];
+
+type ArenaGroupedCardRow = {
+  key: string;
+  label: string;
+  cards: KanbanCard[];
+};
+
+type ArenaGroupedCardColumn = {
+  key: string;
+  label: string;
+  rows: ArenaGroupedCardRow[];
+};
+
 type WorkspaceStreamEnvelope = {
   company_id: string;
   type: string;
@@ -212,6 +241,43 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   return target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
 }
 
+function arenaGroupValue(
+  card: KanbanCard,
+  field: ArenaGroupField,
+  columnByID: Map<string, KanbanColumn>,
+  nodeByID: Map<string, NodeRecord>,
+  userByID: Map<string, CompanyUser>,
+): { key: string; label: string } {
+  const node = nodeByID.get(card.node_id);
+  if (field === "status") {
+    if (card.is_issue) return { key: "issue", label: "Issue" };
+    const label = columnByID.get(card.column_id)?.title.trim() || "No status";
+    return { key: `status:${label.toLowerCase()}`, label };
+  }
+  if (field === "person") {
+    const assignee = node?.assignee_user_id?.trim();
+    if (!assignee) return { key: "person:unassigned", label: "Unassigned" };
+    const user = userByID.get(assignee);
+    const name = user?.display_name?.trim();
+    const email = user?.email?.trim();
+    return { key: `person:${assignee}`, label: name || email || assignee };
+  }
+  if (field === "priority") {
+    const priority = node?.priority ?? 0;
+    return priority > 0 ? { key: `priority:${priority}`, label: `P${priority}` } : { key: "priority:unassigned", label: "No priority" };
+  }
+  if (field === "due_date") {
+    const dueDate = node?.due_date?.trim();
+    return dueDate ? { key: `due:${dueDate}`, label: dueDate } : { key: "due:none", label: "No due date" };
+  }
+  if (field === "work_type") {
+    if (card.is_issue) return { key: "work:issue", label: "Issue" };
+    if (card.logic_gate_id) return { key: "work:logic-gate", label: "Logic Gate" };
+    return { key: "work:node", label: "Node" };
+  }
+  return { key: "all", label: "All" };
+}
+
 export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark"; arenaMode?: boolean }> = ({ accent, widgetId, theme = "teal", arenaMode = false }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
@@ -221,9 +287,13 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [activeLogicGateLabel, setActiveLogicGateLabel] = useState("");
   const [allBoardsOpen, setAllBoardsOpen] = useState(false);
   const [boardSearchQuery, setBoardSearchQuery] = useState("");
+  const [arenaGroupingOpen, setArenaGroupingOpen] = useState(false);
+  const [arenaXGroupBy, setArenaXGroupBy] = useState<ArenaGroupField>("status");
+  const [arenaYGroupBy, setArenaYGroupBy] = useState<ArenaGroupField>("none");
   const [editingBoardTitle, setEditingBoardTitle] = useState(false);
   const [boardTitleDraft, setBoardTitleDraft] = useState("");
   const [boards, setBoards] = useState<KanbanBoard[]>([]);
+  const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [explorerFolders, setExplorerFolders] = useState<CompanyExplorerFolder[]>([]);
   const [explorerFolderItems, setExplorerFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [boardsLoading, setBoardsLoading] = useState(false);
@@ -267,6 +337,23 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
   }, [apiBase]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!companyID) {
+      setCompanyUsers([]);
+      return;
+    }
+    (async () => {
+      try {
+        const payload = await requestJSON<{ users: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`);
+        if (!cancelled) setCompanyUsers(payload.users ?? []);
+      } catch {
+        if (!cancelled) setCompanyUsers([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [companyID, requestJSON]);
 
   const isDark = theme === "dark";
   const surface = isDark ? "#11161b" : "#ffffff";
@@ -334,7 +421,30 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
   const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, normalizeKanbanColumnItemColor(column.item_color)])), [orderedColumns]);
+  const columnByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, column])), [orderedColumns]);
   const cardsByColumn = useMemo(() => groupCardsByColumn(cards), [cards]);
+  const arenaUserByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id, user])), [companyUsers]);
+  const arenaNodeByID = useMemo(() => {
+    const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+    return new Map((snapshot.nodes ?? []).map((node) => [node.node_id, node]));
+  }, [apiBase, cards, columns, companyID]);
+  const arenaGroupedColumns = useMemo<ArenaGroupedCardColumn[]>(() => {
+    const orderedCardByID = new Map(cards.map((card) => [card.card_id, card]));
+    const orderedCards = getOrderedKanbanCardIDs(orderedColumns, cards)
+      .map((cardID) => orderedCardByID.get(cardID))
+      .filter((card): card is KanbanCard => Boolean(card));
+    const columnMap = new Map<string, ArenaGroupedCardColumn>();
+    for (const card of orderedCards) {
+      const x = arenaGroupValue(card, arenaXGroupBy, columnByID, arenaNodeByID, arenaUserByID);
+      const y = arenaGroupValue(card, arenaYGroupBy, columnByID, arenaNodeByID, arenaUserByID);
+      const column = columnMap.get(x.key) ?? { key: x.key, label: x.label, rows: [] };
+      const existingRow = column.rows.find((row) => row.key === y.key);
+      if (existingRow) existingRow.cards.push(card);
+      else column.rows.push({ key: y.key, label: y.label, cards: [card] });
+      columnMap.set(x.key, column);
+    }
+    return Array.from(columnMap.values());
+  }, [arenaNodeByID, arenaUserByID, arenaXGroupBy, arenaYGroupBy, cards, columnByID, orderedColumns]);
   const orderedBoards = useMemo(() => sortKanbanBoards(boards), [boards]);
   const activeBoard = useMemo(() => orderedBoards.find((board) => board.board_id === boardID) ?? null, [boardID, orderedBoards]);
   const activeBoardTitle = activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : (activeLogicGateLabel || KANBAN_DEFAULT_BOARD_TITLE);
@@ -521,10 +631,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     setSelectionAnchorCardID("");
   }, []);
 
-  const refreshBoard = useCallback(async () => {
+  const refreshBoard = useCallback(async (requestedBoardIDOverride?: string) => {
     const requestID = boardRefreshRequestRef.current + 1;
     boardRefreshRequestRef.current = requestID;
-    const requestedBoardID = boardID;
+    const requestedBoardID = requestedBoardIDOverride?.trim() || boardID;
     setLoading(!hasKanbanBoardContentsCache(apiBase, companyID, requestedBoardID));
     setError("");
     try {
@@ -1209,6 +1319,40 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const contextCardSelectionIDs = contextCard
     ? (selectedCardIDs.has(contextCard.card_id) ? Array.from(selectedCardIDs) : [contextCard.card_id])
     : [];
+  const renderArenaGroupSelect = (value: ArenaGroupField, onChange: (value: ArenaGroupField) => void, label: string) => (
+    <label style={{ display: "inline-grid", gridTemplateColumns: "max-content minmax(112px, 1fr)", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 800 }}>
+      <span>{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value as ArenaGroupField)}
+        style={{ height: 26, border: `1px solid ${line}`, borderRadius: 6, background: cardBackground, color: text, font: "inherit", fontSize: 11, fontWeight: 800, padding: "0 6px", outline: "none" }}
+      >
+        {ARENA_GROUP_FIELDS.map((field) => <option key={field.value} value={field.value}>{field.label}</option>)}
+      </select>
+    </label>
+  );
+
+  const renderArenaGroupedBoard = () => (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX + 18, paddingBottom: 16, width: "100%", opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
+      {arenaGroupedColumns.map((groupColumn) => (
+        <section
+          key={groupColumn.key}
+          style={{ width: 300, minWidth: 300, minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX, display: "grid", alignContent: "start", gap: 8, border: `1px solid ${laneBorder}`, background: laneBackground, boxShadow: laneShadow, padding: 8 }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, color: text, fontSize: 12, fontWeight: 900 }}>
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{groupColumn.label}</span>
+            <span style={{ color: subtext }}>{groupColumn.rows.reduce((sum, row) => sum + row.cards.length, 0)}</span>
+          </div>
+          {groupColumn.rows.map((row) => (
+            <div key={row.key} style={{ display: "grid", gap: 6, borderTop: `1px solid ${line}`, paddingTop: 7 }}>
+              {arenaYGroupBy !== "none" && <div style={{ color: subtext, fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>{row.label}</div>}
+              {row.cards.map((card) => renderCard(card))}
+            </div>
+          ))}
+        </section>
+      ))}
+    </div>
+  );
 
   return (
     <div
@@ -1258,6 +1402,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           setHighlightedEntity(null);
           setNodeEditorOverlay(null);
           lastLocalBoardSelectionChangedAtRef.current = Date.now();
+          activeBoardIDRef.current = nextBoardID;
           setActiveBoardID(nextBoardID);
           setAllBoardsOpen(false);
           setBoardSearchQuery("");
@@ -1266,10 +1411,25 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           setActiveLogicGateID(selectedLogicGateID);
           setActiveLogicGateLabel(selectedLogicGateID && selectedBoard ? getKanbanBoardDisplayTitle(selectedBoard) : "");
           publishKanbanBoardSelectionToLinkedFrames(companyID, frameID, nextBoardID, selectedBoard ? getKanbanBoardDisplayTitle(selectedBoard) : nextBoardID);
+          void refreshBoard(nextBoardID);
         }}
       />
       <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#c62828", fontSize: 11, fontWeight: 700 }}>{error}</div>}
+        {arenaMode && (
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <button
+              type="button"
+              onClick={() => setArenaGroupingOpen((open) => !open)}
+              style={{ height: 28, border: `1px solid ${arenaGroupingOpen ? accent : line}`, borderRadius: 6, background: arenaGroupingOpen ? `${accent}22` : cardBackground, color: arenaGroupingOpen ? accent : text, fontSize: 11, fontWeight: 900, cursor: "pointer", padding: "0 10px" }}
+            >
+              Group
+            </button>
+            {arenaGroupingOpen && renderArenaGroupSelect(arenaXGroupBy, setArenaXGroupBy, "X")}
+            {arenaGroupingOpen && renderArenaGroupSelect(arenaYGroupBy, setArenaYGroupBy, "Y")}
+          </div>
+        )}
+        {arenaMode && arenaGroupingOpen ? renderArenaGroupedBoard() : (
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX + 18, paddingBottom: 16, width: arenaMode ? "100%" : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
           {orderedColumns.map((column) => {
             const columnCards = cardsByColumn.get(column.column_id) ?? [];
@@ -1338,6 +1498,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             +
           </button>}
         </div>
+        )}
       </div>
       {contextColumn && columnContextMenu && (
         <FrameRightClickMenu x={columnContextMenu.x} y={columnContextMenu.y} onClose={() => setColumnContextMenu(null)}>

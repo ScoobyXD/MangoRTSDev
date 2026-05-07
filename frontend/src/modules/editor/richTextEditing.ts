@@ -199,8 +199,12 @@ export function deserializeEditorDocumentHTML(storedDocument: string): string {
   return linkifyEditorPlainTextToHTML(storedDocument);
 }
 
+export function normalizeEditorWhitespaceText(value: string): string {
+  return value.replace(/\u00a0/g, " ");
+}
+
 export function readEditorDocumentText(root: HTMLElement): string {
-  return root.textContent ?? "";
+  return normalizeEditorWhitespaceText(root.textContent ?? "");
 }
 
 export function serializeEditorDocumentHTML(root: HTMLElement): string {

@@ -258,6 +258,34 @@ const kanbanCardSelectColumns = `
 company_id, board_id, card_id, column_id, node_id::text, logic_gate_id::text,
 node_title, description_snapshot, is_issue, position, created_timestamp, updated_timestamp`
 
+func syncNodeStatusFromKanbanCardSQL(ctx context.Context, exec kanbanBoardEnsurer, card domain.KanbanCard) error {
+	if card.LogicGateID == nil {
+		return nil
+	}
+	_, err := exec.ExecContext(ctx, `
+update nodes
+set status=case
+      when $5 then 'Issue'
+      else coalesce((
+        select title
+        from kanban_columns
+        where company_id=$1 and board_id=$2 and column_id=$3
+      ), status)
+    end,
+    status_color=case
+      when $5 then '#ffd400'
+      else coalesce((
+        select item_color
+        from kanban_columns
+        where company_id=$1 and board_id=$2 and column_id=$3
+      ), status_color)
+    end
+where company_id=$1 and node_id=$4`,
+		card.CompanyID, card.BoardID, card.ColumnID, card.NodeID, card.IsIssue,
+	)
+	return err
+}
+
 func (r *PostgresRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
 	ctx := context.Background()
 	rows, err := r.db.QueryContext(ctx, `
@@ -490,6 +518,9 @@ returning `+kanbanCardSelectColumns,
 			return domain.KanbanCard{}, err
 		}
 	}
+	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, item); err != nil {
+		return domain.KanbanCard{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.KanbanCard{}, err
 	}
@@ -543,6 +574,9 @@ returning `+kanbanCardSelectColumns,
 		return domain.KanbanCard{}, ErrNotFound
 	}
 	if err != nil {
+		return domain.KanbanCard{}, err
+	}
+	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, item); err != nil {
 		return domain.KanbanCard{}, err
 	}
 	if err := tx.Commit(); err != nil {

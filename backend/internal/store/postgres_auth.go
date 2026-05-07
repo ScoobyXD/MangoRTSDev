@@ -8,25 +8,28 @@ import (
 	"time"
 )
 
-func (r *PostgresRepo) UpsertAuthUser(cognitoSubject, email string) (domain.User, error) {
+func (r *PostgresRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (domain.User, error) {
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	email = normalizeEmail(email)
+	displayName = strings.TrimSpace(displayName)
 	if cognitoSubject == "" {
 		return domain.User{}, ErrInvalid
 	}
 
 	var user domain.User
 	err := r.db.QueryRow(
-		`insert into users (user_id, cognito_subject, email, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, now(), now())
+		`insert into users (user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp)
+		 values ($1, $2, $3, $4, now(), now())
 		 on conflict (cognito_subject) do update set
 		   email = case when excluded.email <> '' then excluded.email else users.email end,
+		   display_name = case when excluded.display_name <> '' then excluded.display_name else users.display_name end,
 		   updated_timestamp = now()
-		 returning user_id, cognito_subject, email, created_timestamp, updated_timestamp`,
+		 returning user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp`,
 		newUUIDv7String(),
 		cognitoSubject,
 		email,
-	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.CreatedTimestamp, &user.UpdatedTimestamp)
+		displayName,
+	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.CreatedTimestamp, &user.UpdatedTimestamp)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -41,11 +44,11 @@ func (r *PostgresRepo) GetAuthUser(cognitoSubject string) (domain.User, error) {
 
 	var user domain.User
 	err := r.db.QueryRow(
-		`select user_id, cognito_subject, email, created_timestamp, updated_timestamp
+		`select user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp
 		 from users
 		 where cognito_subject = $1`,
 		cognitoSubject,
-	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.CreatedTimestamp, &user.UpdatedTimestamp)
+	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.CreatedTimestamp, &user.UpdatedTimestamp)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.User{}, ErrNotFound
 	}
@@ -130,11 +133,11 @@ func (r *PostgresRepo) ListCompanyUsers(companyID string) ([]domain.CompanyUser,
 	}
 
 	rows, err := r.db.Query(
-		`select cm.company_id, u.user_id, u.cognito_subject, u.email, cm.role, cm.created_timestamp, cm.updated_timestamp
+		`select cm.company_id, u.user_id, u.cognito_subject, u.email, u.display_name, cm.role, cm.created_timestamp, cm.updated_timestamp
 		 from company_memberships cm
 		 join users u on u.user_id = cm.user_id
 		 where cm.company_id = $1
-		 order by u.email, u.user_id`,
+		 order by coalesce(nullif(u.display_name, ''), u.email), u.user_id`,
 		companyID,
 	)
 	if err != nil {
@@ -145,7 +148,7 @@ func (r *PostgresRepo) ListCompanyUsers(companyID string) ([]domain.CompanyUser,
 	items := make([]domain.CompanyUser, 0)
 	for rows.Next() {
 		var item domain.CompanyUser
-		if err := rows.Scan(&item.CompanyID, &item.UserID, &item.CognitoSubject, &item.Email, &item.Role, &item.CreatedTimestamp, &item.UpdatedTimestamp); err != nil {
+		if err := rows.Scan(&item.CompanyID, &item.UserID, &item.CognitoSubject, &item.Email, &item.DisplayName, &item.Role, &item.CreatedTimestamp, &item.UpdatedTimestamp); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

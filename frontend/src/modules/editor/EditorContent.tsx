@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, type NodeRecord } from "../node-map/shared";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, toLogicGateCanvasRecord, type LogicGateRecord } from "../logic-gate-map/shared";
 import { EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
@@ -105,6 +105,37 @@ type EditorContentProps = {
   forcedEmptyMessage?: string;
 };
 
+type CompanyUser = {
+  company_id: string;
+  user_id: string;
+  email?: string;
+  display_name?: string;
+  role?: string;
+};
+
+const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function companyUserOptionLabel(user: CompanyUser): string {
+  const name = (user.display_name ?? "").trim();
+  const email = (user.email ?? "").trim();
+  if (name && email) return `${name} <${email}>`;
+  return name || email || user.user_id;
+}
+
+function findCompanyUserByAssigneeDraft(users: CompanyUser[], draft: string): CompanyUser | null {
+  const value = draft.trim().toLowerCase();
+  if (!value) return null;
+  return users.find((user) => {
+    const labels = [
+      companyUserOptionLabel(user),
+      user.display_name ?? "",
+      user.email ?? "",
+      user.user_id,
+    ];
+    return labels.some((label) => label.trim().toLowerCase() === value);
+  }) ?? null;
+}
+
 // Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "teal", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -124,6 +155,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [nodePriorityDraft, setNodePriorityDraft] = useState("");
   const [nodeDueDateDraft, setNodeDueDateDraft] = useState("");
   const [nodeAssigneeDraft, setNodeAssigneeDraft] = useState("");
+  const [nodeAssigneeUserID, setNodeAssigneeUserID] = useState("");
+  const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [documentInformationID, setDocumentInformationID] = useState("");
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
@@ -244,6 +277,46 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
   }, [apiBase]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!companyID) {
+      setCompanyUsers([]);
+      return;
+    }
+    (async () => {
+      try {
+        const payload = await requestJSON<{ users: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`);
+        if (!cancelled) setCompanyUsers(payload.users ?? []);
+      } catch {
+        if (!cancelled) setCompanyUsers([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [companyID, requestJSON]);
+
+  const companyUserByID = useMemo(() => {
+    const items = new Map<string, CompanyUser>();
+    for (const user of companyUsers) items.set(user.user_id, user);
+    return items;
+  }, [companyUsers]);
+
+  const assigneeDraftForUserID = useCallback((userID: string): string => {
+    const user = companyUserByID.get(userID);
+    return user ? companyUserOptionLabel(user) : userID;
+  }, [companyUserByID]);
+
+  const syncNodeAssignee = useCallback((assigneeUserID?: string | null) => {
+    const nextUserID = assigneeUserID ?? "";
+    setNodeAssigneeUserID(nextUserID);
+    setNodeAssigneeDraft(nextUserID ? assigneeDraftForUserID(nextUserID) : "");
+  }, [assigneeDraftForUserID]);
+
+  useEffect(() => {
+    if (!nodeAssigneeUserID) return;
+    const nextDraft = assigneeDraftForUserID(nodeAssigneeUserID);
+    setNodeAssigneeDraft((current) => (current === "" || current === nodeAssigneeUserID ? nextDraft : current));
+  }, [assigneeDraftForUserID, nodeAssigneeUserID]);
 
   const invalidateDocumentTargetCaches = useCallback((target: DocumentSaveTarget) => {
     if (target.entityKind === "logic_gate") invalidateLogicGateRecordStoreCaches(apiBase, companyID, target.entityID);
@@ -446,7 +519,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setNodeStatusColor("");
     setNodePriorityDraft("");
     setNodeDueDateDraft("");
-    setNodeAssigneeDraft("");
+    syncNodeAssignee("");
     documentDraftRef.current = "";
     persistedDocumentRef.current = "";
     documentInformationIDRef.current = "";
@@ -463,7 +536,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
     setDocumentScrollTop(0);
     scheduleIndentGuideUpdate("");
-  }, [scheduleIndentGuideUpdate]);
+  }, [scheduleIndentGuideUpdate, syncNodeAssignee]);
 
   const applyLinkedNode = useCallback((nodeID: string, label = "", options: { focusEditor?: boolean } = {}) => {
     const shouldFocusEditor = options.focusEditor !== false;
@@ -557,13 +630,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodeStatusColor(updated.status_color ?? "");
       setNodePriorityDraft(updated.priority == null ? "" : String(updated.priority));
       setNodeDueDateDraft(formatNodeDueDateForEditor(updated.due_date));
-      setNodeAssigneeDraft(updated.assignee_user_id ?? "");
+      syncNodeAssignee(updated.assignee_user_id);
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
       upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_node_fields");
     }
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON, syncNodeAssignee]);
 
   const commitNodePriorityDraft = useCallback((draft: string) => {
     const raw = draft.trim();
@@ -590,12 +663,24 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   const commitNodeAssigneeDraft = useCallback((draft: string) => {
     const value = draft.trim();
-    if (value && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
-      setError("Person in charge must be a user ID");
+    if (!value) {
+      syncNodeAssignee("");
+      void updateNodePresetPatch({ assignee_user_id: null });
       return;
     }
-    void updateNodePresetPatch({ assignee_user_id: value || null });
-  }, [updateNodePresetPatch]);
+    const selectedUser = findCompanyUserByAssigneeDraft(companyUsers, value);
+    if (selectedUser) {
+      syncNodeAssignee(selectedUser.user_id);
+      void updateNodePresetPatch({ assignee_user_id: selectedUser.user_id });
+      return;
+    }
+    if (!USER_ID_PATTERN.test(value)) {
+      setError("Select a person from the company user list");
+      return;
+    }
+    syncNodeAssignee(value);
+    void updateNodePresetPatch({ assignee_user_id: value });
+  }, [companyUsers, syncNodeAssignee, updateNodePresetPatch]);
 
   useEffect(() => {
     setIsEditingTitle(false);
@@ -765,11 +850,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodeStatusColor(node.status_color ?? "");
       setNodePriorityDraft(node.priority == null ? "" : String(node.priority));
       setNodeDueDateDraft(formatNodeDueDateForEditor(node.due_date));
-      setNodeAssigneeDraft(node.assignee_user_id ?? "");
+      syncNodeAssignee(node.assignee_user_id);
     };
     syncTitleFromGraph();
     return subscribeNodeRelationshipGraph(apiBase, companyID, syncTitleFromGraph);
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID]);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, syncNodeAssignee]);
 
   useEffect(() => {
     if (!linkedNodeID || linkedEntityKind !== "logic_gate") return;
@@ -799,7 +884,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodeStatusColor("");
       setNodePriorityDraft("");
       setNodeDueDateDraft("");
-      setNodeAssigneeDraft("");
+      syncNodeAssignee("");
       documentDraftRef.current = "";
       persistedDocumentRef.current = "";
       documentInformationIDRef.current = "";
@@ -831,7 +916,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodeStatusColor("");
           setNodePriorityDraft("");
           setNodeDueDateDraft("");
-          setNodeAssigneeDraft("");
+          syncNodeAssignee("");
           const nonText = details.information.filter((item) => item.type !== "Text box");
           const textBoxes = projections.filter((item) => item.type === "Text box");
           setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
@@ -862,7 +947,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodeStatusColor(details.node.status_color ?? "");
         setNodePriorityDraft(details.node.priority == null ? "" : String(details.node.priority));
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
-        setNodeAssigneeDraft(details.node.assignee_user_id ?? "");
+        syncNodeAssignee(details.node.assignee_user_id);
         const nonText = details.information.filter((item) => item.type !== "Text box");
         const textBoxes = projections.filter((item) => item.type === "Text box");
         setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
@@ -886,7 +971,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyLoadedDocument, companyID, linkedEntityKind, linkedNodeID, scheduleIndentGuideUpdate]);
+  }, [apiBase, applyLoadedDocument, companyID, linkedEntityKind, linkedNodeID, scheduleIndentGuideUpdate, syncNodeAssignee]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
@@ -965,9 +1050,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               status: nodeStatus || "",
               statusColor: nodeStatusColor || "",
               priorityDraft: nodePriorityDraft,
-              assigneeUserID: nodeAssigneeDraft,
+              assigneeDraft: nodeAssigneeDraft,
               dueDateDraft: nodeDueDateDraft,
             } : null}
+            companyUsers={companyUsers}
             isEditingTitle={isEditingTitle}
             editingTitleRef={editingTitleRef}
             editingTitleDraftRef={editingTitleDraftRef}

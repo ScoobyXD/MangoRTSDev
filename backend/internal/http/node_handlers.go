@@ -165,6 +165,20 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				input.DueDate = &normalized
 				input.DueDateSet = true
 			}
+			if status, set, ok := parseOptionalStringField(fields, "status"); !ok {
+				writeError(w, http.StatusBadRequest, "invalid_status")
+				return
+			} else if set {
+				input.Status = status
+				input.StatusSet = true
+			}
+			if statusColor, set, ok := parseOptionalStringField(fields, "status_color"); !ok {
+				writeError(w, http.StatusBadRequest, "invalid_status_color")
+				return
+			} else if set {
+				input.StatusColor = statusColor
+				input.StatusColorSet = true
+			}
 			if priority, set, ok := parseOptionalPriorityField(fields); !ok {
 				writeError(w, http.StatusBadRequest, "invalid_priority")
 				return
@@ -179,7 +193,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				input.AssigneeUserID = assigneeUserID
 				input.AssigneeUserIDSet = true
 			}
-			if !input.TitleSet && !input.DueDateSet && !input.PrioritySet && !input.AssigneeUserIDSet {
+			if !input.TitleSet && !input.StatusSet && !input.StatusColorSet && !input.DueDateSet && !input.PrioritySet && !input.AssigneeUserIDSet {
 				writeError(w, http.StatusBadRequest, "node_update_required")
 				return
 			}

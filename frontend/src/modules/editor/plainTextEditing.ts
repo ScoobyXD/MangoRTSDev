@@ -44,7 +44,7 @@ function readLine(value: string, index: number): { lineStart: number; lineEnd: n
 }
 
 function readLineIndentation(line: string): string {
-  return /^[ \t]*/.exec(line)?.[0] ?? "";
+  return /^[ \t\u00a0]*/.exec(line)?.[0] ?? "";
 }
 
 function countIndentDepth(indentation: string): number {
@@ -82,7 +82,7 @@ function firstOutlineMarkerForKind(kind: OutlineMarkerKind): string {
 }
 
 function parseOutlineLine(line: string): ParsedOutlineLine | null {
-  const match = /^([ \t]*)(\d+(?:\.\d+)*|[a-z]+|[ivxlcdm]+)([.)])([ \t]*)(.*)$/i.exec(line);
+  const match = /^([ \t\u00a0]*)(\d+(?:\.\d+)*|[a-z]+|[ivxlcdm]+)([.)])([ \t\u00a0]*)(.*)$/i.exec(line);
   if (!match) return null;
   const [, indentation, marker, delimiter, spacing, rest] = match;
   return {
@@ -93,6 +93,14 @@ function parseOutlineLine(line: string): ParsedOutlineLine | null {
     rest,
     depth: countIndentDepth(indentation),
   };
+}
+
+function isIndentationOnly(value: string): boolean {
+  return /^[ \t\u00a0]*$/.test(value);
+}
+
+function normalizeIndentationWhitespace(value: string): string {
+  return value.replace(/\u00a0/g, " ");
 }
 
 function incrementDecimalMarker(marker: string): string | null {
@@ -202,7 +210,7 @@ function replaceCurrentLine(value: string, selectionStart: number, replacementLi
 
 function outdentPlainLine(value: string, selectionStart: number): PlainTextEdit {
   const { line, lineStart } = readLine(value, selectionStart);
-  const removableSpaces = Math.min(EDITOR_TAB_TEXT.length, line.match(/^ */)?.[0].length ?? 0);
+  const removableSpaces = Math.min(EDITOR_TAB_TEXT.length, line.match(/^[ \u00a0]*/)?.[0].length ?? 0);
   const removeCount = line.startsWith("\t") ? 1 : removableSpaces;
   if (removeCount <= 0) return { value, selectionStart, selectionEnd: selectionStart };
   const replacementLine = line.slice(removeCount);
@@ -287,6 +295,37 @@ export function insertEditorEnterText(value: string, selectionStart: number, sel
     ? getAutomaticOutlineContinuation(value, selectionStart)
     : getIndentGuideContinuation(value, selectionStart);
   return replaceSelection(value, selectionStart, selectionEnd, continuation ?? "\n");
+}
+
+export function insertAutomaticOutlineFirstText(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  insertedText: string,
+): PlainTextEdit | null {
+  if (!insertedText || /\r|\n/.test(insertedText) || insertedText.trim().length === 0) return null;
+  const { start, end } = clampSelection(value, selectionStart, selectionEnd);
+  if (start !== end) return null;
+
+  const { lineStart, lineEnd, line } = readLine(value, start);
+  if (parseOutlineLine(line)) return null;
+  const relativeStart = start - lineStart;
+  const beforeCaret = line.slice(0, relativeStart);
+  const afterCaret = line.slice(relativeStart);
+  if (!isIndentationOnly(beforeCaret) || !isIndentationOnly(afterCaret)) return null;
+
+  const indentation = normalizeIndentationWhitespace(beforeCaret);
+  const depth = countIndentDepth(indentation);
+  const linesBeforeCurrent = value.slice(0, lineStart).split(/\r\n|\n|\r/);
+  if (linesBeforeCurrent.length > 0 && linesBeforeCurrent[linesBeforeCurrent.length - 1] === "") linesBeforeCurrent.pop();
+  const marker = nextMarkerForOutlineDepth(linesBeforeCurrent, depth);
+  const replacementLine = `${indentation}${marker}. ${insertedText}`;
+  const nextCursor = lineStart + replacementLine.length;
+  return {
+    value: `${value.slice(0, lineStart)}${replacementLine}${value.slice(lineEnd)}`,
+    selectionStart: nextCursor,
+    selectionEnd: nextCursor,
+  };
 }
 
 export function deleteEditorBackspaceText(value: string, selectionStart: number, selectionEnd: number): PlainTextEdit | null {

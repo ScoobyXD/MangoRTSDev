@@ -23,6 +23,7 @@ type CompanyUser = {
   company_id: string;
   user_id: string;
   email: string;
+  display_name?: string;
   role: string;
 };
 
@@ -388,7 +389,7 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
           }}>
             <select style={inputStyle} value={assignmentUserID} onChange={(event) => setAssignmentUserID(event.target.value)}>
               <option value="">User</option>
-              {users.map((user) => <option key={user.user_id} value={user.user_id}>{user.email || user.user_id}</option>)}
+              {users.map((user) => <option key={user.user_id} value={user.user_id}>{companyUserLabel(user)}</option>)}
             </select>
             <select style={inputStyle} value={resourceType} onChange={(event) => setResourceType(event.target.value)}>
               <option value="folder">folder</option>
@@ -404,7 +405,7 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
       <section style={{ ...sectionStyle, marginTop: 14 }}>
         <h2 style={sectionTitleStyle}>Company Users</h2>
         <div style={{ display: "grid", gap: 6 }}>
-          {users.map((user) => <div key={user.user_id} style={rowStyle}><span>{user.email || user.user_id}</span><span>{user.role}</span></div>)}
+          {users.map((user) => <div key={user.user_id} style={rowStyle}><span>{companyUserLabel(user)}</span><span>{user.role}</span></div>)}
         </div>
       </section>
       <section style={{ ...sectionStyle, marginTop: 14 }}>
@@ -413,7 +414,7 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
           {assignments.map((item) => (
             <div key={`${item.resource_type}:${item.resource_id}:${item.user_id}`} style={rowStyle}>
               <span>{item.resource_type} / {item.resource_id}</span>
-              <span>{users.find((user) => user.user_id === item.user_id)?.email ?? item.user_id}</span>
+              <span>{users.find((user) => user.user_id === item.user_id)?.display_name || users.find((user) => user.user_id === item.user_id)?.email || item.user_id}</span>
               <button style={smallButtonStyle} onClick={async () => {
                 await apiFetchJSON<{ status: string }>(`/v1/resource-assignments?company_id=${encodeURIComponent(companyID)}&resource_type=${encodeURIComponent(item.resource_type)}&resource_id=${encodeURIComponent(item.resource_id)}&user_id=${encodeURIComponent(item.user_id)}`, { method: "DELETE" });
                 await load();
@@ -497,3 +498,9 @@ const rowStyle: React.CSSProperties = {
   borderBottom: "1px solid rgba(12, 67, 74, 0.16)",
   fontSize: 12,
 };
+
+function companyUserLabel(user: CompanyUser): string {
+  const name = (user.display_name ?? "").trim();
+  if (name && user.email) return `${name} <${user.email}>`;
+  return name || user.email || user.user_id;
+}

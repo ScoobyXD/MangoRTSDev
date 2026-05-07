@@ -586,11 +586,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         method: "POST",
         body: JSON.stringify({ company_id: companyID, title: "new node" }),
       });
+      if (parentFolderID) await assignItemToFolder(parentFolderID, "node", node.node_id, { expandTarget: true });
       // Create is API-first, then we patch the shared graph cache so Explorer,
       // Node Map, and future headless agents converge without a snapshot refetch.
       setNodes((previous) => previous.some((item) => item.node_id === node.node_id) ? previous : [...previous, node]);
       upsertNodeRelationshipGraphNode(apiBase, companyID, node);
-      if (parentFolderID) await assignItemToFolder(parentFolderID, "node", node.node_id, { expandTarget: true });
       setExpanded((previous) => {
         const next = new Set(previous);
         next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
@@ -617,11 +617,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         body: JSON.stringify({ company_id: companyID, header: "new logic gate" }),
       });
       const logicGate = toLogicGateCanvasRecord(created);
+      if (parentFolderID) await assignItemToFolder(parentFolderID, "logic_gate", logicGate.logic_gate_id, { expandTarget: true });
       // Same hot-path pattern as nodes: the REST write is canonical, and the
       // local cache patch keeps linked modules responsive under large workspaces.
       setLogicGates((previous) => previous.some((item) => item.logic_gate_id === logicGate.logic_gate_id) ? previous : [...previous, logicGate]);
       upsertLogicGateRelationshipGraphNode(apiBase, companyID, logicGate);
-      if (parentFolderID) await assignItemToFolder(parentFolderID, "logic_gate", logicGate.logic_gate_id, { expandTarget: true });
       setExpanded((previous) => {
         const next = new Set(previous);
         next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
@@ -658,7 +658,41 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     });
     if (normalizedTargets.length === 0) return;
 
+    const deletedFolderIDs = new Set<string>();
+    const deletedNodeIDs = new Set<string>();
+    const deletedLogicGateIDs = new Set<string>();
+    const deletedKanbanBoardIDs = new Set<string>();
+
+    for (const target of normalizedTargets) {
+      if (target.kind === "folder") {
+        for (const id of collectFolderSubtreeIDs(folders, target.id)) deletedFolderIDs.add(id);
+      } else if (target.kind === "node") {
+        deletedNodeIDs.add(target.id);
+      } else if (target.kind === "logic_gate") {
+        deletedLogicGateIDs.add(target.id);
+        deletedKanbanBoardIDs.add(logicGateKanbanBoardID(target.id));
+      } else {
+        deletedKanbanBoardIDs.add(target.id);
+      }
+    }
+
+    const previousFolders = folders;
+    const previousNodes = nodes;
+    const previousLogicGates = logicGates;
+    const previousKanbanBoards = kanbanBoards;
+    const previousFolderItems = folderItems;
+
     setError("");
+    setFolders((previous) => previous.filter((folder) => !deletedFolderIDs.has(folder.folder_id)));
+    setNodes((previous) => previous.filter((node) => !deletedNodeIDs.has(node.node_id)));
+    setLogicGates((previous) => previous.filter((logicGate) => !deletedLogicGateIDs.has(logicGate.logic_gate_id)));
+    setKanbanBoards((previous) => previous.filter((board) => !deletedKanbanBoardIDs.has(board.board_id)));
+    setFolderItems((previous) => previous.filter((item) =>
+      !deletedFolderIDs.has(item.folder_id)
+      && (item.item_type !== "node" || !deletedNodeIDs.has(item.item_id))
+      && (item.item_type !== "logic_gate" || !deletedLogicGateIDs.has(item.item_id))
+      && (item.item_type !== "kanban" || !deletedKanbanBoardIDs.has(item.item_id))
+    ));
     try {
       await requestJSON<CompanyExplorerDeleteBatchResponse>("/v1/company-explorer/delete-batch", {
         method: "POST",
@@ -672,51 +706,23 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         }),
       });
 
-      const deletedFolderIDs = new Set<string>();
-      const deletedNodeIDs = new Set<string>();
-      const deletedLogicGateIDs = new Set<string>();
-      const deletedKanbanBoardIDs = new Set<string>();
-
-      for (const target of normalizedTargets) {
-        if (target.kind === "folder") {
-          for (const id of collectFolderSubtreeIDs(folders, target.id)) deletedFolderIDs.add(id);
-        } else if (target.kind === "node") {
-          deletedNodeIDs.add(target.id);
-        } else if (target.kind === "logic_gate") {
-          deletedLogicGateIDs.add(target.id);
-          deletedKanbanBoardIDs.add(logicGateKanbanBoardID(target.id));
-        } else {
-          deletedKanbanBoardIDs.add(target.id);
-        }
-      }
-
       if (deletedFolderIDs.size > 0) {
-        setFolders((previous) => previous.filter((folder) => !deletedFolderIDs.has(folder.folder_id)));
         for (const folderID of deletedFolderIDs) {
           removeCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folderID);
           removeCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folderID);
         }
       }
       if (deletedNodeIDs.size > 0) {
-        setNodes((previous) => previous.filter((node) => !deletedNodeIDs.has(node.node_id)));
         for (const nodeID of deletedNodeIDs) removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
       }
       if (deletedLogicGateIDs.size > 0) {
-        setLogicGates((previous) => previous.filter((logicGate) => !deletedLogicGateIDs.has(logicGate.logic_gate_id)));
         for (const logicGateID of deletedLogicGateIDs) removeLogicGateRelationshipGraphNode(apiBase, companyID, logicGateID);
       }
       if (deletedKanbanBoardIDs.size > 0) {
-        setKanbanBoards((previous) => previous.filter((board) => !deletedKanbanBoardIDs.has(board.board_id)));
         for (const boardID of deletedKanbanBoardIDs) {
           window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, deletedBoardID: boardID } }));
         }
       }
-      setFolderItems((previous) => previous.filter((item) =>
-        !deletedFolderIDs.has(item.folder_id)
-        && (item.item_type !== "node" || !deletedNodeIDs.has(item.item_id))
-        && (item.item_type !== "logic_gate" || !deletedLogicGateIDs.has(item.item_id))
-        && (item.item_type !== "kanban" || !deletedKanbanBoardIDs.has(item.item_id))
-      ));
 
       lastLocalExplorerSelectionRef.current = { domain: "root", changedAt: Date.now() };
       pendingExplorerSelectionIntentRef.current = "navigate";
@@ -727,9 +733,14 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setSelectedLogicGateID("");
       setSelectedKanbanBoardID("");
     } catch (err) {
+      setFolders(previousFolders);
+      setNodes(previousNodes);
+      setLogicGates(previousLogicGates);
+      setKanbanBoards(previousKanbanBoards);
+      setFolderItems(previousFolderItems);
       setError(err instanceof Error ? err.message : "failed_to_delete_selection");
     }
-  }, [apiBase, companyID, folders, requestJSON]);
+  }, [apiBase, companyID, folderItems, folders, kanbanBoards, logicGates, nodes, requestJSON]);
 
   const getDeleteTargetsForRows = useCallback((rows: ExplorerTreeNode[]): ExplorerDeleteTargetWithLabel[] => {
     const selectedFolderIDs = new Set(rows.filter((row) => row.kind === "folder" && row.folderID).map((row) => row.folderID!));

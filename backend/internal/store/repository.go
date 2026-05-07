@@ -13,7 +13,7 @@ var (
 )
 
 type Repository interface {
-	UpsertAuthUser(cognitoSubject, email string) (domain.User, error)
+	UpsertAuthUser(cognitoSubject, email, displayName string) (domain.User, error)
 	GetAuthUser(cognitoSubject string) (domain.User, error)
 	ListUserMemberships(userID string) ([]domain.CompanyMembership, error)
 	UserHasCompanyAccess(cognitoSubject, companyID string) (bool, error)
@@ -194,6 +194,10 @@ type UpdateNodeInput struct {
 	NodeID            string
 	Title             string
 	TitleSet          bool
+	Status            *string
+	StatusSet         bool
+	StatusColor       *string
+	StatusColorSet    bool
 	DueDate           *string
 	DueDateSet        bool
 	Priority          *int

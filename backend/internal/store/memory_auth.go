@@ -7,9 +7,10 @@ import (
 	"time"
 )
 
-func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email string) (domain.User, error) {
+func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (domain.User, error) {
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	email = normalizeEmail(email)
+	displayName = strings.TrimSpace(displayName)
 	if cognitoSubject == "" {
 		return domain.User{}, ErrInvalid
 	}
@@ -24,12 +25,16 @@ func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email string) (domain.User, 
 			UserID:           newUUIDv7String(),
 			CognitoSubject:   cognitoSubject,
 			Email:            email,
+			DisplayName:      displayName,
 			CreatedTimestamp: now,
 			UpdatedTimestamp: now,
 		}
 	} else {
 		if email != "" {
 			user.Email = email
+		}
+		if displayName != "" {
+			user.DisplayName = displayName
 		}
 		user.UpdatedTimestamp = now
 	}
@@ -204,6 +209,7 @@ func (r *MemoryRepo) ListCompanyUsers(companyID string) ([]domain.CompanyUser, e
 				UserID:           user.UserID,
 				CognitoSubject:   user.CognitoSubject,
 				Email:            user.Email,
+				DisplayName:      user.DisplayName,
 				Role:             membership.Role,
 				CreatedTimestamp: membership.CreatedTimestamp,
 				UpdatedTimestamp: membership.UpdatedTimestamp,
@@ -212,7 +218,15 @@ func (r *MemoryRepo) ListCompanyUsers(companyID string) ([]domain.CompanyUser, e
 		}
 	}
 	slices.SortFunc(items, func(a, b domain.CompanyUser) int {
-		return strings.Compare(a.Email, b.Email)
+		aLabel := a.DisplayName
+		if aLabel == "" {
+			aLabel = a.Email
+		}
+		bLabel := b.DisplayName
+		if bLabel == "" {
+			bLabel = b.Email
+		}
+		return strings.Compare(aLabel, bLabel)
 	})
 	return items, nil
 }

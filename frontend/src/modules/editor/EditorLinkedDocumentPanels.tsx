@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
 import type { EditorTabID } from "./editorTabs";
 import { normalizeNodeDueDateDraft } from "./editorDates";
 
@@ -13,9 +13,10 @@ type EditorLinkedDocumentPanelsProps = {
     status: string;
     statusColor: string;
     priorityDraft: string;
-    assigneeUserID: string;
+    assigneeDraft: string;
     dueDateDraft: string;
   } | null;
+  companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   isEditingTitle: boolean;
   editingTitleRef: React.RefObject<HTMLSpanElement>;
   editingTitleDraftRef: React.MutableRefObject<string>;
@@ -40,6 +41,13 @@ const NODE_PRIORITY_OPTIONS = [
   { value: "4", label: "4 High Priority", color: "#b45309" },
   { value: "5", label: "5 URGENT", color: "#b91c1c" },
 ] as const;
+
+function companyUserOptionLabel(user: { user_id: string; email?: string; display_name?: string }): string {
+  const name = (user.display_name ?? "").trim();
+  const email = (user.email ?? "").trim();
+  if (name && email) return `${name} <${email}>`;
+  return name || email || user.user_id;
+}
 
 function validHexColor(value: string): string {
   return /^#[0-9a-f]{6}$/i.test(value.trim()) ? value.trim() : "";
@@ -80,6 +88,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   linkedNodeMetadataRows,
   linkedNodeHistoryRows,
   nodePresetFields,
+  companyUsers,
   isEditingTitle,
   editingTitleRef,
   editingTitleDraftRef,
@@ -96,6 +105,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   onCommitNodeDueDateDraft,
 }) => {
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
+  const assigneeListID = useId();
   const priorityMenuRef = useRef<HTMLSpanElement | null>(null);
   const dueDatePickerRef = useRef<HTMLInputElement | null>(null);
   const selectedPriority = NODE_PRIORITY_OPTIONS.find((option) => option.value === (nodePresetFields?.priorityDraft || "0")) ?? NODE_PRIORITY_OPTIONS[0];
@@ -204,8 +214,15 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Person In Charge:</strong>
                 <input
-                  value={nodePresetFields.assigneeUserID}
-                  onChange={(event) => onSetNodeAssigneeDraft(event.target.value)}
+                  list={assigneeListID}
+                  value={nodePresetFields.assigneeDraft}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    onSetNodeAssigneeDraft(next);
+                    if (companyUsers.some((user) => companyUserOptionLabel(user) === next)) {
+                      onCommitNodeAssigneeDraft(next);
+                    }
+                  }}
                   onBlur={(event) => onCommitNodeAssigneeDraft(event.currentTarget.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") event.currentTarget.blur();
@@ -214,6 +231,9 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   aria-label="Person in charge"
                   style={{ width: "100%", minWidth: 0, border: "1px solid transparent", background: "transparent", color: "inherit", font: "inherit", padding: 0, outline: "none" }}
                 />
+                <datalist id={assigneeListID}>
+                  {companyUsers.map((user) => <option key={user.user_id} value={companyUserOptionLabel(user)} />)}
+                </datalist>
               </label>
               <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Priority:</strong>

@@ -58,6 +58,7 @@ type User struct {
 	UserID           string    `json:"user_id"`
 	CognitoSubject   string    `json:"cognito_subject"`
 	Email            string    `json:"email"`
+	DisplayName      string    `json:"display_name"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
@@ -82,6 +83,7 @@ type CompanyUser struct {
 	UserID           string    `json:"user_id"`
 	CognitoSubject   string    `json:"cognito_subject"`
 	Email            string    `json:"email"`
+	DisplayName      string    `json:"display_name"`
 	Role             string    `json:"role"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
