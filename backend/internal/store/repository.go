@@ -46,6 +46,7 @@ type Repository interface {
 	RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error)
 	DeleteCompanyExplorerFolder(companyID, folderID string) error
 	AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error)
+	AssignCompanyExplorerFolderItems(companyID string, assignments []CompanyExplorerFolderItemAssignmentInput) ([]domain.CompanyExplorerFolderItem, []CompanyExplorerRelationshipDeleteResult, error)
 	ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error)
 	RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error
 	ListNodeMapPositions(companyID string) ([]domain.NodeMapPosition, error)
@@ -72,6 +73,8 @@ type Repository interface {
 const MapEntityBatchMaxItems = 200
 
 const MapEntityBatchMaxRelationships = 500
+
+const CompanyExplorerFolderItemBatchMaxItems = 200
 
 type MapEntityBatchItemInput struct {
 	ClientID string
@@ -113,6 +116,19 @@ type MapEntityBatchResult struct {
 	FolderItems            []domain.CompanyExplorerFolderItem `json:"folder_items,omitempty"`
 	NodeMapPositions       []domain.NodeMapPosition           `json:"node_map_positions,omitempty"`
 	LogicGateMapPositions  []domain.LogicGateMapPosition      `json:"logic_gate_map_positions,omitempty"`
+}
+
+type CompanyExplorerFolderItemAssignmentInput struct {
+	FolderID string `json:"folder_id"`
+	ItemType string `json:"item_type"`
+	ItemID   string `json:"item_id"`
+	Position int    `json:"position,omitempty"`
+}
+
+type CompanyExplorerRelationshipDeleteResult struct {
+	ItemType        string   `json:"item_type"`
+	ItemID          string   `json:"item_id"`
+	RelationshipIDs []string `json:"relationship_ids"`
 }
 
 type CreateOperationInput struct {

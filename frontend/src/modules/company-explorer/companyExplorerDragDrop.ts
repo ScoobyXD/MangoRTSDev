@@ -24,13 +24,13 @@ export function getExplorerDragPayload(row: ExplorerTreeNode): ExplorerDragPaylo
     return { kind: "folder", folderID: row.folderID, folderKind: row.folderKind };
   }
   if (row.kind === "node" && row.nodeID) {
-    return { kind: "node", itemID: row.nodeID, itemType: "node" };
+    return { kind: "node", itemID: row.nodeID, itemType: "node", sourceTreeID: row.id };
   }
   if (row.kind === "logic_gate" && row.logicGateID) {
-    return { kind: "logic_gate", itemID: row.logicGateID, itemType: "logic_gate" };
+    return { kind: "logic_gate", itemID: row.logicGateID, itemType: "logic_gate", sourceTreeID: row.id };
   }
   if (row.kind === "kanban" && row.kanbanBoardID) {
-    return { kind: "kanban", itemID: row.kanbanBoardID, itemType: "kanban" };
+    return { kind: "kanban", itemID: row.kanbanBoardID, itemType: "kanban", sourceTreeID: row.id };
   }
   return null;
 }
@@ -48,14 +48,14 @@ export function getExplorerDragPayloadForSelection(row: ExplorerTreeNode, select
   if (!basePayload || !baseItem) return basePayload;
 
   const dragIDs = selectedIDs.has(row.id) ? selectedIDs : new Set([row.id]);
-  const items: { itemID: string; itemType: CompanyExplorerItemType }[] = [];
+  const items: { itemID: string; itemType: CompanyExplorerItemType; treeID?: string }[] = [];
   const seen = new Set<string>();
   for (const candidate of rows) {
     if (!dragIDs.has(candidate.id)) continue;
     const item = getExplorerItemPayload(candidate);
     if (!item || item.itemType !== baseItem.itemType || seen.has(item.itemID)) continue;
     seen.add(item.itemID);
-    items.push(item);
+    items.push({ ...item, treeID: candidate.id });
   }
   return items.length > 1 ? { kind: "batch", itemType: baseItem.itemType, items } : basePayload;
 }
@@ -66,7 +66,10 @@ export function readExplorerDragPayload(dataTransfer: DataTransfer): ExplorerDra
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ExplorerDragPayload;
     if (parsed.kind === "folder" && parsed.folderID && parsed.folderKind) return parsed;
-    if ((parsed.kind === "node" || parsed.kind === "logic_gate" || parsed.kind === "kanban") && parsed.itemID && parsed.itemType) return parsed;
+    if ((parsed.kind === "node" || parsed.kind === "logic_gate" || parsed.kind === "kanban") && parsed.itemID && parsed.itemType) return {
+      ...parsed,
+      sourceTreeID: typeof parsed.sourceTreeID === "string" ? parsed.sourceTreeID : undefined,
+    };
     if (parsed.kind === "batch") {
       const itemType = getExplorerDropPayloadItemType(parsed);
       const items = getExplorerDropPayloadItems(parsed);

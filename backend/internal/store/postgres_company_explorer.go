@@ -29,6 +29,49 @@ func nextCompanyExplorerSQLRowPosition(ctx context.Context, tx *sql.Tx, companyI
 	return position, err
 }
 
+func ensureCompanyExplorerDefaultFoldersSQL(ctx context.Context, tx *sql.Tx, companyID string) error {
+	var insertedSeed string
+	err := tx.QueryRowContext(ctx,
+		`insert into company_explorer_default_folder_seeds
+		 (company_id, seed_key, created_timestamp)
+		 values ($1, $2, now())
+		 on conflict (company_id, seed_key) do nothing
+		 returning seed_key`,
+		companyID, companyExplorerDefaultFolderSeedKey,
+	).Scan(&insertedSeed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	position, err := nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, "logic_gate", nil)
+	if err != nil {
+		return err
+	}
+	rootID := newUUIDv7String()
+	if _, err := tx.ExecContext(ctx,
+		`insert into company_explorer_folders
+		 (company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp)
+		 values ($1, $2, null, 'logic_gate', 'Logic Gates', $3, now(), now())`,
+		companyID, rootID, position,
+	); err != nil {
+		return err
+	}
+	for index, name := range companyExplorerDefaultLogicGateChildFolderNames {
+		if _, err := tx.ExecContext(ctx,
+			`insert into company_explorer_folders
+			 (company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp)
+			 values ($1, $2, $3, 'logic_gate', $4, $5, now(), now())`,
+			companyID, newUUIDv7String(), rootID, name, (index+1)*1000,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -99,11 +142,21 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 
 func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
 	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	if err := ensureCompanyExplorerDefaultFoldersSQL(ctx, tx, companyID); err != nil {
+		return nil, err
+	}
+
 	var kindParam any
 	if folderKind != "" {
 		kindParam = folderKind
 	}
-	rows, err := r.db.QueryContext(ctx,
+	rows, err := tx.QueryContext(ctx,
 		`select company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp
 		 from company_explorer_folders
 		 where company_id=$1 and ($2::text is null or folder_kind=$2)
@@ -113,7 +166,6 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	items := make([]domain.CompanyExplorerFolder, 0)
 	for rows.Next() {
@@ -136,7 +188,16 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error) {
@@ -314,14 +375,8 @@ func (r *PostgresRepo) DeleteCompanyExplorerFolder(companyID, folderID string) e
 	return nil
 }
 
-func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error) {
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return domain.CompanyExplorerFolderItem{}, nil, err
-	}
-	defer tx.Rollback()
-
+func assignCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error) {
+	var err error
 	var folderKind string
 	if err := tx.QueryRowContext(ctx,
 		`select folder_kind
@@ -444,10 +499,58 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 			deleteRows.Close()
 		}
 	}
+	return item, deletedRelationshipIDs, nil
+}
+
+func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.CompanyExplorerFolderItem{}, nil, err
+	}
+	defer tx.Rollback()
+
+	item, deletedRelationshipIDs, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, folderID, itemType, itemID, position)
+	if err != nil {
+		return domain.CompanyExplorerFolderItem{}, nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
 	return item, deletedRelationshipIDs, nil
+}
+
+func (r *PostgresRepo) AssignCompanyExplorerFolderItems(companyID string, assignments []CompanyExplorerFolderItemAssignmentInput) ([]domain.CompanyExplorerFolderItem, []CompanyExplorerRelationshipDeleteResult, error) {
+	if len(assignments) == 0 || len(assignments) > CompanyExplorerFolderItemBatchMaxItems {
+		return nil, nil, ErrInvalid
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+
+	items := make([]domain.CompanyExplorerFolderItem, 0, len(assignments))
+	deleted := make([]CompanyExplorerRelationshipDeleteResult, 0)
+	for _, assignment := range assignments {
+		item, deletedRelationshipIDs, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, assignment.FolderID, assignment.ItemType, assignment.ItemID, assignment.Position)
+		if err != nil {
+			return nil, nil, err
+		}
+		items = append(items, item)
+		if len(deletedRelationshipIDs) > 0 {
+			deleted = append(deleted, CompanyExplorerRelationshipDeleteResult{
+				ItemType:        assignment.ItemType,
+				ItemID:          assignment.ItemID,
+				RelationshipIDs: deletedRelationshipIDs,
+			})
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+	return items, deleted, nil
 }
 
 func (r *PostgresRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error) {

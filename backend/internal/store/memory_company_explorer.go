@@ -7,11 +7,55 @@ import (
 	"time"
 )
 
+const companyExplorerDefaultFolderSeedKey = "logic_gates_v1"
+
+var companyExplorerDefaultLogicGateChildFolderNames = []string{
+	"Product",
+	"Design",
+	"Production",
+	"Supply Chain",
+	"QA",
+}
+
 func companyExplorerParentID(folder domain.CompanyExplorerFolder) string {
 	if folder.ParentFolderID == nil {
 		return ""
 	}
 	return *folder.ParentFolderID
+}
+
+func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string) {
+	seedKey := companyID + ":" + companyExplorerDefaultFolderSeedKey
+	if r.defaultFolderSeed[seedKey] {
+		return
+	}
+	now := time.Now().UTC()
+	rootPosition := nextCompanyExplorerRowPosition(r.folders, r.folderItems, companyID, "logic_gate", "")
+	root := domain.CompanyExplorerFolder{
+		CompanyID:        companyID,
+		FolderID:         newUUIDv7String(),
+		FolderKind:       "logic_gate",
+		Name:             "Logic Gates",
+		Position:         rootPosition,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	r.folders[key(companyID, root.FolderID)] = root
+	for index, name := range companyExplorerDefaultLogicGateChildFolderNames {
+		parentID := root.FolderID
+		child := domain.CompanyExplorerFolder{
+			CompanyID:        companyID,
+			FolderID:         newUUIDv7String(),
+			ParentFolderID:   &parentID,
+			FolderKind:       "logic_gate",
+			Name:             name,
+			Position:         (index + 1) * 1000,
+			CreatedTimestamp: now,
+			UpdatedTimestamp: now,
+		}
+		r.folders[key(companyID, child.FolderID)] = child
+	}
+	r.defaultFolderSeed[seedKey] = true
 }
 
 func nextCompanyExplorerFolderPosition(folders map[string]domain.CompanyExplorerFolder, companyID, folderKind, parentFolderID string) int {
@@ -102,8 +146,10 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 }
 
 func (r *MemoryRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
 
 	items := make([]domain.CompanyExplorerFolder, 0)
 	for _, folder := range r.folders {
@@ -239,25 +285,69 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemTy
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	return r.assignCompanyExplorerFolderItemLocked(companyID, folderID, itemType, itemID, position)
+}
+
+func (r *MemoryRepo) AssignCompanyExplorerFolderItems(companyID string, assignments []CompanyExplorerFolderItemAssignmentInput) ([]domain.CompanyExplorerFolderItem, []CompanyExplorerRelationshipDeleteResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(assignments) == 0 || len(assignments) > CompanyExplorerFolderItemBatchMaxItems {
+		return nil, nil, ErrInvalid
+	}
+	for _, assignment := range assignments {
+		if err := r.validateCompanyExplorerFolderItemAssignmentLocked(companyID, assignment.FolderID, assignment.ItemType, assignment.ItemID); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	items := make([]domain.CompanyExplorerFolderItem, 0, len(assignments))
+	deleted := make([]CompanyExplorerRelationshipDeleteResult, 0)
+	for _, assignment := range assignments {
+		item, deletedRelationshipIDs, err := r.assignCompanyExplorerFolderItemLocked(companyID, assignment.FolderID, assignment.ItemType, assignment.ItemID, assignment.Position)
+		if err != nil {
+			return nil, nil, err
+		}
+		items = append(items, item)
+		if len(deletedRelationshipIDs) > 0 {
+			deleted = append(deleted, CompanyExplorerRelationshipDeleteResult{
+				ItemType:        assignment.ItemType,
+				ItemID:          assignment.ItemID,
+				RelationshipIDs: deletedRelationshipIDs,
+			})
+		}
+	}
+	return items, deleted, nil
+}
+
+func (r *MemoryRepo) validateCompanyExplorerFolderItemAssignmentLocked(companyID, folderID, itemType, itemID string) error {
 	folder, ok := r.folders[key(companyID, folderID)]
 	if !ok || (folder.FolderKind != itemType && itemType != "kanban") {
-		return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
+		return ErrNotFound
 	}
 	if itemType == "node" {
 		if _, ok := r.nodes[key(companyID, itemID)]; !ok {
-			return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
+			return ErrNotFound
 		}
 	} else if itemType == "logic_gate" {
 		if _, ok := r.logicGates[key(companyID, itemID)]; !ok {
-			return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
+			return ErrNotFound
 		}
 	} else if itemType == "kanban" {
 		if _, ok := r.kanbanBoards[boardKey(companyID, itemID)]; !ok {
-			return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
+			return ErrNotFound
 		}
 	} else {
-		return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
+		return ErrNotFound
 	}
+	return nil
+}
+
+func (r *MemoryRepo) assignCompanyExplorerFolderItemLocked(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error) {
+	if err := r.validateCompanyExplorerFolderItemAssignmentLocked(companyID, folderID, itemType, itemID); err != nil {
+		return domain.CompanyExplorerFolderItem{}, nil, err
+	}
+	folder := r.folders[key(companyID, folderID)]
 
 	now := time.Now().UTC()
 	k := folderItemKey(companyID, itemType, itemID)

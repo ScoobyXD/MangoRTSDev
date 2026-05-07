@@ -455,6 +455,14 @@ create table if not exists company_explorer_folders (
 create index if not exists idx_company_explorer_folders_parent_kind
   on company_explorer_folders(company_id, folder_kind, parent_folder_id, position, created_timestamp);
 
+create table if not exists company_explorer_default_folder_seeds (
+  company_id uuid not null,
+  seed_key text not null,
+  created_timestamp timestamptz not null default now(),
+  constraint company_explorer_default_folder_seeds_key_nonblank_chk check (btrim(seed_key) <> ''),
+  primary key (company_id, seed_key)
+);
+
 create table if not exists company_explorer_folder_items (
   company_id uuid not null,
   folder_id uuid not null,
