@@ -77,7 +77,9 @@
     "../../../frontend/src/modules/editor/editorIndentGuides.ts",
     "../modules/editor/editorIndentGuides.test.ts",
     "../../../frontend/src/modules/editor/editorProjection.ts",
-    "../modules/editor/editorProjection.test.ts"
+    "../modules/editor/editorProjection.test.ts",
+    "../../../frontend/src/modules/editor/editorDates.ts",
+    "../modules/editor/editorDates.test.ts"
   ],
   "exclude": []
 }

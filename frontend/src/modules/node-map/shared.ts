@@ -9,6 +9,7 @@ export type NodeRecord = {
   node_id: string;
   title: string;
   status?: string | null;
+  status_color?: string | null;
   due_date?: string | null;
   priority?: number | null;
   assignee_user_id?: string | null;

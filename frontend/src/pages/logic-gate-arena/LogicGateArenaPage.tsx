@@ -20,7 +20,13 @@ type ArenaResizeState = {
   kanbanUnits: number;
 };
 
-const SPLITTER_WIDTH_PX = 7;
+type ArenaLogicGateSelection = {
+  id: string;
+  label: string;
+  emptyMessage: string;
+};
+
+const SPLITTER_WIDTH_PX = 5;
 const MIN_EXPLORER_WIDTH_PX = 230;
 const MIN_EDITOR_WIDTH_PX = 300;
 const MIN_KANBAN_WIDTH_PX = 340;
@@ -42,7 +48,8 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizeRef = useRef<ArenaResizeState | null>(null);
-  const [selectedLogicGate, setSelectedLogicGate] = useState({ id: "", label: "" });
+  const lastArenaSelectionChangedAtRef = useRef(0);
+  const [selectedLogicGate, setSelectedLogicGate] = useState<ArenaLogicGateSelection>({ id: "", label: "", emptyMessage: "" });
 
   const arenaFrames = useMemo(() => getArenaFrames(frames), [frames]);
   const explorerFrame = arenaFrames.explorer;
@@ -54,23 +61,39 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
 
   const applySelection = useCallback((selection: LiveSelectionChange | null) => {
     if (!selection || selection.companyID !== companyID) return;
+    if (selection.changedAt > 0 && selection.changedAt < lastArenaSelectionChangedAtRef.current) return;
     if (selection.entityKind === "logic_gate") {
-      setSelectedLogicGate({ id: selection.entityID.trim(), label: selection.label.trim() });
+      lastArenaSelectionChangedAtRef.current = selection.changedAt || Date.now();
+      setSelectedLogicGate({ id: selection.entityID.trim(), label: selection.label.trim(), emptyMessage: "" });
       return;
     }
     if (selection.entityKind === "kanban") {
       const logicGateID = logicGateIDFromKanbanBoardID(selection.entityID);
-      setSelectedLogicGate({ id: logicGateID, label: logicGateID ? selection.label.trim() : "" });
+      lastArenaSelectionChangedAtRef.current = selection.changedAt || Date.now();
+      setSelectedLogicGate({ id: logicGateID, label: logicGateID ? selection.label.trim() : "", emptyMessage: logicGateID ? "" : "Sorry, this editor can only display Logic Gates." });
       return;
     }
-    setSelectedLogicGate({ id: "", label: "" });
-  }, [companyID]);
+    if (selection.entityKind === "node" && selection.sourceModule === "company-explorer" && selection.sourceFrameID === explorerFrame?.id) {
+      lastArenaSelectionChangedAtRef.current = selection.changedAt || Date.now();
+      setSelectedLogicGate({ id: "", label: "", emptyMessage: "Sorry, this editor can only display Logic Gates." });
+      return;
+    }
+  }, [companyID, explorerFrame?.id]);
 
   useEffect(() => {
     if (!editorFrame?.id) return;
-    applySelection(readLiveSelectionForFrame(companyID, editorFrame.id));
-    return subscribeLiveSelection(editorFrame.id, applySelection);
-  }, [applySelection, companyID, editorFrame?.id]);
+    const initialSelections = [editorFrame.id, kanbanFrame?.id ?? ""]
+      .map((frameID) => frameID ? readLiveSelectionForFrame(companyID, frameID) : null)
+      .filter((selection): selection is LiveSelectionChange => Boolean(selection))
+      .sort((a, b) => a.changedAt - b.changedAt);
+    for (const selection of initialSelections) applySelection(selection);
+    const unsubscribeEditor = subscribeLiveSelection(editorFrame.id, applySelection);
+    const unsubscribeKanban = kanbanFrame?.id ? subscribeLiveSelection(kanbanFrame.id, applySelection) : () => {};
+    return () => {
+      unsubscribeEditor();
+      unsubscribeKanban();
+    };
+  }, [applySelection, companyID, editorFrame?.id, kanbanFrame?.id]);
 
   useEffect(() => {
     const onPointerMove = (event: PointerEvent) => {
@@ -155,7 +178,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
         overflow: "hidden",
       }}
     >
-      <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden", borderRight: "1px solid rgba(17,17,17,0.34)" }}>
+      <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden" }}>
         <CompanyExplorerContent accent={explorerFrame.accent} widgetId={explorerFrame.id} theme={explorerFrame.theme} />
       </section>
       <div
@@ -163,9 +186,9 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
         aria-orientation="vertical"
         title="Resize Company Explorer and Editor"
         onPointerDown={(event) => startResize(event, "explorer-editor")}
-        style={{ cursor: "col-resize", background: "linear-gradient(90deg, rgba(17,17,17,0.16), rgba(17,17,17,0.42), rgba(17,17,17,0.16))" }}
+        style={{ cursor: "col-resize", background: "transparent" }}
       />
-      <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden", borderRight: "1px solid rgba(17,17,17,0.34)" }}>
+      <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden" }}>
         <EditorContent
           accent={editorFrame.accent}
           widgetId={editorFrame.id}
@@ -173,6 +196,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
           forcedEntityKind="logic_gate"
           forcedEntityID={selectedLogicGate.id}
           forcedLabel={selectedLogicGate.label}
+          forcedEmptyMessage={selectedLogicGate.emptyMessage}
         />
       </section>
       <div
@@ -180,7 +204,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
         aria-orientation="vertical"
         title="Resize Editor and Kanban board"
         onPointerDown={(event) => startResize(event, "editor-kanban")}
-        style={{ cursor: "col-resize", background: "linear-gradient(90deg, rgba(17,17,17,0.16), rgba(17,17,17,0.42), rgba(17,17,17,0.16))" }}
+        style={{ cursor: "col-resize", background: "transparent" }}
       />
       <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden" }}>
         <KanbanContent accent={kanbanFrame.accent} widgetId={kanbanFrame.id} theme={kanbanFrame.theme} arenaMode />

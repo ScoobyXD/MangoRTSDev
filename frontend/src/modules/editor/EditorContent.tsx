@@ -16,6 +16,7 @@ import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from ".
 import { selectCurrentEditorTextProjection } from "./editorProjection";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
+import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
 import { EditorTabBar } from "./EditorTabBar";
 import {
   deserializeEditorDocumentHTML,
@@ -84,29 +85,6 @@ function selectElementContents(element: HTMLElement) {
   selection.addRange(range);
 }
 
-function formatNodeDueDateForEditor(value: string | null | undefined): string {
-  const raw = (value ?? "").trim();
-  if (!raw) return "";
-  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!match) return raw;
-  return `${Number(match[2])}/${Number(match[3])}/${match[1]}`;
-}
-
-function normalizeNodeDueDateDraft(value: string): string | null {
-  const raw = value.trim();
-  if (!raw) return "";
-  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (iso) return raw;
-  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!slash) return null;
-  const month = Number(slash[1]);
-  const day = Number(slash[2]);
-  const year = Number(slash[3]);
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) return null;
-  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
 type EditorContentProps = {
   accent: string;
   widgetId?: string;
@@ -115,10 +93,11 @@ type EditorContentProps = {
   forcedEntityKind?: "node" | "logic_gate";
   forcedEntityID?: string;
   forcedLabel?: string;
+  forcedEmptyMessage?: string;
 };
 
 // Editor module: linked document canvas for node or logic-gate context.
-export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "teal", forcedEntityKind, forcedEntityID = "", forcedLabel = "" }) => {
+export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "teal", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -132,6 +111,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [linkedNodeMetadataRows, setLinkedNodeMetadataRows] = useState<Array<{ label: string; value: string }>>([]);
   const [linkedNodeHistoryRows, setLinkedNodeHistoryRows] = useState<string[]>([]);
   const [nodeStatus, setNodeStatus] = useState("");
+  const [nodeStatusColor, setNodeStatusColor] = useState("");
   const [nodePriorityDraft, setNodePriorityDraft] = useState("");
   const [nodeDueDateDraft, setNodeDueDateDraft] = useState("");
   const [nodeAssigneeDraft, setNodeAssigneeDraft] = useState("");
@@ -436,6 +416,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setLinkedNodeMetadataRows([]);
     setLinkedNodeHistoryRows([]);
     setNodeStatus("");
+    setNodeStatusColor("");
     setNodePriorityDraft("");
     setNodeDueDateDraft("");
     setNodeAssigneeDraft("");
@@ -546,6 +527,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         body: JSON.stringify({ company_id: companyID, ...patch }),
       });
       setNodeStatus(updated.status ?? "");
+      setNodeStatusColor(updated.status_color ?? "");
       setNodePriorityDraft(updated.priority == null ? "" : String(updated.priority));
       setNodeDueDateDraft(formatNodeDueDateForEditor(updated.due_date));
       setNodeAssigneeDraft(updated.assignee_user_id ?? "");
@@ -573,7 +555,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const commitNodeDueDateDraft = useCallback((draft: string) => {
     const normalized = normalizeNodeDueDateDraft(draft);
     if (normalized === null) {
-      setError("Due date must use mm/dd/yyyy");
+      setError("Due date must use m/d/yy, m/d/yyyy, or yyyy-mm-dd");
       return;
     }
     void updateNodePresetPatch({ due_date: normalized });
@@ -753,6 +735,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         return nextTitle;
       });
       setNodeStatus(node.status ?? "");
+      setNodeStatusColor(node.status_color ?? "");
       setNodePriorityDraft(node.priority == null ? "" : String(node.priority));
       setNodeDueDateDraft(formatNodeDueDateForEditor(node.due_date));
       setNodeAssigneeDraft(node.assignee_user_id ?? "");
@@ -786,6 +769,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setLinkedNodeMetadataRows([]);
       setLinkedNodeHistoryRows([]);
       setNodeStatus("");
+      setNodeStatusColor("");
       setNodePriorityDraft("");
       setNodeDueDateDraft("");
       setNodeAssigneeDraft("");
@@ -817,6 +801,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           if (cancelled) return;
           setLinkedNodeTitle(getLogicGateTitle({ header: details.logic_gate.header, title: details.logic_gate.header }));
           setNodeStatus("");
+          setNodeStatusColor("");
           setNodePriorityDraft("");
           setNodeDueDateDraft("");
           setNodeAssigneeDraft("");
@@ -847,6 +832,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         if (cancelled) return;
         setLinkedNodeTitle(getNodeTitle(details.node));
         setNodeStatus(details.node.status ?? "");
+        setNodeStatusColor(details.node.status_color ?? "");
         setNodePriorityDraft(details.node.priority == null ? "" : String(details.node.priority));
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
         setNodeAssigneeDraft(details.node.assignee_user_id ?? "");
@@ -888,6 +874,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(3,25,30,0.2)";
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
   const hasLinkedDocument = linkedNodeID.trim().length > 0;
+  const emptyMessage = forcedEntityKind && !hasLinkedDocument ? forcedEmptyMessage : "";
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
   const documentTopPx = linkedEntityKind === "node" ? 150 : EDITOR_DOCUMENT_TOP_PX;
   const documentLineHeightPx = documentFontSize * EDITOR_DOCUMENT_LINE_HEIGHT;
@@ -947,6 +934,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             linkedNodeHistoryRows={linkedNodeHistoryRows}
             nodePresetFields={linkedEntityKind === "node" ? {
               status: nodeStatus || "",
+              statusColor: nodeStatusColor || "",
               priorityDraft: nodePriorityDraft,
               assigneeUserID: nodeAssigneeDraft,
               dueDateDraft: nodeDueDateDraft,
@@ -989,6 +977,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             scrollbarTrack={scrollbarTrack}
             {...documentSurfaceHandlers}
           />
+        )}
+        {emptyMessage && (
+          <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: 28, textAlign: "center", fontSize: 13, fontWeight: 700, color: surfaceText, opacity: 0.72 }}>
+            {emptyMessage}
+          </div>
         )}
         {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020", zIndex: 3 }}>{error}</div>}
       </div>

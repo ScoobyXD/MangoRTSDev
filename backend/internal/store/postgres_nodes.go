@@ -16,6 +16,10 @@ case
   when card.is_issue then 'Issue'
   else column_row.title
 end as status,
+case
+  when card.is_issue then '#ffd400'
+  else column_row.item_color
+end as status_color,
 n.due_date::text,
 n.priority,
 n.assignee_user_id::text,
@@ -36,6 +40,7 @@ func scanNode(row interface {
 }) (domain.Node, error) {
 	var item domain.Node
 	var status sql.NullString
+	var statusColor sql.NullString
 	var dueDate sql.NullString
 	var priority sql.NullInt64
 	var assigneeUserID sql.NullString
@@ -44,6 +49,7 @@ func scanNode(row interface {
 		&item.NodeID,
 		&item.Title,
 		&status,
+		&statusColor,
 		&dueDate,
 		&priority,
 		&assigneeUserID,
@@ -51,6 +57,9 @@ func scanNode(row interface {
 	)
 	if status.Valid {
 		item.Status = &status.String
+	}
+	if statusColor.Valid {
+		item.StatusColor = &statusColor.String
 	}
 	if dueDate.Valid {
 		item.DueDate = &dueDate.String

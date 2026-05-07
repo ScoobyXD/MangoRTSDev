@@ -37,6 +37,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorScroll.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorIndentGuides.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorProjection.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorDates.test.js"),
 ];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
 const tscEntrypoint = resolve(frontendRoot, "node_modules/typescript/bin/tsc");

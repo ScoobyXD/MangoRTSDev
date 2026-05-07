@@ -8,7 +8,13 @@ import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upser
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
-import { createKanbanBoard, listKanbanBoards, listKanbanCards, listKanbanColumns, updateKanbanBoard } from "./kanbanApi";
+import { createKanbanBoard, listKanbanBoards, updateKanbanBoard } from "./kanbanApi";
+import {
+  getKanbanBoardContentsSingleFlight,
+  hasKanbanBoardContentsCache,
+  invalidateKanbanBoardContentsCache,
+  primeKanbanBoardContentsCache,
+} from "./KanbanBoardContentStore";
 import {
   addExplorerNodesToKanbanColumnCommand,
   createKanbanColumnCommand,
@@ -87,6 +93,8 @@ type OverlayResizeState = {
   startY: number;
   startWidth: number;
   startHeight: number;
+  boardWidth: number;
+  boardHeight: number;
 };
 
 const nodeEditorOverlayResizeHandles: Array<{
@@ -236,9 +244,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [columnContextMenu, setColumnContextMenu] = useState<{ x: number; y: number; columnID: string } | null>(null);
   const [cardContextMenu, setCardContextMenu] = useState<{ x: number; y: number; cardID: string } | null>(null);
   const [nodeEditorOverlay, setNodeEditorOverlay] = useState<NodeEditorOverlayState | null>(null);
-  const [nodeEditorOverlaySize, setNodeEditorOverlaySize] = useState({ width: 880, height: 640 });
+  const [nodeEditorOverlayRatio, setNodeEditorOverlayRatio] = useState({ width: 0.78, height: 0.82 });
   const [deleteColumnConfirmation, setDeleteColumnConfirmation] = useState<{ columnID: string; title: string } | null>(null);
   const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
+  const boardRootRef = useRef<HTMLDivElement | null>(null);
   const resizeRef = useRef<ColumnResizeState | null>(null);
   const nodeEditorOverlayResizeRef = useRef<OverlayResizeState | null>(null);
   const activeBoardIDRef = useRef(activeBoardID);
@@ -300,9 +309,9 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (state.edges.left) width -= dx;
       if (state.edges.bottom) height += dy;
       if (state.edges.top) height -= dy;
-      setNodeEditorOverlaySize({
-        width: Math.max(560, Math.min(Math.round(width), window.innerWidth - 80)),
-        height: Math.max(420, Math.min(Math.round(height), window.innerHeight - 110)),
+      setNodeEditorOverlayRatio({
+        width: Math.max(0.42, Math.min(width / Math.max(1, state.boardWidth), 0.96)),
+        height: Math.max(0.42, Math.min(height / Math.max(1, state.boardHeight), 0.94)),
       });
     };
     const onEnd = () => {
@@ -384,10 +393,11 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (!node) continue;
       const column = columnByID.get(card.column_id);
       const status = card.is_issue ? "Issue" : (column?.title.trim() || "Unknown");
+      const statusColor = getKanbanConditionalColor(card, columnColorByID);
       invalidateNodeRecordStoreCaches(apiBase, companyID, card.node_id);
-      upsertNodeRelationshipGraphNode(apiBase, companyID, { ...node, status });
+      upsertNodeRelationshipGraphNode(apiBase, companyID, { ...node, status, status_color: statusColor });
     }
-  }, [apiBase, columns, companyID]);
+  }, [apiBase, columnColorByID, columns, companyID]);
 
   const upsertBoardInList = useCallback((board: KanbanBoard) => {
     const next = sortKanbanBoards([
@@ -400,6 +410,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   const removeBoardFromList = useCallback((deletedBoardID: string) => {
     if (!deletedBoardID) return;
+    invalidateKanbanBoardContentsCache(apiBase, companyID, deletedBoardID);
     const next = sortKanbanBoards(boardsRef.current.filter((board) => board.board_id !== deletedBoardID));
     boardsRef.current = next;
     setBoards(next);
@@ -413,7 +424,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setNodeEditorOverlay(null);
       setActiveBoardID(next[0]?.board_id ?? frameBoardIDRef.current);
     }
-  }, []);
+  }, [apiBase, companyID]);
 
   const refreshBoards = useCallback(async () => {
     setBoardsLoading(true);
@@ -507,15 +518,12 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const requestID = boardRefreshRequestRef.current + 1;
     boardRefreshRequestRef.current = requestID;
     const requestedBoardID = boardID;
-    setLoading(true);
+    setLoading(!hasKanbanBoardContentsCache(apiBase, companyID, requestedBoardID));
     setError("");
     try {
-      const [nextColumns, nextCards] = await Promise.all([
-        listKanbanColumns(apiBase, companyID, requestedBoardID),
-        // The UI renders a bounded first window. Headless agents should page by
-        // column through the cards API instead of loading company-scale boards.
-        listKanbanCards(apiBase, companyID, requestedBoardID, "", 500),
-      ]);
+      // The UI renders a bounded first window. Headless agents should page by
+      // column through the cards API instead of loading company-scale boards.
+      const { columns: nextColumns, cards: nextCards } = await getKanbanBoardContentsSingleFlight(apiBase, companyID, requestedBoardID, 500);
       if (boardRefreshRequestRef.current !== requestID || activeBoardIDRef.current !== requestedBoardID) return;
       setColumns(sortColumns(nextColumns));
       setCards(nextCards);
@@ -530,6 +538,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   useEffect(() => {
     refreshBoard();
   }, [refreshBoard]);
+
+  useEffect(() => {
+    primeKanbanBoardContentsCache(apiBase, companyID, boardID, { columns, cards });
+  }, [apiBase, boardID, cards, columns, companyID]);
 
   useEffect(() => {
     refreshBoards();
@@ -589,6 +601,46 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             if (logicGateID) removeBoardFromList(logicGateKanbanBoardID(logicGateID));
             return;
           }
+          if (envelope.type === "kanban_column_created" || envelope.type === "kanban_column_updated") {
+            const streamBoardID = typeof data.board_id === "string" ? data.board_id : "";
+            const column = data.column as KanbanColumn | undefined;
+            if (!streamBoardID) return;
+            invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
+            if (streamBoardID !== activeBoardIDRef.current || !column?.column_id) return;
+            setColumns((previous) => sortColumns([...previous.filter((item) => item.column_id !== column.column_id), column]));
+            return;
+          }
+          if (envelope.type === "kanban_column_deleted") {
+            const streamBoardID = typeof data.board_id === "string" ? data.board_id : "";
+            const columnID = typeof data.column_id === "string" ? data.column_id : "";
+            if (!streamBoardID || !columnID) return;
+            invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
+            if (streamBoardID !== activeBoardIDRef.current) return;
+            setColumns((previous) => previous.filter((column) => column.column_id !== columnID));
+            setCards((previous) => previous.filter((card) => card.column_id !== columnID));
+            return;
+          }
+          if (envelope.type === "kanban_card_upserted" || envelope.type === "kanban_card_moved") {
+            const streamBoardID = typeof data.board_id === "string" ? data.board_id : "";
+            const card = data.card as KanbanCard | undefined;
+            if (!streamBoardID) return;
+            invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
+            if (streamBoardID !== activeBoardIDRef.current || !card?.card_id) return;
+            setCards((previous) => [...previous.filter((item) => item.card_id !== card.card_id), card]);
+            syncNodeStatusesFromCards([card]);
+            return;
+          }
+          if (envelope.type === "kanban_card_deleted") {
+            const streamBoardID = typeof data.board_id === "string" ? data.board_id : "";
+            const cardID = typeof data.card_id === "string" ? data.card_id : "";
+            if (!streamBoardID || !cardID) return;
+            invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
+            if (streamBoardID !== activeBoardIDRef.current) return;
+            setCards((previous) => previous.filter((card) => card.card_id !== cardID));
+            setSelectedCardIDs((previous) => new Set(Array.from(previous).filter((selectedCardID) => selectedCardID !== cardID)));
+            setSelectionAnchorCardID((current) => current === cardID ? "" : current);
+            return;
+          }
           if (envelope.type === "company_explorer_folder_item_assigned") {
             const folderItem = data.folder_item as CompanyExplorerFolderItem | undefined;
             if (!folderItem || folderItem.item_type !== "kanban") return;
@@ -609,7 +661,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         }
       },
     });
-  }, [apiBase, companyID, removeBoardFromList, upsertBoardInList]);
+  }, [apiBase, companyID, removeBoardFromList, syncNodeStatusesFromCards, upsertBoardInList]);
 
   const syncCardTitlesFromNodeGraph = useCallback(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
@@ -657,6 +709,11 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         setActiveLogicGateLabel(selection.label?.trim() || "Logic Gate Kanban");
         setNodeEditorOverlay(null);
         setActiveBoardID(nextBoardID);
+        const cachedBoard = boardsRef.current.find((board) => board.board_id === nextBoardID || board.logic_gate_id === logicGateID);
+        if (cachedBoard) {
+          upsertBoardInList(cachedBoard);
+          return;
+        }
         void listKanbanBoards(apiBase, companyID, 10, 0, logicGateID)
           .then((nextBoards) => {
             if (nextBoards.length > 0) upsertBoardInList(nextBoards[0]);
@@ -1091,6 +1148,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   return (
     <div
+      ref={boardRootRef}
       onMouseDown={(event) => event.stopPropagation()}
       onTouchStart={(event) => event.stopPropagation()}
       style={{ position: "relative", width: "100%", height: "100%", boxSizing: "border-box", paddingTop: topClearancePx, background: surface, color: text, overflow: "hidden" }}
@@ -1148,8 +1206,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       />
       <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#c62828", fontSize: 11, fontWeight: 700 }}>{error}</div>}
-        {loading && <div style={{ color: subtext, fontSize: 12 }}>Loading board...</div>}
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX + 18, paddingBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX + 18, paddingBottom: 16, width: arenaMode ? "100%" : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
           {orderedColumns.map((column) => {
             const columnCards = cardsByColumn.get(column.column_id) ?? [];
             return (
@@ -1182,10 +1239,11 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
                 onCreateNodeInColumn={(columnID) => void createNodeInColumn(columnID)}
                 onDropColumn={onDropColumn}
                 dataTransferIncludes={dataTransferIncludes}
+                fillAvailable={arenaMode}
               />
             );
           })}
-          <button
+          {!arenaMode && <button
             type="button"
             title="Add column"
             onClick={() => void addColumn()}
@@ -1214,11 +1272,22 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             }}
           >
             +
-          </button>
+          </button>}
         </div>
       </div>
       {contextColumn && columnContextMenu && (
         <FrameRightClickMenu x={columnContextMenu.x} y={columnContextMenu.y} onClose={() => setColumnContextMenu(null)}>
+          <button
+            type="button"
+            style={contextMenuButtonStyle}
+            onClick={() => {
+              setColumnContextMenu(null);
+              void createNodeInColumn(contextColumn.column_id);
+            }}
+            {...contextMenuHoverHandlers}
+          >
+            Create new node
+          </button>
           <button
             type="button"
             style={contextMenuButtonStyle}
@@ -1279,11 +1348,13 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             zIndex: 40,
             top: "6%",
             left: "50%",
-            width: `min(${nodeEditorOverlaySize.width}px, calc(100% - 44px))`,
-            height: `min(${nodeEditorOverlaySize.height}px, calc(100% - 64px))`,
+            width: `${Math.round(nodeEditorOverlayRatio.width * 1000) / 10}%`,
+            height: `${Math.round(nodeEditorOverlayRatio.height * 1000) / 10}%`,
+            maxWidth: "calc(100% - 44px)",
+            maxHeight: "calc(100% - 64px)",
             transform: "translateX(-50%)",
-            minWidth: 560,
-            minHeight: 420,
+            minWidth: "min(420px, calc(100% - 44px))",
+            minHeight: "min(320px, calc(100% - 64px))",
             border: "2px solid #111111",
             borderTopWidth: 6,
             background: "#ffffff",
@@ -1333,8 +1404,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
                   edges: handle.edges,
                   startX: event.clientX,
                   startY: event.clientY,
-                  startWidth: nodeEditorOverlaySize.width,
-                  startHeight: nodeEditorOverlaySize.height,
+                  startWidth: (boardRootRef.current?.getBoundingClientRect().width ?? window.innerWidth) * nodeEditorOverlayRatio.width,
+                  startHeight: (boardRootRef.current?.getBoundingClientRect().height ?? window.innerHeight) * nodeEditorOverlayRatio.height,
+                  boardWidth: boardRootRef.current?.getBoundingClientRect().width ?? window.innerWidth,
+                  boardHeight: boardRootRef.current?.getBoundingClientRect().height ?? window.innerHeight,
                 };
               }}
               style={{
