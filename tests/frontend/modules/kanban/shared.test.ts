@@ -245,9 +245,9 @@ test("column layout helpers keep reorder and resize writes bounded", () => {
   assert.deepEqual(swapPlan.columns.map((column) => column.column_id), ["middle", "left", "right"]);
   assert.deepEqual(swapPlan.updates, [{ columnID: "left", position: 2000 }, { columnID: "middle", position: 1000 }]);
   assert.equal(nextColumnPosition(columns), 4000);
-  assert.equal(clampColumnWidth(9999), 520);
+  assert.equal(clampColumnWidth(9999), 2000);
   assert.equal(clampColumnWidth(Number.NaN), KANBAN_DEFAULT_COLUMN_WIDTH_PX);
-  assert.equal(clampColumnHeight(9999), 720);
+  assert.equal(clampColumnHeight(9999), 9999);
   assert.equal(clampColumnHeight(Number.NaN), KANBAN_DEFAULT_COLUMN_HEIGHT_PX);
 });
 

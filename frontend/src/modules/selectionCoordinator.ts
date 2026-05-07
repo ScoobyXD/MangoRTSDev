@@ -76,7 +76,12 @@ export function isSelectionTargetForFrame(selection: LiveSelectionChange, frameI
 
 export function shouldAcceptLiveSelection(current: LiveSelectionChange | null | undefined, incoming: LiveSelectionChange): boolean {
   if (!current) return true;
-  if (current.sourceFrameID === incoming.sourceFrameID) return incoming.sequence > current.sequence;
+  if (current.sourceFrameID === incoming.sourceFrameID) {
+    if (incoming.sequence > current.sequence) return true;
+    // Component-local counters can reset when a tab unmounts and remounts.
+    // A newer timestamp from the same frame still represents the user's latest click.
+    return incoming.changedAt > current.changedAt;
+  }
   if (incoming.changedAt < current.changedAt) return false;
   if (incoming.changedAt > current.changedAt) return true;
   // Different sources have independent sequence counters. When two modules emit

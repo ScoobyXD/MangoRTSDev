@@ -114,7 +114,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
               onRefreshBoards();
             }
           }}
-          style={{ minWidth: 0, height: 25, border: `1px solid ${accent}`, background: isDark ? "#11161b" : "#ffffff", color: text, fontSize: 12, fontWeight: 800, padding: "0 7px", outline: "none" }}
+          style={{ minWidth: 0, height: 25, border: "none", borderBottom: `1px solid ${accent}`, background: "transparent", color: text, fontSize: 14, fontWeight: 900, padding: "0 2px", outline: "none" }}
         />
       ) : (
         <button
@@ -125,7 +125,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
             onSetBoardTitleDraft(activeBoardTitle);
             onSetEditingBoardTitle(true);
           }}
-          style={{ minWidth: 0, height: 25, border: `1px solid ${line}`, background: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)", color: text, cursor: boardTitleReadOnly ? "default" : "text", fontSize: 12, fontWeight: 800, textAlign: "left", padding: "0 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          style={{ minWidth: 0, height: 25, border: "none", background: "transparent", color: text, cursor: boardTitleReadOnly ? "default" : "text", fontSize: 14, fontWeight: 900, textAlign: "left", padding: "0 2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
         >
           {activeBoardTitle}
         </button>
