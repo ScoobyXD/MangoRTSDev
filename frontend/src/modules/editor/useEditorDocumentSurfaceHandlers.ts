@@ -4,6 +4,7 @@ import type { EditorDocumentSurfaceProps } from "./EditorDocumentSurface";
 import type { EditorScrollMemory } from "./editorScroll";
 import {
   EDITOR_TAB_TEXT,
+  deleteEditorBackspaceText,
   insertEditorEnterText,
   insertEditorTabText,
   type EditorOutlineStyleID,
@@ -216,6 +217,19 @@ function replaceSelectionWithStyledText(root: HTMLElement, text: string, fontSiz
 function replaceDocumentWithPlainText(root: HTMLElement, text: string, selectionStart: number, selectionEnd = selectionStart) {
   root.innerHTML = linkifyEditorPlainTextToHTML(text);
   setEditorSelectionByOffsets(root, selectionStart, selectionEnd);
+}
+
+function deleteTextByOffsets(root: HTMLElement, start: number, end: number): boolean {
+  if (start < 0 || end < start) return false;
+  setEditorSelectionByOffsets(root, start, end);
+  const range = getEditorSelectionRange(root);
+  if (!range) return false;
+  range.deleteContents();
+  range.collapse(true);
+  const selection = root.ownerDocument.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  return true;
 }
 
 function getPreviousEditableSiblingAnchor(root: HTMLElement, node: Node): HTMLAnchorElement | null {
@@ -479,6 +493,20 @@ export function useEditorDocumentSurfaceHandlers({
           : replaceSelectionWithText(event.currentTarget, insertedText);
         if (inserted) {
           scrollEditorToLineStart(event.currentTarget);
+          commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        }
+        return;
+      }
+
+      if (event.key === "Backspace") {
+        const offsets = getEditorSelectionOffsets(event.currentTarget);
+        if (!offsets) return;
+        const currentText = readEditorDocumentText(event.currentTarget);
+        const edit = deleteEditorBackspaceText(currentText, offsets.start, offsets.end);
+        if (!edit) return;
+        event.preventDefault();
+        pendingEditorFontSizeRef.current = null;
+        if (deleteTextByOffsets(event.currentTarget, edit.selectionStart, offsets.start)) {
           commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
         }
         return;

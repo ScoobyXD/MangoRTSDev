@@ -90,6 +90,18 @@ test("Backspace deletes one inserted tab-sized space run", () => {
   });
 });
 
+test("Backspace deletes repeated inserted tab-sized space runs one at a time", () => {
+  const value = `alpha${EDITOR_TAB_TEXT.repeat(3)}`;
+  const first = deleteEditorBackspaceText(value, value.length, value.length);
+  assert.equal(first?.value, `alpha${EDITOR_TAB_TEXT.repeat(2)}`);
+
+  const second = first && deleteEditorBackspaceText(first.value, first.selectionStart, first.selectionEnd);
+  assert.equal(second?.value, `alpha${EDITOR_TAB_TEXT}`);
+
+  const third = second && deleteEditorBackspaceText(second.value, second.selectionStart, second.selectionEnd);
+  assert.equal(third?.value, "alpha");
+});
+
 test("automatic outline continuation only looks at the new edit point", () => {
   assert.equal(getAutomaticOutlineContinuation("already typed\nplain line", "already typed\nplain line".length), null);
 });

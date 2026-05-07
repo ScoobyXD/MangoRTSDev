@@ -145,7 +145,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
         whiteSpace: "pre-wrap",
         overflowWrap: "anywhere",
         wordBreak: "break-word",
-        tabSize: 2,
+        tabSize: EDITOR_TAB_TEXT.length,
         letterSpacing: 0,
         fontVariantLigatures: "none",
         caretColor: accent,

@@ -30,3 +30,11 @@ test("indent guides continue through blank lines inside an indented block", () =
     { depth: 1, lineStart: 1, lineEnd: 3 },
   ]);
 });
+
+test("indent guides include newly inserted whitespace-only indented lines", () => {
+  const text = "root\n     ";
+
+  assert.deepEqual(buildEditorIndentGuideSegments(text, 5), [
+    { depth: 1, lineStart: 1, lineEnd: 1 },
+  ]);
+});

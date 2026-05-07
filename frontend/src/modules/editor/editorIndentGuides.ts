@@ -36,7 +36,7 @@ export function buildEditorIndentGuideSegments(text: string, spacesPerIndent: nu
 
   lines.forEach((line, lineIndex) => {
     const isBlank = line.trim().length === 0;
-    const depth = isBlank ? previousNonBlankDepth : countIndentDepth(line, indentWidth);
+    const depth = isBlank && line.length === 0 ? previousNonBlankDepth : countIndentDepth(line, indentWidth);
     for (const depthToClose of [...openByDepth.keys()].filter((value) => value > depth).sort((a, b) => b - a)) {
       closeDepth(depthToClose, lineIndex - 1);
     }
