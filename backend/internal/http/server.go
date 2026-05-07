@@ -53,6 +53,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/workspace/stream", s.handleWorkspaceStream)
 	mux.HandleFunc("/v1/company-explorer/folders", s.handleCompanyExplorerFolders)
 	mux.HandleFunc("/v1/company-explorer/folders/", s.handleCompanyExplorerFolderByID)
+	mux.HandleFunc("/v1/company-explorer/delete-batch", s.handleCompanyExplorerDeleteBatch)
 	mux.HandleFunc("/v1/company-explorer/folder-items/batch", s.handleCompanyExplorerFolderItemsBatch)
 	mux.HandleFunc("/v1/company-explorer/folder-items", s.handleCompanyExplorerFolderItems)
 	mux.HandleFunc("/v1/map-layout", s.handleMapLayout)

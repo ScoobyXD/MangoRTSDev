@@ -83,6 +83,12 @@ export type ExplorerFindSelection = {
   expandedTreeIDs: Set<string>;
 };
 
+export type ExplorerSearchRow = ExplorerCreationContextRow & {
+  label: string;
+  depth: number;
+  folderLabel?: string;
+};
+
 export type ExplorerCreationTargets = {
   preferredFolderKind: CompanyExplorerFolderKind;
   preferredFolderParentID: string;
@@ -238,6 +244,57 @@ export function resolveExplorerCreationTargets(row?: ExplorerCreationContextRow 
     nodeParentFolderID,
     logicGateParentFolderID,
   };
+}
+
+function getExplorerSearchRowsForSelection<T extends ExplorerSearchRow>(rows: T[], selectedRowID: string): T[] {
+  const selectedIndex = rows.findIndex((row) => row.id === selectedRowID);
+  const selected = selectedIndex >= 0 ? rows[selectedIndex] : null;
+  if (!selected || selected.kind !== "folder") return rows;
+
+  const scopedRows: T[] = [];
+  for (let index = selectedIndex + 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row.depth <= selected.depth) break;
+    scopedRows.push(row);
+  }
+  return scopedRows;
+}
+
+function explorerSearchRowMatches(row: ExplorerSearchRow, query: string): boolean {
+  const identity = [
+    row.label,
+    row.kind,
+    row.nodeID ?? "",
+    row.logicGateID ?? "",
+    row.kanbanBoardID ?? "",
+    row.folderID ?? "",
+    row.folderLabel ?? "",
+  ].join(" ").toLowerCase();
+  return identity.includes(query);
+}
+
+export function buildExplorerSearchResults<T extends ExplorerSearchRow>(input: {
+  rows: T[];
+  selectedRowID: string;
+  query: string;
+  limit?: number;
+}): T[] {
+  const query = input.query.trim().toLowerCase();
+  if (!query) return [];
+  const limit = Math.max(1, input.limit ?? 16);
+  const collect = (rows: T[]): T[] => {
+    const matches: T[] = [];
+    for (const row of rows) {
+      if (!explorerSearchRowMatches(row, query)) continue;
+      matches.push(row);
+      if (matches.length >= limit) break;
+    }
+    return matches;
+  };
+
+  const scopedRows = getExplorerSearchRowsForSelection(input.rows, input.selectedRowID);
+  const scopedMatches = scopedRows.length === input.rows.length ? [] : collect(scopedRows);
+  return scopedMatches.length > 0 ? scopedMatches : collect(input.rows);
 }
 
 export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | null):
@@ -494,6 +551,7 @@ export function getExplorerScrollTopForRow(input: {
   viewportHeight: number;
   maxScrollTop?: number;
   bottomPadding?: number;
+  align?: "nearest" | "center";
 }): number {
   const rowTop = input.rowsTopOffset + input.rowIndex * input.rowHeight;
   const rowBottom = rowTop + input.rowHeight;
@@ -501,6 +559,12 @@ export function getExplorerScrollTopForRow(input: {
   const bottomPadding = Math.max(0, input.bottomPadding ?? 0);
   const currentBottom = currentTop + input.viewportHeight - bottomPadding;
   let nextScrollTop = currentTop;
+
+  if (input.align === "center") {
+    nextScrollTop = rowTop - Math.max(0, input.viewportHeight - input.rowHeight) / 2;
+    const maxScrollTop = Math.max(0, input.maxScrollTop ?? Number.POSITIVE_INFINITY);
+    return Math.min(maxScrollTop, Math.max(0, Math.round(nextScrollTop)));
+  }
 
   if (rowTop < currentTop) nextScrollTop = rowTop;
   else if (rowBottom > currentBottom) nextScrollTop = rowBottom - input.viewportHeight + bottomPadding;

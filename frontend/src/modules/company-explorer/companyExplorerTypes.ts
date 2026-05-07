@@ -44,8 +44,8 @@ export type CompanyExplorerContextMenuState = {
   x: number;
   y: number;
   targets: ExplorerCreationTargets;
-  deleteTarget: ExplorerDeleteTarget | null;
-  deleteTargets: ExplorerDeleteTarget[];
+  deleteTarget: ExplorerDeleteTargetWithLabel | null;
+  deleteTargets: ExplorerDeleteTargetWithLabel[];
   renameTarget: ExplorerRenameTarget | null;
   findTarget: ExplorerFindTarget | null;
   renameTreeID: string;
@@ -53,12 +53,20 @@ export type CompanyExplorerContextMenuState = {
   contextKind: CompanyExplorerFolderKind | null;
   createFolderPosition: number;
   canCreateBothFolderTypes: boolean;
+  canCreateFolder: boolean;
+  canCreateNode: boolean;
+  canCreateLogicGate: boolean;
 };
 
 export type ExplorerVirtualizedTree = {
   rows: ExplorerTreeNode[];
   topSpacer: number;
   bottomSpacer: number;
+};
+
+export type ExplorerDeleteTargetWithLabel = ExplorerDeleteTarget & {
+  label?: string;
+  treeID?: string;
 };
 
 export type {

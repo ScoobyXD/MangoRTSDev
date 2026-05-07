@@ -163,7 +163,10 @@ func (r *MemoryRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Position == items[j].Position {
-			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+			if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+				return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+			}
+			return items[i].FolderID < items[j].FolderID
 		}
 		return items[i].Position < items[j].Position
 	})
@@ -422,7 +425,13 @@ func (r *MemoryRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemTyp
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Position == items[j].Position {
-			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+			if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+				return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+			}
+			if items[i].ItemType == items[j].ItemType {
+				return items[i].ItemID < items[j].ItemID
+			}
+			return items[i].ItemType < items[j].ItemType
 		}
 		return items[i].Position < items[j].Position
 	})
