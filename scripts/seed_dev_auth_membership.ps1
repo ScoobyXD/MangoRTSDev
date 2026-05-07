@@ -10,7 +10,7 @@ if (-not $env:COGNITO_SUBJECT) { throw "Set COGNITO_SUBJECT first" }
 if (-not $env:DEV_COMPANY_ID) { throw "Set DEV_COMPANY_ID first" }
 if (-not $env:DEV_COMPANY_NAME) { $env:DEV_COMPANY_NAME = "MangoRTS Dev Company" }
 if (-not $env:DEV_USER_EMAIL) { $env:DEV_USER_EMAIL = "" }
-if (-not $env:DEV_ROLE) { $env:DEV_ROLE = "owner" }
+if (-not $env:DEV_ROLE) { $env:DEV_ROLE = "dev_admin" }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $seedPath = Join-Path $repoRoot "backend/db/seed_dev_auth_membership.sql"

@@ -1,49 +1,49 @@
-# MangoRTS Auth V2
+# MangoRTS Auth MVP
 
-MangoRTS dev uses Amazon Cognito User Pools for human login.
+MangoRTS uses Amazon Cognito for authentication and Mango-owned PostgreSQL tables for company authorization.
 
 ## Login Flow
 
-The frontend uses Cognito managed login with authorization code + PKCE:
+The frontend uses custom React pages and direct Cognito Identity Provider API calls:
 
-1. Browser opens `https://dev.<domain>`.
-2. Frontend checks `VITE_AUTH_MODE`.
-3. If `VITE_AUTH_MODE=cognito` and no valid token exists, the browser redirects to Cognito managed login.
-4. Cognito authenticates the user and redirects back to `https://dev.<domain>`.
-5. Frontend exchanges the code for tokens and stores them in browser storage.
-6. Frontend attaches `Authorization: Bearer <access_token>` to API requests.
+1. Dev admin or company admin creates an invitation in Mango.
+2. The backend stores a hashed Mango invitation token and calls Cognito `AdminCreateUser`.
+3. The user opens `/accept-invite`, enters the Mango invite token, Cognito temporary password, and a new password.
+4. Cognito completes the `NEW_PASSWORD_REQUIRED` challenge and issues tokens.
+5. The frontend calls `/v1/invitations/accept`; Mango links the Cognito subject to `users` and writes `company_memberships`.
+6. Authenticated requests send a Cognito bearer token to the backend.
 
-The temporary CloudFront basic-auth gate protects static pages and health checks. `/v1/*` requests with a Bearer token pass through CloudFront so the backend can validate Cognito JWTs.
-
-Local development keeps auth disabled unless `VITE_AUTH_MODE=cognito` is set.
+The app does not use Cognito Managed Login / Hosted UI. Local development keeps auth disabled unless `VITE_AUTH_MODE=cognito` is set.
 
 ## Backend Enforcement
 
 The backend enables auth only when `AUTH_MODE=cognito`.
 
-When enabled:
-
 - `/healthz` stays public for load balancer health checks.
-- `/v1/*` requires a valid Cognito access token.
+- `/v1/*` requires a valid Cognito access or ID token when auth is enabled.
 - The backend validates issuer, client ID, token use, expiry, and RS256 signature through the Cognito JWKS.
 - The backend upserts the authenticated Cognito subject into `users`.
-- Any request with `company_id` is allowed only if `company_memberships` contains that user for that company.
-
-The backend still accepts `company_id` in API requests for now, but it no longer trusts it blindly when auth is enabled.
+- Memberships are loaded once per request into an actor context.
+- `dev_admin` can access all companies.
+- Company-scoped routes require company membership or `dev_admin`.
+- `company_admin` manages users and resource assignments inside their company.
+- `company_user` is read-only and limited to assigned resources where the route addresses a specific resource.
 
 ## Tables
 
 - `users`: maps Cognito `sub` values to internal user IDs.
 - `companies`: stores tenant/company rows.
-- `company_memberships`: authorizes a user for a company with `owner`, `admin`, `member`, or `agent` role.
+- `company_memberships`: Mango authorization roles: `dev_admin`, `company_admin`, `company_user`, `company_viewer`.
+- `invitations`: company-scoped pending/accepted invite tokens; only token hashes are stored.
+- `resource_assignments`: company-first assignment rows for folders, nodes, logic gates, and kanban boards.
 
-## Dev User Setup
+## Frontend Env
 
-For dev, Cognito public signup is disabled. Create users from AWS Console or CLI, then insert a matching company membership after their first login has created the `users` row.
+- `VITE_AUTH_MODE=cognito`
+- `VITE_COGNITO_REGION`
+- `VITE_COGNITO_USER_POOL_ID`
+- `VITE_COGNITO_CLIENT_ID`
+- `VITE_API_BASE_URL`
 
-Future work:
+Tokens are kept in `sessionStorage` for this MVP. This avoids persistent local storage, but a future secure cookie/session layer is still the preferred production hardening path.
 
-- real invitation flow,
-- enterprise SSO/SAML,
-- role-aware authorization per endpoint,
-- machine-to-machine agent clients and rotation.

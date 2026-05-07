@@ -17,6 +17,7 @@ import { LogicGateMapRelationshipHitLines } from "./LogicGateMapRelationshipHitL
 import { buildLogicGateMapRelationshipRoutingGrid, getLogicGateMapAnchorPoint, routeLogicGateMapDraftPath, routeLogicGateMapOrthogonalPath } from "./logicGateMapRouting";
 import { useLogicGateMapGraphPersistence } from "./useLogicGateMapGraphPersistence";
 import { useLogicGateMapViewportHandlers } from "./useLogicGateMapViewportHandlers";
+import { getActiveCompanyID } from "../../auth/currentCompany";
 
 type LogicGateMapEntityBatchResponse = {
   entity_mappings?: Array<{ client_id: string; entity_id: string }>;
@@ -38,7 +39,7 @@ type ExplorerSelectionOrigin = {
 export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "teal" }) => {
   const SELECTION_CYAN = "rgb(0, 233, 255)";
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
-  const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
+  const companyID = getActiveCompanyID();
   const mapScope = widgetId?.trim() ? widgetId : "global";
   const mapStateKey = `${LOGIC_GATE_MAP_STATE_KEY_PREFIX}:${companyID}:${mapScope}`;
   const fallbackMapStateKey = `${LOGIC_GATE_MAP_STATE_KEY_PREFIX}:${companyID}:last-opened-map`;

@@ -1,19 +1,26 @@
 package httpapi
 
 import (
+	"context"
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/store"
 	"net/http"
 )
 
+type CognitoAdminClient interface {
+	AdminCreateUser(ctx context.Context, email string) error
+}
+
 type Server struct {
 	repo          store.Repository
 	hub           *workspaceEventHub
 	authValidator *auth.Validator
+	cognitoAdmin  CognitoAdminClient
 }
 
 type ServerOptions struct {
 	AuthValidator *auth.Validator
+	CognitoAdmin  CognitoAdminClient
 }
 
 func NewServer(repo store.Repository) *Server {
@@ -25,12 +32,19 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		repo:          repo,
 		hub:           newWorkspaceEventHub(),
 		authValidator: options.AuthValidator,
+		cognitoAdmin:  options.CognitoAdmin,
 	}
 }
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/v1/me", s.handleMe)
+	mux.HandleFunc("/v1/companies", s.handleCompanies)
+	mux.HandleFunc("/v1/companies/", s.handleCompanySubresource)
+	mux.HandleFunc("/v1/invitations", s.handleInvitations)
+	mux.HandleFunc("/v1/invitations/accept", s.handleInvitationAccept)
+	mux.HandleFunc("/v1/resource-assignments", s.handleResourceAssignments)
 	mux.HandleFunc("/v1/nodes", s.handleNodes)
 	mux.HandleFunc("/v1/nodes/", s.handleNodeSubresource)
 	mux.HandleFunc("/v1/node-relationships", s.handleNodeRelationships)

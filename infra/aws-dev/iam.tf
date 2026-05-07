@@ -41,6 +41,25 @@ resource "aws_iam_role" "ecs_task" {
   assume_role_policy = data.aws_iam_policy_document.ecs_task_assume_role.json
 }
 
+data "aws_iam_policy_document" "ecs_task_cognito" {
+  statement {
+    actions = [
+      "cognito-idp:AdminCreateUser"
+    ]
+    resources = [aws_cognito_user_pool.main.arn]
+  }
+}
+
+resource "aws_iam_policy" "ecs_task_cognito" {
+  name   = "${local.name_prefix}-ecs-task-cognito"
+  policy = data.aws_iam_policy_document.ecs_task_cognito.json
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_cognito" {
+  role       = aws_iam_role.ecs_task.name
+  policy_arn = aws_iam_policy.ecs_task_cognito.arn
+}
+
 data "aws_iam_policy_document" "github_oidc_assume_role" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]

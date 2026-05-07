@@ -26,11 +26,6 @@ resource "aws_cognito_user_pool" "main" {
   }
 }
 
-resource "aws_cognito_user_pool_domain" "main" {
-  domain       = var.cognito_domain_prefix
-  user_pool_id = aws_cognito_user_pool.main.id
-}
-
 resource "aws_cognito_resource_server" "mangorts_api" {
   identifier   = "https://${local.api_domain}"
   name         = "MangoRTS API"
@@ -46,14 +41,15 @@ resource "aws_cognito_user_pool_client" "spa" {
   name         = "${local.name_prefix}-spa"
   user_pool_id = aws_cognito_user_pool.main.id
 
-  generate_secret                      = false
-  prevent_user_existence_errors        = "ENABLED"
-  supported_identity_providers         = ["COGNITO"]
-  allowed_oauth_flows_user_pool_client = true
-  allowed_oauth_flows                  = ["code"]
-  allowed_oauth_scopes                 = ["openid", "email", "profile", "${aws_cognito_resource_server.mangorts_api.identifier}/api"]
-  callback_urls                        = ["https://${local.app_domain}"]
-  logout_urls                          = ["https://${local.app_domain}"]
+  generate_secret               = false
+  prevent_user_existence_errors = "ENABLED"
+  enable_token_revocation       = true
+  explicit_auth_flows = [
+    "ALLOW_REFRESH_TOKEN_AUTH",
+    "ALLOW_USER_PASSWORD_AUTH"
+  ]
+  read_attributes  = ["email", "email_verified"]
+  write_attributes = ["email"]
 
   access_token_validity  = 60
   id_token_validity      = 60

@@ -62,6 +62,7 @@ import {
   type KanbanColumnDropPlacement,
   type ExplorerEntityDragItem,
 } from "./shared";
+import { getActiveCompanyID } from "../../auth/currentCompany";
 
 type HighlightedEntity = { nodeID: string } | null;
 
@@ -213,7 +214,7 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
 
 export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark"; arenaMode?: boolean }> = ({ accent, widgetId, theme = "teal", arenaMode = false }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
-  const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
+  const companyID = getActiveCompanyID();
   const frameBoardID = widgetId?.trim() ? widgetId : "global-kanban";
   const [activeBoardID, setActiveBoardID] = useState(frameBoardID);
   const [activeLogicGateID, setActiveLogicGateID] = useState("");

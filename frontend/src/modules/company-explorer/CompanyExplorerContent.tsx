@@ -42,6 +42,7 @@ import { useCompanyExplorerSelectionBridge } from "./useCompanyExplorerSelection
 import { useCompanyExplorerTreeModel } from "./useCompanyExplorerTreeModel";
 import { COMPANY_EXPLORER_TREE_ROW_HEIGHT } from "./useCompanyExplorerVirtualTree";
 import { buildCompanyExplorerTreeRows } from "./companyExplorerTreeRows";
+import { getActiveCompanyID } from "../../auth/currentCompany";
 
 type WorkspaceStreamEnvelope = {
   company_id: string;
@@ -88,7 +89,7 @@ function getExplorerSearchRowsForSelection(rows: ExplorerTreeNode[], selectedRow
 // Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
 export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
-  const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
+  const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
   const expandedStorageKey = `company-explorer-expanded-v1:${companyID}:${scope}`;
   const scrollStorageKey = `company-explorer-scroll-v1:${companyID}:${scope}`;

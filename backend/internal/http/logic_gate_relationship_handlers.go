@@ -20,6 +20,12 @@ func (s *Server) handleLogicGateRelationships(w http.ResponseWriter, r *http.Req
 			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships")
 			return
 		}
+		if sets, shouldFilter, err := s.assignmentSetsForRequest(r, companyID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gate_relationships")
+			return
+		} else if shouldFilter {
+			items = filterLogicGateRelationshipsByAssignments(items, sets)
+		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"logic_gate_relationships": items})
 		return
 	}

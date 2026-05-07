@@ -53,9 +53,14 @@ output "cognito_spa_client_id" {
   value       = aws_cognito_user_pool_client.spa.id
 }
 
-output "cognito_domain" {
-  description = "Cognito managed login domain."
-  value       = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com"
+output "cognito_region" {
+  description = "Cognito User Pool region for custom frontend auth."
+  value       = var.aws_region
+}
+
+output "cognito_issuer" {
+  description = "Cognito JWT issuer URL."
+  value       = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.main.id}"
 }
 
 output "dev_company_id" {

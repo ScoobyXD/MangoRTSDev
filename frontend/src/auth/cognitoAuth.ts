@@ -5,46 +5,153 @@ type TokenSet = {
   expires_at: number;
 };
 
-type CognitoConfig = {
+export type CognitoConfig = {
   enabled: boolean;
-  domain: string;
+  region: string;
+  userPoolID: string;
   clientID: string;
-  redirectURI: string;
-  logoutURI: string;
-  scopes: string;
   apiBase: string;
 };
 
-const TOKEN_KEY = "mangorts:cognito-token-v1";
-const PKCE_VERIFIER_KEY = "mangorts:cognito-pkce-verifier-v1";
-const OAUTH_STATE_KEY = "mangorts:cognito-oauth-state-v1";
+export type LoginResult =
+  | { status: "authenticated" }
+  | { status: "new_password_required"; username: string; session: string };
 
-export async function bootstrapAuth(): Promise<void> {
-  const config = readConfig();
-  if (!config.enabled) return;
+export type MangoMembership = {
+  company_id: string;
+  user_id: string;
+  role: "dev_admin" | "company_admin" | "company_user" | "company_viewer";
+  created_timestamp: string;
+  updated_timestamp: string;
+};
 
-  const url = new URL(window.location.href);
-  const code = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
-  if (code) {
-    await completeLogin(config, code, state ?? "");
-    url.searchParams.delete("code");
-    url.searchParams.delete("state");
-    window.history.replaceState({}, document.title, url.toString());
+export type MangoUser = {
+  user_id: string;
+  cognito_subject: string;
+  email: string;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
+export type CurrentUserResponse = {
+  user: MangoUser;
+  memberships: MangoMembership[];
+  is_dev_admin: boolean;
+};
+
+const TOKEN_KEY = "mangorts:cognito-token-v2";
+
+export function bootstrapAuth(): Promise<void> {
+  return Promise.resolve();
+}
+
+export function readAuthConfig(): CognitoConfig {
+  const env = import.meta.env ?? {};
+  const browserOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  const mode = (env.VITE_AUTH_MODE as string | undefined)?.trim().toLowerCase();
+  const region = (env.VITE_COGNITO_REGION as string | undefined)?.trim() || (env.VITE_AWS_REGION as string | undefined)?.trim() || "";
+  const userPoolID = (env.VITE_COGNITO_USER_POOL_ID as string | undefined)?.trim() ?? "";
+  const clientID = (env.VITE_COGNITO_CLIENT_ID as string | undefined)?.trim() ?? "";
+  const apiBase = (env.VITE_API_BASE_URL as string | undefined)?.trim() || browserOrigin;
+  return {
+    enabled: mode === "cognito",
+    region,
+    userPoolID,
+    clientID,
+    apiBase,
+  };
+}
+
+export function isAuthEnabled(): boolean {
+  return readAuthConfig().enabled;
+}
+
+export function hasStoredToken(): boolean {
+  return readToken() !== null;
+}
+
+export async function loginWithPassword(email: string, password: string): Promise<LoginResult> {
+  const config = readAuthConfig();
+  assertConfigured(config);
+  const username = normalizeEmail(email);
+  const response = await cognitoRequest<InitiateAuthResponse>(config, "InitiateAuth", {
+    AuthFlow: "USER_PASSWORD_AUTH",
+    ClientId: config.clientID,
+    AuthParameters: {
+      USERNAME: username,
+      PASSWORD: password,
+    },
+  });
+  if (response.AuthenticationResult) {
+    writeAuthResult(response.AuthenticationResult);
+    return { status: "authenticated" };
   }
-
-  const token = await getAccessToken(config);
-  if (!token) {
-    await beginLogin(config);
+  if (response.ChallengeName === "NEW_PASSWORD_REQUIRED" && response.Session) {
+    return { status: "new_password_required", username, session: response.Session };
   }
+  throw new Error("unsupported_cognito_challenge");
+}
+
+export async function completeNewPassword(username: string, session: string, newPassword: string): Promise<void> {
+  const config = readAuthConfig();
+  assertConfigured(config);
+  const response = await cognitoRequest<ChallengeResponse>(config, "RespondToAuthChallenge", {
+    ChallengeName: "NEW_PASSWORD_REQUIRED",
+    ClientId: config.clientID,
+    Session: session,
+    ChallengeResponses: {
+      USERNAME: normalizeEmail(username),
+      NEW_PASSWORD: newPassword,
+    },
+  });
+  if (!response.AuthenticationResult) {
+    throw new Error("new_password_challenge_failed");
+  }
+  writeAuthResult(response.AuthenticationResult);
+}
+
+export async function forgotPassword(email: string): Promise<void> {
+  const config = readAuthConfig();
+  assertConfigured(config);
+  await cognitoRequest<unknown>(config, "ForgotPassword", {
+    ClientId: config.clientID,
+    Username: normalizeEmail(email),
+  });
+}
+
+export async function resetPassword(email: string, confirmationCode: string, newPassword: string): Promise<void> {
+  const config = readAuthConfig();
+  assertConfigured(config);
+  await cognitoRequest<unknown>(config, "ConfirmForgotPassword", {
+    ClientId: config.clientID,
+    Username: normalizeEmail(email),
+    ConfirmationCode: confirmationCode.trim(),
+    Password: newPassword,
+  });
+}
+
+export async function acceptInvitation(token: string): Promise<void> {
+  await apiFetchJSON("/v1/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify({ token: token.trim() }),
+  });
+}
+
+export async function fetchCurrentUser(): Promise<CurrentUserResponse> {
+  return apiFetchJSON<CurrentUserResponse>("/v1/me");
+}
+
+export function logout(): void {
+  clearToken();
 }
 
 export function installAuthenticatedFetch(): void {
-  const config = readConfig();
-  if (!config.enabled) return;
+  const config = readAuthConfig();
+  const installedFetch = window.fetch as typeof window.fetch & { __mangortsAuthInstalled?: boolean };
+  if (!config.enabled || installedFetch.__mangortsAuthInstalled) return;
 
   const originalFetch = window.fetch.bind(window);
-  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const wrapped = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const token = shouldAuthorizeRequest(config, input) ? await getAccessToken(config) : "";
     if (!token) {
       return originalFetch(input, init);
@@ -53,123 +160,95 @@ export function installAuthenticatedFetch(): void {
     headers.set("Authorization", `Bearer ${token}`);
     return originalFetch(input, { ...init, headers });
   };
+  (wrapped as { __mangortsAuthInstalled?: boolean }).__mangortsAuthInstalled = true;
+  window.fetch = wrapped;
 }
 
 export async function getApiAccessToken(): Promise<string> {
-  const config = readConfig();
+  const config = readAuthConfig();
   if (!config.enabled) return "";
   return getAccessToken(config);
 }
 
-function readConfig(): CognitoConfig {
-  const env = import.meta.env ?? {};
-  const browserOrigin = typeof window !== "undefined" ? window.location.origin : "";
-  const mode = (env.VITE_AUTH_MODE as string | undefined)?.trim().toLowerCase();
-  const domain = normalizeDomain(env.VITE_COGNITO_DOMAIN as string | undefined);
-  const clientID = (env.VITE_COGNITO_CLIENT_ID as string | undefined)?.trim() ?? "";
-  const redirectURI = (env.VITE_COGNITO_REDIRECT_URI as string | undefined)?.trim() || browserOrigin;
-  const logoutURI = (env.VITE_COGNITO_LOGOUT_URI as string | undefined)?.trim() || browserOrigin;
-  const scopes = (env.VITE_COGNITO_SCOPES as string | undefined)?.trim() || "openid email profile";
-  const apiBase = (env.VITE_API_BASE_URL as string | undefined)?.trim() || browserOrigin;
-  return {
-    enabled: mode === "cognito",
-    domain,
-    clientID,
-    redirectURI,
-    logoutURI,
-    scopes,
-    apiBase,
-  };
+export async function apiFetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
+  const config = readAuthConfig();
+  const headers = new Headers(init?.headers);
+  if (init?.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const response = await fetch(`${config.apiBase}${path}`, { ...init, headers });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `api_${response.status}`);
+  }
+  return response.json() as Promise<T>;
 }
+
+type CognitoAuthResult = {
+  AccessToken: string;
+  IdToken?: string;
+  RefreshToken?: string;
+  ExpiresIn: number;
+};
+
+type InitiateAuthResponse = {
+  AuthenticationResult?: CognitoAuthResult;
+  ChallengeName?: string;
+  Session?: string;
+};
+
+type ChallengeResponse = {
+  AuthenticationResult?: CognitoAuthResult;
+};
 
 async function getAccessToken(config: CognitoConfig): Promise<string> {
   const token = readToken();
   if (!token) return "";
   if (Date.now() < token.expires_at - 30_000) {
-    return token.access_token;
+    return token.id_token || token.access_token;
   }
-  if (!token.refresh_token) return "";
+  if (!token.refresh_token) {
+    clearToken();
+    return "";
+  }
   try {
-    const refreshed = await exchangeToken(config, {
-      grant_type: "refresh_token",
-      client_id: config.clientID,
-      refresh_token: token.refresh_token,
+    const response = await cognitoRequest<InitiateAuthResponse>(config, "InitiateAuth", {
+      AuthFlow: "REFRESH_TOKEN_AUTH",
+      ClientId: config.clientID,
+      AuthParameters: {
+        REFRESH_TOKEN: token.refresh_token,
+      },
     });
-    const next = {
-      ...refreshed,
-      refresh_token: refreshed.refresh_token ?? token.refresh_token,
-    };
-    writeToken(next);
-    return next.access_token;
+    if (!response.AuthenticationResult) {
+      clearToken();
+      return "";
+    }
+    writeAuthResult({
+      ...response.AuthenticationResult,
+      RefreshToken: response.AuthenticationResult.RefreshToken ?? token.refresh_token,
+    });
+    const next = readToken();
+    return next?.id_token || next?.access_token || "";
   } catch {
     clearToken();
     return "";
   }
 }
 
-async function beginLogin(config: CognitoConfig): Promise<never> {
-  assertConfigured(config);
-  const verifier = randomString(64);
-  const challenge = await pkceChallenge(verifier);
-  const state = randomString(32);
-  sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
-  sessionStorage.setItem(OAUTH_STATE_KEY, state);
-
-  const authorize = new URL(`${config.domain}/oauth2/authorize`);
-  authorize.searchParams.set("response_type", "code");
-  authorize.searchParams.set("client_id", config.clientID);
-  authorize.searchParams.set("redirect_uri", config.redirectURI);
-  authorize.searchParams.set("scope", config.scopes);
-  authorize.searchParams.set("state", state);
-  authorize.searchParams.set("code_challenge_method", "S256");
-  authorize.searchParams.set("code_challenge", challenge);
-  window.location.assign(authorize.toString());
-  return new Promise<never>(() => undefined);
-}
-
-async function completeLogin(config: CognitoConfig, code: string, state: string): Promise<void> {
-  assertConfigured(config);
-  const expectedState = sessionStorage.getItem(OAUTH_STATE_KEY) ?? "";
-  const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY) ?? "";
-  sessionStorage.removeItem(OAUTH_STATE_KEY);
-  sessionStorage.removeItem(PKCE_VERIFIER_KEY);
-  if (!expectedState || state !== expectedState || !verifier) {
-    clearToken();
-    throw new Error("invalid_cognito_login_state");
-  }
-
-  const token = await exchangeToken(config, {
-    grant_type: "authorization_code",
-    client_id: config.clientID,
-    code,
-    redirect_uri: config.redirectURI,
-    code_verifier: verifier,
-  });
-  writeToken(token);
-}
-
-async function exchangeToken(config: CognitoConfig, params: Record<string, string>): Promise<TokenSet> {
-  const body = new URLSearchParams(params);
-  const response = await fetch(`${config.domain}/oauth2/token`, {
+async function cognitoRequest<T>(config: CognitoConfig, action: string, payload: unknown): Promise<T> {
+  const response = await fetch(`https://cognito-idp.${config.region}.amazonaws.com/`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
+    headers: {
+      "Content-Type": "application/x-amz-json-1.1",
+      "X-Amz-Target": `AWSCognitoIdentityProviderService.${action}`,
+    },
+    body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw new Error(`cognito_token_${response.status}`);
+    const text = await response.text();
+    throw new Error(text || `cognito_${action}_${response.status}`);
   }
-  const payload = (await response.json()) as {
-    access_token: string;
-    id_token?: string;
-    refresh_token?: string;
-    expires_in: number;
-  };
-  return {
-    access_token: payload.access_token,
-    id_token: payload.id_token,
-    refresh_token: payload.refresh_token,
-    expires_at: Date.now() + payload.expires_in * 1000,
-  };
+  return response.json() as Promise<T>;
 }
 
 function shouldAuthorizeRequest(config: CognitoConfig, input: RequestInfo | URL): boolean {
@@ -182,8 +261,18 @@ function shouldAuthorizeRequest(config: CognitoConfig, input: RequestInfo | URL)
   return url.origin === apiBase.origin && (url.pathname.startsWith("/v1/") || url.pathname === "/healthz");
 }
 
+function writeAuthResult(result: CognitoAuthResult): void {
+  const token: TokenSet = {
+    access_token: result.AccessToken,
+    id_token: result.IdToken,
+    refresh_token: result.RefreshToken,
+    expires_at: Date.now() + result.ExpiresIn * 1000,
+  };
+  sessionStorage.setItem(TOKEN_KEY, JSON.stringify(token));
+}
+
 function readToken(): TokenSet | null {
-  const raw = localStorage.getItem(TOKEN_KEY);
+  const raw = sessionStorage.getItem(TOKEN_KEY);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as TokenSet;
@@ -193,42 +282,16 @@ function readToken(): TokenSet | null {
   }
 }
 
-function writeToken(token: TokenSet): void {
-  localStorage.setItem(TOKEN_KEY, JSON.stringify(token));
-}
-
 function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
-}
-
-function normalizeDomain(value: string | undefined): string {
-  const trimmed = value?.trim() ?? "";
-  if (!trimmed) return "";
-  return trimmed.startsWith("https://") ? trimmed.replace(/\/$/, "") : `https://${trimmed.replace(/\/$/, "")}`;
+  sessionStorage.removeItem(TOKEN_KEY);
 }
 
 function assertConfigured(config: CognitoConfig): void {
-  if (!config.domain || !config.clientID) {
+  if (!config.region || !config.userPoolID || !config.clientID) {
     throw new Error("cognito_auth_not_configured");
   }
 }
 
-function randomString(length: number): string {
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
-  return base64URL(bytes).slice(0, length);
-}
-
-async function pkceChallenge(verifier: string): Promise<string> {
-  const bytes = new TextEncoder().encode(verifier);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return base64URL(new Uint8Array(digest));
-}
-
-function base64URL(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
 }

@@ -65,6 +65,20 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_boards")
 		return
 	}
+	if sets, shouldFilter, err := s.assignmentSetsForRequest(r, companyID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_filter_workspace_snapshot")
+		return
+	} else if shouldFilter {
+		nodes = filterNodesByAssignments(nodes, sets)
+		relationships = filterNodeRelationshipsByAssignments(relationships, sets)
+		logicGates = filterLogicGatesByAssignments(logicGates, sets)
+		logicGateRelationships = filterLogicGateRelationshipsByAssignments(logicGateRelationships, sets)
+		folders = filterFoldersByAssignments(folders, sets)
+		folderItems = filterFolderItemsByAssignments(folderItems, sets)
+		nodeMapPositions = filterNodeMapPositionsByAssignments(nodeMapPositions, sets)
+		logicGateMapPositions = filterLogicGateMapPositionsByAssignments(logicGateMapPositions, sets)
+		kanbanBoards = filterKanbanBoardsByAssignments(kanbanBoards, sets)
+	}
 	// Keep snapshot payload deterministic for unchanged data so ETag-based 304 responses
 	// actually work. Using a "now" timestamp here makes every response look different and
 	// defeats conditional GETs on this hot path.

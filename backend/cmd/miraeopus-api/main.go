@@ -20,6 +20,7 @@ func main() {
 	defer cleanup()
 	server := httpapi.NewServerWithOptions(repo, httpapi.ServerOptions{
 		AuthValidator: buildAuthValidator(),
+		CognitoAdmin:  buildCognitoAdminClient(),
 	})
 
 	addr := os.Getenv("MANGORTS_ADDR")
@@ -113,8 +114,20 @@ func buildAuthValidator() *auth.Validator {
 	return auth.NewValidator(auth.ValidatorConfig{
 		Issuer:   issuer,
 		ClientID: clientID,
-		TokenUse: getenvDefault("COGNITO_TOKEN_USE", "access"),
+		TokenUse: getenvDefault("COGNITO_TOKEN_USE", "access,id"),
 	}, auth.NewRemoteJWKSource(jwksURL))
+}
+
+func buildCognitoAdminClient() *auth.CognitoAdminClient {
+	if !strings.EqualFold(os.Getenv("AUTH_MODE"), "cognito") {
+		return nil
+	}
+	region := getenvDefault("AWS_REGION", getenvDefault("AWS_DEFAULT_REGION", ""))
+	userPoolID := os.Getenv("COGNITO_USER_POOL_ID")
+	if region == "" || userPoolID == "" {
+		return nil
+	}
+	return auth.NewCognitoAdminClient(region, userPoolID)
 }
 
 func withLogging(next http.Handler) http.Handler {

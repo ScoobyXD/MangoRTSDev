@@ -27,6 +27,8 @@ type MemoryRepo struct {
 	users             map[string]domain.User
 	companies         map[string]domain.Company
 	memberships       map[string]domain.CompanyMembership
+	invitations       map[string]domain.Invitation
+	assignments       map[string]domain.ResourceAssignment
 }
 
 func NewMemoryRepo() *MemoryRepo {
@@ -51,6 +53,8 @@ func NewMemoryRepo() *MemoryRepo {
 		users:             map[string]domain.User{},
 		companies:         map[string]domain.Company{},
 		memberships:       map[string]domain.CompanyMembership{},
+		invitations:       map[string]domain.Invitation{},
+		assignments:       map[string]domain.ResourceAssignment{},
 	}
 }
 
@@ -68,4 +72,8 @@ func boardKey(companyID, boardID string) string {
 
 func membershipKey(companyID, userID string) string {
 	return companyID + ":" + userID
+}
+
+func resourceAssignmentKey(companyID, resourceType, resourceID, userID string) string {
+	return companyID + ":" + resourceType + ":" + resourceID + ":" + userID
 }
