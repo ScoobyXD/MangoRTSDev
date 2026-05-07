@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { EditorTabID } from "./editorTabs";
 import { normalizeNodeDueDateDraft } from "./editorDates";
 
@@ -16,7 +16,7 @@ type EditorLinkedDocumentPanelsProps = {
     assigneeDraft: string;
     dueDateDraft: string;
   } | null;
-  companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
+  companyUsers: Array<{ user_id: string; email?: string; display_name?: string; role?: string }>;
   isEditingTitle: boolean;
   editingTitleRef: React.RefObject<HTMLSpanElement>;
   editingTitleDraftRef: React.MutableRefObject<string>;
@@ -80,6 +80,13 @@ const CalendarIcon: React.FC<{ color: string }> = ({ color }) => (
   </svg>
 );
 
+const PersonIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block" }}>
+    <circle cx="8" cy="5.2" r="2.65" fill="none" stroke={color} strokeWidth="1.35" />
+    <path d="M3.1 13.4c.55-2.6 2.35-4.15 4.9-4.15s4.35 1.55 4.9 4.15" fill="none" stroke={color} strokeWidth="1.35" strokeLinecap="round" />
+  </svg>
+);
+
 export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProps> = ({
   activeTab,
   linkedEntityKind,
@@ -105,11 +112,24 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   onCommitNodeDueDateDraft,
 }) => {
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
-  const assigneeListID = useId();
+  const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false);
   const priorityMenuRef = useRef<HTMLSpanElement | null>(null);
+  const assigneeMenuRef = useRef<HTMLSpanElement | null>(null);
   const dueDatePickerRef = useRef<HTMLInputElement | null>(null);
   const selectedPriority = NODE_PRIORITY_OPTIONS.find((option) => option.value === (nodePresetFields?.priorityDraft || "0")) ?? NODE_PRIORITY_OPTIONS[0];
   const statusColor = validHexColor(nodePresetFields?.statusColor ?? "");
+  const filteredCompanyUsers = useMemo(() => {
+    const query = (nodePresetFields?.assigneeDraft ?? "").trim().toLowerCase();
+    const matches = companyUsers.filter((user) => {
+      if (!query) return true;
+      const label = companyUserOptionLabel(user).toLowerCase();
+      return label.includes(query)
+        || (user.display_name ?? "").toLowerCase().includes(query)
+        || (user.email ?? "").toLowerCase().includes(query)
+        || user.user_id.toLowerCase().includes(query);
+    });
+    return matches.slice(0, 8);
+  }, [companyUsers, nodePresetFields?.assigneeDraft]);
 
   useEffect(() => {
     if (!priorityMenuOpen) return;
@@ -127,6 +147,23 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
       window.removeEventListener("keydown", onKeyDown, true);
     };
   }, [priorityMenuOpen]);
+
+  useEffect(() => {
+    if (!assigneeMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (assigneeMenuRef.current?.contains(event.target as Node)) return;
+      setAssigneeMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAssigneeMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [assigneeMenuOpen]);
 
   return (
     <>
@@ -213,27 +250,83 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               </div>
               <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Person In Charge:</strong>
-                <input
-                  list={assigneeListID}
-                  value={nodePresetFields.assigneeDraft}
-                  onChange={(event) => {
-                    const next = event.target.value;
-                    onSetNodeAssigneeDraft(next);
-                    if (companyUsers.some((user) => companyUserOptionLabel(user) === next)) {
-                      onCommitNodeAssigneeDraft(next);
-                    }
-                  }}
-                  onBlur={(event) => onCommitNodeAssigneeDraft(event.currentTarget.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") event.currentTarget.blur();
-                  }}
-                  placeholder="Unassigned"
-                  aria-label="Person in charge"
-                  style={{ width: "100%", minWidth: 0, border: "1px solid transparent", background: "transparent", color: "inherit", font: "inherit", padding: 0, outline: "none" }}
-                />
-                <datalist id={assigneeListID}>
-                  {companyUsers.map((user) => <option key={user.user_id} value={companyUserOptionLabel(user)} />)}
-                </datalist>
+                <span ref={assigneeMenuRef} style={{ position: "relative", minWidth: 0, display: "block" }}>
+                  <input
+                    value={nodePresetFields.assigneeDraft}
+                    onFocus={() => setAssigneeMenuOpen(true)}
+                    onChange={(event) => {
+                      onSetNodeAssigneeDraft(event.target.value);
+                      setAssigneeMenuOpen(true);
+                    }}
+                    onBlur={(event) => {
+                      window.setTimeout(() => setAssigneeMenuOpen(false), 120);
+                      onCommitNodeAssigneeDraft(event.currentTarget.value);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        if (assigneeMenuOpen && filteredCompanyUsers[0]) {
+                          const label = companyUserOptionLabel(filteredCompanyUsers[0]);
+                          onSetNodeAssigneeDraft(label);
+                          onCommitNodeAssigneeDraft(label);
+                          setAssigneeMenuOpen(false);
+                          return;
+                        }
+                        event.currentTarget.blur();
+                      }
+                    }}
+                    placeholder="Unassigned"
+                    aria-label="Person in charge"
+                    style={{ width: "100%", minWidth: 0, border: "1px solid transparent", background: "transparent", color: "inherit", font: "inherit", padding: 0, outline: "none" }}
+                  />
+                  {assigneeMenuOpen && (
+                    <section
+                      className="company-explorer-scroll"
+                      style={{
+                        position: "absolute",
+                        top: "calc(100% + 6px)",
+                        left: 0,
+                        width: "min(320px, 86vw)",
+                        maxHeight: 260,
+                        overflowY: "auto",
+                        border: `1px solid ${ruleColor}`,
+                        borderRadius: 8,
+                        background: "#ffffff",
+                        color: "#111827",
+                        boxShadow: "0 14px 30px rgba(15,23,42,0.18)",
+                        padding: "4px 0",
+                        zIndex: 40,
+                      }}
+                    >
+                      {filteredCompanyUsers.length === 0 ? (
+                        <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 800 }}>No people found</div>
+                      ) : filteredCompanyUsers.map((user) => {
+                        const label = companyUserOptionLabel(user);
+                        return (
+                          <button
+                            key={user.user_id}
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              onSetNodeAssigneeDraft(label);
+                              onCommitNodeAssigneeDraft(label);
+                              setAssigneeMenuOpen(false);
+                            }}
+                            style={{ width: "100%", minHeight: 34, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "none", background: "transparent", color: "#111827", cursor: "pointer", padding: "5px 9px", textAlign: "left" }}
+                          >
+                            <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: hexWithAlpha(accent, "18"), color: accent }}>
+                              <PersonIcon color={accent} />
+                            </span>
+                            <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
+                              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 800 }}>{label}</span>
+                              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 9, fontWeight: 800 }}>{user.role ?? user.user_id}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </section>
+                  )}
+                </span>
               </label>
               <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Priority:</strong>

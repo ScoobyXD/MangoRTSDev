@@ -299,6 +299,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [boardsLoading, setBoardsLoading] = useState(false);
   const [columns, setColumns] = useState<KanbanColumn[]>([]);
   const [cards, setCards] = useState<KanbanCard[]>([]);
+  const [loadedBoardID, setLoadedBoardID] = useState(frameBoardID);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const frameID = frameBoardID;
@@ -644,6 +645,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (boardRefreshRequestRef.current !== requestID || activeBoardIDRef.current !== requestedBoardID) return;
       setColumns(sortColumns(nextColumns));
       setCards(nextCards);
+      setLoadedBoardID(requestedBoardID);
     } catch {
       if (boardRefreshRequestRef.current !== requestID) return;
       setError("Kanban board API unavailable");
@@ -657,8 +659,9 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [refreshBoard]);
 
   useEffect(() => {
+    if (loadedBoardID !== boardID) return;
     primeKanbanBoardContentsCache(apiBase, companyID, boardID, { columns, cards });
-  }, [apiBase, boardID, cards, columns, companyID]);
+  }, [apiBase, boardID, cards, columns, companyID, loadedBoardID]);
 
   useEffect(() => {
     refreshBoards();
@@ -827,7 +830,15 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         setActiveLogicGateID(logicGateID);
         setActiveLogicGateLabel(logicGateID ? (selection.label?.trim() || "Logic Gate Kanban") : "");
         setNodeEditorOverlay(null);
-        setActiveBoardID(selection.entityID.trim());
+        const nextBoardID = selection.entityID.trim();
+        activeBoardIDRef.current = nextBoardID;
+        setColumns([]);
+        setCards([]);
+        setLoadedBoardID("");
+        invalidateKanbanBoardContentsCache(apiBase, companyID, nextBoardID);
+        setLoading(true);
+        setActiveBoardID(nextBoardID);
+        void refreshBoard(nextBoardID);
         return;
       }
       if (selection.entityKind === "logic_gate" && selection.entityID.trim()) {
@@ -839,7 +850,14 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         setActiveLogicGateID(logicGateID);
         setActiveLogicGateLabel(selection.label?.trim() || "Logic Gate Kanban");
         setNodeEditorOverlay(null);
+        activeBoardIDRef.current = nextBoardID;
+        setColumns([]);
+        setCards([]);
+        setLoadedBoardID("");
+        invalidateKanbanBoardContentsCache(apiBase, companyID, nextBoardID);
+        setLoading(true);
         setActiveBoardID(nextBoardID);
+        void refreshBoard(nextBoardID);
         const cachedBoard = boardsRef.current.find((board) => board.board_id === nextBoardID || board.logic_gate_id === logicGateID);
         if (cachedBoard) {
           upsertBoardInList(cachedBoard);
@@ -869,7 +887,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const liveSelection = readLiveSelectionForFrame(companyID, frameID);
     if (liveSelection) applyLiveSelection(liveSelection);
     return subscribeLiveSelection(frameID, applyLiveSelection);
-  }, [apiBase, cards, companyID, frameID, upsertBoardInList]);
+  }, [apiBase, cards, companyID, frameID, refreshBoard, upsertBoardInList]);
 
   const addColumn = useCallback(async () => {
     setError("");
@@ -1401,6 +1419,11 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           setSelectionAnchorCardID("");
           setHighlightedEntity(null);
           setNodeEditorOverlay(null);
+          setColumns([]);
+          setCards([]);
+          setLoadedBoardID("");
+          invalidateKanbanBoardContentsCache(apiBase, companyID, nextBoardID);
+          setLoading(true);
           lastLocalBoardSelectionChangedAtRef.current = Date.now();
           activeBoardIDRef.current = nextBoardID;
           setActiveBoardID(nextBoardID);

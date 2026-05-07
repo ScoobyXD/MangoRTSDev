@@ -15,6 +15,8 @@ type UseCompanyExplorerTreeModelInput = {
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
   rootRowOrder: Record<string, number>;
+  specialFolderPlacements: Record<string, { parentFolderID?: string; position?: number }>;
+  folderSystemParents: Record<string, string>;
   selectedTreeID: string;
   treeViewportHeight: number;
   treeScrollTop: number;
@@ -28,13 +30,15 @@ export function useCompanyExplorerTreeModel({
   folders,
   folderItems,
   rootRowOrder,
+  specialFolderPlacements,
+  folderSystemParents,
   selectedTreeID,
   treeViewportHeight,
   treeScrollTop,
 }: UseCompanyExplorerTreeModelInput) {
   const treeRows = useMemo<ExplorerTreeNode[]>(
-    () => buildCompanyExplorerTreeRows({ expanded, nodes, logicGates, kanbanBoards, folders, folderItems, rootRowOrder }),
-    [expanded, nodes, logicGates, kanbanBoards, folders, folderItems, rootRowOrder],
+    () => buildCompanyExplorerTreeRows({ expanded, nodes, logicGates, kanbanBoards, folders, folderItems, rootRowOrder, specialFolderPlacements, folderSystemParents }),
+    [expanded, nodes, logicGates, kanbanBoards, folders, folderItems, rootRowOrder, specialFolderPlacements, folderSystemParents],
   );
 
   const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID), [selectedTreeID, treeRows]);

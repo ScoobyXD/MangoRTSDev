@@ -10,13 +10,15 @@ export type ExplorerCreationContextRow = {
   kanbanBoardID?: string;
   folderID?: string;
   folderKind?: CompanyExplorerFolderKind;
+  systemFolderID?: string;
 };
 
 export type ExplorerDropPayload = {
-  kind: ExplorerTreeEntityKind | "batch";
+  kind: ExplorerTreeEntityKind | "batch" | "system_folder";
   sourceTreeID?: string;
   folderID?: string;
   folderKind?: CompanyExplorerFolderKind;
+  systemFolderID?: string;
   itemID?: string;
   itemType?: CompanyExplorerItemType;
   items?: ExplorerDropPayloadItem[];
@@ -92,6 +94,7 @@ export type ExplorerSearchRow = ExplorerCreationContextRow & {
 export type ExplorerCreationTargets = {
   preferredFolderKind: CompanyExplorerFolderKind;
   preferredFolderParentID: string;
+  preferredSystemFolderParentID: string;
   nodeFolderParentID: string;
   logicGateFolderParentID: string;
   nodeParentFolderID: string;
@@ -141,6 +144,10 @@ export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | nul
   // Drag events fire on the row under the pointer. A file row already carries
   // its containing folderID, so users can drop anywhere inside that visible
   // folder section without us scanning the DOM or the full tree on every hover.
+  if (payload.kind === "system_folder") {
+    return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
+  }
+
   if (payload.kind === "folder") {
     if (!payload.folderID || payload.folderID === row.folderID || payload.folderKind !== row.folderKind) return null;
     return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
@@ -235,10 +242,12 @@ export function resolveExplorerCreationTargets(row?: ExplorerCreationContextRow 
   const nodeFolderParentID = nodeParentFolderID;
   const logicGateFolderParentID = logicGateParentFolderID;
   const preferredFolderKind: CompanyExplorerFolderKind = row?.folderKind === "logic_gate" || row?.kind === "logic_gate" ? "logic_gate" : "node";
+  const preferredSystemFolderParentID = row?.systemFolderID ?? "";
 
   return {
     preferredFolderKind,
     preferredFolderParentID: preferredFolderKind === "logic_gate" ? logicGateParentFolderID : nodeParentFolderID,
+    preferredSystemFolderParentID,
     nodeFolderParentID,
     logicGateFolderParentID,
     nodeParentFolderID,
