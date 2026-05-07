@@ -90,28 +90,29 @@ func (c *CognitoAdminClient) adminCreateUser(ctx context.Context, email, message
 	return false, fmt.Errorf("cognito admin create user failed: status=%d", statusCode)
 }
 
-func (c *CognitoAdminClient) AdminSetUserPassword(ctx context.Context, email, password string) error {
+func (c *CognitoAdminClient) AdminDeleteUser(ctx context.Context, email string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
-	if c == nil || c.Region == "" || c.UserPoolID == "" || email == "" || strings.TrimSpace(password) == "" {
+	if c == nil || c.Region == "" || c.UserPoolID == "" || email == "" {
 		return ErrCognitoAdminUnavailable
 	}
 	payload := map[string]any{
 		"UserPoolId": c.UserPoolID,
 		"Username":   email,
-		"Password":   password,
-		"Permanent":  true,
 	}
-	statusCode, _, raw, err := c.cognitoPost(ctx, "AdminSetUserPassword", payload)
+	statusCode, header, raw, err := c.cognitoPost(ctx, "AdminDeleteUser", payload)
 	if err != nil {
 		return err
 	}
 	if statusCode >= 200 && statusCode <= 299 {
 		return nil
 	}
-	if detail := strings.TrimSpace(string(raw)); detail != "" {
-		return fmt.Errorf("cognito admin set user password failed: status=%d body=%s", statusCode, detail)
+	if strings.Contains(string(raw), "UserNotFoundException") || strings.Contains(header.Get("X-Amzn-Errortype"), "UserNotFoundException") {
+		return nil
 	}
-	return fmt.Errorf("cognito admin set user password failed: status=%d", statusCode)
+	if detail := strings.TrimSpace(string(raw)); detail != "" {
+		return fmt.Errorf("cognito admin delete user failed: status=%d body=%s", statusCode, detail)
+	}
+	return fmt.Errorf("cognito admin delete user failed: status=%d", statusCode)
 }
 
 func (c *CognitoAdminClient) cognitoPost(ctx context.Context, action string, payload map[string]any) (int, http.Header, []byte, error) {

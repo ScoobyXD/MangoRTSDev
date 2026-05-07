@@ -5,16 +5,14 @@ import (
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/store"
 	"net/http"
-	"time"
 )
 
 type CognitoAdminClient interface {
 	AdminCreateUser(ctx context.Context, email string) error
-	AdminSetUserPassword(ctx context.Context, email, password string) error
+	AdminDeleteUser(ctx context.Context, email string) error
 }
 
 type AuthEmailSender interface {
-	SendPasswordResetCode(ctx context.Context, email, code string, expiresIn time.Duration) error
 	SendSignupConfirmation(ctx context.Context, email, companyName string) error
 }
 
@@ -55,7 +53,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/invitations", s.handleInvitations)
 	mux.HandleFunc("/v1/invitations/accept", s.handleInvitationAccept)
 	mux.HandleFunc("/v1/password-resets/request", s.handlePasswordResetRequest)
-	mux.HandleFunc("/v1/password-resets/confirm", s.handlePasswordResetConfirm)
 	mux.HandleFunc("/v1/nodes", s.handleNodes)
 	mux.HandleFunc("/v1/nodes/", s.handleNodeSubresource)
 	mux.HandleFunc("/v1/node-relationships", s.handleNodeRelationships)

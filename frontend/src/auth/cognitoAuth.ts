@@ -42,6 +42,7 @@ export type CurrentUserResponse = {
 };
 
 const TOKEN_KEY = "mangorts:cognito-token-v2";
+const COGNITO_PASSWORD_RESET_SECONDS = 60 * 60;
 
 export function bootstrapAuth(): Promise<void> {
   return Promise.resolve();
@@ -120,20 +121,28 @@ export async function completeNewPassword(username: string, session: string, new
 }
 
 export async function forgotPassword(email: string): Promise<{ expires_in_seconds?: number }> {
-  return apiFetchJSON<{ expires_in_seconds?: number }>("/v1/password-resets/request", {
+  const username = normalizeEmail(email);
+  const eligibility = await apiFetchJSON<{ expires_in_seconds?: number }>("/v1/password-resets/request", {
     method: "POST",
-    body: JSON.stringify({ email: normalizeEmail(email) }),
+    body: JSON.stringify({ email: username }),
   });
+  const config = readAuthConfig();
+  assertConfigured(config);
+  await cognitoRequest<unknown>(config, "ForgotPassword", {
+    ClientId: config.clientID,
+    Username: username,
+  });
+  return { expires_in_seconds: eligibility.expires_in_seconds ?? COGNITO_PASSWORD_RESET_SECONDS };
 }
 
 export async function resetPassword(email: string, confirmationCode: string, newPassword: string): Promise<void> {
-  await apiFetchJSON<unknown>("/v1/password-resets/confirm", {
-    method: "POST",
-    body: JSON.stringify({
-      email: normalizeEmail(email),
-      code: confirmationCode.trim(),
-      new_password: newPassword,
-    }),
+  const config = readAuthConfig();
+  assertConfigured(config);
+  await cognitoRequest<unknown>(config, "ConfirmForgotPassword", {
+    ClientId: config.clientID,
+    Username: normalizeEmail(email),
+    ConfirmationCode: confirmationCode.trim(),
+    Password: newPassword,
   });
 }
 
@@ -336,20 +345,18 @@ function friendlyApiError(code: string): string {
       return "This user already exists.";
     case "display_name_required":
       return "Enter your name.";
-    case "password_reset_email_not_configured":
-      return "Password reset email is not configured.";
-    case "failed_to_send_password_reset_email":
-      return "The reset code email could not be sent. Try again shortly.";
-    case "password_reset_not_configured":
-      return "Password reset is not configured.";
-    case "password_reset_code_expired":
-      return "The reset code has expired. Request a new reset code.";
-    case "invalid_password_reset_code":
-      return "The reset code is not valid. Use the newest code from your email.";
-    case "failed_to_reset_cognito_password":
-      return "The password could not be reset in Cognito. Try requesting a new reset code.";
-    case "invalid_password_reset":
-      return "Enter your email, reset code, and new password.";
+    case "password_reset_user_not_found":
+      return "You are not a user.";
+    case "cognito_admin_not_configured":
+      return "Cognito admin actions are not configured.";
+    case "failed_to_delete_cognito_user":
+      return "The user could not be deleted in Cognito. Try again shortly.";
+    case "failed_to_delete_company_user":
+      return "The user could not be deleted from Mango. Try again shortly.";
+    case "company_user_not_found":
+      return "That user was not found in this company.";
+    case "cannot_delete_self":
+      return "You cannot delete your own signed-in account.";
     default:
       return "";
   }

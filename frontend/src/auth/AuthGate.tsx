@@ -28,7 +28,7 @@ type CompanyUser = {
   role: string;
 };
 
-const PASSWORD_RESET_SECONDS = 5 * 60;
+const PASSWORD_RESET_SECONDS = 60 * 60;
 
 type Company = {
   company_id: string;
@@ -186,6 +186,11 @@ function companyName(company?: Company | null): string {
   return company?.name?.trim() || "Company";
 }
 
+function selectedUserRole(me: CurrentUserResponse, selectedCompany?: CompanyOption | null): string {
+  if (me.is_dev_admin) return "dev_admin";
+  return selectedCompany?.role || me.memberships[0]?.role || "company_user";
+}
+
 function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -319,7 +324,7 @@ function ForgotPasswordPage({ onNavigate, initialCodeEntryOpen = false }: { onNa
           const seconds = payload.expires_in_seconds || PASSWORD_RESET_SECONDS;
           setExpiresAt(Date.now() + seconds * 1000);
           setCodeEntryOpen(true);
-          setMessage("Reset code sent. It expires in about 5 minutes. Only the newest reset code can be used.");
+          setMessage("Reset code sent. It expires in about 1 hour.");
         } catch (resetRequestError) {
           setError(formatAuthError(resetRequestError, "Password reset request failed"));
         } finally {
@@ -383,6 +388,9 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
   const [inviteToken, setInviteToken] = useState("");
   const [inviteMessage, setInviteMessage] = useState("");
   const [newCompanyName, setNewCompanyName] = useState("");
+  const [deleteConfirmation, setDeleteConfirmation] = useState<CompanyUser | null>(null);
+  const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -437,6 +445,17 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
             </form>
           )}
         </section>
+        <section style={sectionStyle}>
+          <h2 style={sectionTitleStyle}>User Profile</h2>
+          <div style={profileGridStyle}>
+            <span style={profileLabelStyle}>Name</span>
+            <span style={profileValueStyle}>{me.user.display_name || "No name set"}</span>
+            <span style={profileLabelStyle}>Email</span>
+            <span style={profileValueStyle}>{me.user.email}</span>
+            <span style={profileLabelStyle}>Role</span>
+            <span style={profileValueStyle}>{selectedUserRole(me, selectedCompany)}</span>
+          </div>
+        </section>
         {canManageSelectedCompany && <section style={sectionStyle}>
           <h2 style={sectionTitleStyle}>Invite</h2>
           <form style={{ display: "grid", gap: 8 }} onSubmit={async (event) => {
@@ -477,9 +496,78 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
       {canManageSelectedCompany && <section style={{ ...sectionStyle, marginTop: 14 }}>
         <h2 style={sectionTitleStyle}>Company Users</h2>
         <div style={{ display: "grid", gap: 6 }}>
-          {users.map((user) => <div key={user.user_id} style={rowStyle}><span>{companyUserLabel(user)}</span><span>{user.role}</span></div>)}
+          {users.map((user) => (
+            <div key={user.user_id} style={userRowStyle}>
+              <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{companyUserLabel(user)}</span>
+              <span>{user.role}</span>
+              <button
+                type="button"
+                style={{ ...smallButtonStyle, ...dangerButtonStyle }}
+                disabled={user.user_id === me.user.user_id}
+                onClick={() => {
+                  setError("");
+                  setDeleteAcknowledged(false);
+                  setDeleteConfirmation(user);
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          ))}
         </div>
       </section>}
+      {deleteConfirmation && (
+        <div style={modalBackdropStyle}>
+          <div style={modalStyle}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#111111" }}>
+              Are you sure you want to delete this user?
+            </div>
+            <div style={{ fontSize: 11, lineHeight: 1.4, color: "#2e2e2e", overflowWrap: "anywhere" }}>
+              This deletes {companyUserLabel(deleteConfirmation)} from Cognito and removes their Mango user, memberships, and invitation rows.
+            </div>
+            <label style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 8, alignItems: "start", fontSize: 11, lineHeight: 1.35 }}>
+              <input type="checkbox" checked={deleteAcknowledged} onChange={(event) => setDeleteAcknowledged(event.target.checked)} />
+              <span>Yes I know what I'm doing I want to delete this user.</span>
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button
+                type="button"
+                disabled={!deleteAcknowledged || deleteBusy}
+                onClick={async () => {
+                  if (!companyID || !deleteConfirmation) return;
+                  setDeleteBusy(true);
+                  setError("");
+                  try {
+                    await apiFetchJSON(`/v1/companies/${encodeURIComponent(companyID)}/users/${encodeURIComponent(deleteConfirmation.user_id)}`, { method: "DELETE" });
+                    setUsers((previous) => previous.filter((user) => user.user_id !== deleteConfirmation.user_id));
+                    setDeleteConfirmation(null);
+                    setDeleteAcknowledged(false);
+                    await load();
+                  } catch (deleteError) {
+                    console.error("Delete user failed", deleteError);
+                    setError(formatAuthError(deleteError, "Delete user failed"));
+                  } finally {
+                    setDeleteBusy(false);
+                  }
+                }}
+                style={{ ...smallButtonStyle, minHeight: 34, fontWeight: 800 }}
+              >
+                {deleteBusy ? "Deleting" : "Yes"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteConfirmation(null);
+                  setDeleteAcknowledged(false);
+                }}
+                style={{ ...smallButtonStyle, minHeight: 34, ...dangerButtonStyle }}
+              >
+                No
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -564,6 +652,54 @@ const rowStyle: React.CSSProperties = {
   minHeight: 32,
   borderBottom: "1px solid rgba(12, 67, 74, 0.16)",
   fontSize: 12,
+};
+
+const userRowStyle: React.CSSProperties = {
+  ...rowStyle,
+  gridTemplateColumns: "minmax(0, 1fr) auto auto",
+};
+
+const dangerButtonStyle: React.CSSProperties = {
+  borderColor: "#ff3d7f",
+  color: "#8b123f",
+};
+
+const profileGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "auto minmax(0, 1fr)",
+  gap: "6px 10px",
+  fontSize: 12,
+};
+
+const profileLabelStyle: React.CSSProperties = {
+  color: "rgba(4, 29, 34, 0.62)",
+  fontWeight: 800,
+  textTransform: "uppercase",
+};
+
+const profileValueStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflowWrap: "anywhere",
+};
+
+const modalBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.28)",
+  zIndex: 120,
+  display: "grid",
+  placeItems: "center",
+  padding: 16,
+};
+
+const modalStyle: React.CSSProperties = {
+  width: "min(420px, 100%)",
+  borderRadius: 8,
+  border: "1px solid rgba(0,233,255,0.45)",
+  background: "rgba(255,255,255,0.96)",
+  padding: 12,
+  display: "grid",
+  gap: 10,
 };
 
 function companyUserLabel(user: CompanyUser): string {

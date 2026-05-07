@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+const cognitoPasswordResetTTLSeconds = 60 * 60
+
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -57,24 +59,80 @@ func (s *Server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCompanySubresource(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/companies/"), "/")
 	parts := strings.Split(trimmed, "/")
-	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || parts[1] != "users" {
+	if len(parts) < 2 || len(parts) > 3 || strings.TrimSpace(parts[0]) == "" || parts[1] != "users" {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	companyID := strings.TrimSpace(parts[0])
-	if r.Method != http.MethodGet {
+	if len(parts) == 2 {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		if !requireCompanyAccess(w, r, companyID) {
+			return
+		}
+		users, err := s.repo.ListCompanyUsers(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_users")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"users": users})
+		return
+	}
+	if r.Method != http.MethodDelete {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	if !requireCompanyAccess(w, r, companyID) {
+	if !requireCompanyManager(w, r, companyID) {
 		return
 	}
-	users, err := s.repo.ListCompanyUsers(companyID)
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID := strings.TrimSpace(parts[2])
+	if userID == "" {
+		writeError(w, http.StatusBadRequest, "user_id_required")
+		return
+	}
+	target, err := s.repo.GetCompanyUser(companyID, userID)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "user_id_required")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "company_user_not_found")
+		return
+	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_company_users")
+		writeError(w, http.StatusInternalServerError, "failed_to_load_company_user")
 		return
 	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"users": users})
+	if target.UserID == actor.User.UserID {
+		writeError(w, http.StatusConflict, "cannot_delete_self")
+		return
+	}
+	if s.cognitoAdmin == nil {
+		writeError(w, http.StatusServiceUnavailable, "cognito_admin_not_configured")
+		return
+	}
+	if err := s.cognitoAdmin.AdminDeleteUser(r.Context(), target.Email); err != nil {
+		log.Printf("failed to delete cognito user email=%s user_id=%s: %v", target.Email, target.UserID, err)
+		writeError(w, http.StatusBadGateway, "failed_to_delete_cognito_user")
+		return
+	}
+	deleted, err := s.repo.DeleteCompanyUser(companyID, userID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "company_user_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_delete_company_user")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "user": deleted})
 }
 
 func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
@@ -209,10 +267,7 @@ func (s *Server) handlePasswordResetRequest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if _, err := s.repo.GetAuthUserByEmail(email); errors.Is(err, store.ErrNotFound) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":             "reset_code_sent_if_account_exists",
-			"expires_in_seconds": int(store.DefaultPasswordResetTTL.Seconds()),
-		})
+		writeError(w, http.StatusNotFound, "password_reset_user_not_found")
 		return
 	} else if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "email_required")
@@ -221,173 +276,10 @@ func (s *Server) handlePasswordResetRequest(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "failed_to_lookup_user")
 		return
 	}
-	if s.emailSender == nil {
-		writeError(w, http.StatusServiceUnavailable, "password_reset_email_not_configured")
-		return
-	}
-	reset, err := s.repo.CreatePasswordResetCode(store.CreatePasswordResetCodeInput{
-		Email:     email,
-		ExpiresIn: store.DefaultPasswordResetTTL,
-	})
-	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "email_required")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_create_password_reset")
-		return
-	}
-	if err := s.emailSender.SendPasswordResetCode(r.Context(), reset.Email, reset.Code, store.DefaultPasswordResetTTL); err != nil {
-		log.Printf("failed to send password reset email=%s: %v", reset.Email, err)
-		writeError(w, http.StatusBadGateway, "failed_to_send_password_reset_email")
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":             "reset_code_sent",
-		"expires_in_seconds": int(store.DefaultPasswordResetTTL.Seconds()),
+		"status":             "reset_user_found",
+		"expires_in_seconds": cognitoPasswordResetTTLSeconds,
 	})
-}
-
-func (s *Server) handlePasswordResetConfirm(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-	var req struct {
-		Email       string `json:"email"`
-		Code        string `json:"code"`
-		NewPassword string `json:"new_password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
-		return
-	}
-	if strings.TrimSpace(req.Email) == "" || strings.TrimSpace(req.Code) == "" || strings.TrimSpace(req.NewPassword) == "" {
-		writeError(w, http.StatusBadRequest, "invalid_password_reset")
-		return
-	}
-	if s.cognitoAdmin == nil {
-		writeError(w, http.StatusServiceUnavailable, "password_reset_not_configured")
-		return
-	}
-	reset, err := s.repo.ConsumePasswordResetCode(req.Email, req.Code)
-	if errors.Is(err, store.ErrExpired) {
-		writeError(w, http.StatusGone, "password_reset_code_expired")
-		return
-	}
-	if errors.Is(err, store.ErrInvalid) || errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusBadRequest, "invalid_password_reset_code")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_consume_password_reset")
-		return
-	}
-	if err := s.cognitoAdmin.AdminSetUserPassword(r.Context(), reset.Email, req.NewPassword); err != nil {
-		log.Printf("failed to set cognito password reset email=%s: %v", reset.Email, err)
-		writeError(w, http.StatusBadGateway, "failed_to_reset_cognito_password")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "password_reset"})
-}
-
-func (s *Server) handleResourceAssignments(w http.ResponseWriter, r *http.Request) {
-	actor, ok := authenticatedActor(r)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-	if r.Method == http.MethodGet {
-		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-		if companyID == "" {
-			writeError(w, http.StatusBadRequest, "company_id_required")
-			return
-		}
-		userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
-		if !actorCanManageCompany(actor, companyID) {
-			userID = actor.User.UserID
-		}
-		items, err := s.repo.ListResourceAssignments(store.ResourceAssignmentQuery{
-			CompanyID:    companyID,
-			ResourceType: strings.TrimSpace(r.URL.Query().Get("resource_type")),
-			ResourceID:   strings.TrimSpace(r.URL.Query().Get("resource_id")),
-			UserID:       userID,
-		})
-		if errors.Is(err, store.ErrInvalid) {
-			writeError(w, http.StatusBadRequest, "invalid_resource_assignment_query")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_list_resource_assignments")
-			return
-		}
-		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"assignments": items})
-		return
-	}
-	if r.Method == http.MethodPost {
-		var req struct {
-			CompanyID    string `json:"company_id"`
-			ResourceType string `json:"resource_type"`
-			ResourceID   string `json:"resource_id"`
-			UserID       string `json:"user_id"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_json")
-			return
-		}
-		req.CompanyID = strings.TrimSpace(req.CompanyID)
-		if !requireCompanyManager(w, r, req.CompanyID) {
-			return
-		}
-		item, err := s.repo.AssignResource(store.ResourceAssignmentInput{
-			CompanyID:        req.CompanyID,
-			ResourceType:     req.ResourceType,
-			ResourceID:       req.ResourceID,
-			UserID:           req.UserID,
-			AssignedByUserID: actor.User.UserID,
-		})
-		if errors.Is(err, store.ErrInvalid) {
-			writeError(w, http.StatusBadRequest, "invalid_resource_assignment")
-			return
-		}
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "assigned_user_not_found")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_assign_resource")
-			return
-		}
-		writeJSON(w, http.StatusCreated, item)
-		return
-	}
-	if r.Method == http.MethodDelete {
-		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-		if !requireCompanyManager(w, r, companyID) {
-			return
-		}
-		err := s.repo.UnassignResource(
-			companyID,
-			r.URL.Query().Get("resource_type"),
-			r.URL.Query().Get("resource_id"),
-			r.URL.Query().Get("user_id"),
-		)
-		if errors.Is(err, store.ErrInvalid) {
-			writeError(w, http.StatusBadRequest, "invalid_resource_assignment")
-			return
-		}
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "resource_assignment_not_found")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_unassign_resource")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "unassigned"})
-		return
-	}
-	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 }
 
 func requireDevAdmin(w http.ResponseWriter, r *http.Request) bool {

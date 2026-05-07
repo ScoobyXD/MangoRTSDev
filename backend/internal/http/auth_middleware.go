@@ -94,7 +94,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 
 func isPublicAuthEndpoint(path string) bool {
 	switch path {
-	case "/v1/password-resets/request", "/v1/password-resets/confirm":
+	case "/v1/password-resets/request":
 		return true
 	default:
 		return false

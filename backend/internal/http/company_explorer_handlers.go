@@ -26,12 +26,6 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
 		}
-		if sets, shouldFilter, err := s.assignmentSetsForRequest(r, companyID); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_filter_company_explorer_folders")
-			return
-		} else if shouldFilter {
-			items = filterFoldersByAssignments(items, sets)
-		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"folders": items})
 		return
 	}
@@ -312,12 +306,6 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 			return
-		}
-		if sets, shouldFilter, err := s.assignmentSetsForRequest(r, companyID); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_filter_company_explorer_folder_items")
-			return
-		} else if shouldFilter {
-			items = filterFolderItemsByAssignments(items, sets)
 		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"folder_items": items})
 		return

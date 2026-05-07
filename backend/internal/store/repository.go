@@ -11,7 +11,6 @@ var (
 	ErrNotFound      = errors.New("not found")
 	ErrInvalid       = errors.New("invalid")
 	ErrAlreadyExists = errors.New("already exists")
-	ErrExpired       = errors.New("expired")
 )
 
 type Repository interface {
@@ -22,14 +21,10 @@ type Repository interface {
 	UserHasCompanyAccess(cognitoSubject, companyID string) (bool, error)
 	CreateCompany(name string) (domain.Company, error)
 	ListCompanyUsers(companyID string) ([]domain.CompanyUser, error)
+	GetCompanyUser(companyID, userID string) (domain.CompanyUser, error)
+	DeleteCompanyUser(companyID, userID string) (domain.CompanyUser, error)
 	CreateInvitation(input CreateInvitationInput) (domain.Invitation, error)
 	AcceptInvitation(token, cognitoSubject, email, displayName string) (domain.Invitation, error)
-	CreatePasswordResetCode(input CreatePasswordResetCodeInput) (domain.PasswordResetCode, error)
-	ConsumePasswordResetCode(email, code string) (domain.PasswordResetCode, error)
-	ListResourceAssignments(query ResourceAssignmentQuery) ([]domain.ResourceAssignment, error)
-	AssignResource(input ResourceAssignmentInput) (domain.ResourceAssignment, error)
-	UnassignResource(companyID, resourceType, resourceID, userID string) error
-	UserHasResourceAssignment(companyID, userID, resourceType, resourceID string) (bool, error)
 	CreateNode(companyID, title string) (domain.Node, error)
 	UpdateNode(input UpdateNodeInput) (domain.Node, error)
 	UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error)
@@ -217,26 +212,6 @@ type CreateInvitationInput struct {
 	Role            string
 	InvitedByUserID string
 	ExpiresIn       time.Duration
-}
-
-type CreatePasswordResetCodeInput struct {
-	Email     string
-	ExpiresIn time.Duration
-}
-
-type ResourceAssignmentQuery struct {
-	CompanyID    string
-	ResourceType string
-	ResourceID   string
-	UserID       string
-}
-
-type ResourceAssignmentInput struct {
-	CompanyID        string
-	ResourceType     string
-	ResourceID       string
-	UserID           string
-	AssignedByUserID string
 }
 
 func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {

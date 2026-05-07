@@ -68,6 +68,32 @@ func TestCognitoAdminCreateUserResendsExistingInvite(t *testing.T) {
 	}
 }
 
+func TestCognitoAdminDeleteUserTreatsMissingAsDeleted(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "test-access-key")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
+
+	transport := &recordingRoundTripper{
+		responses: []roundTripResponse{
+			{status: http.StatusBadRequest, body: `{"__type":"UserNotFoundException","message":"User does not exist"}`},
+		},
+	}
+	client := &CognitoAdminClient{
+		Region:     "us-west-1",
+		UserPoolID: "us-west-1_test",
+		HTTPClient: &http.Client{Transport: transport},
+	}
+
+	if err := client.AdminDeleteUser(context.Background(), "USER@EXAMPLE.COM"); err != nil {
+		t.Fatal(err)
+	}
+	if len(transport.requests) != 1 {
+		t.Fatalf("requests = %d, want 1", len(transport.requests))
+	}
+	if username := stringField(t, transport.requests[0], "Username"); username != "user@example.com" {
+		t.Fatalf("Username = %q, want lowercased email", username)
+	}
+}
+
 type roundTripResponse struct {
 	status int
 	body   string
