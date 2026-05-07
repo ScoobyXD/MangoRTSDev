@@ -6,11 +6,11 @@ import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot,
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, removeLogicGateRelationshipGraphRelationshipsForLogicGate, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { type ExplorerSelectionState } from "./explorerSync";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerItemType } from "../folders/companyExplorerFolders";
-import { createKanbanBoard, deleteKanbanBoard, listKanbanBoards, updateKanbanBoard } from "../kanban/kanbanApi";
+import { deleteKanbanBoard, listKanbanBoards } from "../kanban/kanbanApi";
 import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntityDragItem, type KanbanBoard, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
-import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
+import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID, EXPLORER_SYSTEM_HISTORY_FOLDER_ID, EXPLORER_SYSTEM_KANBAN_FOLDER_ID, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
 import { CompanyExplorerTree } from "./CompanyExplorerTree";
 import {
@@ -49,6 +49,42 @@ type WorkspaceStreamEnvelope = {
   data?: Record<string, unknown>;
 };
 
+type CompanyExplorerFolderItemAssignment = {
+  folder_id: string;
+  item_type: CompanyExplorerItemType;
+  item_id: string;
+  position?: number;
+};
+
+type CompanyExplorerFolderItemsBatchResponse = {
+  folder_items?: CompanyExplorerFolderItem[];
+};
+
+const SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX: Array<[string, string]> = [
+  ["system-kanban-", EXPLORER_SYSTEM_KANBAN_FOLDER_ID],
+  ["system-active-node-", EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID],
+  ["system-history-node-", EXPLORER_SYSTEM_HISTORY_FOLDER_ID],
+];
+
+function getSystemFolderIDForTreeRowID(rowID: string): string {
+  if (rowID === EXPLORER_SYSTEM_KANBAN_FOLDER_ID || rowID === EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID || rowID === EXPLORER_SYSTEM_HISTORY_FOLDER_ID) return rowID;
+  return SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX.find(([prefix]) => rowID.startsWith(prefix))?.[1] ?? "";
+}
+
+function getExplorerSearchRowsForSelection(rows: ExplorerTreeNode[], selectedRowID: string): ExplorerTreeNode[] {
+  const selectedIndex = rows.findIndex((row) => row.id === selectedRowID);
+  const selected = selectedIndex >= 0 ? rows[selectedIndex] : null;
+  if (!selected || selected.kind !== "folder") return rows;
+
+  const scopedRows: ExplorerTreeNode[] = [];
+  for (let index = selectedIndex + 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row.depth <= selected.depth) break;
+    scopedRows.push(row);
+  }
+  return scopedRows;
+}
+
 // Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
 export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -73,6 +109,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [expanded, setExpanded] = useState<Set<string>>(() => readExpandedRowsFromStorage(expandedStorageKey));
   const selectedTreeIDRef = useRef(selectedTreeID);
   const expandedRef = useRef(expanded);
+  const defaultExpansionAppliedRef = useRef(false);
   const treeRowsRef = useRef<ExplorerTreeNode[]>([]);
   const pendingScrollTreeIDRef = useRef("");
   const [renaming, setRenaming] = useState<ExplorerRenameDraft | null>(null);
@@ -259,9 +296,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const explorerSearchResults = useMemo(() => {
     const query = explorerSearchQuery.trim().toLowerCase();
     if (!query) return [];
-    const expandedForSearch = new Set<string>(["folder-root"]);
+    const expandedForSearch = new Set<string>(["folder-root", EXPLORER_SYSTEM_KANBAN_FOLDER_ID, EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID, EXPLORER_SYSTEM_HISTORY_FOLDER_ID]);
     for (const folder of folders) expandedForSearch.add(`workspace-folder-${folder.folder_id}`);
-    const rows = buildCompanyExplorerTreeRows({
+    const rows = getExplorerSearchRowsForSelection(buildCompanyExplorerTreeRows({
       expanded: expandedForSearch,
       nodes,
       logicGates,
@@ -269,7 +306,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       folders,
       folderItems,
       rootRowOrder,
-    });
+    }), selectedTreeID);
     const matches: ExplorerTreeNode[] = [];
     for (const row of rows) {
       const identity = [
@@ -286,7 +323,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       if (matches.length >= 16) break;
     }
     return matches;
-  }, [explorerSearchQuery, folderItems, folders, kanbanBoards, logicGates, nodes, rootRowOrder]);
+  }, [explorerSearchQuery, folderItems, folders, kanbanBoards, logicGates, nodes, rootRowOrder, selectedTreeID]);
   const explorerSearchOpen = explorerSearchFocused && explorerSearchQuery.trim().length > 0;
 
   useEffect(() => {
@@ -313,7 +350,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     if (!renaming || !renameInputRef.current) return;
     const input = renameInputRef.current;
     input.focus();
-    input.setSelectionRange(renaming.value.length, renaming.value.length);
+    input.select();
   }, [renaming]);
 
   useEffect(() => {
@@ -326,6 +363,30 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, []);
+
+  useEffect(() => {
+    if (defaultExpansionAppliedRef.current) return;
+    try {
+      if (localStorage.getItem(expandedStorageKey) != null) {
+        defaultExpansionAppliedRef.current = true;
+        return;
+      }
+    } catch {
+      // If local storage is blocked, still apply the first-open default.
+    }
+    const logicGateDefaultsRoot = folders.find((folder) =>
+      folder.folder_kind === "logic_gate"
+      && !folder.parent_folder_id
+      && folder.name.trim().toLowerCase() === "logic gates"
+    );
+    if (!logicGateDefaultsRoot) return;
+    defaultExpansionAppliedRef.current = true;
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      next.add(`workspace-folder-${logicGateDefaultsRoot.folder_id}`);
+      return next;
+    });
+  }, [expandedStorageKey, folders]);
 
   useEffect(() => {
     try {
@@ -415,39 +476,44 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [apiBase, companyID, requestJSON]);
 
-  const assignItemToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerItemType, itemID: string, options: { position?: number; expandTarget?: boolean } = {}) => {
-    if (!targetFolderID || !itemID) return;
-    const previousFolderID = folderItems.find((row) => row.item_type === itemType && row.item_id === itemID)?.folder_id ?? "";
+  const assignItemsToFolders = useCallback(async (assignments: CompanyExplorerFolderItemAssignment[], options: { expandTarget?: boolean } = {}) => {
+    const normalizedAssignments = assignments.filter((assignment) => assignment.folder_id && assignment.item_id && assignment.item_type);
+    if (normalizedAssignments.length === 0) return;
+    const previousFolderIDByKey = new Map(folderItems.map((row) => [`${row.item_type}:${row.item_id}`, row.folder_id]));
     setError("");
     try {
-      const item = await requestJSON<CompanyExplorerFolderItem>("/v1/company-explorer/folder-items", {
+      const payload = await requestJSON<CompanyExplorerFolderItemsBatchResponse>("/v1/company-explorer/folder-items/batch", {
         method: "POST",
         body: JSON.stringify({
           company_id: companyID,
-          folder_id: targetFolderID,
-          item_type: itemType,
-          item_id: itemID,
-          position: options.position,
+          assignments: normalizedAssignments,
         }),
       });
+      const items = payload.folder_items ?? [];
       setFolderItems((previous) => {
-        const exists = previous.some((row) => row.item_type === item.item_type && row.item_id === item.item_id);
-        return exists
-          ? previous.map((row) => (row.item_type === item.item_type && row.item_id === item.item_id ? item : row))
-          : [...previous, item];
+        let next = previous;
+        for (const item of items) {
+          const exists = next.some((row) => row.item_type === item.item_type && row.item_id === item.item_id);
+          next = exists
+            ? next.map((row) => (row.item_type === item.item_type && row.item_id === item.item_id ? item : row))
+            : [...next, item];
+        }
+        return next;
       });
-      upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
-      upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
-      if (previousFolderID !== item.folder_id) {
-        // Moving between folder levels starts a new local context. Drop stale
-        // edges immediately; the API performs the same cleanup canonically.
-        if (itemType === "node") removeNodeRelationshipGraphRelationshipsForNode(apiBase, companyID, itemID);
-        else if (itemType === "logic_gate") removeLogicGateRelationshipGraphRelationshipsForLogicGate(apiBase, companyID, itemID);
+      for (const item of items) {
+        upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
+        upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
+        if (previousFolderIDByKey.get(`${item.item_type}:${item.item_id}`) !== item.folder_id) {
+          // Moving between folder levels starts a new local context. Drop stale
+          // edges immediately; the API performs the same cleanup canonically.
+          if (item.item_type === "node") removeNodeRelationshipGraphRelationshipsForNode(apiBase, companyID, item.item_id);
+          else if (item.item_type === "logic_gate") removeLogicGateRelationshipGraphRelationshipsForLogicGate(apiBase, companyID, item.item_id);
+        }
       }
       if (options.expandTarget) {
         setExpanded((previous) => {
           const next = new Set(previous);
-          next.add(`workspace-folder-${targetFolderID}`);
+          for (const assignment of normalizedAssignments) next.add(`workspace-folder-${assignment.folder_id}`);
           return next;
         });
       }
@@ -455,6 +521,15 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setError(err instanceof Error ? err.message : "failed_to_move_item");
     }
   }, [apiBase, companyID, folderItems, requestJSON]);
+
+  const assignItemToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerItemType, itemID: string, options: { position?: number; expandTarget?: boolean } = {}) => {
+    await assignItemsToFolders([{
+      folder_id: targetFolderID,
+      item_type: itemType,
+      item_id: itemID,
+      position: options.position,
+    }], { expandTarget: options.expandTarget });
+  }, [assignItemsToFolders]);
 
   const createNodeAtFolder = useCallback(async (parentFolderID: string) => {
     setError("");
@@ -516,31 +591,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setError(err instanceof Error ? err.message : "failed_to_create_logic_gate");
     }
   }, [apiBase, assignItemToFolder, companyID, requestJSON]);
-
-  const createKanbanAtFolder = useCallback(async (parentFolderID: string) => {
-    setError("");
-    try {
-      const board = await createKanbanBoard(apiBase, companyID, "New Kanban board");
-      setKanbanBoards((previous) => previous.some((item) => item.board_id === board.board_id) ? previous : [...previous, board]);
-      window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, board } }));
-      if (parentFolderID) await assignItemToFolder(parentFolderID, "kanban", board.board_id, { expandTarget: true });
-      setExpanded((previous) => {
-        const next = new Set(previous);
-        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
-        return next;
-      });
-      const treeID = `kanban-${board.board_id}`;
-      lastLocalExplorerSelectionRef.current = { domain: "kanban", changedAt: Date.now() };
-      setSelectedTreeID(treeID);
-      setSelectedTreeIDs(new Set([treeID]));
-      setSelectionAnchorTreeID(treeID);
-      setSelectedKanbanBoardID(board.board_id);
-      setSelectedNodeID("");
-      setSelectedLogicGateID("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_create_kanban");
-    }
-  }, [apiBase, assignItemToFolder, companyID]);
 
   // Delete through canonical REST APIs first, then patch local/shared caches so
   // Explorer and linked maps converge immediately without a full snapshot GET.
@@ -703,10 +753,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         const logicGate = toLogicGateCanvasRecord(updated);
         setLogicGates((previous) => previous.map((item) => (item.logic_gate_id === logicGate.logic_gate_id ? logicGate : item)));
         upsertLogicGateRelationshipGraphNode(apiBase, companyID, logicGate);
-      } else {
-        const board = await updateKanbanBoard(apiBase, companyID, activeRename.target.id, value);
-        setKanbanBoards((previous) => previous.map((item) => (item.board_id === board.board_id ? board : item)));
-        window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, board } }));
       }
       setRenaming((current) => (current?.treeID === activeRename.treeID ? null : current));
     } catch (err) {
@@ -824,6 +870,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       const next = new Set(previous);
       next.add("folder-root");
       for (const treeID of treeIDs) {
+        const systemFolderID = getSystemFolderIDForTreeRowID(treeID);
+        if (systemFolderID) {
+          next.add(systemFolderID);
+          continue;
+        }
         if (treeID.startsWith("workspace-folder-")) {
           addFolderPath(next, treeID.slice("workspace-folder-".length));
           continue;
@@ -942,11 +993,26 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const getExplorerItemRowsForPayload = useCallback((payload: ExplorerDragPayload | null): ExplorerTreeNode[] => {
     const payloadItems = getExplorerDropPayloadItems(payload);
     if (payloadItems.length === 0) return [];
+    const sourceTreeIDs = new Set<string>();
+    if (payload?.sourceTreeID) sourceTreeIDs.add(payload.sourceTreeID);
+    for (const item of payloadItems) {
+      if (item.treeID) sourceTreeIDs.add(item.treeID);
+    }
+    if (sourceTreeIDs.size > 0) {
+      return treeRows.filter((row) => sourceTreeIDs.has(row.id));
+    }
     const keys = new Set(payloadItems.map((item) => `${item.itemType}:${item.itemID}`));
-    return treeRows.filter((row) => {
+    const seen = new Set<string>();
+    const rows: ExplorerTreeNode[] = [];
+    for (const row of treeRows) {
       const item = getExplorerItemPayload(row);
-      return item ? keys.has(`${item.itemType}:${item.itemID}`) : false;
-    });
+      if (!item) continue;
+      const key = `${item.itemType}:${item.itemID}`;
+      if (!keys.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+    }
+    return rows;
   }, [treeRows]);
 
   const canPlaceExplorerItemsAtTarget = useCallback((payload: ExplorerDragPayload | null, target: ExplorerTreeNode): boolean => {
@@ -1016,17 +1082,21 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       });
     }
 
-    await Promise.all(updates.map(({ row, position }) => {
+    const itemAssignments: CompanyExplorerFolderItemAssignment[] = [];
+    const folderMoves: Array<Promise<void>> = [];
+    for (const { row, position } of updates) {
       if (row.kind === "folder" && row.folderID) {
-        return moveFolder(row.folderID, row.parentFolderID ?? "", { position, parentProvided: false });
+        folderMoves.push(moveFolder(row.folderID, row.parentFolderID ?? "", { position, parentProvided: false }));
+        continue;
       }
       const itemType: CompanyExplorerItemType | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "kanban" ? "kanban" : null;
       const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : row.kanbanBoardID;
-      if (row.folderID && itemType && itemID) return assignItemToFolder(row.folderID, itemType, itemID, { position });
-      return Promise.resolve();
-    }));
+      if (row.folderID && itemType && itemID) itemAssignments.push({ folder_id: row.folderID, item_type: itemType, item_id: itemID, position });
+    }
+    await Promise.all(folderMoves);
+    if (itemAssignments.length > 0) await assignItemsToFolders(itemAssignments);
     return true;
-  }, [assignItemToFolder, getReorderRowsForTarget, moveFolder]);
+  }, [assignItemsToFolders, getReorderRowsForTarget, moveFolder]);
 
   const placeExplorerFolderAtTarget = useCallback(async (source: ExplorerTreeNode, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => {
     if (!source.folderID || !source.folderKind || !canPlaceExplorerFolderAtTarget(source, target)) return false;
@@ -1057,18 +1127,22 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       });
     }
 
-    await Promise.all(updates.map(({ row, position }) => {
+    const itemAssignments: CompanyExplorerFolderItemAssignment[] = [];
+    const folderMoves: Array<Promise<void>> = [];
+    for (const { row, position } of updates) {
       if (row.kind === "folder" && row.folderID) {
         const parentFolderID = row.id === source.id ? targetContainer : (row.parentFolderID ?? "");
-        return moveFolder(row.folderID, parentFolderID, { position, parentProvided: row.id === source.id });
+        folderMoves.push(moveFolder(row.folderID, parentFolderID, { position, parentProvided: row.id === source.id }));
+        continue;
       }
       const rowItemType: CompanyExplorerFolderKind | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : null;
       const itemID = row.kind === "node" ? row.nodeID : row.logicGateID;
-      if (targetContainer && rowItemType && itemID) return assignItemToFolder(targetContainer, rowItemType, itemID, { position });
-      return Promise.resolve();
-    }));
+      if (targetContainer && rowItemType && itemID) itemAssignments.push({ folder_id: targetContainer, item_type: rowItemType, item_id: itemID, position });
+    }
+    await Promise.all(folderMoves);
+    if (itemAssignments.length > 0) await assignItemsToFolders(itemAssignments);
     return true;
-  }, [assignItemToFolder, canPlaceExplorerFolderAtTarget, moveFolder, treeRows]);
+  }, [assignItemsToFolders, canPlaceExplorerFolderAtTarget, moveFolder, treeRows]);
 
   const placeExplorerItemsAtTarget = useCallback(async (payload: ExplorerDragPayload | null, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => {
     const itemType = getExplorerDropPayloadItemType(payload);
@@ -1107,17 +1181,21 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       });
     }
 
-    await Promise.all(updates.map(({ row, position }) => {
+    const itemAssignments: CompanyExplorerFolderItemAssignment[] = [];
+    const folderMoves: Array<Promise<void>> = [];
+    for (const { row, position } of updates) {
       if (row.kind === "folder" && row.folderID) {
-        return moveFolder(row.folderID, row.parentFolderID ?? "", { position, parentProvided: false });
+        folderMoves.push(moveFolder(row.folderID, row.parentFolderID ?? "", { position, parentProvided: false }));
+        continue;
       }
       const rowItemType: CompanyExplorerItemType | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "kanban" ? "kanban" : null;
       const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : row.kanbanBoardID;
-      if (targetContainer && rowItemType && itemID) return assignItemToFolder(targetContainer, rowItemType, itemID, { position });
-      return Promise.resolve();
-    }));
+      if (targetContainer && rowItemType && itemID) itemAssignments.push({ folder_id: targetContainer, item_type: rowItemType, item_id: itemID, position });
+    }
+    await Promise.all(folderMoves);
+    if (itemAssignments.length > 0) await assignItemsToFolders(itemAssignments);
     return true;
-  }, [assignItemToFolder, canPlaceExplorerItemsAtTarget, getExplorerItemRowsForPayload, moveFolder, treeRows]);
+  }, [assignItemsToFolders, canPlaceExplorerItemsAtTarget, getExplorerItemRowsForPayload, moveFolder, treeRows]);
 
   const assignExplorerPayloadItemsToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => {
     const items = getExplorerDropPayloadItems(payload).filter((item) => item.itemType === itemType);
@@ -1129,11 +1207,13 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       return rowKind === targetFolderKind || rowKind === "kanban";
     });
     let position = existingRows.reduce((max, row) => Math.max(max, row.position || 0), 0);
+    const assignments: CompanyExplorerFolderItemAssignment[] = [];
     for (const item of items) {
       position += TREE_ROW_POSITION_STEP;
-      await assignItemToFolder(targetFolderID, itemType, item.itemID, { position, expandTarget: true });
+      assignments.push({ folder_id: targetFolderID, item_type: itemType, item_id: item.itemID, position });
     }
-  }, [assignItemToFolder, folders, treeRows]);
+    await assignItemsToFolders(assignments, { expandTarget: true });
+  }, [assignItemsToFolders, folders, treeRows]);
 
   const requestMapFind = useCallback((target: ExplorerFindTarget) => {
     if (target.kind === "node") {
@@ -1178,7 +1258,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     event.stopPropagation();
     if (row) selectTreeRow(row, event, { selectionIntent: "navigate" });
     const contextKind: CompanyExplorerFolderKind | null = row?.folderKind ?? (row?.kind === "node" ? "node" : row?.kind === "logic_gate" ? "logic_gate" : null);
-    const kanbanParentFolderID = row?.folderKind && row.folderID ? row.folderID : "";
     const targets = resolveExplorerCreationTargets(row ?? null);
     const deleteRows = row ? (selectedTreeIDs.has(row.id) ? treeRows.filter((candidate) => selectedTreeIDs.has(candidate.id)) : [row]) : [];
     const deleteTargets = getDeleteTargetsForRows(deleteRows);
@@ -1193,7 +1272,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       renameTreeID: row?.id ?? "",
       renameLabel: row?.label ?? "",
       contextKind,
-      kanbanParentFolderID,
       createFolderPosition: getContextCreateFolderPosition(row, event, targets.preferredFolderKind),
       canCreateBothFolderTypes: !contextKind,
     });
@@ -1355,10 +1433,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         }}
         onCreateLogicGate={(parentFolderID) => {
           void createLogicGateAtFolder(parentFolderID);
-          setExplorerContextMenu(null);
-        }}
-        onCreateKanban={(parentFolderID) => {
-          void createKanbanAtFolder(parentFolderID);
           setExplorerContextMenu(null);
         }}
         onFindTarget={(target) => {

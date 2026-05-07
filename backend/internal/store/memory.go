@@ -17,6 +17,7 @@ type MemoryRepo struct {
 	logicGateRels     map[string][]domain.LogicGateRelationship
 	folders           map[string]domain.CompanyExplorerFolder
 	folderItems       map[string]domain.CompanyExplorerFolderItem
+	defaultFolderSeed map[string]bool
 	nodeMapPositions  map[string]domain.NodeMapPosition
 	logicMapPositions map[string]domain.LogicGateMapPosition
 	operations        map[string]domain.Operation
@@ -40,6 +41,7 @@ func NewMemoryRepo() *MemoryRepo {
 		logicGateRels:     map[string][]domain.LogicGateRelationship{},
 		folders:           map[string]domain.CompanyExplorerFolder{},
 		folderItems:       map[string]domain.CompanyExplorerFolderItem{},
+		defaultFolderSeed: map[string]bool{},
 		nodeMapPositions:  map[string]domain.NodeMapPosition{},
 		logicMapPositions: map[string]domain.LogicGateMapPosition{},
 		operations:        map[string]domain.Operation{},

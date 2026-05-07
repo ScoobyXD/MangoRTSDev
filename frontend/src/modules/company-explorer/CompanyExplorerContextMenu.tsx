@@ -15,7 +15,6 @@ type CompanyExplorerContextMenuProps = {
   onCreateFolder: (folderKind: CompanyExplorerFolderKind, parentFolderID: string, position?: number) => void;
   onCreateNode: (parentFolderID: string) => void;
   onCreateLogicGate: (parentFolderID: string) => void;
-  onCreateKanban: (parentFolderID: string) => void;
   onFindTarget: (target: ExplorerFindTarget) => void;
   onRenameTarget: (treeID: string, target: ExplorerRenameTarget, value: string) => void;
   onDeleteTargets: (targets: ExplorerDeleteTarget[]) => void;
@@ -28,7 +27,6 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   onCreateFolder,
   onCreateNode,
   onCreateLogicGate,
-  onCreateKanban,
   onFindTarget,
   onRenameTarget,
   onDeleteTargets,
@@ -48,9 +46,6 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
           <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateLogicGate(menu.targets.logicGateParentFolderID)}>
             Create Logic Gate
           </button>
-          <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateKanban(menu.kanbanParentFolderID)}>
-            Create New Kanban Board
-          </button>
         </>
       ) : (
         <>
@@ -67,9 +62,6 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
               Create Logic Gate
             </button>
           )}
-          <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateKanban(menu.kanbanParentFolderID)}>
-            Create New Kanban Board
-          </button>
         </>
       )}
       {menu.findTarget && (

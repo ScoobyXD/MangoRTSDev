@@ -3,6 +3,7 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerF
 export type ExplorerTreeEntityKind = "folder" | "node" | "logic_gate" | "kanban";
 
 export type ExplorerCreationContextRow = {
+  id?: string;
   kind: ExplorerTreeEntityKind;
   nodeID?: string;
   logicGateID?: string;
@@ -13,6 +14,7 @@ export type ExplorerCreationContextRow = {
 
 export type ExplorerDropPayload = {
   kind: ExplorerTreeEntityKind | "batch";
+  sourceTreeID?: string;
   folderID?: string;
   folderKind?: CompanyExplorerFolderKind;
   itemID?: string;
@@ -23,6 +25,7 @@ export type ExplorerDropPayload = {
 export type ExplorerDropPayloadItem = {
   itemID: string;
   itemType: CompanyExplorerItemType;
+  treeID?: string;
 };
 
 export type ExplorerDropTarget = {
@@ -90,6 +93,9 @@ export type ExplorerCreationTargets = {
 };
 
 export const EXPLORER_INTERNAL_ROOT_ROW_ID = "folder-root";
+export const EXPLORER_SYSTEM_KANBAN_FOLDER_ID = "system-folder-kanban-boards";
+export const EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID = "system-folder-active-nodes";
+export const EXPLORER_SYSTEM_HISTORY_FOLDER_ID = "system-folder-history";
 export const EXPLORER_DEFAULT_EXPANDED_ROW_IDS = [] as const;
 export const EXPLORER_ROOT_ROW_ORDER = [] as const;
 export const EXPLORER_ROOT_ROW_LABELS = {} as const;
@@ -108,11 +114,11 @@ export function getExplorerDropPayloadItems(payload?: ExplorerDropPayload | null
       const key = `${item.itemType}:${item.itemID}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      items.push({ itemID: item.itemID, itemType: item.itemType });
+      items.push({ itemID: item.itemID, itemType: item.itemType, treeID: item.treeID });
     }
     return items;
   }
-  if (payload.itemID && payload.itemType) return [{ itemID: payload.itemID, itemType: payload.itemType }];
+  if (payload.itemID && payload.itemType) return [{ itemID: payload.itemID, itemType: payload.itemType, treeID: payload.sourceTreeID }];
   return [];
 }
 
@@ -250,6 +256,7 @@ export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | n
 
 export function resolveExplorerRootDropTarget(row?: ExplorerCreationContextRow | null, payload?: ExplorerDropPayload | null): ExplorerDropTarget | null {
   if (!row || row.kind !== "folder" || row.folderID || !payload || payload.kind !== "folder" || !payload.folderID || !payload.folderKind) return null;
+  if (row.id && row.id !== EXPLORER_INTERNAL_ROOT_ROW_ID) return null;
   return { folderID: "", folderKind: payload.folderKind, treeID: "folder-root" };
 }
 
@@ -257,13 +264,11 @@ export function resolveExplorerRenameTarget(row?: ExplorerCreationContextRow | n
   | { kind: "folder"; id: string }
   | { kind: "node"; id: string }
   | { kind: "logic_gate"; id: string }
-  | { kind: "kanban"; id: string }
   | null {
   if (!row) return null;
   if (row.kind === "folder" && row.folderID) return { kind: "folder", id: row.folderID };
   if (row.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
   if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
-  if (row.kind === "kanban" && row.kanbanBoardID) return { kind: "kanban", id: row.kanbanBoardID };
   return null;
 }
 

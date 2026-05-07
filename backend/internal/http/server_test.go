@@ -640,8 +640,8 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	if err := json.NewDecoder(snapshotRec.Body).Decode(&snapshot); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
-	if len(snapshot.Folders) != 4 || len(snapshot.FolderItems) != 3 {
-		t.Fatalf("snapshot folder counts = folders:%d items:%d, want 4/3", len(snapshot.Folders), len(snapshot.FolderItems))
+	if len(snapshot.Folders) != 10 || len(snapshot.FolderItems) != 3 {
+		t.Fatalf("snapshot folder counts = folders:%d items:%d, want 10/3", len(snapshot.Folders), len(snapshot.FolderItems))
 	}
 	foundChild := false
 	for _, folder := range snapshot.Folders {
@@ -651,6 +651,118 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	}
 	if !foundChild {
 		t.Fatalf("snapshot did not preserve moved child folder parent")
+	}
+}
+
+func TestCompanyExplorerDefaultFoldersSeedOnceAndRemainDeletable(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-default-folder-seed-test"
+
+	listFolders := func() []struct {
+		FolderID       string  `json:"folder_id"`
+		ParentFolderID *string `json:"parent_folder_id"`
+		FolderKind     string  `json:"folder_kind"`
+		Name           string  `json:"name"`
+	} {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET default folders status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var payload struct {
+			Folders []struct {
+				FolderID       string  `json:"folder_id"`
+				ParentFolderID *string `json:"parent_folder_id"`
+				FolderKind     string  `json:"folder_kind"`
+				Name           string  `json:"name"`
+			} `json:"folders"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode default folders: %v", err)
+		}
+		return payload.Folders
+	}
+
+	folders := listFolders()
+	var logicRootID string
+	childNames := map[string]bool{}
+	for _, folder := range folders {
+		if folder.Name == "Logic Gates" && folder.FolderKind == "logic_gate" && folder.ParentFolderID == nil {
+			logicRootID = folder.FolderID
+		}
+	}
+	for _, folder := range folders {
+		if folder.ParentFolderID != nil && *folder.ParentFolderID == logicRootID {
+			childNames[folder.Name] = true
+		}
+	}
+	if logicRootID == "" || len(childNames) != 5 || !childNames["Product"] || !childNames["Design"] || !childNames["Production"] || !childNames["Supply Chain"] || !childNames["QA"] {
+		t.Fatalf("default logic gate folders = root:%q children:%v", logicRootID, childNames)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/company-explorer/folders/"+logicRootID+"?company_id="+companyID, nil)
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("DELETE default folder status = %d, want %d body=%s", deleteRec.Code, http.StatusOK, deleteRec.Body.String())
+	}
+	if foldersAfterDelete := listFolders(); len(foldersAfterDelete) != 0 {
+		t.Fatalf("default folders after delete = %+v, want no reseed", foldersAfterDelete)
+	}
+}
+
+func TestCompanyExplorerFolderItemBatchAssignsItemsInOneRequest(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-folder-item-batch-test"
+
+	nodeA, err := repo.CreateNode(companyID, "Batch A")
+	if err != nil {
+		t.Fatalf("CreateNode(A) error = %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "Batch B")
+	if err != nil {
+		t.Fatalf("CreateNode(B) error = %v", err)
+	}
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Batch folder")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder() error = %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"assignments": []map[string]any{
+			{"folder_id": folder.FolderID, "item_type": "node", "item_id": nodeA.NodeID, "position": 1000},
+			{"folder_id": folder.FolderID, "item_type": "node", "item_id": nodeB.NodeID, "position": 2000},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items/batch", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST folder item batch status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var payload struct {
+		FolderItems []struct {
+			ItemID   string `json:"item_id"`
+			Position int    `json:"position"`
+		} `json:"folder_items"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode folder item batch: %v", err)
+	}
+	if len(payload.FolderItems) != 2 || payload.FolderItems[0].ItemID != nodeA.NodeID || payload.FolderItems[0].Position != 1000 || payload.FolderItems[1].ItemID != nodeB.NodeID || payload.FolderItems[1].Position != 2000 {
+		t.Fatalf("batch payload = %+v, want assigned nodes in request order", payload.FolderItems)
 	}
 }
 

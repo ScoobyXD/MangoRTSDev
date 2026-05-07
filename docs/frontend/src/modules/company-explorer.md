@@ -168,7 +168,7 @@ Folder runtime update (2026-05-02):
 - When the right-click context has no folder type, the menu order is `Create node folder`, `Create node`, `Create logic gate folder`, `Create logic gate`. Typed folder creation keeps empty folders aligned with the backend item-type invariant. Right-clicking typed rows uses the compatible single `Create folder` action.
 - Right-clicking a concrete folder, node, or logic gate exposes `Rename` and `Delete`, backed by folder/node/logic-gate APIs.
 - Right-clicking a concrete node or logic gate also exposes `Find Node` or `Find Logic Gate`. The action emits a lightweight focus request to the linked map frame, selects the entity on the map, and pans the map so the card is centered without issuing a new graph read.
-- Double-clicking the title text of a concrete folder, node, or logic gate starts inline rename with the caret at the end of the current title. Double-clicks on the disclosure control, icon, indent, or blank row area only select/toggle and never start rename.
+- Double-clicking the title text of a concrete folder, node, or logic gate starts inline rename with the full current title selected. Double-clicks on the disclosure control, icon, indent, or blank row area only select/toggle and never start rename.
 - Left-clicking elsewhere inside Company Explorer closes the Explorer context menu before applying the new selection.
 - New folders are created inside the right-clicked compatible folder/tree. New nodes and logic gates are created through their canonical APIs and then assigned to the compatible right-clicked folder through `company_explorer_folder_items` when a folder target exists.
 - After any create action, the newly created folder, node, or logic gate becomes the selected highlighted row.
@@ -198,8 +198,8 @@ Folder runtime update (2026-05-02):
 Kanban Explorer update (2026-05-04):
 - Kanban boards are durable Explorer items with `item_type=kanban` and a fixed three-column board icon.
 - Kanban boards can be placed in either node folders or logic-gate folders. Folder kinds remain `node` and `logic_gate`; Kanban is an item type, not a third map scope.
-- Right-clicking Explorer now offers `Create new kanban`. The board is created through `/v1/kanban/boards` first, then assigned to the target folder with `/v1/company-explorer/folder-items` when a folder target exists.
-- Kanban board rows support selection, drag/drop placement, inline rename, and delete through the same Explorer interaction model as node and logic-gate rows.
+- Explorer now groups all boards under the automatic `Kanban Boards` folder. Board creation and renaming are owned by the Kanban module, not the Explorer context menu.
+- Kanban board rows support selection, drag/drop placement, and delete through the Explorer interaction model.
 - Selecting a Kanban board broadcasts a `kanban` live-selection event to linked Kanban frames so they open that board. Map and Editor modules explicitly ignore `kanban` selections, because boards are not displayable map/editor entities.
 - Selecting a card in Kanban can target Explorer with all selected node IDs. Explorer expands the containing folders for those node rows so `Find on company explorer` works for deeply nested cards.
 

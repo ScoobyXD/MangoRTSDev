@@ -241,6 +241,63 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 }
 
+func (s *Server) handleCompanyExplorerFolderItemsBatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+
+	var req struct {
+		CompanyID   string                                           `json:"company_id"`
+		Assignments []store.CompanyExplorerFolderItemAssignmentInput `json:"assignments"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	req.CompanyID = strings.TrimSpace(req.CompanyID)
+	if req.CompanyID == "" || len(req.Assignments) == 0 || len(req.Assignments) > store.CompanyExplorerFolderItemBatchMaxItems {
+		writeError(w, http.StatusBadRequest, "company_assignments_required")
+		return
+	}
+	for index := range req.Assignments {
+		req.Assignments[index].FolderID = strings.TrimSpace(req.Assignments[index].FolderID)
+		req.Assignments[index].ItemType = strings.TrimSpace(req.Assignments[index].ItemType)
+		req.Assignments[index].ItemID = strings.TrimSpace(req.Assignments[index].ItemID)
+		if req.Assignments[index].FolderID == "" || req.Assignments[index].ItemID == "" || !isValidCompanyExplorerItemType(req.Assignments[index].ItemType) {
+			writeError(w, http.StatusBadRequest, "invalid_company_explorer_assignment")
+			return
+		}
+	}
+
+	items, deleted, err := s.repo.AssignCompanyExplorerFolderItems(req.CompanyID, req.Assignments)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "company_explorer_folder_or_item_not_found")
+		return
+	}
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_company_explorer_folder_item_batch")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_assign_company_explorer_folder_items")
+		return
+	}
+	for _, item := range items {
+		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_item": item})
+	}
+	for _, result := range deleted {
+		for _, relationshipID := range result.RelationshipIDs {
+			if result.ItemType == "node" {
+				s.publishWorkspaceEvent(req.CompanyID, "relationship_deleted", map[string]any{"node_relationship_id": relationshipID})
+			} else if result.ItemType == "logic_gate" {
+				s.publishWorkspaceEvent(req.CompanyID, "logic_gate_relationship_deleted", map[string]any{"logic_gate_relationship_id": relationshipID})
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"folder_items": items, "deleted_relationships": deleted})
+}
+
 func isValidCompanyExplorerFolderKind(value string) bool {
 	return value == "node" || value == "logic_gate"
 }
