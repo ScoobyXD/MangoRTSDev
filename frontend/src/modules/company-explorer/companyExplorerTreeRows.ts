@@ -19,6 +19,8 @@ type BuildCompanyExplorerTreeRowsInput = {
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
   rootRowOrder: Record<string, number>;
+  specialFolderPlacements?: Record<string, { parentFolderID?: string; position?: number }>;
+  folderSystemParents?: Record<string, string>;
   todayISODate?: string;
 };
 
@@ -49,6 +51,8 @@ export function buildCompanyExplorerTreeRows({
   folders,
   folderItems,
   rootRowOrder,
+  specialFolderPlacements = {},
+  folderSystemParents = {},
   todayISODate,
 }: BuildCompanyExplorerTreeRowsInput): ExplorerTreeNode[] {
   const rows: ExplorerTreeNode[] = [];
@@ -79,7 +83,15 @@ export function buildCompanyExplorerTreeRows({
   const assignedNodes = new Set(folderItems.filter((item) => item.item_type === "node").map((item) => item.item_id));
   const assignedLogicGates = new Set(folderItems.filter((item) => item.item_type === "logic_gate").map((item) => item.item_id));
   const foldersByParent = new Map<string, CompanyExplorerFolder[]>();
+  const foldersBySystemParent = new Map<string, CompanyExplorerFolder[]>();
   for (const folder of folders) {
+    const systemParentID = folderSystemParents[folder.folder_id] ?? "";
+    if (systemParentID) {
+      const bucket = foldersBySystemParent.get(systemParentID) ?? [];
+      bucket.push(folder);
+      foldersBySystemParent.set(systemParentID, bucket);
+      continue;
+    }
     const key = `${folder.folder_kind}:${folder.parent_folder_id ?? ""}`;
     const bucket = foldersByParent.get(key) ?? [];
     bucket.push(folder);
@@ -93,75 +105,117 @@ export function buildCompanyExplorerTreeRows({
     itemsByFolder.set(key, bucket);
   }
 
-  const pushSystemFolder = (id: string, label: string, position: number) => {
-    rows.push({
-      id,
-      label,
-      depth: 0,
-      kind: "folder",
-      scopeLevel: 0,
-      position,
-      createdTimestamp: SYSTEM_FOLDER_CREATED_TIMESTAMP,
-    });
+  const systemFolderDefinitions = [
+    { id: EXPLORER_SYSTEM_KANBAN_FOLDER_ID, label: "Kanban Boards", defaultPosition: 100 },
+    { id: EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID, label: "Active Nodes", defaultPosition: 200 },
+    { id: EXPLORER_SYSTEM_HISTORY_FOLDER_ID, label: "History", defaultPosition: 300 },
+  ] as const;
+
+  const getSystemFolderLabel = (systemFolderID: string): string => systemFolderDefinitions.find((item) => item.id === systemFolderID)?.label ?? "Special Folder";
+  const getSpecialFolderParentID = (systemFolderID: string): string => {
+    const parentFolderID = specialFolderPlacements[systemFolderID]?.parentFolderID ?? "";
+    return parentFolderID && folderByID.has(parentFolderID) ? parentFolderID : "";
   };
 
-  pushSystemFolder(EXPLORER_SYSTEM_KANBAN_FOLDER_ID, "Kanban Boards", 100);
-  if (expanded.has(EXPLORER_SYSTEM_KANBAN_FOLDER_ID)) {
-    let boardPosition = 0;
-    for (const board of kanbanBoards) {
-      boardPosition += TREE_ROW_POSITION_STEP;
-      rows.push({
-        id: `system-kanban-${board.board_id}`,
-        label: getKanbanBoardDisplayTitle(board),
-        depth: 1,
-        kind: "kanban",
-        kanbanBoardID: board.board_id,
-        scopeLevel: 1,
-        position: boardPosition,
-        createdTimestamp: board.created_timestamp,
-      });
-    }
-  }
+  const buildSystemFolderRows = (parentFolderID: string, depth: number): ExplorerTreeNode[] => {
+    return sortExplorerRowsByPosition(systemFolderDefinitions
+      .filter((definition) => getSpecialFolderParentID(definition.id) === parentFolderID)
+      .map((definition) => {
+        const placement = specialFolderPlacements[definition.id];
+        const effectiveParentFolderID = getSpecialFolderParentID(definition.id);
+        return {
+          id: definition.id,
+          label: definition.label,
+          depth,
+          kind: "folder" as const,
+          parentFolderID: effectiveParentFolderID,
+          systemFolderID: definition.id,
+          scopeLevel: depth,
+          position: placement?.position ?? rootRowOrder[definition.id] ?? definition.defaultPosition,
+          createdTimestamp: SYSTEM_FOLDER_CREATED_TIMESTAMP,
+        };
+      }));
+  };
 
-  pushSystemFolder(EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID, "Active Nodes", 200);
-  if (expanded.has(EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID)) {
-    let activePosition = 0;
-    for (const node of nodes) {
-      const dueDate = normalizeISODate(node.due_date);
-      if (!dueDate || dueDate <= currentDate) continue;
-      activePosition += TREE_ROW_POSITION_STEP;
-      rows.push({
-        id: `system-active-node-${node.node_id}`,
-        label: getNodeTitle(node) || node.node_id,
-        depth: 1,
-        kind: "node",
-        nodeID: node.node_id,
-        scopeLevel: 1,
-        position: activePosition,
-        createdTimestamp: node.created_timestamp,
-      });
+  const pushSystemFolderChildren = (systemFolderID: string, depth: number) => {
+    const label = getSystemFolderLabel(systemFolderID);
+    if (systemFolderID === EXPLORER_SYSTEM_KANBAN_FOLDER_ID) {
+      let boardPosition = 0;
+      for (const board of kanbanBoards) {
+        boardPosition += TREE_ROW_POSITION_STEP;
+        rows.push({
+          id: `system-kanban-${board.board_id}`,
+          label: getKanbanBoardDisplayTitle(board),
+          depth,
+          kind: "kanban",
+          kanbanBoardID: board.board_id,
+          parentSystemFolderID: systemFolderID,
+          folderLabel: label,
+          scopeLevel: depth,
+          position: boardPosition,
+          createdTimestamp: board.created_timestamp,
+        });
+      }
     }
-  }
+    if (systemFolderID === EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID) {
+      let activePosition = 0;
+      for (const node of nodes) {
+        const dueDate = normalizeISODate(node.due_date);
+        if (!dueDate || dueDate <= currentDate) continue;
+        activePosition += TREE_ROW_POSITION_STEP;
+        rows.push({
+          id: `system-active-node-${node.node_id}`,
+          label: getNodeTitle(node) || node.node_id,
+          depth,
+          kind: "node",
+          nodeID: node.node_id,
+          parentSystemFolderID: systemFolderID,
+          folderLabel: label,
+          scopeLevel: depth,
+          position: activePosition,
+          createdTimestamp: node.created_timestamp,
+        });
+      }
+    }
+    if (systemFolderID === EXPLORER_SYSTEM_HISTORY_FOLDER_ID) {
+      let historyPosition = 0;
+      for (const node of nodes) {
+        const dueDate = normalizeISODate(node.due_date);
+        if (!dueDate || dueDate >= currentDate) continue;
+        historyPosition += TREE_ROW_POSITION_STEP;
+        rows.push({
+          id: `system-history-node-${node.node_id}`,
+          label: getNodeTitle(node) || node.node_id,
+          depth,
+          kind: "node",
+          nodeID: node.node_id,
+          parentSystemFolderID: systemFolderID,
+          folderLabel: label,
+          scopeLevel: depth,
+          position: historyPosition,
+          createdTimestamp: node.created_timestamp,
+        });
+      }
+    }
 
-  pushSystemFolder(EXPLORER_SYSTEM_HISTORY_FOLDER_ID, "History", 300);
-  if (expanded.has(EXPLORER_SYSTEM_HISTORY_FOLDER_ID)) {
-    let historyPosition = 0;
-    for (const node of nodes) {
-      const dueDate = normalizeISODate(node.due_date);
-      if (!dueDate || dueDate >= currentDate) continue;
-      historyPosition += TREE_ROW_POSITION_STEP;
-      rows.push({
-        id: `system-history-node-${node.node_id}`,
-        label: getNodeTitle(node) || node.node_id,
-        depth: 1,
-        kind: "node",
-        nodeID: node.node_id,
-        scopeLevel: 1,
-        position: historyPosition,
-        createdTimestamp: node.created_timestamp,
-      });
+    for (const folder of sortExplorerRowsByPosition((foldersBySystemParent.get(systemFolderID) ?? []).map((folder) => ({
+      id: `workspace-folder-${folder.folder_id}`,
+      label: formatExplorerFolderLabel(folder.name),
+      depth,
+      kind: "folder" as const,
+      folderID: folder.folder_id,
+      parentFolderID: "",
+      parentSystemFolderID: systemFolderID,
+      folderKind: folder.folder_kind,
+      folderLabel: `${label} / ${formatExplorerFolderLabel(folder.name)}`,
+      scopeLevel: depth,
+      position: (rootRowOrder[`workspace-folder-${folder.folder_id}`] ?? folder.position) || TREE_ROW_POSITION_STEP,
+      createdTimestamp: folder.created_timestamp,
+    })))) {
+      rows.push(folder);
+      if (expanded.has(folder.id) && folder.folderID && folder.folderKind) pushFolderBranch(folder.folderKind, folder.folderID, depth + 1);
     }
-  }
+  };
 
   const getRootAwarePosition = (folderKind: CompanyExplorerFolderKind, rowID: string, position: number): number => {
     return rootRowOrder[rowID] ?? position + ROOT_ROW_POSITION_OFFSET[folderKind];
@@ -281,6 +335,7 @@ export function buildCompanyExplorerTreeRows({
         createdTimestamp: folder.created_timestamp,
       });
     }
+    if (parentFolderID) branchRows.push(...buildSystemFolderRows(parentFolderID, depth));
 
     return sortExplorerRowsByPosition(branchRows);
   };
@@ -288,6 +343,10 @@ export function buildCompanyExplorerTreeRows({
   const pushFolderBranch = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number) => {
     for (const row of buildFolderBranchRows(folderKind, parentFolderID, depth)) {
       rows.push(row);
+      if (row.systemFolderID && expanded.has(row.id)) {
+        pushSystemFolderChildren(row.systemFolderID, depth + 1);
+        continue;
+      }
       if (row.kind !== "folder" || !expanded.has(row.id) || !row.folderID) continue;
       pushFolderBranch(folderKind, row.folderID, depth + 1);
     }
@@ -297,10 +356,15 @@ export function buildCompanyExplorerTreeRows({
   // Unplaced root entities use local view positions until a folder placement
   // row exists, because their order is personal UI state rather than graph data.
   for (const row of sortExplorerRowsByPosition([
+    ...buildSystemFolderRows("", 0),
     ...buildFolderBranchRows("node", "", 0),
     ...buildFolderBranchRows("logic_gate", "", 0),
   ])) {
     rows.push(row);
+    if (row.systemFolderID && expanded.has(row.id)) {
+      pushSystemFolderChildren(row.systemFolderID, 1);
+      continue;
+    }
     if (row.kind !== "folder" || !expanded.has(row.id) || !row.folderID || !row.folderKind) continue;
     pushFolderBranch(row.folderKind, row.folderID, 1);
   }
