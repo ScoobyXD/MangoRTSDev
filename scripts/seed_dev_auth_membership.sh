@@ -11,7 +11,7 @@ export PGSSLMODE="${PGSSLMODE:-require}"
 : "${DEV_COMPANY_ID:?set DEV_COMPANY_ID}"
 : "${DEV_COMPANY_NAME:=MangoRTS Dev Company}"
 : "${DEV_USER_EMAIL:=}"
-: "${DEV_ROLE:=owner}"
+: "${DEV_ROLE:=dev_admin}"
 
 DB_HOST="${DB_HOST#host=}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

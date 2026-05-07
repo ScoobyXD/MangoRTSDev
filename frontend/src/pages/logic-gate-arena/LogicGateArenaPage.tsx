@@ -5,6 +5,7 @@ import { EditorContent } from "../../modules/editor/EditorContent";
 import { KanbanContent } from "../../modules/kanban/KanbanContent";
 import { logicGateIDFromKanbanBoardID } from "../../modules/kanban/shared";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../../modules/selectionCoordinator";
+import { getActiveCompanyID } from "../../auth/currentCompany";
 
 type LogicGateArenaPageProps = {
   frames: FrameDataModel[];
@@ -45,7 +46,7 @@ function getArenaFrames(frames: FrameDataModel[]) {
 }
 
 export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, updateFrames }) => {
-  const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
+  const companyID = getActiveCompanyID();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizeRef = useRef<ArenaResizeState | null>(null);
   const lastArenaSelectionChangedAtRef = useRef(0);

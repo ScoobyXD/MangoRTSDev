@@ -14,7 +14,17 @@ var (
 
 type Repository interface {
 	UpsertAuthUser(cognitoSubject, email string) (domain.User, error)
+	GetAuthUser(cognitoSubject string) (domain.User, error)
+	ListUserMemberships(userID string) ([]domain.CompanyMembership, error)
 	UserHasCompanyAccess(cognitoSubject, companyID string) (bool, error)
+	CreateCompany(name string) (domain.Company, error)
+	ListCompanyUsers(companyID string) ([]domain.CompanyUser, error)
+	CreateInvitation(input CreateInvitationInput) (domain.Invitation, error)
+	AcceptInvitation(token, cognitoSubject, email string) (domain.Invitation, error)
+	ListResourceAssignments(query ResourceAssignmentQuery) ([]domain.ResourceAssignment, error)
+	AssignResource(input ResourceAssignmentInput) (domain.ResourceAssignment, error)
+	UnassignResource(companyID, resourceType, resourceID, userID string) error
+	UserHasResourceAssignment(companyID, userID, resourceType, resourceID string) (bool, error)
 	CreateNode(companyID, title string) (domain.Node, error)
 	UpdateNode(input UpdateNodeInput) (domain.Node, error)
 	UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error)
@@ -190,6 +200,29 @@ type UpdateNodeInput struct {
 	PrioritySet       bool
 	AssigneeUserID    *string
 	AssigneeUserIDSet bool
+}
+
+type CreateInvitationInput struct {
+	CompanyID       string
+	Email           string
+	Role            string
+	InvitedByUserID string
+	ExpiresIn       time.Duration
+}
+
+type ResourceAssignmentQuery struct {
+	CompanyID    string
+	ResourceType string
+	ResourceID   string
+	UserID       string
+}
+
+type ResourceAssignmentInput struct {
+	CompanyID        string
+	ResourceType     string
+	ResourceID       string
+	UserID           string
+	AssignedByUserID string
 }
 
 func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {

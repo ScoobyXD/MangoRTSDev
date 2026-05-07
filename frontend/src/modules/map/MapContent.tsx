@@ -4,6 +4,7 @@ import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
 import { LogicGateMapContent } from "../logic-gate-map/LogicGateMapContent";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../logic-gate-map/shared";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
+import { getActiveCompanyID } from "../../auth/currentCompany";
 
 type MapMode = "node" | "logic_gate";
 
@@ -26,7 +27,7 @@ function contextTimestamp(raw: string | null): number {
 }
 
 export const MapContent: React.FC<MapProps> = ({ initialMode = "node", ...props }) => {
-  const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
+  const companyID = getActiveCompanyID();
   const scope = props.widgetId?.trim() ? props.widgetId : "global";
   const nodeContextKey = `${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;
   const logicGateContextKey = `${LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`;

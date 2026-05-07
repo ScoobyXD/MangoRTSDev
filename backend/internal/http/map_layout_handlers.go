@@ -47,6 +47,12 @@ func (s *Server) handleMapLayout(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_positions")
 				return
 			}
+			if sets, shouldFilter, err := s.assignmentSetsForRequest(r, companyID); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_filter_node_map_positions")
+				return
+			} else if shouldFilter {
+				items = filterNodeMapPositionsByAssignments(items, sets)
+			}
 			writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"company_id": companyID, "map_type": mapType, "positions": items})
 			return
 		}
@@ -55,6 +61,12 @@ func (s *Server) handleMapLayout(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_positions")
 				return
+			}
+			if sets, shouldFilter, err := s.assignmentSetsForRequest(r, companyID); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gate_map_positions")
+				return
+			} else if shouldFilter {
+				items = filterLogicGateMapPositionsByAssignments(items, sets)
 			}
 			writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"company_id": companyID, "map_type": mapType, "positions": items})
 			return

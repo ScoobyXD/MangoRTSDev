@@ -145,7 +145,7 @@ variable "dev_company_id" {
 }
 
 variable "cognito_domain_prefix" {
-  description = "Cognito hosted login domain prefix. Must be globally unique within the region."
+  description = "Deprecated from the Hosted UI flow. Kept temporarily so older tfvars files continue to load."
   type        = string
 }
 

@@ -99,7 +99,7 @@ resource "aws_ecs_task_definition" "backend" {
         { name = "AWS_REGION", value = var.aws_region },
         { name = "COGNITO_USER_POOL_ID", value = aws_cognito_user_pool.main.id },
         { name = "COGNITO_CLIENT_ID", value = aws_cognito_user_pool_client.spa.id },
-        { name = "COGNITO_TOKEN_USE", value = "access" },
+        { name = "COGNITO_TOKEN_USE", value = "access,id" },
         { name = "MANGORTS_ADDR", value = ":${var.container_port}" },
         { name = "MANGORTS_ALLOWED_ORIGIN", value = "https://${local.app_domain}" },
         { name = "DB_HOST", value = var.existing_db_host },

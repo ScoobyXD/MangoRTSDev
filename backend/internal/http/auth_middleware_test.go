@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"miraeopus/backend/internal/auth"
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"net/http/httptest"
@@ -45,7 +46,7 @@ func TestAuthMiddlewareAllowsCompanyMember(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo.EnsureCompany(companyID, "MangoRTS Dev")
-	if _, err := repo.AddCompanyMembership(subject, companyID, "owner"); err != nil {
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyAdmin); err != nil {
 		t.Fatal(err)
 	}
 
@@ -88,6 +89,166 @@ func TestAuthMiddlewareRejectsNonMemberCompany(t *testing.T) {
 	}
 }
 
+func TestAuthMiddlewareAllowsDevAdminAcrossCompanies(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const adminCompanyID = "11111111-1111-1111-1111-111111111111"
+	const targetCompanyID = "22222222-2222-2222-2222-222222222222"
+	const subject = "cognito-dev-admin-1"
+	_, err := repo.UpsertAuthUser(subject, "dev@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.EnsureCompany(adminCompanyID, "MangoRTS Dev")
+	repo.EnsureCompany(targetCompanyID, "Customer")
+	if _, err := repo.AddCompanyMembership(subject, adminCompanyID, domain.RoleDevAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateNode(targetCompanyID, "target company node"); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+	}).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/nodes?company_id="+targetCompanyID, nil)
+	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, "dev@example.com"))
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", res.Code, http.StatusOK, strings.TrimSpace(res.Body.String()))
+	}
+}
+
+func TestAuthMiddlewareAllowsCompanyAdminInsideCompanyOnly(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const allowedCompanyID = "11111111-1111-1111-1111-111111111111"
+	const deniedCompanyID = "22222222-2222-2222-2222-222222222222"
+	const subject = "cognito-company-admin-1"
+	_, err := repo.UpsertAuthUser(subject, "admin@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.EnsureCompany(allowedCompanyID, "Allowed")
+	repo.EnsureCompany(deniedCompanyID, "Denied")
+	if _, err := repo.AddCompanyMembership(subject, allowedCompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateNode(allowedCompanyID, "allowed node"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateNode(deniedCompanyID, "denied node"); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+	}).Routes()
+	allowedReq := httptest.NewRequest(http.MethodGet, "/v1/nodes?company_id="+allowedCompanyID, nil)
+	allowedReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, "admin@example.com"))
+	allowedRes := httptest.NewRecorder()
+	handler.ServeHTTP(allowedRes, allowedReq)
+	if allowedRes.Code != http.StatusOK {
+		t.Fatalf("allowed status = %d, want %d, body=%s", allowedRes.Code, http.StatusOK, strings.TrimSpace(allowedRes.Body.String()))
+	}
+
+	deniedReq := httptest.NewRequest(http.MethodGet, "/v1/nodes?company_id="+deniedCompanyID, nil)
+	deniedReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, "admin@example.com"))
+	deniedRes := httptest.NewRecorder()
+	handler.ServeHTTP(deniedRes, deniedReq)
+	if deniedRes.Code != http.StatusForbidden {
+		t.Fatalf("denied status = %d, want %d", deniedRes.Code, http.StatusForbidden)
+	}
+}
+
+func TestAuthMiddlewareLimitsCompanyUserToAssignedResources(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	const subject = "cognito-company-user-1"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.EnsureCompany(companyID, "Customer")
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	assignedNode, err := repo.CreateNode(companyID, "assigned node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unassignedNode, err := repo.CreateNode(companyID, "unassigned node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AssignResource(store.ResourceAssignmentInput{
+		CompanyID:        companyID,
+		ResourceType:     domain.ResourceTypeNode,
+		ResourceID:       assignedNode.NodeID,
+		UserID:           user.UserID,
+		AssignedByUserID: user.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, "user@example.com")
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/nodes?company_id="+companyID, nil)
+	listReq.Header.Set("Authorization", token)
+	listRes := httptest.NewRecorder()
+	handler.ServeHTTP(listRes, listReq)
+	if listRes.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d, body=%s", listRes.Code, http.StatusOK, strings.TrimSpace(listRes.Body.String()))
+	}
+	var listPayload struct {
+		Nodes []struct {
+			NodeID string `json:"node_id"`
+		} `json:"nodes"`
+	}
+	if err := json.NewDecoder(listRes.Body).Decode(&listPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(listPayload.Nodes) != 1 || listPayload.Nodes[0].NodeID != assignedNode.NodeID {
+		t.Fatalf("filtered nodes = %+v, want assigned node only", listPayload.Nodes)
+	}
+
+	assignedReq := httptest.NewRequest(http.MethodGet, "/v1/nodes/"+assignedNode.NodeID+"?company_id="+companyID, nil)
+	assignedReq.Header.Set("Authorization", token)
+	assignedRes := httptest.NewRecorder()
+	handler.ServeHTTP(assignedRes, assignedReq)
+	if assignedRes.Code != http.StatusOK {
+		t.Fatalf("assigned status = %d, want %d, body=%s", assignedRes.Code, http.StatusOK, strings.TrimSpace(assignedRes.Body.String()))
+	}
+
+	unassignedReq := httptest.NewRequest(http.MethodGet, "/v1/nodes/"+unassignedNode.NodeID+"?company_id="+companyID, nil)
+	unassignedReq.Header.Set("Authorization", token)
+	unassignedRes := httptest.NewRecorder()
+	handler.ServeHTTP(unassignedRes, unassignedReq)
+	if unassignedRes.Code != http.StatusForbidden {
+		t.Fatalf("unassigned status = %d, want %d", unassignedRes.Code, http.StatusForbidden)
+	}
+
+	writeReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+assignedNode.NodeID, strings.NewReader(`{"company_id":"`+companyID+`","title":"blocked"}`))
+	writeReq.Header.Set("Authorization", token)
+	writeRes := httptest.NewRecorder()
+	handler.ServeHTTP(writeRes, writeReq)
+	if writeRes.Code != http.StatusForbidden {
+		t.Fatalf("write status = %d, want %d", writeRes.Code, http.StatusForbidden)
+	}
+}
+
 func TestAuthMiddlewareChecksBodyCompanyBeforeQueryCompany(t *testing.T) {
 	t.Parallel()
 
@@ -101,7 +262,7 @@ func TestAuthMiddlewareChecksBodyCompanyBeforeQueryCompany(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo.EnsureCompany(allowedCompanyID, "MangoRTS Dev")
-	if _, err := repo.AddCompanyMembership(subject, allowedCompanyID, "owner"); err != nil {
+	if _, err := repo.AddCompanyMembership(subject, allowedCompanyID, domain.RoleCompanyAdmin); err != nil {
 		t.Fatal(err)
 	}
 

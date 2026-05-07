@@ -17,6 +17,7 @@ import { useNodeMapViewportHandlers } from "./useNodeMapViewportHandlers";
 import { filterNodeGraphToFolderScope, resolveMapSelectionAfterGraphLoad, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
+import { getActiveCompanyID } from "../../auth/currentCompany";
 
 type NodeMapEntityBatchResponse = {
   entity_mappings?: Array<{ client_id: string; entity_id: string }>;
@@ -37,7 +38,7 @@ type ExplorerSelectionOrigin = {
 export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "teal" }) => {
   const SELECTION_CYAN = "rgb(0, 233, 255)";
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
-  const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
+  const companyID = getActiveCompanyID();
   const mapScope = widgetId?.trim() ? widgetId : "global";
   const mapStateKey = `node-map-state-v1:${companyID}:${mapScope}`;
   const fallbackMapStateKey = `node-map-state-v1:${companyID}:last-opened-map`;

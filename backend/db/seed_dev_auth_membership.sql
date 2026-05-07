@@ -28,7 +28,18 @@ upserted_user as (
   returning user_id
 )
 insert into company_memberships (company_id, user_id, role, created_timestamp, updated_timestamp)
-select :'company_id'::uuid, user_id, :'membership_role', now(), now()
+select
+  :'company_id'::uuid,
+  user_id,
+  case :'membership_role'
+    when 'owner' then 'company_admin'
+    when 'admin' then 'company_admin'
+    when 'member' then 'company_user'
+    when 'agent' then 'company_user'
+    else :'membership_role'
+  end,
+  now(),
+  now()
 from upserted_user
 on conflict (company_id, user_id) do update set
   role = excluded.role,

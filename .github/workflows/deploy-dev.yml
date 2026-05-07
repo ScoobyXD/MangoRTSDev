@@ -203,7 +203,8 @@ jobs:
           {
             echo "APP_URL=$(terraform output -raw app_url)"
             echo "API_URL=$(terraform output -raw api_url)"
-            echo "COGNITO_DOMAIN=$(terraform output -raw cognito_domain)"
+            echo "COGNITO_REGION=$(terraform output -raw cognito_region)"
+            echo "COGNITO_USER_POOL_ID=$(terraform output -raw cognito_user_pool_id)"
             echo "COGNITO_CLIENT_ID=$(terraform output -raw cognito_spa_client_id)"
             echo "DEV_COMPANY_ID=$(terraform output -raw dev_company_id)"
             echo "FRONTEND_BUCKET=$(terraform output -raw frontend_bucket)"
@@ -215,11 +216,9 @@ jobs:
         env:
           VITE_API_BASE_URL: ${{ env.API_URL }}
           VITE_AUTH_MODE: cognito
-          VITE_COGNITO_DOMAIN: ${{ env.COGNITO_DOMAIN }}
+          VITE_COGNITO_REGION: ${{ env.COGNITO_REGION }}
+          VITE_COGNITO_USER_POOL_ID: ${{ env.COGNITO_USER_POOL_ID }}
           VITE_COGNITO_CLIENT_ID: ${{ env.COGNITO_CLIENT_ID }}
-          VITE_COGNITO_REDIRECT_URI: ${{ env.APP_URL }}
-          VITE_COGNITO_LOGOUT_URI: ${{ env.APP_URL }}
-          VITE_COGNITO_SCOPES: openid email profile
           VITE_COMPANY_ID: ${{ env.DEV_COMPANY_ID }}
         run: |
           npm ci

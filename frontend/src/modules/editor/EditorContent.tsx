@@ -42,6 +42,7 @@ import {
 } from "./useEditorPreferences";
 import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHandlers";
 import { useEditorDocumentPersistence } from "./useEditorDocumentPersistence";
+import { getActiveCompanyID } from "../../auth/currentCompany";
 
 function clampEditorSelectionFontSize(value: number): number {
   return Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, Math.round(value)));
@@ -107,7 +108,7 @@ type EditorContentProps = {
 // Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "teal", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
-  const companyID = (import.meta.env.VITE_COMPANY_ID as string | undefined)?.trim() ?? "11111111-1111-1111-1111-111111111111";
+  const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
   const outlineStyleStorageKey = `editor-outline-style-v1:${companyID}:${scope}`;
   const [linkedMapWidgetID, setLinkedMapWidgetID] = useState("");

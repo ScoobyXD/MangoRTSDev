@@ -1,6 +1,58 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+const (
+	RoleDevAdmin      = "dev_admin"
+	RoleCompanyAdmin  = "company_admin"
+	RoleCompanyUser   = "company_user"
+	RoleCompanyViewer = "company_viewer"
+)
+
+const (
+	ResourceTypeFolder      = "folder"
+	ResourceTypeNode        = "node"
+	ResourceTypeLogicGate   = "logic_gate"
+	ResourceTypeKanbanBoard = "kanban_board"
+)
+
+const (
+	InvitationStatusPending  = "pending"
+	InvitationStatusAccepted = "accepted"
+	InvitationStatusRevoked  = "revoked"
+)
+
+func NormalizeRole(role string) string {
+	switch strings.TrimSpace(role) {
+	case RoleDevAdmin:
+		return RoleDevAdmin
+	case RoleCompanyAdmin, "owner", "admin":
+		return RoleCompanyAdmin
+	case RoleCompanyViewer:
+		return RoleCompanyViewer
+	case RoleCompanyUser, "member", "agent", "":
+		return RoleCompanyUser
+	default:
+		return ""
+	}
+}
+
+func CanManageCompany(role string) bool {
+	role = NormalizeRole(role)
+	return role == RoleDevAdmin || role == RoleCompanyAdmin
+}
+
+func IsValidResourceType(resourceType string) bool {
+	switch strings.TrimSpace(resourceType) {
+	case ResourceTypeFolder, ResourceTypeNode, ResourceTypeLogicGate, ResourceTypeKanbanBoard:
+		return true
+	default:
+		return false
+	}
+}
 
 type User struct {
 	UserID           string    `json:"user_id"`
@@ -21,6 +73,41 @@ type CompanyMembership struct {
 	CompanyID        string    `json:"company_id"`
 	UserID           string    `json:"user_id"`
 	Role             string    `json:"role"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type CompanyUser struct {
+	CompanyID        string    `json:"company_id"`
+	UserID           string    `json:"user_id"`
+	CognitoSubject   string    `json:"cognito_subject"`
+	Email            string    `json:"email"`
+	Role             string    `json:"role"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type Invitation struct {
+	InvitationID      string     `json:"invitation_id"`
+	CompanyID         string     `json:"company_id"`
+	Email             string     `json:"email"`
+	Role              string     `json:"role"`
+	Status            string     `json:"status"`
+	Token             string     `json:"token,omitempty"`
+	InvitedByUserID   string     `json:"invited_by_user_id"`
+	AcceptedByUserID  *string    `json:"accepted_by_user_id,omitempty"`
+	ExpiresTimestamp  time.Time  `json:"expires_timestamp"`
+	AcceptedTimestamp *time.Time `json:"accepted_timestamp,omitempty"`
+	CreatedTimestamp  time.Time  `json:"created_timestamp"`
+	UpdatedTimestamp  time.Time  `json:"updated_timestamp"`
+}
+
+type ResourceAssignment struct {
+	CompanyID        string    `json:"company_id"`
+	ResourceType     string    `json:"resource_type"`
+	ResourceID       string    `json:"resource_id"`
+	UserID           string    `json:"user_id"`
+	AssignedByUserID string    `json:"assigned_by_user_id"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }

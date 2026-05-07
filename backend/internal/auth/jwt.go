@@ -85,7 +85,7 @@ func (v *Validator) Validate(ctx context.Context, token string) (Claims, error) 
 	if getString(raw, "iss") != v.config.Issuer {
 		return Claims{}, ErrInvalidToken
 	}
-	if v.config.TokenUse != "" && getString(raw, "token_use") != v.config.TokenUse {
+	if v.config.TokenUse != "" && !tokenUseAllowed(getString(raw, "token_use"), v.config.TokenUse) {
 		return Claims{}, ErrInvalidToken
 	}
 	client := getString(raw, "client_id")
@@ -228,6 +228,15 @@ func decodeSegment(segment string, target any) error {
 func getString(raw map[string]any, key string) string {
 	value, _ := raw[key].(string)
 	return strings.TrimSpace(value)
+}
+
+func tokenUseAllowed(actual, configured string) bool {
+	for _, allowed := range strings.Split(configured, ",") {
+		if strings.TrimSpace(allowed) == actual {
+			return true
+		}
+	}
+	return false
 }
 
 func getNumber(raw map[string]any, key string) (float64, bool) {
