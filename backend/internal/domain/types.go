@@ -12,22 +12,9 @@ const (
 )
 
 const (
-	ResourceTypeFolder      = "folder"
-	ResourceTypeNode        = "node"
-	ResourceTypeLogicGate   = "logic_gate"
-	ResourceTypeKanbanBoard = "kanban_board"
-)
-
-const (
 	InvitationStatusPending  = "pending"
 	InvitationStatusAccepted = "accepted"
 	InvitationStatusRevoked  = "revoked"
-)
-
-const (
-	PasswordResetStatusPending = "pending"
-	PasswordResetStatusUsed    = "used"
-	PasswordResetStatusRevoked = "revoked"
 )
 
 func NormalizeRole(role string) string {
@@ -46,15 +33,6 @@ func NormalizeRole(role string) string {
 func CanManageCompany(role string) bool {
 	role = NormalizeRole(role)
 	return role == RoleDevAdmin || role == RoleCompanyAdmin
-}
-
-func IsValidResourceType(resourceType string) bool {
-	switch strings.TrimSpace(resourceType) {
-	case ResourceTypeFolder, ResourceTypeNode, ResourceTypeLogicGate, ResourceTypeKanbanBoard:
-		return true
-	default:
-		return false
-	}
 }
 
 type User struct {
@@ -107,27 +85,6 @@ type Invitation struct {
 	AcceptedTimestamp *time.Time `json:"accepted_timestamp,omitempty"`
 	CreatedTimestamp  time.Time  `json:"created_timestamp"`
 	UpdatedTimestamp  time.Time  `json:"updated_timestamp"`
-}
-
-type PasswordResetCode struct {
-	ResetID          string     `json:"reset_id"`
-	Email            string     `json:"email"`
-	Status           string     `json:"status"`
-	Code             string     `json:"code,omitempty"`
-	ExpiresTimestamp time.Time  `json:"expires_timestamp"`
-	UsedTimestamp    *time.Time `json:"used_timestamp,omitempty"`
-	CreatedTimestamp time.Time  `json:"created_timestamp"`
-	UpdatedTimestamp time.Time  `json:"updated_timestamp"`
-}
-
-type ResourceAssignment struct {
-	CompanyID        string    `json:"company_id"`
-	ResourceType     string    `json:"resource_type"`
-	ResourceID       string    `json:"resource_id"`
-	UserID           string    `json:"user_id"`
-	AssignedByUserID string    `json:"assigned_by_user_id"`
-	CreatedTimestamp time.Time `json:"created_timestamp"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
 type Node struct {

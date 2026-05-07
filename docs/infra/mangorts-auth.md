@@ -4,7 +4,7 @@ MangoRTS uses Amazon Cognito for authentication and Mango-owned PostgreSQL table
 
 ## Login Flow
 
-The frontend uses custom React pages, Cognito Identity Provider API calls for sign-in and invite password challenges, and Mango API endpoints for password resets:
+The frontend uses custom React pages, Cognito Identity Provider API calls for sign-in, invite password challenges, and Cognito password resets:
 
 1. Dev admin or company admin creates an invitation in Mango.
 2. The backend stores a hashed Mango invitation token and calls Cognito `AdminCreateUser`.
@@ -24,7 +24,7 @@ aws sso login --profile <profile>
 .\scripts\start_local_cognito_backend.ps1 -AwsProfile <profile> -StopExisting
 ```
 
-The script exports short-lived AWS credentials from the selected AWS CLI profile into `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` before launching the Go backend. This is required because the backend signs Cognito admin and SES email calls from process environment credentials. The active AWS identity must be allowed to call `cognito-idp:AdminCreateUser`, `cognito-idp:AdminSetUserPassword`, and `ses:SendEmail` for the configured resources.
+The script exports short-lived AWS credentials from the selected AWS CLI profile into `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` before launching the Go backend. This is required because the backend signs Cognito admin and SES email calls from process environment credentials. The active AWS identity must be allowed to call `cognito-idp:AdminCreateUser`, `cognito-idp:AdminDeleteUser`, and `ses:SendEmail` for the configured resources.
 
 ## Backend Enforcement
 
@@ -41,7 +41,7 @@ The backend enables auth only when `AUTH_MODE=cognito`.
 - `company_user` has full access inside their company for now.
 - Company invitations can only be created by `dev_admin` or `company_admin`; this is enforced in both HTTP handlers and repository writes.
 - Creating a new pending invitation for the same company and email revokes older pending invitations, so only the latest token can be accepted.
-- Password resets use `/v1/password-resets/request` and `/v1/password-resets/confirm`. Mango stores only salted reset-code hashes, revokes older pending codes for the same email, and enforces a five-minute reset-code TTL before setting the new Cognito password with `AdminSetUserPassword`.
+- Password resets use Cognito `ForgotPassword` and `ConfirmForgotPassword`. Mango's public `/v1/password-resets/request` endpoint only verifies that the email belongs to a Mango user before the frontend asks Cognito to send the reset code. Cognito owns reset-code delivery and its one-hour code lifetime.
 
 ## Tables
 
@@ -49,8 +49,6 @@ The backend enables auth only when `AUTH_MODE=cognito`.
 - `companies`: stores tenant/company rows.
 - `company_memberships`: Mango authorization roles: `dev_admin`, `company_admin`, `company_user`.
 - `invitations`: company-scoped pending/accepted invite tokens; only token hashes are stored.
-- `password_reset_codes`: five-minute password reset codes; only salted code hashes are stored and only the newest pending code per email remains usable.
-- `resource_assignments`: legacy assignment rows for folders, nodes, logic gates, and kanban boards; these are not enforced by auth right now.
 
 ## Frontend Env
 
@@ -62,7 +60,7 @@ The backend enables auth only when `AUTH_MODE=cognito`.
 
 ## Backend Email Env
 
-- `MANGORTS_EMAIL_FROM`: verified SES sender address for password reset and signup confirmation emails.
+- `MANGORTS_EMAIL_FROM`: verified SES sender address for signup confirmation emails.
 
 Tokens are kept in `sessionStorage` for this MVP. This avoids persistent local storage, but a future secure cookie/session layer is still the preferred production hardening path.
 

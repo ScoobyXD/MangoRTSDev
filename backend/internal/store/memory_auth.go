@@ -251,6 +251,93 @@ func (r *MemoryRepo) ListCompanyUsers(companyID string) ([]domain.CompanyUser, e
 	return items, nil
 }
 
+func (r *MemoryRepo) GetCompanyUser(companyID, userID string) (domain.CompanyUser, error) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return domain.CompanyUser{}, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	membership, ok := r.memberships[membershipKey(companyID, userID)]
+	if !ok {
+		return domain.CompanyUser{}, ErrNotFound
+	}
+	for _, user := range r.users {
+		if user.UserID == userID {
+			return domain.CompanyUser{
+				CompanyID:        membership.CompanyID,
+				UserID:           user.UserID,
+				CognitoSubject:   user.CognitoSubject,
+				Email:            user.Email,
+				DisplayName:      user.DisplayName,
+				Role:             membership.Role,
+				CreatedTimestamp: membership.CreatedTimestamp,
+				UpdatedTimestamp: membership.UpdatedTimestamp,
+			}, nil
+		}
+	}
+	return domain.CompanyUser{}, ErrNotFound
+}
+
+func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (domain.CompanyUser, error) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return domain.CompanyUser{}, ErrInvalid
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	membership, ok := r.memberships[membershipKey(companyID, userID)]
+	if !ok {
+		return domain.CompanyUser{}, ErrNotFound
+	}
+	var user domain.User
+	for _, candidate := range r.users {
+		if candidate.UserID == userID {
+			user = candidate
+			break
+		}
+	}
+	if user.UserID == "" {
+		return domain.CompanyUser{}, ErrNotFound
+	}
+	deleted := domain.CompanyUser{
+		CompanyID:        membership.CompanyID,
+		UserID:           user.UserID,
+		CognitoSubject:   user.CognitoSubject,
+		Email:            user.Email,
+		DisplayName:      user.DisplayName,
+		Role:             membership.Role,
+		CreatedTimestamp: membership.CreatedTimestamp,
+		UpdatedTimestamp: membership.UpdatedTimestamp,
+	}
+
+	email := normalizeEmail(user.Email)
+	for key, invitation := range r.invitations {
+		if normalizeEmail(invitation.Email) == email || invitation.InvitedByUserID == userID || (invitation.AcceptedByUserID != nil && *invitation.AcceptedByUserID == userID) {
+			delete(r.invitations, key)
+		}
+	}
+	for key, membership := range r.memberships {
+		if membership.UserID == userID {
+			delete(r.memberships, key)
+		}
+	}
+	for key, node := range r.nodes {
+		if node.AssigneeUserID != nil && *node.AssigneeUserID == userID {
+			node.AssigneeUserID = nil
+			r.nodes[key] = node
+		}
+	}
+	delete(r.users, user.CognitoSubject)
+	return deleted, nil
+}
+
 func (r *MemoryRepo) CreateInvitation(input CreateInvitationInput) (domain.Invitation, error) {
 	companyID := strings.TrimSpace(input.CompanyID)
 	email := normalizeEmail(input.Email)
@@ -365,92 +452,6 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName 
 	return invitation, nil
 }
 
-func (r *MemoryRepo) CreatePasswordResetCode(input CreatePasswordResetCodeInput) (domain.PasswordResetCode, error) {
-	email := normalizeEmail(input.Email)
-	if email == "" {
-		return domain.PasswordResetCode{}, ErrInvalid
-	}
-	ttl := input.ExpiresIn
-	if ttl <= 0 {
-		ttl = DefaultPasswordResetTTL
-	}
-	code, salt, hash, err := newPasswordResetCode()
-	if err != nil {
-		return domain.PasswordResetCode{}, err
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	now := time.Now().UTC()
-	for key, reset := range r.passwordResets {
-		if reset.item.Email == email && reset.item.Status == domain.PasswordResetStatusPending {
-			reset.item.Status = domain.PasswordResetStatusRevoked
-			reset.item.Code = ""
-			reset.item.UpdatedTimestamp = now
-			r.passwordResets[key] = reset
-		}
-	}
-	item := domain.PasswordResetCode{
-		ResetID:          newUUIDv7String(),
-		Email:            email,
-		Status:           domain.PasswordResetStatusPending,
-		Code:             code,
-		ExpiresTimestamp: now.Add(ttl),
-		CreatedTimestamp: now,
-		UpdatedTimestamp: now,
-	}
-	r.passwordResets[item.ResetID] = memoryPasswordResetCode{
-		item:     item,
-		codeHash: hash,
-		codeSalt: salt,
-	}
-	return item, nil
-}
-
-func (r *MemoryRepo) ConsumePasswordResetCode(email, code string) (domain.PasswordResetCode, error) {
-	email = normalizeEmail(email)
-	code = strings.TrimSpace(code)
-	if email == "" || code == "" {
-		return domain.PasswordResetCode{}, ErrInvalid
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	var selected memoryPasswordResetCode
-	var selectedKey string
-	for key, reset := range r.passwordResets {
-		if reset.item.Email != email || reset.item.Status != domain.PasswordResetStatusPending {
-			continue
-		}
-		if selectedKey == "" || reset.item.CreatedTimestamp.After(selected.item.CreatedTimestamp) {
-			selected = reset
-			selectedKey = key
-		}
-	}
-	if selectedKey == "" {
-		return domain.PasswordResetCode{}, ErrNotFound
-	}
-	now := time.Now().UTC()
-	if now.After(selected.item.ExpiresTimestamp) {
-		selected.item.Status = domain.PasswordResetStatusRevoked
-		selected.item.Code = ""
-		selected.item.UpdatedTimestamp = now
-		r.passwordResets[selectedKey] = selected
-		return domain.PasswordResetCode{}, ErrExpired
-	}
-	if passwordResetCodeHash(selected.codeSalt, code) != selected.codeHash {
-		return domain.PasswordResetCode{}, ErrInvalid
-	}
-	selected.item.Status = domain.PasswordResetStatusUsed
-	selected.item.Code = ""
-	selected.item.UsedTimestamp = &now
-	selected.item.UpdatedTimestamp = now
-	r.passwordResets[selectedKey] = selected
-	return selected.item, nil
-}
-
 func (r *MemoryRepo) userCanCreateInvitationLocked(userID, companyID string) bool {
 	userID = strings.TrimSpace(userID)
 	companyID = strings.TrimSpace(companyID)
@@ -464,114 +465,4 @@ func (r *MemoryRepo) userCanCreateInvitationLocked(userID, companyID string) boo
 	}
 	membership, ok := r.memberships[membershipKey(companyID, userID)]
 	return ok && membership.Role == domain.RoleCompanyAdmin
-}
-
-func (r *MemoryRepo) ListResourceAssignments(query ResourceAssignmentQuery) ([]domain.ResourceAssignment, error) {
-	companyID := strings.TrimSpace(query.CompanyID)
-	if companyID == "" {
-		return nil, ErrInvalid
-	}
-	resourceType := strings.TrimSpace(query.ResourceType)
-	resourceID := strings.TrimSpace(query.ResourceID)
-	userID := strings.TrimSpace(query.UserID)
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	items := make([]domain.ResourceAssignment, 0)
-	for _, assignment := range r.assignments {
-		if assignment.CompanyID != companyID {
-			continue
-		}
-		if resourceType != "" && assignment.ResourceType != resourceType {
-			continue
-		}
-		if resourceID != "" && assignment.ResourceID != resourceID {
-			continue
-		}
-		if userID != "" && assignment.UserID != userID {
-			continue
-		}
-		items = append(items, assignment)
-	}
-	slices.SortFunc(items, func(a, b domain.ResourceAssignment) int {
-		if a.ResourceType != b.ResourceType {
-			return strings.Compare(a.ResourceType, b.ResourceType)
-		}
-		if a.ResourceID != b.ResourceID {
-			return strings.Compare(a.ResourceID, b.ResourceID)
-		}
-		return strings.Compare(a.UserID, b.UserID)
-	})
-	return items, nil
-}
-
-func (r *MemoryRepo) AssignResource(input ResourceAssignmentInput) (domain.ResourceAssignment, error) {
-	companyID := strings.TrimSpace(input.CompanyID)
-	resourceType, ok := normalizeResourceType(input.ResourceType)
-	resourceID := strings.TrimSpace(input.ResourceID)
-	userID := strings.TrimSpace(input.UserID)
-	assignedByUserID := strings.TrimSpace(input.AssignedByUserID)
-	if companyID == "" || !ok || resourceID == "" || userID == "" || assignedByUserID == "" {
-		return domain.ResourceAssignment{}, ErrInvalid
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if _, ok := r.memberships[membershipKey(companyID, userID)]; !ok {
-		return domain.ResourceAssignment{}, ErrNotFound
-	}
-	now := time.Now().UTC()
-	assignment := domain.ResourceAssignment{
-		CompanyID:        companyID,
-		ResourceType:     resourceType,
-		ResourceID:       resourceID,
-		UserID:           userID,
-		AssignedByUserID: assignedByUserID,
-		CreatedTimestamp: now,
-		UpdatedTimestamp: now,
-	}
-	key := resourceAssignmentKey(companyID, resourceType, resourceID, userID)
-	if existing, ok := r.assignments[key]; ok {
-		assignment.CreatedTimestamp = existing.CreatedTimestamp
-	}
-	r.assignments[key] = assignment
-	return assignment, nil
-}
-
-func (r *MemoryRepo) UnassignResource(companyID, resourceType, resourceID, userID string) error {
-	companyID = strings.TrimSpace(companyID)
-	resourceType, ok := normalizeResourceType(resourceType)
-	resourceID = strings.TrimSpace(resourceID)
-	userID = strings.TrimSpace(userID)
-	if companyID == "" || !ok || resourceID == "" || userID == "" {
-		return ErrInvalid
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	key := resourceAssignmentKey(companyID, resourceType, resourceID, userID)
-	if _, ok := r.assignments[key]; !ok {
-		return ErrNotFound
-	}
-	delete(r.assignments, key)
-	return nil
-}
-
-func (r *MemoryRepo) UserHasResourceAssignment(companyID, userID, resourceType, resourceID string) (bool, error) {
-	companyID = strings.TrimSpace(companyID)
-	resourceType, ok := normalizeResourceType(resourceType)
-	resourceID = strings.TrimSpace(resourceID)
-	userID = strings.TrimSpace(userID)
-	if companyID == "" || !ok || resourceID == "" || userID == "" {
-		return false, ErrInvalid
-	}
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	_, ok = r.assignments[resourceAssignmentKey(companyID, resourceType, resourceID, userID)]
-	return ok, nil
 }

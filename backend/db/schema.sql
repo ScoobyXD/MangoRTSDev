@@ -107,52 +107,6 @@ create unique index if not exists idx_invitations_one_pending_company_email
   on invitations(company_id, email)
   where status = 'pending';
 
-create table if not exists password_reset_codes (
-  reset_id uuid not null,
-  email text not null,
-  code_hash text not null,
-  code_salt text not null,
-  status text not null default 'pending',
-  expires_timestamp timestamptz not null,
-  used_timestamp timestamptz,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint password_reset_codes_email_nonblank_chk check (btrim(email) <> ''),
-  constraint password_reset_codes_email_lowercase_chk check (email = lower(btrim(email))),
-  constraint password_reset_codes_code_hash_nonblank_chk check (btrim(code_hash) <> ''),
-  constraint password_reset_codes_code_salt_nonblank_chk check (btrim(code_salt) <> ''),
-  constraint password_reset_codes_status_chk check (status in ('pending', 'used', 'revoked')),
-  primary key (reset_id)
-);
-
-create index if not exists idx_password_reset_codes_email_status_created
-  on password_reset_codes(email, status, created_timestamp desc);
-
-create unique index if not exists idx_password_reset_codes_one_pending_email
-  on password_reset_codes(email)
-  where status = 'pending';
-
-create table if not exists resource_assignments (
-  company_id uuid not null,
-  resource_type text not null,
-  resource_id text not null,
-  user_id uuid not null,
-  assigned_by_user_id uuid not null,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint resource_assignments_type_chk check (resource_type in ('folder', 'node', 'logic_gate', 'kanban_board')),
-  constraint resource_assignments_resource_id_nonblank_chk check (btrim(resource_id) <> ''),
-  primary key (company_id, resource_type, resource_id, user_id),
-  foreign key (company_id, user_id) references company_memberships (company_id, user_id) on delete cascade,
-  foreign key (assigned_by_user_id) references users (user_id)
-);
-
-create index if not exists idx_resource_assignments_company_user_resource
-  on resource_assignments(company_id, user_id, resource_type, resource_id);
-
-create index if not exists idx_resource_assignments_company_resource
-  on resource_assignments(company_id, resource_type, resource_id);
-
 create table if not exists nodes (
   company_id uuid not null,
   node_id uuid not null,

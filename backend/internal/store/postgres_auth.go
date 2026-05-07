@@ -176,6 +176,85 @@ func (r *PostgresRepo) ListCompanyUsers(companyID string) ([]domain.CompanyUser,
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) GetCompanyUser(companyID, userID string) (domain.CompanyUser, error) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return domain.CompanyUser{}, ErrInvalid
+	}
+
+	var item domain.CompanyUser
+	err := r.db.QueryRow(
+		`select cm.company_id, u.user_id, u.cognito_subject, u.email, u.display_name, cm.role, cm.created_timestamp, cm.updated_timestamp
+		 from company_memberships cm
+		 join users u on u.user_id = cm.user_id
+		 where cm.company_id = $1
+		   and u.user_id = $2`,
+		companyID,
+		userID,
+	).Scan(&item.CompanyID, &item.UserID, &item.CognitoSubject, &item.Email, &item.DisplayName, &item.Role, &item.CreatedTimestamp, &item.UpdatedTimestamp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.CompanyUser{}, ErrNotFound
+	}
+	return item, err
+}
+
+func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string) (domain.CompanyUser, error) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return domain.CompanyUser{}, ErrInvalid
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return domain.CompanyUser{}, err
+	}
+	defer tx.Rollback()
+
+	var item domain.CompanyUser
+	err = tx.QueryRow(
+		`select cm.company_id, u.user_id, u.cognito_subject, u.email, u.display_name, cm.role, cm.created_timestamp, cm.updated_timestamp
+		 from company_memberships cm
+		 join users u on u.user_id = cm.user_id
+		 where cm.company_id = $1
+		   and u.user_id = $2
+		 for update of cm, u`,
+		companyID,
+		userID,
+	).Scan(&item.CompanyID, &item.UserID, &item.CognitoSubject, &item.Email, &item.DisplayName, &item.Role, &item.CreatedTimestamp, &item.UpdatedTimestamp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.CompanyUser{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.CompanyUser{}, err
+	}
+
+	if _, err = tx.Exec(`update nodes set assignee_user_id = null where assignee_user_id = $1`, userID); err != nil {
+		return domain.CompanyUser{}, err
+	}
+	if _, err = tx.Exec(
+		`delete from invitations
+		 where ($1 <> '' and email = $1)
+		    or invited_by_user_id = $2
+		    or accepted_by_user_id = $2`,
+		normalizeEmail(item.Email),
+		userID,
+	); err != nil {
+		return domain.CompanyUser{}, err
+	}
+	if _, err = tx.Exec(`delete from company_memberships where user_id = $1`, userID); err != nil {
+		return domain.CompanyUser{}, err
+	}
+	if _, err = tx.Exec(`delete from users where user_id = $1`, userID); err != nil {
+		return domain.CompanyUser{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return domain.CompanyUser{}, err
+	}
+	return item, nil
+}
+
 func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Invitation, error) {
 	companyID := strings.TrimSpace(input.CompanyID)
 	email := normalizeEmail(input.Email)
@@ -415,273 +494,4 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 		return domain.Invitation{}, err
 	}
 	return invitation, nil
-}
-
-func (r *PostgresRepo) CreatePasswordResetCode(input CreatePasswordResetCodeInput) (domain.PasswordResetCode, error) {
-	email := normalizeEmail(input.Email)
-	if email == "" {
-		return domain.PasswordResetCode{}, ErrInvalid
-	}
-	ttl := input.ExpiresIn
-	if ttl <= 0 {
-		ttl = DefaultPasswordResetTTL
-	}
-	code, salt, hash, err := newPasswordResetCode()
-	if err != nil {
-		return domain.PasswordResetCode{}, err
-	}
-
-	tx, err := r.db.Begin()
-	if err != nil {
-		return domain.PasswordResetCode{}, err
-	}
-	defer tx.Rollback()
-
-	if _, err = tx.Exec(
-		`update password_reset_codes
-		 set status = 'revoked',
-		     updated_timestamp = now()
-		 where email = $1
-		   and status = 'pending'`,
-		email,
-	); err != nil {
-		return domain.PasswordResetCode{}, err
-	}
-
-	var item domain.PasswordResetCode
-	var usedAt sql.NullTime
-	err = tx.QueryRow(
-		`insert into password_reset_codes (
-		   reset_id, email, code_hash, code_salt, status, expires_timestamp, created_timestamp, updated_timestamp
-		 )
-		 values ($1, $2, $3, $4, 'pending', now() + ($5 * interval '1 second'), now(), now())
-		 returning reset_id, email, status, expires_timestamp, used_timestamp, created_timestamp, updated_timestamp`,
-		newUUIDv7String(),
-		email,
-		hash,
-		salt,
-		int64(ttl.Seconds()),
-	).Scan(&item.ResetID, &item.Email, &item.Status, &item.ExpiresTimestamp, &usedAt, &item.CreatedTimestamp, &item.UpdatedTimestamp)
-	if err != nil {
-		return domain.PasswordResetCode{}, err
-	}
-	if usedAt.Valid {
-		item.UsedTimestamp = &usedAt.Time
-	}
-	item.Code = code
-	if err = tx.Commit(); err != nil {
-		return domain.PasswordResetCode{}, err
-	}
-	return item, nil
-}
-
-func (r *PostgresRepo) ConsumePasswordResetCode(email, code string) (domain.PasswordResetCode, error) {
-	email = normalizeEmail(email)
-	code = strings.TrimSpace(code)
-	if email == "" || code == "" {
-		return domain.PasswordResetCode{}, ErrInvalid
-	}
-
-	tx, err := r.db.Begin()
-	if err != nil {
-		return domain.PasswordResetCode{}, err
-	}
-	defer tx.Rollback()
-
-	var item domain.PasswordResetCode
-	var codeHash string
-	var codeSalt string
-	var usedAt sql.NullTime
-	err = tx.QueryRow(
-		`select reset_id, email, status, code_hash, code_salt, expires_timestamp, used_timestamp,
-		   created_timestamp, updated_timestamp
-		 from password_reset_codes
-		 where email = $1
-		   and status = 'pending'
-		 order by created_timestamp desc, reset_id desc
-		 limit 1
-		 for update`,
-		email,
-	).Scan(
-		&item.ResetID,
-		&item.Email,
-		&item.Status,
-		&codeHash,
-		&codeSalt,
-		&item.ExpiresTimestamp,
-		&usedAt,
-		&item.CreatedTimestamp,
-		&item.UpdatedTimestamp,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.PasswordResetCode{}, ErrNotFound
-	}
-	if err != nil {
-		return domain.PasswordResetCode{}, err
-	}
-	if usedAt.Valid {
-		item.UsedTimestamp = &usedAt.Time
-	}
-
-	if time.Now().UTC().After(item.ExpiresTimestamp) {
-		_, _ = tx.Exec(
-			`update password_reset_codes
-			 set status = 'revoked',
-			     updated_timestamp = now()
-			 where reset_id = $1`,
-			item.ResetID,
-		)
-		_ = tx.Commit()
-		return domain.PasswordResetCode{}, ErrExpired
-	}
-	if passwordResetCodeHash(codeSalt, code) != codeHash {
-		return domain.PasswordResetCode{}, ErrInvalid
-	}
-
-	usedAt = sql.NullTime{}
-	err = tx.QueryRow(
-		`update password_reset_codes
-		 set status = 'used',
-		     used_timestamp = now(),
-		     updated_timestamp = now()
-		 where reset_id = $1
-		 returning status, used_timestamp, updated_timestamp`,
-		item.ResetID,
-	).Scan(&item.Status, &usedAt, &item.UpdatedTimestamp)
-	if err != nil {
-		return domain.PasswordResetCode{}, err
-	}
-	if usedAt.Valid {
-		item.UsedTimestamp = &usedAt.Time
-	}
-	if err = tx.Commit(); err != nil {
-		return domain.PasswordResetCode{}, err
-	}
-	return item, nil
-}
-
-func (r *PostgresRepo) ListResourceAssignments(query ResourceAssignmentQuery) ([]domain.ResourceAssignment, error) {
-	companyID := strings.TrimSpace(query.CompanyID)
-	resourceType := strings.TrimSpace(query.ResourceType)
-	resourceID := strings.TrimSpace(query.ResourceID)
-	userID := strings.TrimSpace(query.UserID)
-	if companyID == "" {
-		return nil, ErrInvalid
-	}
-
-	rows, err := r.db.Query(
-		`select company_id, resource_type, resource_id, user_id, assigned_by_user_id, created_timestamp, updated_timestamp
-		 from resource_assignments
-		 where company_id = $1
-		   and ($2 = '' or resource_type = $2)
-		   and ($3 = '' or resource_id = $3)
-		   and ($4 = '' or user_id = $4)
-		 order by resource_type, resource_id, user_id`,
-		companyID,
-		resourceType,
-		resourceID,
-		userID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := make([]domain.ResourceAssignment, 0)
-	for rows.Next() {
-		var item domain.ResourceAssignment
-		if err := rows.Scan(&item.CompanyID, &item.ResourceType, &item.ResourceID, &item.UserID, &item.AssignedByUserID, &item.CreatedTimestamp, &item.UpdatedTimestamp); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (r *PostgresRepo) AssignResource(input ResourceAssignmentInput) (domain.ResourceAssignment, error) {
-	companyID := strings.TrimSpace(input.CompanyID)
-	resourceType, ok := normalizeResourceType(input.ResourceType)
-	resourceID := strings.TrimSpace(input.ResourceID)
-	userID := strings.TrimSpace(input.UserID)
-	assignedByUserID := strings.TrimSpace(input.AssignedByUserID)
-	if companyID == "" || !ok || resourceID == "" || userID == "" || assignedByUserID == "" {
-		return domain.ResourceAssignment{}, ErrInvalid
-	}
-
-	var assignment domain.ResourceAssignment
-	err := r.db.QueryRow(
-		`insert into resource_assignments (
-		   company_id, resource_type, resource_id, user_id, assigned_by_user_id, created_timestamp, updated_timestamp
-		 )
-		 values ($1, $2, $3, $4, $5, now(), now())
-		 on conflict (company_id, resource_type, resource_id, user_id) do update set
-		   assigned_by_user_id = excluded.assigned_by_user_id,
-		   updated_timestamp = now()
-		 returning company_id, resource_type, resource_id, user_id, assigned_by_user_id, created_timestamp, updated_timestamp`,
-		companyID,
-		resourceType,
-		resourceID,
-		userID,
-		assignedByUserID,
-	).Scan(&assignment.CompanyID, &assignment.ResourceType, &assignment.ResourceID, &assignment.UserID, &assignment.AssignedByUserID, &assignment.CreatedTimestamp, &assignment.UpdatedTimestamp)
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.ResourceAssignment{}, ErrNotFound
-	}
-	return assignment, err
-}
-
-func (r *PostgresRepo) UnassignResource(companyID, resourceType, resourceID, userID string) error {
-	companyID = strings.TrimSpace(companyID)
-	resourceType, ok := normalizeResourceType(resourceType)
-	resourceID = strings.TrimSpace(resourceID)
-	userID = strings.TrimSpace(userID)
-	if companyID == "" || !ok || resourceID == "" || userID == "" {
-		return ErrInvalid
-	}
-
-	res, err := r.db.Exec(
-		`delete from resource_assignments
-		 where company_id = $1
-		   and resource_type = $2
-		   and resource_id = $3
-		   and user_id = $4`,
-		companyID,
-		resourceType,
-		resourceID,
-		userID,
-	)
-	if err != nil {
-		return err
-	}
-	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *PostgresRepo) UserHasResourceAssignment(companyID, userID, resourceType, resourceID string) (bool, error) {
-	companyID = strings.TrimSpace(companyID)
-	resourceType, ok := normalizeResourceType(resourceType)
-	resourceID = strings.TrimSpace(resourceID)
-	userID = strings.TrimSpace(userID)
-	if companyID == "" || !ok || resourceID == "" || userID == "" {
-		return false, ErrInvalid
-	}
-
-	var exists bool
-	err := r.db.QueryRow(
-		`select exists(
-		   select 1
-		   from resource_assignments
-		   where company_id = $1
-		     and user_id = $2
-		     and resource_type = $3
-		     and resource_id = $4
-		 )`,
-		companyID,
-		userID,
-		resourceType,
-		resourceID,
-	).Scan(&exists)
-	return exists, err
 }

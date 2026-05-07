@@ -30,16 +30,6 @@ func NewSESEmailSender(region, fromEmailAddress string) *SESEmailSender {
 	}
 }
 
-func (s *SESEmailSender) SendPasswordResetCode(ctx context.Context, email, code string, expiresIn time.Duration) error {
-	minutes := int(expiresIn.Minutes())
-	if minutes <= 0 {
-		minutes = 5
-	}
-	subject := "Your MangoRTS password reset code"
-	body := fmt.Sprintf("Your MangoRTS password reset code is %s.\n\nThis code expires in about %d minutes. Only the newest reset code can be used.", strings.TrimSpace(code), minutes)
-	return s.sendTextEmail(ctx, email, subject, body)
-}
-
 func (s *SESEmailSender) SendSignupConfirmation(ctx context.Context, email, companyName string) error {
 	companyName = strings.TrimSpace(companyName)
 	if companyName == "" {

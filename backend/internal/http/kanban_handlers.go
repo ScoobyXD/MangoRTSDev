@@ -87,12 +87,6 @@ func (s *Server) handleKanbanBoards(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_boards")
 			return
 		}
-		if sets, shouldFilter, err := s.assignmentSetsForRequest(r, companyID); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_filter_kanban_boards")
-			return
-		} else if shouldFilter {
-			items = filterKanbanBoardsByAssignments(items, sets)
-		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"boards": items})
 		return
 	}

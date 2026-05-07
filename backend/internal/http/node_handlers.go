@@ -22,12 +22,6 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
 			return
 		}
-		if sets, shouldFilter, err := s.assignmentSetsForRequest(r, companyID); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_filter_nodes")
-			return
-		} else if shouldFilter {
-			items = filterNodesByAssignments(items, sets)
-		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"nodes": items})
 		return
 	}
