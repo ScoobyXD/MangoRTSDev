@@ -6,6 +6,7 @@ import {
   buildExplorerFindSelection,
   buildExplorerRowBatchReorderPlan,
   buildExplorerRowReorderPlan,
+  buildExplorerSearchResults,
   formatExplorerFolderLabel,
   getExplorerScrollTopForRow,
   resolveExplorerClickSelection,
@@ -96,6 +97,28 @@ run("automatic folders hold kanban boards and nodes by due date", () => {
     "node-future",
     "node-past",
     "node-today",
+  ]);
+});
+
+run("root folders from different domains can be locally ordered together", () => {
+  const rows = buildCompanyExplorerTreeRows({
+    expanded: new Set(),
+    nodes: [],
+    logicGates: [],
+    kanbanBoards: [],
+    folders: [
+      { company_id: "c", folder_id: "node-root", folder_kind: "node", name: "Node Root", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
+      { company_id: "c", folder_id: "logic-root", folder_kind: "logic_gate", name: "Logic Root", position: 1000, created_timestamp: "2", updated_timestamp: "2" },
+    ],
+    folderItems: [],
+    rootRowOrder: { "workspace-folder-logic-root": 500 },
+  });
+  assert.deepEqual(rows.map((row) => row.id), [
+    "system-folder-kanban-boards",
+    "system-folder-active-nodes",
+    "system-folder-history",
+    "workspace-folder-logic-root",
+    "workspace-folder-node-root",
   ]);
 });
 
@@ -391,6 +414,36 @@ run("find scrolling accounts for the Explorer header and keeps the target above 
     bottomPadding: 30,
     maxScrollTop: 1000,
   }), 391);
+});
+
+run("find scrolling can center a selected result", () => {
+  assert.equal(getExplorerScrollTopForRow({
+    rowIndex: 20,
+    rowHeight: 30,
+    rowsTopOffset: 31,
+    currentScrollTop: 360,
+    viewportHeight: 300,
+    bottomPadding: 30,
+    maxScrollTop: 1000,
+    align: "center",
+  }), 496);
+});
+
+run("search falls back to the whole company when selected folder has no matches", () => {
+  const rows = [
+    { id: "workspace-folder-a", label: "Folder A", depth: 0, kind: "folder" as const, folderID: "a", folderKind: "node" as const },
+    { id: "node-alpha", label: "Alpha", depth: 1, kind: "node" as const, nodeID: "alpha", folderID: "a", folderKind: "node" as const },
+    { id: "workspace-folder-b", label: "Folder B", depth: 0, kind: "folder" as const, folderID: "b", folderKind: "node" as const },
+    { id: "node-beta", label: "Beta", depth: 1, kind: "node" as const, nodeID: "beta", folderID: "b", folderKind: "node" as const },
+  ];
+  assert.deepEqual(
+    buildExplorerSearchResults({ rows, selectedRowID: "workspace-folder-a", query: "beta" }).map((row) => row.id),
+    ["node-beta"],
+  );
+  assert.deepEqual(
+    buildExplorerSearchResults({ rows, selectedRowID: "workspace-folder-a", query: "alpha" }).map((row) => row.id),
+    ["node-alpha"],
+  );
 });
 
 run("find selection expands ancestor folders and highlights every requested entity", () => {

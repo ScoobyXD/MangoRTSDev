@@ -766,6 +766,51 @@ func TestCompanyExplorerFolderItemBatchAssignsItemsInOneRequest(t *testing.T) {
 	}
 }
 
+func TestCompanyExplorerDeleteBatchDeletesSelectedTargetsInOneRequest(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-explorer-delete-batch-test"
+
+	node, err := repo.CreateNode(companyID, "Batch delete node")
+	if err != nil {
+		t.Fatalf("CreateNode() error = %v", err)
+	}
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Batch delete folder")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder() error = %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"targets": []map[string]string{
+			{"kind": "node", "id": node.NodeID},
+			{"kind": "folder", "id": folder.FolderID, "folder_kind": "node"},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/delete-batch", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST delete batch status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if _, err := repo.GetNode(companyID, node.NodeID); err != store.ErrNotFound {
+		t.Fatalf("GetNode after batch delete error = %v, want ErrNotFound", err)
+	}
+	folders, err := repo.ListCompanyExplorerFolders(companyID, "node")
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerFolders() error = %v", err)
+	}
+	for _, item := range folders {
+		if item.FolderID == folder.FolderID {
+			t.Fatalf("folder %s still exists after batch delete", folder.FolderID)
+		}
+	}
+}
+
 func TestCompanyExplorerFolderItemMovesBreakRelationships(t *testing.T) {
 	t.Parallel()
 

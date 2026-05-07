@@ -6,11 +6,11 @@ import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot,
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, removeLogicGateRelationshipGraphRelationshipsForLogicGate, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { type ExplorerSelectionState } from "./explorerSync";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerItemType } from "../folders/companyExplorerFolders";
-import { deleteKanbanBoard, listKanbanBoards } from "../kanban/kanbanApi";
+import { listKanbanBoards } from "../kanban/kanbanApi";
 import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntityDragItem, type KanbanBoard, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
-import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID, EXPLORER_SYSTEM_HISTORY_FOLDER_ID, EXPLORER_SYSTEM_KANBAN_FOLDER_ID, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
+import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchResults, EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID, EXPLORER_SYSTEM_HISTORY_FOLDER_ID, EXPLORER_SYSTEM_KANBAN_FOLDER_ID, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
 import { CompanyExplorerTree } from "./CompanyExplorerTree";
 import {
@@ -29,6 +29,7 @@ import {
 import {
   type CompanyExplorerContextMenuState,
   type ExplorerDeleteTarget,
+  type ExplorerDeleteTargetWithLabel,
   type ExplorerDragPayload,
   type ExplorerFindTarget,
   type ExplorerRenameDraft,
@@ -60,6 +61,11 @@ type CompanyExplorerFolderItemsBatchResponse = {
   folder_items?: CompanyExplorerFolderItem[];
 };
 
+type CompanyExplorerDeleteBatchResponse = {
+  status?: string;
+  targets?: Array<{ kind: string; id: string }>;
+};
+
 const SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX: Array<[string, string]> = [
   ["system-kanban-", EXPLORER_SYSTEM_KANBAN_FOLDER_ID],
   ["system-active-node-", EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID],
@@ -71,18 +77,74 @@ function getSystemFolderIDForTreeRowID(rowID: string): string {
   return SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX.find(([prefix]) => rowID.startsWith(prefix))?.[1] ?? "";
 }
 
-function getExplorerSearchRowsForSelection(rows: ExplorerTreeNode[], selectedRowID: string): ExplorerTreeNode[] {
-  const selectedIndex = rows.findIndex((row) => row.id === selectedRowID);
-  const selected = selectedIndex >= 0 ? rows[selectedIndex] : null;
-  if (!selected || selected.kind !== "folder") return rows;
+function getDeleteVocabulary(kind: ExplorerDeleteTarget["kind"], plural = false): string {
+  if (kind === "folder") return plural ? "folders" : "folder";
+  if (kind === "node") return plural ? "nodes" : "node";
+  if (kind === "logic_gate") return plural ? "Logic Gates" : "Logic Gate";
+  return plural ? "Kanban Boards" : "Kanban Board";
+}
 
-  const scopedRows: ExplorerTreeNode[] = [];
-  for (let index = selectedIndex + 1; index < rows.length; index += 1) {
-    const row = rows[index];
-    if (row.depth <= selected.depth) break;
-    scopedRows.push(row);
+function joinHumanList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
+function getDeleteTargetLabel(target: ExplorerDeleteTargetWithLabel): string {
+  const label = target.label?.trim() || target.id;
+  return `${getDeleteVocabulary(target.kind)} "${label}"`;
+}
+
+function buildDeleteConfirmationSummary(input: {
+  targets: ExplorerDeleteTargetWithLabel[];
+  folders: CompanyExplorerFolder[];
+  folderItems: CompanyExplorerFolderItem[];
+}): {
+  title: string;
+  detail: string;
+  targetList: string;
+  totalThings: number;
+  requiresFolderAcknowledgement: boolean;
+} {
+  const counts = new Map<ExplorerDeleteTarget["kind"], number>();
+  let totalThings = 0;
+  for (const target of input.targets) {
+    counts.set(target.kind, (counts.get(target.kind) ?? 0) + 1);
+    if (target.kind === "folder") {
+      const subtreeIDs = collectFolderSubtreeIDs(input.folders, target.id);
+      const folderCount = subtreeIDs.size || 1;
+      const itemCount = input.folderItems.filter((item) => subtreeIDs.has(item.folder_id)).length;
+      totalThings += folderCount + itemCount;
+    } else {
+      totalThings += 1;
+    }
   }
-  return scopedRows;
+  totalThings = Math.max(totalThings, input.targets.length);
+  const requiresFolderAcknowledgement = input.targets.some((target) => target.kind === "folder");
+  const targetList = input.targets.slice(0, 6).map(getDeleteTargetLabel);
+  if (input.targets.length > targetList.length) targetList.push(`${input.targets.length - targetList.length} more`);
+
+  if (input.targets.length === 1) {
+    const target = input.targets[0];
+    const vocabulary = getDeleteVocabulary(target.kind);
+    return {
+      title: `Are you sure you want to delete this ${vocabulary}: ${target.label?.trim() || target.id}?`,
+      detail: `This deletes ${totalThings} thing${totalThings === 1 ? "" : "s"}.`,
+      targetList: getDeleteTargetLabel(target),
+      totalThings,
+      requiresFolderAcknowledgement,
+    };
+  }
+
+  const kindDetails = Array.from(counts.entries())
+    .map(([kind, count]) => `${count} ${getDeleteVocabulary(kind, count !== 1)}`);
+  return {
+    title: `Are you sure you want to delete these ${totalThings} things?`,
+    detail: `This batch includes ${joinHumanList(kindDetails)}.`,
+    targetList: joinHumanList(targetList),
+    totalThings,
+    requiresFolderAcknowledgement,
+  };
 }
 
 // Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
@@ -126,7 +188,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [dragOverPlacement, setDragOverPlacement] = useState<ExplorerRowDropPlacement | null>(null);
   const [dragPayload, setDragPayload] = useState<ExplorerDragPayload | null>(null);
   const [explorerContextMenu, setExplorerContextMenu] = useState<CompanyExplorerContextMenuState | null>(null);
-  const [deleteConfirmation, setDeleteConfirmation] = useState<{ targets: ExplorerDeleteTarget[] } | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ targets: ExplorerDeleteTargetWithLabel[] } | null>(null);
+  const [deleteFolderAcknowledged, setDeleteFolderAcknowledged] = useState(false);
   const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
   const [explorerSearchFocused, setExplorerSearchFocused] = useState(false);
   const [linkRevision, setLinkRevision] = useState(0);
@@ -142,6 +205,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const lastLocalExplorerSelectionRef = useRef<{ domain: ExplorerSelectionDomain; changedAt: number }>({ domain: "root", changedAt: 0 });
   const pendingExplorerSelectionIntentRef = useRef<SelectionIntent>("activate");
   const explorerContextSequenceRef = useRef(0);
+  const pendingScrollAlignRef = useRef<"nearest" | "center">("nearest");
 
   useEffect(() => {
     let cancelled = false;
@@ -294,11 +358,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   });
 
   const explorerSearchResults = useMemo(() => {
-    const query = explorerSearchQuery.trim().toLowerCase();
-    if (!query) return [];
     const expandedForSearch = new Set<string>(["folder-root", EXPLORER_SYSTEM_KANBAN_FOLDER_ID, EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID, EXPLORER_SYSTEM_HISTORY_FOLDER_ID]);
     for (const folder of folders) expandedForSearch.add(`workspace-folder-${folder.folder_id}`);
-    const rows = getExplorerSearchRowsForSelection(buildCompanyExplorerTreeRows({
+    const rows = buildCompanyExplorerTreeRows({
       expanded: expandedForSearch,
       nodes,
       logicGates,
@@ -306,23 +368,8 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       folders,
       folderItems,
       rootRowOrder,
-    }), selectedTreeID);
-    const matches: ExplorerTreeNode[] = [];
-    for (const row of rows) {
-      const identity = [
-        row.label,
-        row.kind,
-        row.nodeID ?? "",
-        row.logicGateID ?? "",
-        row.kanbanBoardID ?? "",
-        row.folderID ?? "",
-        row.folderLabel ?? "",
-      ].join(" ").toLowerCase();
-      if (!identity.includes(query)) continue;
-      matches.push(row);
-      if (matches.length >= 16) break;
-    }
-    return matches;
+    });
+    return buildExplorerSearchResults({ rows, selectedRowID: selectedTreeID, query: explorerSearchQuery, limit: 16 });
   }, [explorerSearchQuery, folderItems, folders, kanbanBoards, logicGates, nodes, rootRowOrder, selectedTreeID]);
   const explorerSearchOpen = explorerSearchFocused && explorerSearchQuery.trim().length > 0;
 
@@ -592,74 +639,84 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [apiBase, assignItemToFolder, companyID, requestJSON]);
 
-  // Delete through canonical REST APIs first, then patch local/shared caches so
-  // Explorer and linked maps converge immediately without a full snapshot GET.
-  const deleteExplorerTarget = useCallback(async (target: ExplorerDeleteTarget) => {
+  // Delete through one canonical batch request, then patch local/shared caches
+  // once so multi-select deletes do not visibly collapse one row at a time.
+  const deleteExplorerTargets = useCallback(async (targets: ExplorerDeleteTargetWithLabel[]) => {
+    const seen = new Set<string>();
+    const selectedLogicGateBoardIDs = new Set(
+      targets
+        .filter((target) => target.kind === "logic_gate")
+        .map((target) => logicGateKanbanBoardID(target.id)),
+    );
+    const normalizedTargets = targets.filter((target) => {
+      if (target.kind === "kanban" && selectedLogicGateBoardIDs.has(target.id)) return false;
+      const key = `${target.kind}:${target.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (normalizedTargets.length === 0) return;
+
     setError("");
     try {
-      if (target.kind === "folder") {
-        const deletedFolder = folders.find((folder) => folder.folder_id === target.id);
-        await requestJSON<{ status: string }>(`/v1/company-explorer/folders/${target.id}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
-        const deletedFolderIDs = collectFolderSubtreeIDs(folders, target.id);
+      await requestJSON<CompanyExplorerDeleteBatchResponse>("/v1/company-explorer/delete-batch", {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyID,
+          targets: normalizedTargets.map((target) => ({
+            kind: target.kind,
+            id: target.id,
+            folder_kind: target.kind === "folder" ? target.folderKind : undefined,
+          })),
+        }),
+      });
+
+      const deletedFolderIDs = new Set<string>();
+      const deletedNodeIDs = new Set<string>();
+      const deletedLogicGateIDs = new Set<string>();
+      const deletedKanbanBoardIDs = new Set<string>();
+
+      for (const target of normalizedTargets) {
+        if (target.kind === "folder") {
+          for (const id of collectFolderSubtreeIDs(folders, target.id)) deletedFolderIDs.add(id);
+        } else if (target.kind === "node") {
+          deletedNodeIDs.add(target.id);
+        } else if (target.kind === "logic_gate") {
+          deletedLogicGateIDs.add(target.id);
+          deletedKanbanBoardIDs.add(logicGateKanbanBoardID(target.id));
+        } else {
+          deletedKanbanBoardIDs.add(target.id);
+        }
+      }
+
+      if (deletedFolderIDs.size > 0) {
         setFolders((previous) => previous.filter((folder) => !deletedFolderIDs.has(folder.folder_id)));
-        setFolderItems((previous) => previous.filter((item) => !deletedFolderIDs.has(item.folder_id)));
-        removeCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, target.id);
-        removeCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, target.id);
-        const parentTreeID = deletedFolder?.parent_folder_id
-          ? `workspace-folder-${deletedFolder.parent_folder_id}`
-          : "folder-root";
-        lastLocalExplorerSelectionRef.current = { domain: parentTreeID === "folder-root" ? "root" : target.folderKind, changedAt: Date.now() };
-        pendingExplorerSelectionIntentRef.current = "navigate";
-        setSelectedTreeID(parentTreeID);
-        setSelectedTreeIDs(new Set([parentTreeID]));
-        setSelectionAnchorTreeID(parentTreeID);
-        setSelectedNodeID("");
-        setSelectedLogicGateID("");
-        setSelectedKanbanBoardID("");
-        return;
+        for (const folderID of deletedFolderIDs) {
+          removeCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folderID);
+          removeCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folderID);
+        }
       }
-
-      if (target.kind === "node") {
-        await requestJSON<{ status: string }>(`/v1/nodes/${target.id}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
-        setNodes((previous) => previous.filter((node) => node.node_id !== target.id));
-        setFolderItems((previous) => previous.filter((item) => item.item_type !== "node" || item.item_id !== target.id));
-        removeNodeRelationshipGraphNode(apiBase, companyID, target.id);
-        lastLocalExplorerSelectionRef.current = { domain: "root", changedAt: Date.now() };
-        pendingExplorerSelectionIntentRef.current = "navigate";
-        setSelectedTreeID("folder-root");
-        setSelectedTreeIDs(new Set(["folder-root"]));
-        setSelectionAnchorTreeID("folder-root");
-        setSelectedNodeID("");
-        setSelectedLogicGateID("");
-        setSelectedKanbanBoardID("");
-        return;
+      if (deletedNodeIDs.size > 0) {
+        setNodes((previous) => previous.filter((node) => !deletedNodeIDs.has(node.node_id)));
+        for (const nodeID of deletedNodeIDs) removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
       }
-
-      if (target.kind === "kanban") {
-        await deleteKanbanBoard(apiBase, companyID, target.id);
-        setKanbanBoards((previous) => previous.filter((board) => board.board_id !== target.id));
-        setFolderItems((previous) => previous.filter((item) => item.item_type !== "kanban" || item.item_id !== target.id));
-        window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, deletedBoardID: target.id } }));
-        lastLocalExplorerSelectionRef.current = { domain: "root", changedAt: Date.now() };
-        setSelectedTreeID("folder-root");
-        setSelectedTreeIDs(new Set(["folder-root"]));
-        setSelectionAnchorTreeID("folder-root");
-        setSelectedNodeID("");
-        setSelectedLogicGateID("");
-        setSelectedKanbanBoardID("");
-        return;
+      if (deletedLogicGateIDs.size > 0) {
+        setLogicGates((previous) => previous.filter((logicGate) => !deletedLogicGateIDs.has(logicGate.logic_gate_id)));
+        for (const logicGateID of deletedLogicGateIDs) removeLogicGateRelationshipGraphNode(apiBase, companyID, logicGateID);
       }
-
-      await requestJSON<{ status: string }>(`/v1/logic-gates/${target.id}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
-      const associatedBoardID = logicGateKanbanBoardID(target.id);
-      setLogicGates((previous) => previous.filter((logicGate) => logicGate.logic_gate_id !== target.id));
-      setKanbanBoards((previous) => previous.filter((board) => board.board_id !== associatedBoardID));
+      if (deletedKanbanBoardIDs.size > 0) {
+        setKanbanBoards((previous) => previous.filter((board) => !deletedKanbanBoardIDs.has(board.board_id)));
+        for (const boardID of deletedKanbanBoardIDs) {
+          window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, deletedBoardID: boardID } }));
+        }
+      }
       setFolderItems((previous) => previous.filter((item) =>
-        (item.item_type !== "logic_gate" || item.item_id !== target.id)
-        && (item.item_type !== "kanban" || item.item_id !== associatedBoardID)
+        !deletedFolderIDs.has(item.folder_id)
+        && (item.item_type !== "node" || !deletedNodeIDs.has(item.item_id))
+        && (item.item_type !== "logic_gate" || !deletedLogicGateIDs.has(item.item_id))
+        && (item.item_type !== "kanban" || !deletedKanbanBoardIDs.has(item.item_id))
       ));
-      removeLogicGateRelationshipGraphNode(apiBase, companyID, target.id);
-      window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, deletedBoardID: associatedBoardID } }));
+
       lastLocalExplorerSelectionRef.current = { domain: "root", changedAt: Date.now() };
       pendingExplorerSelectionIntentRef.current = "navigate";
       setSelectedTreeID("folder-root");
@@ -669,15 +726,14 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setSelectedLogicGateID("");
       setSelectedKanbanBoardID("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : `failed_to_delete_${target.kind}`);
+      setError(err instanceof Error ? err.message : "failed_to_delete_selection");
     }
   }, [apiBase, companyID, folders, requestJSON]);
 
-  const getDeleteTargetsForRows = useCallback((rows: ExplorerTreeNode[]): ExplorerDeleteTarget[] => {
+  const getDeleteTargetsForRows = useCallback((rows: ExplorerTreeNode[]): ExplorerDeleteTargetWithLabel[] => {
     const selectedFolderIDs = new Set(rows.filter((row) => row.kind === "folder" && row.folderID).map((row) => row.folderID!));
-    const isCoveredBySelectedAncestor = (row: ExplorerTreeNode): boolean => {
-      if (row.kind !== "folder" || !row.parentFolderID) return false;
-      let currentFolderID = row.parentFolderID;
+    const isFolderCoveredBySelectedAncestor = (folderID: string): boolean => {
+      let currentFolderID = folderID;
       const seen = new Set<string>();
       while (currentFolderID && !seen.has(currentFolderID)) {
         if (selectedFolderIDs.has(currentFolderID)) return true;
@@ -686,7 +742,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       }
       return false;
     };
-    const targets: ExplorerDeleteTarget[] = [];
+    const isCoveredBySelectedAncestor = (row: ExplorerTreeNode): boolean => {
+      if (row.kind === "folder") return Boolean(row.parentFolderID && isFolderCoveredBySelectedAncestor(row.parentFolderID));
+      return Boolean(row.folderID && isFolderCoveredBySelectedAncestor(row.folderID));
+    };
+    const targets: ExplorerDeleteTargetWithLabel[] = [];
     const seenTargets = new Set<string>();
     for (const row of rows) {
       if (isCoveredBySelectedAncestor(row)) continue;
@@ -695,14 +755,15 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       const key = `${target.kind}:${target.id}`;
       if (seenTargets.has(key)) continue;
       seenTargets.add(key);
-      targets.push(target);
+      targets.push({ ...target, label: row.label, treeID: row.id });
     }
     return targets;
   }, [folders]);
 
-  const requestDeleteTargets = useCallback((targets: ExplorerDeleteTarget[]) => {
+  const requestDeleteTargets = useCallback((targets: ExplorerDeleteTargetWithLabel[]) => {
     if (targets.length === 0) return;
     setExplorerContextMenu(null);
+    setDeleteFolderAcknowledged(false);
     setDeleteConfirmation({ targets });
   }, []);
 
@@ -712,12 +773,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     const targets = getDeleteTargetsForRows(selectedRows.length > 0 ? selectedRows : (selectedTree ? [selectedTree] : []));
     requestDeleteTargets(targets);
   }, [deleteConfirmation, getDeleteTargetsForRows, requestDeleteTargets, selectedTree, selectedTreeIDs, treeRows]);
-
-  const deleteExplorerTargets = useCallback(async (targets: ExplorerDeleteTarget[]) => {
-    for (const target of targets) {
-      await deleteExplorerTarget(target);
-    }
-  }, [deleteExplorerTarget]);
 
   const commitRename = useCallback(async (draft?: ExplorerRenameDraft) => {
     const activeRename = draft ?? renaming;
@@ -906,7 +961,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     setRenaming({ treeID: row.id, target, value: row.label });
   }, [focusTreeRow]);
 
-  const scrollTreeRowIntoView = useCallback((rowID: string) => {
+  const scrollTreeRowIntoView = useCallback((rowID: string, options: { align?: "nearest" | "center" } = {}) => {
     const index = treeRows.findIndex((row) => row.id === rowID);
     const viewport = treeViewportRef.current;
     if (index < 0 || !viewport) return;
@@ -921,6 +976,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       viewportHeight,
       maxScrollTop: Math.max(0, viewport.scrollHeight - viewportHeight),
       bottomPadding: COMPANY_EXPLORER_TREE_ROW_HEIGHT * 2,
+      align: options.align,
     });
     if (nextScrollTop === currentTop) return;
     viewport.scrollTop = nextScrollTop;
@@ -955,6 +1011,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       setSelectedNodeID("");
       setSelectedKanbanBoardID("");
     }
+    pendingScrollAlignRef.current = "center";
     pendingScrollTreeIDRef.current = plan.primaryTreeID;
   }, [folderItems, folders, logicGates, nodes]);
 
@@ -968,14 +1025,17 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     setSelectedTreeIDs(new Set([row.id]));
     setSelectionAnchorTreeID(row.id);
     focusTreeRow(row, { selectionIntent: "activate" });
+    pendingScrollAlignRef.current = "center";
     pendingScrollTreeIDRef.current = row.id;
   }, [expandTreeIDs, focusTreeRow]);
 
   useEffect(() => {
     const rowID = pendingScrollTreeIDRef.current;
     if (!rowID || !treeRows.some((row) => row.id === rowID)) return;
+    const align = pendingScrollAlignRef.current;
     pendingScrollTreeIDRef.current = "";
-    window.requestAnimationFrame(() => scrollTreeRowIntoView(rowID));
+    pendingScrollAlignRef.current = "nearest";
+    window.requestAnimationFrame(() => scrollTreeRowIntoView(rowID, { align }));
   }, [scrollTreeRowIntoView, treeRows]);
 
   const handleTreeKeyDown = useCompanyExplorerKeyboard({
@@ -1056,7 +1116,11 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     const targetContainer = getExplorerRowContainerID(target);
     const sourceKind = getExplorerRowOrderKind(source);
     const targetKind = getExplorerRowOrderKind(target);
-    if (sourceContainer == null || targetContainer == null || sourceContainer !== targetContainer || !sourceKind || sourceKind !== targetKind) return [];
+    if (sourceContainer == null || targetContainer == null || sourceContainer !== targetContainer || !sourceKind || !targetKind) return [];
+    if (sourceContainer === "" && targetContainer === "") {
+      return treeRows.filter((row) => getExplorerRowContainerID(row) === "" && Boolean(getExplorerRowOrderKind(row)));
+    }
+    if (sourceKind !== targetKind) return [];
     return treeRows.filter((row) => getExplorerRowContainerID(row) === sourceContainer && getExplorerRowOrderKind(row) === sourceKind);
   }, [treeRows]);
 
@@ -1073,7 +1137,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
     if (updates.length === 0) return false;
 
-    const localRootUpdates = updates.filter(({ row }) => row.kind !== "folder" && row.folderID === "");
+    const localRootUpdates = updates.filter(({ row }) => getExplorerRowContainerID(row) === "");
     if (localRootUpdates.length > 0) {
       setRootRowOrder((previous) => {
         const next = { ...previous };
@@ -1120,9 +1184,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     if (targetContainer === "") {
       setRootRowOrder((previous) => {
         const next = { ...previous };
-        for (const { row, position } of updates) {
-          if (row.kind !== "folder") next[row.id] = position;
-        }
+        for (const { row, position } of updates) next[row.id] = position;
         return next;
       });
     }
@@ -1174,9 +1236,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     if (targetContainer === "") {
       setRootRowOrder((previous) => {
         const next = { ...previous };
-        for (const { row, position } of updates) {
-          if (row.kind !== "folder") next[row.id] = position;
-        }
+        for (const { row, position } of updates) next[row.id] = position;
         return next;
       });
     }
@@ -1256,11 +1316,18 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const openExplorerContextMenu = useCallback((event: React.MouseEvent, row?: ExplorerTreeNode | null) => {
     event.preventDefault();
     event.stopPropagation();
-    if (row) selectTreeRow(row, event, { selectionIntent: "navigate" });
+    if (row) {
+      if (selectedTreeIDs.has(row.id)) focusTreeRow(row, { selectionIntent: "navigate" });
+      else selectTreeRow(row, undefined, { selectionIntent: "navigate" });
+    }
     const contextKind: CompanyExplorerFolderKind | null = row?.folderKind ?? (row?.kind === "node" ? "node" : row?.kind === "logic_gate" ? "logic_gate" : null);
     const targets = resolveExplorerCreationTargets(row ?? null);
     const deleteRows = row ? (selectedTreeIDs.has(row.id) ? treeRows.filter((candidate) => selectedTreeIDs.has(candidate.id)) : [row]) : [];
     const deleteTargets = getDeleteTargetsForRows(deleteRows);
+    const isSystemContext = row ? Boolean(getSystemFolderIDForTreeRowID(row.id)) : false;
+    const canCreateFolder = !isSystemContext;
+    const canCreateNode = !isSystemContext;
+    const canCreateLogicGate = !isSystemContext;
     setExplorerContextMenu({
       x: event.clientX,
       y: event.clientY,
@@ -1273,9 +1340,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       renameLabel: row?.label ?? "",
       contextKind,
       createFolderPosition: getContextCreateFolderPosition(row, event, targets.preferredFolderKind),
-      canCreateBothFolderTypes: !contextKind,
+      canCreateBothFolderTypes: !contextKind && !isSystemContext,
+      canCreateFolder,
+      canCreateNode,
+      canCreateLogicGate,
     });
-  }, [getContextCreateFolderPosition, getDeleteTargetsForRows, selectTreeRow, selectedTreeIDs, treeRows]);
+  }, [focusTreeRow, getContextCreateFolderPosition, getDeleteTargetsForRows, selectTreeRow, selectedTreeIDs, treeRows]);
 
   // Kanban accepts node cards only. A mixed Explorer selection is still valid
   // for navigation, but the drag payload intentionally exports node rows only.
@@ -1332,6 +1402,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     expandTreeIDs,
     applyExplorerFindSelection,
   });
+
+  const deleteSummary = useMemo(() => (
+    deleteConfirmation
+      ? buildDeleteConfirmationSummary({ targets: deleteConfirmation.targets, folders, folderItems })
+      : null
+  ), [deleteConfirmation, folderItems, folders]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
@@ -1450,30 +1526,49 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         onDeleteTargets={requestDeleteTargets}
       />
 
-      {deleteConfirmation && (
+      {deleteConfirmation && deleteSummary && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
           <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 700 }}>
-              Are you sure you want to delete {deleteConfirmation.targets.length} thing{deleteConfirmation.targets.length === 1 ? "" : "s"}?
+              {deleteSummary.title}
             </div>
             <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#b8c4cc" : "#2e2e2e" }}>
-              This removes the selected Company Explorer object{deleteConfirmation.targets.length === 1 ? "" : "s"} immediately.
+              {deleteSummary.detail}
             </div>
+            <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#d6e0e6" : "#222222" }}>
+              Selected: {deleteSummary.targetList}
+            </div>
+            {deleteSummary.requiresFolderAcknowledgement && (
+              <label style={{ display: "grid", gridTemplateColumns: "18px minmax(0, 1fr)", gap: 7, alignItems: "start", fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#f6f8fb" : "#111111" }}>
+                <input
+                  type="checkbox"
+                  checked={deleteFolderAcknowledged}
+                  onChange={(event) => setDeleteFolderAcknowledged(event.currentTarget.checked)}
+                  style={{ marginTop: 1 }}
+                />
+                <span>I understand that deleting this folder deletes all contents inside of this folder.</span>
+              </label>
+            )}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <button
                 type="button"
                 onClick={() => {
                   const targets = deleteConfirmation.targets;
                   setDeleteConfirmation(null);
+                  setDeleteFolderAcknowledged(false);
                   void deleteExplorerTargets(targets);
                 }}
-                style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", color: "#111111", cursor: "pointer", fontWeight: 700 }}
+                disabled={deleteSummary.requiresFolderAcknowledgement && !deleteFolderAcknowledged}
+                style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", color: "#111111", cursor: deleteSummary.requiresFolderAcknowledgement && !deleteFolderAcknowledged ? "not-allowed" : "pointer", fontWeight: 700, opacity: deleteSummary.requiresFolderAcknowledgement && !deleteFolderAcknowledged ? 0.55 : 1 }}
               >
                 Yes
               </button>
               <button
                 type="button"
-                onClick={() => setDeleteConfirmation(null)}
+                onClick={() => {
+                  setDeleteConfirmation(null);
+                  setDeleteFolderAcknowledged(false);
+                }}
                 style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#fff", cursor: "pointer", fontWeight: 700 }}
               >
                 No

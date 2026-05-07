@@ -23,6 +23,10 @@ type BuildCompanyExplorerTreeRowsInput = {
 };
 
 const SYSTEM_FOLDER_CREATED_TIMESTAMP = "0000-00-00T00:00:00.000Z";
+const ROOT_ROW_POSITION_OFFSET: Record<CompanyExplorerFolderKind, number> = {
+  node: 0,
+  logic_gate: 100_000_000,
+};
 
 function getLocalISODate(): string {
   const now = new Date();
@@ -140,7 +144,11 @@ export function buildCompanyExplorerTreeRows({
     }
   }
 
-  const pushFolderBranch = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number) => {
+  const getRootAwarePosition = (folderKind: CompanyExplorerFolderKind, rowID: string, position: number): number => {
+    return rootRowOrder[rowID] ?? position + ROOT_ROW_POSITION_OFFSET[folderKind];
+  };
+
+  const buildFolderBranchRows = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number): ExplorerTreeNode[] => {
     const directItems = (itemsByFolder.get(parentFolderID) ?? []).filter((item) => item.item_type === folderKind || item.item_type === "kanban");
     const branchRows: ExplorerTreeNode[] = [];
     let syntheticRootPosition = 0;
@@ -158,7 +166,7 @@ export function buildCompanyExplorerTreeRows({
           folderID: "",
           folderKind,
           scopeLevel: depth,
-          position: rootRowOrder[rowID] ?? syntheticRootPosition,
+          position: getRootAwarePosition(folderKind, rowID, syntheticRootPosition),
           createdTimestamp: node.created_timestamp,
         });
       }
@@ -177,7 +185,7 @@ export function buildCompanyExplorerTreeRows({
           folderID: "",
           folderKind,
           scopeLevel: depth,
-          position: rootRowOrder[rowID] ?? syntheticRootPosition,
+          position: getRootAwarePosition(folderKind, rowID, syntheticRootPosition),
           createdTimestamp: logicGate.created_timestamp,
         });
       }
@@ -196,7 +204,7 @@ export function buildCompanyExplorerTreeRows({
             folderKind,
             folderLabel: folderLabelByID.get(parentFolderID),
             scopeLevel: depth,
-            position: item.position || TREE_ROW_POSITION_STEP,
+            position: parentFolderID === "" ? getRootAwarePosition(folderKind, `node-${node.node_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
             createdTimestamp: item.created_timestamp,
           });
         }
@@ -213,7 +221,7 @@ export function buildCompanyExplorerTreeRows({
             folderKind,
             folderLabel: folderLabelByID.get(parentFolderID),
             scopeLevel: depth,
-            position: item.position || TREE_ROW_POSITION_STEP,
+            position: parentFolderID === "" ? getRootAwarePosition(folderKind, `logic-gate-${logicGate.logic_gate_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
             createdTimestamp: item.created_timestamp,
           });
         }
@@ -230,7 +238,7 @@ export function buildCompanyExplorerTreeRows({
             folderKind,
             folderLabel: folderLabelByID.get(parentFolderID),
             scopeLevel: depth,
-            position: item.position || TREE_ROW_POSITION_STEP,
+            position: parentFolderID === "" ? getRootAwarePosition(folderKind, `kanban-${board.board_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
             createdTimestamp: board.created_timestamp,
           });
         }
@@ -250,12 +258,16 @@ export function buildCompanyExplorerTreeRows({
         folderKind,
         folderLabel: folder.name,
         scopeLevel: depth,
-        position: folder.position || TREE_ROW_POSITION_STEP,
+        position: parentFolderID === "" ? getRootAwarePosition(folderKind, rowID, folder.position || TREE_ROW_POSITION_STEP) : folder.position || TREE_ROW_POSITION_STEP,
         createdTimestamp: folder.created_timestamp,
       });
     }
 
-    for (const row of sortExplorerRowsByPosition(branchRows)) {
+    return sortExplorerRowsByPosition(branchRows);
+  };
+
+  const pushFolderBranch = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number) => {
+    for (const row of buildFolderBranchRows(folderKind, parentFolderID, depth)) {
       rows.push(row);
       if (row.kind !== "folder" || !expanded.has(row.id) || !row.folderID) continue;
       pushFolderBranch(folderKind, row.folderID, depth + 1);
@@ -265,7 +277,13 @@ export function buildCompanyExplorerTreeRows({
   // Durable folders/items share sparse positions inside each parent folder.
   // Unplaced root entities use local view positions until a folder placement
   // row exists, because their order is personal UI state rather than graph data.
-  pushFolderBranch("node", "", 0);
-  pushFolderBranch("logic_gate", "", 0);
+  for (const row of sortExplorerRowsByPosition([
+    ...buildFolderBranchRows("node", "", 0),
+    ...buildFolderBranchRows("logic_gate", "", 0),
+  ])) {
+    rows.push(row);
+    if (row.kind !== "folder" || !expanded.has(row.id) || !row.folderID || !row.folderKind) continue;
+    pushFolderBranch(row.folderKind, row.folderID, 1);
+  }
   return rows;
 }
