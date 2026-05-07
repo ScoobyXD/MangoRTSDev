@@ -149,17 +149,22 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var req struct {
-		Token string `json:"token"`
+		Token       string `json:"token"`
+		DisplayName string `json:"display_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	if strings.TrimSpace(req.DisplayName) == "" {
+		writeError(w, http.StatusBadRequest, "display_name_required")
 		return
 	}
 	email := actor.User.Email
 	if email == "" {
 		email = actor.Claims.Email
 	}
-	invitation, err := s.repo.AcceptInvitation(req.Token, actor.Claims.Subject, email)
+	invitation, err := s.repo.AcceptInvitation(req.Token, actor.Claims.Subject, email, req.DisplayName)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusForbidden, "invitation_email_mismatch")
 		return
@@ -172,7 +177,118 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed_to_accept_invitation")
 		return
 	}
-	writeJSON(w, http.StatusOK, invitation)
+	emailStatus := "not_configured"
+	if s.emailSender != nil {
+		emailStatus = "sent"
+		if err := s.emailSender.SendSignupConfirmation(r.Context(), invitation.Email, invitation.CompanyName); err != nil {
+			emailStatus = "failed"
+			log.Printf("failed to send signup confirmation email=%s company_id=%s: %v", invitation.Email, invitation.CompanyID, err)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"invitation":                invitation,
+		"confirmation_email_status": emailStatus,
+	})
+}
+
+func (s *Server) handlePasswordResetRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	email := strings.TrimSpace(req.Email)
+	if email == "" {
+		writeError(w, http.StatusBadRequest, "email_required")
+		return
+	}
+	if _, err := s.repo.GetAuthUserByEmail(email); errors.Is(err, store.ErrNotFound) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":             "reset_code_sent_if_account_exists",
+			"expires_in_seconds": int(store.DefaultPasswordResetTTL.Seconds()),
+		})
+		return
+	} else if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "email_required")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_lookup_user")
+		return
+	}
+	if s.emailSender == nil {
+		writeError(w, http.StatusServiceUnavailable, "password_reset_email_not_configured")
+		return
+	}
+	reset, err := s.repo.CreatePasswordResetCode(store.CreatePasswordResetCodeInput{
+		Email:     email,
+		ExpiresIn: store.DefaultPasswordResetTTL,
+	})
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "email_required")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_create_password_reset")
+		return
+	}
+	if err := s.emailSender.SendPasswordResetCode(r.Context(), reset.Email, reset.Code, store.DefaultPasswordResetTTL); err != nil {
+		log.Printf("failed to send password reset email=%s: %v", reset.Email, err)
+		writeError(w, http.StatusBadGateway, "failed_to_send_password_reset_email")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":             "reset_code_sent",
+		"expires_in_seconds": int(store.DefaultPasswordResetTTL.Seconds()),
+	})
+}
+
+func (s *Server) handlePasswordResetConfirm(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		Email       string `json:"email"`
+		Code        string `json:"code"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	if strings.TrimSpace(req.Email) == "" || strings.TrimSpace(req.Code) == "" || strings.TrimSpace(req.NewPassword) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_password_reset")
+		return
+	}
+	if s.cognitoAdmin == nil {
+		writeError(w, http.StatusServiceUnavailable, "password_reset_not_configured")
+		return
+	}
+	reset, err := s.repo.ConsumePasswordResetCode(req.Email, req.Code)
+	if errors.Is(err, store.ErrExpired) {
+		writeError(w, http.StatusGone, "password_reset_code_expired")
+		return
+	}
+	if errors.Is(err, store.ErrInvalid) || errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusBadRequest, "invalid_password_reset_code")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_consume_password_reset")
+		return
+	}
+	if err := s.cognitoAdmin.AdminSetUserPassword(r.Context(), reset.Email, req.NewPassword); err != nil {
+		log.Printf("failed to set cognito password reset email=%s: %v", reset.Email, err)
+		writeError(w, http.StatusBadGateway, "failed_to_reset_cognito_password")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "password_reset"})
 }
 
 func (s *Server) handleResourceAssignments(w http.ResponseWriter, r *http.Request) {

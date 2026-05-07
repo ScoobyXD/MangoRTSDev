@@ -5,10 +5,17 @@ import (
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/store"
 	"net/http"
+	"time"
 )
 
 type CognitoAdminClient interface {
 	AdminCreateUser(ctx context.Context, email string) error
+	AdminSetUserPassword(ctx context.Context, email, password string) error
+}
+
+type AuthEmailSender interface {
+	SendPasswordResetCode(ctx context.Context, email, code string, expiresIn time.Duration) error
+	SendSignupConfirmation(ctx context.Context, email, companyName string) error
 }
 
 type Server struct {
@@ -16,11 +23,13 @@ type Server struct {
 	hub           *workspaceEventHub
 	authValidator *auth.Validator
 	cognitoAdmin  CognitoAdminClient
+	emailSender   AuthEmailSender
 }
 
 type ServerOptions struct {
 	AuthValidator *auth.Validator
 	CognitoAdmin  CognitoAdminClient
+	EmailSender   AuthEmailSender
 }
 
 func NewServer(repo store.Repository) *Server {
@@ -33,6 +42,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		hub:           newWorkspaceEventHub(),
 		authValidator: options.AuthValidator,
 		cognitoAdmin:  options.CognitoAdmin,
+		emailSender:   options.EmailSender,
 	}
 }
 
@@ -44,6 +54,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/companies/", s.handleCompanySubresource)
 	mux.HandleFunc("/v1/invitations", s.handleInvitations)
 	mux.HandleFunc("/v1/invitations/accept", s.handleInvitationAccept)
+	mux.HandleFunc("/v1/password-resets/request", s.handlePasswordResetRequest)
+	mux.HandleFunc("/v1/password-resets/confirm", s.handlePasswordResetConfirm)
 	mux.HandleFunc("/v1/nodes", s.handleNodes)
 	mux.HandleFunc("/v1/nodes/", s.handleNodeSubresource)
 	mux.HandleFunc("/v1/node-relationships", s.handleNodeRelationships)

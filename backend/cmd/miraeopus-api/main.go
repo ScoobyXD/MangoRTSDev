@@ -21,6 +21,7 @@ func main() {
 	server := httpapi.NewServerWithOptions(repo, httpapi.ServerOptions{
 		AuthValidator: buildAuthValidator(),
 		CognitoAdmin:  buildCognitoAdminClient(),
+		EmailSender:   buildEmailSender(),
 	})
 
 	addr := os.Getenv("MANGORTS_ADDR")
@@ -128,6 +129,21 @@ func buildCognitoAdminClient() *auth.CognitoAdminClient {
 		return nil
 	}
 	return auth.NewCognitoAdminClient(region, userPoolID)
+}
+
+func buildEmailSender() *auth.SESEmailSender {
+	if !strings.EqualFold(os.Getenv("AUTH_MODE"), "cognito") {
+		return nil
+	}
+	from := strings.TrimSpace(os.Getenv("MANGORTS_EMAIL_FROM"))
+	if from == "" {
+		return nil
+	}
+	region := getenvDefault("AWS_REGION", getenvDefault("AWS_DEFAULT_REGION", ""))
+	if region == "" {
+		return nil
+	}
+	return auth.NewSESEmailSender(region, from)
 }
 
 func withLogging(next http.Handler) http.Handler {

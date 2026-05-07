@@ -44,9 +44,18 @@ resource "aws_iam_role" "ecs_task" {
 data "aws_iam_policy_document" "ecs_task_cognito" {
   statement {
     actions = [
-      "cognito-idp:AdminCreateUser"
+      "cognito-idp:AdminCreateUser",
+      "cognito-idp:AdminSetUserPassword"
     ]
     resources = [aws_cognito_user_pool.main.arn]
+  }
+
+  statement {
+    actions = [
+      "ses:SendEmail",
+      "ses:SendRawEmail"
+    ]
+    resources = ["*"]
   }
 }
 

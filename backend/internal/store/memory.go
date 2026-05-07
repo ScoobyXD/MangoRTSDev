@@ -28,7 +28,14 @@ type MemoryRepo struct {
 	companies         map[string]domain.Company
 	memberships       map[string]domain.CompanyMembership
 	invitations       map[string]domain.Invitation
+	passwordResets    map[string]memoryPasswordResetCode
 	assignments       map[string]domain.ResourceAssignment
+}
+
+type memoryPasswordResetCode struct {
+	item     domain.PasswordResetCode
+	codeHash string
+	codeSalt string
 }
 
 func NewMemoryRepo() *MemoryRepo {
@@ -54,6 +61,7 @@ func NewMemoryRepo() *MemoryRepo {
 		companies:         map[string]domain.Company{},
 		memberships:       map[string]domain.CompanyMembership{},
 		invitations:       map[string]domain.Invitation{},
+		passwordResets:    map[string]memoryPasswordResetCode{},
 		assignments:       map[string]domain.ResourceAssignment{},
 	}
 }

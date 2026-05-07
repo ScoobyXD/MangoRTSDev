@@ -55,6 +55,25 @@ func (r *PostgresRepo) GetAuthUser(cognitoSubject string) (domain.User, error) {
 	return user, err
 }
 
+func (r *PostgresRepo) GetAuthUserByEmail(email string) (domain.User, error) {
+	email = normalizeEmail(email)
+	if email == "" {
+		return domain.User{}, ErrInvalid
+	}
+
+	var user domain.User
+	err := r.db.QueryRow(
+		`select user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp
+		 from users
+		 where email = $1`,
+		email,
+	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.CreatedTimestamp, &user.UpdatedTimestamp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.User{}, ErrNotFound
+	}
+	return user, err
+}
+
 func (r *PostgresRepo) ListUserMemberships(userID string) ([]domain.CompanyMembership, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -184,6 +203,22 @@ func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Inv
 	if !companyExists {
 		return domain.Invitation{}, ErrNotFound
 	}
+	var inviterCanManage bool
+	if err = tx.QueryRow(
+		`select exists(
+		   select 1
+		   from company_memberships
+		   where user_id = $1
+		     and (role = 'dev_admin' or (company_id = $2 and role = 'company_admin'))
+		 )`,
+		invitedByUserID,
+		companyID,
+	).Scan(&inviterCanManage); err != nil {
+		return domain.Invitation{}, err
+	}
+	if !inviterCanManage {
+		return domain.Invitation{}, ErrInvalid
+	}
 	var existingUser bool
 	if err = tx.QueryRow(
 		`select exists(
@@ -249,6 +284,9 @@ func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Inv
 	if err != nil {
 		return domain.Invitation{}, err
 	}
+	if err = tx.QueryRow(`select name from companies where company_id = $1`, companyID).Scan(&invitation.CompanyName); err != nil {
+		return domain.Invitation{}, err
+	}
 	invitation.Token = token
 	if err = tx.Commit(); err != nil {
 		return domain.Invitation{}, err
@@ -256,11 +294,12 @@ func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Inv
 	return invitation, nil
 }
 
-func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email string) (domain.Invitation, error) {
+func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayName string) (domain.Invitation, error) {
 	token = strings.TrimSpace(token)
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	email = normalizeEmail(email)
-	if token == "" || cognitoSubject == "" || email == "" {
+	displayName = strings.TrimSpace(displayName)
+	if token == "" || cognitoSubject == "" || email == "" || displayName == "" {
 		return domain.Invitation{}, ErrInvalid
 	}
 
@@ -279,15 +318,17 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email string) (do
 	var acceptedBy sql.NullString
 	var acceptedAt sql.NullTime
 	err = tx.QueryRow(
-		`select invitation_id, company_id, email, role, status, token_hash, invited_by_user_id,
-		   accepted_by_user_id, expires_timestamp, accepted_timestamp, created_timestamp, updated_timestamp
-		 from invitations
-		 where token_hash = $1
+		`select i.invitation_id, i.company_id, c.name, i.email, i.role, i.status, i.token_hash, i.invited_by_user_id,
+		   i.accepted_by_user_id, i.expires_timestamp, i.accepted_timestamp, i.created_timestamp, i.updated_timestamp
+		 from invitations i
+		 join companies c on c.company_id = i.company_id
+		 where i.token_hash = $1
 		 for update`,
 		invitationTokenHash(token),
 	).Scan(
 		&invitation.InvitationID,
 		&invitation.CompanyID,
+		&invitation.CompanyName,
 		&invitation.Email,
 		&invitation.Role,
 		&invitation.Status,
@@ -320,16 +361,18 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email string) (do
 
 	var user domain.User
 	err = tx.QueryRow(
-		`insert into users (user_id, cognito_subject, email, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, now(), now())
+		`insert into users (user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp)
+		 values ($1, $2, $3, $4, now(), now())
 		 on conflict (cognito_subject) do update set
 		   email = case when excluded.email <> '' then excluded.email else users.email end,
+		   display_name = case when excluded.display_name <> '' then excluded.display_name else users.display_name end,
 		   updated_timestamp = now()
-		 returning user_id, cognito_subject, email, created_timestamp, updated_timestamp`,
+		 returning user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp`,
 		newUUIDv7String(),
 		cognitoSubject,
 		email,
-	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.CreatedTimestamp, &user.UpdatedTimestamp)
+		displayName,
+	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.CreatedTimestamp, &user.UpdatedTimestamp)
 	if err != nil {
 		return domain.Invitation{}, err
 	}
@@ -372,6 +415,149 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email string) (do
 		return domain.Invitation{}, err
 	}
 	return invitation, nil
+}
+
+func (r *PostgresRepo) CreatePasswordResetCode(input CreatePasswordResetCodeInput) (domain.PasswordResetCode, error) {
+	email := normalizeEmail(input.Email)
+	if email == "" {
+		return domain.PasswordResetCode{}, ErrInvalid
+	}
+	ttl := input.ExpiresIn
+	if ttl <= 0 {
+		ttl = DefaultPasswordResetTTL
+	}
+	code, salt, hash, err := newPasswordResetCode()
+	if err != nil {
+		return domain.PasswordResetCode{}, err
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return domain.PasswordResetCode{}, err
+	}
+	defer tx.Rollback()
+
+	if _, err = tx.Exec(
+		`update password_reset_codes
+		 set status = 'revoked',
+		     updated_timestamp = now()
+		 where email = $1
+		   and status = 'pending'`,
+		email,
+	); err != nil {
+		return domain.PasswordResetCode{}, err
+	}
+
+	var item domain.PasswordResetCode
+	var usedAt sql.NullTime
+	err = tx.QueryRow(
+		`insert into password_reset_codes (
+		   reset_id, email, code_hash, code_salt, status, expires_timestamp, created_timestamp, updated_timestamp
+		 )
+		 values ($1, $2, $3, $4, 'pending', now() + ($5 * interval '1 second'), now(), now())
+		 returning reset_id, email, status, expires_timestamp, used_timestamp, created_timestamp, updated_timestamp`,
+		newUUIDv7String(),
+		email,
+		hash,
+		salt,
+		int64(ttl.Seconds()),
+	).Scan(&item.ResetID, &item.Email, &item.Status, &item.ExpiresTimestamp, &usedAt, &item.CreatedTimestamp, &item.UpdatedTimestamp)
+	if err != nil {
+		return domain.PasswordResetCode{}, err
+	}
+	if usedAt.Valid {
+		item.UsedTimestamp = &usedAt.Time
+	}
+	item.Code = code
+	if err = tx.Commit(); err != nil {
+		return domain.PasswordResetCode{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) ConsumePasswordResetCode(email, code string) (domain.PasswordResetCode, error) {
+	email = normalizeEmail(email)
+	code = strings.TrimSpace(code)
+	if email == "" || code == "" {
+		return domain.PasswordResetCode{}, ErrInvalid
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return domain.PasswordResetCode{}, err
+	}
+	defer tx.Rollback()
+
+	var item domain.PasswordResetCode
+	var codeHash string
+	var codeSalt string
+	var usedAt sql.NullTime
+	err = tx.QueryRow(
+		`select reset_id, email, status, code_hash, code_salt, expires_timestamp, used_timestamp,
+		   created_timestamp, updated_timestamp
+		 from password_reset_codes
+		 where email = $1
+		   and status = 'pending'
+		 order by created_timestamp desc, reset_id desc
+		 limit 1
+		 for update`,
+		email,
+	).Scan(
+		&item.ResetID,
+		&item.Email,
+		&item.Status,
+		&codeHash,
+		&codeSalt,
+		&item.ExpiresTimestamp,
+		&usedAt,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.PasswordResetCode{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.PasswordResetCode{}, err
+	}
+	if usedAt.Valid {
+		item.UsedTimestamp = &usedAt.Time
+	}
+
+	if time.Now().UTC().After(item.ExpiresTimestamp) {
+		_, _ = tx.Exec(
+			`update password_reset_codes
+			 set status = 'revoked',
+			     updated_timestamp = now()
+			 where reset_id = $1`,
+			item.ResetID,
+		)
+		_ = tx.Commit()
+		return domain.PasswordResetCode{}, ErrExpired
+	}
+	if passwordResetCodeHash(codeSalt, code) != codeHash {
+		return domain.PasswordResetCode{}, ErrInvalid
+	}
+
+	usedAt = sql.NullTime{}
+	err = tx.QueryRow(
+		`update password_reset_codes
+		 set status = 'used',
+		     used_timestamp = now(),
+		     updated_timestamp = now()
+		 where reset_id = $1
+		 returning status, used_timestamp, updated_timestamp`,
+		item.ResetID,
+	).Scan(&item.Status, &usedAt, &item.UpdatedTimestamp)
+	if err != nil {
+		return domain.PasswordResetCode{}, err
+	}
+	if usedAt.Valid {
+		item.UsedTimestamp = &usedAt.Time
+	}
+	if err = tx.Commit(); err != nil {
+		return domain.PasswordResetCode{}, err
+	}
+	return item, nil
 }
 
 func (r *PostgresRepo) ListResourceAssignments(query ResourceAssignmentQuery) ([]domain.ResourceAssignment, error) {
