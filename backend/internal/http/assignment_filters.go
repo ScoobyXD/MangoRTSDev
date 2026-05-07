@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"miraeopus/backend/internal/domain"
-	"miraeopus/backend/internal/store"
 	"net/http"
 )
 
@@ -13,28 +12,7 @@ func (s assignmentSets) has(resourceType, resourceID string) bool {
 }
 
 func (s *Server) assignmentSetsForRequest(r *http.Request, companyID string) (assignmentSets, bool, error) {
-	actor, ok := authenticatedActor(r)
-	if !ok || actor.IsDevAdmin {
-		return nil, false, nil
-	}
-	if actorRoleForCompany(actor, companyID) != domain.RoleCompanyUser {
-		return nil, false, nil
-	}
-	assignments, err := s.repo.ListResourceAssignments(store.ResourceAssignmentQuery{
-		CompanyID: companyID,
-		UserID:    actor.User.UserID,
-	})
-	if err != nil {
-		return nil, false, err
-	}
-	sets := assignmentSets{}
-	for _, assignment := range assignments {
-		if sets[assignment.ResourceType] == nil {
-			sets[assignment.ResourceType] = map[string]bool{}
-		}
-		sets[assignment.ResourceType][assignment.ResourceID] = true
-	}
-	return sets, true, nil
+	return nil, false, nil
 }
 
 func filterNodesByAssignments(items []domain.Node, sets assignmentSets) []domain.Node {

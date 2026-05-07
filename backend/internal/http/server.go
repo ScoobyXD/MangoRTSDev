@@ -44,7 +44,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/companies/", s.handleCompanySubresource)
 	mux.HandleFunc("/v1/invitations", s.handleInvitations)
 	mux.HandleFunc("/v1/invitations/accept", s.handleInvitationAccept)
-	mux.HandleFunc("/v1/resource-assignments", s.handleResourceAssignments)
 	mux.HandleFunc("/v1/nodes", s.handleNodes)
 	mux.HandleFunc("/v1/nodes/", s.handleNodeSubresource)
 	mux.HandleFunc("/v1/node-relationships", s.handleNodeRelationships)

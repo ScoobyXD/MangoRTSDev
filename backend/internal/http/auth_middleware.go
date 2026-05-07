@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/domain"
-	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
 )
@@ -164,81 +162,9 @@ func actorRoleForCompany(actor ActorContext, companyID string) string {
 }
 
 func (s *Server) authorizeCompanyRequest(w http.ResponseWriter, r *http.Request, actor ActorContext, companyID, role string) bool {
-	if actor.IsDevAdmin || role == domain.RoleCompanyAdmin {
+	if actor.IsDevAdmin || role == domain.RoleCompanyAdmin || role == domain.RoleCompanyUser {
 		return true
 	}
-	if role == domain.RoleCompanyViewer {
-		if r.Method == http.MethodGet {
-			return true
-		}
-		writeError(w, http.StatusForbidden, "company_read_only")
-		return false
-	}
-	if role != domain.RoleCompanyUser {
-		writeError(w, http.StatusForbidden, "company_access_denied")
-		return false
-	}
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusForbidden, "company_user_write_denied")
-		return false
-	}
-	resourceType, resourceID := companyResourceFromRequest(r)
-	if resourceType == "" || resourceID == "" {
-		return true
-	}
-	ok, err := s.repo.UserHasResourceAssignment(companyID, actor.User.UserID, resourceType, resourceID)
-	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusForbidden, "resource_assignment_required")
-		return false
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_check_resource_assignment")
-		return false
-	}
-	if !ok {
-		writeError(w, http.StatusForbidden, "resource_assignment_required")
-		return false
-	}
-	return true
-}
-
-func companyResourceFromRequest(r *http.Request) (string, string) {
-	path := strings.TrimSpace(r.URL.Path)
-	if id := pathID(path, "/v1/nodes/"); id != "" {
-		return domain.ResourceTypeNode, id
-	}
-	if id := pathID(path, "/v1/logic-gates/"); id != "" {
-		return domain.ResourceTypeLogicGate, id
-	}
-	if id := pathID(path, "/v1/kanban/boards/"); id != "" {
-		return domain.ResourceTypeKanbanBoard, id
-	}
-	if strings.HasPrefix(path, "/v1/kanban/columns") || strings.HasPrefix(path, "/v1/kanban/cards") {
-		if boardID := strings.TrimSpace(r.URL.Query().Get("board_id")); boardID != "" {
-			return domain.ResourceTypeKanbanBoard, boardID
-		}
-	}
-	if id := pathID(path, "/v1/company-explorer/folders/"); id != "" {
-		return domain.ResourceTypeFolder, id
-	}
-	if strings.HasPrefix(path, "/v1/company-explorer/folder-items") {
-		if folderID := strings.TrimSpace(r.URL.Query().Get("folder_id")); folderID != "" {
-			return domain.ResourceTypeFolder, folderID
-		}
-	}
-	return "", ""
-}
-
-func pathID(path, prefix string) string {
-	if !strings.HasPrefix(path, prefix) {
-		return ""
-	}
-	trimmed := strings.Trim(strings.TrimPrefix(path, prefix), "/")
-	if trimmed == "" {
-		return ""
-	}
-	if index := strings.Index(trimmed, "/"); index >= 0 {
-		return strings.TrimSpace(trimmed[:index])
-	}
-	return strings.TrimSpace(trimmed)
+	writeError(w, http.StatusForbidden, "company_access_denied")
+	return false
 }

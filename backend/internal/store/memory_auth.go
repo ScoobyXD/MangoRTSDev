@@ -65,6 +65,9 @@ func (r *MemoryRepo) ListUserMemberships(userID string) ([]domain.CompanyMembers
 	items := make([]domain.CompanyMembership, 0)
 	for _, membership := range r.memberships {
 		if membership.UserID == userID {
+			if company, ok := r.companies[membership.CompanyID]; ok {
+				membership.CompanyName = company.Name
+			}
 			items = append(items, membership)
 		}
 	}
@@ -245,6 +248,14 @@ func (r *MemoryRepo) CreateInvitation(input CreateInvitationInput) (domain.Invit
 		return domain.Invitation{}, err
 	}
 	now := time.Now().UTC()
+	for existingTokenHash, existing := range r.invitations {
+		if existing.CompanyID == companyID && existing.Email == email && existing.Status == domain.InvitationStatusPending {
+			existing.Status = domain.InvitationStatusRevoked
+			existing.Token = ""
+			existing.UpdatedTimestamp = now
+			r.invitations[existingTokenHash] = existing
+		}
+	}
 	invitation := domain.Invitation{
 		InvitationID:     newUUIDv7String(),
 		CompanyID:        companyID,

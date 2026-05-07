@@ -167,14 +167,14 @@ func TestAuthMiddlewareAllowsCompanyAdminInsideCompanyOnly(t *testing.T) {
 	}
 }
 
-func TestAuthMiddlewareLimitsCompanyUserToAssignedResources(t *testing.T) {
+func TestAuthMiddlewareAllowsCompanyUserFullCompanyAccess(t *testing.T) {
 	t.Parallel()
 
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const companyID = "11111111-1111-1111-1111-111111111111"
 	const subject = "cognito-company-user-1"
-	user, err := repo.UpsertAuthUser(subject, "user@example.com")
+	_, err := repo.UpsertAuthUser(subject, "user@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,15 +188,6 @@ func TestAuthMiddlewareLimitsCompanyUserToAssignedResources(t *testing.T) {
 	}
 	unassignedNode, err := repo.CreateNode(companyID, "unassigned node")
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.AssignResource(store.ResourceAssignmentInput{
-		CompanyID:        companyID,
-		ResourceType:     domain.ResourceTypeNode,
-		ResourceID:       assignedNode.NodeID,
-		UserID:           user.UserID,
-		AssignedByUserID: user.UserID,
-	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -220,8 +211,8 @@ func TestAuthMiddlewareLimitsCompanyUserToAssignedResources(t *testing.T) {
 	if err := json.NewDecoder(listRes.Body).Decode(&listPayload); err != nil {
 		t.Fatal(err)
 	}
-	if len(listPayload.Nodes) != 1 || listPayload.Nodes[0].NodeID != assignedNode.NodeID {
-		t.Fatalf("filtered nodes = %+v, want assigned node only", listPayload.Nodes)
+	if len(listPayload.Nodes) != 2 {
+		t.Fatalf("filtered nodes = %+v, want both company nodes", listPayload.Nodes)
 	}
 
 	assignedReq := httptest.NewRequest(http.MethodGet, "/v1/nodes/"+assignedNode.NodeID+"?company_id="+companyID, nil)
@@ -236,16 +227,16 @@ func TestAuthMiddlewareLimitsCompanyUserToAssignedResources(t *testing.T) {
 	unassignedReq.Header.Set("Authorization", token)
 	unassignedRes := httptest.NewRecorder()
 	handler.ServeHTTP(unassignedRes, unassignedReq)
-	if unassignedRes.Code != http.StatusForbidden {
-		t.Fatalf("unassigned status = %d, want %d", unassignedRes.Code, http.StatusForbidden)
+	if unassignedRes.Code != http.StatusOK {
+		t.Fatalf("unassigned status = %d, want %d, body=%s", unassignedRes.Code, http.StatusOK, strings.TrimSpace(unassignedRes.Body.String()))
 	}
 
-	writeReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+assignedNode.NodeID, strings.NewReader(`{"company_id":"`+companyID+`","title":"blocked"}`))
+	writeReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+assignedNode.NodeID, strings.NewReader(`{"company_id":"`+companyID+`","title":"allowed"}`))
 	writeReq.Header.Set("Authorization", token)
 	writeRes := httptest.NewRecorder()
 	handler.ServeHTTP(writeRes, writeReq)
-	if writeRes.Code != http.StatusForbidden {
-		t.Fatalf("write status = %d, want %d", writeRes.Code, http.StatusForbidden)
+	if writeRes.Code != http.StatusOK {
+		t.Fatalf("write status = %d, want %d, body=%s", writeRes.Code, http.StatusOK, strings.TrimSpace(writeRes.Body.String()))
 	}
 }
 

@@ -6,10 +6,9 @@ import (
 )
 
 const (
-	RoleDevAdmin      = "dev_admin"
-	RoleCompanyAdmin  = "company_admin"
-	RoleCompanyUser   = "company_user"
-	RoleCompanyViewer = "company_viewer"
+	RoleDevAdmin     = "dev_admin"
+	RoleCompanyAdmin = "company_admin"
+	RoleCompanyUser  = "company_user"
 )
 
 const (
@@ -31,8 +30,6 @@ func NormalizeRole(role string) string {
 		return RoleDevAdmin
 	case RoleCompanyAdmin, "owner", "admin":
 		return RoleCompanyAdmin
-	case RoleCompanyViewer:
-		return RoleCompanyViewer
 	case RoleCompanyUser, "member", "agent", "":
 		return RoleCompanyUser
 	default:
@@ -71,6 +68,7 @@ type Company struct {
 
 type CompanyMembership struct {
 	CompanyID        string    `json:"company_id"`
+	CompanyName      string    `json:"company_name,omitempty"`
 	UserID           string    `json:"user_id"`
 	Role             string    `json:"role"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`

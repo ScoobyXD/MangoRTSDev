@@ -19,8 +19,9 @@ export type LoginResult =
 
 export type MangoMembership = {
   company_id: string;
+  company_name?: string;
   user_id: string;
-  role: "dev_admin" | "company_admin" | "company_user" | "company_viewer";
+  role: "dev_admin" | "company_admin" | "company_user";
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -321,7 +322,7 @@ function friendlyApiError(code: string): string {
     case "invitation_email_mismatch":
       return "This Mango invite token belongs to a different email address.";
     case "invitation_not_found":
-      return "This Mango invite token was not found, has expired, or was already accepted.";
+      return "This Mango invite token was not found, has expired, was already accepted, or was replaced by a newer invite.";
     case "unauthorized":
       return "You are not signed in. Sign in or complete the temporary password step first.";
     case "company_admin_required":

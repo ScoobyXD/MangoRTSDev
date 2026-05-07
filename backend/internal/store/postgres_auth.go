@@ -59,10 +59,11 @@ func (r *PostgresRepo) ListUserMemberships(userID string) ([]domain.CompanyMembe
 	}
 
 	rows, err := r.db.Query(
-		`select company_id, user_id, role, created_timestamp, updated_timestamp
-		 from company_memberships
-		 where user_id = $1
-		 order by company_id`,
+		`select cm.company_id, c.name, cm.user_id, cm.role, cm.created_timestamp, cm.updated_timestamp
+		 from company_memberships cm
+		 join companies c on c.company_id = cm.company_id
+		 where cm.user_id = $1
+		 order by c.name, cm.company_id`,
 		userID,
 	)
 	if err != nil {
@@ -73,7 +74,7 @@ func (r *PostgresRepo) ListUserMemberships(userID string) ([]domain.CompanyMembe
 	items := make([]domain.CompanyMembership, 0)
 	for rows.Next() {
 		var item domain.CompanyMembership
-		if err := rows.Scan(&item.CompanyID, &item.UserID, &item.Role, &item.CreatedTimestamp, &item.UpdatedTimestamp); err != nil {
+		if err := rows.Scan(&item.CompanyID, &item.CompanyName, &item.UserID, &item.Role, &item.CreatedTimestamp, &item.UpdatedTimestamp); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -161,8 +162,13 @@ func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Inv
 	if companyID == "" || email == "" || invitedByUserID == "" || !ok {
 		return domain.Invitation{}, ErrInvalid
 	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return domain.Invitation{}, err
+	}
+	defer tx.Rollback()
 	var companyExists bool
-	if err := r.db.QueryRow(
+	if err = tx.QueryRow(
 		`select exists(
 		   select 1
 		   from companies
@@ -176,7 +182,7 @@ func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Inv
 		return domain.Invitation{}, ErrNotFound
 	}
 	var existingUser bool
-	if err := r.db.QueryRow(
+	if err = tx.QueryRow(
 		`select exists(
 		   select 1
 		   from users
@@ -199,7 +205,19 @@ func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Inv
 	}
 
 	var invitation domain.Invitation
-	err = r.db.QueryRow(
+	if _, err = tx.Exec(
+		`update invitations
+		 set status = 'revoked',
+		     updated_timestamp = now()
+		 where company_id = $1
+		   and email = $2
+		   and status = 'pending'`,
+		companyID,
+		email,
+	); err != nil {
+		return domain.Invitation{}, err
+	}
+	err = tx.QueryRow(
 		`insert into invitations (
 		   invitation_id, company_id, email, role, token_hash, status,
 		   invited_by_user_id, expires_timestamp, created_timestamp, updated_timestamp
@@ -229,6 +247,9 @@ func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Inv
 		return domain.Invitation{}, err
 	}
 	invitation.Token = token
+	if err = tx.Commit(); err != nil {
+		return domain.Invitation{}, err
+	}
 	return invitation, nil
 }
 

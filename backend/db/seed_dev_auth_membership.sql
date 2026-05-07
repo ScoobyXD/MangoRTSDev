@@ -36,6 +36,7 @@ select
     when 'admin' then 'company_admin'
     when 'member' then 'company_user'
     when 'agent' then 'company_user'
+    when 'company_viewer' then 'company_user'
     else :'membership_role'
   end,
   now(),

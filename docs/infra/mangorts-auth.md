@@ -37,16 +37,18 @@ The backend enables auth only when `AUTH_MODE=cognito`.
 - Memberships are loaded once per request into an actor context.
 - `dev_admin` can access all companies.
 - Company-scoped routes require company membership or `dev_admin`.
-- `company_admin` manages users and resource assignments inside their company.
-- `company_user` is read-only and limited to assigned resources where the route addresses a specific resource.
+- `company_admin` manages users inside their company.
+- `company_user` has full access inside their company for now.
+- Company invitations can only be created by `dev_admin` or `company_admin`.
+- Creating a new pending invitation for the same company and email revokes older pending invitations, so only the latest token can be accepted.
 
 ## Tables
 
 - `users`: maps Cognito `sub` values to internal user IDs.
 - `companies`: stores tenant/company rows.
-- `company_memberships`: Mango authorization roles: `dev_admin`, `company_admin`, `company_user`, `company_viewer`.
+- `company_memberships`: Mango authorization roles: `dev_admin`, `company_admin`, `company_user`.
 - `invitations`: company-scoped pending/accepted invite tokens; only token hashes are stored.
-- `resource_assignments`: company-first assignment rows for folders, nodes, logic gates, and kanban boards.
+- `resource_assignments`: legacy assignment rows for folders, nodes, logic gates, and kanban boards; these are not enforced by auth right now.
 
 ## Frontend Env
 

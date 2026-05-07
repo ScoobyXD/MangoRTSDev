@@ -27,16 +27,13 @@ type CompanyUser = {
   role: string;
 };
 
-type ResourceAssignment = {
-  company_id: string;
-  resource_type: string;
-  resource_id: string;
-  user_id: string;
-};
-
 type Company = {
   company_id: string;
   name: string;
+};
+
+type CompanyOption = Company & {
+  role?: string;
 };
 
 const panelStyle: React.CSSProperties = {
@@ -176,6 +173,14 @@ function formatInviteError(error: unknown): string {
     return "This user already exists.";
   }
   return formatAuthError(error, "Invite failed");
+}
+
+function canManageAnyCompany(me: CurrentUserResponse): boolean {
+  return me.is_dev_admin || me.memberships.some((item) => item.role === "company_admin");
+}
+
+function companyName(company?: Company | null): string {
+  return company?.name?.trim() || company?.company_id || "Company";
 }
 
 function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
@@ -336,50 +341,47 @@ function ResetPasswordPage({ onNavigate }: { onNavigate: (path: string) => void 
 }
 
 function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; onNavigate: (path: string) => void; onLogout: () => void }) {
-  const manageableMemberships = useMemo(
-    () => me.memberships.filter((item) => me.is_dev_admin || item.role === "company_admin"),
+  const membershipOptions = useMemo<CompanyOption[]>(
+    () => me.memberships.map((item) => ({ company_id: item.company_id, name: item.company_name || item.company_id, role: item.role })),
     [me],
   );
   const [createdCompanies, setCreatedCompanies] = useState<Company[]>([]);
-  const companyOptions = useMemo(() => {
-    const fromMemberships = manageableMemberships.map((item) => ({ company_id: item.company_id, name: item.company_id }));
-    return [...createdCompanies, ...fromMemberships.filter((item) => !createdCompanies.some((company) => company.company_id === item.company_id))];
-  }, [createdCompanies, manageableMemberships]);
+  const companyOptions = useMemo<CompanyOption[]>(() => {
+    return [...createdCompanies, ...membershipOptions.filter((item) => !createdCompanies.some((company) => company.company_id === item.company_id))];
+  }, [createdCompanies, membershipOptions]);
   const [companyID, setCompanyID] = useState(companyOptions[0]?.company_id ?? getActiveCompanyID());
+  const selectedCompany = companyOptions.find((company) => company.company_id === companyID) ?? companyOptions[0] ?? null;
+  const canManageSelectedCompany = me.is_dev_admin || selectedCompany?.role === "company_admin";
   const [users, setUsers] = useState<CompanyUser[]>([]);
-  const [assignments, setAssignments] = useState<ResourceAssignment[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("company_user");
   const [inviteToken, setInviteToken] = useState("");
   const [inviteMessage, setInviteMessage] = useState("");
   const [newCompanyName, setNewCompanyName] = useState("");
-  const [assignmentUserID, setAssignmentUserID] = useState("");
-  const [resourceType, setResourceType] = useState("node");
-  const [resourceID, setResourceID] = useState("");
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    if (!companyID) return;
+    if (!companyID || !canManageSelectedCompany) {
+      setUsers([]);
+      return;
+    }
     setError("");
     try {
-      const [usersPayload, assignmentsPayload] = await Promise.all([
-        apiFetchJSON<{ users: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`),
-        apiFetchJSON<{ assignments: ResourceAssignment[] }>(`/v1/resource-assignments?company_id=${encodeURIComponent(companyID)}`),
-      ]);
+      const usersPayload = await apiFetchJSON<{ users: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`);
       setUsers(usersPayload.users ?? []);
-      setAssignments(assignmentsPayload.assignments ?? []);
     } catch {
       setError("Failed to load users");
     }
-  }, [companyID]);
+  }, [canManageSelectedCompany, companyID]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { if (selectedCompany && selectedCompany.company_id !== companyID) setCompanyID(selectedCompany.company_id); }, [companyID, selectedCompany]);
   useEffect(() => { if (companyID) setActiveCompanyID(companyID); }, [companyID]);
 
   return (
     <div style={{ minHeight: "100vh", background: "#f7fffe", color: "#041d22", fontFamily: "'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace", padding: 18 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <h1 style={{ margin: 0, fontSize: 18 }}>Users</h1>
+        <h1 style={{ margin: 0, fontSize: 18 }}>{canManageAnyCompany(me) ? "Users" : "Company"}</h1>
         <div style={{ display: "flex", gap: 8 }}>
           <button style={smallButtonStyle} onClick={() => onNavigate("/")}>App</button>
           <button style={smallButtonStyle} onClick={onLogout}>Logout</button>
@@ -389,9 +391,15 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
         <section style={sectionStyle}>
           <h2 style={sectionTitleStyle}>Company</h2>
-          <select style={inputStyle} value={companyID} onChange={(event) => setCompanyID(event.target.value)}>
-            {companyOptions.map((company) => <option key={company.company_id} value={company.company_id}>{company.name}</option>)}
-          </select>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 800 }}>{companyName(selectedCompany)}</div>
+            {selectedCompany && <div style={{ marginTop: 3, fontSize: 11, color: "rgba(4, 29, 34, 0.68)", overflowWrap: "anywhere" }}>{selectedCompany.company_id}</div>}
+          </div>
+          {companyOptions.length > 1 && (
+            <select style={inputStyle} value={companyID} onChange={(event) => setCompanyID(event.target.value)}>
+              {companyOptions.map((company) => <option key={company.company_id} value={company.company_id}>{companyName(company)}</option>)}
+            </select>
+          )}
           {me.is_dev_admin && (
             <form style={{ display: "grid", gap: 8 }} onSubmit={async (event) => {
               event.preventDefault();
@@ -405,7 +413,7 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
             </form>
           )}
         </section>
-        <section style={sectionStyle}>
+        {canManageSelectedCompany && <section style={sectionStyle}>
           <h2 style={sectionTitleStyle}>Invite</h2>
           <form style={{ display: "grid", gap: 8 }} onSubmit={async (event) => {
             event.preventDefault();
@@ -435,60 +443,19 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
             <select style={inputStyle} value={inviteRole} onChange={(event) => setInviteRole(event.target.value)}>
               <option value="company_user">company_user</option>
               <option value="company_admin">company_admin</option>
-              <option value="company_viewer">company_viewer</option>
             </select>
             <button style={buttonStyle}>Invite user</button>
           </form>
           {inviteToken && <div style={{ overflowWrap: "anywhere", fontSize: 12 }}>Invite token: {inviteToken}</div>}
           {inviteMessage && <div style={{ fontSize: 12 }}>{inviteMessage}</div>}
-        </section>
-        <section style={sectionStyle}>
-          <h2 style={sectionTitleStyle}>Assign</h2>
-          <form style={{ display: "grid", gap: 8 }} onSubmit={async (event) => {
-            event.preventDefault();
-            await apiFetchJSON<ResourceAssignment>("/v1/resource-assignments", {
-              method: "POST",
-              body: JSON.stringify({ company_id: companyID, user_id: assignmentUserID, resource_type: resourceType, resource_id: resourceID }),
-            });
-            setResourceID("");
-            await load();
-          }}>
-            <select style={inputStyle} value={assignmentUserID} onChange={(event) => setAssignmentUserID(event.target.value)}>
-              <option value="">User</option>
-              {users.map((user) => <option key={user.user_id} value={user.user_id}>{user.email || user.user_id}</option>)}
-            </select>
-            <select style={inputStyle} value={resourceType} onChange={(event) => setResourceType(event.target.value)}>
-              <option value="folder">folder</option>
-              <option value="node">node</option>
-              <option value="logic_gate">logic_gate</option>
-              <option value="kanban_board">kanban_board</option>
-            </select>
-            <input style={inputStyle} value={resourceID} onChange={(event) => setResourceID(event.target.value)} placeholder="Resource ID" />
-            <button style={buttonStyle}>Assign</button>
-          </form>
-        </section>
+        </section>}
       </div>
-      <section style={{ ...sectionStyle, marginTop: 14 }}>
+      {canManageSelectedCompany && <section style={{ ...sectionStyle, marginTop: 14 }}>
         <h2 style={sectionTitleStyle}>Company Users</h2>
         <div style={{ display: "grid", gap: 6 }}>
           {users.map((user) => <div key={user.user_id} style={rowStyle}><span>{user.email || user.user_id}</span><span>{user.role}</span></div>)}
         </div>
-      </section>
-      <section style={{ ...sectionStyle, marginTop: 14 }}>
-        <h2 style={sectionTitleStyle}>Assignments</h2>
-        <div style={{ display: "grid", gap: 6 }}>
-          {assignments.map((item) => (
-            <div key={`${item.resource_type}:${item.resource_id}:${item.user_id}`} style={rowStyle}>
-              <span>{item.resource_type} / {item.resource_id}</span>
-              <span>{users.find((user) => user.user_id === item.user_id)?.email ?? item.user_id}</span>
-              <button style={smallButtonStyle} onClick={async () => {
-                await apiFetchJSON<{ status: string }>(`/v1/resource-assignments?company_id=${encodeURIComponent(companyID)}&resource_type=${encodeURIComponent(item.resource_type)}&resource_id=${encodeURIComponent(item.resource_id)}&user_id=${encodeURIComponent(item.user_id)}`, { method: "DELETE" });
-                await load();
-              }}>Unassign</button>
-            </div>
-          ))}
-        </div>
-      </section>
+      </section>}
     </div>
   );
 }
@@ -506,10 +473,11 @@ function AuthPanel({ title, error, children }: { title: string; error?: string; 
 }
 
 function AccountBar({ me, onNavigate, onLogout }: { me: CurrentUserResponse; onNavigate: (path: string) => void; onLogout: () => void }) {
+  const manager = canManageAnyCompany(me);
   return (
     <div style={{ position: "fixed", top: 8, right: 8, zIndex: 200, display: "flex", alignItems: "center", gap: 6, padding: "5px 6px", background: "rgba(255,255,255,0.92)", border: "1px solid rgba(12, 67, 74, 0.28)", borderRadius: 8, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>
       <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{me.user.email}</span>
-      <button style={smallButtonStyle} onClick={() => onNavigate("/admin/users")}>Users</button>
+      <button style={smallButtonStyle} onClick={() => onNavigate("/admin/users")}>{manager ? "Users" : "Company"}</button>
       <button style={smallButtonStyle} onClick={onLogout}>Logout</button>
     </div>
   );
@@ -557,7 +525,7 @@ const sectionTitleStyle: React.CSSProperties = {
 
 const rowStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) auto auto",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
   alignItems: "center",
   gap: 8,
   minHeight: 32,

@@ -65,7 +65,7 @@ create table if not exists company_memberships (
   role text not null default 'company_user',
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint company_memberships_role_chk check (role in ('dev_admin', 'company_admin', 'company_user', 'company_viewer')),
+  constraint company_memberships_role_chk check (role in ('dev_admin', 'company_admin', 'company_user')),
   primary key (company_id, user_id),
   foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (user_id) references users (user_id) on delete cascade
@@ -90,7 +90,7 @@ create table if not exists invitations (
   constraint invitations_email_nonblank_chk check (btrim(email) <> ''),
   constraint invitations_email_lowercase_chk check (email = lower(btrim(email))),
   constraint invitations_token_hash_nonblank_chk check (btrim(token_hash) <> ''),
-  constraint invitations_role_chk check (role in ('company_admin', 'company_user', 'company_viewer')),
+  constraint invitations_role_chk check (role in ('company_admin', 'company_user')),
   constraint invitations_status_chk check (status in ('pending', 'accepted', 'revoked')),
   primary key (invitation_id),
   unique (token_hash),
@@ -101,6 +101,10 @@ create table if not exists invitations (
 
 create index if not exists idx_invitations_company_email_status
   on invitations(company_id, email, status, created_timestamp desc);
+
+create unique index if not exists idx_invitations_one_pending_company_email
+  on invitations(company_id, email)
+  where status = 'pending';
 
 create table if not exists resource_assignments (
   company_id uuid not null,
