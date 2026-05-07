@@ -45,6 +45,7 @@ create table if not exists users (
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
   constraint users_cognito_subject_nonblank_chk check (btrim(cognito_subject) <> ''),
+  constraint users_email_lowercase_chk check (email = lower(btrim(email))),
   primary key (user_id),
   unique (cognito_subject)
 );
@@ -87,6 +88,7 @@ create table if not exists invitations (
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
   constraint invitations_email_nonblank_chk check (btrim(email) <> ''),
+  constraint invitations_email_lowercase_chk check (email = lower(btrim(email))),
   constraint invitations_token_hash_nonblank_chk check (btrim(token_hash) <> ''),
   constraint invitations_role_chk check (role in ('company_admin', 'company_user', 'company_viewer')),
   constraint invitations_status_chk check (status in ('pending', 'accepted', 'revoked')),

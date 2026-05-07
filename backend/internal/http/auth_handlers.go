@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -122,6 +123,7 @@ func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
 	if s.cognitoAdmin != nil {
 		cognitoStatus = "sent"
 		if err := s.cognitoAdmin.AdminCreateUser(r.Context(), invitation.Email); err != nil {
+			log.Printf("failed to create cognito invitation user email=%s: %v", invitation.Email, err)
 			writeError(w, http.StatusBadGateway, "failed_to_create_cognito_user")
 			return
 		}

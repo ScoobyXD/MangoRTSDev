@@ -104,6 +104,10 @@ $env:DB_MIGRATION_START_AT="20260505_auth_identity_and_memberships.sql"
 Remove-Item Env:\DB_MIGRATION_START_AT
 ```
 
+Current dev Cognito note: the Terraform user pool does not explicitly set `username_configuration.case_sensitive = false`.
+Treat MangoRTS auth emails as lowercase canonical values when creating Cognito users, creating invitations, and seeding DB users.
+The app still uses the Cognito `sub` claim as the internal identity key.
+
 After the Cognito dev user exists, fetch its subject and seed membership:
 
 ```powershell

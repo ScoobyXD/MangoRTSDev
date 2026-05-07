@@ -15,6 +15,17 @@ The frontend uses custom React pages and direct Cognito Identity Provider API ca
 
 The app does not use Cognito Managed Login / Hosted UI. Local development keeps auth disabled unless `VITE_AUTH_MODE=cognito` is set.
 
+## Local Cognito Backend
+
+Use `scripts/start_local_cognito_backend.ps1` when running the local API against the dev Cognito pool and dev Postgres:
+
+```powershell
+aws sso login --profile <profile>
+.\scripts\start_local_cognito_backend.ps1 -AwsProfile <profile> -StopExisting
+```
+
+The script exports short-lived AWS credentials from the selected AWS CLI profile into `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` before launching the Go backend. This is required because the backend signs Cognito `AdminCreateUser` calls from process environment credentials. The active AWS identity must be allowed to call `cognito-idp:AdminCreateUser` on the configured user pool.
+
 ## Backend Enforcement
 
 The backend enables auth only when `AUTH_MODE=cognito`.

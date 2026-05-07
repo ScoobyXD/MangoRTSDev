@@ -153,6 +153,17 @@ export default function AuthGate() {
   );
 }
 
+function formatLoginError(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return `Login failed: ${error.message}`;
+  }
+  return "Login failed";
+}
+
+function normalizeEmailInput(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -172,8 +183,9 @@ function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: 
             return;
           }
           await onAuthenticated();
-        } catch {
-          setError("Login failed");
+        } catch (loginError) {
+          console.error("Login failed", loginError);
+          setError(formatLoginError(loginError));
         } finally {
           setBusy(false);
         }
@@ -357,15 +369,20 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
           <h2 style={sectionTitleStyle}>Invite</h2>
           <form style={{ display: "grid", gap: 8 }} onSubmit={async (event) => {
             event.preventDefault();
+            const normalizedInviteEmail = normalizeEmailInput(inviteEmail);
+            if (!normalizedInviteEmail) {
+              setError("Email required");
+              return;
+            }
             const payload = await apiFetchJSON<{ invitation: { token?: string } }>("/v1/invitations", {
               method: "POST",
-              body: JSON.stringify({ company_id: companyID, email: inviteEmail, role: inviteRole }),
+              body: JSON.stringify({ company_id: companyID, email: normalizedInviteEmail, role: inviteRole }),
             });
             setInviteToken(payload.invitation.token ?? "");
             setInviteEmail("");
             await load();
           }}>
-            <input style={inputStyle} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} type="email" placeholder="Email" />
+            <input style={inputStyle} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value.toLowerCase())} type="email" placeholder="Email" />
             <select style={inputStyle} value={inviteRole} onChange={(event) => setInviteRole(event.target.value)}>
               <option value="company_user">company_user</option>
               <option value="company_admin">company_admin</option>

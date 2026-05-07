@@ -18,6 +18,7 @@ $dbHost = $env:DB_HOST.Trim()
 if ($dbHost.StartsWith("host=")) {
   $dbHost = $dbHost.Substring(5)
 }
+$userEmail = $env:DEV_USER_EMAIL.Trim().ToLowerInvariant()
 
 psql `
   -h $dbHost `
@@ -28,7 +29,7 @@ psql `
   -v "company_id=$env:DEV_COMPANY_ID" `
   -v "company_name=$env:DEV_COMPANY_NAME" `
   -v "cognito_subject=$env:COGNITO_SUBJECT" `
-  -v "user_email=$env:DEV_USER_EMAIL" `
+  -v "user_email=$userEmail" `
   -v "membership_role=$env:DEV_ROLE" `
   -f $seedPath
 

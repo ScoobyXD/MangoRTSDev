@@ -18,12 +18,12 @@ upserted_user as (
   values (
     coalesce((select user_id from existing_user), md5(random()::text || clock_timestamp()::text)::uuid),
     :'cognito_subject',
-    :'user_email',
+    lower(btrim(:'user_email')),
     now(),
     now()
   )
   on conflict (cognito_subject) do update set
-    email = excluded.email,
+    email = case when excluded.email <> '' then excluded.email else users.email end,
     updated_timestamp = now()
   returning user_id
 )

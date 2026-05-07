@@ -91,6 +91,9 @@ func (c *CognitoAdminClient) AdminCreateUser(ctx context.Context, email string) 
 	if strings.Contains(string(raw), "UsernameExistsException") || strings.Contains(res.Header.Get("X-Amzn-Errortype"), "UsernameExistsException") {
 		return nil
 	}
+	if detail := strings.TrimSpace(string(raw)); detail != "" {
+		return fmt.Errorf("cognito admin create user failed: status=%d body=%s", res.StatusCode, detail)
+	}
 	return fmt.Errorf("cognito admin create user failed: status=%d", res.StatusCode)
 }
 
