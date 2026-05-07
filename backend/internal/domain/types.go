@@ -31,6 +31,7 @@ type Node struct {
 	// Title is the canonical public API field name for node text labels.
 	Title            string    `json:"title"`
 	Status           *string   `json:"status"`
+	StatusColor      *string   `json:"status_color"`
 	DueDate          *string   `json:"due_date"`
 	Priority         *int      `json:"priority"`
 	AssigneeUserID   *string   `json:"assignee_user_id"`

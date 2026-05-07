@@ -35,29 +35,37 @@ func (r *MemoryRepo) CreateNode(companyID, title string) (domain.Node, error) {
 	return n, nil
 }
 
-func (r *MemoryRepo) deriveNodeStatusLocked(companyID, nodeID string) *string {
+func (r *MemoryRepo) deriveNodeStatusLocked(companyID, nodeID string) (*string, *string) {
 	for _, cards := range r.kanbanCards {
 		for _, card := range cards {
 			if card.CompanyID != companyID || card.NodeID != nodeID || card.LogicGateID == nil {
 				continue
 			}
 			status := ""
+			statusColor := ""
 			if card.IsIssue {
 				status = "Issue"
+				statusColor = "#ffd400"
 			} else if title, ok := r.kanbanColumnTitleLocked(companyID, card.BoardID, card.ColumnID); ok {
 				status = title
+				if column, found := r.kanbanColumnLocked(companyID, card.BoardID, card.ColumnID); found {
+					statusColor = column.ItemColor
+				}
 			}
 			if status == "" {
 				status = "Unknown"
 			}
-			return &status
+			if statusColor == "" {
+				statusColor = "#2f7d62"
+			}
+			return &status, &statusColor
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func (r *MemoryRepo) withDerivedNodeStatusLocked(node domain.Node) domain.Node {
-	node.Status = r.deriveNodeStatusLocked(node.CompanyID, node.NodeID)
+	node.Status, node.StatusColor = r.deriveNodeStatusLocked(node.CompanyID, node.NodeID)
 	return node
 }
 

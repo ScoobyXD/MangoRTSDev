@@ -79,12 +79,20 @@ func (r *MemoryRepo) kanbanColumnExistsLocked(companyID, boardID, columnID strin
 }
 
 func (r *MemoryRepo) kanbanColumnTitleLocked(companyID, boardID, columnID string) (string, bool) {
+	column, ok := r.kanbanColumnLocked(companyID, boardID, columnID)
+	if !ok {
+		return "", false
+	}
+	return column.Title, true
+}
+
+func (r *MemoryRepo) kanbanColumnLocked(companyID, boardID, columnID string) (domain.KanbanColumn, bool) {
 	for _, column := range r.kanbanColumns[boardKey(companyID, boardID)] {
 		if column.ColumnID == columnID {
-			return column.Title, true
+			return column, true
 		}
 	}
-	return "", false
+	return domain.KanbanColumn{}, false
 }
 
 func (r *MemoryRepo) ensureKanbanBoardLocked(companyID, boardID, title string) domain.KanbanBoard {

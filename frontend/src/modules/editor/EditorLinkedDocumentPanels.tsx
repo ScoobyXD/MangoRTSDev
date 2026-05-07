@@ -1,5 +1,6 @@
-import type React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { EditorTabID } from "./editorTabs";
+import { normalizeNodeDueDateDraft } from "./editorDates";
 
 type EditorLinkedDocumentPanelsProps = {
   activeTab: EditorTabID;
@@ -10,6 +11,7 @@ type EditorLinkedDocumentPanelsProps = {
   linkedNodeHistoryRows: string[];
   nodePresetFields: {
     status: string;
+    statusColor: string;
     priorityDraft: string;
     assigneeUserID: string;
     dueDateDraft: string;
@@ -31,13 +33,44 @@ type EditorLinkedDocumentPanelsProps = {
 };
 
 const NODE_PRIORITY_OPTIONS = [
-  { value: "0", label: "0 Unassigned" },
-  { value: "1", label: "1 Low Priority" },
-  { value: "2", label: "2 Medium-Low Priority" },
-  { value: "3", label: "3 Medium Priority" },
-  { value: "4", label: "4 High Priority" },
-  { value: "5", label: "5 URGENT" },
+  { value: "0", label: "0 Unassigned", color: "#64748b" },
+  { value: "1", label: "1 Low Priority", color: "#2f7d62" },
+  { value: "2", label: "2 Medium-Low Priority", color: "#4776b5" },
+  { value: "3", label: "3 Medium Priority", color: "#9a6a1a" },
+  { value: "4", label: "4 High Priority", color: "#b45309" },
+  { value: "5", label: "5 URGENT", color: "#b91c1c" },
 ] as const;
+
+function validHexColor(value: string): string {
+  return /^#[0-9a-f]{6}$/i.test(value.trim()) ? value.trim() : "";
+}
+
+function hexWithAlpha(hex: string, alpha: string): string {
+  const clean = validHexColor(hex);
+  return clean ? `${clean}${alpha}` : "rgba(100,116,139,0.12)";
+}
+
+function dateInputValueFromDraft(draft: string): string {
+  return normalizeNodeDueDateDraft(draft) ?? "";
+}
+
+function editorDateFromDateInput(value: string): string {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return value;
+  return `${Number(match[2])}/${Number(match[3])}/${match[1]}`;
+}
+
+const PriorityCheckIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg aria-hidden="true" width="12" height="10" viewBox="0 0 12 10" style={{ display: "block" }}>
+    <path d="M1 5.1 4.2 8 11 1" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const CalendarIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block" }}>
+    <path d="M3 2.75h10v10.5H3zM3 5.5h10M5.25 1.5v2.4M10.75 1.5v2.4" fill="none" stroke={color} strokeWidth="1.25" strokeLinecap="round" />
+  </svg>
+);
 
 export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProps> = ({
   activeTab,
@@ -61,148 +94,301 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   onCommitNodeAssigneeDraft,
   onSetNodeDueDateDraft,
   onCommitNodeDueDateDraft,
-}) => (
-  <>
-    {(activeTab === "editor" || activeTab === "outline-styles") && (
-      <div style={{ display: "grid", gap: 8, pointerEvents: "auto" }}>
-        <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: 0, color: accent, cursor: "text" }}>
-          <span style={{ textTransform: "uppercase" }}>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>&nbsp;
-          <span
-            ref={editingTitleRef}
-            contentEditable={isEditingTitle}
-            suppressContentEditableWarning
-            onClick={(event) => {
-              event.stopPropagation();
-              if (!isEditingTitle) {
-                editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new logic gate" : "new node");
-                onSetIsEditingTitle(true);
-              }
-            }}
-            onInput={(event) => {
-              editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
-            }}
-            onBlur={() => {
-              if (!isEditingTitle) return;
-              const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
-              void onUpdateTitle(latestTitle);
-              onSetIsEditingTitle(false);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
+}) => {
+  const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
+  const priorityMenuRef = useRef<HTMLSpanElement | null>(null);
+  const dueDatePickerRef = useRef<HTMLInputElement | null>(null);
+  const selectedPriority = NODE_PRIORITY_OPTIONS.find((option) => option.value === (nodePresetFields?.priorityDraft || "0")) ?? NODE_PRIORITY_OPTIONS[0];
+  const statusColor = validHexColor(nodePresetFields?.statusColor ?? "");
+
+  useEffect(() => {
+    if (!priorityMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (priorityMenuRef.current?.contains(event.target as Node)) return;
+      setPriorityMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPriorityMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [priorityMenuOpen]);
+
+  return (
+    <>
+      {(activeTab === "editor" || activeTab === "outline-styles") && (
+        <div style={{ display: "grid", gap: 8, pointerEvents: "auto" }}>
+          <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: 0, color: accent, cursor: "text" }}>
+            <span style={{ textTransform: "uppercase" }}>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>&nbsp;
+            <span
+              ref={editingTitleRef}
+              contentEditable={isEditingTitle}
+              suppressContentEditableWarning
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!isEditingTitle) {
+                  editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new logic gate" : "new node");
+                  onSetIsEditingTitle(true);
+                }
+              }}
+              onInput={(event) => {
+                editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
+              }}
+              onBlur={() => {
+                if (!isEditingTitle) return;
                 const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
                 void onUpdateTitle(latestTitle);
                 onSetIsEditingTitle(false);
-              }
-              if (event.key === "Escape") {
-                event.preventDefault();
-                if (editingTitleRef.current) editingTitleRef.current.textContent = linkedNodeTitle;
-                onSetIsEditingTitle(false);
-              }
-            }}
-            style={{ outline: "none", cursor: "text" }}
-          >
-            {linkedNodeTitle || "\u00A0"}
-          </span>
-        </div>
-        {nodePresetFields && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(0, 220px) minmax(0, 310px)",
-              columnGap: 56,
-              rowGap: 4,
-              maxWidth: "min(640px, 100%)",
-              padding: "2px 0 8px",
-              borderBottom: `1px dashed ${ruleColor}`,
-              fontFamily: "'IBM Plex Mono', 'Consolas', monospace",
-              fontSize: 14,
-              lineHeight: 1.45,
-              color: "inherit",
-              pointerEvents: "auto",
-            }}
-          >
-            <div style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6 }}>
-              <strong>Status:</strong>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nodePresetFields.status || "None"}</span>
-            </div>
-            <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
-              <strong>Person In Charge:</strong>
-              <input
-                value={nodePresetFields.assigneeUserID}
-                onChange={(event) => onSetNodeAssigneeDraft(event.target.value)}
-                onBlur={(event) => onCommitNodeAssigneeDraft(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") event.currentTarget.blur();
-                }}
-                placeholder="Unassigned"
-                aria-label="Person in charge"
-                style={{ width: "100%", minWidth: 0, border: "1px solid transparent", background: "transparent", color: "inherit", font: "inherit", padding: 0, outline: "none" }}
-              />
-            </label>
-            <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
-              <strong>Priority:</strong>
-              <span style={{ position: "relative", display: "inline-block", width: "min(100%, 220px)" }}>
-                <select
-                  value={nodePresetFields.priorityDraft || "0"}
-                  onChange={(event) => {
-                    onSetNodePriorityDraft(event.target.value);
-                    onCommitNodePriorityDraft(event.target.value);
-                  }}
-                  onBlur={(event) => onCommitNodePriorityDraft(event.currentTarget.value)}
-                  aria-label="Priority"
-                  style={{ width: "100%", appearance: "none", WebkitAppearance: "none", border: "1px solid transparent", background: "transparent", color: "inherit", font: "inherit", padding: "0 18px 0 0", outline: "none" }}
-                >
-                  {NODE_PRIORITY_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-                <svg aria-hidden="true" width="10" height="7" viewBox="0 0 10 7" style={{ position: "absolute", right: 2, top: "50%", transform: "translateY(-45%)", pointerEvents: "none", color: "currentColor" }}>
-                  <path d="M1 1.25 5 5.25 9 1.25" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </span>
-            </label>
-            <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
-              <strong>Due Date:</strong>
-              <input
-                value={nodePresetFields.dueDateDraft}
-                onChange={(event) => onSetNodeDueDateDraft(event.target.value)}
-                onBlur={(event) => onCommitNodeDueDateDraft(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") event.currentTarget.blur();
-                }}
-                placeholder="mm/dd/yyyy"
-                aria-label="Due date"
-                style={{ width: 120, border: "1px solid transparent", background: "transparent", color: "inherit", font: "inherit", padding: 0, outline: "none" }}
-              />
-            </label>
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
+                  void onUpdateTitle(latestTitle);
+                  onSetIsEditingTitle(false);
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  if (editingTitleRef.current) editingTitleRef.current.textContent = linkedNodeTitle;
+                  onSetIsEditingTitle(false);
+                }
+              }}
+              style={{ outline: "none", cursor: "text" }}
+            >
+              {linkedNodeTitle || "\u00A0"}
+            </span>
           </div>
-        )}
-        {linkedNodeInfoPreview.length > 0 && <div style={{ fontSize: 10, opacity: 0.7 }}>{linkedNodeInfoPreview.join(" - ")}</div>}
-      </div>
-    )}
-
-    {activeTab === "metadata" && linkedNodeMetadataRows.length > 0 && (
-      <section style={{ display: "grid", gap: 6, maxWidth: 520, pointerEvents: "auto" }}>
-        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>Metadata</div>
-        <div style={{ display: "grid", gap: 4 }}>
-          {linkedNodeMetadataRows.map((row) => (
-            <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "4px 6px" }}>
-              <span style={{ opacity: 0.75 }}>{row.label}</span>
-              <strong>{row.value}</strong>
+          {nodePresetFields && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 230px), 1fr))",
+                columnGap: 24,
+                rowGap: 6,
+                maxWidth: "min(720px, 100%)",
+                padding: "2px 0 8px",
+                borderBottom: `1px dashed ${ruleColor}`,
+                fontFamily: "'IBM Plex Mono', 'Consolas', monospace",
+                fontSize: 13,
+                lineHeight: 1.35,
+                color: "inherit",
+                pointerEvents: "auto",
+              }}
+            >
+              <div style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+                <strong>Status:</strong>
+                <span
+                  title={nodePresetFields.status || "None"}
+                  style={{
+                    minWidth: 0,
+                    justifySelf: "start",
+                    maxWidth: "100%",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    border: `1px solid ${statusColor || ruleColor}`,
+                    borderRadius: 6,
+                    padding: "1px 7px",
+                    color: statusColor || "inherit",
+                    background: statusColor ? hexWithAlpha(statusColor, "1f") : "transparent",
+                    fontWeight: 800,
+                  }}
+                >
+                  {nodePresetFields.status || "None"}
+                </span>
+              </div>
+              <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+                <strong>Person In Charge:</strong>
+                <input
+                  value={nodePresetFields.assigneeUserID}
+                  onChange={(event) => onSetNodeAssigneeDraft(event.target.value)}
+                  onBlur={(event) => onCommitNodeAssigneeDraft(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                  }}
+                  placeholder="Unassigned"
+                  aria-label="Person in charge"
+                  style={{ width: "100%", minWidth: 0, border: "1px solid transparent", background: "transparent", color: "inherit", font: "inherit", padding: 0, outline: "none" }}
+                />
+              </label>
+              <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+                <strong>Priority:</strong>
+                <span ref={priorityMenuRef} style={{ position: "relative", display: "inline-block", width: "min(100%, 250px)" }}>
+                  <button
+                    type="button"
+                    aria-haspopup="listbox"
+                    aria-expanded={priorityMenuOpen}
+                    onClick={() => setPriorityMenuOpen((open) => !open)}
+                    style={{
+                      width: "100%",
+                      minHeight: 26,
+                      display: "grid",
+                      gridTemplateColumns: "10px minmax(0, 1fr) 12px",
+                      alignItems: "center",
+                      gap: 7,
+                      border: `1px solid ${selectedPriority.color}66`,
+                      borderRadius: 6,
+                      background: hexWithAlpha(selectedPriority.color, "14"),
+                      color: selectedPriority.color,
+                      font: "inherit",
+                      fontSize: 11.5,
+                      fontWeight: 800,
+                      padding: "3px 8px",
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                  >
+                    <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: selectedPriority.color }} />
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedPriority.label}</span>
+                    <span aria-hidden="true" style={{ fontSize: 10, lineHeight: 1, color: "currentColor" }}>v</span>
+                  </button>
+                  {priorityMenuOpen && (
+                    <div
+                      role="listbox"
+                      aria-label="Priority"
+                      style={{
+                        position: "absolute",
+                        zIndex: 30,
+                        top: "calc(100% + 5px)",
+                        left: 0,
+                        width: "min(270px, 86vw)",
+                        padding: 5,
+                        border: `1px solid ${ruleColor}`,
+                        borderRadius: 8,
+                        background: "#ffffff",
+                        boxShadow: "0 14px 30px rgba(15,23,42,0.18)",
+                        color: "#111827",
+                      }}
+                    >
+                      {NODE_PRIORITY_OPTIONS.map((option) => {
+                        const selected = option.value === selectedPriority.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            role="option"
+                            aria-selected={selected}
+                            onClick={() => {
+                              onSetNodePriorityDraft(option.value);
+                              onCommitNodePriorityDraft(option.value);
+                              setPriorityMenuOpen(false);
+                            }}
+                            style={{
+                              width: "100%",
+                              display: "grid",
+                              gridTemplateColumns: "10px minmax(0, 1fr) 18px",
+                              alignItems: "center",
+                              gap: 8,
+                              border: "none",
+                              borderRadius: 6,
+                              background: selected ? hexWithAlpha(option.color, "18") : "transparent",
+                              color: selected ? option.color : "#1f2937",
+                              font: "inherit",
+                              fontSize: 11.5,
+                              fontWeight: 800,
+                              padding: "7px 8px",
+                              cursor: "pointer",
+                              textAlign: "left",
+                            }}
+                          >
+                            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: option.color }} />
+                            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
+                            <span
+                              aria-hidden="true"
+                              style={{
+                                width: 15,
+                                height: 15,
+                                display: "grid",
+                                placeItems: "center",
+                                border: `1px solid ${selected ? option.color : "#cbd5e1"}`,
+                                borderRadius: 4,
+                                background: selected ? "#ffffff" : "transparent",
+                              }}
+                            >
+                              {selected ? <PriorityCheckIcon color={option.color} /> : null}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </span>
+              </label>
+              <label style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+                <strong>Due Date:</strong>
+                <span style={{ position: "relative", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 24px", alignItems: "center", width: 148 }}>
+                  <input
+                    value={nodePresetFields.dueDateDraft}
+                    onChange={(event) => onSetNodeDueDateDraft(event.target.value)}
+                    onBlur={(event) => onCommitNodeDueDateDraft(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                    }}
+                    placeholder="m/d/yy"
+                    aria-label="Due date"
+                    style={{ width: "100%", minWidth: 0, border: "1px solid transparent", borderRight: "none", background: "transparent", color: "inherit", font: "inherit", padding: 0, outline: "none" }}
+                  />
+                  <button
+                    type="button"
+                    title="Choose due date"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      const picker = dueDatePickerRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
+                      if (!picker) return;
+                      if (picker.showPicker) picker.showPicker();
+                      else picker.click();
+                    }}
+                    style={{ width: 24, height: 24, border: `1px solid ${ruleColor}`, borderRadius: 5, background: panelBackground, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
+                  >
+                    <CalendarIcon color={accent} />
+                  </button>
+                  <input
+                    ref={dueDatePickerRef}
+                    type="date"
+                    tabIndex={-1}
+                    value={dateInputValueFromDraft(nodePresetFields.dueDateDraft)}
+                    onChange={(event) => {
+                      const next = editorDateFromDateInput(event.currentTarget.value);
+                      onSetNodeDueDateDraft(next);
+                      onCommitNodeDueDateDraft(next);
+                    }}
+                    aria-hidden="true"
+                    style={{ position: "absolute", right: 0, bottom: 0, width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
+                  />
+                </span>
+              </label>
             </div>
-          ))}
+          )}
+          {linkedNodeInfoPreview.length > 0 && <div style={{ fontSize: 10, opacity: 0.7 }}>{linkedNodeInfoPreview.join(" - ")}</div>}
         </div>
-      </section>
-    )}
+      )}
 
-    {activeTab === "history" && linkedNodeHistoryRows.length > 0 && (
-      <section style={{ display: "grid", gap: 6, maxWidth: 640, pointerEvents: "auto" }}>
-        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>History</div>
-        <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "6px 8px 6px 22px" }}>
-          {linkedNodeHistoryRows.map((row, index) => <li key={`${row}-${index}`}>{row}</li>)}
-        </ul>
-      </section>
-    )}
-  </>
-);
+      {activeTab === "metadata" && linkedNodeMetadataRows.length > 0 && (
+        <section style={{ display: "grid", gap: 6, maxWidth: 520, pointerEvents: "auto" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>Metadata</div>
+          <div style={{ display: "grid", gap: 4 }}>
+            {linkedNodeMetadataRows.map((row) => (
+              <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "4px 6px" }}>
+                <span style={{ opacity: 0.75 }}>{row.label}</span>
+                <strong>{row.value}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {activeTab === "history" && linkedNodeHistoryRows.length > 0 && (
+        <section style={{ display: "grid", gap: 6, maxWidth: 640, pointerEvents: "auto" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>History</div>
+          <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "6px 8px 6px 22px" }}>
+            {linkedNodeHistoryRows.map((row, index) => <li key={`${row}-${index}`}>{row}</li>)}
+          </ul>
+        </section>
+      )}
+    </>
+  );
+};

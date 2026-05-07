@@ -51,6 +51,7 @@ type KanbanColumnViewProps = {
   onCreateNodeInColumn: (columnID: string) => void;
   onDropColumn: (event: React.DragEvent<HTMLElement>, columnID: string) => void;
   dataTransferIncludes: (event: React.DragEvent, mime: string) => boolean;
+  fillAvailable?: boolean;
 };
 
 export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
@@ -81,6 +82,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
   onCreateNodeInColumn,
   onDropColumn,
   dataTransferIncludes,
+  fillAvailable = false,
 }) => {
   const columnWidth = getColumnWidth(column);
   const columnHeight = getColumnHeight(column);
@@ -108,7 +110,8 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
       onDrop={(event) => onDropColumn(event, column.column_id)}
       style={{
         position: "relative",
-        flex: `0 0 ${columnWidth}px`,
+        flex: fillAvailable ? `1 1 ${columnWidth}px` : `0 0 ${columnWidth}px`,
+        minWidth: fillAvailable ? Math.min(columnWidth, 220) : undefined,
         height: columnHeight,
         minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX / 2,
         background: `linear-gradient(180deg, ${hexToRgba(columnColor, 0.1)}, ${laneBackground} 78px)`,
