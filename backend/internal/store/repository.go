@@ -229,8 +229,8 @@ func normalizeKanbanColumnWidth(widthPx int) int {
 	if widthPx < 180 {
 		return 180
 	}
-	if widthPx > 520 {
-		return 520
+	if widthPx > 2000 {
+		return 2000
 	}
 	return widthPx
 }
@@ -242,8 +242,8 @@ func normalizeKanbanColumnHeight(heightPx int) int {
 	if heightPx < 160 {
 		return 160
 	}
-	if heightPx > 720 {
-		return 720
+	if heightPx > 10000 {
+		return 10000
 	}
 	return heightPx
 }

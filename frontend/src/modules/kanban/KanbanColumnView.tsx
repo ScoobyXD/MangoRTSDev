@@ -51,7 +51,7 @@ type KanbanColumnViewProps = {
   onCreateNodeInColumn: (columnID: string) => void;
   onDropColumn: (event: React.DragEvent<HTMLElement>, columnID: string) => void;
   dataTransferIncludes: (event: React.DragEvent, mime: string) => boolean;
-  fillAvailable?: boolean;
+  showCreateNodeButton?: boolean;
 };
 
 export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
@@ -82,7 +82,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
   onCreateNodeInColumn,
   onDropColumn,
   dataTransferIncludes,
-  fillAvailable = false,
+  showCreateNodeButton = true,
 }) => {
   const columnWidth = getColumnWidth(column);
   const columnHeight = getColumnHeight(column);
@@ -110,8 +110,8 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
       onDrop={(event) => onDropColumn(event, column.column_id)}
       style={{
         position: "relative",
-        flex: fillAvailable ? `1 1 ${columnWidth}px` : `0 0 ${columnWidth}px`,
-        minWidth: fillAvailable ? Math.min(columnWidth, 220) : undefined,
+        flex: `0 0 ${columnWidth}px`,
+        width: columnWidth,
         height: columnHeight,
         minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX / 2,
         background: `linear-gradient(180deg, ${hexToRgba(columnColor, 0.1)}, ${laneBackground} 78px)`,
@@ -135,7 +135,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
           onSetDraggingColumnID("");
           onSetDragOverColumnID("");
         }}
-        style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr) 28px 28px", alignItems: "center", borderBottom: `1px solid ${hexToRgba(columnColor, 0.72)}`, background: hexToRgba(columnColor, 0.12), cursor: "default" }}
+        style={{ display: "grid", gridTemplateColumns: showCreateNodeButton ? "20px minmax(0, 1fr) 28px 28px" : "20px minmax(0, 1fr) 28px", alignItems: "center", borderBottom: `1px solid ${hexToRgba(columnColor, 0.72)}`, background: hexToRgba(columnColor, 0.12), cursor: "default" }}
       >
         <span aria-hidden="true" style={{ color: subtext, fontSize: 15, lineHeight: 1, textAlign: "center", cursor: editingColumnID === column.column_id ? "default" : "grab" }}>::</span>
         {editingColumnID === column.column_id ? (
@@ -170,15 +170,17 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
             {column.title}
           </div>
         )}
-        <button
-          title="Create node"
-          type="button"
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={() => onCreateNodeInColumn(column.column_id)}
-          style={{ width: 28, height: 28, border: "none", background: "transparent", color: text, cursor: "pointer", fontSize: 20, lineHeight: 1 }}
-        >
-          +
-        </button>
+        {showCreateNodeButton && (
+          <button
+            title="Create node"
+            type="button"
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={() => onCreateNodeInColumn(column.column_id)}
+            style={{ width: 28, height: 28, border: "none", background: "transparent", color: text, cursor: "pointer", fontSize: 20, lineHeight: 1 }}
+          >
+            +
+          </button>
+        )}
         <button
           title="Delete column"
           type="button"

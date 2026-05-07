@@ -25,6 +25,12 @@ test("accepts only newer selections from the same source stream", () => {
   assert.equal(shouldAcceptLiveSelection(current, selection({ sequence: 11 })), true);
 });
 
+test("accepts newer same-source selections after a remount sequence reset", () => {
+  const current = selection({ sequence: 10, changedAt: 1000 });
+  const remountedClick = selection({ sequence: 1, changedAt: 2000 });
+  assert.equal(shouldAcceptLiveSelection(current, remountedClick), true);
+});
+
 test("rejects older cross-source selections so delayed echoes cannot win", () => {
   const current = selection({ sourceFrameID: "explorer-1", sourceModule: "company-explorer", changedAt: 2000 });
   const delayedEcho = selection({ sourceFrameID: "map-1", sourceModule: "node-map", changedAt: 1500, sequence: 999 });

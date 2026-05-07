@@ -4,7 +4,7 @@ import { EditorContent } from "../editor/EditorContent";
 import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, type NodeRecord } from "../node-map/shared";
-import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
+import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
@@ -247,12 +247,14 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [nodeEditorOverlayRatio, setNodeEditorOverlayRatio] = useState({ width: 0.78, height: 0.82 });
   const [deleteColumnConfirmation, setDeleteColumnConfirmation] = useState<{ columnID: string; title: string } | null>(null);
   const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
+  const [deleteNodeConfirmation, setDeleteNodeConfirmation] = useState<{ nodeIDs: string[] } | null>(null);
   const boardRootRef = useRef<HTMLDivElement | null>(null);
   const resizeRef = useRef<ColumnResizeState | null>(null);
   const nodeEditorOverlayResizeRef = useRef<OverlayResizeState | null>(null);
   const activeBoardIDRef = useRef(activeBoardID);
   const frameBoardIDRef = useRef(frameBoardID);
   const boardsRef = useRef<KanbanBoard[]>([]);
+  const cardsRef = useRef<KanbanCard[]>([]);
   const boardRefreshRequestRef = useRef(0);
   const lastLocalBoardSelectionChangedAtRef = useRef(0);
 
@@ -295,6 +297,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   useEffect(() => {
     boardsRef.current = boards;
   }, [boards]);
+
+  useEffect(() => {
+    cardsRef.current = cards;
+  }, [cards]);
 
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
@@ -641,6 +647,20 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             setSelectionAnchorCardID((current) => current === cardID ? "" : current);
             return;
           }
+          if (envelope.type === "node_deleted") {
+            const nodeID = typeof data.node_id === "string" ? data.node_id : "";
+            if (!nodeID) return;
+            invalidateKanbanBoardContentsCache(apiBase, companyID, activeBoardIDRef.current);
+            const removedCardIDs = new Set(cardsRef.current.filter((card) => card.node_id === nodeID).map((card) => card.card_id));
+            setCards((previous) => previous.filter((card) => card.node_id !== nodeID));
+            setSelectedCardIDs((previous) => {
+              return new Set(Array.from(previous).filter((selectedCardID) => !removedCardIDs.has(selectedCardID)));
+            });
+            setSelectionAnchorCardID((current) => (removedCardIDs.has(current) ? "" : current));
+            setHighlightedEntity((current) => (current?.nodeID === nodeID ? null : current));
+            setNodeEditorOverlay((current) => (current?.nodeID === nodeID ? null : current));
+            return;
+          }
           if (envelope.type === "company_explorer_folder_item_assigned") {
             const folderItem = data.folder_item as CompanyExplorerFolderItem | undefined;
             if (!folderItem || folderItem.item_type !== "kanban") return;
@@ -925,6 +945,19 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     setDeleteCardConfirmation({ cardIDs: uniqueCardIDs });
   }, [cards]);
 
+  const requestNodeDeleteFromCards = useCallback((cardIDs: string[]) => {
+    const selectedCardIDSet = new Set(cardIDs);
+    const nodeIDs = cards
+      .filter((card) => selectedCardIDSet.has(card.card_id))
+      .map((card) => card.node_id.trim())
+      .filter(Boolean);
+    const uniqueNodeIDs = Array.from(new Set(nodeIDs));
+    if (uniqueNodeIDs.length === 0) return;
+    setCardContextMenu(null);
+    setColumnContextMenu(null);
+    setDeleteNodeConfirmation({ nodeIDs: uniqueNodeIDs });
+  }, [cards]);
+
   const removeCards = useCallback(async (cardIDs: string[]) => {
     const ids = new Set(cardIDs);
     if (ids.size === 0) return;
@@ -941,6 +974,33 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setCards(previousCards);
     }
   }, [cards, kanbanCommandContext]);
+
+  const removeNodes = useCallback(async (nodeIDs: string[]) => {
+    const ids = new Set(nodeIDs.map((nodeID) => nodeID.trim()).filter(Boolean));
+    if (ids.size === 0) return;
+    const previousCards = cards;
+    const removedCardIDs = new Set(cards.filter((card) => ids.has(card.node_id)).map((card) => card.card_id));
+    setCards((current) => current.filter((card) => !ids.has(card.node_id)));
+    setSelectedCardIDs((current) => new Set(Array.from(current).filter((cardID) => !removedCardIDs.has(cardID))));
+    setSelectionAnchorCardID((current) => (removedCardIDs.has(current) ? "" : current));
+    setCardContextMenu(null);
+    setError("");
+    try {
+      await Promise.all(Array.from(ids).map((nodeID) => requestJSON<{ status: string }>(`/v1/nodes/${encodeURIComponent(nodeID)}?company_id=${encodeURIComponent(companyID)}`, {
+        method: "DELETE",
+      })));
+      for (const nodeID of ids) {
+        invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
+        removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
+      }
+      invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
+      setHighlightedEntity((current) => (current && ids.has(current.nodeID) ? null : current));
+      setNodeEditorOverlay((current) => (current && ids.has(current.nodeID) ? null : current));
+    } catch {
+      setError("Node delete failed");
+      setCards(previousCards);
+    }
+  }, [apiBase, boardID, cards, companyID, requestJSON]);
 
   const toggleCardIssue = useCallback(async (card: KanbanCard, isIssue: boolean) => {
     const previousCards = cards;
@@ -965,12 +1025,12 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       // the modal Yes button so selection can never remove a card by itself.
       event.preventDefault();
       event.stopPropagation();
-      if (deleteCardConfirmation) return;
+      if (deleteCardConfirmation || deleteNodeConfirmation) return;
       requestCardDelete(Array.from(selectedCardIDs));
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [deleteCardConfirmation, requestCardDelete, selectedCardIDs]);
+  }, [deleteCardConfirmation, deleteNodeConfirmation, requestCardDelete, selectedCardIDs]);
 
   const addEntitiesToColumn = useCallback(async (columnID: string, items: ExplorerEntityDragItem[]) => {
     try {
@@ -1145,6 +1205,9 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
 
   const contextColumn = columnContextMenu ? columns.find((column) => column.column_id === columnContextMenu.columnID) : null;
   const contextCard = cardContextMenu ? cards.find((card) => card.card_id === cardContextMenu.cardID) : null;
+  const contextCardSelectionIDs = contextCard
+    ? (selectedCardIDs.has(contextCard.card_id) ? Array.from(selectedCardIDs) : [contextCard.card_id])
+    : [];
 
   return (
     <div
@@ -1239,7 +1302,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
                 onCreateNodeInColumn={(columnID) => void createNodeInColumn(columnID)}
                 onDropColumn={onDropColumn}
                 dataTransferIncludes={dataTransferIncludes}
-                fillAvailable={arenaMode}
+                showCreateNodeButton={!arenaMode}
               />
             );
           })}
@@ -1320,21 +1383,31 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       )}
       {contextCard && cardContextMenu && (
         <FrameRightClickMenu x={cardContextMenu.x} y={cardContextMenu.y} onClose={() => setCardContextMenu(null)}>
-          <button
-            type="button"
-            style={contextMenuButtonStyle}
-            onClick={() => void toggleCardIssue(contextCard, !contextCard.is_issue)}
-            {...contextMenuHoverHandlers}
-          >
-            {contextCard.is_issue ? "Clear Issue" : "Mark Issue"}
-          </button>
+          {!arenaMode && (
+            <button
+              type="button"
+              style={contextMenuButtonStyle}
+              onClick={() => void toggleCardIssue(contextCard, !contextCard.is_issue)}
+              {...contextMenuHoverHandlers}
+            >
+              {contextCard.is_issue ? "Clear Issue" : "Mark Issue"}
+            </button>
+          )}
           <button
             type="button"
             style={{ ...contextMenuButtonStyle, color: "#c62828" }}
-            onClick={() => requestCardDelete(selectedCardIDs.has(contextCard.card_id) ? Array.from(selectedCardIDs) : [contextCard.card_id])}
+            onClick={() => requestNodeDeleteFromCards(contextCardSelectionIDs)}
             {...contextMenuHoverHandlers}
           >
-            Delete card
+            Delete node
+          </button>
+          <button
+            type="button"
+            style={contextMenuButtonStyle}
+            onClick={() => requestCardDelete(contextCardSelectionIDs)}
+            {...contextMenuHoverHandlers}
+          >
+            Remove node from Kanban Board
           </button>
         </FrameRightClickMenu>
       )}
@@ -1420,14 +1493,45 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           ))}
         </div>
       )}
+      {deleteNodeConfirmation && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
+          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#111111" }}>
+              Are you sure you want to delete {deleteNodeConfirmation.nodeIDs.length} node{deleteNodeConfirmation.nodeIDs.length === 1 ? "" : "s"}?
+            </div>
+            <div style={{ fontSize: 11, lineHeight: 1.35, color: "#2e2e2e" }}>
+              This deletes the underlying node data and removes its Kanban placements.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  void removeNodes(deleteNodeConfirmation.nodeIDs);
+                  setDeleteNodeConfirmation(null);
+                }}
+                style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}
+              >
+                Yes
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeleteNodeConfirmation(null)}
+                style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#fff", cursor: "pointer", fontWeight: 700 }}
+              >
+                No
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {deleteCardConfirmation && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
           <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#111111" }}>
-              Are you sure you want to delete {deleteCardConfirmation.cardIDs.length} Kanban card{deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"}?
+              Are you sure you want to remove {deleteCardConfirmation.cardIDs.length} node{deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"} from this Kanban Board?
             </div>
             <div style={{ fontSize: 11, lineHeight: 1.35, color: "#2e2e2e" }}>
-              This only removes the selected Kanban board card{deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"}. The underlying node{deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"} will continue to exist outside this board.
+              The underlying node{deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"} will continue to exist outside this board.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <button

@@ -10,7 +10,7 @@ import {
   EVENT_NODE_MAP_SELECTION_UPDATED,
 } from "../node-map/eventbus";
 import { NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX } from "../node-map/shared";
-import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
+import { hasSequenceGap, isNewerSequence, nextLocalContextSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { classifyFrameKind, FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
 import type { CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
@@ -514,8 +514,8 @@ export function useCompanyExplorerSelectionBridge({
       const targetIDs = new Set(resolveConnectedFrameTargets({ sourceFrameID: scope, edges: graph, registry }));
       if (targetIDs.size === 0) return;
 
-      explorerContextSequenceRef.current += 1;
       const changedAt = Date.now();
+      explorerContextSequenceRef.current = nextLocalContextSequence(`explorer_selection:${companyID}:${scope}`, changedAt);
       const targetFrameIDs = Array.from(targetIDs);
       const publishedSelection = resolveExplorerPublishedSelection({
         selectedTreeID,

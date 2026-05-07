@@ -61,8 +61,8 @@ function editorDateFromDateInput(value: string): string {
 }
 
 const PriorityCheckIcon: React.FC<{ color: string }> = ({ color }) => (
-  <svg aria-hidden="true" width="12" height="10" viewBox="0 0 12 10" style={{ display: "block" }}>
-    <path d="M1 5.1 4.2 8 11 1" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+  <svg aria-hidden="true" width="13" height="13" viewBox="0 0 13 13" style={{ display: "block" }}>
+    <path d="m3.1 6.55 2.05 2.05 4.75-4.75" fill="none" stroke={color} strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
@@ -122,7 +122,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     <>
       {(activeTab === "editor" || activeTab === "outline-styles") && (
         <div style={{ display: "grid", gap: 8, pointerEvents: "auto" }}>
-          <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: 0, color: accent, cursor: "text" }}>
+          <div style={{ minWidth: 0, fontSize: 18, fontWeight: 800, letterSpacing: 0, color: accent, cursor: "text", overflowWrap: "anywhere", wordBreak: "break-word" }}>
             <span style={{ textTransform: "uppercase" }}>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>&nbsp;
             <span
               ref={editingTitleRef}
@@ -157,7 +157,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   onSetIsEditingTitle(false);
                 }
               }}
-              style={{ outline: "none", cursor: "text" }}
+              style={{ outline: "none", cursor: "text", overflowWrap: "anywhere", wordBreak: "break-word" }}
             >
               {linkedNodeTitle || "\u00A0"}
             </span>
@@ -227,7 +227,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                       width: "100%",
                       minHeight: 26,
                       display: "grid",
-                      gridTemplateColumns: "10px minmax(0, 1fr) 12px",
+                      gridTemplateColumns: "minmax(0, 1fr) 18px",
                       alignItems: "center",
                       gap: 7,
                       border: `1px solid ${selectedPriority.color}66`,
@@ -242,9 +242,10 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                       textAlign: "left",
                     }}
                   >
-                    <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: selectedPriority.color }} />
                     <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedPriority.label}</span>
-                    <span aria-hidden="true" style={{ fontSize: 10, lineHeight: 1, color: "currentColor" }}>v</span>
+                    <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: "currentColor" }}>
+                      {selectedPriority.value !== "0" ? <PriorityCheckIcon color={selectedPriority.color} /> : null}
+                    </span>
                   </button>
                   {priorityMenuOpen && (
                     <div
@@ -280,7 +281,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                             style={{
                               width: "100%",
                               display: "grid",
-                              gridTemplateColumns: "10px minmax(0, 1fr) 18px",
+                              gridTemplateColumns: "minmax(0, 1fr) 18px",
                               alignItems: "center",
                               gap: 8,
                               border: "none",
@@ -295,20 +296,8 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                               textAlign: "left",
                             }}
                           >
-                            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: option.color }} />
                             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
-                            <span
-                              aria-hidden="true"
-                              style={{
-                                width: 15,
-                                height: 15,
-                                display: "grid",
-                                placeItems: "center",
-                                border: `1px solid ${selected ? option.color : "#cbd5e1"}`,
-                                borderRadius: 4,
-                                background: selected ? "#ffffff" : "transparent",
-                              }}
-                            >
+                            <span aria-hidden="true" style={{ display: "grid", placeItems: "center" }}>
                               {selected ? <PriorityCheckIcon color={option.color} /> : null}
                             </span>
                           </button>
@@ -328,7 +317,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                     onKeyDown={(event) => {
                       if (event.key === "Enter") event.currentTarget.blur();
                     }}
-                    placeholder="m/d/yy"
+                    placeholder="mm/dd/yyyy"
                     aria-label="Due date"
                     style={{ width: "100%", minWidth: 0, border: "1px solid transparent", borderRight: "none", background: "transparent", color: "inherit", font: "inherit", padding: 0, outline: "none" }}
                   />
@@ -363,7 +352,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               </label>
             </div>
           )}
-          {linkedNodeInfoPreview.length > 0 && <div style={{ fontSize: 10, opacity: 0.7 }}>{linkedNodeInfoPreview.join(" - ")}</div>}
+          {linkedNodeInfoPreview.length > 0 && <div style={{ minWidth: 0, fontSize: 10, opacity: 0.7, overflowWrap: "anywhere", wordBreak: "break-word" }}>{linkedNodeInfoPreview.join(" - ")}</div>}
         </div>
       )}
 

@@ -47,6 +47,14 @@ function clampEditorSelectionFontSize(value: number): number {
   return Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, Math.round(value)));
 }
 
+function responsiveEditorDocumentFontSize(widthPx: number): number {
+  if (!Number.isFinite(widthPx) || widthPx <= 0) return EDITOR_DOCUMENT_FONT_SIZE_PX;
+  if (widthPx < 320) return 12;
+  if (widthPx < 460) return 13;
+  if (widthPx < 620) return 14;
+  return EDITOR_DOCUMENT_FONT_SIZE_PX;
+}
+
 function getSelectionRangeInsideElement(element: HTMLElement): Range | null {
   const selection = element.ownerDocument.getSelection();
   if (!selection || selection.rangeCount === 0) return null;
@@ -119,7 +127,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(outlineStyleStorageKey);
-  const documentFontSize = EDITOR_DOCUMENT_FONT_SIZE_PX;
+  const [documentFontSize, setDocumentFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [selectionFontSize, setSelectionFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
@@ -140,6 +148,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const pendingSaveRef = useRef<DocumentSaveRequest | null>(null);
   const queuedSaveRef = useRef<DocumentSaveRequest | null>(null);
   const saveInFlightRef = useRef(false);
+  const editorRootRef = useRef<HTMLDivElement | null>(null);
   const lastSelectionRevisionRef = useRef(0);
   const lastLogicGateSelectionRevisionRef = useRef(0);
   const lastAppliedSelectionChangedAtRef = useRef(0);
@@ -149,6 +158,23 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   useEffect(() => {
     activeTabRef.current = activeTab;
   }, [activeTab]);
+
+  useEffect(() => {
+    const element = editorRootRef.current;
+    if (!element) return;
+    const updateFontSize = () => {
+      const next = responsiveEditorDocumentFontSize(element.getBoundingClientRect().width);
+      setDocumentFontSize((current) => (current === next ? current : next));
+    };
+    updateFontSize();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateFontSize);
+      return () => window.removeEventListener("resize", updateFontSize);
+    }
+    const observer = new ResizeObserver(updateFontSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   const scheduleIndentGuideUpdate = useCallback((text: string) => {
     if (indentGuideFrameRef.current !== null) {
@@ -896,6 +922,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   return (
     <div
+      ref={editorRootRef}
       data-frame-interactive="true"
       onMouseDown={(event) => event.stopPropagation()}
       onTouchStart={(event) => event.stopPropagation()}
