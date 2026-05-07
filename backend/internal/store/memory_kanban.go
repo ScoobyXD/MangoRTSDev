@@ -95,6 +95,32 @@ func (r *MemoryRepo) kanbanColumnLocked(companyID, boardID, columnID string) (do
 	return domain.KanbanColumn{}, false
 }
 
+func (r *MemoryRepo) syncNodeStatusFromKanbanCardLocked(card domain.KanbanCard) {
+	if card.LogicGateID == nil {
+		return
+	}
+	node, ok := r.nodes[key(card.CompanyID, card.NodeID)]
+	if !ok {
+		return
+	}
+	status := ""
+	statusColor := ""
+	if card.IsIssue {
+		status = "Issue"
+		statusColor = "#ffd400"
+	} else if column, found := r.kanbanColumnLocked(card.CompanyID, card.BoardID, card.ColumnID); found {
+		status = column.Title
+		statusColor = column.ItemColor
+	}
+	if status != "" {
+		node.Status = &status
+	}
+	if statusColor != "" {
+		node.StatusColor = &statusColor
+	}
+	r.nodes[key(card.CompanyID, card.NodeID)] = node
+}
+
 func (r *MemoryRepo) ensureKanbanBoardLocked(companyID, boardID, title string) domain.KanbanBoard {
 	return r.ensureKanbanBoardLockedWithLogicGate(companyID, boardID, title, nil)
 }
@@ -450,6 +476,7 @@ func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.Kan
 		}
 		card.UpdatedTimestamp = now
 		r.kanbanCards[k][index] = card
+		r.syncNodeStatusFromKanbanCardLocked(card)
 		return card, nil
 	}
 	card := domain.KanbanCard{
@@ -471,6 +498,7 @@ func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.Kan
 		card.LogicGateID = &value
 	}
 	r.kanbanCards[k] = append(r.kanbanCards[k], card)
+	r.syncNodeStatusFromKanbanCardLocked(card)
 	return card, nil
 }
 
@@ -503,6 +531,7 @@ func (r *MemoryRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCar
 		}
 		card.UpdatedTimestamp = now
 		r.kanbanCards[k][index] = card
+		r.syncNodeStatusFromKanbanCardLocked(card)
 		return card, nil
 	}
 	return domain.KanbanCard{}, ErrNotFound

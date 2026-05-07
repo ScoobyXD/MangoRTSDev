@@ -65,7 +65,13 @@ func (r *MemoryRepo) deriveNodeStatusLocked(companyID, nodeID string) (*string, 
 }
 
 func (r *MemoryRepo) withDerivedNodeStatusLocked(node domain.Node) domain.Node {
-	node.Status, node.StatusColor = r.deriveNodeStatusLocked(node.CompanyID, node.NodeID)
+	derivedStatus, derivedColor := r.deriveNodeStatusLocked(node.CompanyID, node.NodeID)
+	if derivedStatus != nil {
+		node.Status = derivedStatus
+	}
+	if derivedColor != nil {
+		node.StatusColor = derivedColor
+	}
 	return node
 }
 
@@ -92,6 +98,12 @@ func (r *MemoryRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {
 	}
 	if input.DueDateSet {
 		node.DueDate = input.DueDate
+	}
+	if input.StatusSet {
+		node.Status = input.Status
+	}
+	if input.StatusColorSet {
+		node.StatusColor = input.StatusColor
 	}
 	if input.PrioritySet {
 		node.Priority = input.Priority

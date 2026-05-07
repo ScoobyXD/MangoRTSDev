@@ -24,6 +24,7 @@ var (
 type Claims struct {
 	Subject string
 	Email   string
+	Name    string
 	Issuer  string
 	Client  string
 }
@@ -125,6 +126,7 @@ func (v *Validator) Validate(ctx context.Context, token string) (Claims, error) 
 	return Claims{
 		Subject: subject,
 		Email:   getString(raw, "email"),
+		Name:    displayNameFromClaims(raw),
 		Issuer:  getString(raw, "iss"),
 		Client:  client,
 	}, nil
@@ -228,6 +230,14 @@ func decodeSegment(segment string, target any) error {
 func getString(raw map[string]any, key string) string {
 	value, _ := raw[key].(string)
 	return strings.TrimSpace(value)
+}
+
+func displayNameFromClaims(raw map[string]any) string {
+	if name := getString(raw, "name"); name != "" {
+		return name
+	}
+	parts := []string{getString(raw, "given_name"), getString(raw, "family_name")}
+	return strings.TrimSpace(strings.Join(parts, " "))
 }
 
 func tokenUseAllowed(actual, configured string) bool {

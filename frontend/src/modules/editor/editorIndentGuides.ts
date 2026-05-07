@@ -7,7 +7,7 @@ export type EditorIndentGuideSegment = {
 function countIndentDepth(line: string, spacesPerIndent: number): number {
   let columns = 0;
   for (const char of line) {
-    if (char === " ") {
+    if (char === " " || char === "\u00a0") {
       columns += 1;
       continue;
     }

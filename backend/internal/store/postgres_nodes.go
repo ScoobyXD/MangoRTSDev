@@ -12,14 +12,20 @@ const nodeSelectColumns = `
 n.company_id,
 n.node_id,
 n.title,
-case
-  when card.is_issue then 'Issue'
-  else column_row.title
-end as status,
-case
-  when card.is_issue then '#ffd400'
-  else column_row.item_color
-end as status_color,
+coalesce(
+  case
+    when card.is_issue then 'Issue'
+    else column_row.title
+  end,
+  nullif(n.status, '')
+) as status,
+coalesce(
+  case
+    when card.is_issue then '#ffd400'
+    else column_row.item_color
+  end,
+  nullif(n.status_color, '')
+) as status_color,
 n.due_date::text,
 n.priority,
 n.assignee_user_id::text,
@@ -102,6 +108,16 @@ func (r *PostgresRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {
 		value := strings.TrimSpace(*input.DueDate)
 		dueDate = &value
 	}
+	status := (*string)(nil)
+	if input.Status != nil {
+		value := strings.TrimSpace(*input.Status)
+		status = &value
+	}
+	statusColor := (*string)(nil)
+	if input.StatusColor != nil {
+		value := strings.TrimSpace(*input.StatusColor)
+		statusColor = &value
+	}
 	assigneeUserID := (*string)(nil)
 	if input.AssigneeUserID != nil {
 		value := strings.TrimSpace(*input.AssigneeUserID)
@@ -110,14 +126,20 @@ func (r *PostgresRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {
 	_, err = tx.ExecContext(ctx, `
 update nodes
 set title = case when $4 then $3 else title end,
-    due_date = case when $6 then nullif($5::text, '')::date else due_date end,
-    priority = case when $8 then $7::smallint else priority end,
-    assignee_user_id = case when $10 then nullif($9::text, '')::uuid else assignee_user_id end
+    status = case when $6 then nullif($5::text, '') else status end,
+    status_color = case when $8 then nullif($7::text, '') else status_color end,
+    due_date = case when $10 then nullif($9::text, '')::date else due_date end,
+    priority = case when $12 then $11::smallint else priority end,
+    assignee_user_id = case when $14 then nullif($13::text, '')::uuid else assignee_user_id end
 where company_id = $1 and node_id = $2`,
 		input.CompanyID,
 		input.NodeID,
 		input.Title,
 		input.TitleSet,
+		status,
+		input.StatusSet,
+		statusColor,
+		input.StatusColorSet,
 		dueDate,
 		input.DueDateSet,
 		input.Priority,

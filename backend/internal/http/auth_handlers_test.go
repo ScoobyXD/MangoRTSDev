@@ -29,13 +29,13 @@ func TestCreateInvitationRejectsExistingMangoUser(t *testing.T) {
 	const adminSubject = "admin-subject"
 	const existingSubject = "existing-subject"
 	repo.EnsureCompany(companyID, "MangoRTS Dev")
-	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com"); err != nil {
+	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.AddCompanyMembership(adminSubject, companyID, domain.RoleDevAdmin); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertAuthUser(existingSubject, "existing@example.com"); err != nil {
+	if _, err := repo.UpsertAuthUser(existingSubject, "existing@example.com", ""); err != nil {
 		t.Fatal(err)
 	}
 	cognito := &recordingCognitoAdmin{}
@@ -78,7 +78,7 @@ func TestCreateInvitationSendsCognitoForNewMangoUser(t *testing.T) {
 	const companyID = "11111111-1111-1111-1111-111111111111"
 	const adminSubject = "admin-subject"
 	repo.EnsureCompany(companyID, "MangoRTS Dev")
-	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com"); err != nil {
+	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.AddCompanyMembership(adminSubject, companyID, domain.RoleDevAdmin); err != nil {
@@ -124,7 +124,7 @@ func TestCreateInvitationRejectsCompanyUser(t *testing.T) {
 	const companyID = "11111111-1111-1111-1111-111111111111"
 	const subject = "company-user-subject"
 	repo.EnsureCompany(companyID, "MangoRTS Dev")
-	if _, err := repo.UpsertAuthUser(subject, "user@example.com"); err != nil {
+	if _, err := repo.UpsertAuthUser(subject, "user@example.com", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
@@ -163,7 +163,7 @@ func TestInvitationAcceptRejectsOlderTokenForSameCompanyEmail(t *testing.T) {
 	const inviteeSubject = "invitee-subject"
 	const inviteeEmail = "invitee@example.com"
 	repo.EnsureCompany(companyID, "MangoRTS Dev")
-	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com"); err != nil {
+	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.AddCompanyMembership(adminSubject, companyID, domain.RoleCompanyAdmin); err != nil {

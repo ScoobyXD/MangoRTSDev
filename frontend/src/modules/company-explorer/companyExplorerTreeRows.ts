@@ -56,7 +56,26 @@ export function buildCompanyExplorerTreeRows({
   const nodeByID = new Map(nodes.map((node) => [node.node_id, node]));
   const logicGateByID = new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
   const kanbanBoardByID = new Map(kanbanBoards.map((board) => [board.board_id, board]));
-  const folderLabelByID = new Map(folders.map((folder) => [folder.folder_id, folder.name]));
+  const folderByID = new Map(folders.map((folder) => [folder.folder_id, folder]));
+  const folderPathLabelByID = new Map<string, string>();
+  const getFolderPathLabel = (folderID: string): string => {
+    if (!folderID) return "";
+    const cached = folderPathLabelByID.get(folderID);
+    if (cached !== undefined) return cached;
+    const parts: string[] = [];
+    let currentID = folderID;
+    const seen = new Set<string>();
+    while (currentID && !seen.has(currentID)) {
+      seen.add(currentID);
+      const folder = folderByID.get(currentID);
+      if (!folder) break;
+      parts.push(formatExplorerFolderLabel(folder.name));
+      currentID = folder.parent_folder_id ?? "";
+    }
+    const label = parts.reverse().join(" / ");
+    folderPathLabelByID.set(folderID, label);
+    return label;
+  };
   const assignedNodes = new Set(folderItems.filter((item) => item.item_type === "node").map((item) => item.item_id));
   const assignedLogicGates = new Set(folderItems.filter((item) => item.item_type === "logic_gate").map((item) => item.item_id));
   const foldersByParent = new Map<string, CompanyExplorerFolder[]>();
@@ -202,7 +221,7 @@ export function buildCompanyExplorerTreeRows({
             nodeID: node.node_id,
             folderID: parentFolderID,
             folderKind,
-            folderLabel: folderLabelByID.get(parentFolderID),
+            folderLabel: getFolderPathLabel(parentFolderID),
             scopeLevel: depth,
             position: parentFolderID === "" ? getRootAwarePosition(folderKind, `node-${node.node_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
             createdTimestamp: item.created_timestamp,
@@ -219,7 +238,7 @@ export function buildCompanyExplorerTreeRows({
             logicGateID: logicGate.logic_gate_id,
             folderID: parentFolderID,
             folderKind,
-            folderLabel: folderLabelByID.get(parentFolderID),
+            folderLabel: getFolderPathLabel(parentFolderID),
             scopeLevel: depth,
             position: parentFolderID === "" ? getRootAwarePosition(folderKind, `logic-gate-${logicGate.logic_gate_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
             createdTimestamp: item.created_timestamp,
@@ -236,7 +255,7 @@ export function buildCompanyExplorerTreeRows({
             kanbanBoardID: board.board_id,
             folderID: parentFolderID,
             folderKind,
-            folderLabel: folderLabelByID.get(parentFolderID),
+            folderLabel: getFolderPathLabel(parentFolderID),
             scopeLevel: depth,
             position: parentFolderID === "" ? getRootAwarePosition(folderKind, `kanban-${board.board_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
             createdTimestamp: board.created_timestamp,
@@ -256,7 +275,7 @@ export function buildCompanyExplorerTreeRows({
         folderID: folder.folder_id,
         parentFolderID: folder.parent_folder_id ?? "",
         folderKind,
-        folderLabel: folder.name,
+        folderLabel: getFolderPathLabel(folder.folder_id),
         scopeLevel: depth,
         position: parentFolderID === "" ? getRootAwarePosition(folderKind, rowID, folder.position || TREE_ROW_POSITION_STEP) : folder.position || TREE_ROW_POSITION_STEP,
         createdTimestamp: folder.created_timestamp,

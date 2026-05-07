@@ -42,7 +42,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		user, err := s.repo.UpsertAuthUser(claims.Subject, claims.Email)
+		user, err := s.repo.UpsertAuthUser(claims.Subject, claims.Email, claims.Name)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_record_authenticated_user")
 			return

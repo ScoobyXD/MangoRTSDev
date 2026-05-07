@@ -24,6 +24,7 @@ type CompanyUser = {
   company_id: string;
   user_id: string;
   email: string;
+  display_name?: string;
   role: string;
 };
 
@@ -453,7 +454,7 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
       {canManageSelectedCompany && <section style={{ ...sectionStyle, marginTop: 14 }}>
         <h2 style={sectionTitleStyle}>Company Users</h2>
         <div style={{ display: "grid", gap: 6 }}>
-          {users.map((user) => <div key={user.user_id} style={rowStyle}><span>{user.email || user.user_id}</span><span>{user.role}</span></div>)}
+          {users.map((user) => <div key={user.user_id} style={rowStyle}><span>{companyUserLabel(user)}</span><span>{user.role}</span></div>)}
         </div>
       </section>}
     </div>
@@ -532,3 +533,9 @@ const rowStyle: React.CSSProperties = {
   borderBottom: "1px solid rgba(12, 67, 74, 0.16)",
   fontSize: 12,
 };
+
+function companyUserLabel(user: CompanyUser): string {
+  const name = (user.display_name ?? "").trim();
+  if (name && user.email) return `${name} <${user.email}>`;
+  return name || user.email || user.user_id;
+}

@@ -5,6 +5,7 @@ import type { EditorScrollMemory } from "./editorScroll";
 import {
   EDITOR_TAB_TEXT,
   deleteEditorBackspaceText,
+  insertAutomaticOutlineFirstText,
   insertEditorEnterText,
   insertEditorTabText,
   type EditorOutlineStyleID,
@@ -387,6 +388,21 @@ export function useEditorDocumentSurfaceHandlers({
             commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
           }
           return;
+        }
+
+        if (outlineStyle === "automatic-outline-numbering") {
+          const offsets = getEditorSelectionOffsets(event.currentTarget);
+          const currentText = offsets ? readEditorDocumentText(event.currentTarget) : "";
+          const edit = offsets
+            ? insertAutomaticOutlineFirstText(currentText, offsets.start, offsets.end, inputEvent.data)
+            : null;
+          if (edit) {
+            event.preventDefault();
+            pendingEditorFontSizeRef.current = null;
+            replaceDocumentWithPlainText(event.currentTarget, edit.value, edit.selectionStart, edit.selectionEnd);
+            commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+            return;
+          }
         }
 
         const anchor = getCollapsedAnchorAtSelectionEnd(event.currentTarget);

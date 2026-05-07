@@ -207,7 +207,14 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
                 style={{ width: "100%", minHeight: 30, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr) auto", alignItems: "center", gap: 7, border: "none", background: row.id === selectedTreeID ? selectedRowBackground : "transparent", color: surfaceText, cursor: "pointer", padding: "5px 9px", textAlign: "left" }}
               >
                 <ExplorerRowIcon kind={row.kind} />
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 700 }}>{row.label}</span>
+                <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 700 }}>{row.label}</span>
+                  {row.folderLabel && (
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: folderToggleColor, fontSize: 9, fontWeight: 700 }}>
+                      {row.folderLabel}
+                    </span>
+                  )}
+                </span>
                 <span style={{ color: folderToggleColor, fontSize: 9, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase" }}>{row.kind === "logic_gate" ? "Logic" : row.kind}</span>
               </button>
             ))}

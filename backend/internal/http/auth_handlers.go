@@ -66,7 +66,7 @@ func (s *Server) handleCompanySubresource(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	if !requireCompanyManager(w, r, companyID) {
+	if !requireCompanyAccess(w, r, companyID) {
 		return
 	}
 	users, err := s.repo.ListCompanyUsers(companyID)
@@ -300,6 +300,24 @@ func requireCompanyManager(w http.ResponseWriter, r *http.Request, companyID str
 	}
 	if !actorCanManageCompany(actor, companyID) {
 		writeError(w, http.StatusForbidden, "company_admin_required")
+		return false
+	}
+	return true
+}
+
+func requireCompanyAccess(w http.ResponseWriter, r *http.Request, companyID string) bool {
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return false
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	if actorRoleForCompany(actor, companyID) == "" {
+		writeError(w, http.StatusForbidden, "company_access_denied")
 		return false
 	}
 	return true

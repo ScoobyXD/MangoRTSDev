@@ -41,7 +41,7 @@ func TestAuthMiddlewareAllowsCompanyMember(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	const companyID = "11111111-1111-1111-1111-111111111111"
 	const subject = "cognito-user-1"
-	_, err := repo.UpsertAuthUser(subject, "dev@example.com")
+	_, err := repo.UpsertAuthUser(subject, "dev@example.com", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestAuthMiddlewareRejectsNonMemberCompany(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	const companyID = "11111111-1111-1111-1111-111111111111"
 	const subject = "cognito-user-1"
-	_, err := repo.UpsertAuthUser(subject, "dev@example.com")
+	_, err := repo.UpsertAuthUser(subject, "dev@example.com", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestAuthMiddlewareAllowsDevAdminAcrossCompanies(t *testing.T) {
 	const adminCompanyID = "11111111-1111-1111-1111-111111111111"
 	const targetCompanyID = "22222222-2222-2222-2222-222222222222"
 	const subject = "cognito-dev-admin-1"
-	_, err := repo.UpsertAuthUser(subject, "dev@example.com")
+	_, err := repo.UpsertAuthUser(subject, "dev@example.com", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestAuthMiddlewareAllowsCompanyAdminInsideCompanyOnly(t *testing.T) {
 	const allowedCompanyID = "11111111-1111-1111-1111-111111111111"
 	const deniedCompanyID = "22222222-2222-2222-2222-222222222222"
 	const subject = "cognito-company-admin-1"
-	_, err := repo.UpsertAuthUser(subject, "admin@example.com")
+	_, err := repo.UpsertAuthUser(subject, "admin@example.com", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestAuthMiddlewareAllowsCompanyUserFullCompanyAccess(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	const companyID = "11111111-1111-1111-1111-111111111111"
 	const subject = "cognito-company-user-1"
-	_, err := repo.UpsertAuthUser(subject, "user@example.com")
+	_, err := repo.UpsertAuthUser(subject, "user@example.com", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestAuthMiddlewareChecksBodyCompanyBeforeQueryCompany(t *testing.T) {
 	const allowedCompanyID = "11111111-1111-1111-1111-111111111111"
 	const deniedCompanyID = "22222222-2222-2222-2222-222222222222"
 	const subject = "cognito-user-1"
-	_, err := repo.UpsertAuthUser(subject, "dev@example.com")
+	_, err := repo.UpsertAuthUser(subject, "dev@example.com", "")
 	if err != nil {
 		t.Fatal(err)
 	}
