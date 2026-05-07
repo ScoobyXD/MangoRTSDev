@@ -67,7 +67,6 @@ type CompanyExplorerTreeProps = {
   placeExplorerFolderAtTarget: (source: ExplorerTreeNode, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => Promise<boolean>;
   placeExplorerItemsAtTarget: (payload: ExplorerDragPayload | null, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => Promise<boolean>;
   moveFolder: (folderID: string, parentFolderID: string | undefined, options?: { position?: number; expandTarget?: boolean; parentProvided?: boolean; targetExpanded?: boolean }) => Promise<void>;
-  moveSystemFolder: (systemFolderID: string, parentFolderID: string, options?: { position?: number; expandTarget?: boolean; targetExpanded?: boolean }) => void;
   assignExplorerPayloadItemsToFolder: (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => Promise<void>;
 };
 
@@ -127,7 +126,6 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   placeExplorerFolderAtTarget,
   placeExplorerItemsAtTarget,
   moveFolder,
-  moveSystemFolder,
   assignExplorerPayloadItemsToFolder,
 }) => (
   <div
@@ -208,7 +206,7 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
                 onClick={() => onSelectExplorerSearchResult(row)}
                 style={{ width: "100%", minHeight: 30, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr) auto", alignItems: "center", gap: 7, border: "none", background: row.id === selectedTreeID ? selectedRowBackground : "transparent", color: surfaceText, cursor: "pointer", padding: "5px 9px", textAlign: "left" }}
               >
-                <ExplorerRowIcon row={row} />
+                <ExplorerRowIcon kind={row.kind} />
                 <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
                   <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 700 }}>{row.label}</span>
                   {row.folderLabel && (
@@ -269,7 +267,6 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
         placeExplorerFolderAtTarget={placeExplorerFolderAtTarget}
         placeExplorerItemsAtTarget={placeExplorerItemsAtTarget}
         moveFolder={moveFolder}
-        moveSystemFolder={moveSystemFolder}
         assignExplorerPayloadItemsToFolder={assignExplorerPayloadItemsToFolder}
       />
     ))}

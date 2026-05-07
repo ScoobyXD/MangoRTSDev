@@ -25,6 +25,8 @@ export function buildEditorIndentGuideSegments(text: string, spacesPerIndent: nu
   const lines = text.split(/\r\n|\n|\r/);
   const openByDepth = new Map<number, number>();
   const segments: EditorIndentGuideSegment[] = [];
+  let previousNonBlankDepth = 0;
+
   const closeDepth = (depth: number, lineEnd: number) => {
     const lineStart = openByDepth.get(depth);
     if (lineStart === undefined) return;
@@ -34,14 +36,14 @@ export function buildEditorIndentGuideSegments(text: string, spacesPerIndent: nu
 
   lines.forEach((line, lineIndex) => {
     const isBlank = line.trim().length === 0;
-    const depth = countIndentDepth(line, indentWidth);
-    if (isBlank && depth === 0) return;
+    const depth = isBlank && line.length === 0 ? previousNonBlankDepth : countIndentDepth(line, indentWidth);
     for (const depthToClose of [...openByDepth.keys()].filter((value) => value > depth).sort((a, b) => b - a)) {
       closeDepth(depthToClose, lineIndex - 1);
     }
     for (let currentDepth = 1; currentDepth <= depth; currentDepth += 1) {
       if (!openByDepth.has(currentDepth)) openByDepth.set(currentDepth, lineIndex);
     }
+    if (!isBlank) previousNonBlankDepth = depth;
   });
 
   const finalLineIndex = Math.max(0, lines.length - 1);

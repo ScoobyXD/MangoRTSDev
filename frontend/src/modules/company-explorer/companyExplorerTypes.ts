@@ -20,8 +20,6 @@ export type ExplorerTreeNode = {
   folderID?: string;
   parentFolderID?: string;
   folderKind?: CompanyExplorerFolderKind;
-  systemFolderID?: string;
-  parentSystemFolderID?: string;
   folderLabel?: string;
   scopeLevel: number;
   position: number;

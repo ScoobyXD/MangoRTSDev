@@ -20,9 +20,6 @@ export const TREE_TOGGLE_SLOT_PX = 18;
 export const TREE_ROW_POSITION_STEP = 1000;
 
 export function getExplorerDragPayload(row: ExplorerTreeNode): ExplorerDragPayload | null {
-  if (row.systemFolderID) {
-    return { kind: "system_folder", systemFolderID: row.systemFolderID, sourceTreeID: row.id };
-  }
   if (row.kind === "folder" && row.folderID && row.folderKind) {
     return { kind: "folder", folderID: row.folderID, folderKind: row.folderKind };
   }
@@ -68,7 +65,6 @@ export function readExplorerDragPayload(dataTransfer: DataTransfer): ExplorerDra
     const raw = dataTransfer.getData(EXPLORER_DRAG_MIME);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ExplorerDragPayload;
-    if (parsed.kind === "system_folder" && parsed.systemFolderID) return { kind: "system_folder", systemFolderID: parsed.systemFolderID, sourceTreeID: typeof parsed.sourceTreeID === "string" ? parsed.sourceTreeID : parsed.systemFolderID };
     if (parsed.kind === "folder" && parsed.folderID && parsed.folderKind) return parsed;
     if ((parsed.kind === "node" || parsed.kind === "logic_gate" || parsed.kind === "kanban") && parsed.itemID && parsed.itemType) return {
       ...parsed,
@@ -110,17 +106,12 @@ export function sortExplorerRowsByPosition(rows: ExplorerTreeNode[]): ExplorerTr
 }
 
 export function getExplorerRowContainerID(row: ExplorerTreeNode): string | null {
-  if (row.systemFolderID) return row.parentFolderID ?? "";
-  if (row.parentSystemFolderID) return row.parentSystemFolderID;
   if (row.kind === "folder") return row.parentFolderID ?? "";
   if (row.folderKind) return row.folderID ?? "";
   return null;
 }
 
-export type ExplorerRowOrderKind = CompanyExplorerItemType | CompanyExplorerFolderKind | "system_folder";
-
-export function getExplorerRowOrderKind(row: ExplorerTreeNode): ExplorerRowOrderKind | null {
-  if (row.systemFolderID) return "system_folder";
+export function getExplorerRowOrderKind(row: ExplorerTreeNode): CompanyExplorerItemType | CompanyExplorerFolderKind | null {
   if (row.kind === "folder") return row.folderKind ?? null;
   return row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "kanban" ? "kanban" : null;
 }

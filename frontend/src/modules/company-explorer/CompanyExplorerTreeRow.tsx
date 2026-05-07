@@ -73,7 +73,6 @@ type CompanyExplorerTreeRowProps = {
   placeExplorerFolderAtTarget: (source: ExplorerTreeNode, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => Promise<boolean>;
   placeExplorerItemsAtTarget: (payload: ExplorerDragPayload | null, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => Promise<boolean>;
   moveFolder: (folderID: string, parentFolderID: string | undefined, options?: { position?: number; expandTarget?: boolean; parentProvided?: boolean; targetExpanded?: boolean }) => Promise<void>;
-  moveSystemFolder: (systemFolderID: string, parentFolderID: string, options?: { position?: number; expandTarget?: boolean; targetExpanded?: boolean }) => void;
   assignExplorerPayloadItemsToFolder: (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => Promise<void>;
 };
 
@@ -118,7 +117,6 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   placeExplorerFolderAtTarget,
   placeExplorerItemsAtTarget,
   moveFolder,
-  moveSystemFolder,
   assignExplorerPayloadItemsToFolder,
 }) => {
   const isFolder = row.kind === "folder";
@@ -180,21 +178,21 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         const placement = row.kind === "folder" ? getExplorerDropIntent(event) : getExplorerRowReorderPlacement(event);
         const isDraggedItemRow = payload?.kind !== "folder" && getExplorerItemRowsForPayload(payload).some((item) => item.id === row.id);
         if (isDraggedItemRow) return;
-        if ((payload?.kind === "folder" || payload?.kind === "system_folder") && placement !== "inside" && sourceRow && sourceRow.id !== row.id && getReorderRowsForTarget(sourceRow, row).length > 0) {
+        if (payload?.kind === "folder" && placement !== "inside" && sourceRow && sourceRow.id !== row.id && getReorderRowsForTarget(sourceRow, row).length > 0) {
           event.preventDefault();
           event.dataTransfer.dropEffect = "move";
           onSetDragOverTreeID(row.id);
           onSetDragOverPlacement(placement);
           return;
         }
-        if ((payload?.kind === "folder" || payload?.kind === "system_folder") && placement !== "inside" && sourceRow && canPlaceExplorerFolderAtTarget(sourceRow, row)) {
+        if (payload?.kind === "folder" && placement !== "inside" && sourceRow && canPlaceExplorerFolderAtTarget(sourceRow, row)) {
           event.preventDefault();
           event.dataTransfer.dropEffect = "move";
           onSetDragOverTreeID(row.id);
           onSetDragOverPlacement(placement);
           return;
         }
-        if (payload?.kind !== "folder" && payload?.kind !== "system_folder" && placement !== "inside" && canPlaceExplorerItemsAtTarget(payload, row)) {
+        if (payload?.kind !== "folder" && placement !== "inside" && canPlaceExplorerItemsAtTarget(payload, row)) {
           event.preventDefault();
           event.dataTransfer.dropEffect = "move";
           onSetDragOverTreeID(row.id);
@@ -221,27 +219,23 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         onSetDragOverTreeID("");
         onSetDragOverPlacement(null);
         if (isDraggedItemRow) return;
-        if ((payload?.kind === "folder" || payload?.kind === "system_folder") && placement !== "inside" && sourceRow && sourceRow.id !== row.id && getReorderRowsForTarget(sourceRow, row).length > 0) {
+        if (payload?.kind === "folder" && placement !== "inside" && sourceRow && sourceRow.id !== row.id && getReorderRowsForTarget(sourceRow, row).length > 0) {
           event.preventDefault();
           void reorderExplorerRows(sourceRow, row, placement);
           return;
         }
-        if ((payload?.kind === "folder" || payload?.kind === "system_folder") && placement !== "inside" && sourceRow && canPlaceExplorerFolderAtTarget(sourceRow, row)) {
+        if (payload?.kind === "folder" && placement !== "inside" && sourceRow && canPlaceExplorerFolderAtTarget(sourceRow, row)) {
           event.preventDefault();
           void placeExplorerFolderAtTarget(sourceRow, row, placement);
           return;
         }
-        if (payload?.kind !== "folder" && payload?.kind !== "system_folder" && placement !== "inside" && canPlaceExplorerItemsAtTarget(payload, row)) {
+        if (payload?.kind !== "folder" && placement !== "inside" && canPlaceExplorerItemsAtTarget(payload, row)) {
           event.preventDefault();
           void placeExplorerItemsAtTarget(payload, row, placement);
           return;
         }
         if (!dropTarget || !payload) return;
         event.preventDefault();
-        if (payload.kind === "system_folder" && payload.systemFolderID) {
-          moveSystemFolder(payload.systemFolderID, dropTarget.folderID, { targetExpanded: expanded.has(dropTarget.treeID), expandTarget: true });
-          return;
-        }
         if (payload.kind === "folder" && payload.folderID) {
           void moveFolder(payload.folderID, dropTarget.folderID, { targetExpanded: expanded.has(dropTarget.treeID) });
           return;
@@ -286,7 +280,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
           <ExplorerDisclosureIcon open={isOpen} color={folderToggleColor} />
         </button>
       ) : <span style={{ width: TREE_TOGGLE_SLOT_PX, flexShrink: 0 }} />}
-      <ExplorerRowIcon row={row} />
+      <ExplorerRowIcon kind={row.kind} />
       {renaming?.treeID === row.id ? (
         <input
           ref={renameInputRef}

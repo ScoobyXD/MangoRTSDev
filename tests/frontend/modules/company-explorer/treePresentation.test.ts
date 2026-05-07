@@ -127,7 +127,6 @@ run("context creation targets nested logic gate folders", () => {
   assert.deepEqual(targets, {
     preferredFolderKind: "logic_gate",
     preferredFolderParentID: "logic-folder-1",
-    preferredSystemFolderParentID: "",
     nodeFolderParentID: "",
     logicGateFolderParentID: "logic-folder-1",
     nodeParentFolderID: "",
@@ -140,7 +139,6 @@ run("context creation targets node siblings from a node row", () => {
   assert.deepEqual(targets, {
     preferredFolderKind: "node",
     preferredFolderParentID: "node-folder-1",
-    preferredSystemFolderParentID: "",
     nodeFolderParentID: "node-folder-1",
     logicGateFolderParentID: "",
     nodeParentFolderID: "node-folder-1",
