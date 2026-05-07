@@ -144,6 +144,12 @@ variable "dev_company_id" {
   type        = string
 }
 
+variable "email_from_address" {
+  description = "Verified SES sender address for MangoRTS auth emails. Leave empty to disable backend-sent auth emails."
+  type        = string
+  default     = ""
+}
+
 variable "cognito_domain_prefix" {
   description = "Deprecated from the Hosted UI flow. Kept temporarily so older tfvars files continue to load."
   type        = string

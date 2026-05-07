@@ -30,6 +30,7 @@ export type MangoUser = {
   user_id: string;
   cognito_subject: string;
   email: string;
+  display_name: string;
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -118,30 +119,28 @@ export async function completeNewPassword(username: string, session: string, new
   writeAuthResult(response.AuthenticationResult);
 }
 
-export async function forgotPassword(email: string): Promise<void> {
-  const config = readAuthConfig();
-  assertConfigured(config);
-  await cognitoRequest<unknown>(config, "ForgotPassword", {
-    ClientId: config.clientID,
-    Username: normalizeEmail(email),
+export async function forgotPassword(email: string): Promise<{ expires_in_seconds?: number }> {
+  return apiFetchJSON<{ expires_in_seconds?: number }>("/v1/password-resets/request", {
+    method: "POST",
+    body: JSON.stringify({ email: normalizeEmail(email) }),
   });
 }
 
 export async function resetPassword(email: string, confirmationCode: string, newPassword: string): Promise<void> {
-  const config = readAuthConfig();
-  assertConfigured(config);
-  await cognitoRequest<unknown>(config, "ConfirmForgotPassword", {
-    ClientId: config.clientID,
-    Username: normalizeEmail(email),
-    ConfirmationCode: confirmationCode.trim(),
-    Password: newPassword,
+  await apiFetchJSON<unknown>("/v1/password-resets/confirm", {
+    method: "POST",
+    body: JSON.stringify({
+      email: normalizeEmail(email),
+      code: confirmationCode.trim(),
+      new_password: newPassword,
+    }),
   });
 }
 
-export async function acceptInvitation(token: string): Promise<void> {
+export async function acceptInvitation(token: string, displayName: string): Promise<void> {
   await apiFetchJSON("/v1/invitations/accept", {
     method: "POST",
-    body: JSON.stringify({ token: token.trim() }),
+    body: JSON.stringify({ token: token.trim(), display_name: displayName.trim() }),
   });
 }
 
@@ -335,6 +334,22 @@ function friendlyApiError(code: string): string {
       return "The selected company was not found.";
     case "user_already_exists":
       return "This user already exists.";
+    case "display_name_required":
+      return "Enter your name.";
+    case "password_reset_email_not_configured":
+      return "Password reset email is not configured.";
+    case "failed_to_send_password_reset_email":
+      return "The reset code email could not be sent. Try again shortly.";
+    case "password_reset_not_configured":
+      return "Password reset is not configured.";
+    case "password_reset_code_expired":
+      return "The reset code has expired. Request a new reset code.";
+    case "invalid_password_reset_code":
+      return "The reset code is not valid. Use the newest code from your email.";
+    case "failed_to_reset_cognito_password":
+      return "The password could not be reset in Cognito. Try requesting a new reset code.";
+    case "invalid_password_reset":
+      return "Enter your email, reset code, and new password.";
     default:
       return "";
   }

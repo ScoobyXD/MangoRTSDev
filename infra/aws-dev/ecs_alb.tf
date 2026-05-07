@@ -102,6 +102,7 @@ resource "aws_ecs_task_definition" "backend" {
         { name = "COGNITO_TOKEN_USE", value = "access,id" },
         { name = "MANGORTS_ADDR", value = ":${var.container_port}" },
         { name = "MANGORTS_ALLOWED_ORIGIN", value = "https://${local.app_domain}" },
+        { name = "MANGORTS_EMAIL_FROM", value = var.email_from_address },
         { name = "DB_HOST", value = var.existing_db_host },
         { name = "DB_PORT", value = tostring(var.existing_db_port) },
         { name = "DB_NAME", value = var.existing_db_name },

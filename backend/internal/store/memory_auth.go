@@ -58,6 +58,23 @@ func (r *MemoryRepo) GetAuthUser(cognitoSubject string) (domain.User, error) {
 	return user, nil
 }
 
+func (r *MemoryRepo) GetAuthUserByEmail(email string) (domain.User, error) {
+	email = normalizeEmail(email)
+	if email == "" {
+		return domain.User{}, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, user := range r.users {
+		if normalizeEmail(user.Email) == email {
+			return user, nil
+		}
+	}
+	return domain.User{}, ErrNotFound
+}
+
 func (r *MemoryRepo) ListUserMemberships(userID string) ([]domain.CompanyMembership, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -238,7 +255,8 @@ func (r *MemoryRepo) CreateInvitation(input CreateInvitationInput) (domain.Invit
 	companyID := strings.TrimSpace(input.CompanyID)
 	email := normalizeEmail(input.Email)
 	role, ok := normalizeInvitableRole(input.Role)
-	if companyID == "" || email == "" || input.InvitedByUserID == "" || !ok {
+	invitedByUserID := strings.TrimSpace(input.InvitedByUserID)
+	if companyID == "" || email == "" || invitedByUserID == "" || !ok {
 		return domain.Invitation{}, ErrInvalid
 	}
 	ttl := input.ExpiresIn
@@ -251,6 +269,9 @@ func (r *MemoryRepo) CreateInvitation(input CreateInvitationInput) (domain.Invit
 
 	if _, ok := r.companies[companyID]; !ok {
 		return domain.Invitation{}, ErrNotFound
+	}
+	if !r.userCanCreateInvitationLocked(invitedByUserID, companyID) {
+		return domain.Invitation{}, ErrInvalid
 	}
 	for _, user := range r.users {
 		if normalizeEmail(user.Email) == email {
@@ -273,11 +294,12 @@ func (r *MemoryRepo) CreateInvitation(input CreateInvitationInput) (domain.Invit
 	invitation := domain.Invitation{
 		InvitationID:     newUUIDv7String(),
 		CompanyID:        companyID,
+		CompanyName:      r.companies[companyID].Name,
 		Email:            email,
 		Role:             role,
 		Status:           domain.InvitationStatusPending,
 		Token:            token,
-		InvitedByUserID:  strings.TrimSpace(input.InvitedByUserID),
+		InvitedByUserID:  invitedByUserID,
 		ExpiresTimestamp: now.Add(ttl),
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
@@ -286,11 +308,12 @@ func (r *MemoryRepo) CreateInvitation(input CreateInvitationInput) (domain.Invit
 	return invitation, nil
 }
 
-func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email string) (domain.Invitation, error) {
+func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName string) (domain.Invitation, error) {
 	tokenHash := invitationTokenHash(token)
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	email = normalizeEmail(email)
-	if strings.TrimSpace(token) == "" || cognitoSubject == "" || email == "" {
+	displayName = strings.TrimSpace(displayName)
+	if strings.TrimSpace(token) == "" || cognitoSubject == "" || email == "" || displayName == "" {
 		return domain.Invitation{}, ErrInvalid
 	}
 
@@ -304,6 +327,9 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email string) (doma
 	if invitation.Email != email {
 		return domain.Invitation{}, ErrInvalid
 	}
+	if company, ok := r.companies[invitation.CompanyID]; ok {
+		invitation.CompanyName = company.Name
+	}
 	user, ok := r.users[cognitoSubject]
 	if !ok {
 		now := time.Now().UTC()
@@ -311,9 +337,15 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email string) (doma
 			UserID:           newUUIDv7String(),
 			CognitoSubject:   cognitoSubject,
 			Email:            email,
+			DisplayName:      displayName,
 			CreatedTimestamp: now,
 			UpdatedTimestamp: now,
 		}
+		r.users[cognitoSubject] = user
+	} else {
+		user.Email = email
+		user.DisplayName = displayName
+		user.UpdatedTimestamp = time.Now().UTC()
 		r.users[cognitoSubject] = user
 	}
 	now := time.Now().UTC()
@@ -331,6 +363,107 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email string) (doma
 	invitation.Token = ""
 	r.invitations[tokenHash] = invitation
 	return invitation, nil
+}
+
+func (r *MemoryRepo) CreatePasswordResetCode(input CreatePasswordResetCodeInput) (domain.PasswordResetCode, error) {
+	email := normalizeEmail(input.Email)
+	if email == "" {
+		return domain.PasswordResetCode{}, ErrInvalid
+	}
+	ttl := input.ExpiresIn
+	if ttl <= 0 {
+		ttl = DefaultPasswordResetTTL
+	}
+	code, salt, hash, err := newPasswordResetCode()
+	if err != nil {
+		return domain.PasswordResetCode{}, err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now().UTC()
+	for key, reset := range r.passwordResets {
+		if reset.item.Email == email && reset.item.Status == domain.PasswordResetStatusPending {
+			reset.item.Status = domain.PasswordResetStatusRevoked
+			reset.item.Code = ""
+			reset.item.UpdatedTimestamp = now
+			r.passwordResets[key] = reset
+		}
+	}
+	item := domain.PasswordResetCode{
+		ResetID:          newUUIDv7String(),
+		Email:            email,
+		Status:           domain.PasswordResetStatusPending,
+		Code:             code,
+		ExpiresTimestamp: now.Add(ttl),
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	r.passwordResets[item.ResetID] = memoryPasswordResetCode{
+		item:     item,
+		codeHash: hash,
+		codeSalt: salt,
+	}
+	return item, nil
+}
+
+func (r *MemoryRepo) ConsumePasswordResetCode(email, code string) (domain.PasswordResetCode, error) {
+	email = normalizeEmail(email)
+	code = strings.TrimSpace(code)
+	if email == "" || code == "" {
+		return domain.PasswordResetCode{}, ErrInvalid
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var selected memoryPasswordResetCode
+	var selectedKey string
+	for key, reset := range r.passwordResets {
+		if reset.item.Email != email || reset.item.Status != domain.PasswordResetStatusPending {
+			continue
+		}
+		if selectedKey == "" || reset.item.CreatedTimestamp.After(selected.item.CreatedTimestamp) {
+			selected = reset
+			selectedKey = key
+		}
+	}
+	if selectedKey == "" {
+		return domain.PasswordResetCode{}, ErrNotFound
+	}
+	now := time.Now().UTC()
+	if now.After(selected.item.ExpiresTimestamp) {
+		selected.item.Status = domain.PasswordResetStatusRevoked
+		selected.item.Code = ""
+		selected.item.UpdatedTimestamp = now
+		r.passwordResets[selectedKey] = selected
+		return domain.PasswordResetCode{}, ErrExpired
+	}
+	if passwordResetCodeHash(selected.codeSalt, code) != selected.codeHash {
+		return domain.PasswordResetCode{}, ErrInvalid
+	}
+	selected.item.Status = domain.PasswordResetStatusUsed
+	selected.item.Code = ""
+	selected.item.UsedTimestamp = &now
+	selected.item.UpdatedTimestamp = now
+	r.passwordResets[selectedKey] = selected
+	return selected.item, nil
+}
+
+func (r *MemoryRepo) userCanCreateInvitationLocked(userID, companyID string) bool {
+	userID = strings.TrimSpace(userID)
+	companyID = strings.TrimSpace(companyID)
+	if userID == "" || companyID == "" {
+		return false
+	}
+	for _, membership := range r.memberships {
+		if membership.UserID == userID && membership.Role == domain.RoleDevAdmin {
+			return true
+		}
+	}
+	membership, ok := r.memberships[membershipKey(companyID, userID)]
+	return ok && membership.Role == domain.RoleCompanyAdmin
 }
 
 func (r *MemoryRepo) ListResourceAssignments(query ResourceAssignmentQuery) ([]domain.ResourceAssignment, error) {

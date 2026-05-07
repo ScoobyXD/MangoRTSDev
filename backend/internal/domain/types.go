@@ -24,6 +24,12 @@ const (
 	InvitationStatusRevoked  = "revoked"
 )
 
+const (
+	PasswordResetStatusPending = "pending"
+	PasswordResetStatusUsed    = "used"
+	PasswordResetStatusRevoked = "revoked"
+)
+
 func NormalizeRole(role string) string {
 	switch strings.TrimSpace(role) {
 	case RoleDevAdmin:
@@ -90,6 +96,7 @@ type CompanyUser struct {
 type Invitation struct {
 	InvitationID      string     `json:"invitation_id"`
 	CompanyID         string     `json:"company_id"`
+	CompanyName       string     `json:"company_name,omitempty"`
 	Email             string     `json:"email"`
 	Role              string     `json:"role"`
 	Status            string     `json:"status"`
@@ -100,6 +107,17 @@ type Invitation struct {
 	AcceptedTimestamp *time.Time `json:"accepted_timestamp,omitempty"`
 	CreatedTimestamp  time.Time  `json:"created_timestamp"`
 	UpdatedTimestamp  time.Time  `json:"updated_timestamp"`
+}
+
+type PasswordResetCode struct {
+	ResetID          string     `json:"reset_id"`
+	Email            string     `json:"email"`
+	Status           string     `json:"status"`
+	Code             string     `json:"code,omitempty"`
+	ExpiresTimestamp time.Time  `json:"expires_timestamp"`
+	UsedTimestamp    *time.Time `json:"used_timestamp,omitempty"`
+	CreatedTimestamp time.Time  `json:"created_timestamp"`
+	UpdatedTimestamp time.Time  `json:"updated_timestamp"`
 }
 
 type ResourceAssignment struct {

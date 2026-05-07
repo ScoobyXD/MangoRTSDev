@@ -28,6 +28,8 @@ type CompanyUser = {
   role: string;
 };
 
+const PASSWORD_RESET_SECONDS = 5 * 60;
+
 type Company = {
   company_id: string;
   name: string;
@@ -135,7 +137,7 @@ export default function AuthGate() {
       return <ForgotPasswordPage onNavigate={navigate} />;
     }
     if (normalizedPath === "/reset-password") {
-      return <ResetPasswordPage onNavigate={navigate} />;
+      return <ForgotPasswordPage onNavigate={navigate} initialCodeEntryOpen />;
     }
     return <LoginPage onChallenge={setPendingChallenge} onAuthenticated={loadMe} onNavigate={navigate} />;
   }
@@ -181,7 +183,7 @@ function canManageAnyCompany(me: CurrentUserResponse): boolean {
 }
 
 function companyName(company?: Company | null): string {
-  return company?.name?.trim() || company?.company_id || "Company";
+  return company?.name?.trim() || "Company";
 }
 
 function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
@@ -225,6 +227,7 @@ function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: 
 function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNavigate }: { pendingChallenge: PendingChallenge; onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
   const params = new URLSearchParams(window.location.search);
   const [token, setToken] = useState(params.get("token") ?? "");
+  const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState(pendingChallenge?.username ?? "");
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -241,6 +244,9 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
         try {
           if (!token.trim()) {
             throw new Error("Enter the Mango invite token.");
+          }
+          if (!displayName.trim()) {
+            throw new Error("Enter your name.");
           }
           if (hasStoredToken()) {
             onChallenge(null);
@@ -269,7 +275,7 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
             onChallenge(null);
             setPasswordStepComplete(true);
           }
-          await acceptInvitation(token);
+          await acceptInvitation(token, displayName);
           await onAuthenticated();
           onNavigate("/");
         } catch (inviteError) {
@@ -280,6 +286,7 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
         }
       }}>
         <input style={inputStyle} value={token} onChange={(event) => setToken(event.target.value)} placeholder="Invite token" autoComplete="off" />
+        <input style={inputStyle} value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your name" autoComplete="name" />
         {showPasswordStep && !pendingChallenge && <input style={inputStyle} value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email" autoComplete="email" />}
         {showPasswordStep && !pendingChallenge && <input style={inputStyle} value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} type="password" placeholder="Temporary or current password" autoComplete="current-password" />}
         {showPasswordStep && <input style={inputStyle} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />}
@@ -290,60 +297,77 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
   );
 }
 
-function ForgotPasswordPage({ onNavigate }: { onNavigate: (path: string) => void }) {
+function ForgotPasswordPage({ onNavigate, initialCodeEntryOpen = false }: { onNavigate: (path: string) => void; initialCodeEntryOpen?: boolean }) {
   const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [codeEntryOpen, setCodeEntryOpen] = useState(initialCodeEntryOpen);
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
   return (
     <AuthPanel title="Forgot Password" error={error}>
       <form style={{ display: "grid", gap: 10 }} onSubmit={async (event) => {
         event.preventDefault();
         setError("");
+        setSuccess("");
+        setBusy(true);
         try {
-          await forgotPassword(email);
-          setMessage("Reset code sent");
+          const payload = await forgotPassword(email);
+          const seconds = payload.expires_in_seconds || PASSWORD_RESET_SECONDS;
+          setExpiresAt(Date.now() + seconds * 1000);
+          setCodeEntryOpen(true);
+          setMessage("Reset code sent. It expires in about 5 minutes. Only the newest reset code can be used.");
         } catch (resetRequestError) {
           setError(formatAuthError(resetRequestError, "Password reset request failed"));
+        } finally {
+          setBusy(false);
         }
       }}>
         <input style={inputStyle} value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email" autoComplete="email" />
-        <button style={buttonStyle}>Send reset code</button>
+        <button style={buttonStyle} disabled={busy}>{busy ? "Sending" : "Send reset code"}</button>
       </form>
       {message && <div style={{ fontSize: 12 }}>{message}</div>}
-      <button style={linkButtonStyle} onClick={() => onNavigate("/reset-password")}>Enter reset code</button>
-    </AuthPanel>
-  );
-}
-
-function ResetPasswordPage({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  return (
-    <AuthPanel title="Reset Password" error={error}>
-      <form style={{ display: "grid", gap: 10 }} onSubmit={async (event) => {
-        event.preventDefault();
-        setError("");
-        try {
-          await resetPassword(email, code, password);
-          onNavigate("/login");
-        } catch (resetError) {
-          setError(formatAuthError(resetError, "Password reset failed"));
-        }
-      }}>
-        <input style={inputStyle} value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Email" autoComplete="email" />
-        <input style={inputStyle} value={code} onChange={(event) => setCode(event.target.value)} placeholder="Reset code" autoComplete="one-time-code" />
-        <input style={inputStyle} value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />
-        <button style={buttonStyle}>Reset password</button>
-      </form>
+      {codeEntryOpen && (
+        <form style={{ display: "grid", gap: 10 }} onSubmit={async (event) => {
+          event.preventDefault();
+          setError("");
+          setSuccess("");
+          if (expiresAt !== null && Date.now() > expiresAt) {
+            setError("The reset code has expired. Request a new reset code.");
+            return;
+          }
+          setBusy(true);
+          try {
+            await resetPassword(email, code, password);
+            setSuccess("Password has been reset.");
+            setCode("");
+            setPassword("");
+          } catch (resetError) {
+            setError(formatAuthError(resetError, "Password reset failed"));
+          } finally {
+            setBusy(false);
+          }
+        }}>
+          <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 800 }}>
+            Enter reset code in here
+            <input style={inputStyle} value={code} onChange={(event) => setCode(event.target.value)} placeholder="Reset code" autoComplete="one-time-code" />
+          </label>
+          <input style={inputStyle} value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />
+          <button style={buttonStyle} disabled={busy}>{busy ? "Submitting" : "Submit"}</button>
+        </form>
+      )}
+      {success && <div style={successMessageStyle}><span aria-hidden="true">✓</span><span>{success}</span></div>}
+      <button style={linkButtonStyle} onClick={() => onNavigate("/login")}>Back to login</button>
     </AuthPanel>
   );
 }
 
 function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; onNavigate: (path: string) => void; onLogout: () => void }) {
   const membershipOptions = useMemo<CompanyOption[]>(
-    () => me.memberships.map((item) => ({ company_id: item.company_id, name: item.company_name || item.company_id, role: item.role })),
+    () => me.memberships.map((item) => ({ company_id: item.company_id, name: item.company_name || "Company", role: item.role })),
     [me],
   );
   const [createdCompanies, setCreatedCompanies] = useState<Company[]>([]);
@@ -394,7 +418,6 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
           <h2 style={sectionTitleStyle}>Company</h2>
           <div>
             <div style={{ fontSize: 15, fontWeight: 800 }}>{companyName(selectedCompany)}</div>
-            {selectedCompany && <div style={{ marginTop: 3, fontSize: 11, color: "rgba(4, 29, 34, 0.68)", overflowWrap: "anywhere" }}>{selectedCompany.company_id}</div>}
           </div>
           {companyOptions.length > 1 && (
             <select style={inputStyle} value={companyID} onChange={(event) => setCompanyID(event.target.value)}>
@@ -522,6 +545,15 @@ const sectionTitleStyle: React.CSSProperties = {
   margin: 0,
   fontSize: 13,
   textTransform: "uppercase",
+};
+
+const successMessageStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  color: "#0f7b3f",
+  fontSize: 13,
+  fontWeight: 800,
 };
 
 const rowStyle: React.CSSProperties = {

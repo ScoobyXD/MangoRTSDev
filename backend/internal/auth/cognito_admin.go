@@ -74,21 +74,62 @@ func (c *CognitoAdminClient) adminCreateUser(ctx context.Context, email, message
 	if messageAction != "" {
 		payload["MessageAction"] = messageAction
 	}
-	body, err := json.Marshal(payload)
+	statusCode, header, raw, err := c.cognitoPost(ctx, "AdminCreateUser", payload)
 	if err != nil {
 		return false, err
 	}
+	if statusCode >= 200 && statusCode <= 299 {
+		return false, nil
+	}
+	if strings.Contains(string(raw), "UsernameExistsException") || strings.Contains(header.Get("X-Amzn-Errortype"), "UsernameExistsException") {
+		return true, nil
+	}
+	if detail := strings.TrimSpace(string(raw)); detail != "" {
+		return false, fmt.Errorf("cognito admin create user failed: status=%d body=%s", statusCode, detail)
+	}
+	return false, fmt.Errorf("cognito admin create user failed: status=%d", statusCode)
+}
+
+func (c *CognitoAdminClient) AdminSetUserPassword(ctx context.Context, email, password string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if c == nil || c.Region == "" || c.UserPoolID == "" || email == "" || strings.TrimSpace(password) == "" {
+		return ErrCognitoAdminUnavailable
+	}
+	payload := map[string]any{
+		"UserPoolId": c.UserPoolID,
+		"Username":   email,
+		"Password":   password,
+		"Permanent":  true,
+	}
+	statusCode, _, raw, err := c.cognitoPost(ctx, "AdminSetUserPassword", payload)
+	if err != nil {
+		return err
+	}
+	if statusCode >= 200 && statusCode <= 299 {
+		return nil
+	}
+	if detail := strings.TrimSpace(string(raw)); detail != "" {
+		return fmt.Errorf("cognito admin set user password failed: status=%d body=%s", statusCode, detail)
+	}
+	return fmt.Errorf("cognito admin set user password failed: status=%d", statusCode)
+}
+
+func (c *CognitoAdminClient) cognitoPost(ctx context.Context, action string, payload map[string]any) (int, http.Header, []byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, nil, nil, err
+	}
 	creds, err := c.credentials(ctx)
 	if err != nil {
-		return false, err
+		return 0, nil, nil, err
 	}
 	endpoint := fmt.Sprintf("https://cognito-idp.%s.amazonaws.com/", c.Region)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return false, err
+		return 0, nil, nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-amz-json-1.1")
-	req.Header.Set("X-Amz-Target", "AWSCognitoIdentityProviderService.AdminCreateUser")
+	req.Header.Set("X-Amz-Target", "AWSCognitoIdentityProviderService."+action)
 	signV4(req, body, creds, c.Region, "cognito-idp", time.Now().UTC())
 
 	client := c.HTTPClient
@@ -97,20 +138,11 @@ func (c *CognitoAdminClient) adminCreateUser(ctx context.Context, email, message
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		return false, err
+		return 0, nil, nil, err
 	}
 	defer res.Body.Close()
-	if res.StatusCode >= 200 && res.StatusCode <= 299 {
-		return false, nil
-	}
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
-	if strings.Contains(string(raw), "UsernameExistsException") || strings.Contains(res.Header.Get("X-Amzn-Errortype"), "UsernameExistsException") {
-		return true, nil
-	}
-	if detail := strings.TrimSpace(string(raw)); detail != "" {
-		return false, fmt.Errorf("cognito admin create user failed: status=%d body=%s", res.StatusCode, detail)
-	}
-	return false, fmt.Errorf("cognito admin create user failed: status=%d", res.StatusCode)
+	return res.StatusCode, res.Header, raw, nil
 }
 
 func (c *CognitoAdminClient) credentials(ctx context.Context) (awsCredentials, error) {

@@ -36,6 +36,10 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if isPublicAuthEndpoint(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
 
 		claims, err := s.authValidator.Validate(r.Context(), bearerToken(r.Header.Get("Authorization")))
 		if err != nil {
@@ -86,6 +90,15 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, actorContextKey{}, actor)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func isPublicAuthEndpoint(path string) bool {
+	switch path {
+	case "/v1/password-resets/request", "/v1/password-resets/confirm":
+		return true
+	default:
+		return false
+	}
 }
 
 func bearerToken(header string) string {
