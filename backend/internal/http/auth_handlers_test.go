@@ -20,7 +20,7 @@ func (c *recordingCognitoAdmin) AdminCreateUser(_ context.Context, email string)
 	return nil
 }
 
-func TestCreateInvitationSkipsCognitoForExistingMangoUser(t *testing.T) {
+func TestCreateInvitationRejectsExistingMangoUser(t *testing.T) {
 	t.Parallel()
 
 	key := mustRSAKey(t)
@@ -53,26 +53,20 @@ func TestCreateInvitationSkipsCognitoForExistingMangoUser(t *testing.T) {
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
 
-	if res.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d, body=%s", res.Code, http.StatusCreated, strings.TrimSpace(res.Body.String()))
+	if res.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d, body=%s", res.Code, http.StatusConflict, strings.TrimSpace(res.Body.String()))
 	}
 	if len(cognito.emails) != 0 {
 		t.Fatalf("cognito invite calls = %v, want none", cognito.emails)
 	}
 	var payload struct {
-		CognitoInviteStatus string `json:"cognito_invite_status"`
-		Invitation          struct {
-			Token string `json:"token"`
-		} `json:"invitation"`
+		Error string `json:"error"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.CognitoInviteStatus != "existing_mango_user" {
-		t.Fatalf("cognito status = %q, want existing_mango_user", payload.CognitoInviteStatus)
-	}
-	if payload.Invitation.Token == "" {
-		t.Fatal("invite token is empty")
+	if payload.Error != "user_already_exists" {
+		t.Fatalf("error = %q, want user_already_exists", payload.Error)
 	}
 }
 

@@ -166,11 +166,16 @@ function inviteStatusMessage(status?: string): string {
   switch (status) {
     case "sent":
       return "Cognito temporary password email sent.";
-    case "existing_mango_user":
-      return "Existing Mango user. Share this Mango invite token; no Cognito temp-password email was sent.";
     default:
       return "Mango invite created, but Cognito email was not configured.";
   }
+}
+
+function formatInviteError(error: unknown): string {
+  if (error instanceof Error && error.message.trim() === "This user already exists.") {
+    return "This user already exists.";
+  }
+  return formatAuthError(error, "Invite failed");
 }
 
 function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
@@ -407,6 +412,7 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
             const normalizedInviteEmail = normalizeEmailInput(inviteEmail);
             setError("");
             setInviteMessage("");
+            setInviteToken("");
             if (!normalizedInviteEmail) {
               setError("Email required");
               return;
@@ -422,7 +428,7 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
               await load();
             } catch (inviteError) {
               console.error("Invite failed", inviteError);
-              setError(formatAuthError(inviteError, "Invite failed"));
+              setError(formatInviteError(inviteError));
             }
           }}>
             <input style={inputStyle} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value.toLowerCase())} type="email" placeholder="Email" />

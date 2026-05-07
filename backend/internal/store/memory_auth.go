@@ -53,23 +53,6 @@ func (r *MemoryRepo) GetAuthUser(cognitoSubject string) (domain.User, error) {
 	return user, nil
 }
 
-func (r *MemoryRepo) AuthUserEmailExists(email string) (bool, error) {
-	email = normalizeEmail(email)
-	if email == "" {
-		return false, ErrInvalid
-	}
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	for _, user := range r.users {
-		if normalizeEmail(user.Email) == email {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 func (r *MemoryRepo) ListUserMemberships(userID string) ([]domain.CompanyMembership, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -241,10 +224,6 @@ func (r *MemoryRepo) CreateInvitation(input CreateInvitationInput) (domain.Invit
 	if companyID == "" || email == "" || input.InvitedByUserID == "" || !ok {
 		return domain.Invitation{}, ErrInvalid
 	}
-	token, tokenHash, err := newInvitationToken()
-	if err != nil {
-		return domain.Invitation{}, err
-	}
 	ttl := input.ExpiresIn
 	if ttl <= 0 {
 		ttl = DefaultInvitationTTL
@@ -255,6 +234,15 @@ func (r *MemoryRepo) CreateInvitation(input CreateInvitationInput) (domain.Invit
 
 	if _, ok := r.companies[companyID]; !ok {
 		return domain.Invitation{}, ErrNotFound
+	}
+	for _, user := range r.users {
+		if normalizeEmail(user.Email) == email {
+			return domain.Invitation{}, ErrAlreadyExists
+		}
+	}
+	token, tokenHash, err := newInvitationToken()
+	if err != nil {
+		return domain.Invitation{}, err
 	}
 	now := time.Now().UTC()
 	invitation := domain.Invitation{

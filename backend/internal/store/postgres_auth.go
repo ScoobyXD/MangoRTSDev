@@ -52,24 +52,6 @@ func (r *PostgresRepo) GetAuthUser(cognitoSubject string) (domain.User, error) {
 	return user, err
 }
 
-func (r *PostgresRepo) AuthUserEmailExists(email string) (bool, error) {
-	email = normalizeEmail(email)
-	if email == "" {
-		return false, ErrInvalid
-	}
-
-	var ok bool
-	err := r.db.QueryRow(
-		`select exists(
-		   select 1
-		   from users
-		   where lower(email) = $1
-		 )`,
-		email,
-	).Scan(&ok)
-	return ok, err
-}
-
 func (r *PostgresRepo) ListUserMemberships(userID string) ([]domain.CompanyMembership, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -178,6 +160,34 @@ func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Inv
 	invitedByUserID := strings.TrimSpace(input.InvitedByUserID)
 	if companyID == "" || email == "" || invitedByUserID == "" || !ok {
 		return domain.Invitation{}, ErrInvalid
+	}
+	var companyExists bool
+	if err := r.db.QueryRow(
+		`select exists(
+		   select 1
+		   from companies
+		   where company_id = $1
+		 )`,
+		companyID,
+	).Scan(&companyExists); err != nil {
+		return domain.Invitation{}, err
+	}
+	if !companyExists {
+		return domain.Invitation{}, ErrNotFound
+	}
+	var existingUser bool
+	if err := r.db.QueryRow(
+		`select exists(
+		   select 1
+		   from users
+		   where lower(email) = $1
+		 )`,
+		email,
+	).Scan(&existingUser); err != nil {
+		return domain.Invitation{}, err
+	}
+	if existingUser {
+		return domain.Invitation{}, ErrAlreadyExists
 	}
 	token, tokenHash, err := newInvitationToken()
 	if err != nil {

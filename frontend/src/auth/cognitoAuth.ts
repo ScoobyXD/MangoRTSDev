@@ -332,6 +332,8 @@ function friendlyApiError(code: string): string {
       return "The invite email, company, or role is invalid.";
     case "company_not_found":
       return "The selected company was not found.";
+    case "user_already_exists":
+      return "This user already exists.";
     default:
       return "";
   }

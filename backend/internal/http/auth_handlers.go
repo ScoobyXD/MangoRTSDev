@@ -114,20 +114,17 @@ func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "company_not_found")
 		return
 	}
+	if errors.Is(err, store.ErrAlreadyExists) {
+		writeError(w, http.StatusConflict, "user_already_exists")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_invitation")
 		return
 	}
 
 	cognitoStatus := "not_configured"
-	existingUser, err := s.repo.AuthUserEmailExists(invitation.Email)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_check_existing_user")
-		return
-	}
-	if existingUser {
-		cognitoStatus = "existing_mango_user"
-	} else if s.cognitoAdmin != nil {
+	if s.cognitoAdmin != nil {
 		cognitoStatus = "sent"
 		if err := s.cognitoAdmin.AdminCreateUser(r.Context(), invitation.Email); err != nil {
 			log.Printf("failed to create cognito invitation user email=%s: %v", invitation.Email, err)
