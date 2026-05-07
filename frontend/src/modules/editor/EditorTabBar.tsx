@@ -65,6 +65,7 @@ type EditorTabBarProps = {
   onSetSelectionFontSize: (fontSize: number) => void;
   onOutlineStyleFocus: () => void;
   onOutlineStyleChange: (outlineStyle: EditorOutlineStyleID) => void;
+  reserveHeaderOffset?: boolean;
 };
 
 export const EditorTabBar: React.FC<EditorTabBarProps> = ({
@@ -82,6 +83,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   onSetSelectionFontSize,
   onOutlineStyleFocus,
   onOutlineStyleChange,
+  reserveHeaderOffset = true,
 }) => {
   const [outlineMenuOpen, setOutlineMenuOpen] = useState(false);
   const [hoveredOutlineStyle, setHoveredOutlineStyle] = useState<EditorOutlineStyleID | null>(null);
@@ -113,8 +115,10 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     return () => window.removeEventListener("pointerdown", closeOnPointerDown);
   }, [outlineMenuOpen]);
 
+  const currentOutlineStyleLabel = EDITOR_OUTLINE_STYLE_ITEMS.find((item) => item.id === outlineStyle)?.label ?? "Outline Styles";
+
   return (
-    <div style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", gap: 6, paddingLeft: 106, overflow: "visible", scrollbarWidth: "none", pointerEvents: "auto" }}>
+    <div style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", gap: 6, paddingLeft: reserveHeaderOffset ? 106 : 0, overflow: "visible", scrollbarWidth: "none", pointerEvents: "auto" }}>
       {EDITOR_TAB_ITEMS.map((tab) => {
         const selected = activeTab === tab.id;
         const tabStyle: React.CSSProperties = {
@@ -201,7 +205,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 }}
                 style={{ ...tabStyle, display: "inline-flex", alignItems: "center", gap: 6, paddingRight: 7 }}
               >
-                <span>{tab.label}</span>
+                <span>{currentOutlineStyleLabel}</span>
                 <EditorDisclosureIcon color={surfaceText} />
               </button>
               {outlineMenuOpen && (

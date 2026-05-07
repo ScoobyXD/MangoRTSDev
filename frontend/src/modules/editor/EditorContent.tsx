@@ -949,6 +949,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               setOutlineStyle(nextOutlineStyle);
               setActiveTab("outline-styles");
             }}
+            reserveHeaderOffset={!forcedEntityKind}
           />
           
           <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 21, borderBottom: `1px solid ${ruleColor}`, transform: "translateY(8px)", pointerEvents: "none", zIndex: 1 }} />
