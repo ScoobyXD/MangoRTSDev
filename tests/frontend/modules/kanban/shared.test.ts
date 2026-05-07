@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, clampColumnHeight, clampColumnWidth, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, sanitizeExplorerEntityDragPayload, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_GROUP_FIELDS, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, buildKanbanGroupedBoardLayout, clampColumnHeight, clampColumnWidth, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, sanitizeExplorerEntityDragPayload, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
 
 function card(overrides: Partial<KanbanCard>): KanbanCard {
   return {
@@ -105,6 +105,41 @@ test("groupCardsByColumn sorts each column by stable board position", () => {
     }),
   ]);
   assert.deepEqual((grouped.get("todo") ?? []).map((card) => card.card_id), ["early", "late"]);
+});
+
+test("grouped board layout uses one global Y-axis row order across X-axis columns", () => {
+  const columns = [
+    column({ column_id: "todo", title: "Todo", position: 1000 }),
+    column({ column_id: "done", title: "Done", position: 2000 }),
+    column({ column_id: "empty", title: "Empty", position: 3000 }),
+  ];
+  const cards = [
+    card({ card_id: "todo-jonathan", column_id: "todo", node_id: "node-jonathan", position: 1000 }),
+    card({ card_id: "todo-joe", column_id: "todo", node_id: "node-joe", position: 2000 }),
+    card({ card_id: "done-pam", column_id: "done", node_id: "node-pam", position: 1000 }),
+  ];
+  const layout = buildKanbanGroupedBoardLayout({
+    columns,
+    cards,
+    xGroupBy: "status",
+    yGroupBy: "person",
+    nodeByID: new Map([
+      ["node-jonathan", { node_id: "node-jonathan", assignee_user_id: "user-jonathan" }],
+      ["node-joe", { node_id: "node-joe", assignee_user_id: "user-joe" }],
+      ["node-pam", { node_id: "node-pam", assignee_user_id: "user-pam" }],
+    ]),
+    userByID: new Map([
+      ["user-jonathan", { user_id: "user-jonathan", display_name: "Jonathan" }],
+      ["user-joe", { user_id: "user-joe", display_name: "Joe" }],
+      ["user-pam", { user_id: "user-pam", display_name: "Pam" }],
+    ]),
+  });
+
+  assert.deepEqual(layout.rows.map((row) => row.label), ["Jonathan", "Joe", "Pam"]);
+  assert.deepEqual(layout.columns.map((groupColumn) => groupColumn.label), ["Todo", "Done", "Empty"]);
+  assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["todo-jonathan"], ["todo-joe"], []]);
+  assert.deepEqual(layout.columns[1].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[], [], ["done-pam"]]);
+  assert.deepEqual(layout.columns[2].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[], [], []]);
 });
 
 test("card selection helper supports ranges and additive toggles across columns", () => {
@@ -254,4 +289,5 @@ test("column layout helpers keep reorder and resize writes bounded", () => {
 test("kanban visual contract preserves column title casing and frame-header clearance", () => {
   assert.equal(KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, "none");
   assert.ok(KANBAN_MODULE_TOP_CLEARANCE_PX >= 34);
+  assert.deepEqual(KANBAN_GROUP_FIELDS.map((field) => field.value), ["status", "person", "priority", "due_date", "work_type", "none"]);
 });

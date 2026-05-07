@@ -110,6 +110,50 @@ export type KanbanCardSelectionUpdate = {
 
 export type KanbanColumnDropPlacement = "before" | "after" | "swap";
 export type KanbanCardDropPlacement = "before" | "after";
+export type KanbanGroupField = "status" | "person" | "priority" | "due_date" | "work_type" | "none";
+
+export type KanbanGroupNode = {
+  node_id: string;
+  due_date?: string | null;
+  priority?: number | null;
+  assignee_user_id?: string | null;
+};
+
+export type KanbanGroupUser = {
+  user_id: string;
+  email?: string;
+  display_name?: string;
+};
+
+export type KanbanGroupedBoardRow = {
+  key: string;
+  label: string;
+};
+
+export type KanbanGroupedBoardCell = {
+  rowKey: string;
+  cards: KanbanCard[];
+};
+
+export type KanbanGroupedBoardColumn = {
+  key: string;
+  label: string;
+  cells: KanbanGroupedBoardCell[];
+};
+
+export type KanbanGroupedBoardLayout = {
+  columns: KanbanGroupedBoardColumn[];
+  rows: KanbanGroupedBoardRow[];
+};
+
+export const KANBAN_GROUP_FIELDS: Array<{ value: KanbanGroupField; label: string }> = [
+  { value: "status", label: "Status" },
+  { value: "person", label: "Person" },
+  { value: "priority", label: "Priority" },
+  { value: "due_date", label: "Due Date" },
+  { value: "work_type", label: "Work Type" },
+  { value: "none", label: "None" },
+];
 
 export function isKanbanBoardDropItemType(value: unknown): value is "node" {
   return value === "node";
@@ -522,6 +566,109 @@ export function groupCardsByColumn(cards: KanbanCard[]): Map<string, KanbanCard[
     list.sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp));
   }
   return grouped;
+}
+
+function kanbanStatusGroupFromColumn(column: Pick<KanbanColumn, "title">): KanbanGroupedBoardRow {
+  const label = column.title.trim() || "No status";
+  return { key: `status:${label.toLowerCase()}`, label };
+}
+
+export function getKanbanGroupValue(
+  card: KanbanCard,
+  field: KanbanGroupField,
+  columnByID: ReadonlyMap<string, Pick<KanbanColumn, "title">>,
+  nodeByID: ReadonlyMap<string, KanbanGroupNode>,
+  userByID: ReadonlyMap<string, KanbanGroupUser>,
+): KanbanGroupedBoardRow {
+  const node = nodeByID.get(card.node_id);
+  if (field === "status") {
+    if (card.is_issue) return { key: "issue", label: "Issue" };
+    const column = columnByID.get(card.column_id);
+    return column ? kanbanStatusGroupFromColumn(column) : { key: "status:no-status", label: "No status" };
+  }
+  if (field === "person") {
+    const assignee = node?.assignee_user_id?.trim();
+    if (!assignee) return { key: "person:unassigned", label: "Unassigned" };
+    const user = userByID.get(assignee);
+    const name = user?.display_name?.trim();
+    const email = user?.email?.trim();
+    return { key: `person:${assignee}`, label: name || email || assignee };
+  }
+  if (field === "priority") {
+    const priority = node?.priority ?? 0;
+    return priority > 0 ? { key: `priority:${priority}`, label: `P${priority}` } : { key: "priority:unassigned", label: "No priority" };
+  }
+  if (field === "due_date") {
+    const dueDate = node?.due_date?.trim();
+    return dueDate ? { key: `due:${dueDate}`, label: dueDate } : { key: "due:none", label: "No due date" };
+  }
+  if (field === "work_type") {
+    if (card.is_issue) return { key: "work:issue", label: "Issue" };
+    if (card.logic_gate_id) return { key: "work:logic-gate", label: "Logic Gate" };
+    return { key: "work:node", label: "Node" };
+  }
+  return { key: "all", label: "All" };
+}
+
+function addUniqueKanbanGroup(target: KanbanGroupedBoardRow[], seen: Set<string>, group: KanbanGroupedBoardRow): void {
+  if (seen.has(group.key)) return;
+  seen.add(group.key);
+  target.push(group);
+}
+
+function seedKanbanGroupsForField(field: KanbanGroupField, columns: KanbanColumn[]): KanbanGroupedBoardRow[] {
+  if (field === "none") return [{ key: "all", label: "All" }];
+  if (field !== "status") return [];
+  const groups: KanbanGroupedBoardRow[] = [];
+  const seen = new Set<string>();
+  for (const column of sortColumns(columns)) {
+    addUniqueKanbanGroup(groups, seen, kanbanStatusGroupFromColumn(column));
+  }
+  return groups;
+}
+
+export function buildKanbanGroupedBoardLayout(args: {
+  columns: KanbanColumn[];
+  cards: KanbanCard[];
+  xGroupBy: KanbanGroupField;
+  yGroupBy: KanbanGroupField;
+  nodeByID: ReadonlyMap<string, KanbanGroupNode>;
+  userByID: ReadonlyMap<string, KanbanGroupUser>;
+}): KanbanGroupedBoardLayout {
+  const orderedColumns = sortColumns(args.columns);
+  const columnByID = new Map(orderedColumns.map((column) => [column.column_id, column]));
+  const orderedCardByID = new Map(args.cards.map((card) => [card.card_id, card]));
+  const orderedCards = getOrderedKanbanCardIDs(orderedColumns, args.cards)
+    .map((cardID) => orderedCardByID.get(cardID))
+    .filter((card): card is KanbanCard => Boolean(card));
+  const columns = seedKanbanGroupsForField(args.xGroupBy, orderedColumns);
+  const rows = seedKanbanGroupsForField(args.yGroupBy, orderedColumns);
+  const seenColumns = new Set(columns.map((column) => column.key));
+  const seenRows = new Set(rows.map((row) => row.key));
+  const cardsByColumnAndRow = new Map<string, Map<string, KanbanCard[]>>();
+
+  for (const card of orderedCards) {
+    const column = getKanbanGroupValue(card, args.xGroupBy, columnByID, args.nodeByID, args.userByID);
+    const row = getKanbanGroupValue(card, args.yGroupBy, columnByID, args.nodeByID, args.userByID);
+    addUniqueKanbanGroup(columns, seenColumns, column);
+    addUniqueKanbanGroup(rows, seenRows, row);
+    const rowMap = cardsByColumnAndRow.get(column.key) ?? new Map<string, KanbanCard[]>();
+    const list = rowMap.get(row.key) ?? [];
+    list.push(card);
+    rowMap.set(row.key, list);
+    cardsByColumnAndRow.set(column.key, rowMap);
+  }
+
+  return {
+    columns: columns.map((column) => {
+      const rowMap = cardsByColumnAndRow.get(column.key) ?? new Map<string, KanbanCard[]>();
+      return {
+        ...column,
+        cells: rows.map((row) => ({ rowKey: row.key, cards: rowMap.get(row.key) ?? [] })),
+      };
+    }),
+    rows,
+  };
 }
 
 export function getOrderedKanbanCardIDs(columns: KanbanColumn[], cards: KanbanCard[]): string[] {
