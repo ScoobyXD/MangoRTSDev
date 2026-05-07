@@ -123,7 +123,7 @@ go test ./...
 
 ```powershell
 ./scripts/apply_canonical_schema.ps1
-./scripts/apply_node_relationship_guards.ps1
+./scripts/apply_db_migrations.ps1
 ./scripts/check_db_ready.ps1
 ```
 
@@ -131,7 +131,7 @@ go test ./...
 
 ```bash
 ./scripts/apply_canonical_schema.sh
-./scripts/apply_node_relationship_guards.sh
+./scripts/apply_db_migrations.sh
 ./scripts/check_db_ready.sh
 ```
 
@@ -142,10 +142,10 @@ psql "host=$DB_HOST port=${DB_PORT:-5432} user=$DB_USER dbname=$DB_NAME sslmode=
   -f db/schema.sql
 ```
 
-For existing databases that were created before relationship guard constraints were added, run:
+For existing databases that were created before relationship guard constraints were added, run the generic migration runner:
 
 ```bash
-./scripts/apply_node_relationship_guards.sh
+./scripts/apply_db_migrations.sh
 ```
 
 These guards enforce:

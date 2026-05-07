@@ -48,7 +48,7 @@ Update `docs/README.md` to say V2 means the `infra/aws-dev` platform with Cognit
 
 ### Phase 2: Clean Legacy Guidance
 - Update backend README references from `infra/terraform` to `infra/aws-dev`.
-- Mark `scripts/release_staging.ps1` and `scripts/release_staging.sh` as legacy or disable with an explanatory guard.
+- Remove legacy staging release wrappers so deploy guidance points to `infra/aws-dev` and `.github/workflows/deploy-dev.yml`.
 - Mark current docs that still say MangoOS as historical unless they are active product docs.
 - Keep old Go module/binary name `miraeopus` for now as internal legacy naming.
 

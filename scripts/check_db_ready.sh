@@ -34,10 +34,10 @@ begin
     raise exception 'canonical schema tables are missing; run apply_canonical_schema first';
   end if;
   if not exists (select 1 from pg_constraint where conname = 'node_relationships_position_pair_chk') then
-    raise exception 'missing constraint node_relationships_position_pair_chk; run apply_node_relationship_guards';
+    raise exception 'missing constraint node_relationships_position_pair_chk; run apply_db_migrations';
   end if;
   if not exists (select 1 from pg_constraint where conname = 'node_relationships_not_self_chk') then
-    raise exception 'missing constraint node_relationships_not_self_chk; run apply_node_relationship_guards';
+    raise exception 'missing constraint node_relationships_not_self_chk; run apply_db_migrations';
   end if;
 end $$;
 SQL
