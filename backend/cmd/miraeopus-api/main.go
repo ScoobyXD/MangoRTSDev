@@ -156,6 +156,7 @@ func buildNylasConfig() httpapi.NylasConfig {
 		RedirectURI:         strings.TrimSpace(os.Getenv("NYLAS_REDIRECT_URI")),
 		FrontendRedirectURL: strings.TrimSpace(os.Getenv("NYLAS_FRONTEND_REDIRECT_URL")),
 		StateSecret:         strings.TrimSpace(os.Getenv("NYLAS_STATE_SECRET")),
+		WebhookSecret:       strings.TrimSpace(os.Getenv("NYLAS_WEBHOOK_SECRET")),
 		GoogleScopes:        splitScopes(os.Getenv("NYLAS_GOOGLE_SCOPES")),
 		MicrosoftScopes:     splitScopes(os.Getenv("NYLAS_MICROSOFT_SCOPES")),
 	}

@@ -97,6 +97,45 @@ type UserEmailConnection struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
+type CommunicationsMessageState struct {
+	CompanyID        string    `json:"company_id"`
+	MessageID        string    `json:"message_id"`
+	SharedInbox      bool      `json:"shared_inbox"`
+	Status           string    `json:"status"`
+	AssignedUserID   *string   `json:"assigned_user_id,omitempty"`
+	LinkedNodeID     *string   `json:"linked_node_id,omitempty"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type CommunicationsMessageComment struct {
+	CompanyID        string    `json:"company_id"`
+	MessageID        string    `json:"message_id"`
+	CommentID        string    `json:"comment_id"`
+	UserID           string    `json:"user_id"`
+	Body             string    `json:"body"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type CommunicationsSharedDraft struct {
+	CompanyID        string    `json:"company_id"`
+	MessageID        string    `json:"message_id"`
+	DraftID          string    `json:"draft_id"`
+	UserID           string    `json:"user_id"`
+	Subject          string    `json:"subject"`
+	Body             string    `json:"body"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type CommunicationsReadReceipt struct {
+	CompanyID     string    `json:"company_id"`
+	MessageID     string    `json:"message_id"`
+	UserID        string    `json:"user_id"`
+	ReadTimestamp time.Time `json:"read_timestamp"`
+}
+
 type Node struct {
 	CompanyID string `json:"company_id"`
 	NodeID    string `json:"node_id"`
