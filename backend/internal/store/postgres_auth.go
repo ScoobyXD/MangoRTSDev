@@ -373,6 +373,54 @@ func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Inv
 	return invitation, nil
 }
 
+func (r *PostgresRepo) ValidateInvitationToken(token string) (domain.Invitation, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return domain.Invitation{}, ErrInvalid
+	}
+
+	var invitation domain.Invitation
+	var acceptedBy sql.NullString
+	var acceptedAt sql.NullTime
+	err := r.db.QueryRow(
+		`select i.invitation_id, i.company_id, c.name, i.email, i.role, i.status, i.invited_by_user_id,
+		   i.accepted_by_user_id, i.expires_timestamp, i.accepted_timestamp, i.created_timestamp, i.updated_timestamp
+		 from invitations i
+		 join companies c on c.company_id = i.company_id
+		 where i.token_hash = $1`,
+		invitationTokenHash(token),
+	).Scan(
+		&invitation.InvitationID,
+		&invitation.CompanyID,
+		&invitation.CompanyName,
+		&invitation.Email,
+		&invitation.Role,
+		&invitation.Status,
+		&invitation.InvitedByUserID,
+		&acceptedBy,
+		&invitation.ExpiresTimestamp,
+		&acceptedAt,
+		&invitation.CreatedTimestamp,
+		&invitation.UpdatedTimestamp,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Invitation{}, ErrInvitationBadToken
+	}
+	if err != nil {
+		return domain.Invitation{}, err
+	}
+	if acceptedBy.Valid {
+		invitation.AcceptedByUserID = &acceptedBy.String
+	}
+	if acceptedAt.Valid {
+		invitation.AcceptedTimestamp = &acceptedAt.Time
+	}
+	if err := invitationAvailabilityError(invitation, time.Now().UTC()); err != nil {
+		return domain.Invitation{}, err
+	}
+	return invitation, nil
+}
+
 func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayName string) (domain.Invitation, error) {
 	token = strings.TrimSpace(token)
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
@@ -420,7 +468,7 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 		&invitation.UpdatedTimestamp,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return domain.Invitation{}, ErrNotFound
+		return domain.Invitation{}, ErrInvitationBadToken
 	}
 	if err != nil {
 		return domain.Invitation{}, err
@@ -431,11 +479,13 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 	if acceptedAt.Valid {
 		invitation.AcceptedTimestamp = &acceptedAt.Time
 	}
-	if invitation.Status != domain.InvitationStatusPending || time.Now().UTC().After(invitation.ExpiresTimestamp) {
-		return domain.Invitation{}, ErrNotFound
+	if stateErr := invitationAvailabilityError(invitation, time.Now().UTC()); stateErr != nil {
+		err = stateErr
+		return domain.Invitation{}, stateErr
 	}
 	if normalizeEmail(invitation.Email) != email {
-		return domain.Invitation{}, ErrInvalid
+		err = ErrInvitationEmailMismatch
+		return domain.Invitation{}, err
 	}
 
 	var user domain.User

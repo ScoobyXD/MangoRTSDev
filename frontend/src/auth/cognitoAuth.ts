@@ -35,6 +35,16 @@ export type MangoUser = {
   updated_timestamp: string;
 };
 
+export type MangoInvitation = {
+  invitation_id: string;
+  company_id: string;
+  company_name?: string;
+  email: string;
+  role: "company_admin" | "company_user";
+  status: string;
+  expires_timestamp: string;
+};
+
 export type CurrentUserResponse = {
   user: MangoUser;
   memberships: MangoMembership[];
@@ -146,6 +156,28 @@ export async function resetPassword(email: string, confirmationCode: string, new
   });
 }
 
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const config = readAuthConfig();
+  assertConfigured(config);
+  const accessToken = await getCognitoAccessToken(config);
+  if (!accessToken) {
+    throw new Error("Your session expired. Sign in again before changing your password.");
+  }
+  await cognitoRequest<unknown>(config, "ChangePassword", {
+    AccessToken: accessToken,
+    PreviousPassword: currentPassword,
+    ProposedPassword: newPassword,
+  });
+}
+
+export async function validateInvitationToken(token: string): Promise<MangoInvitation> {
+  const payload = await apiFetchJSON<{ invitation: MangoInvitation }>("/v1/invitations/validate", {
+    method: "POST",
+    body: JSON.stringify({ token: token.trim() }),
+  });
+  return payload.invitation;
+}
+
 export async function acceptInvitation(token: string, displayName: string): Promise<void> {
   await apiFetchJSON("/v1/invitations/accept", {
     method: "POST",
@@ -218,14 +250,24 @@ type ChallengeResponse = {
 };
 
 async function getAccessToken(config: CognitoConfig): Promise<string> {
+  const token = await getFreshTokenSet(config);
+  return token?.id_token || token?.access_token || "";
+}
+
+async function getCognitoAccessToken(config: CognitoConfig): Promise<string> {
+  const token = await getFreshTokenSet(config);
+  return token?.access_token || "";
+}
+
+async function getFreshTokenSet(config: CognitoConfig): Promise<TokenSet | null> {
   const token = readToken();
-  if (!token) return "";
+  if (!token) return null;
   if (Date.now() < token.expires_at - 30_000) {
-    return token.id_token || token.access_token;
+    return token;
   }
   if (!token.refresh_token) {
     clearToken();
-    return "";
+    return null;
   }
   try {
     const response = await cognitoRequest<InitiateAuthResponse>(config, "InitiateAuth", {
@@ -237,17 +279,16 @@ async function getAccessToken(config: CognitoConfig): Promise<string> {
     });
     if (!response.AuthenticationResult) {
       clearToken();
-      return "";
+      return null;
     }
     writeAuthResult({
       ...response.AuthenticationResult,
       RefreshToken: response.AuthenticationResult.RefreshToken ?? token.refresh_token,
     });
-    const next = readToken();
-    return next?.id_token || next?.access_token || "";
+    return readToken();
   } catch {
     clearToken();
-    return "";
+    return null;
   }
 }
 
@@ -271,7 +312,7 @@ function cognitoErrorMessage(response: Response, text: string, action: string): 
   const payload = parseErrorPayload(text);
   const type = normalizeAwsErrorType(stringValue(payload?.__type) || response.headers.get("x-amzn-errortype") || "");
   const rawMessage = stringValue(payload?.message) || stringValue(payload?.Message) || response.headers.get("x-amzn-errormessage")?.trim() || "";
-  const message = friendlyCognitoError(type, rawMessage);
+  const message = friendlyCognitoError(type, rawMessage, action);
   if (message) return message;
   if (type && rawMessage) return `${type}: ${rawMessage}`;
   if (rawMessage) return rawMessage;
@@ -291,10 +332,13 @@ function apiErrorMessage(response: Response, text: string): string {
   return `API request failed with HTTP ${response.status}.`;
 }
 
-function friendlyCognitoError(type: string, message: string): string {
+function friendlyCognitoError(type: string, message: string, action: string): string {
   const lowerMessage = message.toLowerCase();
   if (lowerMessage.includes("invalid session for the user") && lowerMessage.includes("used once")) {
     return "That Cognito invite session has already been used. Sign in with the new password, then paste the Mango invite token again.";
+  }
+  if (action === "ChangePassword" && type === "NotAuthorizedException" && lowerMessage.includes("incorrect")) {
+    return "Current password is incorrect.";
   }
   if (type === "NotAuthorizedException" && lowerMessage.includes("incorrect username or password")) {
     return "Incorrect email or password.";
@@ -329,10 +373,22 @@ function friendlyApiError(code: string): string {
       return "Mango created the invite, but Cognito did not create the user. Check backend logs and AWS credentials, then create a fresh invite.";
     case "invitation_email_mismatch":
       return "This Mango invite token belongs to a different email address.";
+    case "invitation_token_required":
+      return "Enter the Mango invite token.";
+    case "invitation_bad_token":
+      return "The Mango invite token is not valid.";
+    case "invitation_expired":
+      return "The Mango invite token has expired. Ask an admin to send a new invite.";
+    case "invitation_already_accepted":
+      return "This Mango invite token was already accepted. Sign in instead.";
+    case "invitation_replaced":
+      return "This Mango invite token was replaced by a newer invite. Use the newest invite email.";
     case "invitation_not_found":
-      return "This Mango invite token was not found, has expired, was already accepted, or was replaced by a newer invite.";
+      return "The Mango invite token is not valid.";
     case "unauthorized":
       return "You are not signed in. Sign in or complete the temporary password step first.";
+    case "authenticated_email_required":
+      return "The signed-in Cognito session does not include an email address.";
     case "company_admin_required":
       return "You need company admin access for that company.";
     case "dev_admin_required":

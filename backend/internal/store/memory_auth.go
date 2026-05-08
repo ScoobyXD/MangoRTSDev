@@ -395,24 +395,52 @@ func (r *MemoryRepo) CreateInvitation(input CreateInvitationInput) (domain.Invit
 	return invitation, nil
 }
 
-func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName string) (domain.Invitation, error) {
+func (r *MemoryRepo) ValidateInvitationToken(token string) (domain.Invitation, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return domain.Invitation{}, ErrInvalid
+	}
 	tokenHash := invitationTokenHash(token)
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	invitation, ok := r.invitations[tokenHash]
+	if !ok {
+		return domain.Invitation{}, ErrInvitationBadToken
+	}
+	if company, ok := r.companies[invitation.CompanyID]; ok {
+		invitation.CompanyName = company.Name
+	}
+	invitation.Token = ""
+	if err := invitationAvailabilityError(invitation, time.Now().UTC()); err != nil {
+		return domain.Invitation{}, err
+	}
+	return invitation, nil
+}
+
+func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName string) (domain.Invitation, error) {
+	token = strings.TrimSpace(token)
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	email = normalizeEmail(email)
 	displayName = strings.TrimSpace(displayName)
-	if strings.TrimSpace(token) == "" || cognitoSubject == "" || email == "" || displayName == "" {
+	if token == "" || cognitoSubject == "" || email == "" || displayName == "" {
 		return domain.Invitation{}, ErrInvalid
 	}
+	tokenHash := invitationTokenHash(token)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	invitation, ok := r.invitations[tokenHash]
-	if !ok || invitation.Status != domain.InvitationStatusPending || time.Now().UTC().After(invitation.ExpiresTimestamp) {
-		return domain.Invitation{}, ErrNotFound
+	if !ok {
+		return domain.Invitation{}, ErrInvitationBadToken
+	}
+	if err := invitationAvailabilityError(invitation, time.Now().UTC()); err != nil {
+		return domain.Invitation{}, err
 	}
 	if invitation.Email != email {
-		return domain.Invitation{}, ErrInvalid
+		return domain.Invitation{}, ErrInvitationEmailMismatch
 	}
 	if company, ok := r.companies[invitation.CompanyID]; ok {
 		invitation.CompanyName = company.Name

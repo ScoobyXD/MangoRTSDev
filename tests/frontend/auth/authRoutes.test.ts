@@ -5,12 +5,14 @@ import { isAuthPath, nextPathForAuthState } from "../../../frontend/src/auth/aut
 test("auth route guard sends unauthenticated app routes to login", () => {
   assert.equal(nextPathForAuthState("/", false), "/login");
   assert.equal(nextPathForAuthState("/admin/users", false), "/login");
+  assert.equal(nextPathForAuthState("/settings", false), "/login");
   assert.equal(nextPathForAuthState("/accept-invite", false), "/accept-invite");
 });
 
 test("auth route guard sends authenticated login routes back to app", () => {
   assert.equal(nextPathForAuthState("/login", true), "/");
-  assert.equal(nextPathForAuthState("/admin/users", true), "/admin/users");
+  assert.equal(nextPathForAuthState("/admin/users", true), "/settings");
+  assert.equal(nextPathForAuthState("/settings", true), "/settings");
 });
 
 test("signup is not an auth route", () => {
