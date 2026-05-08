@@ -184,6 +184,7 @@ type CompanyExplorerFolder struct {
 	FolderID         string    `json:"folder_id"`
 	ParentFolderID   *string   `json:"parent_folder_id,omitempty"`
 	FolderKind       string    `json:"folder_kind"`
+	SystemKey        *string   `json:"system_key,omitempty"`
 	Name             string    `json:"name"`
 	Position         int       `json:"position"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`

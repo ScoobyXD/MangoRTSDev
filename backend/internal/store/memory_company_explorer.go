@@ -8,6 +8,10 @@ import (
 )
 
 const companyExplorerDefaultFolderSeedKey = "logic_gates_v1"
+const companyExplorerSystemFolderSeedKey = "system_folders_v1"
+const CompanyExplorerSystemKanbanBoardsKey = "kanban_boards"
+const CompanyExplorerSystemActiveNodesKey = "active_nodes"
+const CompanyExplorerSystemHistoryKey = "history"
 
 var companyExplorerDefaultLogicGateChildFolderNames = []string{
 	"Product",
@@ -15,6 +19,16 @@ var companyExplorerDefaultLogicGateChildFolderNames = []string{
 	"Production",
 	"Supply Chain",
 	"QA",
+}
+
+var companyExplorerSystemFolderSeeds = []struct {
+	Key      string
+	Name     string
+	Position int
+}{
+	{Key: CompanyExplorerSystemKanbanBoardsKey, Name: "Kanban Boards", Position: 100},
+	{Key: CompanyExplorerSystemActiveNodesKey, Name: "Active Nodes", Position: 200},
+	{Key: CompanyExplorerSystemHistoryKey, Name: "History", Position: 300},
 }
 
 func companyExplorerParentID(folder domain.CompanyExplorerFolder) string {
@@ -25,6 +39,36 @@ func companyExplorerParentID(folder domain.CompanyExplorerFolder) string {
 }
 
 func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string) {
+	systemSeedKey := companyID + ":" + companyExplorerSystemFolderSeedKey
+	if !r.defaultFolderSeed[systemSeedKey] {
+		now := time.Now().UTC()
+		for _, seed := range companyExplorerSystemFolderSeeds {
+			systemKey := seed.Key
+			exists := false
+			for _, folder := range r.folders {
+				if folder.CompanyID == companyID && folder.SystemKey != nil && *folder.SystemKey == systemKey {
+					exists = true
+					break
+				}
+			}
+			if exists {
+				continue
+			}
+			folderID := newUUIDv7String()
+			r.folders[key(companyID, folderID)] = domain.CompanyExplorerFolder{
+				CompanyID:        companyID,
+				FolderID:         folderID,
+				FolderKind:       "node",
+				SystemKey:        &systemKey,
+				Name:             seed.Name,
+				Position:         seed.Position,
+				CreatedTimestamp: now,
+				UpdatedTimestamp: now,
+			}
+		}
+		r.defaultFolderSeed[systemSeedKey] = true
+	}
+
 	seedKey := companyID + ":" + companyExplorerDefaultFolderSeedKey
 	if r.defaultFolderSeed[seedKey] {
 		return
@@ -242,6 +286,9 @@ func (r *MemoryRepo) RenameCompanyExplorerFolder(companyID, folderID, name strin
 	if !ok {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
+	if item.SystemKey != nil {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
+	}
 	item.Name = name
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
@@ -270,6 +317,11 @@ func (r *MemoryRepo) DeleteCompanyExplorerFolder(companyID, folderID string) err
 				toDelete[folder.FolderID] = true
 				changed = true
 			}
+		}
+	}
+	for _, folder := range r.folders {
+		if folder.CompanyID == companyID && toDelete[folder.FolderID] && folder.SystemKey != nil {
+			return ErrInvalid
 		}
 	}
 
@@ -324,8 +376,7 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItems(companyID string, assignme
 }
 
 func (r *MemoryRepo) validateCompanyExplorerFolderItemAssignmentLocked(companyID, folderID, itemType, itemID string) error {
-	folder, ok := r.folders[key(companyID, folderID)]
-	if !ok || (folder.FolderKind != itemType && itemType != "kanban") {
+	if _, ok := r.folders[key(companyID, folderID)]; !ok {
 		return ErrNotFound
 	}
 	if itemType == "node" {

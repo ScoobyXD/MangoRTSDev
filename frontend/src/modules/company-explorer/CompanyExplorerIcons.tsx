@@ -1,13 +1,17 @@
 import type React from "react";
 import { KanbanBoardIcon } from "../kanban/KanbanBoardIcon";
 import type { ExplorerTreeNode } from "./companyExplorerTypes";
+import { EXPLORER_SYSTEM_FOLDER_COLOR } from "./treePresentation";
 
-export const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"] }> = ({ kind }) => {
+export const ExplorerRowIcon: React.FC<{ kind: ExplorerTreeNode["kind"]; systemKey?: ExplorerTreeNode["systemKey"] }> = ({ kind, systemKey }) => {
   if (kind === "folder") {
+    const fill = systemKey ? "rgba(0, 233, 255, 0.18)" : "#f6c944";
+    const tabFill = systemKey ? "rgba(0, 233, 255, 0.34)" : "#ffd85a";
+    const stroke = systemKey ? EXPLORER_SYSTEM_FOLDER_COLOR : "#9d7412";
     return (
       <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
-        <path d="M1.4 4.3h4.8l1.1 1.35h7.1v6.35a1.45 1.45 0 0 1-1.45 1.45H2.85A1.45 1.45 0 0 1 1.4 12z" fill="#f6c944" stroke="#9d7412" strokeWidth="1.15" strokeLinejoin="round" />
-        <path d="M1.4 5.65V3.9c0-.8.65-1.45 1.45-1.45h3.1L7.2 4.3" fill="#ffd85a" stroke="#9d7412" strokeWidth="1.15" strokeLinejoin="round" />
+        <path d="M1.4 4.3h4.8l1.1 1.35h7.1v6.35a1.45 1.45 0 0 1-1.45 1.45H2.85A1.45 1.45 0 0 1 1.4 12z" fill={fill} stroke={stroke} strokeWidth="1.15" strokeLinejoin="round" />
+        <path d="M1.4 5.65V3.9c0-.8.65-1.45 1.45-1.45h3.1L7.2 4.3" fill={tabFill} stroke={stroke} strokeWidth="1.15" strokeLinejoin="round" />
       </svg>
     );
   }

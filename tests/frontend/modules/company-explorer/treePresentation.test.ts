@@ -22,6 +22,12 @@ import {
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
 import { buildCompanyExplorerTreeRows } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
 
+const systemFolders = [
+  { company_id: "c", folder_id: "system-kanban", folder_kind: "node" as const, system_key: "kanban_boards" as const, name: "Kanban Boards", position: 100, created_timestamp: "0", updated_timestamp: "0" },
+  { company_id: "c", folder_id: "system-active", folder_kind: "node" as const, system_key: "active_nodes" as const, name: "Active Nodes", position: 200, created_timestamp: "0", updated_timestamp: "0" },
+  { company_id: "c", folder_id: "system-history", folder_kind: "node" as const, system_key: "history" as const, name: "History", position: 300, created_timestamp: "0", updated_timestamp: "0" },
+];
+
 function run(name: string, fn: () => void): void {
   try {
     fn();
@@ -51,11 +57,11 @@ run("tree rows render a blank root when the workspace is empty", () => {
     nodes: [],
     logicGates: [],
     kanbanBoards: [],
-    folders: [],
+    folders: systemFolders,
     folderItems: [],
     rootRowOrder: {},
   });
-  assert.deepEqual(rows.map((row) => row.id), ["system-folder-kanban-boards", "system-folder-active-nodes", "system-folder-history"]);
+  assert.deepEqual(rows.map((row) => row.id), ["workspace-folder-system-kanban", "workspace-folder-system-active", "workspace-folder-system-history"]);
 });
 
 run("tree rows render root content without a synthetic Company folder", () => {
@@ -64,17 +70,17 @@ run("tree rows render root content without a synthetic Company folder", () => {
     nodes: [{ company_id: "c", node_id: "node-a", title: "Alpha", created_timestamp: "1" }],
     logicGates: [],
     kanbanBoards: [],
-    folders: [],
+    folders: systemFolders,
     folderItems: [],
     rootRowOrder: {},
   });
-  assert.deepEqual(rows.map((row) => row.id), ["system-folder-kanban-boards", "system-folder-active-nodes", "system-folder-history", "node-node-a"]);
+  assert.deepEqual(rows.map((row) => row.id), ["workspace-folder-system-kanban", "workspace-folder-system-active", "workspace-folder-system-history", "node-node-a"]);
   assert.equal(rows[rows.length - 1]?.depth, 0);
 });
 
 run("automatic folders hold kanban boards and nodes by due date", () => {
   const rows = buildCompanyExplorerTreeRows({
-    expanded: new Set(["system-folder-kanban-boards", "system-folder-active-nodes", "system-folder-history"]),
+    expanded: new Set(["workspace-folder-system-kanban", "workspace-folder-system-active", "workspace-folder-system-history"]),
     nodes: [
       { company_id: "c", node_id: "future", title: "Future", due_date: "2026-05-08", created_timestamp: "1" },
       { company_id: "c", node_id: "past", title: "Past", due_date: "2026-05-06", created_timestamp: "2" },
@@ -82,17 +88,17 @@ run("automatic folders hold kanban boards and nodes by due date", () => {
     ],
     logicGates: [],
     kanbanBoards: [{ company_id: "c", board_id: "board-1", title: "Launch", position: 1000, created_timestamp: "4", updated_timestamp: "4" }],
-    folders: [],
+    folders: systemFolders,
     folderItems: [],
     rootRowOrder: {},
     todayISODate: "2026-05-07",
   });
   assert.deepEqual(rows.map((row) => row.id), [
-    "system-folder-kanban-boards",
+    "workspace-folder-system-kanban",
     "system-kanban-board-1",
-    "system-folder-active-nodes",
+    "workspace-folder-system-active",
     "system-active-node-future",
-    "system-folder-history",
+    "workspace-folder-system-history",
     "system-history-node-past",
     "node-future",
     "node-past",
@@ -107,6 +113,7 @@ run("root folders from different domains can be locally ordered together", () =>
     logicGates: [],
     kanbanBoards: [],
     folders: [
+      ...systemFolders,
       { company_id: "c", folder_id: "node-root", folder_kind: "node", name: "Node Root", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
       { company_id: "c", folder_id: "logic-root", folder_kind: "logic_gate", name: "Logic Root", position: 1000, created_timestamp: "2", updated_timestamp: "2" },
     ],
@@ -114,9 +121,9 @@ run("root folders from different domains can be locally ordered together", () =>
     rootRowOrder: { "workspace-folder-logic-root": 500 },
   });
   assert.deepEqual(rows.map((row) => row.id), [
-    "system-folder-kanban-boards",
-    "system-folder-active-nodes",
-    "system-folder-history",
+    "workspace-folder-system-kanban",
+    "workspace-folder-system-active",
+    "workspace-folder-system-history",
     "workspace-folder-logic-root",
     "workspace-folder-node-root",
   ]);
@@ -127,9 +134,9 @@ run("context creation targets nested logic gate folders", () => {
   assert.deepEqual(targets, {
     preferredFolderKind: "logic_gate",
     preferredFolderParentID: "logic-folder-1",
-    nodeFolderParentID: "",
+    nodeFolderParentID: "logic-folder-1",
     logicGateFolderParentID: "logic-folder-1",
-    nodeParentFolderID: "",
+    nodeParentFolderID: "logic-folder-1",
     logicGateParentFolderID: "logic-folder-1",
   });
 });
@@ -142,7 +149,7 @@ run("context creation targets node siblings from a node row", () => {
     nodeFolderParentID: "node-folder-1",
     logicGateFolderParentID: "",
     nodeParentFolderID: "node-folder-1",
-    logicGateParentFolderID: "",
+    logicGateParentFolderID: "node-folder-1",
   });
 });
 
@@ -152,6 +159,7 @@ run("rename targets only resolve for concrete folders and entities", () => {
   assert.deepEqual(resolveExplorerRenameTarget({ kind: "logic_gate", logicGateID: "gate-1" }), { kind: "logic_gate", id: "gate-1" });
   assert.equal(resolveExplorerRenameTarget({ kind: "kanban", kanbanBoardID: "board-1" }), null);
   assert.equal(resolveExplorerRenameTarget({ kind: "folder", folderKind: "node" }), null);
+  assert.equal(resolveExplorerRenameTarget({ kind: "folder", folderKind: "node", folderID: "system", systemKey: "history" }), null);
 });
 
 run("delete targets only resolve for concrete folders and entities", () => {
@@ -160,6 +168,7 @@ run("delete targets only resolve for concrete folders and entities", () => {
   assert.deepEqual(resolveExplorerDeleteTarget({ kind: "logic_gate", logicGateID: "gate-1" }), { kind: "logic_gate", id: "gate-1" });
   assert.deepEqual(resolveExplorerDeleteTarget({ kind: "kanban", kanbanBoardID: "board-1" }), { kind: "kanban", id: "board-1" });
   assert.equal(resolveExplorerDeleteTarget({ kind: "folder", folderKind: "node" }), null);
+  assert.equal(resolveExplorerDeleteTarget({ kind: "folder", folderKind: "node", folderID: "system", systemKey: "active_nodes" }), null);
 });
 
 run("drop targets resolve item rows to their containing folder", () => {
@@ -179,12 +188,12 @@ run("drop targets resolve item rows to their containing folder", () => {
     { folderID: "gate-folder", folderKind: "logic_gate", treeID: "workspace-folder-gate-folder" },
   );
 
-  assert.equal(
+  assert.deepEqual(
     resolveExplorerDropTarget(
       { kind: "node", folderKind: "node", folderID: "test-folder", nodeID: "node-1" },
       { kind: "logic_gate", itemType: "logic_gate", itemID: "gate-1" },
     ),
-    null,
+    { folderID: "test-folder", folderKind: "node", treeID: "workspace-folder-test-folder" },
   );
   assert.equal(resolveExplorerDropTarget({ kind: "node", nodeID: "root-node" }, { kind: "node", itemType: "node", itemID: "node-2" }), null);
 

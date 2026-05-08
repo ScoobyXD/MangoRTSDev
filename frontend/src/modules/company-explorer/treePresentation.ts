@@ -1,4 +1,4 @@
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind, CompanyExplorerItemType } from "../folders/companyExplorerFolders.js";
+import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind, CompanyExplorerItemType, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
 
 export type ExplorerTreeEntityKind = "folder" | "node" | "logic_gate" | "kanban";
 
@@ -10,6 +10,7 @@ export type ExplorerCreationContextRow = {
   kanbanBoardID?: string;
   folderID?: string;
   folderKind?: CompanyExplorerFolderKind;
+  systemKey?: CompanyExplorerSystemFolderKey;
 };
 
 export type ExplorerDropPayload = {
@@ -102,9 +103,14 @@ export const EXPLORER_INTERNAL_ROOT_ROW_ID = "folder-root";
 export const EXPLORER_SYSTEM_KANBAN_FOLDER_ID = "system-folder-kanban-boards";
 export const EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID = "system-folder-active-nodes";
 export const EXPLORER_SYSTEM_HISTORY_FOLDER_ID = "system-folder-history";
+export const EXPLORER_SYSTEM_FOLDER_COLOR = "rgb(0, 233, 255)";
 export const EXPLORER_DEFAULT_EXPANDED_ROW_IDS = [] as const;
 export const EXPLORER_ROOT_ROW_ORDER = [] as const;
 export const EXPLORER_ROOT_ROW_LABELS = {} as const;
+
+export function isExplorerSystemFolderKey(value: unknown): value is CompanyExplorerSystemFolderKey {
+  return value === "kanban_boards" || value === "active_nodes" || value === "history";
+}
 
 export function formatExplorerFolderLabel(name: string): string {
   return name;
@@ -147,10 +153,9 @@ export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | nul
   }
 
   const itemType = getExplorerDropPayloadItemType(payload);
-  // Kanban boards are durable Explorer items, but they are not map/editor
-  // entities. They can live in either current folder kind without creating a
-  // third folder taxonomy.
-  if (itemType !== "kanban" && itemType !== row.folderKind) return null;
+  // Explorer folders are mixed workspaces now: nodes, logic gates, and Kanban
+  // boards can share a folder while map projections filter by item type.
+  if (!itemType) return null;
   return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
 }
 
@@ -230,10 +235,11 @@ export function buildExplorerRowBatchReorderPlan(
 }
 
 export function resolveExplorerCreationTargets(row?: ExplorerCreationContextRow | null): ExplorerCreationTargets {
-  const nodeParentFolderID = row?.folderKind === "node" || row?.kind === "node" ? row.folderID ?? "" : "";
-  const logicGateParentFolderID = row?.folderKind === "logic_gate" || row?.kind === "logic_gate" ? row.folderID ?? "" : "";
+  const containingFolderID = row?.folderID ?? "";
+  const nodeParentFolderID = containingFolderID;
+  const logicGateParentFolderID = containingFolderID;
   const nodeFolderParentID = nodeParentFolderID;
-  const logicGateFolderParentID = logicGateParentFolderID;
+  const logicGateFolderParentID = row?.folderKind === "logic_gate" ? containingFolderID : "";
   const preferredFolderKind: CompanyExplorerFolderKind = row?.folderKind === "logic_gate" || row?.kind === "logic_gate" ? "logic_gate" : "node";
 
   return {
@@ -304,6 +310,7 @@ export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | n
   | { kind: "kanban"; id: string }
   | null {
   if (!row) return null;
+  if (row.systemKey) return null;
   if (row.kind === "folder" && row.folderID && row.folderKind) return { kind: "folder", id: row.folderID, folderKind: row.folderKind };
   if (row.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
   if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
@@ -323,6 +330,7 @@ export function resolveExplorerRenameTarget(row?: ExplorerCreationContextRow | n
   | { kind: "logic_gate"; id: string }
   | null {
   if (!row) return null;
+  if (row.systemKey) return null;
   if (row.kind === "folder" && row.folderID) return { kind: "folder", id: row.folderID };
   if (row.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
   if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
@@ -367,7 +375,7 @@ export function resolveExplorerPublishedSelection(input: {
   const selectedKanbanBoardID = entityKind === "kanban" ? entityID : "";
   const isLogicGateContext = entityKind === "logic_gate"
     || (entityKind === "folder" && input.selectedFolderKind === "logic_gate")
-    || (entityKind === "folder" && !input.selectedFolderKind && input.targetFrameKind === "logic-map");
+    || (entityKind === "folder" && input.targetFrameKind === "logic-map");
 
   return {
     entityKind,

@@ -477,16 +477,22 @@ create table if not exists company_explorer_folders (
   folder_id uuid not null,
   parent_folder_id uuid,
   folder_kind text not null,
+  system_key text,
   name text not null,
   position integer not null default 1000,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   constraint company_explorer_folders_kind_chk check (folder_kind in ('node', 'logic_gate')),
+  constraint company_explorer_folders_system_key_nonblank_chk check (system_key is null or btrim(system_key) <> ''),
   constraint company_explorer_folders_name_nonblank_chk check (btrim(name) <> ''),
   constraint company_explorer_folders_parent_not_self_chk check (parent_folder_id is null or parent_folder_id <> folder_id),
   primary key (company_id, folder_id),
   foreign key (company_id, parent_folder_id) references company_explorer_folders (company_id, folder_id) on delete cascade
 );
+
+create unique index if not exists idx_company_explorer_folders_system_key
+  on company_explorer_folders(company_id, system_key)
+  where system_key is not null;
 
 create index if not exists idx_company_explorer_folders_parent_kind
   on company_explorer_folders(company_id, folder_kind, parent_folder_id, position, created_timestamp);

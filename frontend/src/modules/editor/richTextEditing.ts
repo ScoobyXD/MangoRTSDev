@@ -203,8 +203,28 @@ export function normalizeEditorWhitespaceText(value: string): string {
   return value.replace(/\u00a0/g, " ");
 }
 
+const EDITOR_TEXT_BLOCK_TAGS = new Set(["DIV", "P", "LI"]);
+
 export function readEditorDocumentText(root: HTMLElement): string {
-  return normalizeEditorWhitespaceText(root.textContent ?? "");
+  let text = "";
+  const appendNodeText = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      text += node.textContent ?? "";
+      return;
+    }
+    if (!(node instanceof HTMLElement)) return;
+    if (node.tagName === "BR") {
+      text += "\n";
+      return;
+    }
+    const isBlock = EDITOR_TEXT_BLOCK_TAGS.has(node.tagName);
+    if (isBlock && text && !text.endsWith("\n")) text += "\n";
+    node.childNodes.forEach(appendNodeText);
+    if (isBlock && !text.endsWith("\n")) text += "\n";
+  };
+  root.childNodes.forEach(appendNodeText);
+  if (text.endsWith("\n")) text = text.slice(0, -1);
+  return normalizeEditorWhitespaceText(text);
 }
 
 export function serializeEditorDocumentHTML(root: HTMLElement): string {

@@ -90,7 +90,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
               style={{
                 position: "absolute",
                 top: segment.lineStart * documentLineHeightPx,
-                left: `${(segment.depth - 1) * EDITOR_TAB_TEXT.length}ch`,
+                left: `${segment.depth * EDITOR_TAB_TEXT.length}ch`,
                 height: Math.max(documentLineHeightPx, (segment.lineEnd - segment.lineStart + 1) * documentLineHeightPx),
                 borderLeft: `1px solid ${indentGuideColor}`,
                 opacity: 0.9,

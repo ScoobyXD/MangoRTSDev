@@ -5,12 +5,12 @@ import { emitDashboardEvent, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_NODE_MA
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, removeNodeRelationshipGraphRelationshipsForNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, removeLogicGateRelationshipGraphRelationshipsForLogicGate, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { type ExplorerSelectionState } from "./explorerSync";
-import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerItemType } from "../folders/companyExplorerFolders";
+import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerItemType, type CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders";
 import { listKanbanBoards } from "../kanban/kanbanApi";
 import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntityDragItem, type KanbanBoard, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
-import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchResults, EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID, EXPLORER_SYSTEM_HISTORY_FOLDER_ID, EXPLORER_SYSTEM_KANBAN_FOLDER_ID, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
+import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchResults, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
 import { CompanyExplorerTree } from "./CompanyExplorerTree";
 import {
@@ -67,14 +67,13 @@ type CompanyExplorerDeleteBatchResponse = {
   targets?: Array<{ kind: string; id: string }>;
 };
 
-const SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX: Array<[string, string]> = [
-  ["system-kanban-", EXPLORER_SYSTEM_KANBAN_FOLDER_ID],
-  ["system-active-node-", EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID],
-  ["system-history-node-", EXPLORER_SYSTEM_HISTORY_FOLDER_ID],
+const SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX: Array<[string, CompanyExplorerSystemFolderKey]> = [
+  ["system-kanban-", "kanban_boards"],
+  ["system-active-node-", "active_nodes"],
+  ["system-history-node-", "history"],
 ];
 
-function getSystemFolderIDForTreeRowID(rowID: string): string {
-  if (rowID === EXPLORER_SYSTEM_KANBAN_FOLDER_ID || rowID === EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID || rowID === EXPLORER_SYSTEM_HISTORY_FOLDER_ID) return rowID;
+function getSystemFolderKeyForTreeRowID(rowID: string): CompanyExplorerSystemFolderKey | "" {
   return SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX.find(([prefix]) => rowID.startsWith(prefix))?.[1] ?? "";
 }
 
@@ -148,6 +147,16 @@ function buildDeleteConfirmationSummary(input: {
   };
 }
 
+function findProtectedSystemFolderInDeleteTargets(targets: ExplorerDeleteTargetWithLabel[], folders: CompanyExplorerFolder[]): CompanyExplorerFolder | null {
+  for (const target of targets) {
+    if (target.kind !== "folder") continue;
+    const subtreeIDs = collectFolderSubtreeIDs(folders, target.id);
+    const protectedFolder = folders.find((folder) => subtreeIDs.has(folder.folder_id) && isExplorerSystemFolderKey(folder.system_key));
+    if (protectedFolder) return protectedFolder;
+  }
+  return null;
+}
+
 // Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
 export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -190,6 +199,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [dragPayload, setDragPayload] = useState<ExplorerDragPayload | null>(null);
   const [explorerContextMenu, setExplorerContextMenu] = useState<CompanyExplorerContextMenuState | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ targets: ExplorerDeleteTargetWithLabel[] } | null>(null);
+  const [deleteBlockedMessage, setDeleteBlockedMessage] = useState("");
   const [deleteFolderAcknowledged, setDeleteFolderAcknowledged] = useState(false);
   const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
   const [explorerSearchFocused, setExplorerSearchFocused] = useState(false);
@@ -357,9 +367,18 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     treeViewportHeight,
     treeScrollTop,
   });
+  const systemFolderTreeIDByKey = useMemo(() => {
+    const items = new Map<CompanyExplorerSystemFolderKey, string>();
+    for (const folder of folders) {
+      if (isExplorerSystemFolderKey(folder.system_key)) {
+        items.set(folder.system_key, `workspace-folder-${folder.folder_id}`);
+      }
+    }
+    return items;
+  }, [folders]);
 
   const explorerSearchResults = useMemo(() => {
-    const expandedForSearch = new Set<string>(["folder-root", EXPLORER_SYSTEM_KANBAN_FOLDER_ID, EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID, EXPLORER_SYSTEM_HISTORY_FOLDER_ID]);
+    const expandedForSearch = new Set<string>(["folder-root"]);
     for (const folder of folders) expandedForSearch.add(`workspace-folder-${folder.folder_id}`);
     const rows = buildCompanyExplorerTreeRows({
       expanded: expandedForSearch,
@@ -526,7 +545,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   const assignItemsToFolders = useCallback(async (assignments: CompanyExplorerFolderItemAssignment[], options: { expandTarget?: boolean } = {}) => {
     const normalizedAssignments = assignments.filter((assignment) => assignment.folder_id && assignment.item_id && assignment.item_type);
-    if (normalizedAssignments.length === 0) return;
+    if (normalizedAssignments.length === 0) return true;
     const previousFolderIDByKey = new Map(folderItems.map((row) => [`${row.item_type}:${row.item_id}`, row.folder_id]));
     setError("");
     try {
@@ -565,19 +584,37 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           return next;
         });
       }
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_move_item");
+      return false;
     }
   }, [apiBase, companyID, folderItems, requestJSON]);
 
   const assignItemToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerItemType, itemID: string, options: { position?: number; expandTarget?: boolean } = {}) => {
-    await assignItemsToFolders([{
+    return assignItemsToFolders([{
       folder_id: targetFolderID,
       item_type: itemType,
       item_id: itemID,
       position: options.position,
     }], { expandTarget: options.expandTarget });
   }, [assignItemsToFolders]);
+
+  const nextFolderItemPosition = useCallback((folderID: string): number => {
+    const existingRows = treeRows.filter((row) => getExplorerRowContainerID(row) === folderID);
+    return existingRows.reduce((max, row) => Math.max(max, row.position || 0), 0) + TREE_ROW_POSITION_STEP;
+  }, [treeRows]);
+
+  const upsertOptimisticFolderItem = useCallback((item: CompanyExplorerFolderItem) => {
+    setFolderItems((previous) => {
+      const exists = previous.some((row) => row.item_type === item.item_type && row.item_id === item.item_id);
+      return exists
+        ? previous.map((row) => (row.item_type === item.item_type && row.item_id === item.item_id ? item : row))
+        : [...previous, item];
+    });
+    upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
+    upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
+  }, [apiBase, companyID]);
 
   const createNodeAtFolder = useCallback(async (parentFolderID: string) => {
     setError("");
@@ -586,7 +623,19 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         method: "POST",
         body: JSON.stringify({ company_id: companyID, title: "new node" }),
       });
-      if (parentFolderID) await assignItemToFolder(parentFolderID, "node", node.node_id, { expandTarget: true });
+      if (parentFolderID) {
+        const optimisticItem: CompanyExplorerFolderItem = {
+          company_id: companyID,
+          folder_id: parentFolderID,
+          item_type: "node",
+          item_id: node.node_id,
+          position: nextFolderItemPosition(parentFolderID),
+          created_timestamp: new Date().toISOString(),
+          updated_timestamp: new Date().toISOString(),
+        };
+        upsertOptimisticFolderItem(optimisticItem);
+        void assignItemToFolder(parentFolderID, "node", node.node_id, { position: optimisticItem.position, expandTarget: true });
+      }
       // Create is API-first, then we patch the shared graph cache so Explorer,
       // Node Map, and future headless agents converge without a snapshot refetch.
       setNodes((previous) => previous.some((item) => item.node_id === node.node_id) ? previous : [...previous, node]);
@@ -607,7 +656,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node");
     }
-  }, [apiBase, assignItemToFolder, companyID, requestJSON]);
+  }, [apiBase, assignItemToFolder, companyID, nextFolderItemPosition, requestJSON, upsertOptimisticFolderItem]);
 
   const createLogicGateAtFolder = useCallback(async (parentFolderID: string) => {
     setError("");
@@ -617,7 +666,19 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         body: JSON.stringify({ company_id: companyID, header: "new logic gate" }),
       });
       const logicGate = toLogicGateCanvasRecord(created);
-      if (parentFolderID) await assignItemToFolder(parentFolderID, "logic_gate", logicGate.logic_gate_id, { expandTarget: true });
+      if (parentFolderID) {
+        const optimisticItem: CompanyExplorerFolderItem = {
+          company_id: companyID,
+          folder_id: parentFolderID,
+          item_type: "logic_gate",
+          item_id: logicGate.logic_gate_id,
+          position: nextFolderItemPosition(parentFolderID),
+          created_timestamp: new Date().toISOString(),
+          updated_timestamp: new Date().toISOString(),
+        };
+        upsertOptimisticFolderItem(optimisticItem);
+        void assignItemToFolder(parentFolderID, "logic_gate", logicGate.logic_gate_id, { position: optimisticItem.position, expandTarget: true });
+      }
       // Same hot-path pattern as nodes: the REST write is canonical, and the
       // local cache patch keeps linked modules responsive under large workspaces.
       setLogicGates((previous) => previous.some((item) => item.logic_gate_id === logicGate.logic_gate_id) ? previous : [...previous, logicGate]);
@@ -638,7 +699,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_logic_gate");
     }
-  }, [apiBase, assignItemToFolder, companyID, requestJSON]);
+  }, [apiBase, assignItemToFolder, companyID, nextFolderItemPosition, requestJSON, upsertOptimisticFolderItem]);
 
   // Delete through one canonical batch request, then patch local/shared caches
   // once so multi-select deletes do not visibly collapse one row at a time.
@@ -774,10 +835,16 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   const requestDeleteTargets = useCallback((targets: ExplorerDeleteTargetWithLabel[]) => {
     if (targets.length === 0) return;
+    const protectedFolder = findProtectedSystemFolderInDeleteTargets(targets, folders);
+    if (protectedFolder) {
+      setExplorerContextMenu(null);
+      setDeleteBlockedMessage(`We can't delete this folder because it contains the special folder: ${protectedFolder.name}`);
+      return;
+    }
     setExplorerContextMenu(null);
     setDeleteFolderAcknowledged(false);
     setDeleteConfirmation({ targets });
-  }, []);
+  }, [folders]);
 
   const requestDeleteSelection = useCallback(() => {
     if (deleteConfirmation) return;
@@ -937,9 +1004,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       const next = new Set(previous);
       next.add("folder-root");
       for (const treeID of treeIDs) {
-        const systemFolderID = getSystemFolderIDForTreeRowID(treeID);
-        if (systemFolderID) {
-          next.add(systemFolderID);
+        const systemFolderKey = getSystemFolderKeyForTreeRowID(treeID);
+        if (systemFolderKey) {
+          const systemFolderTreeID = systemFolderTreeIDByKey.get(systemFolderKey);
+          if (systemFolderTreeID) next.add(systemFolderTreeID);
           continue;
         }
         if (treeID.startsWith("workspace-folder-")) {
@@ -960,7 +1028,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       }
       return next;
     });
-  }, [folderItems, folders]);
+  }, [folderItems, folders, systemFolderTreeIDByKey]);
 
   const startRenamingRow = useCallback((row: ExplorerTreeNode) => {
     const target = resolveExplorerRenameTarget(row);
@@ -1090,9 +1158,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const canPlaceExplorerItemsAtTarget = useCallback((payload: ExplorerDragPayload | null, target: ExplorerTreeNode): boolean => {
     const itemType = getExplorerDropPayloadItemType(payload);
     const targetKind = getExplorerRowOrderKind(target);
-    const targetAcceptsItem = itemType === targetKind
-      || itemType === "kanban"
-      || (target.kind === "kanban" && target.folderKind === itemType);
+    const targetAcceptsItem = Boolean(itemType && targetKind);
     if (!itemType || !targetAcceptsItem) return false;
     const itemRows = getExplorerItemRowsForPayload(payload);
     if (itemRows.length === 0 || itemRows.some((row) => row.id === target.id)) return false;
@@ -1132,8 +1198,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     if (sourceContainer === "" && targetContainer === "") {
       return treeRows.filter((row) => getExplorerRowContainerID(row) === "" && Boolean(getExplorerRowOrderKind(row)));
     }
-    if (sourceKind !== targetKind) return [];
-    return treeRows.filter((row) => getExplorerRowContainerID(row) === sourceContainer && getExplorerRowOrderKind(row) === sourceKind);
+    return treeRows.filter((row) => getExplorerRowContainerID(row) === sourceContainer && Boolean(getExplorerRowOrderKind(row)));
   }, [treeRows]);
 
   const reorderExplorerRows = useCallback(async (source: ExplorerTreeNode, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => {
@@ -1227,7 +1292,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     const targetRows = treeRows.filter((row) => {
       if (getExplorerRowContainerID(row) !== targetContainer) return false;
       const rowKind = getExplorerRowOrderKind(row);
-      return rowKind === itemType || rowKind === "kanban" || itemType === "kanban";
+      return Boolean(rowKind);
     });
     const targetRowIDs = new Set(targetRows.map((row) => row.id));
     const rowsForPlan = [
@@ -1272,11 +1337,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const assignExplorerPayloadItemsToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => {
     const items = getExplorerDropPayloadItems(payload).filter((item) => item.itemType === itemType);
     if (!targetFolderID || items.length === 0) return;
-    const targetFolderKind = folders.find((folder) => folder.folder_id === targetFolderID)?.folder_kind ?? (itemType === "logic_gate" ? "logic_gate" : "node");
     const existingRows = treeRows.filter((row) => {
       if (getExplorerRowContainerID(row) !== targetFolderID) return false;
       const rowKind = getExplorerRowOrderKind(row);
-      return rowKind === targetFolderKind || rowKind === "kanban";
+      return Boolean(rowKind);
     });
     let position = existingRows.reduce((max, row) => Math.max(max, row.position || 0), 0);
     const assignments: CompanyExplorerFolderItemAssignment[] = [];
@@ -1336,10 +1400,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     const targets = resolveExplorerCreationTargets(row ?? null);
     const deleteRows = row ? (selectedTreeIDs.has(row.id) ? treeRows.filter((candidate) => selectedTreeIDs.has(candidate.id)) : [row]) : [];
     const deleteTargets = getDeleteTargetsForRows(deleteRows);
-    const isSystemContext = row ? Boolean(getSystemFolderIDForTreeRowID(row.id)) : false;
-    const canCreateFolder = !isSystemContext;
-    const canCreateNode = !isSystemContext;
-    const canCreateLogicGate = !isSystemContext;
     setExplorerContextMenu({
       x: event.clientX,
       y: event.clientY,
@@ -1352,10 +1412,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       renameLabel: row?.label ?? "",
       contextKind,
       createFolderPosition: getContextCreateFolderPosition(row, event, targets.preferredFolderKind),
-      canCreateBothFolderTypes: !contextKind && !isSystemContext,
-      canCreateFolder,
-      canCreateNode,
-      canCreateLogicGate,
+      canCreateBothFolderTypes: !contextKind,
+      canCreateFolder: true,
+      canCreateNode: true,
+      canCreateLogicGate: true,
     });
   }, [focusTreeRow, getContextCreateFolderPosition, getDeleteTargetsForRows, selectTreeRow, selectedTreeIDs, treeRows]);
 
@@ -1537,6 +1597,22 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         }}
         onDeleteTargets={requestDeleteTargets}
       />
+
+      {deleteBlockedMessage && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
+          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700 }}>Folder cannot be deleted</div>
+            <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#d6e0e6" : "#222222" }}>{deleteBlockedMessage}</div>
+            <button
+              type="button"
+              onClick={() => setDeleteBlockedMessage("")}
+              style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", color: "#111111", cursor: "pointer", fontWeight: 700, minHeight: 28 }}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
 
       {deleteConfirmation && deleteSummary && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
