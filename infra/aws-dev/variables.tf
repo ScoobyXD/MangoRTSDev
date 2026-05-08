@@ -185,6 +185,12 @@ variable "nylas_state_secret_arn" {
   default     = ""
 }
 
+variable "nylas_webhook_secret_arn" {
+  description = "AWS Secrets Manager ARN containing the Nylas webhook secret. Required for push email refresh."
+  type        = string
+  default     = ""
+}
+
 variable "nylas_google_scopes" {
   description = "Space-separated Google scopes requested through Nylas Hosted OAuth."
   type        = string

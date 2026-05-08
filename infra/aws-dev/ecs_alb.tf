@@ -118,6 +118,7 @@ resource "aws_ecs_task_definition" "backend" {
           { name = "NYLAS_CLIENT_ID", value = var.nylas_client_id },
           { name = "NYLAS_API_BASE_URL", value = var.nylas_api_base_url },
           { name = "NYLAS_REDIRECT_URI", value = local.nylas_redirect_uri },
+          { name = "NYLAS_WEBHOOK_URL", value = local.nylas_webhook_url },
           { name = "NYLAS_FRONTEND_REDIRECT_URL", value = local.nylas_frontend_redirect_url },
           { name = "NYLAS_GOOGLE_SCOPES", value = var.nylas_google_scopes },
           { name = "NYLAS_MICROSOFT_SCOPES", value = var.nylas_microsoft_scopes }
@@ -130,6 +131,9 @@ resource "aws_ecs_task_definition" "backend" {
         local.nylas_enabled ? [
           { name = "NYLAS_API_KEY", valueFrom = var.nylas_api_key_secret_arn },
           { name = "NYLAS_STATE_SECRET", valueFrom = var.nylas_state_secret_arn }
+        ] : [],
+        local.nylas_enabled && trimspace(var.nylas_webhook_secret_arn) != "" ? [
+          { name = "NYLAS_WEBHOOK_SECRET", valueFrom = var.nylas_webhook_secret_arn }
         ] : []
       )
       logConfiguration = {
