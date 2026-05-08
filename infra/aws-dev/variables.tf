@@ -150,6 +150,47 @@ variable "email_from_address" {
   default     = ""
 }
 
+variable "nylas_client_id" {
+  description = "Nylas application client/application ID for Hosted OAuth. Leave empty to disable Communications email integration."
+  type        = string
+  default     = ""
+}
+
+variable "nylas_api_base_url" {
+  description = "Nylas API base URL for the app's data residency."
+  type        = string
+  default     = "https://api.us.nylas.com"
+
+  validation {
+    condition     = contains(["https://api.us.nylas.com", "https://api.eu.nylas.com"], var.nylas_api_base_url)
+    error_message = "nylas_api_base_url must be https://api.us.nylas.com or https://api.eu.nylas.com."
+  }
+}
+
+variable "nylas_api_key_secret_arn" {
+  description = "AWS Secrets Manager ARN containing the Nylas API key. Required when nylas_client_id is set."
+  type        = string
+  default     = ""
+}
+
+variable "nylas_state_secret_arn" {
+  description = "AWS Secrets Manager ARN containing a long random secret for signing Nylas OAuth state. Required when nylas_client_id is set."
+  type        = string
+  default     = ""
+}
+
+variable "nylas_google_scopes" {
+  description = "Space-separated Google scopes requested through Nylas Hosted OAuth."
+  type        = string
+  default     = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.labels"
+}
+
+variable "nylas_microsoft_scopes" {
+  description = "Space-separated Microsoft scopes requested through Nylas Hosted OAuth."
+  type        = string
+  default     = "offline_access User.Read Mail.ReadWrite Mail.Send"
+}
+
 variable "cognito_domain_prefix" {
   description = "Deprecated from the Hosted UI flow. Kept temporarily so older tfvars files continue to load."
   type        = string

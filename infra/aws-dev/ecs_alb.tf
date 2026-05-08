@@ -92,26 +92,42 @@ resource "aws_ecs_task_definition" "backend" {
         hostPort      = var.container_port
         protocol      = "tcp"
       }]
-      environment = [
-        { name = "APP_ENV", value = "staging" },
-        { name = "ALLOW_INMEMORY_FALLBACK", value = "false" },
-        { name = "AUTH_MODE", value = "cognito" },
-        { name = "AWS_REGION", value = var.aws_region },
-        { name = "COGNITO_USER_POOL_ID", value = aws_cognito_user_pool.main.id },
-        { name = "COGNITO_CLIENT_ID", value = aws_cognito_user_pool_client.spa.id },
-        { name = "COGNITO_TOKEN_USE", value = "access,id" },
-        { name = "MANGORTS_ADDR", value = ":${var.container_port}" },
-        { name = "MANGORTS_ALLOWED_ORIGIN", value = "https://${local.app_domain}" },
-        { name = "MANGORTS_EMAIL_FROM", value = var.email_from_address },
-        { name = "DB_HOST", value = var.existing_db_host },
-        { name = "DB_PORT", value = tostring(var.existing_db_port) },
-        { name = "DB_NAME", value = var.existing_db_name },
-        { name = "DB_USER", value = var.existing_db_user },
-        { name = "DB_SSLMODE", value = "require" }
-      ]
-      secrets = [
-        { name = "DB_PASSWORD", valueFrom = var.existing_db_password_secret_arn }
-      ]
+      environment = concat(
+        [
+          { name = "APP_ENV", value = "staging" },
+          { name = "ALLOW_INMEMORY_FALLBACK", value = "false" },
+          { name = "AUTH_MODE", value = "cognito" },
+          { name = "AWS_REGION", value = var.aws_region },
+          { name = "COGNITO_USER_POOL_ID", value = aws_cognito_user_pool.main.id },
+          { name = "COGNITO_CLIENT_ID", value = aws_cognito_user_pool_client.spa.id },
+          { name = "COGNITO_TOKEN_USE", value = "access,id" },
+          { name = "MANGORTS_ADDR", value = ":${var.container_port}" },
+          { name = "MANGORTS_ALLOWED_ORIGIN", value = "https://${local.app_domain}" },
+          { name = "MANGORTS_EMAIL_FROM", value = var.email_from_address },
+          { name = "DB_HOST", value = var.existing_db_host },
+          { name = "DB_PORT", value = tostring(var.existing_db_port) },
+          { name = "DB_NAME", value = var.existing_db_name },
+          { name = "DB_USER", value = var.existing_db_user },
+          { name = "DB_SSLMODE", value = "require" }
+        ],
+        local.nylas_enabled ? [
+          { name = "NYLAS_CLIENT_ID", value = var.nylas_client_id },
+          { name = "NYLAS_API_BASE_URL", value = var.nylas_api_base_url },
+          { name = "NYLAS_REDIRECT_URI", value = local.nylas_redirect_uri },
+          { name = "NYLAS_FRONTEND_REDIRECT_URL", value = local.nylas_frontend_redirect_url },
+          { name = "NYLAS_GOOGLE_SCOPES", value = var.nylas_google_scopes },
+          { name = "NYLAS_MICROSOFT_SCOPES", value = var.nylas_microsoft_scopes }
+        ] : []
+      )
+      secrets = concat(
+        [
+          { name = "DB_PASSWORD", valueFrom = var.existing_db_password_secret_arn }
+        ],
+        local.nylas_enabled ? [
+          { name = "NYLAS_API_KEY", valueFrom = var.nylas_api_key_secret_arn },
+          { name = "NYLAS_STATE_SECRET", valueFrom = var.nylas_state_secret_arn }
+        ] : []
+      )
       logConfiguration = {
         logDriver = "awslogs"
         options = {

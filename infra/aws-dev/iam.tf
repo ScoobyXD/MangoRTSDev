@@ -21,8 +21,12 @@ resource "aws_iam_role_policy_attachment" "ecs_execution" {
 
 data "aws_iam_policy_document" "ecs_execution_secrets" {
   statement {
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = [var.existing_db_password_secret_arn]
+    actions = ["secretsmanager:GetSecretValue"]
+    resources = compact([
+      var.existing_db_password_secret_arn,
+      var.nylas_api_key_secret_arn,
+      var.nylas_state_secret_arn
+    ])
   }
 }
 

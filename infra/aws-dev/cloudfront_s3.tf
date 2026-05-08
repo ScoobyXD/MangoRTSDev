@@ -133,6 +133,17 @@ resource "aws_cloudfront_distribution" "app" {
   }
 
   ordered_cache_behavior {
+    path_pattern             = "/nylas/oauth/*"
+    target_origin_id         = "backend-alb"
+    viewer_protocol_policy   = "redirect-to-https"
+    allowed_methods          = ["GET", "HEAD", "OPTIONS"]
+    cached_methods           = ["GET", "HEAD", "OPTIONS"]
+    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    compress                 = true
+  }
+
+  ordered_cache_behavior {
     path_pattern             = "/healthz"
     target_origin_id         = "backend-alb"
     viewer_protocol_policy   = "redirect-to-https"

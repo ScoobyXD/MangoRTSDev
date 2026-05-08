@@ -38,6 +38,15 @@ dev_company_id = "11111111-1111-1111-1111-111111111111"
 # Must be verified in SES in aws_region before signup confirmation emails are enabled.
 email_from_address = "no-reply@example.com"
 
+# Nylas Communications. Keep secret values in AWS Secrets Manager and pass ARNs here.
+# Register https://api.dev.example.com/nylas/oauth/callback in the Nylas dashboard.
+nylas_client_id            = "00000000-0000-0000-0000-000000000000"
+nylas_api_base_url         = "https://api.us.nylas.com"
+nylas_api_key_secret_arn   = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/dev/nylas-api-key"
+nylas_state_secret_arn     = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/dev/nylas-state-secret"
+nylas_google_scopes        = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.labels"
+nylas_microsoft_scopes     = "offline_access User.Read Mail.ReadWrite Mail.Send"
+
 # Deprecated from the Hosted UI flow; keep a placeholder until the variable is removed.
 cognito_domain_prefix = "unused-custom-auth"
 
