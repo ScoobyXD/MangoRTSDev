@@ -328,6 +328,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (domain.Company
 			delete(r.memberships, key)
 		}
 	}
+	delete(r.emailConnections, userID)
 	for key, node := range r.nodes {
 		if node.AssigneeUserID != nil && *node.AssigneeUserID == userID {
 			node.AssigneeUserID = nil

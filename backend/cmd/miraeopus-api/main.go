@@ -22,6 +22,8 @@ func main() {
 		AuthValidator: buildAuthValidator(),
 		CognitoAdmin:  buildCognitoAdminClient(),
 		EmailSender:   buildEmailSender(),
+		NylasClient:   buildNylasClient(),
+		NylasConfig:   buildNylasConfig(),
 	})
 
 	addr := os.Getenv("MANGORTS_ADDR")
@@ -144,6 +146,35 @@ func buildEmailSender() *auth.SESEmailSender {
 		return nil
 	}
 	return auth.NewSESEmailSender(region, from)
+}
+
+func buildNylasConfig() httpapi.NylasConfig {
+	return httpapi.NylasConfig{
+		ClientID:            strings.TrimSpace(os.Getenv("NYLAS_CLIENT_ID")),
+		APIKey:              strings.TrimSpace(os.Getenv("NYLAS_API_KEY")),
+		APIBaseURL:          getenvDefault("NYLAS_API_BASE_URL", "https://api.us.nylas.com"),
+		RedirectURI:         strings.TrimSpace(os.Getenv("NYLAS_REDIRECT_URI")),
+		FrontendRedirectURL: strings.TrimSpace(os.Getenv("NYLAS_FRONTEND_REDIRECT_URL")),
+		StateSecret:         strings.TrimSpace(os.Getenv("NYLAS_STATE_SECRET")),
+		GoogleScopes:        splitScopes(os.Getenv("NYLAS_GOOGLE_SCOPES")),
+		MicrosoftScopes:     splitScopes(os.Getenv("NYLAS_MICROSOFT_SCOPES")),
+	}
+}
+
+func buildNylasClient() httpapi.NylasClient {
+	config := buildNylasConfig()
+	if !config.IsConfigured() {
+		return nil
+	}
+	return httpapi.NewNylasRESTClient(config.APIBaseURL, config.APIKey, config.ClientID)
+}
+
+func splitScopes(raw string) []string {
+	fields := strings.Fields(strings.ReplaceAll(raw, ",", " "))
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
 }
 
 func withLogging(next http.Handler) http.Handler {

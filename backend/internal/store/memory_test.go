@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"miraeopus/backend/internal/domain"
 	"testing"
 	"time"
@@ -518,5 +519,43 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 	}
 	if updated.DueDate == nil || *updated.DueDate != dueDate || updated.Priority == nil || *updated.Priority != priority {
 		t.Fatalf("node metadata = due %+v priority %+v", updated.DueDate, updated.Priority)
+	}
+}
+
+func TestMemoryRepoUserEmailConnectionLifecycle(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMemoryRepo()
+	user, err := repo.UpsertAuthUser("subject-email", "User@Example.com", "Email User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing connection error = %v, want ErrNotFound", err)
+	}
+	connection, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "gmail",
+		AccountEmail: "User@Example.com",
+		GrantID:      "grant-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connection.Provider != "google" || connection.AccountEmail != "user@example.com" || connection.GrantID != "grant-1" || connection.Status != "connected" {
+		t.Fatalf("connection = %+v, want normalized connected google grant", connection)
+	}
+	updated, err := repo.UpdateUserEmailConnectionStatus(user.UserID, "reauth_required")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != "reauth_required" {
+		t.Fatalf("status = %q, want reauth_required", updated.Status)
+	}
+	if err := repo.DeleteUserEmailConnection(user.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("connection after delete error = %v, want ErrNotFound", err)
 	}
 }

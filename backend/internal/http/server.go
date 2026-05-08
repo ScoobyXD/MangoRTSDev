@@ -22,12 +22,16 @@ type Server struct {
 	authValidator *auth.Validator
 	cognitoAdmin  CognitoAdminClient
 	emailSender   AuthEmailSender
+	nylasClient   NylasClient
+	nylasConfig   NylasConfig
 }
 
 type ServerOptions struct {
 	AuthValidator *auth.Validator
 	CognitoAdmin  CognitoAdminClient
 	EmailSender   AuthEmailSender
+	NylasClient   NylasClient
+	NylasConfig   NylasConfig
 }
 
 func NewServer(repo store.Repository) *Server {
@@ -41,6 +45,8 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		authValidator: options.AuthValidator,
 		cognitoAdmin:  options.CognitoAdmin,
 		emailSender:   options.EmailSender,
+		nylasClient:   options.NylasClient,
+		nylasConfig:   options.NylasConfig,
 	}
 }
 
@@ -54,6 +60,13 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/invitations/validate", s.handleInvitationValidate)
 	mux.HandleFunc("/v1/invitations/accept", s.handleInvitationAccept)
 	mux.HandleFunc("/v1/password-resets/request", s.handlePasswordResetRequest)
+	mux.HandleFunc("/v1/communications/status", s.handleCommunicationsStatus)
+	mux.HandleFunc("/v1/communications/auth-url", s.handleCommunicationsAuthURL)
+	mux.HandleFunc("/v1/communications/disconnect", s.handleCommunicationsDisconnect)
+	mux.HandleFunc("/v1/communications/folders", s.handleCommunicationsFolders)
+	mux.HandleFunc("/v1/communications/messages", s.handleCommunicationsMessages)
+	mux.HandleFunc("/v1/communications/messages/", s.handleCommunicationsMessageByID)
+	mux.HandleFunc("/nylas/oauth/callback", s.handleNylasOAuthCallback)
 	mux.HandleFunc("/v1/nodes", s.handleNodes)
 	mux.HandleFunc("/v1/nodes/", s.handleNodeSubresource)
 	mux.HandleFunc("/v1/node-relationships", s.handleNodeRelationships)
