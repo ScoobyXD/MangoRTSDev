@@ -148,6 +148,37 @@ func (r *MemoryRepo) CreateCompany(name string) (domain.Company, error) {
 	return company, nil
 }
 
+func (r *MemoryRepo) ListCompanies(query string, limit int) ([]domain.Company, error) {
+	query = strings.ToLower(strings.TrimSpace(query))
+	limit = NormalizeCompanyListLimit(limit)
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.Company, 0, min(limit, len(r.companies)))
+	for _, company := range r.companies {
+		if query != "" && !strings.Contains(strings.ToLower(company.Name), query) && !strings.Contains(strings.ToLower(company.CompanyID), query) {
+			continue
+		}
+		items = append(items, company)
+	}
+	slices.SortFunc(items, func(a, b domain.Company) int {
+		aName := strings.ToLower(strings.TrimSpace(a.Name))
+		bName := strings.ToLower(strings.TrimSpace(b.Name))
+		if aName < bName {
+			return -1
+		}
+		if aName > bName {
+			return 1
+		}
+		return strings.Compare(a.CompanyID, b.CompanyID)
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
 func (r *MemoryRepo) EnsureCompany(companyID, name string) domain.Company {
 	companyID = strings.TrimSpace(companyID)
 	name = strings.TrimSpace(name)

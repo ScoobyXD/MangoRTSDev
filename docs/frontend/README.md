@@ -36,6 +36,10 @@ This folder contains architecture, product behavior, and migration documentation
   - Explorer drag payload contract
   - headless Kanban API contract
   - linkable frame behavior
+- `docs/frontend/src/modules/settings.md`
+  - Settings company scope behavior
+  - dev-admin company search and invite targeting
+  - mandatory Settings custom dropdown convention
 
 ### Migration history
 - `docs/frontend/migration/FRAME_MODULE_MIGRATION_HANDOFF.md`

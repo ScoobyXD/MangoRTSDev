@@ -36,6 +36,7 @@ The backend enables auth only when `AUTH_MODE=cognito`.
 - The backend upserts the authenticated Cognito subject into `users`.
 - Memberships are loaded once per request into an actor context.
 - `dev_admin` can access all companies.
+- `dev_admin` can list/search companies through bounded `GET /v1/companies?query=<text>&limit=<n>` for Settings scope selection and invite targeting.
 - Company-scoped routes require company membership or `dev_admin`.
 - `company_admin` manages users inside their company.
 - `company_user` has full access inside their company for now.
