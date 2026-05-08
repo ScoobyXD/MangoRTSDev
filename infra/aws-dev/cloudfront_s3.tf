@@ -53,6 +53,9 @@ function handler(event) {
     return request;
   }
   if (request.headers.authorization && request.headers.authorization.value === expected) {
+    if (isFrontendRoute(request.uri)) {
+      request.uri = "/index.html";
+    }
     return request;
   }
   return {
@@ -63,6 +66,17 @@ function handler(event) {
       "cache-control": { value: "no-store" }
     }
   };
+}
+
+function isFrontendRoute(uri) {
+  if (uri === "/") {
+    return true;
+  }
+  if (uri.indexOf("/v1/") === 0 || uri.indexOf("/nylas/oauth/") === 0 || uri === "/healthz") {
+    return false;
+  }
+  var lastSegment = uri.substring(uri.lastIndexOf("/") + 1);
+  return lastSegment.indexOf(".") === -1;
 }
 JS
 }
@@ -165,17 +179,6 @@ resource "aws_cloudfront_distribution" "app" {
     }
   }
 
-  custom_error_response {
-    error_code         = 403
-    response_code      = 200
-    response_page_path = "/index.html"
-  }
-
-  custom_error_response {
-    error_code         = 404
-    response_code      = 200
-    response_page_path = "/index.html"
-  }
 
   viewer_certificate {
     acm_certificate_arn      = aws_acm_certificate_validation.cloudfront.certificate_arn

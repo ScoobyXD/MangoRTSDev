@@ -303,6 +303,10 @@ jobs:
           require_status "frontend deploy-info" "200" "$status" "$tmp_body"
           jq -e --arg revision "$GITHUB_SHA" --arg app_url "$APP_URL" '.revision == $revision and .api_base_url == $app_url' "$tmp_body" >/dev/null
 
+          status="$(curl --silent --show-error "${curl_auth[@]}" --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/accept-invite")"
+          require_status "frontend route rewrite" "200" "$status" "$tmp_body"
+          grep -q '<div id="root"></div>' "$tmp_body"
+
           for attempt in {1..18}; do
             status="$(curl --silent --show-error "${curl_auth[@]}" --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/healthz" || true)"
             if [[ "$status" == "200" ]] && jq -e --arg revision "$GITHUB_SHA" '.ok == true and .deploy_revision == $revision' "$tmp_body" >/dev/null 2>&1; then
