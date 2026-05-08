@@ -347,7 +347,7 @@ function SettingsSelect({
                   onChange(option.value);
                   setOpen(false);
                 }}
-                style={{ ...settingsOptionButtonStyle, background: selectedOption ? "rgba(0, 233, 255, 0.18)" : "transparent", color: selectedOption ? "rgb(0, 233, 255)" : "#e8fbff" }}
+                style={{ ...settingsOptionButtonStyle, background: selectedOption ? "rgba(0, 233, 255, 0.18)" : "#ffffff", color: "#000000" }}
               >
                 <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
                 <span aria-hidden="true" style={{ display: "grid", placeItems: "center" }}>
@@ -452,8 +452,8 @@ function CompanySearchSelect({
                 style={{ ...settingsCompanyOptionButtonStyle, background: selectedOption ? "rgba(0, 233, 255, 0.18)" : "transparent" }}
               >
                 <span style={{ minWidth: 0, display: "grid", gap: 2 }}>
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: selectedOption ? "rgb(0, 233, 255)" : "#e8fbff", fontWeight: 900 }}>{companyName(company)}</span>
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(202, 242, 248, 0.72)", fontSize: 10 }}>{company.company_id}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#000000", fontWeight: 900 }}>{companyName(company)}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#000000", fontSize: 10 }}>{company.company_id}</span>
                 </span>
                 <span aria-hidden="true" style={{ display: "grid", placeItems: "center" }}>
                   {selectedOption ? <SettingsCheckIcon /> : null}
@@ -945,10 +945,10 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
       {deleteConfirmation && (
         <div style={modalBackdropStyle}>
           <div style={modalStyle}>
-            <div style={{ fontSize: 12, fontWeight: 800, color: "#e8fbff" }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#000000" }}>
               Are you sure you want to delete this user?
             </div>
-            <div style={{ fontSize: 11, lineHeight: 1.4, color: "rgba(202, 242, 248, 0.78)", overflowWrap: "anywhere" }}>
+            <div style={{ fontSize: 11, lineHeight: 1.4, color: "#000000", overflowWrap: "anywhere" }}>
               This deletes {companyUserLabel(deleteConfirmation)} from Cognito and removes their Mango user, memberships, and invitation rows.
             </div>
             <label style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 8, alignItems: "start", fontSize: 11, lineHeight: 1.35 }}>
@@ -1050,19 +1050,19 @@ const smallButtonStyle: React.CSSProperties = {
   minHeight: 30,
   border: "1px solid rgba(0, 233, 255, 0.62)",
   borderRadius: 6,
-  background: "linear-gradient(180deg, rgba(9, 31, 38, 0.84), rgba(5, 18, 23, 0.72))",
-  color: "#e8fbff",
+  background: "#ffffff",
+  color: "#000000",
   cursor: "pointer",
   font: "inherit",
   fontWeight: 800,
   padding: "0 10px",
-  boxShadow: "0 0 0 1px rgba(0, 233, 255, 0.12) inset, 0 8px 20px rgba(0, 0, 0, 0.22)",
+  boxShadow: "0 0 0 1px rgba(0, 233, 255, 0.12) inset",
 };
 
 const settingsPageStyle: React.CSSProperties = {
   minHeight: "100vh",
   background: "#ffffff",
-  color: "#e8fbff",
+  color: "#000000",
   fontFamily: "'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace",
   padding: 18,
   overflowY: "auto",
@@ -1079,7 +1079,7 @@ const settingsHeaderStyle: React.CSSProperties = {
 const settingsPageTitleStyle: React.CSSProperties = {
   margin: 0,
   fontSize: 18,
-  color: "#e8fbff",
+  color: "#000000",
   textTransform: "uppercase",
 };
 
@@ -1091,25 +1091,25 @@ const settingsNavStyle: React.CSSProperties = {
 };
 
 const settingsErrorStyle: React.CSSProperties = {
-  color: "#ff9abf",
+  color: "#000000",
   marginBottom: 10,
   fontSize: 12,
   fontWeight: 800,
 };
 
 const settingsErrorSmallStyle: React.CSSProperties = {
-  color: "#ff9abf",
+  color: "#000000",
   fontSize: 12,
 };
 
 const settingsInfoTextStyle: React.CSSProperties = {
-  color: "rgba(202, 242, 248, 0.72)",
+  color: "#000000",
   fontSize: 12,
   lineHeight: 1.4,
 };
 
 const settingsFieldLabelStyle: React.CSSProperties = {
-  color: "rgba(202, 242, 248, 0.68)",
+  color: "#000000",
   fontSize: 10,
   fontWeight: 900,
   textTransform: "uppercase",
@@ -1121,8 +1121,8 @@ const settingsInputStyle: React.CSSProperties = {
   height: 38,
   border: "1px solid rgba(0, 233, 255, 0.44)",
   borderRadius: 6,
-  background: "rgba(2, 13, 18, 0.58)",
-  color: "#e8fbff",
+  background: "#ffffff",
+  color: "#000000",
   font: "inherit",
   fontSize: 12,
   fontWeight: 800,
@@ -1136,7 +1136,7 @@ const settingsPrimaryButtonStyle: React.CSSProperties = {
   border: "1px solid rgba(0, 233, 255, 0.84)",
   borderRadius: 6,
   background: "linear-gradient(180deg, rgba(0, 233, 255, 0.98), rgba(0, 177, 208, 0.92))",
-  color: "#031217",
+  color: "#000000",
   cursor: "pointer",
   font: "inherit",
   fontWeight: 900,
@@ -1153,8 +1153,8 @@ const settingsSelectButtonStyle: React.CSSProperties = {
   gap: 8,
   border: "1px solid rgba(0, 233, 255, 0.44)",
   borderRadius: 6,
-  background: "rgba(2, 13, 18, 0.58)",
-  color: "#e8fbff",
+  background: "#ffffff",
+  color: "#000000",
   cursor: "pointer",
   font: "inherit",
   fontSize: 12,
@@ -1173,8 +1173,8 @@ const settingsComboIconButtonStyle: React.CSSProperties = {
   placeItems: "center",
   border: "1px solid rgba(0, 233, 255, 0.36)",
   borderRadius: 5,
-  background: "rgba(0, 233, 255, 0.08)",
-  color: "rgb(0, 233, 255)",
+  background: "#ffffff",
+  color: "#000000",
   cursor: "pointer",
 };
 
@@ -1190,9 +1190,9 @@ const settingsMenuStyle: React.CSSProperties = {
   padding: 5,
   border: "1px solid rgba(0, 233, 255, 0.58)",
   borderRadius: 8,
-  background: "rgba(4, 18, 24, 0.98)",
-  color: "#e8fbff",
-  boxShadow: "0 16px 34px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(0, 233, 255, 0.12) inset",
+  background: "#ffffff",
+  color: "#000000",
+  boxShadow: "0 12px 28px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(0, 233, 255, 0.12) inset",
 };
 
 const settingsOptionButtonStyle: React.CSSProperties = {
@@ -1219,7 +1219,7 @@ const settingsCompanyOptionButtonStyle: React.CSSProperties = {
 
 const settingsEmptyOptionStyle: React.CSSProperties = {
   padding: "8px 10px",
-  color: "rgba(202, 242, 248, 0.62)",
+  color: "#000000",
   fontSize: 11,
   fontWeight: 800,
 };
@@ -1229,12 +1229,12 @@ const settingsScopePlateStyle: React.CSSProperties = {
   gap: 4,
   border: "1px solid rgba(0, 233, 255, 0.32)",
   borderRadius: 8,
-  background: "rgba(0, 233, 255, 0.07)",
+  background: "#ffffff",
   padding: 10,
 };
 
 const settingsScopeKickerStyle: React.CSSProperties = {
-  color: "rgba(202, 242, 248, 0.62)",
+  color: "#000000",
   fontSize: 10,
   fontWeight: 900,
   textTransform: "uppercase",
@@ -1242,7 +1242,7 @@ const settingsScopeKickerStyle: React.CSSProperties = {
 
 const settingsScopeNameStyle: React.CSSProperties = {
   minWidth: 0,
-  color: "#e8fbff",
+  color: "#000000",
   fontSize: 15,
   fontWeight: 900,
   overflow: "hidden",
@@ -1251,7 +1251,7 @@ const settingsScopeNameStyle: React.CSSProperties = {
 };
 
 const settingsScopeUUIDStyle: React.CSSProperties = {
-  color: "rgba(202, 242, 248, 0.74)",
+  color: "#000000",
   fontSize: 11,
   overflowWrap: "anywhere",
 };
@@ -1259,8 +1259,8 @@ const settingsScopeUUIDStyle: React.CSSProperties = {
 const settingsActiveScopeStyle: React.CSSProperties = {
   border: "1px solid rgba(101, 247, 167, 0.34)",
   borderRadius: 6,
-  background: "rgba(101, 247, 167, 0.08)",
-  color: "#bfffd6",
+  background: "#ffffff",
+  color: "#000000",
   fontSize: 11,
   fontWeight: 900,
   padding: "7px 8px",
@@ -1275,7 +1275,7 @@ const settingsSubsectionStyle: React.CSSProperties = {
 
 const settingsSubsectionTitleStyle: React.CSSProperties = {
   margin: 0,
-  color: "rgba(202, 242, 248, 0.82)",
+  color: "#000000",
   fontSize: 11,
   fontWeight: 900,
   textTransform: "uppercase",
@@ -1295,7 +1295,7 @@ const settingsSectionHeaderRowStyle: React.CSSProperties = {
 
 const settingsSectionScopeStyle: React.CSSProperties = {
   minWidth: 0,
-  color: "rgba(202, 242, 248, 0.72)",
+  color: "#000000",
   fontSize: 11,
   fontWeight: 800,
 };
@@ -1305,11 +1305,10 @@ const sectionStyle: React.CSSProperties = {
   gap: 10,
   padding: 14,
   border: "1px solid rgba(0, 233, 255, 0.68)",
-  background: "linear-gradient(180deg, rgba(10, 31, 38, 0.82), rgba(4, 18, 24, 0.66))",
+  background: "#ffffff",
   borderRadius: 8,
-  color: "#e8fbff",
-  boxShadow: "0 0 0 1px rgba(0, 233, 255, 0.12) inset, 0 16px 36px rgba(0, 0, 0, 0.34)",
-  backdropFilter: "blur(14px)",
+  color: "#000000",
+  boxShadow: "0 0 0 1px rgba(0, 233, 255, 0.12) inset, 0 12px 24px rgba(0, 0, 0, 0.12)",
 };
 
 const settingsTopRowStyle: React.CSSProperties = {
@@ -1323,7 +1322,7 @@ const sectionTitleStyle: React.CSSProperties = {
   margin: 0,
   fontSize: 13,
   textTransform: "uppercase",
-  color: "rgb(0, 233, 255)",
+  color: "#000000",
   letterSpacing: 0,
 };
 
@@ -1338,7 +1337,7 @@ const successMessageStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  color: "#65f7a7",
+  color: "#000000",
   fontSize: 13,
   fontWeight: 800,
 };
@@ -1346,12 +1345,12 @@ const successMessageStyle: React.CSSProperties = {
 const successBoxStyle: React.CSSProperties = {
   display: "grid",
   gap: 4,
-  color: "#65f7a7",
+  color: "#000000",
   fontSize: 12,
   fontWeight: 800,
   border: "1px solid rgba(101, 247, 167, 0.36)",
   borderRadius: 6,
-  background: "rgba(101, 247, 167, 0.08)",
+  background: "#ffffff",
   padding: 8,
 };
 
@@ -1372,7 +1371,7 @@ const userRowStyle: React.CSSProperties = {
 
 const dangerButtonStyle: React.CSSProperties = {
   borderColor: "#ff3d7f",
-  color: "#ffd6e4",
+  color: "#000000",
 };
 
 const profileGridStyle: React.CSSProperties = {
@@ -1383,7 +1382,7 @@ const profileGridStyle: React.CSSProperties = {
 };
 
 const profileLabelStyle: React.CSSProperties = {
-  color: "rgba(202, 242, 248, 0.62)",
+  color: "#000000",
   fontWeight: 800,
   textTransform: "uppercase",
 };
@@ -1396,7 +1395,7 @@ const profileValueStyle: React.CSSProperties = {
 const modalBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0,0,0,0.58)",
+  background: "rgba(255,255,255,0.74)",
   zIndex: 120,
   display: "grid",
   placeItems: "center",
@@ -1407,12 +1406,12 @@ const modalStyle: React.CSSProperties = {
   width: "min(420px, 100%)",
   borderRadius: 8,
   border: "1px solid rgba(0,233,255,0.68)",
-  background: "linear-gradient(180deg, rgba(10, 31, 38, 0.96), rgba(4, 18, 24, 0.92))",
-  color: "#e8fbff",
+  background: "#ffffff",
+  color: "#000000",
   padding: 12,
   display: "grid",
   gap: 10,
-  boxShadow: "0 0 0 1px rgba(0, 233, 255, 0.12) inset, 0 18px 42px rgba(0, 0, 0, 0.42)",
+  boxShadow: "0 0 0 1px rgba(0, 233, 255, 0.12) inset, 0 18px 42px rgba(0, 0, 0, 0.18)",
 };
 
 function companyUserLabel(user: CompanyUser): string {

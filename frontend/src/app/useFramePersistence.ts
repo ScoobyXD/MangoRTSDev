@@ -82,7 +82,7 @@ function sanitizeFrames(value: unknown): FrameDataModel[] {
 }
 
 function sanitizePage(value: unknown): ViewTab["page"] {
-  return value === "logic-gate-arena" ? value : undefined;
+  return value === "logic-gate-arena" || value === "communications" ? value : undefined;
 }
 
 function createUniqueFrameID(usedFrameIDs: Set<string>): string {

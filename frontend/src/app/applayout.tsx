@@ -31,6 +31,7 @@ import {
 import { loadFrameLinks, loadSettings, loadViews, persistFrameLinks, persistFrameRegistry, saveSettings, saveViews } from "./useFramePersistence";
 import { useFrameDragResize } from "./useFrameDragResize";
 import { LogicGateArenaPage } from "../pages/logic-gate-arena";
+import { CommunicationsPage } from "../pages/communications/CommunicationsPage";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 
@@ -82,6 +83,8 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId) ?? tabs[0], [tabs, activeTabId]);
   const frames = activeTab?.frames ?? [];
   const isLogicGateArenaView = activeTab?.page === "logic-gate-arena";
+  const isCommunicationsView = activeTab?.page === "communications";
+  const isFullPageView = isLogicGateArenaView || isCommunicationsView;
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
   const childrenByParent = useMemo(() => {
     const grouped = new Map<string, FrameDataModel[]>();
@@ -475,7 +478,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
   const openCommunicationsView = useCallback((tabID: string) => {
     const framesForView = createCommunicationsViewFrames();
     const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
-    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Communications", page: undefined, frames: framesForView } : tab)));
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Communications", page: "communications", frames: framesForView } : tab)));
     setFrameLinks((previous) => previous.filter((edge) => !replacedFrameIDs.has(edge.a) && !replacedFrameIDs.has(edge.b)));
     setActiveTabId(tabID);
     setEditMode(false);
@@ -547,12 +550,11 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
         style={{ height: HEADER_H, padding: "0 20px", display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", background: headerBgColor, borderBottom: `1px solid ${UI_THEME.line}` }}
         onContextMenu={(e) => { e.preventDefault(); setHeaderMenu({ x: e.clientX, y: e.clientY }); setCanvasMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           <h1 style={{ fontWeight: 800, color: headerTextColor, letterSpacing: "0.04em", textTransform: "uppercase", margin: 0, lineHeight: 1 }}><span style={{ fontSize: 18 }}>Mango</span><span style={{ fontSize: 23, marginLeft: 2 }}>RTS</span></h1>
-          {accountChrome}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 6, justifySelf: "center", maxWidth: "55vw", overflowX: "auto", padding: "2px 4px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, justifySelf: "center", maxWidth: "68vw", overflowX: "auto", padding: "2px 4px" }}>
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -598,23 +600,26 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
             </button>
           ))}
           <button onClick={addTab} title="New view tab" style={{ width: 30, height: 30, border: "1px solid rgba(8,52,58,0.35)", borderRadius: 8, background: tabBgColor, color: tabTextColor, cursor: "pointer", fontSize: 20, lineHeight: 1 }}>+</button>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end" }}>
           <button onClick={() => setEditMode((v) => !v)} style={{ height: 32, padding: "0 10px", background: editMode ? "#9df8ff" : tabBgColor, color: tabTextColor, border: `1px solid ${editMode ? "#0f7f8b" : UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
             {editMode ? "EDIT: ON" : "EDIT: OFF"}
           </button>
           <button onClick={() => { addFrame(); setEditMode(true); }} style={{ width: 32, height: 32, background: tabBgColor, color: tabTextColor, border: `1px solid ${UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 20 }}>+</button>
         </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end", minWidth: 0 }}>
+          {accountChrome}
+        </div>
       </header>
 
       <FrameCanvas
         style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }}
-        onClick={isLogicGateArenaView ? undefined : () => { setSelectedFrameId(null); setSelectedFrameIds(new Set()); }}
-        onContextMenu={isLogicGateArenaView ? (e) => e.preventDefault() : (e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY, gridX: Math.floor(e.clientX / stepX), gridY: Math.floor((e.clientY - HEADER_H) / stepY) }); setHeaderMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
+        onClick={isFullPageView ? undefined : () => { setSelectedFrameId(null); setSelectedFrameIds(new Set()); }}
+        onContextMenu={isFullPageView ? (e) => e.preventDefault() : (e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY, gridX: Math.floor(e.clientX / stepX), gridY: Math.floor((e.clientY - HEADER_H) / stepY) }); setHeaderMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
       >
         {isLogicGateArenaView ? (
           <LogicGateArenaPage frames={frames} updateFrames={updateActiveFrames} />
+        ) : isCommunicationsView ? (
+          <CommunicationsPage embedded />
         ) : (
           <>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
