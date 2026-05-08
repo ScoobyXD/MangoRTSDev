@@ -74,6 +74,12 @@ jobs:
           TF_EXISTING_DB_SECURITY_GROUP_ID: ${{ vars.TF_EXISTING_DB_SECURITY_GROUP_ID }}
           TF_DEV_COMPANY_ID: ${{ vars.TF_DEV_COMPANY_ID }}
           TF_COGNITO_DOMAIN_PREFIX: ${{ vars.TF_COGNITO_DOMAIN_PREFIX }}
+          TF_NYLAS_CLIENT_ID: ${{ vars.TF_NYLAS_CLIENT_ID || '' }}
+          TF_NYLAS_API_BASE_URL: ${{ vars.TF_NYLAS_API_BASE_URL || 'https://api.us.nylas.com' }}
+          TF_NYLAS_API_KEY_SECRET_ARN: ${{ vars.TF_NYLAS_API_KEY_SECRET_ARN || '' }}
+          TF_NYLAS_STATE_SECRET_ARN: ${{ vars.TF_NYLAS_STATE_SECRET_ARN || '' }}
+          TF_NYLAS_GOOGLE_SCOPES: ${{ vars.TF_NYLAS_GOOGLE_SCOPES || 'https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.labels' }}
+          TF_NYLAS_MICROSOFT_SCOPES: ${{ vars.TF_NYLAS_MICROSOFT_SCOPES || 'offline_access User.Read Mail.ReadWrite Mail.Send' }}
           TF_DEV_BASIC_AUTH_USERNAME: ${{ vars.TF_DEV_BASIC_AUTH_USERNAME || 'mangorts-dev' }}
           TF_DEV_BASIC_AUTH_PASSWORD: ${{ secrets.DEV_BASIC_AUTH_PASSWORD }}
           TF_GITHUB_OWNER: ${{ vars.TF_GITHUB_OWNER || github.repository_owner }}
@@ -93,6 +99,18 @@ jobs:
           : "${TF_DEV_BASIC_AUTH_PASSWORD:?Set GitHub secret DEV_BASIC_AUTH_PASSWORD}"
           if [[ "$TF_CREATE_PRIVATE_ECS_SUBNETS" != "true" && "$TF_CREATE_PRIVATE_ECS_SUBNETS" != "false" ]]; then
             echo "TF_CREATE_PRIVATE_ECS_SUBNETS must be true or false" >&2
+            exit 1
+          fi
+          NYLAS_CONFIGURED_COUNT=0
+          [[ -n "$TF_NYLAS_CLIENT_ID" ]] && NYLAS_CONFIGURED_COUNT=$((NYLAS_CONFIGURED_COUNT + 1))
+          [[ -n "$TF_NYLAS_API_KEY_SECRET_ARN" ]] && NYLAS_CONFIGURED_COUNT=$((NYLAS_CONFIGURED_COUNT + 1))
+          [[ -n "$TF_NYLAS_STATE_SECRET_ARN" ]] && NYLAS_CONFIGURED_COUNT=$((NYLAS_CONFIGURED_COUNT + 1))
+          if [[ "$NYLAS_CONFIGURED_COUNT" != "0" && "$NYLAS_CONFIGURED_COUNT" != "3" ]]; then
+            echo "Set all or none of TF_NYLAS_CLIENT_ID, TF_NYLAS_API_KEY_SECRET_ARN, and TF_NYLAS_STATE_SECRET_ARN." >&2
+            exit 1
+          fi
+          if [[ "$TF_NYLAS_API_BASE_URL" != "https://api.us.nylas.com" && "$TF_NYLAS_API_BASE_URL" != "https://api.eu.nylas.com" ]]; then
+            echo "TF_NYLAS_API_BASE_URL must be https://api.us.nylas.com or https://api.eu.nylas.com" >&2
             exit 1
           fi
           normalize_json_string_array() {
@@ -135,6 +153,12 @@ jobs:
           backend_image_uri = ""
           dev_company_id = $(json_string "$TF_DEV_COMPANY_ID")
           cognito_domain_prefix = $(json_string "$TF_COGNITO_DOMAIN_PREFIX")
+          nylas_client_id = $(json_string "$TF_NYLAS_CLIENT_ID")
+          nylas_api_base_url = $(json_string "$TF_NYLAS_API_BASE_URL")
+          nylas_api_key_secret_arn = $(json_string "$TF_NYLAS_API_KEY_SECRET_ARN")
+          nylas_state_secret_arn = $(json_string "$TF_NYLAS_STATE_SECRET_ARN")
+          nylas_google_scopes = $(json_string "$TF_NYLAS_GOOGLE_SCOPES")
+          nylas_microsoft_scopes = $(json_string "$TF_NYLAS_MICROSOFT_SCOPES")
           dev_basic_auth_username = $(json_string "$TF_DEV_BASIC_AUTH_USERNAME")
           dev_basic_auth_password = $(json_string "$TF_DEV_BASIC_AUTH_PASSWORD")
           github_owner = $(json_string "$TF_GITHUB_OWNER")
@@ -203,6 +227,8 @@ jobs:
           {
             echo "APP_URL=$(terraform output -raw app_url)"
             echo "API_URL=$(terraform output -raw api_url)"
+            echo "NYLAS_CALLBACK_URL=$(terraform output -raw nylas_callback_url)"
+            echo "NYLAS_FRONTEND_REDIRECT_URL=$(terraform output -raw nylas_frontend_redirect_url)"
             echo "COGNITO_REGION=$(terraform output -raw cognito_region)"
             echo "COGNITO_USER_POOL_ID=$(terraform output -raw cognito_user_pool_id)"
             echo "COGNITO_CLIENT_ID=$(terraform output -raw cognito_spa_client_id)"
@@ -228,3 +254,16 @@ jobs:
         run: |
           aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}" --delete
           aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths "/*"
+
+      - name: Deployment summary
+        run: |
+          {
+            echo "## MangoRTS dev deploy"
+            echo ""
+            echo "- App: ${APP_URL}"
+            echo "- API: ${API_URL}"
+            echo "- Nylas callback URL: ${NYLAS_CALLBACK_URL}"
+            echo "- Nylas frontend redirect URL: ${NYLAS_FRONTEND_REDIRECT_URL}"
+            echo ""
+            echo "Register the Nylas callback URL in the Nylas dashboard for the same app/client ID used by TF_NYLAS_CLIENT_ID."
+          } >> "$GITHUB_STEP_SUMMARY"

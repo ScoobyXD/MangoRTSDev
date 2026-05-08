@@ -21,7 +21,8 @@ This phase creates ECR, Cognito, S3, CloudFront, ALB, Route 53, ACM, WAF, IAM/OI
 
 8. Save the `github_deploy_role_arn` output as GitHub secret `AWS_DEV_DEPLOY_ROLE_ARN`.
 9. Set GitHub variables/secrets used by `.github/workflows/deploy-dev.yml`, including state backend values, Terraform inputs, `AWS_REGION`, and `DEV_BASIC_AUTH_PASSWORD`.
-10. Apply database schema/migrations from a machine that can reach the DB, then seed the dev company membership after the first Cognito user exists.
+10. To enable Communications, store the Nylas API key and OAuth state secret in AWS Secrets Manager, then set the GitHub Nylas variables listed below.
+11. Apply database schema/migrations from a machine that can reach the DB, then seed the dev company membership after the first Cognito user exists.
 
 ## GitHub Configuration
 
@@ -52,6 +53,38 @@ For ECS networking, use one of these:
 
 Optional variables have workflow defaults: `TF_STATE_KEY`, `TF_STATE_REGION`, `TF_APP_SUBDOMAIN`, `TF_API_SUBDOMAIN`, `TF_ORIGIN_SUBDOMAIN`, `TF_EXISTING_DB_PORT`, `TF_PRIVATE_SUBNET_IDS`, `TF_CREATE_PRIVATE_ECS_SUBNETS`, `TF_ECS_PRIVATE_SUBNET_CIDRS`, `TF_ECS_NAT_GATEWAY_MODE`, `TF_DEV_BASIC_AUTH_USERNAME`, `TF_GITHUB_OWNER`, `TF_GITHUB_REPOSITORY`, and `TF_GITHUB_BRANCH`.
 
+Nylas Communications variables:
+
+- `TF_NYLAS_CLIENT_ID`: Nylas application ID/client ID.
+- `TF_NYLAS_API_KEY_SECRET_ARN`: AWS Secrets Manager ARN containing the Nylas API key.
+- `TF_NYLAS_STATE_SECRET_ARN`: AWS Secrets Manager ARN containing a long random state-signing secret.
+- `TF_NYLAS_API_BASE_URL`: optional, defaults to `https://api.us.nylas.com`; use `https://api.eu.nylas.com` only for EU Nylas apps.
+- `TF_NYLAS_GOOGLE_SCOPES`: optional, defaults to the fully qualified Gmail scopes required by Mango.
+- `TF_NYLAS_MICROSOFT_SCOPES`: optional, defaults to `offline_access User.Read Mail.ReadWrite Mail.Send`.
+
+Store Nylas secret values in AWS Secrets Manager, not GitHub secrets or Terraform variables:
+
+```powershell
+aws secretsmanager create-secret `
+  --region $env:AWS_REGION `
+  --name mangorts/dev/nylas-api-key `
+  --secret-string "<nylas-api-key>"
+
+$stateBytes = New-Object byte[] 48
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($stateBytes)
+$stateSecret = [Convert]::ToBase64String($stateBytes)
+aws secretsmanager create-secret `
+  --region $env:AWS_REGION `
+  --name mangorts/dev/nylas-state-secret `
+  --secret-string $stateSecret
+```
+
+After the workflow runs, register the `nylas_callback_url` Terraform output in the Nylas dashboard for the same Nylas app:
+
+```text
+https://api.dev.<domain>/nylas/oauth/callback
+```
+
 ## Normal Deploy
 
 The workflow `.github/workflows/deploy-dev.yml` currently runs manually through `workflow_dispatch` only. This is intentional while the first AWS dev deploy is being stabilized. Re-enable `push` deploys only after repeated dev deploys are boring and reliable.
@@ -69,6 +102,7 @@ It performs:
 9. Build the frontend with Cognito and API env vars.
 10. Sync `frontend/dist` to S3.
 11. Invalidate CloudFront.
+12. Print the app, API, and Nylas callback URLs into the GitHub step summary.
 
 ## Current Dev Shortcuts
 
@@ -92,6 +126,14 @@ curl -i https://api.dev.<domain>/healthz
 ```
 
 Both URLs are protected by temporary CloudFront basic auth. API calls to `/v1/*` also require Cognito Bearer tokens.
+
+For Communications, confirm the callback route is forwarded to the backend and not served by S3:
+
+```powershell
+curl -i https://api.dev.<domain>/nylas/oauth/callback
+```
+
+The expected result without OAuth query parameters is a redirect back to the frontend with a `nylas_error` query parameter, not a CloudFront/S3 404.
 
 ## Rollback
 

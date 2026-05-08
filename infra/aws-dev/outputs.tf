@@ -8,6 +8,16 @@ output "api_url" {
   value       = "https://${local.api_domain}"
 }
 
+output "nylas_callback_url" {
+  description = "Nylas Hosted OAuth callback URL to register in the Nylas dashboard."
+  value       = local.nylas_redirect_uri
+}
+
+output "nylas_frontend_redirect_url" {
+  description = "Frontend URL the backend redirects to after a successful Nylas OAuth callback."
+  value       = local.nylas_frontend_redirect_url
+}
+
 output "frontend_bucket" {
   description = "Private S3 bucket for frontend build artifacts."
   value       = aws_s3_bucket.frontend.bucket

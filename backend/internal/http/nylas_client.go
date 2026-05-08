@@ -58,16 +58,61 @@ func (c NylasConfig) ScopesForProvider(provider string) []string {
 	switch normalizeCommunicationsProvider(provider) {
 	case "google":
 		if len(c.GoogleScopes) > 0 {
-			return c.GoogleScopes
+			return normalizeNylasProviderScopes("google", c.GoogleScopes)
 		}
-		return []string{"openid", "userinfo.email", "gmail.modify", "gmail.send", "gmail.labels"}
+		return []string{
+			"https://www.googleapis.com/auth/userinfo.email",
+			"https://www.googleapis.com/auth/gmail.modify",
+			"https://www.googleapis.com/auth/gmail.send",
+			"https://www.googleapis.com/auth/gmail.labels",
+		}
 	case "microsoft":
 		if len(c.MicrosoftScopes) > 0 {
-			return c.MicrosoftScopes
+			return normalizeNylasProviderScopes("microsoft", c.MicrosoftScopes)
 		}
 		return []string{"offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send"}
 	default:
 		return nil
+	}
+}
+
+func normalizeNylasProviderScopes(provider string, scopes []string) []string {
+	provider = normalizeCommunicationsProvider(provider)
+	out := make([]string, 0, len(scopes))
+	seen := make(map[string]struct{}, len(scopes))
+	for _, scope := range scopes {
+		scope = strings.TrimSpace(scope)
+		if scope == "" {
+			continue
+		}
+		if provider == "google" {
+			scope = normalizeGoogleScope(scope)
+			if scope == "" {
+				continue
+			}
+		}
+		if _, ok := seen[scope]; ok {
+			continue
+		}
+		seen[scope] = struct{}{}
+		out = append(out, scope)
+	}
+	return out
+}
+
+func normalizeGoogleScope(scope string) string {
+	const googleScopePrefix = "https://www.googleapis.com/auth/"
+	switch {
+	case scope == "openid":
+		return ""
+	case strings.HasPrefix(scope, "https://"):
+		return scope
+	case strings.HasPrefix(scope, "/"):
+		return googleScopePrefix + strings.TrimPrefix(scope, "/")
+	case strings.HasPrefix(scope, "gmail."), strings.HasPrefix(scope, "userinfo."):
+		return googleScopePrefix + scope
+	default:
+		return scope
 	}
 }
 
@@ -190,12 +235,14 @@ func (c *NylasRESTClient) ExchangeCode(ctx context.Context, code, redirectURI st
 		GrantType    string `json:"grant_type"`
 		Code         string `json:"code"`
 		RedirectURI  string `json:"redirect_uri"`
+		CodeVerifier string `json:"code_verifier"`
 	}
 	payload.ClientID = c.clientID
 	payload.ClientSecret = c.apiKey
 	payload.GrantType = "authorization_code"
 	payload.Code = strings.TrimSpace(code)
 	payload.RedirectURI = strings.TrimSpace(redirectURI)
+	payload.CodeVerifier = "nylas"
 
 	var response struct {
 		NylasGrant
