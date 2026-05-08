@@ -53,6 +53,7 @@ export type CurrentUserResponse = {
 
 const TOKEN_KEY = "mangorts:cognito-token-v2";
 const COGNITO_PASSWORD_RESET_SECONDS = 60 * 60;
+const PUBLIC_AUTH_PATHS = new Set(["/v1/invitations/validate", "/v1/password-resets/request"]);
 
 export function bootstrapAuth(): Promise<void> {
   return Promise.resolve();
@@ -224,12 +225,19 @@ export async function apiFetchJSON<T>(path: string, init?: RequestInit): Promise
   if (init?.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const response = await fetch(`${config.apiBase}${path}`, { ...init, headers });
+  const response = await fetch(apiRequestURL(config, path), { ...init, headers });
   if (!response.ok) {
     const text = await response.text();
     throw new Error(apiErrorMessage(response, text));
   }
   return response.json() as Promise<T>;
+}
+
+function apiRequestURL(config: CognitoConfig, path: string): string {
+  if (shouldUseBrowserOriginForPublicAuth(path)) {
+    return `${window.location.origin}${path}`;
+  }
+  return `${config.apiBase}${path}`;
 }
 
 type CognitoAuthResult = {
@@ -438,6 +446,10 @@ function normalizeAwsErrorType(type: string): string {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function shouldUseBrowserOriginForPublicAuth(path: string): boolean {
+  return typeof window !== "undefined" && PUBLIC_AUTH_PATHS.has(path);
 }
 
 function shouldAuthorizeRequest(config: CognitoConfig, input: RequestInfo | URL): boolean {

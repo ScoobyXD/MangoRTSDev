@@ -240,7 +240,9 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         env:
-          VITE_API_BASE_URL: ${{ env.API_URL }}
+          # Keep browser API calls on the app origin so public auth endpoints can
+          # pass the dev CloudFront Basic Auth gate before a Cognito token exists.
+          VITE_API_BASE_URL: ${{ env.APP_URL }}
           VITE_AUTH_MODE: cognito
           VITE_COGNITO_REGION: ${{ env.COGNITO_REGION }}
           VITE_COGNITO_USER_POOL_ID: ${{ env.COGNITO_USER_POOL_ID }}
