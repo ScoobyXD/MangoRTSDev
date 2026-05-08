@@ -42,3 +42,19 @@ func invitationTokenHash(token string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(token)))
 	return hex.EncodeToString(sum[:])
 }
+
+func invitationAvailabilityError(invitation domain.Invitation, now time.Time) error {
+	switch invitation.Status {
+	case domain.InvitationStatusPending:
+		if now.UTC().After(invitation.ExpiresTimestamp) {
+			return ErrInvitationExpired
+		}
+		return nil
+	case domain.InvitationStatusAccepted:
+		return ErrInvitationAlreadyAccepted
+	case domain.InvitationStatusRevoked:
+		return ErrInvitationReplaced
+	default:
+		return ErrInvitationBadToken
+	}
+}

@@ -51,6 +51,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/companies", s.handleCompanies)
 	mux.HandleFunc("/v1/companies/", s.handleCompanySubresource)
 	mux.HandleFunc("/v1/invitations", s.handleInvitations)
+	mux.HandleFunc("/v1/invitations/validate", s.handleInvitationValidate)
 	mux.HandleFunc("/v1/invitations/accept", s.handleInvitationAccept)
 	mux.HandleFunc("/v1/password-resets/request", s.handlePasswordResetRequest)
 	mux.HandleFunc("/v1/nodes", s.handleNodes)

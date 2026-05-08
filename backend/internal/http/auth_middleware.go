@@ -46,6 +46,11 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
+		if isClaimsOnlyAuthEndpoint(r.URL.Path) {
+			ctx := context.WithValue(r.Context(), authClaimsContextKey{}, claims)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
 		user, err := s.repo.UpsertAuthUser(claims.Subject, claims.Email, claims.Name)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_record_authenticated_user")
@@ -94,7 +99,16 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 
 func isPublicAuthEndpoint(path string) bool {
 	switch path {
-	case "/v1/password-resets/request":
+	case "/v1/password-resets/request", "/v1/invitations/validate":
+		return true
+	default:
+		return false
+	}
+}
+
+func isClaimsOnlyAuthEndpoint(path string) bool {
+	switch path {
+	case "/v1/invitations/accept":
 		return true
 	default:
 		return false

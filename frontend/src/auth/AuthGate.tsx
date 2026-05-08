@@ -4,6 +4,7 @@ import { getActiveCompanyID, setActiveCompanyID } from "./currentCompany";
 import {
   acceptInvitation,
   apiFetchJSON,
+  changePassword,
   completeNewPassword,
   fetchCurrentUser,
   formatAuthError,
@@ -13,6 +14,7 @@ import {
   loginWithPassword,
   logout,
   resetPassword,
+  validateInvitationToken,
   type CurrentUserResponse,
   type LoginResult,
 } from "./cognitoAuth";
@@ -142,8 +144,8 @@ export default function AuthGate() {
     return <LoginPage onChallenge={setPendingChallenge} onAuthenticated={loadMe} onNavigate={navigate} />;
   }
 
-  if (normalizedPath === "/admin/users") {
-    return <AdminUsersPage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} />;
+  if (normalizedPath === "/settings" || normalizedPath === "/admin/users") {
+    return <SettingsPage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} />;
   }
 
   return (
@@ -178,8 +180,12 @@ function formatInviteError(error: unknown): string {
   return formatAuthError(error, "Invite failed");
 }
 
-function canManageAnyCompany(me: CurrentUserResponse): boolean {
-  return me.is_dev_admin || me.memberships.some((item) => item.role === "company_admin");
+function invitePasswordError(error: unknown): Error {
+  const message = error instanceof Error ? error.message.trim() : "";
+  if (message === "Incorrect email or password.") {
+    return new Error("The temporary or current password is incorrect for that invited email.");
+  }
+  return error instanceof Error ? error : new Error("The temporary password check failed.");
 }
 
 function companyName(company?: Company | null): string {
@@ -253,11 +259,16 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
           if (!displayName.trim()) {
             throw new Error("Enter your name.");
           }
+          const invitation = await validateInvitationToken(token);
+          const invitedEmail = normalizeEmailInput(invitation.email);
           if (hasStoredToken()) {
             onChallenge(null);
             setPasswordStepComplete(true);
           } else {
             if (pendingChallenge) {
+              if (invitedEmail && normalizeEmailInput(pendingChallenge.username) !== invitedEmail) {
+                throw new Error("This Mango invite token belongs to a different email address.");
+              }
               if (!newPassword.trim()) {
                 throw new Error("Enter a new password.");
               }
@@ -269,7 +280,15 @@ function AcceptInvitePage({ pendingChallenge, onChallenge, onAuthenticated, onNa
               if (!temporaryPassword.trim()) {
                 throw new Error("Enter the Cognito temporary password from the invite email, or your current password if you already changed it.");
               }
-              const result = await loginWithPassword(email, temporaryPassword);
+              if (invitedEmail && normalizeEmailInput(email) !== invitedEmail) {
+                throw new Error("This Mango invite token belongs to a different email address.");
+              }
+              let result: LoginResult;
+              try {
+                result = await loginWithPassword(email, temporaryPassword);
+              } catch (passwordError) {
+                throw invitePasswordError(passwordError);
+              }
               if (result.status === "new_password_required") {
                 if (!newPassword.trim()) {
                   throw new Error("Enter a new password.");
@@ -364,13 +383,13 @@ function ForgotPasswordPage({ onNavigate, initialCodeEntryOpen = false }: { onNa
           <button style={buttonStyle} disabled={busy}>{busy ? "Submitting" : "Submit"}</button>
         </form>
       )}
-      {success && <div style={successMessageStyle}><span aria-hidden="true">✓</span><span>{success}</span></div>}
+      {success && <div style={successMessageStyle}>{success}</div>}
       <button style={linkButtonStyle} onClick={() => onNavigate("/login")}>Back to login</button>
     </AuthPanel>
   );
 }
 
-function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; onNavigate: (path: string) => void; onLogout: () => void }) {
+function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; onNavigate: (path: string) => void; onLogout: () => void }) {
   const membershipOptions = useMemo<CompanyOption[]>(
     () => me.memberships.map((item) => ({ company_id: item.company_id, name: item.company_name || "Company", role: item.role })),
     [me],
@@ -380,18 +399,27 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
     return [...createdCompanies, ...membershipOptions.filter((item) => !createdCompanies.some((company) => company.company_id === item.company_id))];
   }, [createdCompanies, membershipOptions]);
   const [companyID, setCompanyID] = useState(companyOptions[0]?.company_id ?? getActiveCompanyID());
-  const selectedCompany = companyOptions.find((company) => company.company_id === companyID) ?? companyOptions[0] ?? null;
-  const canManageSelectedCompany = me.is_dev_admin || selectedCompany?.role === "company_admin";
+  const selectedCompany = companyOptions.find((company) => company.company_id === companyID) ?? null;
+  const canManageSelectedCompany = Boolean(companyID) && (me.is_dev_admin || selectedCompany?.role === "company_admin");
   const [users, setUsers] = useState<CompanyUser[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("company_user");
   const [inviteToken, setInviteToken] = useState("");
   const [inviteMessage, setInviteMessage] = useState("");
   const [newCompanyName, setNewCompanyName] = useState("");
+  const [createdCompanyNotice, setCreatedCompanyNotice] = useState<Company | null>(null);
+  const [companyBusy, setCompanyBusy] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newSettingsPassword, setNewSettingsPassword] = useState("");
+  const [confirmSettingsPassword, setConfirmSettingsPassword] = useState("");
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordBusy, setPasswordBusy] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState<CompanyUser | null>(null);
   const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [error, setError] = useState("");
+  const activeCompanyLabel = selectedCompany ? companyName(selectedCompany) : companyID ? "Manual company" : "No company selected";
 
   const load = useCallback(async () => {
     if (!companyID || !canManageSelectedCompany) {
@@ -408,55 +436,75 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
   }, [canManageSelectedCompany, companyID]);
 
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { if (selectedCompany && selectedCompany.company_id !== companyID) setCompanyID(selectedCompany.company_id); }, [companyID, selectedCompany]);
   useEffect(() => { if (companyID) setActiveCompanyID(companyID); }, [companyID]);
 
   return (
     <div style={{ minHeight: "100vh", background: "#f7fffe", color: "#041d22", fontFamily: "'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace", padding: 18 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <h1 style={{ margin: 0, fontSize: 18 }}>{canManageAnyCompany(me) ? "Users" : "Company"}</h1>
+        <h1 style={{ margin: 0, fontSize: 18 }}>Settings</h1>
         <div style={{ display: "flex", gap: 8 }}>
           <button style={smallButtonStyle} onClick={() => onNavigate("/")}>App</button>
           <button style={smallButtonStyle} onClick={onLogout}>Logout</button>
         </div>
       </div>
       {error && <div style={{ color: "#9c1b1b", marginBottom: 10 }}>{error}</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
-        <section style={sectionStyle}>
+      <div style={settingsTopRowStyle}>
+        <section style={{ ...sectionStyle, flex: "1 1 280px" }}>
           <h2 style={sectionTitleStyle}>Company</h2>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 800 }}>{companyName(selectedCompany)}</div>
+            <div style={{ fontSize: 15, fontWeight: 800 }}>{activeCompanyLabel}</div>
+            {companyID && <div style={{ fontSize: 11, overflowWrap: "anywhere" }}>UUID: {companyID}</div>}
           </div>
-          {companyOptions.length > 1 && (
-            <select style={inputStyle} value={companyID} onChange={(event) => setCompanyID(event.target.value)}>
+          {(companyOptions.length > 1 || me.is_dev_admin) && (
+            <select style={inputStyle} value={selectedCompany?.company_id ?? ""} onChange={(event) => setCompanyID(event.target.value)}>
+              {me.is_dev_admin && <option value="">Manual company UUID</option>}
               {companyOptions.map((company) => <option key={company.company_id} value={company.company_id}>{companyName(company)}</option>)}
             </select>
           )}
           {me.is_dev_admin && (
+            <input
+              style={inputStyle}
+              value={companyID}
+              onChange={(event) => setCompanyID(event.target.value.trim())}
+              placeholder="Target company UUID"
+              autoComplete="off"
+            />
+          )}
+          {me.is_dev_admin && (
             <form style={{ display: "grid", gap: 8 }} onSubmit={async (event) => {
               event.preventDefault();
-              const company = await apiFetchJSON<Company>("/v1/companies", { method: "POST", body: JSON.stringify({ name: newCompanyName }) });
-              setCreatedCompanies((prev) => [...prev, company]);
-              setCompanyID(company.company_id);
-              setNewCompanyName("");
+              setError("");
+              setCreatedCompanyNotice(null);
+              if (!newCompanyName.trim()) {
+                setError("Company name required");
+                return;
+              }
+              setCompanyBusy(true);
+              try {
+                const company = await apiFetchJSON<Company>("/v1/companies", { method: "POST", body: JSON.stringify({ name: newCompanyName }) });
+                setCreatedCompanies((prev) => [company, ...prev.filter((item) => item.company_id !== company.company_id)]);
+                setCompanyID(company.company_id);
+                setCreatedCompanyNotice(company);
+                setNewCompanyName("");
+              } catch (companyError) {
+                console.error("Company creation failed", companyError);
+                setError(formatAuthError(companyError, "Company creation failed"));
+              } finally {
+                setCompanyBusy(false);
+              }
             }}>
               <input style={inputStyle} value={newCompanyName} onChange={(event) => setNewCompanyName(event.target.value)} placeholder="New company name" />
-              <button style={buttonStyle}>Create company</button>
+              <button style={buttonStyle} disabled={companyBusy}>{companyBusy ? "Creating" : "Create company"}</button>
             </form>
           )}
+          {createdCompanyNotice && (
+            <div style={successBoxStyle}>
+              <span>Company created: {createdCompanyNotice.name}</span>
+              <span style={{ overflowWrap: "anywhere" }}>UUID: {createdCompanyNotice.company_id}</span>
+            </div>
+          )}
         </section>
-        <section style={sectionStyle}>
-          <h2 style={sectionTitleStyle}>User Profile</h2>
-          <div style={profileGridStyle}>
-            <span style={profileLabelStyle}>Name</span>
-            <span style={profileValueStyle}>{me.user.display_name || "No name set"}</span>
-            <span style={profileLabelStyle}>Email</span>
-            <span style={profileValueStyle}>{me.user.email}</span>
-            <span style={profileLabelStyle}>Role</span>
-            <span style={profileValueStyle}>{selectedUserRole(me, selectedCompany)}</span>
-          </div>
-        </section>
-        {canManageSelectedCompany && <section style={sectionStyle}>
+        {canManageSelectedCompany && <section style={{ ...sectionStyle, flex: "1 1 280px" }}>
           <h2 style={sectionTitleStyle}>Invite</h2>
           <form style={{ display: "grid", gap: 8 }} onSubmit={async (event) => {
             event.preventDefault();
@@ -466,6 +514,10 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
             setInviteToken("");
             if (!normalizedInviteEmail) {
               setError("Email required");
+              return;
+            }
+            if (!companyID) {
+              setError("Company UUID required");
               return;
             }
             try {
@@ -492,6 +544,50 @@ function AdminUsersPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse;
           {inviteToken && <div style={{ overflowWrap: "anywhere", fontSize: 12 }}>Invite token: {inviteToken}</div>}
           {inviteMessage && <div style={{ fontSize: 12 }}>{inviteMessage}</div>}
         </section>}
+        <section style={{ ...sectionStyle, flex: me.is_dev_admin ? "0 1 360px" : "1 1 280px", marginLeft: me.is_dev_admin ? "auto" : undefined }}>
+          <h2 style={sectionTitleStyle}>User Profile</h2>
+          <div style={profileGridStyle}>
+            <span style={profileLabelStyle}>Name</span>
+            <span style={profileValueStyle}>{me.user.display_name || "No name set"}</span>
+            <span style={profileLabelStyle}>Email</span>
+            <span style={profileValueStyle}>{me.user.email}</span>
+            <span style={profileLabelStyle}>Role</span>
+            <span style={profileValueStyle}>{selectedUserRole(me, selectedCompany)}</span>
+          </div>
+          <form style={{ display: "grid", gap: 8, borderTop: "1px solid rgba(12, 67, 74, 0.16)", paddingTop: 10 }} onSubmit={async (event) => {
+            event.preventDefault();
+            setPasswordError("");
+            setPasswordMessage("");
+            if (!currentPassword || !newSettingsPassword) {
+              setPasswordError("Enter your current password and a new password.");
+              return;
+            }
+            if (newSettingsPassword !== confirmSettingsPassword) {
+              setPasswordError("New password and confirmation do not match.");
+              return;
+            }
+            setPasswordBusy(true);
+            try {
+              await changePassword(currentPassword, newSettingsPassword);
+              setPasswordMessage("Password changed.");
+              setCurrentPassword("");
+              setNewSettingsPassword("");
+              setConfirmSettingsPassword("");
+            } catch (changeError) {
+              console.error("Password change failed", changeError);
+              setPasswordError(formatAuthError(changeError, "Password change failed"));
+            } finally {
+              setPasswordBusy(false);
+            }
+          }}>
+            <input style={inputStyle} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} type="password" placeholder="Current password" autoComplete="current-password" />
+            <input style={inputStyle} value={newSettingsPassword} onChange={(event) => setNewSettingsPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />
+            <input style={inputStyle} value={confirmSettingsPassword} onChange={(event) => setConfirmSettingsPassword(event.target.value)} type="password" placeholder="Confirm new password" autoComplete="new-password" />
+            <button style={buttonStyle} disabled={passwordBusy}>{passwordBusy ? "Changing" : "Change password"}</button>
+          </form>
+          {passwordError && <div style={{ color: "#9c1b1b", fontSize: 12 }}>{passwordError}</div>}
+          {passwordMessage && <div style={successMessageStyle}>{passwordMessage}</div>}
+        </section>
       </div>
       {canManageSelectedCompany && <section style={{ ...sectionStyle, marginTop: 14 }}>
         <h2 style={sectionTitleStyle}>Company Users</h2>
@@ -585,11 +681,10 @@ function AuthPanel({ title, error, children }: { title: string; error?: string; 
 }
 
 function AccountBar({ me, onNavigate, onLogout }: { me: CurrentUserResponse; onNavigate: (path: string) => void; onLogout: () => void }) {
-  const manager = canManageAnyCompany(me);
   return (
     <div style={{ position: "fixed", top: 8, right: 8, zIndex: 200, display: "flex", alignItems: "center", gap: 6, padding: "5px 6px", background: "rgba(255,255,255,0.92)", border: "1px solid rgba(12, 67, 74, 0.28)", borderRadius: 8, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>
       <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{me.user.email}</span>
-      <button style={smallButtonStyle} onClick={() => onNavigate("/admin/users")}>{manager ? "Users" : "Company"}</button>
+      <button style={smallButtonStyle} onClick={() => onNavigate("/settings")}>Settings</button>
       <button style={smallButtonStyle} onClick={onLogout}>Logout</button>
     </div>
   );
@@ -629,6 +724,13 @@ const sectionStyle: React.CSSProperties = {
   borderRadius: 8,
 };
 
+const settingsTopRowStyle: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 14,
+  alignItems: "stretch",
+};
+
 const sectionTitleStyle: React.CSSProperties = {
   margin: 0,
   fontSize: 13,
@@ -641,6 +743,14 @@ const successMessageStyle: React.CSSProperties = {
   gap: 8,
   color: "#0f7b3f",
   fontSize: 13,
+  fontWeight: 800,
+};
+
+const successBoxStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 4,
+  color: "#0f7b3f",
+  fontSize: 12,
   fontWeight: 800,
 };
 

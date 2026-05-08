@@ -203,8 +203,20 @@ func TestInvitationAcceptRejectsOlderTokenForSameCompanyEmail(t *testing.T) {
 	firstAcceptReq.Header.Set("Authorization", inviteeToken)
 	firstAcceptRes := httptest.NewRecorder()
 	handler.ServeHTTP(firstAcceptRes, firstAcceptReq)
-	if firstAcceptRes.Code != http.StatusNotFound {
-		t.Fatalf("first accept status = %d, want %d, body=%s", firstAcceptRes.Code, http.StatusNotFound, strings.TrimSpace(firstAcceptRes.Body.String()))
+	if firstAcceptRes.Code != http.StatusConflict {
+		t.Fatalf("first accept status = %d, want %d, body=%s", firstAcceptRes.Code, http.StatusConflict, strings.TrimSpace(firstAcceptRes.Body.String()))
+	}
+	var firstAcceptPayload struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(firstAcceptRes.Body).Decode(&firstAcceptPayload); err != nil {
+		t.Fatal(err)
+	}
+	if firstAcceptPayload.Error != "invitation_replaced" {
+		t.Fatalf("first accept error = %q, want invitation_replaced", firstAcceptPayload.Error)
+	}
+	if _, err := repo.GetAuthUser(inviteeSubject); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("invitee user after rejected old token error = %v, want ErrNotFound", err)
 	}
 
 	secondAcceptReq := httptest.NewRequest(http.MethodPost, "/v1/invitations/accept", strings.NewReader(`{"token":"`+secondToken+`","display_name":"Invitee User"}`))
@@ -213,6 +225,30 @@ func TestInvitationAcceptRejectsOlderTokenForSameCompanyEmail(t *testing.T) {
 	handler.ServeHTTP(secondAcceptRes, secondAcceptReq)
 	if secondAcceptRes.Code != http.StatusOK {
 		t.Fatalf("second accept status = %d, want %d, body=%s", secondAcceptRes.Code, http.StatusOK, strings.TrimSpace(secondAcceptRes.Body.String()))
+	}
+}
+
+func TestInvitationValidateRejectsBadTokenWithoutAuth(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	handler := NewServer(repo).Routes()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/invitations/validate", strings.NewReader(`{"token":"not-a-real-token"}`))
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("validate status = %d, want %d, body=%s", res.Code, http.StatusNotFound, strings.TrimSpace(res.Body.String()))
+	}
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error != "invitation_bad_token" {
+		t.Fatalf("validate error = %q, want invitation_bad_token", payload.Error)
 	}
 }
 

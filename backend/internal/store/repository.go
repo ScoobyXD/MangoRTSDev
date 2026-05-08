@@ -8,9 +8,14 @@ import (
 )
 
 var (
-	ErrNotFound      = errors.New("not found")
-	ErrInvalid       = errors.New("invalid")
-	ErrAlreadyExists = errors.New("already exists")
+	ErrNotFound                  = errors.New("not found")
+	ErrInvalid                   = errors.New("invalid")
+	ErrAlreadyExists             = errors.New("already exists")
+	ErrInvitationBadToken        = errors.New("invitation bad token")
+	ErrInvitationExpired         = errors.New("invitation expired")
+	ErrInvitationAlreadyAccepted = errors.New("invitation already accepted")
+	ErrInvitationReplaced        = errors.New("invitation replaced")
+	ErrInvitationEmailMismatch   = errors.New("invitation email mismatch")
 )
 
 type Repository interface {
@@ -24,6 +29,7 @@ type Repository interface {
 	GetCompanyUser(companyID, userID string) (domain.CompanyUser, error)
 	DeleteCompanyUser(companyID, userID string) (domain.CompanyUser, error)
 	CreateInvitation(input CreateInvitationInput) (domain.Invitation, error)
+	ValidateInvitationToken(token string) (domain.Invitation, error)
 	AcceptInvitation(token, cognitoSubject, email, displayName string) (domain.Invitation, error)
 	CreateNode(companyID, title string) (domain.Node, error)
 	UpdateNode(input UpdateNodeInput) (domain.Node, error)

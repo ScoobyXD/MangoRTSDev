@@ -196,12 +196,32 @@ func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleInvitationValidate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	invitation, err := s.repo.ValidateInvitationToken(req.Token)
+	if err != nil {
+		writeInvitationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"invitation": invitation})
+}
+
 func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	actor, ok := authenticatedActor(r)
+	claims, ok := authenticatedClaims(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -218,20 +238,19 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "display_name_required")
 		return
 	}
-	email := actor.User.Email
-	if email == "" {
-		email = actor.Claims.Email
-	}
-	invitation, err := s.repo.AcceptInvitation(req.Token, actor.Claims.Subject, email, req.DisplayName)
-	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusForbidden, "invitation_email_mismatch")
+	if strings.TrimSpace(req.Token) == "" {
+		writeError(w, http.StatusBadRequest, "invitation_token_required")
 		return
 	}
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "invitation_not_found")
+	if strings.TrimSpace(claims.Email) == "" {
+		writeError(w, http.StatusBadRequest, "authenticated_email_required")
 		return
 	}
+	invitation, err := s.repo.AcceptInvitation(req.Token, claims.Subject, claims.Email, req.DisplayName)
 	if err != nil {
+		if writeInvitationError(w, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed_to_accept_invitation")
 		return
 	}
@@ -247,6 +266,26 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 		"invitation":                invitation,
 		"confirmation_email_status": emailStatus,
 	})
+}
+
+func writeInvitationError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, store.ErrInvalid):
+		writeError(w, http.StatusBadRequest, "invitation_token_required")
+	case errors.Is(err, store.ErrInvitationBadToken):
+		writeError(w, http.StatusNotFound, "invitation_bad_token")
+	case errors.Is(err, store.ErrInvitationExpired):
+		writeError(w, http.StatusGone, "invitation_expired")
+	case errors.Is(err, store.ErrInvitationAlreadyAccepted):
+		writeError(w, http.StatusConflict, "invitation_already_accepted")
+	case errors.Is(err, store.ErrInvitationReplaced):
+		writeError(w, http.StatusConflict, "invitation_replaced")
+	case errors.Is(err, store.ErrInvitationEmailMismatch):
+		writeError(w, http.StatusForbidden, "invitation_email_mismatch")
+	default:
+		return false
+	}
+	return true
 }
 
 func (s *Server) handlePasswordResetRequest(w http.ResponseWriter, r *http.Request) {
