@@ -1,6 +1,7 @@
 export const EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES = 20;
 export const EDITOR_RICH_TEXT_PREFIX = "<!-- mango-editor-html-v1 -->";
 export const EDITOR_LINK_COLOR = "rgb(0, 86, 214)";
+export const EDITOR_TERMINAL_BREAK_ATTRIBUTE = "data-mango-editor-terminal-break";
 
 const URL_PATTERN = /\b((?:https?:\/\/|www\.)[^\s<>"']+)/gi;
 const TRAILING_URL_PUNCTUATION = /[),.;:!?]+$/;
@@ -87,7 +88,11 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
   const element = source as HTMLElement;
   const tagName = element.tagName.toLowerCase();
   if (tagName === "br") {
-    target.appendChild(ownerDocument.createElement("br"));
+    const br = ownerDocument.createElement("br");
+    if (element.getAttribute(EDITOR_TERMINAL_BREAK_ATTRIBUTE) === "true") {
+      br.setAttribute(EDITOR_TERMINAL_BREAK_ATTRIBUTE, "true");
+    }
+    target.appendChild(br);
     return;
   }
 

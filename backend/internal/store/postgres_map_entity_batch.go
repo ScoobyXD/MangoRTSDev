@@ -103,14 +103,18 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 		if err != nil {
 			return MapEntityBatchResult{}, err
 		}
-		for _, mapping := range result.EntityMappings {
+		for index, mapping := range result.EntityMappings {
+			itemPosition := position
+			if index < len(input.Items) && input.Items[index].Position > 0 {
+				itemPosition = input.Items[index].Position
+			}
 			var item domain.CompanyExplorerFolderItem
 			if err := tx.QueryRowContext(ctx,
 				`insert into company_explorer_folder_items
 				 (company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp)
 				 values ($1, $2, $3, $4, $5, now(), now())
 				 returning company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp`,
-				input.CompanyID, input.FolderID, input.EntityKind, mapping.EntityID, position,
+				input.CompanyID, input.FolderID, input.EntityKind, mapping.EntityID, itemPosition,
 			).Scan(
 				&item.CompanyID,
 				&item.FolderID,
@@ -122,7 +126,11 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 			); err != nil {
 				return MapEntityBatchResult{}, err
 			}
-			position += 1000
+			if itemPosition >= position {
+				position = itemPosition + 1000
+			} else {
+				position += 1000
+			}
 			result.FolderItems = append(result.FolderItems, item)
 		}
 	}

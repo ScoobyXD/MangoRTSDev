@@ -101,6 +101,7 @@ type MapEntityBatchItemInput struct {
 	Title    string
 	X        float64
 	Y        float64
+	Position int
 }
 
 type MapEntityBatchRelationshipInput struct {

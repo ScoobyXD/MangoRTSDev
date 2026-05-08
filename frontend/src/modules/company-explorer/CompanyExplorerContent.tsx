@@ -10,6 +10,7 @@ import { listKanbanBoards } from "../kanban/kanbanApi";
 import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntityDragItem, type KanbanBoard, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
+import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchResults, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
 import { CompanyExplorerTree } from "./CompanyExplorerTree";
@@ -59,6 +60,12 @@ type CompanyExplorerFolderItemAssignment = {
 };
 
 type CompanyExplorerFolderItemsBatchResponse = {
+  folder_items?: CompanyExplorerFolderItem[];
+};
+
+type CompanyExplorerMapEntityBatchResponse = {
+  nodes?: NodeRecord[];
+  logic_gates?: LogicGateApiRecord[];
   folder_items?: CompanyExplorerFolderItem[];
 };
 
@@ -591,20 +598,6 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
   }, [apiBase, companyID, folderItems, requestJSON]);
 
-  const assignItemToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerItemType, itemID: string, options: { position?: number; expandTarget?: boolean } = {}) => {
-    return assignItemsToFolders([{
-      folder_id: targetFolderID,
-      item_type: itemType,
-      item_id: itemID,
-      position: options.position,
-    }], { expandTarget: options.expandTarget });
-  }, [assignItemsToFolders]);
-
-  const nextFolderItemPosition = useCallback((folderID: string): number => {
-    const existingRows = treeRows.filter((row) => getExplorerRowContainerID(row) === folderID);
-    return existingRows.reduce((max, row) => Math.max(max, row.position || 0), 0) + TREE_ROW_POSITION_STEP;
-  }, [treeRows]);
-
   const upsertOptimisticFolderItem = useCallback((item: CompanyExplorerFolderItem) => {
     setFolderItems((previous) => {
       const exists = previous.some((row) => row.item_type === item.item_type && row.item_id === item.item_id);
@@ -616,35 +609,39 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
   }, [apiBase, companyID]);
 
-  const createNodeAtFolder = useCallback(async (parentFolderID: string) => {
+  const expandCreatedItemTarget = useCallback((parentFolderID: string) => {
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
+      return next;
+    });
+  }, []);
+
+  const createNodeAtFolder = useCallback(async (parentFolderID: string, position?: number) => {
     setError("");
     try {
-      const node = await requestJSON<NodeRecord>("/v1/nodes", {
-        method: "POST",
-        body: JSON.stringify({ company_id: companyID, title: "new node" }),
+      const response = await createMapEntityBatchCommand<CompanyExplorerMapEntityBatchResponse>({
+        companyID,
+        entityKind: "node",
+        folderID: parentFolderID,
+        items: [{
+          client_id: createMapEntityBatchClientID("explorer-node"),
+          title: "new node",
+          x: 120,
+          y: 120,
+          position,
+        }],
+        requestJSON,
       });
-      if (parentFolderID) {
-        const optimisticItem: CompanyExplorerFolderItem = {
-          company_id: companyID,
-          folder_id: parentFolderID,
-          item_type: "node",
-          item_id: node.node_id,
-          position: nextFolderItemPosition(parentFolderID),
-          created_timestamp: new Date().toISOString(),
-          updated_timestamp: new Date().toISOString(),
-        };
-        upsertOptimisticFolderItem(optimisticItem);
-        void assignItemToFolder(parentFolderID, "node", node.node_id, { position: optimisticItem.position, expandTarget: true });
-      }
-      // Create is API-first, then we patch the shared graph cache so Explorer,
-      // Node Map, and future headless agents converge without a snapshot refetch.
+      const node = response.nodes?.[0];
+      if (!node) throw new Error("node_batch_create_missing_node");
+      for (const item of response.folder_items ?? []) upsertOptimisticFolderItem(item);
       setNodes((previous) => previous.some((item) => item.node_id === node.node_id) ? previous : [...previous, node]);
       upsertNodeRelationshipGraphNode(apiBase, companyID, node);
-      setExpanded((previous) => {
-        const next = new Set(previous);
-        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
-        return next;
-      });
+      if (!parentFolderID && position && position > 0) {
+        setRootRowOrder((previous) => ({ ...previous, [`node-${node.node_id}`]: position }));
+      }
+      expandCreatedItemTarget(parentFolderID);
       lastLocalExplorerSelectionRef.current = { domain: "node", changedAt: Date.now() };
       pendingExplorerSelectionIntentRef.current = "activate";
       setSelectedTreeID(`node-${node.node_id}`);
@@ -656,38 +653,34 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node");
     }
-  }, [apiBase, assignItemToFolder, companyID, nextFolderItemPosition, requestJSON, upsertOptimisticFolderItem]);
+  }, [apiBase, companyID, expandCreatedItemTarget, requestJSON, upsertOptimisticFolderItem]);
 
-  const createLogicGateAtFolder = useCallback(async (parentFolderID: string) => {
+  const createLogicGateAtFolder = useCallback(async (parentFolderID: string, position?: number) => {
     setError("");
     try {
-      const created = await requestJSON<LogicGateApiRecord>("/v1/logic-gates", {
-        method: "POST",
-        body: JSON.stringify({ company_id: companyID, header: "new logic gate" }),
+      const response = await createMapEntityBatchCommand<CompanyExplorerMapEntityBatchResponse>({
+        companyID,
+        entityKind: "logic_gate",
+        folderID: parentFolderID,
+        items: [{
+          client_id: createMapEntityBatchClientID("explorer-logic-gate"),
+          title: "new logic gate",
+          x: 120,
+          y: 120,
+          position,
+        }],
+        requestJSON,
       });
+      const created = response.logic_gates?.[0];
+      if (!created) throw new Error("logic_gate_batch_create_missing_gate");
       const logicGate = toLogicGateCanvasRecord(created);
-      if (parentFolderID) {
-        const optimisticItem: CompanyExplorerFolderItem = {
-          company_id: companyID,
-          folder_id: parentFolderID,
-          item_type: "logic_gate",
-          item_id: logicGate.logic_gate_id,
-          position: nextFolderItemPosition(parentFolderID),
-          created_timestamp: new Date().toISOString(),
-          updated_timestamp: new Date().toISOString(),
-        };
-        upsertOptimisticFolderItem(optimisticItem);
-        void assignItemToFolder(parentFolderID, "logic_gate", logicGate.logic_gate_id, { position: optimisticItem.position, expandTarget: true });
-      }
-      // Same hot-path pattern as nodes: the REST write is canonical, and the
-      // local cache patch keeps linked modules responsive under large workspaces.
+      for (const item of response.folder_items ?? []) upsertOptimisticFolderItem(item);
       setLogicGates((previous) => previous.some((item) => item.logic_gate_id === logicGate.logic_gate_id) ? previous : [...previous, logicGate]);
       upsertLogicGateRelationshipGraphNode(apiBase, companyID, logicGate);
-      setExpanded((previous) => {
-        const next = new Set(previous);
-        next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
-        return next;
-      });
+      if (!parentFolderID && position && position > 0) {
+        setRootRowOrder((previous) => ({ ...previous, [`logic-gate-${logicGate.logic_gate_id}`]: position }));
+      }
+      expandCreatedItemTarget(parentFolderID);
       lastLocalExplorerSelectionRef.current = { domain: "logic_gate", changedAt: Date.now() };
       pendingExplorerSelectionIntentRef.current = "activate";
       setSelectedTreeID(`logic-gate-${logicGate.logic_gate_id}`);
@@ -699,7 +692,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_logic_gate");
     }
-  }, [apiBase, assignItemToFolder, companyID, nextFolderItemPosition, requestJSON, upsertOptimisticFolderItem]);
+  }, [apiBase, companyID, expandCreatedItemTarget, requestJSON, upsertOptimisticFolderItem]);
 
   // Delete through one canonical batch request, then patch local/shared caches
   // once so multi-select deletes do not visibly collapse one row at a time.
@@ -1367,7 +1360,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     });
   }, [linkedLogicMapFrameID, linkedMapFrameID, scope]);
 
-  const getContextCreateFolderPosition = useCallback((row: ExplorerTreeNode | null | undefined, event: React.MouseEvent, folderKind: CompanyExplorerFolderKind): number => {
+  const getContextCreatePosition = useCallback((row: ExplorerTreeNode | null | undefined, event: React.MouseEvent): number => {
     if (!row) return 0;
     if (row.kind === "folder") return 0;
     const targetContainer = getExplorerRowContainerID(row);
@@ -1375,7 +1368,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     const siblingRows = treeRows.filter((candidate) => {
       if (getExplorerRowContainerID(candidate) !== targetContainer) return false;
       const rowKind = getExplorerRowOrderKind(candidate);
-      return rowKind === folderKind || rowKind === "kanban";
+      return Boolean(rowKind);
     });
     const targetIndex = siblingRows.findIndex((candidate) => candidate.id === row.id);
     if (targetIndex < 0) return 0;
@@ -1411,13 +1404,13 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       renameTreeID: row?.id ?? "",
       renameLabel: row?.label ?? "",
       contextKind,
-      createFolderPosition: getContextCreateFolderPosition(row, event, targets.preferredFolderKind),
+      createPosition: getContextCreatePosition(row, event),
       canCreateBothFolderTypes: !contextKind,
       canCreateFolder: true,
       canCreateNode: true,
       canCreateLogicGate: true,
     });
-  }, [focusTreeRow, getContextCreateFolderPosition, getDeleteTargetsForRows, selectTreeRow, selectedTreeIDs, treeRows]);
+  }, [focusTreeRow, getContextCreatePosition, getDeleteTargetsForRows, selectTreeRow, selectedTreeIDs, treeRows]);
 
   // Kanban accepts node cards only. A mixed Explorer selection is still valid
   // for navigation, but the drag payload intentionally exports node rows only.
@@ -1575,12 +1568,12 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           void createFolder(folderKind, parentFolderID, position);
           setExplorerContextMenu(null);
         }}
-        onCreateNode={(parentFolderID) => {
-          void createNodeAtFolder(parentFolderID);
+        onCreateNode={(parentFolderID, position) => {
+          void createNodeAtFolder(parentFolderID, position);
           setExplorerContextMenu(null);
         }}
-        onCreateLogicGate={(parentFolderID) => {
-          void createLogicGateAtFolder(parentFolderID);
+        onCreateLogicGate={(parentFolderID, position) => {
+          void createLogicGateAtFolder(parentFolderID, position);
           setExplorerContextMenu(null);
         }}
         onFindTarget={(target) => {

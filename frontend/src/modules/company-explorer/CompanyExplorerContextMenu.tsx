@@ -13,8 +13,8 @@ type CompanyExplorerContextMenuProps = {
   buttonStyle: React.CSSProperties;
   onClose: () => void;
   onCreateFolder: (folderKind: CompanyExplorerFolderKind, parentFolderID: string, position?: number) => void;
-  onCreateNode: (parentFolderID: string) => void;
-  onCreateLogicGate: (parentFolderID: string) => void;
+  onCreateNode: (parentFolderID: string, position?: number) => void;
+  onCreateLogicGate: (parentFolderID: string, position?: number) => void;
   onFindTarget: (target: ExplorerFindTarget) => void;
   onRenameTarget: (treeID: string, target: ExplorerRenameTarget, value: string) => void;
   onDeleteTargets: (targets: ExplorerDeleteTargetWithLabel[]) => void;
@@ -41,17 +41,17 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
       {menu.canCreateBothFolderTypes ? (
         <>
           {menu.canCreateFolder && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID, menu.createFolderPosition)}>
+            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID, menu.createPosition)}>
               Create New Folder
             </button>
           )}
           {menu.canCreateNode && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateNode(menu.targets.nodeParentFolderID)}>
+            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateNode(menu.targets.nodeParentFolderID, menu.createPosition)}>
               Create Node
             </button>
           )}
           {menu.canCreateLogicGate && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateLogicGate(menu.targets.logicGateParentFolderID)}>
+            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateLogicGate(menu.targets.logicGateParentFolderID, menu.createPosition)}>
               Create Logic Gate
             </button>
           )}
@@ -59,17 +59,17 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
       ) : (
         <>
           {menu.canCreateFolder && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID, menu.createFolderPosition)}>
+            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateFolder(menu.targets.preferredFolderKind, menu.targets.preferredFolderParentID, menu.createPosition)}>
               Create New Folder
             </button>
           )}
           {menu.canCreateNode && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateNode(menu.targets.nodeParentFolderID)}>
+            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateNode(menu.targets.nodeParentFolderID, menu.createPosition)}>
               Create Node
             </button>
           )}
           {menu.canCreateLogicGate && (
-            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateLogicGate(menu.targets.logicGateParentFolderID)}>
+            <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateLogicGate(menu.targets.logicGateParentFolderID, menu.createPosition)}>
               Create Logic Gate
             </button>
           )}

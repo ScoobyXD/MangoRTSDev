@@ -11,6 +11,7 @@ import {
   type EditorOutlineStyleID,
 } from "./plainTextEditing";
 import {
+  EDITOR_TERMINAL_BREAK_ATTRIBUTE,
   getEditorLinkHrefForText,
   linkifyEditorPlainTextToHTML,
   readEditorDocumentText,
@@ -127,12 +128,22 @@ function setEditorSelectionByOffsets(root: HTMLElement, start: number, end = sta
   selection.addRange(range);
 }
 
-function replaceSelectionWithText(root: HTMLElement, text: string): boolean {
+function removeEditorTerminalBreaks(root: HTMLElement) {
+  root.querySelectorAll(`br[${EDITOR_TERMINAL_BREAK_ATTRIBUTE}="true"]`).forEach((node) => node.remove());
+}
+
+function replaceSelectionWithText(root: HTMLElement, text: string, options: { preserveTrailingNewline?: boolean } = {}): boolean {
   const range = getEditorSelectionRange(root);
   if (!range) return false;
+  removeEditorTerminalBreaks(root);
   const node = root.ownerDocument.createTextNode(text);
   range.deleteContents();
   range.insertNode(node);
+  if (options.preserveTrailingNewline) {
+    const terminalBreak = root.ownerDocument.createElement("br");
+    terminalBreak.setAttribute(EDITOR_TERMINAL_BREAK_ATTRIBUTE, "true");
+    node.after(terminalBreak);
+  }
   range.setStart(node, node.data.length);
   range.collapse(true);
   const selection = root.ownerDocument.getSelection();
@@ -281,9 +292,15 @@ function getCollapsedAnchorAtSelectionEnd(root: HTMLElement): HTMLAnchorElement 
   return null;
 }
 
-function insertPlainTextAfterAnchor(root: HTMLElement, anchor: HTMLAnchorElement, text: string): boolean {
+function insertPlainTextAfterAnchor(root: HTMLElement, anchor: HTMLAnchorElement, text: string, options: { preserveTrailingNewline?: boolean } = {}): boolean {
+  removeEditorTerminalBreaks(root);
   const textNode = root.ownerDocument.createTextNode(text);
   anchor.after(textNode);
+  if (options.preserveTrailingNewline) {
+    const terminalBreak = root.ownerDocument.createElement("br");
+    terminalBreak.setAttribute(EDITOR_TERMINAL_BREAK_ATTRIBUTE, "true");
+    textNode.after(terminalBreak);
+  }
   const range = root.ownerDocument.createRange();
   range.setStart(textNode, textNode.data.length);
   range.collapse(true);
@@ -505,8 +522,8 @@ export function useEditorDocumentSurfaceHandlers({
         const insertedText = edit.value.slice(offsets.start, edit.selectionStart);
         const anchor = getCollapsedAnchorAtSelectionEnd(event.currentTarget);
         const inserted = anchor
-          ? insertPlainTextAfterAnchor(event.currentTarget, anchor, insertedText)
-          : replaceSelectionWithText(event.currentTarget, insertedText);
+          ? insertPlainTextAfterAnchor(event.currentTarget, anchor, insertedText, { preserveTrailingNewline: edit.value.endsWith("\n") })
+          : replaceSelectionWithText(event.currentTarget, insertedText, { preserveTrailingNewline: edit.value.endsWith("\n") });
         if (inserted) {
           scrollEditorToLineStart(event.currentTarget);
           commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);

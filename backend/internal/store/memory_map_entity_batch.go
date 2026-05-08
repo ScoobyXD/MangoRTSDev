@@ -110,17 +110,25 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 
 	if input.FolderID != "" {
 		position := nextCompanyExplorerFolderChildPosition(r.folders, r.folderItems, input.CompanyID, input.FolderID, targetFolderKind)
-		for _, mapping := range result.EntityMappings {
+		for index, mapping := range result.EntityMappings {
+			itemPosition := position
+			if index < len(input.Items) && input.Items[index].Position > 0 {
+				itemPosition = input.Items[index].Position
+			}
 			item := domain.CompanyExplorerFolderItem{
 				CompanyID:        input.CompanyID,
 				FolderID:         input.FolderID,
 				ItemType:         input.EntityKind,
 				ItemID:           mapping.EntityID,
-				Position:         position,
+				Position:         itemPosition,
 				CreatedTimestamp: now,
 				UpdatedTimestamp: now,
 			}
-			position += 1000
+			if itemPosition >= position {
+				position = itemPosition + 1000
+			} else {
+				position += 1000
+			}
 			r.folderItems[folderItemKey(input.CompanyID, input.EntityKind, mapping.EntityID)] = item
 			result.FolderItems = append(result.FolderItems, item)
 		}
