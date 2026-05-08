@@ -25,6 +25,7 @@ type Repository interface {
 	ListUserMemberships(userID string) ([]domain.CompanyMembership, error)
 	UserHasCompanyAccess(cognitoSubject, companyID string) (bool, error)
 	CreateCompany(name string) (domain.Company, error)
+	ListCompanies(query string, limit int) ([]domain.Company, error)
 	ListCompanyUsers(companyID string) ([]domain.CompanyUser, error)
 	GetCompanyUser(companyID, userID string) (domain.CompanyUser, error)
 	DeleteCompanyUser(companyID, userID string) (domain.CompanyUser, error)
@@ -164,6 +165,19 @@ type CreateOperationInput struct {
 const KanbanMaxCardsLimit = 500
 
 const KanbanMaxBoardsLimit = 200
+
+const DefaultCompanyListLimit = 100
+const CompanyListMaxLimit = 200
+
+func NormalizeCompanyListLimit(limit int) int {
+	if limit <= 0 {
+		return DefaultCompanyListLimit
+	}
+	if limit > CompanyListMaxLimit {
+		return CompanyListMaxLimit
+	}
+	return limit
+}
 
 const KanbanDefaultPendingColor = "#808080"
 const KanbanDefaultInProgressColor = "#ff9500"

@@ -7,6 +7,7 @@ import (
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -30,6 +31,27 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCompanies(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		if !requireDevAdmin(w, r) {
+			return
+		}
+		limit := store.DefaultCompanyListLimit
+		if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+			parsed, err := strconv.Atoi(rawLimit)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_company_limit")
+				return
+			}
+			limit = parsed
+		}
+		companies, err := s.repo.ListCompanies(r.URL.Query().Get("query"), limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_companies")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"companies": companies})
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return

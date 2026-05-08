@@ -134,6 +134,76 @@ func TestCreateInvitationSendsCognitoForNewMangoUser(t *testing.T) {
 	}
 }
 
+func TestListCompaniesRequiresDevAdminAndSearchesNameOrID(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const devCompanyID = "11111111-1111-1111-1111-111111111111"
+	const alphaCompanyID = "22222222-2222-2222-2222-222222222222"
+	const betaCompanyID = "33333333-3333-3333-3333-333333333333"
+	const devSubject = "dev-admin-subject"
+	const companyAdminSubject = "company-admin-subject"
+	repo.EnsureCompany(devCompanyID, "MangoRTS Dev")
+	repo.EnsureCompany(alphaCompanyID, "Alpha Systems")
+	repo.EnsureCompany(betaCompanyID, "Beta Manufacturing")
+	if _, err := repo.UpsertAuthUser(devSubject, "dev@example.com", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(devSubject, devCompanyID, domain.RoleDevAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertAuthUser(companyAdminSubject, "admin@example.com", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(companyAdminSubject, alphaCompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/companies?query=beta&limit=10", nil)
+	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", devSubject, "dev@example.com"))
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("dev admin list status = %d, want %d, body=%s", res.Code, http.StatusOK, strings.TrimSpace(res.Body.String()))
+	}
+	var payload struct {
+		Companies []domain.Company `json:"companies"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Companies) != 1 || payload.Companies[0].CompanyID != betaCompanyID {
+		t.Fatalf("companies = %+v, want only beta company", payload.Companies)
+	}
+
+	idReq := httptest.NewRequest(http.MethodGet, "/v1/companies?query=2222&limit=10", nil)
+	idReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", devSubject, "dev@example.com"))
+	idRes := httptest.NewRecorder()
+	handler.ServeHTTP(idRes, idReq)
+	if idRes.Code != http.StatusOK {
+		t.Fatalf("dev admin id search status = %d, want %d, body=%s", idRes.Code, http.StatusOK, strings.TrimSpace(idRes.Body.String()))
+	}
+	payload.Companies = nil
+	if err := json.NewDecoder(idRes.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Companies) != 1 || payload.Companies[0].CompanyID != alphaCompanyID {
+		t.Fatalf("companies = %+v, want only alpha company", payload.Companies)
+	}
+
+	forbiddenReq := httptest.NewRequest(http.MethodGet, "/v1/companies?limit=10", nil)
+	forbiddenReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", companyAdminSubject, "admin@example.com"))
+	forbiddenRes := httptest.NewRecorder()
+	handler.ServeHTTP(forbiddenRes, forbiddenReq)
+	if forbiddenRes.Code != http.StatusForbidden {
+		t.Fatalf("company admin list status = %d, want %d, body=%s", forbiddenRes.Code, http.StatusForbidden, strings.TrimSpace(forbiddenRes.Body.String()))
+	}
+}
+
 func TestCreateInvitationRejectsCompanyUser(t *testing.T) {
 	t.Parallel()
 

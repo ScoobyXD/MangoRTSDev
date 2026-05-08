@@ -146,6 +146,37 @@ func (r *PostgresRepo) CreateCompany(name string) (domain.Company, error) {
 	return company, err
 }
 
+func (r *PostgresRepo) ListCompanies(query string, limit int) ([]domain.Company, error) {
+	query = strings.ToLower(strings.TrimSpace(query))
+	limit = NormalizeCompanyListLimit(limit)
+
+	rows, err := r.db.Query(
+		`select company_id, name, created_timestamp, updated_timestamp
+		 from companies
+		 where $1 = ''
+		    or lower(name) like '%' || $1 || '%'
+		    or company_id::text like '%' || $1 || '%'
+		 order by lower(name), company_id
+		 limit $2`,
+		query,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.Company, 0)
+	for rows.Next() {
+		var item domain.Company
+		if err := rows.Scan(&item.CompanyID, &item.Name, &item.CreatedTimestamp, &item.UpdatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *PostgresRepo) ListCompanyUsers(companyID string) ([]domain.CompanyUser, error) {
 	companyID = strings.TrimSpace(companyID)
 	if companyID == "" {

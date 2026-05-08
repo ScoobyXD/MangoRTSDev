@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLayout from "../app/applayout";
-import { getActiveCompanyID, setActiveCompanyID } from "./currentCompany";
+import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
 import {
   acceptInvitation,
   apiFetchJSON,
@@ -41,6 +41,19 @@ type Company = {
 type CompanyOption = Company & {
   role?: string;
 };
+
+type SettingsSelectOption = {
+  value: string;
+  label: string;
+  detail?: string;
+};
+
+const INVITE_ROLE_OPTIONS: SettingsSelectOption[] = [
+  { value: "company_user", label: "company_user" },
+  { value: "company_admin", label: "company_admin" },
+];
+
+const COMPANY_SEARCH_LIMIT = 100;
 
 const panelStyle: React.CSSProperties = {
   minHeight: "100vh",
@@ -100,8 +113,12 @@ export default function AuthGate() {
     try {
       const current = await fetchCurrentUser();
       setMe(current);
-      const companyID = current.memberships.find((item) => item.role !== "dev_admin")?.company_id ?? current.memberships[0]?.company_id;
-      if (companyID) setActiveCompanyID(companyID);
+      const storedCompanyID = getStoredActiveCompanyID();
+      const storedCompanyAllowed = storedCompanyID && (current.is_dev_admin || current.memberships.some((item) => item.company_id === storedCompanyID));
+      if (!storedCompanyAllowed) {
+        const companyID = current.memberships.find((item) => item.role !== "dev_admin")?.company_id ?? current.memberships[0]?.company_id;
+        if (companyID) setActiveCompanyID(companyID);
+      }
       const nextPath = nextPathForAuthState(window.location.pathname, true);
       if (nextPath !== window.location.pathname) navigate(nextPath);
     } catch {
@@ -200,6 +217,239 @@ function companyName(company?: Company | null): string {
 function selectedUserRole(me: CurrentUserResponse, selectedCompany?: CompanyOption | null): string {
   if (me.is_dev_admin) return "dev_admin";
   return selectedCompany?.role || me.memberships[0]?.role || "company_user";
+}
+
+function companyOptionKeywords(company: CompanyOption): string {
+  return `${company.name} ${company.company_id}`.toLowerCase();
+}
+
+function mergeCompanyOptions(...groups: CompanyOption[][]): CompanyOption[] {
+  const byID = new Map<string, CompanyOption>();
+  for (const group of groups) {
+    for (const company of group) {
+      const companyID = company.company_id.trim();
+      if (!companyID) continue;
+      const existing = byID.get(companyID);
+      byID.set(companyID, { ...company, role: company.role || existing?.role });
+    }
+  }
+  return Array.from(byID.values()).sort((a, b) => companyName(a).localeCompare(companyName(b)) || a.company_id.localeCompare(b.company_id));
+}
+
+function filterCompanyOptions(options: CompanyOption[], query: string): CompanyOption[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return options.slice(0, COMPANY_SEARCH_LIMIT);
+  return options.filter((company) => companyOptionKeywords(company).includes(normalizedQuery)).slice(0, COMPANY_SEARCH_LIMIT);
+}
+
+function SettingsCheckIcon({ color = "rgb(0, 233, 255)" }: { color?: string }) {
+  return (
+    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
+      <path d="M3.2 8.2 6.4 11.4 12.9 4.6" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SettingsDisclosureIcon({ open, color = "currentColor" }: { open: boolean; color?: string }) {
+  return (
+    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", transform: open ? "rotate(180deg)" : "none", transition: "transform 120ms ease" }}>
+      <path d="M4 6.2 8 10.2 12 6.2" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SettingsSearchIcon({ color = "currentColor" }: { color?: string }) {
+  return (
+    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
+      <circle cx="7" cy="7" r="4.2" fill="none" stroke={color} strokeWidth="1.5" />
+      <path d="M10.2 10.2 14 14" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function useCloseSettingsPopover(open: boolean, ref: React.RefObject<HTMLElement>, onClose: () => void): void {
+  useEffect(() => {
+    if (!open) return;
+    const onMouseDown = (event: MouseEvent) => {
+      if (ref.current?.contains(event.target as Node)) return;
+      onClose();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    const timer = window.setTimeout(() => window.addEventListener("mousedown", onMouseDown, true), 0);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("mousedown", onMouseDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [open, onClose, ref]);
+}
+
+function SettingsSelect({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+}: {
+  value: string;
+  options: SettingsSelectOption[];
+  onChange: (value: string) => void;
+  ariaLabel: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useCloseSettingsPopover(open, rootRef, close);
+  const selected = options.find((option) => option.value === value) ?? options[0];
+  return (
+    <span ref={rootRef} style={{ position: "relative", display: "block", minWidth: 0 }}>
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((nextOpen) => !nextOpen)}
+        style={{ ...settingsSelectButtonStyle, borderColor: open ? "rgba(0, 233, 255, 0.92)" : settingsSelectButtonStyle.borderColor }}
+      >
+        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected?.label ?? "Select"}</span>
+        <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: "rgb(0, 233, 255)" }}>
+          <SettingsDisclosureIcon open={open} />
+        </span>
+      </button>
+      {open && (
+        <div role="listbox" aria-label={ariaLabel} className="company-explorer-scroll" style={settingsMenuStyle}>
+          {options.map((option) => {
+            const selectedOption = option.value === value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="option"
+                aria-selected={selectedOption}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+                style={{ ...settingsOptionButtonStyle, background: selectedOption ? "rgba(0, 233, 255, 0.18)" : "transparent", color: selectedOption ? "rgb(0, 233, 255)" : "#e8fbff" }}
+              >
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
+                <span aria-hidden="true" style={{ display: "grid", placeItems: "center" }}>
+                  {selectedOption ? <SettingsCheckIcon /> : null}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </span>
+  );
+}
+
+function CompanySearchSelect({
+  value,
+  options,
+  onChange,
+  onSearchQueryChange,
+  ariaLabel,
+  placeholder = "Search companies",
+}: {
+  value: string;
+  options: CompanyOption[];
+  onChange: (companyID: string) => void;
+  onSearchQueryChange?: (query: string) => void;
+  ariaLabel: string;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLLabelElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useCloseSettingsPopover(open, rootRef, close);
+  const selected = options.find((company) => company.company_id === value) ?? null;
+  const matches = useMemo(() => filterCompanyOptions(options, query), [options, query]);
+
+  useEffect(() => {
+    if (!open || !onSearchQueryChange) return;
+    const timer = window.setTimeout(() => onSearchQueryChange(query), 140);
+    return () => window.clearTimeout(timer);
+  }, [onSearchQueryChange, open, query]);
+
+  const selectCompany = useCallback((company: CompanyOption) => {
+    onChange(company.company_id);
+    setQuery("");
+    setOpen(false);
+  }, [onChange]);
+
+  return (
+    <label ref={rootRef} style={{ position: "relative", display: "grid", gap: 5, minWidth: 0 }}>
+      <span style={settingsFieldLabelStyle}>{ariaLabel}</span>
+      <span style={{ position: "relative", display: "block", minWidth: 0 }}>
+        <input
+          value={query}
+          onFocus={() => setOpen(true)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setOpen(true);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && matches[0]) {
+              event.preventDefault();
+              selectCompany(matches[0]);
+            }
+            if (event.key === "ArrowDown") setOpen(true);
+          }}
+          placeholder={selected ? companyName(selected) : placeholder}
+          autoComplete="off"
+          aria-label={ariaLabel}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          style={{ ...settingsInputStyle, paddingRight: 58 }}
+        />
+        <span aria-hidden="true" style={{ position: "absolute", right: 31, top: 11, color: "rgba(0, 233, 255, 0.84)", pointerEvents: "none" }}>
+          <SettingsSearchIcon />
+        </span>
+        <button
+          type="button"
+          aria-label={`${ariaLabel} list`}
+          onClick={() => setOpen((nextOpen) => !nextOpen)}
+          style={settingsComboIconButtonStyle}
+        >
+          <SettingsDisclosureIcon open={open} />
+        </button>
+      </span>
+      {open && (
+        <div role="listbox" aria-label={ariaLabel} className="company-explorer-scroll" style={{ ...settingsMenuStyle, maxHeight: 310 }}>
+          {matches.length === 0 ? (
+            <div style={settingsEmptyOptionStyle}>No companies found</div>
+          ) : matches.map((company) => {
+            const selectedOption = company.company_id === value;
+            return (
+              <button
+                key={company.company_id}
+                type="button"
+                role="option"
+                aria-selected={selectedOption}
+                title={company.company_id}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => selectCompany(company)}
+                style={{ ...settingsCompanyOptionButtonStyle, background: selectedOption ? "rgba(0, 233, 255, 0.18)" : "transparent" }}
+              >
+                <span style={{ minWidth: 0, display: "grid", gap: 2 }}>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: selectedOption ? "rgb(0, 233, 255)" : "#e8fbff", fontWeight: 900 }}>{companyName(company)}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(202, 242, 248, 0.72)", fontSize: 10 }}>{company.company_id}</span>
+                </span>
+                <span aria-hidden="true" style={{ display: "grid", placeItems: "center" }}>
+                  {selectedOption ? <SettingsCheckIcon /> : null}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </label>
+  );
 }
 
 function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
@@ -399,14 +649,22 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
     () => me.memberships.map((item) => ({ company_id: item.company_id, name: item.company_name || "Company", role: item.role })),
     [me],
   );
+  const [devCompanies, setDevCompanies] = useState<CompanyOption[]>([]);
   const [createdCompanies, setCreatedCompanies] = useState<Company[]>([]);
-  const companyOptions = useMemo<CompanyOption[]>(() => {
-    return [...createdCompanies, ...membershipOptions.filter((item) => !createdCompanies.some((company) => company.company_id === item.company_id))];
-  }, [createdCompanies, membershipOptions]);
-  const [companyID, setCompanyID] = useState(companyOptions[0]?.company_id ?? getActiveCompanyID());
+  const createdCompanyOptions = useMemo<CompanyOption[]>(() => createdCompanies.map((company) => ({ ...company })), [createdCompanies]);
+  const companyOptions = useMemo<CompanyOption[]>(
+    () => mergeCompanyOptions(createdCompanyOptions, devCompanies, membershipOptions),
+    [createdCompanyOptions, devCompanies, membershipOptions],
+  );
+  const [companyID, setCompanyID] = useState(() => {
+    const activeCompanyID = getActiveCompanyID();
+    if (membershipOptions.some((company) => company.company_id === activeCompanyID)) return activeCompanyID;
+    return membershipOptions.find((company) => company.role !== "dev_admin")?.company_id ?? membershipOptions[0]?.company_id ?? activeCompanyID;
+  });
   const selectedCompany = companyOptions.find((company) => company.company_id === companyID) ?? null;
   const canManageSelectedCompany = Boolean(companyID) && (me.is_dev_admin || selectedCompany?.role === "company_admin");
   const [users, setUsers] = useState<CompanyUser[]>([]);
+  const [inviteCompanyID, setInviteCompanyID] = useState(() => companyID);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("company_user");
   const [inviteToken, setInviteToken] = useState("");
@@ -424,7 +682,25 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
   const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [error, setError] = useState("");
-  const activeCompanyLabel = selectedCompany ? companyName(selectedCompany) : companyID ? "Manual company" : "No company selected";
+  const inviteSelectedCompany = companyOptions.find((company) => company.company_id === inviteCompanyID) ?? null;
+  const activeCompanyLabel = selectedCompany ? companyName(selectedCompany) : companyID ? "Selected company" : "No company selected";
+  const canInvite = me.is_dev_admin || canManageSelectedCompany;
+
+  const loadCompanyOptions = useCallback(async (query = "") => {
+    if (!me.is_dev_admin) return;
+    const params = new URLSearchParams();
+    const trimmedQuery = query.trim();
+    if (trimmedQuery) params.set("query", trimmedQuery);
+    params.set("limit", String(COMPANY_SEARCH_LIMIT));
+    try {
+      const payload = await apiFetchJSON<{ companies: Company[] }>(`/v1/companies?${params.toString()}`);
+      const nextCompanies = (payload.companies ?? []).map((company) => ({ ...company }));
+      setDevCompanies((previous) => mergeCompanyOptions(nextCompanies, previous));
+    } catch (companyLookupError) {
+      console.error("Company lookup failed", companyLookupError);
+      setError("Failed to load company list");
+    }
+  }, [me.is_dev_admin]);
 
   const load = useCallback(async () => {
     if (!companyID || !canManageSelectedCompany) {
@@ -440,96 +716,106 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
     }
   }, [canManageSelectedCompany, companyID]);
 
+  useEffect(() => { void loadCompanyOptions(""); }, [loadCompanyOptions]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (companyID) setActiveCompanyID(companyID); }, [companyID]);
+  useEffect(() => {
+    if (!me.is_dev_admin) setInviteCompanyID(companyID);
+    else if (!inviteCompanyID && companyID) setInviteCompanyID(companyID);
+  }, [companyID, inviteCompanyID, me.is_dev_admin]);
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f7fffe", color: "#041d22", fontFamily: "'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace", padding: 18 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <h1 style={{ margin: 0, fontSize: 18 }}>Settings</h1>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button style={smallButtonStyle} onClick={() => onNavigate("/")}>App</button>
+    <div style={settingsPageStyle}>
+      <div style={settingsHeaderStyle}>
+        <h1 style={settingsPageTitleStyle}>Settings</h1>
+        <div style={settingsNavStyle}>
+          <button style={smallButtonStyle} onClick={() => onNavigate("/")}>MangoRTS</button>
           <button style={smallButtonStyle} onClick={() => onNavigate("/communications")}>Communications</button>
           <button style={smallButtonStyle} onClick={onLogout}>Logout</button>
         </div>
       </div>
-      {error && <div style={{ color: "#9c1b1b", marginBottom: 10 }}>{error}</div>}
+      {error && <div style={settingsErrorStyle}>{error}</div>}
       <div style={settingsTopRowStyle}>
         <section style={{ ...sectionStyle, flex: "1 1 280px" }}>
           <h2 style={sectionTitleStyle}>Company</h2>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 800 }}>{activeCompanyLabel}</div>
-            {companyID && <div style={{ fontSize: 11, overflowWrap: "anywhere" }}>UUID: {companyID}</div>}
+          <div style={settingsScopePlateStyle}>
+            <span style={settingsScopeKickerStyle}>Active Scope</span>
+            <span style={settingsScopeNameStyle}>{activeCompanyLabel}</span>
+            {companyID && <span style={settingsScopeUUIDStyle}>UUID: {companyID}</span>}
           </div>
-          {(companyOptions.length > 1 || me.is_dev_admin) && (
-            <select style={inputStyle} value={selectedCompany?.company_id ?? ""} onChange={(event) => setCompanyID(event.target.value)}>
-              {me.is_dev_admin && <option value="">Manual company UUID</option>}
-              {companyOptions.map((company) => <option key={company.company_id} value={company.company_id}>{companyName(company)}</option>)}
-            </select>
+          <CompanySearchSelect
+            value={companyID}
+            options={companyOptions}
+            onChange={setCompanyID}
+            onSearchQueryChange={me.is_dev_admin ? loadCompanyOptions : undefined}
+            ariaLabel="Company Scope"
+            placeholder="Search company or UUID"
+          />
+          {companyID && (
+            <div style={settingsActiveScopeStyle}>
+              Scope active: {activeCompanyLabel}
+              <span style={{ overflowWrap: "anywhere" }}> {companyID}</span>
+            </div>
           )}
           {me.is_dev_admin && (
-            <input
-              style={inputStyle}
-              value={companyID}
-              onChange={(event) => setCompanyID(event.target.value.trim())}
-              placeholder="Target company UUID"
-              autoComplete="off"
-            />
-          )}
-          {me.is_dev_admin && (
-            <form style={{ display: "grid", gap: 8 }} onSubmit={async (event) => {
-              event.preventDefault();
-              setError("");
-              setCreatedCompanyNotice(null);
-              if (!newCompanyName.trim()) {
-                setError("Company name required");
-                return;
-              }
-              setCompanyBusy(true);
-              try {
-                const company = await apiFetchJSON<Company>("/v1/companies", { method: "POST", body: JSON.stringify({ name: newCompanyName }) });
-                setCreatedCompanies((prev) => [company, ...prev.filter((item) => item.company_id !== company.company_id)]);
-                setCompanyID(company.company_id);
-                setCreatedCompanyNotice(company);
-                setNewCompanyName("");
-              } catch (companyError) {
-                console.error("Company creation failed", companyError);
-                setError(formatAuthError(companyError, "Company creation failed"));
-              } finally {
-                setCompanyBusy(false);
-              }
-            }}>
-              <input style={inputStyle} value={newCompanyName} onChange={(event) => setNewCompanyName(event.target.value)} placeholder="New company name" />
-              <button style={buttonStyle} disabled={companyBusy}>{companyBusy ? "Creating" : "Create company"}</button>
-            </form>
-          )}
-          {createdCompanyNotice && (
-            <div style={successBoxStyle}>
-              <span>Company created: {createdCompanyNotice.name}</span>
-              <span style={{ overflowWrap: "anywhere" }}>UUID: {createdCompanyNotice.company_id}</span>
+            <div style={settingsSubsectionStyle}>
+              <h3 style={settingsSubsectionTitleStyle}>Create New Company</h3>
+              <form style={{ display: "grid", gap: 8 }} onSubmit={async (event) => {
+                event.preventDefault();
+                setError("");
+                setCreatedCompanyNotice(null);
+                if (!newCompanyName.trim()) {
+                  setError("Company name required");
+                  return;
+                }
+                setCompanyBusy(true);
+                try {
+                  const company = await apiFetchJSON<Company>("/v1/companies", { method: "POST", body: JSON.stringify({ name: newCompanyName }) });
+                  setCreatedCompanies((prev) => [company, ...prev.filter((item) => item.company_id !== company.company_id)]);
+                  setCompanyID(company.company_id);
+                  setInviteCompanyID(company.company_id);
+                  setCreatedCompanyNotice(company);
+                  setNewCompanyName("");
+                } catch (companyError) {
+                  console.error("Company creation failed", companyError);
+                  setError(formatAuthError(companyError, "Company creation failed"));
+                } finally {
+                  setCompanyBusy(false);
+                }
+              }}>
+                <input style={settingsInputStyle} value={newCompanyName} onChange={(event) => setNewCompanyName(event.target.value)} placeholder="New company name" />
+                <button style={settingsPrimaryButtonStyle} disabled={companyBusy}>{companyBusy ? "Creating" : "Create new company"}</button>
+              </form>
+              {createdCompanyNotice && (
+                <div style={successBoxStyle}>
+                  <span>Company created: {createdCompanyNotice.name}</span>
+                  <span style={{ overflowWrap: "anywhere" }}>UUID: {createdCompanyNotice.company_id}</span>
+                </div>
+              )}
             </div>
           )}
         </section>
-        {canManageSelectedCompany && <section style={{ ...sectionStyle, flex: "1 1 280px" }}>
+        {canInvite && <section style={{ ...sectionStyle, flex: "1 1 280px" }}>
           <h2 style={sectionTitleStyle}>Invite</h2>
           <form style={{ display: "grid", gap: 8 }} onSubmit={async (event) => {
             event.preventDefault();
             const normalizedInviteEmail = normalizeEmailInput(inviteEmail);
+            const targetCompanyID = me.is_dev_admin ? inviteCompanyID : companyID;
             setError("");
             setInviteMessage("");
             setInviteToken("");
-            if (!normalizedInviteEmail) {
-              setError("Email required");
+            if (!targetCompanyID) {
+              setError("Invite company required");
               return;
             }
-            if (!companyID) {
-              setError("Company UUID required");
+            if (!normalizedInviteEmail) {
+              setError("Email required");
               return;
             }
             try {
               const payload = await apiFetchJSON<{ invitation: { token?: string }; cognito_invite_status?: string }>("/v1/invitations", {
                 method: "POST",
-                body: JSON.stringify({ company_id: companyID, email: normalizedInviteEmail, role: inviteRole }),
+                body: JSON.stringify({ company_id: targetCompanyID, email: normalizedInviteEmail, role: inviteRole }),
               });
               setInviteToken(payload.invitation.token ?? "");
               setInviteMessage(inviteStatusMessage(payload.cognito_invite_status));
@@ -540,15 +826,28 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
               setError(formatInviteError(inviteError));
             }
           }}>
-            <input style={inputStyle} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value.toLowerCase())} type="email" placeholder="Email" />
-            <select style={inputStyle} value={inviteRole} onChange={(event) => setInviteRole(event.target.value)}>
-              <option value="company_user">company_user</option>
-              <option value="company_admin">company_admin</option>
-            </select>
-            <button style={buttonStyle}>Invite user</button>
+            {me.is_dev_admin && (
+              <CompanySearchSelect
+                value={inviteCompanyID}
+                options={companyOptions}
+                onChange={setInviteCompanyID}
+                onSearchQueryChange={loadCompanyOptions}
+                ariaLabel="Invite Company"
+                placeholder="Search company or UUID"
+              />
+            )}
+            {me.is_dev_admin && inviteCompanyID && (
+              <div style={settingsActiveScopeStyle}>
+                Invite target: {inviteSelectedCompany ? companyName(inviteSelectedCompany) : "Selected company"}
+                <span style={{ overflowWrap: "anywhere" }}> {inviteCompanyID}</span>
+              </div>
+            )}
+            <input style={settingsInputStyle} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value.toLowerCase())} type="email" placeholder="Email" />
+            <SettingsSelect value={inviteRole} options={INVITE_ROLE_OPTIONS} onChange={setInviteRole} ariaLabel="User role" />
+            <button style={settingsPrimaryButtonStyle}>Invite user</button>
           </form>
-          {inviteToken && <div style={{ overflowWrap: "anywhere", fontSize: 12 }}>Invite token: {inviteToken}</div>}
-          {inviteMessage && <div style={{ fontSize: 12 }}>{inviteMessage}</div>}
+          {inviteToken && <div style={settingsTokenStyle}>Invite token: {inviteToken}</div>}
+          {inviteMessage && <div style={settingsInfoTextStyle}>{inviteMessage}</div>}
         </section>}
         <section style={{ ...sectionStyle, flex: me.is_dev_admin ? "0 1 360px" : "1 1 280px", marginLeft: me.is_dev_admin ? "auto" : undefined }}>
           <h2 style={sectionTitleStyle}>User Profile</h2>
@@ -560,7 +859,7 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
             <span style={profileLabelStyle}>Role</span>
             <span style={profileValueStyle}>{selectedUserRole(me, selectedCompany)}</span>
           </div>
-          <form style={{ display: "grid", gap: 8, borderTop: "1px solid rgba(12, 67, 74, 0.16)", paddingTop: 10 }} onSubmit={async (event) => {
+          <form style={settingsSubsectionStyle} onSubmit={async (event) => {
             event.preventDefault();
             setPasswordError("");
             setPasswordMessage("");
@@ -586,18 +885,26 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
               setPasswordBusy(false);
             }
           }}>
-            <input style={inputStyle} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} type="password" placeholder="Current password" autoComplete="current-password" />
-            <input style={inputStyle} value={newSettingsPassword} onChange={(event) => setNewSettingsPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />
-            <input style={inputStyle} value={confirmSettingsPassword} onChange={(event) => setConfirmSettingsPassword(event.target.value)} type="password" placeholder="Confirm new password" autoComplete="new-password" />
-            <button style={buttonStyle} disabled={passwordBusy}>{passwordBusy ? "Changing" : "Change password"}</button>
+            <h3 style={settingsSubsectionTitleStyle}>Change Password</h3>
+            <input style={settingsInputStyle} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} type="password" placeholder="Current password" autoComplete="current-password" />
+            <input style={settingsInputStyle} value={newSettingsPassword} onChange={(event) => setNewSettingsPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />
+            <input style={settingsInputStyle} value={confirmSettingsPassword} onChange={(event) => setConfirmSettingsPassword(event.target.value)} type="password" placeholder="Confirm new password" autoComplete="new-password" />
+            <button style={settingsPrimaryButtonStyle} disabled={passwordBusy}>{passwordBusy ? "Changing" : "Change password"}</button>
           </form>
-          {passwordError && <div style={{ color: "#9c1b1b", fontSize: 12 }}>{passwordError}</div>}
+          {passwordError && <div style={settingsErrorSmallStyle}>{passwordError}</div>}
           {passwordMessage && <div style={successMessageStyle}>{passwordMessage}</div>}
         </section>
       </div>
       {canManageSelectedCompany && <section style={{ ...sectionStyle, marginTop: 14 }}>
-        <h2 style={sectionTitleStyle}>Company Users</h2>
+        <div style={settingsSectionHeaderRowStyle}>
+          <h2 style={sectionTitleStyle}>Company Users</h2>
+          <span style={settingsSectionScopeStyle}>
+            {activeCompanyLabel}
+            {companyID && <span style={{ overflowWrap: "anywhere" }}> {companyID}</span>}
+          </span>
+        </div>
         <div style={{ display: "grid", gap: 6 }}>
+          {users.length === 0 && <div style={settingsInfoTextStyle}>No users in this company scope.</div>}
           {users.map((user) => (
             <div key={user.user_id} style={userRowStyle}>
               <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{companyUserLabel(user)}</span>
@@ -621,10 +928,10 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
       {deleteConfirmation && (
         <div style={modalBackdropStyle}>
           <div style={modalStyle}>
-            <div style={{ fontSize: 12, fontWeight: 800, color: "#111111" }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#e8fbff" }}>
               Are you sure you want to delete this user?
             </div>
-            <div style={{ fontSize: 11, lineHeight: 1.4, color: "#2e2e2e", overflowWrap: "anywhere" }}>
+            <div style={{ fontSize: 11, lineHeight: 1.4, color: "rgba(202, 242, 248, 0.78)", overflowWrap: "anywhere" }}>
               This deletes {companyUserLabel(deleteConfirmation)} from Cognito and removes their Mango user, memberships, and invitation rows.
             </div>
             <label style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 8, alignItems: "start", fontSize: 11, lineHeight: 1.35 }}>
@@ -688,8 +995,8 @@ function AuthPanel({ title, error, children }: { title: string; error?: string; 
 
 function AccountBar({ me, onNavigate, onLogout }: { me: CurrentUserResponse; onNavigate: (path: string) => void; onLogout: () => void }) {
   return (
-    <div style={{ position: "fixed", top: 8, right: 8, zIndex: 200, display: "flex", alignItems: "center", gap: 6, padding: "5px 6px", background: "rgba(255,255,255,0.92)", border: "1px solid rgba(12, 67, 74, 0.28)", borderRadius: 8, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>
-      <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{me.user.email}</span>
+    <div style={{ position: "fixed", top: 8, right: 8, zIndex: 200, display: "flex", alignItems: "center", gap: 6, padding: "5px 6px", background: "rgba(5, 18, 24, 0.76)", border: "1px solid rgba(0, 233, 255, 0.62)", borderRadius: 8, boxShadow: "0 0 0 1px rgba(0, 233, 255, 0.12) inset, 0 10px 24px rgba(0,0,0,0.22)", backdropFilter: "blur(12px)", color: "#e8fbff", fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>
+      <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(232, 251, 255, 0.82)" }}>{me.user.email}</span>
       <button style={smallButtonStyle} onClick={() => onNavigate("/communications")}>Communications</button>
       <button style={smallButtonStyle} onClick={() => onNavigate("/settings")}>Settings</button>
       <button style={smallButtonStyle} onClick={onLogout}>Logout</button>
@@ -712,23 +1019,269 @@ const linkButtonStyle: React.CSSProperties = {
 };
 
 const smallButtonStyle: React.CSSProperties = {
-  minHeight: 28,
-  border: "1px solid rgba(12, 67, 74, 0.35)",
+  minHeight: 30,
+  border: "1px solid rgba(0, 233, 255, 0.62)",
   borderRadius: 6,
-  background: "#fff",
-  color: "#041d22",
+  background: "linear-gradient(180deg, rgba(9, 31, 38, 0.84), rgba(5, 18, 23, 0.72))",
+  color: "#e8fbff",
   cursor: "pointer",
   font: "inherit",
-  padding: "0 8px",
+  fontWeight: 800,
+  padding: "0 10px",
+  boxShadow: "0 0 0 1px rgba(0, 233, 255, 0.12) inset, 0 8px 20px rgba(0, 0, 0, 0.22)",
+};
+
+const settingsPageStyle: React.CSSProperties = {
+  minHeight: "100vh",
+  background: "linear-gradient(135deg, #051017 0%, #0b191f 48%, #160f18 100%)",
+  color: "#e8fbff",
+  fontFamily: "'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace",
+  padding: 18,
+  overflowY: "auto",
+};
+
+const settingsHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  marginBottom: 16,
+};
+
+const settingsPageTitleStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: 18,
+  color: "#e8fbff",
+  textTransform: "uppercase",
+};
+
+const settingsNavStyle: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  justifyContent: "flex-end",
+  gap: 8,
+};
+
+const settingsErrorStyle: React.CSSProperties = {
+  color: "#ff9abf",
+  marginBottom: 10,
+  fontSize: 12,
+  fontWeight: 800,
+};
+
+const settingsErrorSmallStyle: React.CSSProperties = {
+  color: "#ff9abf",
+  fontSize: 12,
+};
+
+const settingsInfoTextStyle: React.CSSProperties = {
+  color: "rgba(202, 242, 248, 0.72)",
+  fontSize: 12,
+  lineHeight: 1.4,
+};
+
+const settingsFieldLabelStyle: React.CSSProperties = {
+  color: "rgba(202, 242, 248, 0.68)",
+  fontSize: 10,
+  fontWeight: 900,
+  textTransform: "uppercase",
+};
+
+const settingsInputStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  height: 38,
+  border: "1px solid rgba(0, 233, 255, 0.44)",
+  borderRadius: 6,
+  background: "rgba(2, 13, 18, 0.58)",
+  color: "#e8fbff",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 800,
+  padding: "0 10px",
+  outline: "none",
+  boxShadow: "0 0 0 1px rgba(0, 233, 255, 0.08) inset",
+};
+
+const settingsPrimaryButtonStyle: React.CSSProperties = {
+  minHeight: 38,
+  border: "1px solid rgba(0, 233, 255, 0.84)",
+  borderRadius: 6,
+  background: "linear-gradient(180deg, rgba(0, 233, 255, 0.98), rgba(0, 177, 208, 0.92))",
+  color: "#031217",
+  cursor: "pointer",
+  font: "inherit",
+  fontWeight: 900,
+  padding: "0 12px",
+  boxShadow: "0 0 18px rgba(0, 233, 255, 0.22)",
+};
+
+const settingsSelectButtonStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 38,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 18px",
+  alignItems: "center",
+  gap: 8,
+  border: "1px solid rgba(0, 233, 255, 0.44)",
+  borderRadius: 6,
+  background: "rgba(2, 13, 18, 0.58)",
+  color: "#e8fbff",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+  padding: "0 10px",
+  textAlign: "left",
+};
+
+const settingsComboIconButtonStyle: React.CSSProperties = {
+  position: "absolute",
+  top: 5,
+  right: 5,
+  width: 28,
+  height: 28,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(0, 233, 255, 0.36)",
+  borderRadius: 5,
+  background: "rgba(0, 233, 255, 0.08)",
+  color: "rgb(0, 233, 255)",
+  cursor: "pointer",
+};
+
+const settingsMenuStyle: React.CSSProperties = {
+  position: "absolute",
+  zIndex: 40,
+  top: "calc(100% + 6px)",
+  left: 0,
+  width: "min(460px, 92vw)",
+  maxHeight: 260,
+  overflowY: "auto",
+  overflowX: "hidden",
+  padding: 5,
+  border: "1px solid rgba(0, 233, 255, 0.58)",
+  borderRadius: 8,
+  background: "rgba(4, 18, 24, 0.98)",
+  color: "#e8fbff",
+  boxShadow: "0 16px 34px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(0, 233, 255, 0.12) inset",
+};
+
+const settingsOptionButtonStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 32,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 18px",
+  alignItems: "center",
+  gap: 8,
+  border: "none",
+  borderRadius: 6,
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+  padding: "7px 8px",
+  textAlign: "left",
+};
+
+const settingsCompanyOptionButtonStyle: React.CSSProperties = {
+  ...settingsOptionButtonStyle,
+  minHeight: 42,
+};
+
+const settingsEmptyOptionStyle: React.CSSProperties = {
+  padding: "8px 10px",
+  color: "rgba(202, 242, 248, 0.62)",
+  fontSize: 11,
+  fontWeight: 800,
+};
+
+const settingsScopePlateStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 4,
+  border: "1px solid rgba(0, 233, 255, 0.32)",
+  borderRadius: 8,
+  background: "rgba(0, 233, 255, 0.07)",
+  padding: 10,
+};
+
+const settingsScopeKickerStyle: React.CSSProperties = {
+  color: "rgba(202, 242, 248, 0.62)",
+  fontSize: 10,
+  fontWeight: 900,
+  textTransform: "uppercase",
+};
+
+const settingsScopeNameStyle: React.CSSProperties = {
+  minWidth: 0,
+  color: "#e8fbff",
+  fontSize: 15,
+  fontWeight: 900,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const settingsScopeUUIDStyle: React.CSSProperties = {
+  color: "rgba(202, 242, 248, 0.74)",
+  fontSize: 11,
+  overflowWrap: "anywhere",
+};
+
+const settingsActiveScopeStyle: React.CSSProperties = {
+  border: "1px solid rgba(101, 247, 167, 0.34)",
+  borderRadius: 6,
+  background: "rgba(101, 247, 167, 0.08)",
+  color: "#bfffd6",
+  fontSize: 11,
+  fontWeight: 900,
+  padding: "7px 8px",
+};
+
+const settingsSubsectionStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 8,
+  borderTop: "1px solid rgba(0, 233, 255, 0.18)",
+  paddingTop: 10,
+};
+
+const settingsSubsectionTitleStyle: React.CSSProperties = {
+  margin: 0,
+  color: "rgba(202, 242, 248, 0.82)",
+  fontSize: 11,
+  fontWeight: 900,
+  textTransform: "uppercase",
+};
+
+const settingsTokenStyle: React.CSSProperties = {
+  ...settingsInfoTextStyle,
+  overflowWrap: "anywhere",
+};
+
+const settingsSectionHeaderRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "baseline",
+  flexWrap: "wrap",
+  gap: 8,
+};
+
+const settingsSectionScopeStyle: React.CSSProperties = {
+  minWidth: 0,
+  color: "rgba(202, 242, 248, 0.72)",
+  fontSize: 11,
+  fontWeight: 800,
 };
 
 const sectionStyle: React.CSSProperties = {
   display: "grid",
   gap: 10,
-  padding: 12,
-  border: "1px solid rgba(12, 67, 74, 0.25)",
-  background: "#fff",
+  padding: 14,
+  border: "1px solid rgba(0, 233, 255, 0.68)",
+  background: "linear-gradient(180deg, rgba(10, 31, 38, 0.82), rgba(4, 18, 24, 0.66))",
   borderRadius: 8,
+  color: "#e8fbff",
+  boxShadow: "0 0 0 1px rgba(0, 233, 255, 0.12) inset, 0 16px 36px rgba(0, 0, 0, 0.34)",
+  backdropFilter: "blur(14px)",
 };
 
 const settingsTopRowStyle: React.CSSProperties = {
@@ -742,13 +1295,15 @@ const sectionTitleStyle: React.CSSProperties = {
   margin: 0,
   fontSize: 13,
   textTransform: "uppercase",
+  color: "rgb(0, 233, 255)",
+  letterSpacing: 0,
 };
 
 const successMessageStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  color: "#0f7b3f",
+  color: "#65f7a7",
   fontSize: 13,
   fontWeight: 800,
 };
@@ -756,9 +1311,13 @@ const successMessageStyle: React.CSSProperties = {
 const successBoxStyle: React.CSSProperties = {
   display: "grid",
   gap: 4,
-  color: "#0f7b3f",
+  color: "#65f7a7",
   fontSize: 12,
   fontWeight: 800,
+  border: "1px solid rgba(101, 247, 167, 0.36)",
+  borderRadius: 6,
+  background: "rgba(101, 247, 167, 0.08)",
+  padding: 8,
 };
 
 const rowStyle: React.CSSProperties = {
@@ -767,7 +1326,7 @@ const rowStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 8,
   minHeight: 32,
-  borderBottom: "1px solid rgba(12, 67, 74, 0.16)",
+  borderBottom: "1px solid rgba(0, 233, 255, 0.14)",
   fontSize: 12,
 };
 
@@ -778,7 +1337,7 @@ const userRowStyle: React.CSSProperties = {
 
 const dangerButtonStyle: React.CSSProperties = {
   borderColor: "#ff3d7f",
-  color: "#8b123f",
+  color: "#ffd6e4",
 };
 
 const profileGridStyle: React.CSSProperties = {
@@ -789,7 +1348,7 @@ const profileGridStyle: React.CSSProperties = {
 };
 
 const profileLabelStyle: React.CSSProperties = {
-  color: "rgba(4, 29, 34, 0.62)",
+  color: "rgba(202, 242, 248, 0.62)",
   fontWeight: 800,
   textTransform: "uppercase",
 };
@@ -802,7 +1361,7 @@ const profileValueStyle: React.CSSProperties = {
 const modalBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0,0,0,0.28)",
+  background: "rgba(0,0,0,0.58)",
   zIndex: 120,
   display: "grid",
   placeItems: "center",
@@ -812,11 +1371,13 @@ const modalBackdropStyle: React.CSSProperties = {
 const modalStyle: React.CSSProperties = {
   width: "min(420px, 100%)",
   borderRadius: 8,
-  border: "1px solid rgba(0,233,255,0.45)",
-  background: "rgba(255,255,255,0.96)",
+  border: "1px solid rgba(0,233,255,0.68)",
+  background: "linear-gradient(180deg, rgba(10, 31, 38, 0.96), rgba(4, 18, 24, 0.92))",
+  color: "#e8fbff",
   padding: 12,
   display: "grid",
   gap: 10,
+  boxShadow: "0 0 0 1px rgba(0, 233, 255, 0.12) inset, 0 18px 42px rgba(0, 0, 0, 0.42)",
 };
 
 function companyUserLabel(user: CompanyUser): string {

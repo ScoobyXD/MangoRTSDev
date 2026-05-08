@@ -315,9 +315,9 @@ export function CommunicationsPage({ me, onNavigate, onLogout }: CommunicationsP
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           <span style={userPillStyle}>{me.user.email}</span>
-          <button style={smallButtonStyle} onClick={() => onNavigate("/")}>App</button>
-          <button style={smallButtonStyle} onClick={() => onNavigate("/settings")}>Settings</button>
-          <button style={smallButtonStyle} onClick={onLogout}>Logout</button>
+          <button style={headerButtonStyle} onClick={() => onNavigate("/")}>MangoRTS</button>
+          <button style={headerButtonStyle} onClick={() => onNavigate("/settings")}>Settings</button>
+          <button style={headerButtonStyle} onClick={onLogout}>Logout</button>
         </div>
       </header>
 
@@ -707,6 +707,15 @@ const smallButtonStyle: React.CSSProperties = {
   font: "inherit",
   fontSize: 11,
   padding: "0 9px",
+};
+
+const headerButtonStyle: React.CSSProperties = {
+  ...smallButtonStyle,
+  border: "1px solid rgba(0, 233, 255, 0.62)",
+  background: "linear-gradient(180deg, rgba(9, 31, 38, 0.84), rgba(5, 18, 23, 0.72))",
+  color: "#e8fbff",
+  fontWeight: 800,
+  boxShadow: "0 0 0 1px rgba(0, 233, 255, 0.12) inset, 0 8px 20px rgba(0, 0, 0, 0.18)",
 };
 
 const primaryButtonStyle: React.CSSProperties = {

@@ -32,6 +32,7 @@ A half-decent analogy is an internal Bloombergy terminal on steroids with video 
 - **Nested relationship visuals** — for list-like nested UI (including right-click menus), use Boxy Hierarchical: Company Explorer-inspired boxy rows with child rows indented under the parent row.
 - **Hierarchy list styling convention** — Boxy Hierarchical lists are fully boxy (top-level and nested rows), without triangle expand/collapse icons or decorative connector lines unless explicitly requested.
 - **Hierarchy spacing rule** — in Boxy Hierarchical lists, stacked hierarchy boxes touch with no vertical gaps between adjacent rows (top-level and nested).
+- **Settings dropdown convention** — Settings must not use native `<select>` dropdowns. Use the MangoRTS custom dropdown pattern: teal RGB(0, 233, 255) frame, glass/dark menu surface, searchable input for large option sets, and a checkmark on the selected option.
 - **Module-name click switcher** — single-click the module name tag (not the full header row) to open a module-type picker and swap kind/title in place. Works in edit and non-edit mode.
 - **Add widget (+)** — always-visible button in header. Works in any mode.
 - **Nothing auto-moves, instant snapping, no transitions**
