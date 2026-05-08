@@ -16,11 +16,13 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 		EntityMappings: make([]MapEntityBatchEntityMapping, 0, len(input.Items)),
 	}
 
+	targetFolderKind := input.EntityKind
 	if input.FolderID != "" {
 		folder, ok := r.folders[key(input.CompanyID, input.FolderID)]
-		if !ok || folder.FolderKind != input.EntityKind {
+		if !ok {
 			return MapEntityBatchResult{}, ErrNotFound
 		}
+		targetFolderKind = folder.FolderKind
 	}
 
 	inputClientIDs := make(map[string]struct{}, len(input.Items))
@@ -107,7 +109,7 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 	}
 
 	if input.FolderID != "" {
-		position := nextCompanyExplorerFolderChildPosition(r.folders, r.folderItems, input.CompanyID, input.FolderID, input.EntityKind)
+		position := nextCompanyExplorerFolderChildPosition(r.folders, r.folderItems, input.CompanyID, input.FolderID, targetFolderKind)
 		for _, mapping := range result.EntityMappings {
 			item := domain.CompanyExplorerFolderItem{
 				CompanyID:        input.CompanyID,

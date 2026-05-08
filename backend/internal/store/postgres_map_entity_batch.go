@@ -21,21 +21,18 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 		EntityMappings: make([]MapEntityBatchEntityMapping, 0, len(input.Items)),
 	}
 
+	targetFolderKind := input.EntityKind
 	if input.FolderID != "" {
-		var folderKind string
 		if err := tx.QueryRowContext(ctx,
 			`select folder_kind
 			 from company_explorer_folders
 			 where company_id=$1 and folder_id=$2`,
 			input.CompanyID, input.FolderID,
-		).Scan(&folderKind); err != nil {
+		).Scan(&targetFolderKind); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return MapEntityBatchResult{}, ErrNotFound
 			}
 			return MapEntityBatchResult{}, err
-		}
-		if folderKind != input.EntityKind {
-			return MapEntityBatchResult{}, ErrNotFound
 		}
 	}
 
@@ -102,7 +99,7 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 	}
 
 	if input.FolderID != "" {
-		position, err := nextCompanyExplorerSQLRowPosition(ctx, tx, input.CompanyID, input.EntityKind, input.FolderID)
+		position, err := nextCompanyExplorerSQLRowPosition(ctx, tx, input.CompanyID, targetFolderKind, input.FolderID)
 		if err != nil {
 			return MapEntityBatchResult{}, err
 		}

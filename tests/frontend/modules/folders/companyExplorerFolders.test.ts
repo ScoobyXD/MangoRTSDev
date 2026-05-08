@@ -10,11 +10,11 @@ const folders = [
 ];
 
 test("folder subtree includes nested descendants", () => {
-  assert.deepEqual(Array.from(getFolderSubtreeIDs(folders, "folder-parent")).sort(), ["folder-child", "folder-parent"]);
+  assert.deepEqual(Array.from(getFolderSubtreeIDs(folders, "folder-parent")).sort(), ["bad-logic-child", "folder-child", "folder-parent"]);
 });
 
-test("folder subtree traversal does not cross node and logic-gate hierarchies", () => {
-  assert.equal(getFolderSubtreeIDs(folders, "folder-parent").has("bad-logic-child"), false);
+test("folder subtree traversal supports mixed node and logic-gate folders", () => {
+  assert.equal(getFolderSubtreeIDs(folders, "folder-parent").has("bad-logic-child"), true);
 });
 
 test("node folder scope keeps only nodes in selected folder subtree and their internal relationships", () => {

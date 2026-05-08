@@ -119,6 +119,10 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
 				return
 			}
+			if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusConflict, "protected_company_explorer_folder_cannot_be_renamed")
+				return
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_rename_company_explorer_folder")
 				return
@@ -142,6 +146,9 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 		}
 		if err := s.repo.DeleteCompanyExplorerFolder(companyID, folderID); errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+			return
+		} else if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusConflict, "protected_company_explorer_folder_cannot_be_deleted")
 			return
 		} else if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_folder")
@@ -239,6 +246,10 @@ func (s *Server) handleCompanyExplorerDeleteBatch(w http.ResponseWriter, r *http
 			err := s.repo.DeleteCompanyExplorerFolder(req.CompanyID, target.ID)
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+				return
+			}
+			if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusConflict, "protected_company_explorer_folder_cannot_be_deleted")
 				return
 			}
 			if err != nil {

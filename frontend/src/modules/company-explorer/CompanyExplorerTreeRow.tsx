@@ -125,6 +125,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   const rowDragPayload = getExplorerDragPayloadForSelection(row, selectedTreeIDs, treeRows);
   const isDragging = draggingTreeID === row.id;
   const isDropTarget = dragOverTreeID === row.id;
+  const specialFolderColor = row.systemKey ? "rgb(0, 233, 255)" : "";
 
   return (
     <div
@@ -280,7 +281,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
           <ExplorerDisclosureIcon open={isOpen} color={folderToggleColor} />
         </button>
       ) : <span style={{ width: TREE_TOGGLE_SLOT_PX, flexShrink: 0 }} />}
-      <ExplorerRowIcon kind={row.kind} />
+      <ExplorerRowIcon kind={row.kind} systemKey={row.systemKey} />
       {renaming?.treeID === row.id ? (
         <input
           ref={renameInputRef}
@@ -327,7 +328,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
             event.stopPropagation();
             onStartRenamingRow(row);
           }}
-          style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "default", userSelect: "none" }}
+          style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "default", userSelect: "none", color: specialFolderColor || undefined, fontWeight: row.systemKey ? 800 : undefined }}
         >
           {row.label}
         </span>

@@ -63,12 +63,12 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
               Create New Folder
             </button>
           )}
-          {menu.canCreateNode && menu.contextKind !== "logic_gate" && (
+          {menu.canCreateNode && (
             <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateNode(menu.targets.nodeParentFolderID)}>
               Create Node
             </button>
           )}
-          {menu.canCreateLogicGate && menu.contextKind !== "node" && (
+          {menu.canCreateLogicGate && (
             <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onCreateLogicGate(menu.targets.logicGateParentFolderID)}>
               Create Logic Gate
             </button>

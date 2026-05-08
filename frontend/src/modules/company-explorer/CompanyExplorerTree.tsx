@@ -206,9 +206,9 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
                 onClick={() => onSelectExplorerSearchResult(row)}
                 style={{ width: "100%", minHeight: 30, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr) auto", alignItems: "center", gap: 7, border: "none", background: row.id === selectedTreeID ? selectedRowBackground : "transparent", color: surfaceText, cursor: "pointer", padding: "5px 9px", textAlign: "left" }}
               >
-                <ExplorerRowIcon kind={row.kind} />
+                <ExplorerRowIcon kind={row.kind} systemKey={row.systemKey} />
                 <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 700 }}>{row.label}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: row.systemKey ? 800 : 700, color: row.systemKey ? "rgb(0, 233, 255)" : undefined }}>{row.label}</span>
                   {row.folderLabel && (
                     <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: folderToggleColor, fontSize: 9, fontWeight: 700 }}>
                       {row.folderLabel}

@@ -30,8 +30,34 @@ func nextCompanyExplorerSQLRowPosition(ctx context.Context, tx *sql.Tx, companyI
 }
 
 func ensureCompanyExplorerDefaultFoldersSQL(ctx context.Context, tx *sql.Tx, companyID string) error {
-	var insertedSeed string
+	var insertedSystemSeed string
 	err := tx.QueryRowContext(ctx,
+		`insert into company_explorer_default_folder_seeds
+		 (company_id, seed_key, created_timestamp)
+		 values ($1, $2, now())
+		 on conflict (company_id, seed_key) do nothing
+		 returning seed_key`,
+		companyID, companyExplorerSystemFolderSeedKey,
+	).Scan(&insertedSystemSeed)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil {
+		for _, seed := range companyExplorerSystemFolderSeeds {
+			if _, err := tx.ExecContext(ctx,
+				`insert into company_explorer_folders
+				 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
+				 values ($1, $2, null, 'node', $3, $4, $5, now(), now())
+				 on conflict (company_id, system_key) where system_key is not null do nothing`,
+				companyID, newUUIDv7String(), seed.Key, seed.Name, seed.Position,
+			); err != nil {
+				return err
+			}
+		}
+	}
+
+	var insertedSeed string
+	err = tx.QueryRowContext(ctx,
 		`insert into company_explorer_default_folder_seeds
 		 (company_id, seed_key, created_timestamp)
 		 values ($1, $2, now())
@@ -53,8 +79,8 @@ func ensureCompanyExplorerDefaultFoldersSQL(ctx context.Context, tx *sql.Tx, com
 	rootID := newUUIDv7String()
 	if _, err := tx.ExecContext(ctx,
 		`insert into company_explorer_folders
-		 (company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp)
-		 values ($1, $2, null, 'logic_gate', 'Logic Gates', $3, now(), now())`,
+		 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
+		 values ($1, $2, null, 'logic_gate', null, 'Logic Gates', $3, now(), now())`,
 		companyID, rootID, position,
 	); err != nil {
 		return err
@@ -62,8 +88,8 @@ func ensureCompanyExplorerDefaultFoldersSQL(ctx context.Context, tx *sql.Tx, com
 	for index, name := range companyExplorerDefaultLogicGateChildFolderNames {
 		if _, err := tx.ExecContext(ctx,
 			`insert into company_explorer_folders
-			 (company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp)
-			 values ($1, $2, $3, 'logic_gate', $4, $5, now(), now())`,
+			 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
+			 values ($1, $2, $3, 'logic_gate', null, $4, $5, now(), now())`,
 			companyID, newUUIDv7String(), rootID, name, (index+1)*1000,
 		); err != nil {
 			return err
@@ -113,17 +139,19 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 		Position:   position,
 	}
 	var parentOut sql.NullString
+	var systemOut sql.NullString
 	if err := tx.QueryRowContext(ctx,
 		`insert into company_explorer_folders
-		 (company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4, $5, $6, now(), now())
-		 returning company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp`,
+		 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
+		 values ($1, $2, $3, $4, null, $5, $6, now(), now())
+		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp`,
 		item.CompanyID, item.FolderID, parent, item.FolderKind, item.Name, item.Position,
 	).Scan(
 		&item.CompanyID,
 		&item.FolderID,
 		&parentOut,
 		&item.FolderKind,
+		&systemOut,
 		&item.Name,
 		&item.Position,
 		&item.CreatedTimestamp,
@@ -133,6 +161,9 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 	}
 	if parentOut.Valid {
 		item.ParentFolderID = &parentOut.String
+	}
+	if systemOut.Valid {
+		item.SystemKey = &systemOut.String
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
@@ -157,7 +188,7 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 		kindParam = folderKind
 	}
 	rows, err := tx.QueryContext(ctx,
-		`select company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp
+		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp
 		 from company_explorer_folders
 		 where company_id=$1 and ($2::text is null or folder_kind=$2)
 		 order by position asc, created_timestamp asc`,
@@ -171,11 +202,13 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 	for rows.Next() {
 		var item domain.CompanyExplorerFolder
 		var parent sql.NullString
+		var systemKey sql.NullString
 		if err := rows.Scan(
 			&item.CompanyID,
 			&item.FolderID,
 			&parent,
 			&item.FolderKind,
+			&systemKey,
 			&item.Name,
 			&item.Position,
 			&item.CreatedTimestamp,
@@ -185,6 +218,9 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 		}
 		if parent.Valid {
 			item.ParentFolderID = &parent.String
+		}
+		if systemKey.Valid {
+			item.SystemKey = &systemKey.String
 		}
 		items = append(items, item)
 	}
@@ -292,17 +328,19 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 
 	var item domain.CompanyExplorerFolder
 	var parentOut sql.NullString
+	var systemOut sql.NullString
 	if err := tx.QueryRowContext(ctx,
 		`update company_explorer_folders
 		 set parent_folder_id=$3, position=$4, updated_timestamp=now()
 		 where company_id=$1 and folder_id=$2
-		 returning company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp`,
+		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp`,
 		companyID, folderID, parent, position,
 	).Scan(
 		&item.CompanyID,
 		&item.FolderID,
 		&parentOut,
 		&item.FolderKind,
+		&systemOut,
 		&item.Name,
 		&item.Position,
 		&item.CreatedTimestamp,
@@ -316,6 +354,9 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 	if parentOut.Valid {
 		item.ParentFolderID = &parentOut.String
 	}
+	if systemOut.Valid {
+		item.SystemKey = &systemOut.String
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
@@ -324,19 +365,37 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 
 func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error) {
 	ctx := context.Background()
+	var systemKey sql.NullString
+	if err := r.db.QueryRowContext(ctx,
+		`select system_key
+		 from company_explorer_folders
+		 where company_id=$1 and folder_id=$2`,
+		companyID, folderID,
+	).Scan(&systemKey); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.CompanyExplorerFolder{}, ErrNotFound
+		}
+		return domain.CompanyExplorerFolder{}, err
+	}
+	if systemKey.Valid {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
+	}
+
 	var item domain.CompanyExplorerFolder
 	var parent sql.NullString
+	var systemOut sql.NullString
 	if err := r.db.QueryRowContext(ctx,
 		`update company_explorer_folders
 		 set name=$3, updated_timestamp=now()
 		 where company_id=$1 and folder_id=$2
-		 returning company_id, folder_id, parent_folder_id, folder_kind, name, position, created_timestamp, updated_timestamp`,
+		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp`,
 		companyID, folderID, name,
 	).Scan(
 		&item.CompanyID,
 		&item.FolderID,
 		&parent,
 		&item.FolderKind,
+		&systemOut,
 		&item.Name,
 		&item.Position,
 		&item.CreatedTimestamp,
@@ -350,11 +409,39 @@ func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name str
 	if parent.Valid {
 		item.ParentFolderID = &parent.String
 	}
+	if systemOut.Valid {
+		item.SystemKey = &systemOut.String
+	}
 	return item, nil
 }
 
 func (r *PostgresRepo) DeleteCompanyExplorerFolder(companyID, folderID string) error {
 	ctx := context.Background()
+	var protectedFolderName string
+	err := r.db.QueryRowContext(ctx,
+		`with recursive subtree as (
+		   select folder_id, name, system_key
+		   from company_explorer_folders
+		   where company_id=$1 and folder_id=$2
+		   union all
+		   select child.folder_id, child.name, child.system_key
+		   from company_explorer_folders child
+		   join subtree parent on child.company_id=$1 and child.parent_folder_id=parent.folder_id
+		 )
+		 select name
+		 from subtree
+		 where system_key is not null
+		 order by name asc
+		 limit 1`,
+		companyID, folderID,
+	).Scan(&protectedFolderName)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil {
+		return ErrInvalid
+	}
+
 	deleted, err := r.db.ExecContext(ctx,
 		`delete from company_explorer_folders
 		 where company_id=$1 and folder_id=$2`,
@@ -389,10 +476,6 @@ func assignCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, company
 		}
 		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
-	if folderKind != itemType && itemType != "kanban" {
-		return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
-	}
-
 	var exists bool
 	var existsQuery string
 	if itemType == "node" {

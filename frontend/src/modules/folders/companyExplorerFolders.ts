@@ -3,12 +3,14 @@ import type { NodeRecord, NodeRelationship } from "../node-map/shared.js";
 
 export type CompanyExplorerFolderKind = "node" | "logic_gate";
 export type CompanyExplorerItemType = CompanyExplorerFolderKind | "kanban";
+export type CompanyExplorerSystemFolderKey = "kanban_boards" | "active_nodes" | "history";
 
 export type CompanyExplorerFolder = {
   company_id: string;
   folder_id: string;
   parent_folder_id?: string;
   folder_kind: CompanyExplorerFolderKind;
+  system_key?: CompanyExplorerSystemFolderKey;
   name: string;
   position: number;
   created_timestamp: string;
@@ -33,20 +35,19 @@ export function isCompanyExplorerItemType(value: unknown): value is CompanyExplo
   return isCompanyExplorerFolderKind(value) || value === "kanban";
 }
 
+export function isCompanyExplorerSystemFolderKey(value: unknown): value is CompanyExplorerSystemFolderKey {
+  return value === "kanban_boards" || value === "active_nodes" || value === "history";
+}
+
 export function getFolderSubtreeIDs(folders: CompanyExplorerFolder[], rootFolderID: string): Set<string> {
   const ids = new Set<string>();
   if (!rootFolderID) return ids;
   ids.add(rootFolderID);
-  const rootKind = folders.find((folder) => folder.folder_id === rootFolderID)?.folder_kind;
   let changed = true;
   while (changed) {
     changed = false;
     for (const folder of folders) {
       if (!folder.parent_folder_id) continue;
-      // Folder IDs are globally unique in normal data, but scope traversal still
-      // guards by kind so a bad imported row cannot bleed logic gates into a
-      // node folder map, or nodes into a logic-gate folder map.
-      if (rootKind && folder.folder_kind !== rootKind) continue;
       if (!ids.has(folder.parent_folder_id) || ids.has(folder.folder_id)) continue;
       ids.add(folder.folder_id);
       changed = true;

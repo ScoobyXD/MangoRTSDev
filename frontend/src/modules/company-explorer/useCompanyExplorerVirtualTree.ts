@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { ExplorerTreeNode, ExplorerVirtualizedTree } from "./companyExplorerTypes";
 
 export const COMPANY_EXPLORER_TREE_ROW_HEIGHT = 30;
+export const COMPANY_EXPLORER_BOTTOM_BUFFER_ROWS = 8;
 const TREE_OVERSCAN = 8;
 
 export function useCompanyExplorerVirtualTree(
@@ -19,7 +20,7 @@ export function useCompanyExplorerVirtualTree(
     return {
       rows,
       topSpacer: start * COMPANY_EXPLORER_TREE_ROW_HEIGHT,
-      bottomSpacer: Math.max(0, (total - end) * COMPANY_EXPLORER_TREE_ROW_HEIGHT),
+      bottomSpacer: Math.max(0, (total - end + COMPANY_EXPLORER_BOTTOM_BUFFER_ROWS) * COMPANY_EXPLORER_TREE_ROW_HEIGHT),
     };
   }, [treeRows, treeViewportHeight, treeScrollTop]);
 }

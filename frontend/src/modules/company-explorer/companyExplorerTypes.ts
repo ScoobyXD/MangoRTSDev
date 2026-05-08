@@ -1,4 +1,4 @@
-import type { CompanyExplorerFolderKind, CompanyExplorerItemType } from "../folders/companyExplorerFolders.js";
+import type { CompanyExplorerFolderKind, CompanyExplorerItemType, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
 import type {
   ExplorerCreationTargets,
   ExplorerDropPayload,
@@ -20,6 +20,7 @@ export type ExplorerTreeNode = {
   folderID?: string;
   parentFolderID?: string;
   folderKind?: CompanyExplorerFolderKind;
+  systemKey?: CompanyExplorerSystemFolderKey;
   folderLabel?: string;
   scopeLevel: number;
   position: number;

@@ -3,10 +3,8 @@ import { getNodeTitle as getLogicGateTitle, type NodeRecord as LogicGateRecord }
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind } from "../folders/companyExplorerFolders.js";
 import { getKanbanBoardDisplayTitle, type KanbanBoard } from "../kanban/shared.js";
 import {
-  EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID,
-  EXPLORER_SYSTEM_HISTORY_FOLDER_ID,
-  EXPLORER_SYSTEM_KANBAN_FOLDER_ID,
   formatExplorerFolderLabel,
+  isExplorerSystemFolderKey,
 } from "./treePresentation.js";
 import { sortExplorerRowsByPosition, TREE_ROW_POSITION_STEP } from "./companyExplorerDragDrop.js";
 import type { ExplorerTreeNode } from "./companyExplorerTypes.js";
@@ -22,7 +20,6 @@ type BuildCompanyExplorerTreeRowsInput = {
   todayISODate?: string;
 };
 
-const SYSTEM_FOLDER_CREATED_TIMESTAMP = "0000-00-00T00:00:00.000Z";
 const ROOT_ROW_POSITION_OFFSET: Record<CompanyExplorerFolderKind, number> = {
   node: 0,
   logic_gate: 100_000_000,
@@ -93,82 +90,12 @@ export function buildCompanyExplorerTreeRows({
     itemsByFolder.set(key, bucket);
   }
 
-  const pushSystemFolder = (id: string, label: string, position: number) => {
-    rows.push({
-      id,
-      label,
-      depth: 0,
-      kind: "folder",
-      scopeLevel: 0,
-      position,
-      createdTimestamp: SYSTEM_FOLDER_CREATED_TIMESTAMP,
-    });
-  };
-
-  pushSystemFolder(EXPLORER_SYSTEM_KANBAN_FOLDER_ID, "Kanban Boards", 100);
-  if (expanded.has(EXPLORER_SYSTEM_KANBAN_FOLDER_ID)) {
-    let boardPosition = 0;
-    for (const board of kanbanBoards) {
-      boardPosition += TREE_ROW_POSITION_STEP;
-      rows.push({
-        id: `system-kanban-${board.board_id}`,
-        label: getKanbanBoardDisplayTitle(board),
-        depth: 1,
-        kind: "kanban",
-        kanbanBoardID: board.board_id,
-        scopeLevel: 1,
-        position: boardPosition,
-        createdTimestamp: board.created_timestamp,
-      });
-    }
-  }
-
-  pushSystemFolder(EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID, "Active Nodes", 200);
-  if (expanded.has(EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID)) {
-    let activePosition = 0;
-    for (const node of nodes) {
-      const dueDate = normalizeISODate(node.due_date);
-      if (!dueDate || dueDate <= currentDate) continue;
-      activePosition += TREE_ROW_POSITION_STEP;
-      rows.push({
-        id: `system-active-node-${node.node_id}`,
-        label: getNodeTitle(node) || node.node_id,
-        depth: 1,
-        kind: "node",
-        nodeID: node.node_id,
-        scopeLevel: 1,
-        position: activePosition,
-        createdTimestamp: node.created_timestamp,
-      });
-    }
-  }
-
-  pushSystemFolder(EXPLORER_SYSTEM_HISTORY_FOLDER_ID, "History", 300);
-  if (expanded.has(EXPLORER_SYSTEM_HISTORY_FOLDER_ID)) {
-    let historyPosition = 0;
-    for (const node of nodes) {
-      const dueDate = normalizeISODate(node.due_date);
-      if (!dueDate || dueDate >= currentDate) continue;
-      historyPosition += TREE_ROW_POSITION_STEP;
-      rows.push({
-        id: `system-history-node-${node.node_id}`,
-        label: getNodeTitle(node) || node.node_id,
-        depth: 1,
-        kind: "node",
-        nodeID: node.node_id,
-        scopeLevel: 1,
-        position: historyPosition,
-        createdTimestamp: node.created_timestamp,
-      });
-    }
-  }
-
   const getRootAwarePosition = (folderKind: CompanyExplorerFolderKind, rowID: string, position: number): number => {
     return rootRowOrder[rowID] ?? position + ROOT_ROW_POSITION_OFFSET[folderKind];
   };
 
   const buildFolderBranchRows = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number): ExplorerTreeNode[] => {
-    const directItems = (itemsByFolder.get(parentFolderID) ?? []).filter((item) => item.item_type === folderKind || item.item_type === "kanban");
+    const directItems = itemsByFolder.get(parentFolderID) ?? [];
     const branchRows: ExplorerTreeNode[] = [];
     let syntheticRootPosition = 0;
     if (parentFolderID === "" && folderKind === "node") {
@@ -275,6 +202,7 @@ export function buildCompanyExplorerTreeRows({
         folderID: folder.folder_id,
         parentFolderID: folder.parent_folder_id ?? "",
         folderKind,
+        systemKey: isExplorerSystemFolderKey(folder.system_key) ? folder.system_key : undefined,
         folderLabel: getFolderPathLabel(folder.folder_id),
         scopeLevel: depth,
         position: parentFolderID === "" ? getRootAwarePosition(folderKind, rowID, folder.position || TREE_ROW_POSITION_STEP) : folder.position || TREE_ROW_POSITION_STEP,
@@ -285,10 +213,68 @@ export function buildCompanyExplorerTreeRows({
     return sortExplorerRowsByPosition(branchRows);
   };
 
+  const buildSystemFolderContentRows = (systemKey: string | undefined, depth: number): ExplorerTreeNode[] => {
+    const contentRows: ExplorerTreeNode[] = [];
+    if (systemKey === "kanban_boards") {
+      let boardPosition = 0;
+      for (const board of kanbanBoards) {
+        boardPosition += TREE_ROW_POSITION_STEP;
+        contentRows.push({
+          id: `system-kanban-${board.board_id}`,
+          label: getKanbanBoardDisplayTitle(board),
+          depth,
+          kind: "kanban",
+          kanbanBoardID: board.board_id,
+          scopeLevel: depth,
+          position: boardPosition,
+          createdTimestamp: board.created_timestamp,
+        });
+      }
+    }
+    if (systemKey === "active_nodes") {
+      let activePosition = 0;
+      for (const node of nodes) {
+        const dueDate = normalizeISODate(node.due_date);
+        if (!dueDate || dueDate <= currentDate) continue;
+        activePosition += TREE_ROW_POSITION_STEP;
+        contentRows.push({
+          id: `system-active-node-${node.node_id}`,
+          label: getNodeTitle(node) || node.node_id,
+          depth,
+          kind: "node",
+          nodeID: node.node_id,
+          scopeLevel: depth,
+          position: activePosition,
+          createdTimestamp: node.created_timestamp,
+        });
+      }
+    }
+    if (systemKey === "history") {
+      let historyPosition = 0;
+      for (const node of nodes) {
+        const dueDate = normalizeISODate(node.due_date);
+        if (!dueDate || dueDate >= currentDate) continue;
+        historyPosition += TREE_ROW_POSITION_STEP;
+        contentRows.push({
+          id: `system-history-node-${node.node_id}`,
+          label: getNodeTitle(node) || node.node_id,
+          depth,
+          kind: "node",
+          nodeID: node.node_id,
+          scopeLevel: depth,
+          position: historyPosition,
+          createdTimestamp: node.created_timestamp,
+        });
+      }
+    }
+    return contentRows;
+  };
+
   const pushFolderBranch = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number) => {
     for (const row of buildFolderBranchRows(folderKind, parentFolderID, depth)) {
       rows.push(row);
       if (row.kind !== "folder" || !expanded.has(row.id) || !row.folderID) continue;
+      for (const systemRow of buildSystemFolderContentRows(row.systemKey, depth + 1)) rows.push(systemRow);
       pushFolderBranch(folderKind, row.folderID, depth + 1);
     }
   };
@@ -302,6 +288,7 @@ export function buildCompanyExplorerTreeRows({
   ])) {
     rows.push(row);
     if (row.kind !== "folder" || !expanded.has(row.id) || !row.folderID || !row.folderKind) continue;
+    for (const systemRow of buildSystemFolderContentRows(row.systemKey, 1)) rows.push(systemRow);
     pushFolderBranch(row.folderKind, row.folderID, 1);
   }
   return rows;
