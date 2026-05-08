@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLayout from "../app/applayout";
+import { createLogicGateArenaFrames } from "../app/DefaultViews";
+import { computeLinkPlan, mergeLinkPlan } from "../app/frameLinking";
 import { UI_THEME } from "../app/frameLayoutTypes";
-import { loadSettings } from "../app/useFramePersistence";
+import { loadFrameLinks, loadSettings, persistFrameLinks, persistFrameRegistry } from "../app/useFramePersistence";
+import type { FrameDataModel } from "../types";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
 import {
   acceptInvitation,
@@ -22,8 +25,31 @@ import {
 } from "./cognitoAuth";
 import { isAuthPath, nextPathForAuthState } from "./authRoutes";
 import { CommunicationsPage } from "../pages/communications/CommunicationsPage";
+import { LogicGateArenaPage } from "../pages/logic-gate-arena";
 
 type PendingChallenge = Extract<LoginResult, { status: "new_password_required" }> | null;
+
+function persistStandaloneFrameGraph(frames: FrameDataModel[]): void {
+  const registry = Object.fromEntries(frames.map((frame) => [frame.id, { kind: frame.kind }]));
+  persistFrameRegistry(registry);
+  persistFrameLinks(mergeLinkPlan(loadFrameLinks(), computeLinkPlan(frames)));
+}
+
+function createStandaloneLogicGateArenaFrames(): FrameDataModel[] {
+  const frames = createLogicGateArenaFrames();
+  persistStandaloneFrameGraph(frames);
+  return frames;
+}
+
+function LogicGateArenaStandalonePage() {
+  const [frames, setFrames] = useState<FrameDataModel[]>(createStandaloneLogicGateArenaFrames);
+  useEffect(() => { persistStandaloneFrameGraph(frames); }, [frames]);
+  return (
+    <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "#ffffff" }}>
+      <LogicGateArenaPage frames={frames} updateFrames={setFrames} />
+    </div>
+  );
+}
 
 type CompanyUser = {
   company_id: string;
@@ -182,7 +208,11 @@ export default function AuthGate() {
     return <SettingsPage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} />;
   }
 
-  if (normalizedPath === "/communications") {
+  if (normalizedPath === "/logic-gate-arena") {
+    return <LogicGateArenaStandalonePage />;
+  }
+
+  if (normalizedPath === "/communications" || normalizedPath === "/communication") {
     return <CommunicationsPage me={me} onNavigate={navigate} />;
   }
 
@@ -745,7 +775,8 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
         <h1 style={settingsPageTitleStyle}>Settings</h1>
         <div style={settingsNavStyle}>
           <button style={smallButtonStyle} onClick={() => onNavigate("/")}>MangoRTS</button>
-          <button style={smallButtonStyle} onClick={() => onNavigate("/communications")}>Communications</button>
+          <button style={smallButtonStyle} onClick={() => onNavigate("/logic-gate-arena")}>Logic Gate Arena</button>
+          <button style={smallButtonStyle} onClick={() => onNavigate("/communication")}>Communication</button>
         </div>
       </div>
       {error && <div style={settingsErrorStyle}>{error}</div>}
@@ -1014,17 +1045,20 @@ function AccountBar({ me, onNavigate }: { me: CurrentUserResponse; onNavigate: (
   const displayName = me.user.display_name?.trim() || me.user.email;
   const headerBackground = loadSettings().headerBgColor || UI_THEME.panel;
   const headerText = loadSettings().headerTextColor || UI_THEME.text;
+  const navButtonStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 5, height: 28, border: "none", background: "transparent", color: headerText, cursor: "pointer", font: "inherit", fontWeight: 900, padding: 0, whiteSpace: "nowrap" };
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0, height: "100%", padding: "0 8px", background: headerBackground, color: headerText, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>
-      <span style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, maxWidth: 190, color: headerText, fontWeight: 800 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, height: "100%", padding: "0 8px", background: headerBackground, color: headerText, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, maxWidth: 160, color: headerText, fontWeight: 800 }}>
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
         <PersonIcon />
       </span>
-      <button
-        type="button"
-        style={{ display: "flex", alignItems: "center", gap: 5, height: 28, border: "none", background: "transparent", color: headerText, cursor: "pointer", font: "inherit", fontWeight: 900, padding: 0 }}
-        onClick={() => onNavigate("/settings")}
-      >
+      <button type="button" style={navButtonStyle} onClick={() => onNavigate("/logic-gate-arena")}>
+        <span>Logic Gate Arena</span>
+      </button>
+      <button type="button" style={navButtonStyle} onClick={() => onNavigate("/communication")}>
+        <span>Communication</span>
+      </button>
+      <button type="button" style={navButtonStyle} onClick={() => onNavigate("/settings")}>
         <span>Settings</span>
         <GearIcon />
       </button>
