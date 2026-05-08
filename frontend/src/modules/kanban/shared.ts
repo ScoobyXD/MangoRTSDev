@@ -110,7 +110,8 @@ export type KanbanCardSelectionUpdate = {
 
 export type KanbanColumnDropPlacement = "before" | "after" | "swap";
 export type KanbanCardDropPlacement = "before" | "after";
-export type KanbanGroupField = "status" | "person" | "priority" | "due_date" | "work_type" | "none";
+export type KanbanGroupField = "status" | "person" | "priority" | "due_date";
+export type KanbanGroupSortDirection = "asc" | "desc";
 
 export type KanbanGroupNode = {
   node_id: string;
@@ -128,6 +129,7 @@ export type KanbanGroupUser = {
 export type KanbanGroupedBoardRow = {
   key: string;
   label: string;
+  sortValue: string | number;
 };
 
 export type KanbanGroupedBoardCell = {
@@ -151,8 +153,6 @@ export const KANBAN_GROUP_FIELDS: Array<{ value: KanbanGroupField; label: string
   { value: "person", label: "Person" },
   { value: "priority", label: "Priority" },
   { value: "due_date", label: "Due Date" },
-  { value: "work_type", label: "Work Type" },
-  { value: "none", label: "None" },
 ];
 
 export function isKanbanBoardDropItemType(value: unknown): value is "node" {
@@ -568,46 +568,49 @@ export function groupCardsByColumn(cards: KanbanCard[]): Map<string, KanbanCard[
   return grouped;
 }
 
-function kanbanStatusGroupFromColumn(column: Pick<KanbanColumn, "title">): KanbanGroupedBoardRow {
+function kanbanStatusGroupFromColumn(column: Pick<KanbanColumn, "title" | "position">): KanbanGroupedBoardRow {
   const label = column.title.trim() || "No status";
-  return { key: `status:${label.toLowerCase()}`, label };
+  return { key: `status:${label.toLowerCase()}`, label, sortValue: column.position };
+}
+
+function getKanbanPriorityGroupLabel(priority: number): string {
+  if (priority === 1) return "1 Low Priority";
+  if (priority === 2) return "2 Medium-Low Priority";
+  if (priority === 3) return "3 Medium Priority";
+  if (priority === 4) return "4 High Priority";
+  if (priority === 5) return "5 URGENT";
+  return "0 Unassigned";
 }
 
 export function getKanbanGroupValue(
   card: KanbanCard,
   field: KanbanGroupField,
-  columnByID: ReadonlyMap<string, Pick<KanbanColumn, "title">>,
+  columnByID: ReadonlyMap<string, Pick<KanbanColumn, "title" | "position">>,
   nodeByID: ReadonlyMap<string, KanbanGroupNode>,
   userByID: ReadonlyMap<string, KanbanGroupUser>,
 ): KanbanGroupedBoardRow {
   const node = nodeByID.get(card.node_id);
   if (field === "status") {
-    if (card.is_issue) return { key: "issue", label: "Issue" };
+    if (card.is_issue) return { key: "issue", label: "Issue", sortValue: Number.MAX_SAFE_INTEGER };
     const column = columnByID.get(card.column_id);
-    return column ? kanbanStatusGroupFromColumn(column) : { key: "status:no-status", label: "No status" };
+    return column ? kanbanStatusGroupFromColumn(column) : { key: "status:no-status", label: "No status", sortValue: Number.MAX_SAFE_INTEGER - 1 };
   }
   if (field === "person") {
     const assignee = node?.assignee_user_id?.trim();
-    if (!assignee) return { key: "person:unassigned", label: "Unassigned" };
+    if (!assignee) return { key: "person:unassigned", label: "Unassigned", sortValue: "" };
     const user = userByID.get(assignee);
     const name = user?.display_name?.trim();
     const email = user?.email?.trim();
-    return { key: `person:${assignee}`, label: name || email || assignee };
+    const label = name || email || assignee;
+    return { key: `person:${assignee}`, label, sortValue: label.toLowerCase() };
   }
   if (field === "priority") {
     const priority = node?.priority ?? 0;
-    return priority > 0 ? { key: `priority:${priority}`, label: `P${priority}` } : { key: "priority:unassigned", label: "No priority" };
+    const normalized = priority > 0 ? Math.max(1, Math.min(5, Math.round(priority))) : 0;
+    return { key: `priority:${normalized}`, label: getKanbanPriorityGroupLabel(normalized), sortValue: normalized };
   }
-  if (field === "due_date") {
-    const dueDate = node?.due_date?.trim();
-    return dueDate ? { key: `due:${dueDate}`, label: dueDate } : { key: "due:none", label: "No due date" };
-  }
-  if (field === "work_type") {
-    if (card.is_issue) return { key: "work:issue", label: "Issue" };
-    if (card.logic_gate_id) return { key: "work:logic-gate", label: "Logic Gate" };
-    return { key: "work:node", label: "Node" };
-  }
-  return { key: "all", label: "All" };
+  const dueDate = node?.due_date?.trim();
+  return dueDate ? { key: `due:${dueDate}`, label: dueDate, sortValue: dueDate } : { key: "due:none", label: "No due date", sortValue: "" };
 }
 
 function addUniqueKanbanGroup(target: KanbanGroupedBoardRow[], seen: Set<string>, group: KanbanGroupedBoardRow): void {
@@ -617,7 +620,6 @@ function addUniqueKanbanGroup(target: KanbanGroupedBoardRow[], seen: Set<string>
 }
 
 function seedKanbanGroupsForField(field: KanbanGroupField, columns: KanbanColumn[]): KanbanGroupedBoardRow[] {
-  if (field === "none") return [{ key: "all", label: "All" }];
   if (field !== "status") return [];
   const groups: KanbanGroupedBoardRow[] = [];
   const seen = new Set<string>();
@@ -627,11 +629,25 @@ function seedKanbanGroupsForField(field: KanbanGroupField, columns: KanbanColumn
   return groups;
 }
 
+function compareKanbanGroups(a: KanbanGroupedBoardRow, b: KanbanGroupedBoardRow): number {
+  if (typeof a.sortValue === "number" && typeof b.sortValue === "number") {
+    return a.sortValue - b.sortValue || a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" });
+  }
+  return String(a.sortValue).localeCompare(String(b.sortValue), undefined, { numeric: true, sensitivity: "base" }) || a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function sortKanbanGroups(groups: KanbanGroupedBoardRow[], direction: KanbanGroupSortDirection): KanbanGroupedBoardRow[] {
+  const sorted = [...groups].sort(compareKanbanGroups);
+  return direction === "desc" ? sorted.reverse() : sorted;
+}
+
 export function buildKanbanGroupedBoardLayout(args: {
   columns: KanbanColumn[];
   cards: KanbanCard[];
   xGroupBy: KanbanGroupField;
   yGroupBy: KanbanGroupField;
+  xSortDirection?: KanbanGroupSortDirection;
+  ySortDirection?: KanbanGroupSortDirection;
   nodeByID: ReadonlyMap<string, KanbanGroupNode>;
   userByID: ReadonlyMap<string, KanbanGroupUser>;
 }): KanbanGroupedBoardLayout {
@@ -659,15 +675,18 @@ export function buildKanbanGroupedBoardLayout(args: {
     cardsByColumnAndRow.set(column.key, rowMap);
   }
 
+  const sortedColumns = sortKanbanGroups(columns, args.xSortDirection ?? "asc");
+  const sortedRows = sortKanbanGroups(rows, args.ySortDirection ?? "asc");
+
   return {
-    columns: columns.map((column) => {
+    columns: sortedColumns.map((column) => {
       const rowMap = cardsByColumnAndRow.get(column.key) ?? new Map<string, KanbanCard[]>();
       return {
         ...column,
-        cells: rows.map((row) => ({ rowKey: row.key, cards: rowMap.get(row.key) ?? [] })),
+        cells: sortedRows.map((row) => ({ rowKey: row.key, cards: rowMap.get(row.key) ?? [] })),
       };
     }),
-    rows,
+    rows: sortedRows,
   };
 }
 
