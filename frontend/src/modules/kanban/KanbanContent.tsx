@@ -148,7 +148,7 @@ const contextMenuHoverHandlers = {
 };
 
 const ARENA_GROUP_COLUMN_WIDTH_PX = 300;
-const ARENA_GROUP_ROW_LABEL_WIDTH_PX = 118;
+const ARENA_GROUP_ROW_LABEL_WIDTH_PX = 104;
 const ARENA_GROUP_MIN_CELL_HEIGHT_PX = 86;
 const ARENA_GROUP_FRAME_BACKGROUND = "#ffffff";
 const ARENA_GROUP_GLASS_BORDER_LIGHT = "rgba(0, 180, 210, 0.32)";
@@ -262,6 +262,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [boardTitleDraft, setBoardTitleDraft] = useState("");
   const [boards, setBoards] = useState<KanbanBoard[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
+  const [nodeGraphRevision, setNodeGraphRevision] = useState(0);
   const [explorerFolders, setExplorerFolders] = useState<CompanyExplorerFolder[]>([]);
   const [explorerFolderItems, setExplorerFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [boardsLoading, setBoardsLoading] = useState(false);
@@ -367,6 +368,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     if (!arenaGroupMenuOpen) return undefined;
     const onPointerDown = (event: PointerEvent) => {
       if (arenaGroupControlsRef.current?.contains(event.target as Node)) return;
+      if ((event.target as Element | null)?.closest?.("[data-arena-group-controls='true']")) return;
       setArenaGroupMenuOpen(null);
     };
     window.addEventListener("pointerdown", onPointerDown);
@@ -409,7 +411,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const arenaNodeByID = useMemo(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
     return new Map((snapshot.nodes ?? []).map((node) => [node.node_id, node]));
-  }, [apiBase, cards, columns, companyID]);
+  }, [apiBase, cards, columns, companyID, nodeGraphRevision]);
   const arenaGroupedBoard = useMemo(() => buildKanbanGroupedBoardLayout({
     columns: orderedColumns,
     cards,
@@ -786,8 +788,12 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   }, [apiBase, companyID]);
 
   useEffect(() => {
-    syncCardTitlesFromNodeGraph();
-    return subscribeNodeRelationshipGraph(apiBase, companyID, syncCardTitlesFromNodeGraph);
+    const applyNodeGraphChange = () => {
+      setNodeGraphRevision((revision) => revision + 1);
+      syncCardTitlesFromNodeGraph();
+    };
+    applyNodeGraphChange();
+    return subscribeNodeRelationshipGraph(apiBase, companyID, applyNodeGraphChange);
   }, [apiBase, companyID, syncCardTitlesFromNodeGraph]);
 
   useEffect(() => {
@@ -1464,10 +1470,8 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   };
 
   const renderArenaGroupingControls = () => {
-    const controlColumnCount = Math.max(arenaGroupedBoard.columns.length, 1);
-    const gridWidth = ARENA_GROUP_ROW_LABEL_WIDTH_PX + (controlColumnCount * ARENA_GROUP_COLUMN_WIDTH_PX) + (controlColumnCount * 8);
     return (
-      <div ref={arenaGroupControlsRef} style={{ display: "grid", alignItems: "start", gap: 8, minWidth: arenaGroupingOpen ? gridWidth : undefined, marginBottom: 10 }}>
+      <div ref={arenaGroupControlsRef} data-arena-group-controls="true" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: arenaGroupingOpen ? 8 : 10 }}>
         <button
           type="button"
           onClick={() => setArenaGroupingOpen((open) => !open)}
@@ -1475,23 +1479,6 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         >
           Group
         </button>
-        {arenaGroupingOpen && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: `${ARENA_GROUP_ROW_LABEL_WIDTH_PX}px repeat(${controlColumnCount}, ${ARENA_GROUP_COLUMN_WIDTH_PX}px)`,
-              columnGap: 8,
-              alignItems: "end",
-            }}
-          >
-            <div style={{ gridColumn: 1, minWidth: 0 }}>
-              {renderArenaGroupSelect(arenaYGroupBy, selectArenaYGroupBy, "Y-axis", "y", arenaYSortDirection, () => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc")), "compact")}
-            </div>
-            <div style={{ gridColumn: `2 / span ${controlColumnCount}`, minWidth: 0, justifySelf: "start" }}>
-              {renderArenaGroupSelect(arenaXGroupBy, setArenaXGroupBy, "X-Axis", "x", arenaXSortDirection, () => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc")))}
-            </div>
-          </div>
-        )}
       </div>
     );
   };
@@ -1513,13 +1500,25 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const groupFrameShadow = ARENA_GROUP_FRAME_SHADOW;
     const groupFrameText = "#102226";
     const gridWidth = ARENA_GROUP_ROW_LABEL_WIDTH_PX + (columnCount * ARENA_GROUP_COLUMN_WIDTH_PX) + (columnCount * 8);
+    const xAxisControlColumn = Math.min(columnCount, 2) + 1;
+    const axisControlCellStyle: React.CSSProperties = {
+      minWidth: 0,
+      minHeight: 56,
+      display: "grid",
+      alignItems: "end",
+      border: `1px solid ${glassBorder}`,
+      background: groupFrameBackground,
+      boxShadow: groupFrameShadow,
+      padding: 6,
+      zIndex: 3,
+    };
     return (
       <div
         style={{
           minWidth: gridWidth,
           display: "grid",
           gridTemplateColumns: `${ARENA_GROUP_ROW_LABEL_WIDTH_PX}px repeat(${columnCount}, ${ARENA_GROUP_COLUMN_WIDTH_PX}px)`,
-          gridTemplateRows: `38px repeat(${rowCount}, minmax(${ARENA_GROUP_MIN_CELL_HEIGHT_PX}px, auto))`,
+          gridTemplateRows: `minmax(56px, auto) minmax(38px, auto) repeat(${rowCount}, minmax(${ARENA_GROUP_MIN_CELL_HEIGHT_PX}px, auto))`,
           columnGap: 8,
           rowGap: 0,
           alignItems: "stretch",
@@ -1527,6 +1526,12 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1,
         }}
       >
+        <div data-arena-group-controls="true" style={{ ...axisControlCellStyle, gridColumn: 1, gridRow: 1 }}>
+          {renderArenaGroupSelect(arenaYGroupBy, selectArenaYGroupBy, "Y-axis", "y", arenaYSortDirection, () => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc")), "compact")}
+        </div>
+        <div data-arena-group-controls="true" style={{ ...axisControlCellStyle, gridColumn: xAxisControlColumn, gridRow: 1 }}>
+          {renderArenaGroupSelect(arenaXGroupBy, setArenaXGroupBy, "X-Axis", "x", arenaXSortDirection, () => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc")), "compact")}
+        </div>
         {groupColumns.map((groupColumn, columnIndex) => {
           const cardCount = groupColumn.cells.reduce((sum, cell) => sum + cell.cards.length, 0);
           return (
@@ -1534,7 +1539,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
               key={groupColumn.key}
               style={{
                 gridColumn: columnIndex + 2,
-                gridRow: 1,
+                gridRow: 2,
                 minWidth: 0,
                 display: "flex",
                 alignItems: "center",
@@ -1552,7 +1557,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
                 fontWeight: 900,
               }}
             >
-              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{groupColumn.label}</span>
+              <span style={{ minWidth: 0, overflowWrap: "anywhere", whiteSpace: "normal", lineHeight: 1.2 }}>{groupColumn.label}</span>
               <span style={{ flexShrink: 0, color: subtext }}>{cardCount}</span>
             </div>
           );
@@ -1562,7 +1567,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             key={row.key}
             style={{
               gridColumn: 1,
-              gridRow: rowIndex + 2,
+              gridRow: rowIndex + 3,
               minHeight: ARENA_GROUP_MIN_CELL_HEIGHT_PX,
               minWidth: 0,
               display: "grid",
@@ -1586,7 +1591,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
             key={`${groupColumn.key}:${cell.rowKey}`}
             style={{
               gridColumn: columnIndex + 2,
-              gridRow: rowIndex + 2,
+              gridRow: rowIndex + 3,
               minHeight: ARENA_GROUP_MIN_CELL_HEIGHT_PX,
               display: "grid",
               alignContent: "start",
@@ -1667,7 +1672,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           void refreshBoard(nextBoardID);
         }}
       />
-      <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)" }}>
+      <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "8px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#c62828", fontSize: 11, fontWeight: 700 }}>{error}</div>}
         {arenaMode && renderArenaGroupingControls()}
         {arenaMode && arenaGroupingOpen ? renderArenaGroupedBoard() : (

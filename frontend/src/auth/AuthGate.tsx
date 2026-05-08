@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppLayout from "../app/applayout";
+import { UI_THEME } from "../app/frameLayoutTypes";
+import { loadSettings } from "../app/useFramePersistence";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
 import {
   acceptInvitation,
@@ -47,6 +49,20 @@ type SettingsSelectOption = {
   label: string;
   detail?: string;
 };
+
+const PersonIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
+    <circle cx="8" cy="5.1" r="2.75" fill="none" stroke={color} strokeWidth="1.45" />
+    <path d="M3.3 13.15c.72-2.15 2.37-3.35 4.7-3.35s3.98 1.2 4.7 3.35" fill="none" stroke={color} strokeWidth="1.45" strokeLinecap="round" />
+  </svg>
+);
+
+const GearIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
+    <path d="M6.9 1.8h2.2l.38 1.45c.34.12.66.26.96.43l1.3-.75 1.55 1.55-.75 1.3c.17.3.31.62.43.96l1.45.38v2.2l-1.45.38c-.12.34-.26.66-.43.96l.75 1.3-1.55 1.55-1.3-.75c-.3.17-.62.31-.96.43l-.38 1.45H6.9l-.38-1.45a5.16 5.16 0 0 1-.96-.43l-1.3.75-1.55-1.55.75-1.3a5.16 5.16 0 0 1-.43-.96l-1.45-.38v-2.2l1.45-.38c.12-.34.26-.66.43-.96l-.75-1.3 1.55-1.55 1.3.75c.3-.17.62-.31.96-.43L6.9 1.8Z" fill="none" stroke={color} strokeWidth="1.15" strokeLinejoin="round" />
+    <circle cx="8" cy="8.2" r="1.85" fill="none" stroke={color} strokeWidth="1.15" />
+  </svg>
+);
 
 const INVITE_ROLE_OPTIONS: SettingsSelectOption[] = [
   { value: "company_user", label: "company_user" },
@@ -167,13 +183,12 @@ export default function AuthGate() {
   }
 
   if (normalizedPath === "/communications") {
-    return <CommunicationsPage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} />;
+    return <CommunicationsPage me={me} onNavigate={navigate} />;
   }
 
   return (
     <>
-      <AppLayout />
-      <AccountBar me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} />
+      <AppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} />
     </>
   );
 }
@@ -731,7 +746,6 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
         <div style={settingsNavStyle}>
           <button style={smallButtonStyle} onClick={() => onNavigate("/")}>MangoRTS</button>
           <button style={smallButtonStyle} onClick={() => onNavigate("/communications")}>Communications</button>
-          <button style={smallButtonStyle} onClick={onLogout}>Logout</button>
         </div>
       </div>
       {error && <div style={settingsErrorStyle}>{error}</div>}
@@ -850,7 +864,10 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
           {inviteMessage && <div style={settingsInfoTextStyle}>{inviteMessage}</div>}
         </section>}
         <section style={{ ...sectionStyle, flex: me.is_dev_admin ? "0 1 360px" : "1 1 280px", marginLeft: me.is_dev_admin ? "auto" : undefined }}>
-          <h2 style={sectionTitleStyle}>User Profile</h2>
+          <div style={settingsProfileHeaderStyle}>
+            <h2 style={sectionTitleStyle}>User Profile</h2>
+            <button style={smallButtonStyle} onClick={onLogout}>Logout</button>
+          </div>
           <div style={profileGridStyle}>
             <span style={profileLabelStyle}>Name</span>
             <span style={profileValueStyle}>{me.user.display_name || "No name set"}</span>
@@ -993,13 +1010,24 @@ function AuthPanel({ title, error, children }: { title: string; error?: string; 
   );
 }
 
-function AccountBar({ me, onNavigate, onLogout }: { me: CurrentUserResponse; onNavigate: (path: string) => void; onLogout: () => void }) {
+function AccountBar({ me, onNavigate }: { me: CurrentUserResponse; onNavigate: (path: string) => void }) {
+  const displayName = me.user.display_name?.trim() || me.user.email;
+  const headerBackground = loadSettings().headerBgColor || UI_THEME.panel;
+  const headerText = loadSettings().headerTextColor || UI_THEME.text;
   return (
-    <div style={{ position: "fixed", top: 8, right: 8, zIndex: 200, display: "flex", alignItems: "center", gap: 6, padding: "5px 6px", background: "rgba(5, 18, 24, 0.76)", border: "1px solid rgba(0, 233, 255, 0.62)", borderRadius: 8, boxShadow: "0 0 0 1px rgba(0, 233, 255, 0.12) inset, 0 10px 24px rgba(0,0,0,0.22)", backdropFilter: "blur(12px)", color: "#e8fbff", fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>
-      <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(232, 251, 255, 0.82)" }}>{me.user.email}</span>
-      <button style={smallButtonStyle} onClick={() => onNavigate("/communications")}>Communications</button>
-      <button style={smallButtonStyle} onClick={() => onNavigate("/settings")}>Settings</button>
-      <button style={smallButtonStyle} onClick={onLogout}>Logout</button>
+    <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0, height: "100%", padding: "0 8px", background: headerBackground, color: headerText, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, maxWidth: 190, color: headerText, fontWeight: 800 }}>
+        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
+        <PersonIcon />
+      </span>
+      <button
+        type="button"
+        style={{ display: "flex", alignItems: "center", gap: 5, height: 28, border: "none", background: "transparent", color: headerText, cursor: "pointer", font: "inherit", fontWeight: 900, padding: 0 }}
+        onClick={() => onNavigate("/settings")}
+      >
+        <span>Settings</span>
+        <GearIcon />
+      </button>
     </div>
   );
 }
@@ -1033,7 +1061,7 @@ const smallButtonStyle: React.CSSProperties = {
 
 const settingsPageStyle: React.CSSProperties = {
   minHeight: "100vh",
-  background: "linear-gradient(135deg, #051017 0%, #0b191f 48%, #160f18 100%)",
+  background: "#ffffff",
   color: "#e8fbff",
   fontFamily: "'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace",
   padding: 18,
@@ -1297,6 +1325,13 @@ const sectionTitleStyle: React.CSSProperties = {
   textTransform: "uppercase",
   color: "rgb(0, 233, 255)",
   letterSpacing: 0,
+};
+
+const settingsProfileHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 10,
 };
 
 const successMessageStyle: React.CSSProperties = {

@@ -4,6 +4,7 @@ import { EditorContent } from "./editor/EditorContent";
 import { CompanyExplorerContent } from "./company-explorer";
 import { StatsContent } from "./stats/StatsContent";
 import { KanbanContent } from "./kanban/KanbanContent";
+import { CommunicationsFrameContent } from "../pages/communications/CommunicationsPage";
 
 export interface ModuleTemplate {
   kind: string;
@@ -20,6 +21,7 @@ export const MODULE_LIBRARY: ModuleTemplate[] = [
   { kind: "company-explorer", label: "Company Explorer", defaultW: 18, defaultH: 14, render: CompanyExplorerContent },
   { kind: "editor", label: "Editor", defaultW: 16, defaultH: 14, render: EditorContent },
   { kind: "kanban", label: "Kanban board", defaultW: 18, defaultH: 7, render: KanbanContent },
+  { kind: "communications", label: "Communications", defaultW: 24, defaultH: 16, render: CommunicationsFrameContent },
   { kind: "map", label: "Map", defaultW: 16, defaultH: 14, render: MapContent },
   { kind: "stats", label: "Stats", defaultW: 12, defaultH: 10, render: StatsContent },
 ];

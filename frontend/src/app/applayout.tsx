@@ -7,7 +7,7 @@ import type { FrameDataModel, DragState } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { emitDashboardEvent, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
 import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, mergeLinkPlan, type FrameLinkEdge } from "./frameLinking";
-import { createDefaultNodeViewFrames, createLogicGateArenaFrames } from "./DefaultViews";
+import { createCommunicationsViewFrames, createDefaultNodeViewFrames, createLogicGateArenaFrames } from "./DefaultViews";
 import { FrameCard, GridCrosses, PlacementSplash } from "./FrameChrome";
 import {
   CELL_SIZE,
@@ -34,7 +34,11 @@ import { LogicGateArenaPage } from "../pages/logic-gate-arena";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 
-const App: React.FC = () => {
+type AppProps = {
+  accountChrome?: React.ReactNode;
+};
+
+const App: React.FC<AppProps> = ({ accountChrome }) => {
   const loaded = useMemo(() => loadViews(), []);
   const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(loaded.activeId);
@@ -468,6 +472,15 @@ const App: React.FC = () => {
     setEditMode(false);
   }, [tabs]);
 
+  const openCommunicationsView = useCallback((tabID: string) => {
+    const framesForView = createCommunicationsViewFrames();
+    const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Communications", page: undefined, frames: framesForView } : tab)));
+    setFrameLinks((previous) => previous.filter((edge) => !replacedFrameIDs.has(edge.a) && !replacedFrameIDs.has(edge.b)));
+    setActiveTabId(tabID);
+    setEditMode(false);
+  }, [tabs]);
+
   const saveCurrentAsTemplate = useCallback((tabID: string) => {
     const source = tabs.find((tab) => tab.id === tabID);
     if (!source) return;
@@ -534,8 +547,9 @@ const App: React.FC = () => {
         style={{ height: HEADER_H, padding: "0 20px", display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", background: headerBgColor, borderBottom: `1px solid ${UI_THEME.line}` }}
         onContextMenu={(e) => { e.preventDefault(); setHeaderMenu({ x: e.clientX, y: e.clientY }); setCanvasMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
           <h1 style={{ fontWeight: 800, color: headerTextColor, letterSpacing: "0.04em", textTransform: "uppercase", margin: 0, lineHeight: 1 }}><span style={{ fontSize: 18 }}>Mango</span><span style={{ fontSize: 23, marginLeft: 2 }}>RTS</span></h1>
+          {accountChrome}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 6, justifySelf: "center", maxWidth: "55vw", overflowX: "auto", padding: "2px 4px" }}>
@@ -746,6 +760,7 @@ const App: React.FC = () => {
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
           <button style={menuBtnBase} onClick={() => { openDefaultNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Default Node View</button>
           <button style={menuBtnBase} onClick={() => { openLogicGateArena(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Logic Gate Arena</button>
+          <button style={menuBtnBase} onClick={() => { openCommunicationsView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Communications</button>
           <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>
         </FrameRightClickMenu>
       )}

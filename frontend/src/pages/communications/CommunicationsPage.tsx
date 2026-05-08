@@ -18,9 +18,9 @@ import {
 } from "./communicationsApi";
 
 type CommunicationsPageProps = {
-  me: CurrentUserResponse;
-  onNavigate: (path: string) => void;
-  onLogout: () => void;
+  me?: CurrentUserResponse;
+  onNavigate?: (path: string) => void;
+  embedded?: boolean;
 };
 
 type ComposeState = {
@@ -43,7 +43,7 @@ const emptyCompose: ComposeState = {
   body: "",
 };
 
-export function CommunicationsPage({ me, onNavigate, onLogout }: CommunicationsPageProps) {
+export function CommunicationsPage({ me, onNavigate, embedded = false }: CommunicationsPageProps) {
   const [status, setStatus] = useState<CommunicationsStatus | null>(null);
   const [folders, setFolders] = useState<EmailFolder[]>([]);
   const [messages, setMessages] = useState<EmailMessage[]>([]);
@@ -306,7 +306,8 @@ export function CommunicationsPage({ me, onNavigate, onLogout }: CommunicationsP
   };
 
   return (
-    <div style={pageStyle}>
+    <div style={embedded ? { ...pageStyle, height: "100%" } : pageStyle}>
+      {!embedded && (
       <header style={headerStyle}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           <h1 style={brandStyle}>MangoRTS</h1>
@@ -314,12 +315,12 @@ export function CommunicationsPage({ me, onNavigate, onLogout }: CommunicationsP
           <span style={titleStyle}>Communications</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-          <span style={userPillStyle}>{me.user.email}</span>
-          <button style={headerButtonStyle} onClick={() => onNavigate("/")}>MangoRTS</button>
-          <button style={headerButtonStyle} onClick={() => onNavigate("/settings")}>Settings</button>
-          <button style={headerButtonStyle} onClick={onLogout}>Logout</button>
+          {me && <span style={userPillStyle}>{me.user.display_name?.trim() || me.user.email}</span>}
+          <button style={headerButtonStyle} onClick={() => onNavigate?.("/")}>MangoRTS</button>
+          <button style={headerButtonStyle} onClick={() => onNavigate?.("/settings")}>Settings</button>
         </div>
       </header>
+      )}
 
       {error && <div style={errorStyle}>{error}</div>}
       {notice && <div style={noticeStyle}>{notice}</div>}
@@ -473,6 +474,10 @@ export function CommunicationsPage({ me, onNavigate, onLogout }: CommunicationsP
     </div>
   );
 }
+
+export const CommunicationsFrameContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = () => (
+  <CommunicationsPage embedded />
+);
 
 function ComposePanel({ compose, busy, onChange, onCancel, onSubmit }: {
   compose: ComposeState;
