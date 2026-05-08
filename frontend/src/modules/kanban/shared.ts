@@ -130,6 +130,7 @@ export type KanbanGroupedBoardRow = {
   key: string;
   label: string;
   sortValue: string | number;
+  sortLast?: boolean;
 };
 
 export type KanbanGroupedBoardCell = {
@@ -154,6 +155,10 @@ export const KANBAN_GROUP_FIELDS: Array<{ value: KanbanGroupField; label: string
   { value: "priority", label: "Priority" },
   { value: "due_date", label: "Due Date" },
 ];
+
+export function getDefaultKanbanYAxisSortDirection(field: KanbanGroupField): KanbanGroupSortDirection {
+  return field === "priority" ? "desc" : "asc";
+}
 
 export function isKanbanBoardDropItemType(value: unknown): value is "node" {
   return value === "node";
@@ -610,7 +615,7 @@ export function getKanbanGroupValue(
     return { key: `priority:${normalized}`, label: getKanbanPriorityGroupLabel(normalized), sortValue: normalized };
   }
   const dueDate = node?.due_date?.trim();
-  return dueDate ? { key: `due:${dueDate}`, label: dueDate, sortValue: dueDate } : { key: "due:none", label: "No due date", sortValue: "" };
+  return dueDate ? { key: `due:${dueDate}`, label: dueDate, sortValue: dueDate } : { key: "due:none", label: "No due date", sortValue: "", sortLast: true };
 }
 
 function addUniqueKanbanGroup(target: KanbanGroupedBoardRow[], seen: Set<string>, group: KanbanGroupedBoardRow): void {
@@ -637,8 +642,9 @@ function compareKanbanGroups(a: KanbanGroupedBoardRow, b: KanbanGroupedBoardRow)
 }
 
 function sortKanbanGroups(groups: KanbanGroupedBoardRow[], direction: KanbanGroupSortDirection): KanbanGroupedBoardRow[] {
-  const sorted = [...groups].sort(compareKanbanGroups);
-  return direction === "desc" ? sorted.reverse() : sorted;
+  const regularGroups = groups.filter((group) => !group.sortLast).sort(compareKanbanGroups);
+  const trailingGroups = groups.filter((group) => group.sortLast).sort(compareKanbanGroups);
+  return direction === "desc" ? [...regularGroups.reverse(), ...trailingGroups] : [...regularGroups, ...trailingGroups];
 }
 
 export function buildKanbanGroupedBoardLayout(args: {

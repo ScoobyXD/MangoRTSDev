@@ -46,6 +46,7 @@ import {
   clampColumnWidth,
   getKanbanBoardDisplayTitle,
   getKanbanConditionalColor,
+  getDefaultKanbanYAxisSortDirection,
   getOrderedKanbanCardIDs,
   groupCardsByColumn,
   logicGateKanbanBoardID,
@@ -149,12 +150,10 @@ const contextMenuHoverHandlers = {
 const ARENA_GROUP_COLUMN_WIDTH_PX = 300;
 const ARENA_GROUP_ROW_LABEL_WIDTH_PX = 118;
 const ARENA_GROUP_MIN_CELL_HEIGHT_PX = 86;
-const ARENA_GROUP_GLASS_BACKGROUND_LIGHT = "rgba(230, 253, 255, 0.62)";
-const ARENA_GROUP_GLASS_BACKGROUND_DARK = "rgba(9, 28, 35, 0.66)";
+const ARENA_GROUP_FRAME_BACKGROUND = "#ffffff";
 const ARENA_GROUP_GLASS_BORDER_LIGHT = "rgba(0, 180, 210, 0.32)";
 const ARENA_GROUP_GLASS_BORDER_DARK = "rgba(0, 233, 255, 0.28)";
-const ARENA_GROUP_GLASS_SHADOW_LIGHT = "0 14px 34px rgba(12, 67, 74, 0.12), inset 0 1px 0 rgba(255,255,255,0.72)";
-const ARENA_GROUP_GLASS_SHADOW_DARK = "0 16px 36px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.12)";
+const ARENA_GROUP_FRAME_SHADOW = "0 1px 2px rgba(15,23,42,0.06)";
 
 const KanbanDisclosureIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style={{ display: "block" }}>
@@ -258,7 +257,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const [arenaXGroupBy, setArenaXGroupBy] = useState<KanbanGroupField>("status");
   const [arenaYGroupBy, setArenaYGroupBy] = useState<KanbanGroupField>("person");
   const [arenaXSortDirection, setArenaXSortDirection] = useState<KanbanGroupSortDirection>("asc");
-  const [arenaYSortDirection, setArenaYSortDirection] = useState<KanbanGroupSortDirection>("asc");
+  const [arenaYSortDirection, setArenaYSortDirection] = useState<KanbanGroupSortDirection>(() => getDefaultKanbanYAxisSortDirection("person"));
   const [editingBoardTitle, setEditingBoardTitle] = useState(false);
   const [boardTitleDraft, setBoardTitleDraft] = useState("");
   const [boards, setBoards] = useState<KanbanBoard[]>([]);
@@ -1295,6 +1294,12 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
   const contextCardSelectionIDs = contextCard
     ? (selectedCardIDs.has(contextCard.card_id) ? Array.from(selectedCardIDs) : [contextCard.card_id])
     : [];
+
+  const selectArenaYGroupBy = useCallback((field: KanbanGroupField) => {
+    setArenaYGroupBy(field);
+    setArenaYSortDirection(getDefaultKanbanYAxisSortDirection(field));
+  }, []);
+
   const renderArenaGroupSelect = (
     value: KanbanGroupField,
     onChange: (value: KanbanGroupField) => void,
@@ -1302,134 +1307,189 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     axis: "x" | "y",
     sortDirection: KanbanGroupSortDirection,
     onToggleSortDirection: () => void,
+    layout: "inline" | "compact" = "inline",
   ) => {
     const selectedField = KANBAN_GROUP_FIELDS.find((field) => field.value === value) ?? KANBAN_GROUP_FIELDS[0];
     const menuOpen = arenaGroupMenuOpen === axis;
     const groupMenuAccent = theme === "light" ? "rgb(0, 164, 190)" : "rgb(0, 233, 255)";
     const selectedBackground = isDark ? "rgba(0, 233, 255, 0.18)" : "rgba(0, 233, 255, 0.22)";
-    const hoveredBackground = isDark ? "rgba(0, 233, 255, 0.12)" : "rgba(0, 233, 255, 0.14)";
+    const hoveredBackground = "rgba(0, 233, 255, 0.14)";
+    const menuText = "#102226";
     const sortLabel = sortDirection === "asc" ? "Asc" : "Desc";
-    return (
-      <label style={{ display: "inline-grid", gridTemplateColumns: "max-content minmax(136px, 1fr) 56px", alignItems: "center", gap: 7, fontSize: 11, fontWeight: 900 }}>
-        <span style={{ color: subtext, textTransform: "uppercase" }}>{label}</span>
-        <span style={{ position: "relative", minWidth: 0 }}>
-          <button
-            type="button"
-            aria-haspopup="listbox"
-            aria-expanded={menuOpen}
-            onClick={() => setArenaGroupMenuOpen((open) => (open === axis ? null : axis))}
-            style={{
-              width: "100%",
-              minHeight: 28,
-              display: "grid",
-              gridTemplateColumns: "minmax(0, 1fr) 16px",
-              alignItems: "center",
-              gap: 8,
-              border: `1px solid ${menuOpen ? groupMenuAccent : line}`,
-              borderRadius: 6,
-              background: menuOpen ? selectedBackground : cardBackground,
-              color: menuOpen ? groupMenuAccent : text,
-              font: "inherit",
-              fontSize: 11,
-              fontWeight: 900,
-              padding: "4px 8px",
-              cursor: "pointer",
-              textAlign: "left",
-              boxShadow: menuOpen ? `0 0 0 2px rgba(0, 233, 255, 0.14)` : "none",
-            }}
-          >
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedField.label}</span>
-            <span aria-hidden="true" style={{ display: "grid", placeItems: "center", transform: menuOpen ? "rotate(180deg)" : "none", transition: "transform 120ms ease" }}>
-              <KanbanDisclosureIcon color="currentColor" />
-            </span>
-          </button>
-          {menuOpen && (
-            <div
-              role="listbox"
-              aria-label={`${label} grouping`}
-              style={{
-                position: "absolute",
-                zIndex: 20,
-                top: "calc(100% + 5px)",
-                left: 0,
-                width: "min(220px, 78vw)",
-                padding: 5,
-                border: `1px solid rgba(0, 233, 255, 0.34)`,
-                borderRadius: 8,
-                background: isDark ? "rgba(9, 28, 35, 0.92)" : "rgba(235, 253, 255, 0.96)",
-                boxShadow: isDark ? "0 16px 32px rgba(0,0,0,0.42)" : "0 14px 30px rgba(15,23,42,0.18)",
-                color: text,
-                backdropFilter: "blur(14px)",
-              }}
-            >
-              {KANBAN_GROUP_FIELDS.map((field) => {
-                const selected = field.value === value;
-                return (
-                  <button
-                    key={field.value}
-                    type="button"
-                    role="option"
-                    aria-selected={selected}
-                    onClick={() => {
-                      onChange(field.value);
-                      setArenaGroupMenuOpen(null);
-                    }}
-                    style={{
-                      width: "100%",
-                      display: "grid",
-                      gridTemplateColumns: "minmax(0, 1fr) 16px",
-                      alignItems: "center",
-                      gap: 8,
-                      border: "none",
-                      borderRadius: 6,
-                      background: selected ? selectedBackground : "transparent",
-                      color: selected ? groupMenuAccent : text,
-                      font: "inherit",
-                      fontSize: 11,
-                      fontWeight: selected ? 900 : 800,
-                      padding: "7px 8px",
-                      cursor: "pointer",
-                      textAlign: "left",
-                    }}
-                    onMouseEnter={(event) => {
-                      if (!selected) event.currentTarget.style.background = hoveredBackground;
-                    }}
-                    onMouseLeave={(event) => {
-                      event.currentTarget.style.background = selected ? selectedBackground : "transparent";
-                    }}
-                  >
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{field.label}</span>
-                    <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: groupMenuAccent }}>
-                      {selected ? <KanbanCheckIcon color={groupMenuAccent} /> : null}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </span>
+    const compact = layout === "compact";
+    const sortButton = (
+      <button
+        type="button"
+        title={`${label} sort ${sortDirection === "asc" ? "ascending" : "descending"}`}
+        onClick={onToggleSortDirection}
+        style={{
+          height: compact ? 20 : 28,
+          minWidth: compact ? 44 : undefined,
+          border: `1px solid ${line}`,
+          borderRadius: compact ? 4 : 6,
+          background: cardBackground,
+          color: text,
+          font: "inherit",
+          fontSize: compact ? 9 : 10.5,
+          fontWeight: 900,
+          cursor: "pointer",
+          padding: compact ? "0 5px" : "0 8px",
+          textAlign: "center",
+          textTransform: "uppercase",
+        }}
+      >
+        {sortLabel}
+      </button>
+    );
+    const selectButton = (
+      <span style={{ position: "relative", minWidth: 0, width: "100%" }}>
         <button
           type="button"
-          title={`${label} sort ${sortDirection === "asc" ? "ascending" : "descending"}`}
-          onClick={onToggleSortDirection}
+          aria-haspopup="listbox"
+          aria-expanded={menuOpen}
+          onClick={() => setArenaGroupMenuOpen((open) => (open === axis ? null : axis))}
           style={{
-            height: 28,
-            border: `1px solid ${line}`,
+            width: "100%",
+            minHeight: 28,
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) 16px",
+            alignItems: "center",
+            gap: 8,
+            border: `1px solid ${menuOpen ? groupMenuAccent : line}`,
             borderRadius: 6,
-            background: cardBackground,
-            color: text,
+            background: menuOpen ? selectedBackground : cardBackground,
+            color: menuOpen ? groupMenuAccent : text,
             font: "inherit",
-            fontSize: 10.5,
+            fontSize: 11,
             fontWeight: 900,
+            padding: compact ? "4px 6px" : "4px 8px",
             cursor: "pointer",
-            padding: "0 8px",
-            textAlign: "center",
-            textTransform: "uppercase",
+            textAlign: "left",
+            boxShadow: menuOpen ? `0 0 0 2px rgba(0, 233, 255, 0.14)` : "none",
           }}
         >
-          {sortLabel}
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedField.label}</span>
+          <span aria-hidden="true" style={{ display: "grid", placeItems: "center", transform: menuOpen ? "rotate(180deg)" : "none", transition: "transform 120ms ease" }}>
+            <KanbanDisclosureIcon color="currentColor" />
+          </span>
         </button>
+        {menuOpen && (
+          <div
+            role="listbox"
+            aria-label={`${label} grouping`}
+            style={{
+              position: "absolute",
+              zIndex: 20,
+              top: "calc(100% + 5px)",
+              left: 0,
+              width: "min(220px, 78vw)",
+              padding: 5,
+              border: `1px solid rgba(0, 180, 210, 0.34)`,
+              borderRadius: 6,
+              background: "#ffffff",
+              boxShadow: "0 12px 28px rgba(0,16,20,0.18)",
+              color: menuText,
+            }}
+          >
+            {KANBAN_GROUP_FIELDS.map((field) => {
+              const selected = field.value === value;
+              return (
+                <button
+                  key={field.value}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => {
+                    onChange(field.value);
+                    setArenaGroupMenuOpen(null);
+                  }}
+                  style={{
+                    width: "100%",
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0, 1fr) 16px",
+                    alignItems: "center",
+                    gap: 8,
+                    border: "none",
+                    borderRadius: 4,
+                    background: selected ? selectedBackground : "transparent",
+                    color: selected ? groupMenuAccent : menuText,
+                    font: "inherit",
+                    fontSize: 11,
+                    fontWeight: selected ? 900 : 800,
+                    padding: "7px 8px",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                  onMouseEnter={(event) => {
+                    if (!selected) event.currentTarget.style.background = hoveredBackground;
+                  }}
+                  onMouseLeave={(event) => {
+                    event.currentTarget.style.background = selected ? selectedBackground : "transparent";
+                  }}
+                >
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{field.label}</span>
+                  <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: groupMenuAccent }}>
+                    {selected ? <KanbanCheckIcon color={groupMenuAccent} /> : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </span>
+    );
+
+    if (compact) {
+      return (
+        <label style={{ width: "100%", minWidth: 0, display: "grid", gridTemplateRows: "20px 28px", alignItems: "end", gap: 4, fontSize: 11, fontWeight: 900 }}>
+          <span style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: subtext, textTransform: "uppercase" }}>{label}</span>
+            {sortButton}
+          </span>
+          {selectButton}
+        </label>
+      );
+    }
+
+    return (
+      <label style={{ display: "inline-grid", gridTemplateColumns: "max-content minmax(136px, 190px) 56px", alignItems: "center", gap: 7, fontSize: 11, fontWeight: 900 }}>
+        <span style={{ color: subtext, textTransform: "uppercase" }}>{label}</span>
+        {selectButton}
+        {sortButton}
       </label>
+    );
+  };
+
+  const renderArenaGroupingControls = () => {
+    const controlColumnCount = Math.max(arenaGroupedBoard.columns.length, 1);
+    const gridWidth = ARENA_GROUP_ROW_LABEL_WIDTH_PX + (controlColumnCount * ARENA_GROUP_COLUMN_WIDTH_PX) + (controlColumnCount * 8);
+    return (
+      <div ref={arenaGroupControlsRef} style={{ display: "grid", alignItems: "start", gap: 8, minWidth: arenaGroupingOpen ? gridWidth : undefined, marginBottom: 10 }}>
+        <button
+          type="button"
+          onClick={() => setArenaGroupingOpen((open) => !open)}
+          style={{ justifySelf: "start", height: 28, border: `1px solid ${arenaGroupingOpen ? accent : line}`, borderRadius: 6, background: arenaGroupingOpen ? `${accent}22` : cardBackground, color: arenaGroupingOpen ? accent : text, fontSize: 11, fontWeight: 900, cursor: "pointer", padding: "0 10px" }}
+        >
+          Group
+        </button>
+        {arenaGroupingOpen && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: `${ARENA_GROUP_ROW_LABEL_WIDTH_PX}px repeat(${controlColumnCount}, ${ARENA_GROUP_COLUMN_WIDTH_PX}px)`,
+              columnGap: 8,
+              alignItems: "end",
+            }}
+          >
+            <div style={{ gridColumn: 1, minWidth: 0 }}>
+              {renderArenaGroupSelect(arenaYGroupBy, selectArenaYGroupBy, "Y-axis", "y", arenaYSortDirection, () => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc")), "compact")}
+            </div>
+            <div style={{ gridColumn: `2 / span ${controlColumnCount}`, minWidth: 0, justifySelf: "start" }}>
+              {renderArenaGroupSelect(arenaXGroupBy, setArenaXGroupBy, "X-Axis", "x", arenaXSortDirection, () => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc")))}
+            </div>
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -1445,10 +1505,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         </div>
       );
     }
-    const glassBackground = isDark ? ARENA_GROUP_GLASS_BACKGROUND_DARK : ARENA_GROUP_GLASS_BACKGROUND_LIGHT;
+    const groupFrameBackground = ARENA_GROUP_FRAME_BACKGROUND;
     const glassBorder = isDark ? ARENA_GROUP_GLASS_BORDER_DARK : ARENA_GROUP_GLASS_BORDER_LIGHT;
-    const glassShadow = isDark ? ARENA_GROUP_GLASS_SHADOW_DARK : ARENA_GROUP_GLASS_SHADOW_LIGHT;
-    const emptyCellBackground = isDark ? "rgba(0, 233, 255, 0.045)" : "rgba(0, 233, 255, 0.075)";
+    const groupFrameShadow = ARENA_GROUP_FRAME_SHADOW;
+    const groupFrameText = "#102226";
     const gridWidth = ARENA_GROUP_ROW_LABEL_WIDTH_PX + (columnCount * ARENA_GROUP_COLUMN_WIDTH_PX) + (columnCount * 8);
     return (
       <div
@@ -1481,10 +1541,9 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
                 borderBottom: "none",
                 borderTopLeftRadius: 8,
                 borderTopRightRadius: 8,
-                background: glassBackground,
-                color: text,
-                boxShadow: glassShadow,
-                backdropFilter: "blur(16px) saturate(1.18)",
+                background: groupFrameBackground,
+                color: groupFrameText,
+                boxShadow: groupFrameShadow,
                 padding: "0 9px",
                 fontSize: 12,
                 fontWeight: 900,
@@ -1533,9 +1592,8 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
               borderTop: rowIndex === 0 ? `1px solid ${glassBorder}` : "none",
               borderBottomLeftRadius: rowIndex === rowCount - 1 ? 8 : 0,
               borderBottomRightRadius: rowIndex === rowCount - 1 ? 8 : 0,
-              background: cell.cards.length > 0 ? glassBackground : emptyCellBackground,
-              boxShadow: glassShadow,
-              backdropFilter: "blur(16px) saturate(1.18)",
+              background: groupFrameBackground,
+              boxShadow: groupFrameShadow,
               padding: 8,
             }}
           >
@@ -1608,19 +1666,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       />
       <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#c62828", fontSize: 11, fontWeight: 700 }}>{error}</div>}
-        {arenaMode && (
-          <div ref={arenaGroupControlsRef} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 10 }}>
-            <button
-              type="button"
-              onClick={() => setArenaGroupingOpen((open) => !open)}
-              style={{ height: 28, border: `1px solid ${arenaGroupingOpen ? accent : line}`, borderRadius: 6, background: arenaGroupingOpen ? `${accent}22` : cardBackground, color: arenaGroupingOpen ? accent : text, fontSize: 11, fontWeight: 900, cursor: "pointer", padding: "0 10px" }}
-            >
-              Group
-            </button>
-            {arenaGroupingOpen && renderArenaGroupSelect(arenaXGroupBy, setArenaXGroupBy, "X-Axis", "x", arenaXSortDirection, () => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc")))}
-            {arenaGroupingOpen && renderArenaGroupSelect(arenaYGroupBy, setArenaYGroupBy, "Y-axis", "y", arenaYSortDirection, () => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc")))}
-          </div>
-        )}
+        {arenaMode && renderArenaGroupingControls()}
         {arenaMode && arenaGroupingOpen ? renderArenaGroupedBoard() : (
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX + 18, paddingBottom: 16, width: arenaMode ? "100%" : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
           {orderedColumns.map((column) => {

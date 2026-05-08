@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_GROUP_FIELDS, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, buildKanbanGroupedBoardLayout, clampColumnHeight, clampColumnWidth, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, sanitizeExplorerEntityDragPayload, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_GROUP_FIELDS, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, buildKanbanGroupedBoardLayout, clampColumnHeight, clampColumnWidth, getDefaultKanbanYAxisSortDirection, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, sanitizeExplorerEntityDragPayload, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
 
 function card(overrides: Partial<KanbanCard>): KanbanCard {
   return {
@@ -169,6 +169,36 @@ test("grouped board layout sorts group axes and uses full priority labels", () =
   assert.deepEqual(layout.rows.map((row) => row.label), ["5 URGENT", "1 Low Priority"]);
   assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["urgent"], []]);
   assert.deepEqual(layout.columns[1].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[], ["low"]]);
+});
+
+test("default Y-axis grouping sort puts urgent priority first and due dates earliest first", () => {
+  assert.equal(getDefaultKanbanYAxisSortDirection("priority"), "desc");
+  assert.equal(getDefaultKanbanYAxisSortDirection("due_date"), "asc");
+  assert.equal(getDefaultKanbanYAxisSortDirection("status"), "asc");
+  assert.equal(getDefaultKanbanYAxisSortDirection("person"), "asc");
+});
+
+test("grouped board layout keeps no due date after real due dates", () => {
+  const columns = [column({ column_id: "todo", title: "Todo", position: 1000 })];
+  const cards = [
+    card({ card_id: "none", column_id: "todo", node_id: "node-none", position: 1000 }),
+    card({ card_id: "soon", column_id: "todo", node_id: "node-soon", position: 2000 }),
+    card({ card_id: "later", column_id: "todo", node_id: "node-later", position: 3000 }),
+  ];
+  const layout = buildKanbanGroupedBoardLayout({
+    columns,
+    cards,
+    xGroupBy: "status",
+    yGroupBy: "due_date",
+    nodeByID: new Map([
+      ["node-none", { node_id: "node-none" }],
+      ["node-soon", { node_id: "node-soon", due_date: "2026-05-09" }],
+      ["node-later", { node_id: "node-later", due_date: "2026-06-01" }],
+    ]),
+    userByID: new Map(),
+  });
+
+  assert.deepEqual(layout.rows.map((row) => row.label), ["2026-05-09", "2026-06-01", "No due date"]);
 });
 
 test("card selection helper supports ranges and additive toggles across columns", () => {
