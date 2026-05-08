@@ -31,6 +31,10 @@ type Repository interface {
 	CreateInvitation(input CreateInvitationInput) (domain.Invitation, error)
 	ValidateInvitationToken(token string) (domain.Invitation, error)
 	AcceptInvitation(token, cognitoSubject, email, displayName string) (domain.Invitation, error)
+	GetUserEmailConnection(userID string) (domain.UserEmailConnection, error)
+	UpsertUserEmailConnection(input UserEmailConnectionInput) (domain.UserEmailConnection, error)
+	UpdateUserEmailConnectionStatus(userID, status string) (domain.UserEmailConnection, error)
+	DeleteUserEmailConnection(userID string) error
 	CreateNode(companyID, title string) (domain.Node, error)
 	UpdateNode(input UpdateNodeInput) (domain.Node, error)
 	UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error)
@@ -218,6 +222,14 @@ type CreateInvitationInput struct {
 	Role            string
 	InvitedByUserID string
 	ExpiresIn       time.Duration
+}
+
+type UserEmailConnectionInput struct {
+	UserID       string
+	Provider     string
+	AccountEmail string
+	GrantID      string
+	Status       string
 }
 
 func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {

@@ -19,6 +19,7 @@ import {
   type LoginResult,
 } from "./cognitoAuth";
 import { isAuthPath, nextPathForAuthState } from "./authRoutes";
+import { CommunicationsPage } from "../pages/communications/CommunicationsPage";
 
 type PendingChallenge = Extract<LoginResult, { status: "new_password_required" }> | null;
 
@@ -146,6 +147,10 @@ export default function AuthGate() {
 
   if (normalizedPath === "/settings" || normalizedPath === "/admin/users") {
     return <SettingsPage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} />;
+  }
+
+  if (normalizedPath === "/communications") {
+    return <CommunicationsPage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} />;
   }
 
   return (
@@ -444,6 +449,7 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
         <h1 style={{ margin: 0, fontSize: 18 }}>Settings</h1>
         <div style={{ display: "flex", gap: 8 }}>
           <button style={smallButtonStyle} onClick={() => onNavigate("/")}>App</button>
+          <button style={smallButtonStyle} onClick={() => onNavigate("/communications")}>Communications</button>
           <button style={smallButtonStyle} onClick={onLogout}>Logout</button>
         </div>
       </div>
@@ -684,6 +690,7 @@ function AccountBar({ me, onNavigate, onLogout }: { me: CurrentUserResponse; onN
   return (
     <div style={{ position: "fixed", top: 8, right: 8, zIndex: 200, display: "flex", alignItems: "center", gap: 6, padding: "5px 6px", background: "rgba(255,255,255,0.92)", border: "1px solid rgba(12, 67, 74, 0.28)", borderRadius: 8, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>
       <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{me.user.email}</span>
+      <button style={smallButtonStyle} onClick={() => onNavigate("/communications")}>Communications</button>
       <button style={smallButtonStyle} onClick={() => onNavigate("/settings")}>Settings</button>
       <button style={smallButtonStyle} onClick={onLogout}>Logout</button>
     </div>
