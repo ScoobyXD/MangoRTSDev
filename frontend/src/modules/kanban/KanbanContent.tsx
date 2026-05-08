@@ -796,6 +796,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       if (selection.entityKind === "kanban" && selection.entityID.trim()) {
         if (lastLocalBoardSelectionChangedAtRef.current > 0 && selection.changedAt > 0 && selection.changedAt < lastLocalBoardSelectionChangedAtRef.current) return;
         const logicGateID = logicGateIDFromKanbanBoardID(selection.entityID);
+        activeBoardIDRef.current = selection.entityID.trim();
         setSelectedCardIDs(new Set());
         setSelectionAnchorCardID("");
         setHighlightedEntity(null);
@@ -806,8 +807,10 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         return;
       }
       if (selection.entityKind === "logic_gate" && selection.entityID.trim()) {
+        if (lastLocalBoardSelectionChangedAtRef.current > 0 && selection.changedAt > 0 && selection.changedAt < lastLocalBoardSelectionChangedAtRef.current) return;
         const logicGateID = selection.entityID.trim();
         const nextBoardID = logicGateKanbanBoardID(logicGateID);
+        activeBoardIDRef.current = nextBoardID;
         setSelectedCardIDs(new Set());
         setSelectionAnchorCardID("");
         setHighlightedEntity(null);
@@ -831,7 +834,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       }
       if (selection.entityKind === "node" && selection.entityID.trim()) {
         const selectedNodeIDs = new Set((selection.selectedEntityIDs?.length ? selection.selectedEntityIDs : [selection.entityID]).map((id) => id.trim()).filter(Boolean));
-        const selectedCards = cards.filter((card) => selectedNodeIDs.has(card.node_id));
+        const selectedCards = cardsRef.current.filter((card) => selectedNodeIDs.has(card.node_id));
         setSelectedCardIDs(new Set(selectedCards.map((card) => card.card_id)));
         setSelectionAnchorCardID(selectedCards[0]?.card_id ?? "");
         setHighlightedEntity({ nodeID: selection.entityID.trim() });
@@ -844,7 +847,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const liveSelection = readLiveSelectionForFrame(companyID, frameID);
     if (liveSelection) applyLiveSelection(liveSelection);
     return subscribeLiveSelection(frameID, applyLiveSelection);
-  }, [apiBase, cards, companyID, frameID, upsertBoardInList]);
+  }, [apiBase, companyID, frameID, upsertBoardInList]);
 
   const addColumn = useCallback(async () => {
     setError("");
