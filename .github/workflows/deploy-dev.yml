@@ -151,6 +151,7 @@ jobs:
           existing_db_password_secret_arn = $(json_string "$TF_EXISTING_DB_PASSWORD_SECRET_ARN")
           existing_db_security_group_id = $(json_string "$TF_EXISTING_DB_SECURITY_GROUP_ID")
           backend_image_uri = ""
+          deploy_revision = $(json_string "$GITHUB_SHA")
           dev_company_id = $(json_string "$TF_DEV_COMPANY_ID")
           cognito_domain_prefix = $(json_string "$TF_COGNITO_DOMAIN_PREFIX")
           nylas_client_id = $(json_string "$TF_NYLAS_CLIENT_ID")
@@ -167,7 +168,7 @@ jobs:
           EOF
           {
             echo "Generated non-secret Terraform inputs:"
-            grep -E '^(aws_region|root_domain_name|vpc_id|public_subnet_ids|private_subnet_ids|create_private_ecs_subnets|ecs_private_subnet_cidrs|ecs_nat_gateway_mode|github_owner|github_repository|github_branch) =' ci.auto.tfvars
+            grep -E '^(aws_region|root_domain_name|vpc_id|public_subnet_ids|private_subnet_ids|create_private_ecs_subnets|ecs_private_subnet_cidrs|ecs_nat_gateway_mode|deploy_revision|github_owner|github_repository|github_branch) =' ci.auto.tfvars
           }
           while IFS= read -r subnet_id; do
             if ! aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "$subnet_id" --filters "Name=vpc-id,Values=$TF_VPC_ID" >/dev/null; then
@@ -251,11 +252,89 @@ jobs:
         run: |
           npm ci
           npm run build
+          jq -n \
+            --arg revision "$GITHUB_SHA" \
+            --arg app_url "$APP_URL" \
+            --arg api_base_url "$APP_URL" \
+            --arg auth_mode "cognito" \
+            --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{revision: $revision, app_url: $app_url, api_base_url: $api_base_url, auth_mode: $auth_mode, built_at: $built_at}' \
+            > dist/deploy-info.json
+          node -e "const fs=require('fs'); const info=JSON.parse(fs.readFileSync('dist/deploy-info.json','utf8')); if (info.revision !== process.env.GITHUB_SHA || info.api_base_url !== process.env.APP_URL) { throw new Error('frontend deploy metadata mismatch'); }"
+          if grep -R -l --fixed-strings "$API_URL" dist/assets dist/index.html >/tmp/mangorts-api-host-matches.txt; then
+            echo "Frontend bundle still references split API origin ${API_URL}. Browser API calls must use ${APP_URL}." >&2
+            cat /tmp/mangorts-api-host-matches.txt >&2
+            exit 1
+          fi
+          if ! grep -R -l --fixed-strings "$APP_URL" dist/assets dist/index.html >/dev/null; then
+            echo "Frontend bundle does not reference app-origin API base ${APP_URL}." >&2
+            exit 1
+          fi
 
       - name: Publish frontend
         run: |
           aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}" --delete
-          aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths "/*"
+          INVALIDATION_ID="$(aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths "/*" --query 'Invalidation.Id' --output text)"
+          echo "CLOUDFRONT_INVALIDATION_ID=${INVALIDATION_ID}" >> "$GITHUB_ENV"
+          aws cloudfront wait invalidation-completed --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --id "$INVALIDATION_ID"
+
+      - name: Post-deploy smoke tests
+        env:
+          DEV_BASIC_AUTH_USERNAME: ${{ vars.TF_DEV_BASIC_AUTH_USERNAME || 'mangorts-dev' }}
+          DEV_BASIC_AUTH_PASSWORD: ${{ secrets.DEV_BASIC_AUTH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          curl_auth=(--user "${DEV_BASIC_AUTH_USERNAME}:${DEV_BASIC_AUTH_PASSWORD}")
+          tmp_body="$(mktemp)"
+
+          require_status() {
+            local name="$1"
+            local want="$2"
+            local status="$3"
+            local body_file="$4"
+            if [[ "$status" != "$want" ]]; then
+              echo "${name} returned HTTP ${status}, want ${want}" >&2
+              cat "$body_file" >&2 || true
+              exit 1
+            fi
+          }
+
+          status="$(curl --silent --show-error "${curl_auth[@]}" --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/deploy-info.json")"
+          require_status "frontend deploy-info" "200" "$status" "$tmp_body"
+          jq -e --arg revision "$GITHUB_SHA" --arg app_url "$APP_URL" '.revision == $revision and .api_base_url == $app_url' "$tmp_body" >/dev/null
+
+          for attempt in {1..18}; do
+            status="$(curl --silent --show-error "${curl_auth[@]}" --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/healthz" || true)"
+            if [[ "$status" == "200" ]] && jq -e --arg revision "$GITHUB_SHA" '.ok == true and .deploy_revision == $revision' "$tmp_body" >/dev/null 2>&1; then
+              break
+            fi
+            if [[ "$attempt" == "18" ]]; then
+              echo "backend health did not report deployed revision ${GITHUB_SHA}" >&2
+              cat "$tmp_body" >&2 || true
+              exit 1
+            fi
+            sleep 10
+          done
+
+          status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" \
+            --request OPTIONS \
+            --header "Origin: ${APP_URL}" \
+            --header "Access-Control-Request-Method: POST" \
+            --header "Access-Control-Request-Headers: content-type" \
+            "${APP_URL}/v1/invitations/validate")"
+          require_status "invite validate preflight" "204" "$status" "$tmp_body"
+
+          status="$(curl --silent --show-error "${curl_auth[@]}" --output "$tmp_body" --write-out "%{http_code}" \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data '{"token":"deploy-smoke-invalid-token"}' \
+            "${APP_URL}/v1/invitations/validate")"
+          require_status "invite validate backend route" "404" "$status" "$tmp_body"
+          jq -e '.error == "invitation_bad_token"' "$tmp_body" >/dev/null
+
+          status="$(curl --silent --show-error "${curl_auth[@]}" --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/v1/me")"
+          require_status "backend unauthorized route" "401" "$status" "$tmp_body"
+          jq -e '.error == "unauthorized"' "$tmp_body" >/dev/null
 
       - name: Deployment summary
         run: |

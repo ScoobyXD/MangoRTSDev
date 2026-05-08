@@ -5,6 +5,7 @@ import (
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/store"
 	"net/http"
+	"os"
 )
 
 type CognitoAdminClient interface {
@@ -96,5 +97,19 @@ func (s *Server) Routes() http.Handler {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	payload := map[string]any{"ok": true}
+	addHealthEnv(payload, "app_env", "APP_ENV")
+	addHealthEnv(payload, "auth_mode", "AUTH_MODE")
+	addHealthEnv(payload, "allowed_origin", "MANGORTS_ALLOWED_ORIGIN")
+	addHealthEnv(payload, "deploy_environment", "MANGORTS_DEPLOY_ENV")
+	addHealthEnv(payload, "deploy_revision", "MANGORTS_DEPLOY_REVISION")
+	addHealthEnv(payload, "app_url", "MANGORTS_APP_URL")
+	addHealthEnv(payload, "api_url", "MANGORTS_API_URL")
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func addHealthEnv(payload map[string]any, field, envKey string) {
+	if value := os.Getenv(envKey); value != "" {
+		payload[field] = value
+	}
 }

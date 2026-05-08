@@ -115,6 +115,12 @@ variable "backend_image_uri" {
   default     = ""
 }
 
+variable "deploy_revision" {
+  description = "Source revision currently being deployed. Exposed through non-secret health metadata."
+  type        = string
+  default     = ""
+}
+
 variable "container_port" {
   description = "Backend container port."
   type        = number
