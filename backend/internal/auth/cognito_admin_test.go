@@ -94,6 +94,33 @@ func TestCognitoAdminDeleteUserTreatsMissingAsDeleted(t *testing.T) {
 	}
 }
 
+func TestCognitoAdminDeleteUserPreservesCognitoSubject(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "test-access-key")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
+
+	transport := &recordingRoundTripper{
+		responses: []roundTripResponse{
+			{status: http.StatusOK, body: `{}`},
+		},
+	}
+	client := &CognitoAdminClient{
+		Region:     "us-west-1",
+		UserPoolID: "us-west-1_test",
+		HTTPClient: &http.Client{Transport: transport},
+	}
+
+	const subject = "1939c95e-2021-700c-10f7-e03ae12e81aa"
+	if err := client.AdminDeleteUser(context.Background(), subject); err != nil {
+		t.Fatal(err)
+	}
+	if len(transport.requests) != 1 {
+		t.Fatalf("requests = %d, want 1", len(transport.requests))
+	}
+	if username := stringField(t, transport.requests[0], "Username"); username != subject {
+		t.Fatalf("Username = %q, want Cognito subject", username)
+	}
+}
+
 type roundTripResponse struct {
 	status int
 	body   string

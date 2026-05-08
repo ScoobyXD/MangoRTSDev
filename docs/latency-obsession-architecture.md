@@ -599,11 +599,3 @@ Any such change must include:
 **Latency-architecture alignment outcome:**
 - Better compliance with “event-driven sync” while reducing broad fan-out.
 - Better compliance with “batch updates / avoid global rerenders” by isolating high-frequency interaction state from cross-module context propagation.
-
-ok we shall
-   see
-      yes no maybe so
-         e
-            w
-               w
-                  w

@@ -9,7 +9,7 @@ import (
 
 type CognitoAdminClient interface {
 	AdminCreateUser(ctx context.Context, email string) error
-	AdminDeleteUser(ctx context.Context, email string) error
+	AdminDeleteUser(ctx context.Context, username string) error
 }
 
 type AuthEmailSender interface {

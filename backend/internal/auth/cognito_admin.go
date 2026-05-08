@@ -90,14 +90,14 @@ func (c *CognitoAdminClient) adminCreateUser(ctx context.Context, email, message
 	return false, fmt.Errorf("cognito admin create user failed: status=%d", statusCode)
 }
 
-func (c *CognitoAdminClient) AdminDeleteUser(ctx context.Context, email string) error {
-	email = strings.ToLower(strings.TrimSpace(email))
-	if c == nil || c.Region == "" || c.UserPoolID == "" || email == "" {
+func (c *CognitoAdminClient) AdminDeleteUser(ctx context.Context, username string) error {
+	username = normalizeCognitoUsername(username)
+	if c == nil || c.Region == "" || c.UserPoolID == "" || username == "" {
 		return ErrCognitoAdminUnavailable
 	}
 	payload := map[string]any{
 		"UserPoolId": c.UserPoolID,
-		"Username":   email,
+		"Username":   username,
 	}
 	statusCode, header, raw, err := c.cognitoPost(ctx, "AdminDeleteUser", payload)
 	if err != nil {
@@ -113,6 +113,14 @@ func (c *CognitoAdminClient) AdminDeleteUser(ctx context.Context, email string) 
 		return fmt.Errorf("cognito admin delete user failed: status=%d body=%s", statusCode, detail)
 	}
 	return fmt.Errorf("cognito admin delete user failed: status=%d", statusCode)
+}
+
+func normalizeCognitoUsername(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.Contains(value, "@") {
+		return strings.ToLower(value)
+	}
+	return value
 }
 
 func (c *CognitoAdminClient) cognitoPost(ctx context.Context, action string, payload map[string]any) (int, http.Header, []byte, error) {

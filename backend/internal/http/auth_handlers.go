@@ -118,8 +118,8 @@ func (s *Server) handleCompanySubresource(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusServiceUnavailable, "cognito_admin_not_configured")
 		return
 	}
-	if err := s.cognitoAdmin.AdminDeleteUser(r.Context(), target.Email); err != nil {
-		log.Printf("failed to delete cognito user email=%s user_id=%s: %v", target.Email, target.UserID, err)
+	if err := s.cognitoAdmin.AdminDeleteUser(r.Context(), target.CognitoSubject); err != nil {
+		log.Printf("failed to delete cognito user email=%s cognito_subject=%s user_id=%s: %v", target.Email, target.CognitoSubject, target.UserID, err)
 		writeError(w, http.StatusBadGateway, "failed_to_delete_cognito_user")
 		return
 	}

@@ -22,8 +22,8 @@ func (c *recordingCognitoAdmin) AdminCreateUser(_ context.Context, email string)
 	return nil
 }
 
-func (c *recordingCognitoAdmin) AdminDeleteUser(_ context.Context, email string) error {
-	c.deleted = append(c.deleted, email)
+func (c *recordingCognitoAdmin) AdminDeleteUser(_ context.Context, username string) error {
+	c.deleted = append(c.deleted, username)
 	return nil
 }
 
@@ -355,8 +355,8 @@ func TestDeleteCompanyUserDeletesCognitoAndAllowsReinvite(t *testing.T) {
 	if deleteRes.Code != http.StatusOK {
 		t.Fatalf("delete status = %d, want %d, body=%s", deleteRes.Code, http.StatusOK, strings.TrimSpace(deleteRes.Body.String()))
 	}
-	if len(cognito.deleted) != 1 || cognito.deleted[0] != targetEmail {
-		t.Fatalf("cognito deletes = %v, want [%s]", cognito.deleted, targetEmail)
+	if len(cognito.deleted) != 1 || cognito.deleted[0] != targetSubject {
+		t.Fatalf("cognito deletes = %v, want [%s]", cognito.deleted, targetSubject)
 	}
 	if _, err := repo.GetAuthUser(targetSubject); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("target user after delete error = %v, want ErrNotFound", err)
