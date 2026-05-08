@@ -1518,7 +1518,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           minWidth: gridWidth,
           display: "grid",
           gridTemplateColumns: `${ARENA_GROUP_ROW_LABEL_WIDTH_PX}px repeat(${columnCount}, ${ARENA_GROUP_COLUMN_WIDTH_PX}px)`,
-          gridTemplateRows: `minmax(56px, auto) minmax(38px, auto) repeat(${rowCount}, minmax(${ARENA_GROUP_MIN_CELL_HEIGHT_PX}px, auto))`,
+          gridTemplateRows: `minmax(56px, auto) minmax(56px, auto) repeat(${rowCount}, minmax(${ARENA_GROUP_MIN_CELL_HEIGHT_PX}px, auto))`,
           columnGap: 8,
           rowGap: 0,
           alignItems: "stretch",
@@ -1526,7 +1526,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
           opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1,
         }}
       >
-        <div data-arena-group-controls="true" style={{ ...axisControlCellStyle, gridColumn: 1, gridRow: 1 }}>
+        <div data-arena-group-controls="true" style={{ ...axisControlCellStyle, gridColumn: 1, gridRow: 2 }}>
           {renderArenaGroupSelect(arenaYGroupBy, selectArenaYGroupBy, "Y-axis", "y", arenaYSortDirection, () => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc")), "compact")}
         </div>
         <div data-arena-group-controls="true" style={{ ...axisControlCellStyle, gridColumn: xAxisControlColumn, gridRow: 1 }}>
