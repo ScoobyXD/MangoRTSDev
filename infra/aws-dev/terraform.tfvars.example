@@ -44,7 +44,6 @@ nylas_client_id            = "00000000-0000-0000-0000-000000000000"
 nylas_api_base_url         = "https://api.us.nylas.com"
 nylas_api_key_secret_arn   = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/dev/nylas-api-key"
 nylas_state_secret_arn     = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/dev/nylas-state-secret"
-nylas_webhook_secret_arn   = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/dev/nylas-webhook-secret"
 nylas_google_scopes        = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.labels"
 nylas_microsoft_scopes     = "offline_access User.Read Mail.ReadWrite Mail.Send"
 

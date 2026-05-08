@@ -33,18 +33,9 @@ type Repository interface {
 	ValidateInvitationToken(token string) (domain.Invitation, error)
 	AcceptInvitation(token, cognitoSubject, email, displayName string) (domain.Invitation, error)
 	GetUserEmailConnection(userID string) (domain.UserEmailConnection, error)
-	GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error)
 	UpsertUserEmailConnection(input UserEmailConnectionInput) (domain.UserEmailConnection, error)
 	UpdateUserEmailConnectionStatus(userID, status string) (domain.UserEmailConnection, error)
 	DeleteUserEmailConnection(userID string) error
-	GetCommunicationsMessageState(companyID, messageID string) (domain.CommunicationsMessageState, error)
-	UpsertCommunicationsMessageState(input CommunicationsMessageStateInput) (domain.CommunicationsMessageState, error)
-	ListCommunicationsMessageComments(companyID, messageID string) ([]domain.CommunicationsMessageComment, error)
-	CreateCommunicationsMessageComment(input CommunicationsMessageCommentInput) (domain.CommunicationsMessageComment, error)
-	ListCommunicationsSharedDrafts(companyID, messageID string) ([]domain.CommunicationsSharedDraft, error)
-	UpsertCommunicationsSharedDraft(input CommunicationsSharedDraftInput) (domain.CommunicationsSharedDraft, error)
-	ListCommunicationsReadReceipts(companyID, messageID string) ([]domain.CommunicationsReadReceipt, error)
-	UpsertCommunicationsReadReceipt(companyID, messageID, userID string) (domain.CommunicationsReadReceipt, error)
 	CreateNode(companyID, title string) (domain.Node, error)
 	UpdateNode(input UpdateNodeInput) (domain.Node, error)
 	UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error)
@@ -254,34 +245,6 @@ type UserEmailConnectionInput struct {
 	AccountEmail string
 	GrantID      string
 	Status       string
-}
-
-type CommunicationsMessageStateInput struct {
-	CompanyID         string
-	MessageID         string
-	SharedInbox       bool
-	SharedInboxSet    bool
-	Status            string
-	StatusSet         bool
-	AssignedUserID    *string
-	AssignedUserIDSet bool
-	LinkedNodeID      *string
-	LinkedNodeIDSet   bool
-}
-
-type CommunicationsMessageCommentInput struct {
-	CompanyID string
-	MessageID string
-	UserID    string
-	Body      string
-}
-
-type CommunicationsSharedDraftInput struct {
-	CompanyID string
-	MessageID string
-	UserID    string
-	Subject   string
-	Body      string
 }
 
 func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {

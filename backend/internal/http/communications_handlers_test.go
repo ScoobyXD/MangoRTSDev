@@ -2,12 +2,8 @@ package httpapi
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"net/http/httptest"
@@ -303,121 +299,6 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	}
 }
 
-func TestCommunicationsCollaborationHandlers(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	const companyID = "11111111-1111-1111-1111-111111111111"
-	const subject = "email-user"
-	repo.EnsureCompany(companyID, "MangoRTS Dev")
-	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
-		t.Fatal(err)
-	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-	}).Routes()
-	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-	messagePath := "/v1/communications/collaboration/message-1"
-
-	assertJSONStatus(t, handler, http.MethodGet, messagePath+"?company_id="+companyID, "", token, http.StatusOK)
-	assertJSONStatus(t, handler, http.MethodPut, messagePath, `{"company_id":"`+companyID+`","shared_inbox":true,"assigned_user_id":"`+user.UserID+`","status":"pending"}`, token, http.StatusOK)
-	assertJSONStatus(t, handler, http.MethodPost, messagePath+"/comments", `{"company_id":"`+companyID+`","body":"checking this"}`, token, http.StatusCreated)
-	assertJSONStatus(t, handler, http.MethodPost, messagePath+"/drafts", `{"company_id":"`+companyID+`","subject":"Re: Hello","body":"Shared draft"}`, token, http.StatusOK)
-	assertJSONStatus(t, handler, http.MethodPost, messagePath+"/read-receipts", `{"company_id":"`+companyID+`"}`, token, http.StatusOK)
-
-	req := httptest.NewRequest(http.MethodGet, messagePath+"?company_id="+companyID, nil)
-	req.Header.Set("Authorization", token)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("collaboration status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	var payload struct {
-		State struct {
-			SharedInbox    bool   `json:"shared_inbox"`
-			Status         string `json:"status"`
-			AssignedUserID string `json:"assigned_user_id"`
-		} `json:"state"`
-		Comments     []domain.CommunicationsMessageComment `json:"comments"`
-		Drafts       []domain.CommunicationsSharedDraft    `json:"drafts"`
-		ReadReceipts []domain.CommunicationsReadReceipt    `json:"read_receipts"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatal(err)
-	}
-	if !payload.State.SharedInbox || payload.State.Status != "pending" || payload.State.AssignedUserID != user.UserID {
-		t.Fatalf("state = %+v, want shared pending assigned", payload.State)
-	}
-	if len(payload.Comments) != 1 || len(payload.Drafts) != 1 || len(payload.ReadReceipts) != 1 {
-		t.Fatalf("collaboration payload counts comments=%d drafts=%d receipts=%d", len(payload.Comments), len(payload.Drafts), len(payload.ReadReceipts))
-	}
-}
-
-func TestNylasWebhookPublishesCommunicationsWorkspaceEvent(t *testing.T) {
-	t.Parallel()
-
-	repo := store.NewMemoryRepo()
-	const companyID = "11111111-1111-1111-1111-111111111111"
-	const subject = "email-user"
-	repo.EnsureCompany(companyID, "MangoRTS Dev")
-	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       user.UserID,
-		Provider:     "google",
-		AccountEmail: user.Email,
-		GrantID:      "grant-1",
-		Status:       "connected",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	config := testNylasConfig()
-	config.WebhookSecret = "webhook-secret"
-	server := NewServerWithOptions(repo, ServerOptions{NylasConfig: config})
-	handler := server.Routes()
-
-	ch := server.hub.subscribe()
-	defer server.hub.unsubscribe(ch)
-
-	challengeReq := httptest.NewRequest(http.MethodGet, "/nylas/webhooks?challenge=abc123", nil)
-	challengeRec := httptest.NewRecorder()
-	handler.ServeHTTP(challengeRec, challengeReq)
-	if challengeRec.Code != http.StatusOK || challengeRec.Body.String() != "abc123" {
-		t.Fatalf("challenge status=%d body=%q", challengeRec.Code, challengeRec.Body.String())
-	}
-
-	body := `{"type":"message.created","data":{"object":{"id":"message-1","grant_id":"grant-1","subject":"Hello"}}}`
-	req := httptest.NewRequest(http.MethodPost, "/nylas/webhooks", strings.NewReader(body))
-	req.Header.Set("x-nylas-signature", signWebhookBody(config.WebhookSecret, body))
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("webhook status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	select {
-	case raw := <-ch:
-		var envelope workspaceEventEnvelope
-		if err := json.Unmarshal(raw, &envelope); err != nil {
-			t.Fatal(err)
-		}
-		if envelope.CompanyID != companyID || envelope.Type != "communications_message_created" {
-			t.Fatalf("envelope = %+v, want communications message event for company", envelope)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for workspace event")
-	}
-}
-
 func TestCommunicationsNylasAuthErrorMarksReauthRequired(t *testing.T) {
 	t.Parallel()
 
@@ -457,12 +338,6 @@ func TestCommunicationsNylasAuthErrorMarksReauthRequired(t *testing.T) {
 	if connection.Status != "reauth_required" {
 		t.Fatalf("connection status = %q, want reauth_required", connection.Status)
 	}
-}
-
-func signWebhookBody(secret, body string) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(body))
-	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func assertJSONStatus(t *testing.T, handler http.Handler, method, path, body, authHeader string, want int) {

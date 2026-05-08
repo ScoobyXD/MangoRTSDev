@@ -58,7 +58,6 @@ Nylas Communications variables:
 - `TF_NYLAS_CLIENT_ID`: Nylas application ID/client ID.
 - `TF_NYLAS_API_KEY_SECRET_ARN`: AWS Secrets Manager ARN containing the Nylas API key.
 - `TF_NYLAS_STATE_SECRET_ARN`: AWS Secrets Manager ARN containing a long random state-signing secret.
-- `TF_NYLAS_WEBHOOK_SECRET_ARN`: AWS Secrets Manager ARN containing the Nylas webhook secret for message push notifications.
 - `TF_NYLAS_API_BASE_URL`: optional, defaults to `https://api.us.nylas.com`; use `https://api.eu.nylas.com` only for EU Nylas apps.
 - `TF_NYLAS_GOOGLE_SCOPES`: optional, defaults to the fully qualified Gmail scopes required by Mango.
 - `TF_NYLAS_MICROSOFT_SCOPES`: optional, defaults to `offline_access User.Read Mail.ReadWrite Mail.Send`.
@@ -85,8 +84,6 @@ After the workflow runs, register the `nylas_callback_url` Terraform output in t
 ```text
 https://api.dev.<domain>/nylas/oauth/callback
 ```
-
-Register the `nylas_webhook_url` output as a Nylas webhook for `message.created`, `message.updated`, and `message.deleted` triggers. Store the generated webhook secret in the secret referenced by `TF_NYLAS_WEBHOOK_SECRET_ARN`.
 
 ## Normal Deploy
 

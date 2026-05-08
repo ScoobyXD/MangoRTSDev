@@ -20,7 +20,6 @@ type NylasConfig struct {
 	RedirectURI         string
 	FrontendRedirectURL string
 	StateSecret         string
-	WebhookSecret       string
 	GoogleScopes        []string
 	MicrosoftScopes     []string
 }
