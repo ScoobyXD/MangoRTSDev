@@ -135,11 +135,40 @@ test("grouped board layout uses one global Y-axis row order across X-axis column
     ]),
   });
 
-  assert.deepEqual(layout.rows.map((row) => row.label), ["Jonathan", "Joe", "Pam"]);
+  assert.deepEqual(layout.rows.map((row) => row.label), ["Joe", "Jonathan", "Pam"]);
   assert.deepEqual(layout.columns.map((groupColumn) => groupColumn.label), ["Todo", "Done", "Empty"]);
-  assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["todo-jonathan"], ["todo-joe"], []]);
+  assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["todo-joe"], ["todo-jonathan"], []]);
   assert.deepEqual(layout.columns[1].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[], [], ["done-pam"]]);
   assert.deepEqual(layout.columns[2].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[], [], []]);
+});
+
+test("grouped board layout sorts group axes and uses full priority labels", () => {
+  const columns = [
+    column({ column_id: "todo", title: "Todo", position: 1000 }),
+    column({ column_id: "done", title: "Done", position: 2000 }),
+  ];
+  const cards = [
+    card({ card_id: "low", column_id: "todo", node_id: "node-low", position: 1000 }),
+    card({ card_id: "urgent", column_id: "done", node_id: "node-urgent", position: 1000 }),
+  ];
+  const layout = buildKanbanGroupedBoardLayout({
+    columns,
+    cards,
+    xGroupBy: "status",
+    yGroupBy: "priority",
+    xSortDirection: "desc",
+    ySortDirection: "desc",
+    nodeByID: new Map([
+      ["node-low", { node_id: "node-low", priority: 1 }],
+      ["node-urgent", { node_id: "node-urgent", priority: 5 }],
+    ]),
+    userByID: new Map(),
+  });
+
+  assert.deepEqual(layout.columns.map((groupColumn) => groupColumn.label), ["Done", "Todo"]);
+  assert.deepEqual(layout.rows.map((row) => row.label), ["5 URGENT", "1 Low Priority"]);
+  assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["urgent"], []]);
+  assert.deepEqual(layout.columns[1].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[], ["low"]]);
 });
 
 test("card selection helper supports ranges and additive toggles across columns", () => {
@@ -289,5 +318,5 @@ test("column layout helpers keep reorder and resize writes bounded", () => {
 test("kanban visual contract preserves column title casing and frame-header clearance", () => {
   assert.equal(KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, "none");
   assert.ok(KANBAN_MODULE_TOP_CLEARANCE_PX >= 34);
-  assert.deepEqual(KANBAN_GROUP_FIELDS.map((field) => field.value), ["status", "person", "priority", "due_date", "work_type", "none"]);
+  assert.deepEqual(KANBAN_GROUP_FIELDS.map((field) => field.value), ["status", "person", "priority", "due_date"]);
 });
