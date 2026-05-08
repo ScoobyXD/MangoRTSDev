@@ -88,3 +88,20 @@ export function createLogicGateArenaFrames(): FrameDataModel[] {
     },
   ];
 }
+
+export function createCommunicationsViewFrames(): FrameDataModel[] {
+  const communicationsID = createFrameId();
+
+  return [
+    {
+      id: communicationsID,
+      kind: "communications",
+      x: 1,
+      y: 1,
+      w: 42,
+      h: 30,
+      title: "Communications",
+      ...WHITE_FRAME,
+    },
+  ];
+}
