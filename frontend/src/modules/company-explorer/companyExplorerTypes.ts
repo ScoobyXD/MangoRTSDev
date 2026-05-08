@@ -52,7 +52,7 @@ export type CompanyExplorerContextMenuState = {
   renameTreeID: string;
   renameLabel: string;
   contextKind: CompanyExplorerFolderKind | null;
-  createFolderPosition: number;
+  createPosition: number;
   canCreateBothFolderTypes: boolean;
   canCreateFolder: boolean;
   canCreateNode: boolean;

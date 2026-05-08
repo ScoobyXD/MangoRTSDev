@@ -1857,7 +1857,7 @@ func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *test
 		"company_id":"` + companyID + `",
 		"entity_kind":"logic_gate",
 		"folder_id":"` + folder.FolderID + `",
-		"items":[{"client_id":"new-gate","header":"New gate","x":480,"y":360}],
+		"items":[{"client_id":"new-gate","header":"New gate","x":480,"y":360,"position":4242}],
 		"relationships":[{"entity_id_a":"` + source.LogicGateID + `","client_id_b":"new-gate","a_position":"Input","b_position":"Output"}]
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/map-entity-batches", bytes.NewReader(body))
@@ -1880,6 +1880,7 @@ func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *test
 			FolderID string `json:"folder_id"`
 			ItemType string `json:"item_type"`
 			ItemID   string `json:"item_id"`
+			Position int    `json:"position"`
 		} `json:"folder_items"`
 		LogicGateMapPositions []struct {
 			LogicGateID string  `json:"logic_gate_id"`
@@ -1899,5 +1900,8 @@ func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *test
 	}
 	if payload.FolderItems[0].FolderID != folder.FolderID || payload.FolderItems[0].ItemType != "logic_gate" || payload.FolderItems[0].ItemID != createdID {
 		t.Fatalf("folder item did not place created gate: %+v created=%s", payload.FolderItems[0], createdID)
+	}
+	if payload.FolderItems[0].Position != 4242 {
+		t.Fatalf("folder item position = %d, want 4242", payload.FolderItems[0].Position)
 	}
 }

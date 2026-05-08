@@ -9,6 +9,7 @@ export type MapEntityBatchItem = {
   title: string;
   x: number;
   y: number;
+  position?: number;
 };
 
 export type MapEntityBatchRelationship = {

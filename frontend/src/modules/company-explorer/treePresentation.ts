@@ -238,7 +238,7 @@ export function resolveExplorerCreationTargets(row?: ExplorerCreationContextRow 
   const containingFolderID = row?.folderID ?? "";
   const nodeParentFolderID = containingFolderID;
   const logicGateParentFolderID = containingFolderID;
-  const nodeFolderParentID = nodeParentFolderID;
+  const nodeFolderParentID = row?.folderKind === "node" ? containingFolderID : "";
   const logicGateFolderParentID = row?.folderKind === "logic_gate" ? containingFolderID : "";
   const preferredFolderKind: CompanyExplorerFolderKind = row?.folderKind === "logic_gate" || row?.kind === "logic_gate" ? "logic_gate" : "node";
 

@@ -14,6 +14,7 @@ type mapEntityBatchItemRequest struct {
 	Header   string  `json:"header"`
 	X        float64 `json:"x"`
 	Y        float64 `json:"y"`
+	Position int     `json:"position"`
 }
 
 type mapEntityBatchRelationshipRequest struct {
@@ -105,6 +106,7 @@ func buildMapEntityBatchInput(
 			Title:    title,
 			X:        item.X,
 			Y:        item.Y,
+			Position: item.Position,
 		})
 	}
 
@@ -150,6 +152,9 @@ func buildMapEntityBatchInput(
 }
 
 func publishMapEntityBatchEvents(s *Server, result store.MapEntityBatchResult) {
+	for _, item := range result.FolderItems {
+		s.publishWorkspaceEvent(result.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_item": item})
+	}
 	for _, item := range result.Nodes {
 		s.publishWorkspaceEvent(result.CompanyID, "node_created", map[string]any{"node_id": item.NodeID, "node": item})
 	}
@@ -161,9 +166,6 @@ func publishMapEntityBatchEvents(s *Server, result store.MapEntityBatchResult) {
 	}
 	if len(result.LogicGateMapPositions) > 0 {
 		s.publishWorkspaceEvent(result.CompanyID, "logic_gate_map_positions_updated", map[string]any{"positions": result.LogicGateMapPositions})
-	}
-	for _, item := range result.FolderItems {
-		s.publishWorkspaceEvent(result.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_item": item})
 	}
 	for _, item := range result.Relationships {
 		s.publishWorkspaceEvent(result.CompanyID, "relationship_created", map[string]any{

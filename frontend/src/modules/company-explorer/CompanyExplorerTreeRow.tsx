@@ -125,7 +125,6 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   const rowDragPayload = getExplorerDragPayloadForSelection(row, selectedTreeIDs, treeRows);
   const isDragging = draggingTreeID === row.id;
   const isDropTarget = dragOverTreeID === row.id;
-  const specialFolderColor = row.systemKey ? "rgb(0, 233, 255)" : "";
 
   return (
     <div
@@ -328,7 +327,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
             event.stopPropagation();
             onStartRenamingRow(row);
           }}
-          style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "default", userSelect: "none", color: specialFolderColor || undefined, fontWeight: row.systemKey ? 800 : undefined }}
+          style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "default", userSelect: "none" }}
         >
           {row.label}
         </span>
