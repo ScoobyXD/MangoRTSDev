@@ -78,6 +78,7 @@ jobs:
           TF_NYLAS_API_BASE_URL: ${{ vars.TF_NYLAS_API_BASE_URL || 'https://api.us.nylas.com' }}
           TF_NYLAS_API_KEY_SECRET_ARN: ${{ vars.TF_NYLAS_API_KEY_SECRET_ARN || '' }}
           TF_NYLAS_STATE_SECRET_ARN: ${{ vars.TF_NYLAS_STATE_SECRET_ARN || '' }}
+          TF_NYLAS_WEBHOOK_SECRET_ARN: ${{ vars.TF_NYLAS_WEBHOOK_SECRET_ARN || '' }}
           TF_NYLAS_GOOGLE_SCOPES: ${{ vars.TF_NYLAS_GOOGLE_SCOPES || 'https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.labels' }}
           TF_NYLAS_MICROSOFT_SCOPES: ${{ vars.TF_NYLAS_MICROSOFT_SCOPES || 'offline_access User.Read Mail.ReadWrite Mail.Send' }}
           TF_ORIGIN_VERIFY_SECRET: ${{ secrets.ORIGIN_VERIFY_SECRET || secrets.DEV_BASIC_AUTH_PASSWORD }}
@@ -107,6 +108,13 @@ jobs:
           if [[ "$NYLAS_CONFIGURED_COUNT" != "0" && "$NYLAS_CONFIGURED_COUNT" != "3" ]]; then
             echo "Set all or none of TF_NYLAS_CLIENT_ID, TF_NYLAS_API_KEY_SECRET_ARN, and TF_NYLAS_STATE_SECRET_ARN." >&2
             exit 1
+          fi
+          if [[ -n "$TF_NYLAS_WEBHOOK_SECRET_ARN" && "$NYLAS_CONFIGURED_COUNT" != "3" ]]; then
+            echo "TF_NYLAS_WEBHOOK_SECRET_ARN requires the core Nylas Communications variables." >&2
+            exit 1
+          fi
+          if [[ "$NYLAS_CONFIGURED_COUNT" == "3" && -z "$TF_NYLAS_WEBHOOK_SECRET_ARN" ]]; then
+            echo "Warning: Nylas Communications is enabled without TF_NYLAS_WEBHOOK_SECRET_ARN, so realtime email updates will not be active." >&2
           fi
           if [[ "$TF_NYLAS_API_BASE_URL" != "https://api.us.nylas.com" && "$TF_NYLAS_API_BASE_URL" != "https://api.eu.nylas.com" ]]; then
             echo "TF_NYLAS_API_BASE_URL must be https://api.us.nylas.com or https://api.eu.nylas.com" >&2
@@ -157,6 +165,7 @@ jobs:
           nylas_api_base_url = $(json_string "$TF_NYLAS_API_BASE_URL")
           nylas_api_key_secret_arn = $(json_string "$TF_NYLAS_API_KEY_SECRET_ARN")
           nylas_state_secret_arn = $(json_string "$TF_NYLAS_STATE_SECRET_ARN")
+          nylas_webhook_secret_arn = $(json_string "$TF_NYLAS_WEBHOOK_SECRET_ARN")
           nylas_google_scopes = $(json_string "$TF_NYLAS_GOOGLE_SCOPES")
           nylas_microsoft_scopes = $(json_string "$TF_NYLAS_MICROSOFT_SCOPES")
           origin_verify_secret = $(json_string "$TF_ORIGIN_VERIFY_SECRET")
@@ -227,6 +236,7 @@ jobs:
             echo "APP_URL=$(terraform output -raw app_url)"
             echo "API_URL=$(terraform output -raw api_url)"
             echo "NYLAS_CALLBACK_URL=$(terraform output -raw nylas_callback_url)"
+            echo "NYLAS_WEBHOOK_URL=$(terraform output -raw nylas_webhook_url)"
             echo "NYLAS_FRONTEND_REDIRECT_URL=$(terraform output -raw nylas_frontend_redirect_url)"
             echo "COGNITO_REGION=$(terraform output -raw cognito_region)"
             echo "COGNITO_USER_POOL_ID=$(terraform output -raw cognito_user_pool_id)"
@@ -334,6 +344,14 @@ jobs:
           require_status "backend unauthorized route" "401" "$status" "$tmp_body"
           jq -e '.error == "unauthorized"' "$tmp_body" >/dev/null
 
+          status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/nylas/webhook?challenge=deploy-smoke-nylas-webhook")"
+          require_status "nylas webhook challenge route" "200" "$status" "$tmp_body"
+          if [[ "$(cat "$tmp_body")" != "deploy-smoke-nylas-webhook" ]]; then
+            echo "Nylas webhook challenge returned unexpected body" >&2
+            cat "$tmp_body" >&2 || true
+            exit 1
+          fi
+
       - name: Deployment summary
         run: |
           {
@@ -342,7 +360,8 @@ jobs:
             echo "- App: ${APP_URL}"
             echo "- API: ${API_URL}"
             echo "- Nylas callback URL: ${NYLAS_CALLBACK_URL}"
+            echo "- Nylas webhook URL: ${NYLAS_WEBHOOK_URL}"
             echo "- Nylas frontend redirect URL: ${NYLAS_FRONTEND_REDIRECT_URL}"
             echo ""
-            echo "Register the Nylas callback URL in the Nylas dashboard for the same app/client ID used by TF_NYLAS_CLIENT_ID."
+            echo "Register the Nylas callback URL and webhook URL in the Nylas dashboard for the same app/client ID used by TF_NYLAS_CLIENT_ID."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -130,6 +130,9 @@ resource "aws_ecs_task_definition" "backend" {
         local.nylas_enabled ? [
           { name = "NYLAS_API_KEY", valueFrom = var.nylas_api_key_secret_arn },
           { name = "NYLAS_STATE_SECRET", valueFrom = var.nylas_state_secret_arn }
+        ] : [],
+        local.nylas_realtime_enabled ? [
+          { name = "NYLAS_WEBHOOK_SECRET", valueFrom = var.nylas_webhook_secret_arn }
         ] : []
       )
       logConfiguration = {

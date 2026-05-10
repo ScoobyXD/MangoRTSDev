@@ -21,7 +21,7 @@ This phase creates ECR, Cognito, S3, CloudFront, ALB, Route 53, ACM, WAF, IAM/OI
 
 8. Save the `github_deploy_role_arn` output as GitHub secret `AWS_DEV_DEPLOY_ROLE_ARN`.
 9. Set GitHub variables/secrets used by `.github/workflows/deploy-dev.yml`, including state backend values, Terraform inputs, `AWS_REGION`, and `ORIGIN_VERIFY_SECRET`.
-10. To enable Communications, store the Nylas API key and OAuth state secret in AWS Secrets Manager, then set the GitHub Nylas variables listed below.
+10. To enable Communications, store the Nylas API key and OAuth state secret in AWS Secrets Manager, then set the GitHub Nylas variables listed below. Realtime inbox updates require a Nylas webhook destination and webhook secret after the first deploy exposes the webhook URL.
 11. Apply database schema/migrations from a machine that can reach the DB, then seed the dev company membership after the first Cognito user exists.
 
 ## GitHub Configuration
@@ -60,6 +60,7 @@ Nylas Communications variables:
 - `TF_NYLAS_CLIENT_ID`: Nylas application ID/client ID.
 - `TF_NYLAS_API_KEY_SECRET_ARN`: AWS Secrets Manager ARN containing the Nylas API key.
 - `TF_NYLAS_STATE_SECRET_ARN`: AWS Secrets Manager ARN containing a long random state-signing secret.
+- `TF_NYLAS_WEBHOOK_SECRET_ARN`: optional until the webhook exists; AWS Secrets Manager ARN containing the `webhook_secret` returned by the Nylas webhook destination. Required for realtime Communications updates.
 - `TF_NYLAS_API_BASE_URL`: optional, defaults to `https://api.us.nylas.com`; use `https://api.eu.nylas.com` only for EU Nylas apps.
 - `TF_NYLAS_GOOGLE_SCOPES`: optional, defaults to the fully qualified Gmail scopes required by Mango.
 - `TF_NYLAS_MICROSOFT_SCOPES`: optional, defaults to `offline_access User.Read Mail.ReadWrite Mail.Send`.
@@ -85,6 +86,33 @@ After the workflow runs, register the `nylas_callback_url` Terraform output in t
 
 ```text
 https://api.dev.<domain>/nylas/oauth/callback
+```
+
+Then create a Nylas webhook destination using the `nylas_webhook_url` Terraform output:
+
+```text
+https://api.dev.<domain>/nylas/webhook
+```
+
+Subscribe the webhook to these triggers: `message.created`, `message.updated`, `message.deleted`, `folder.created`, `folder.updated`, and `folder.deleted`. Nylas sends update suffixes such as `.truncated` or `.transformed` without subscribing to those suffixes separately; the backend accepts them by prefix.
+
+If using the Nylas API instead of the dashboard, create the webhook after the first deploy:
+
+```powershell
+curl --request POST `
+  --url "https://api.us.nylas.com/v3/webhooks/" `
+  --header "Content-Type: application/json" `
+  --header "Authorization: Bearer <nylas-api-key>" `
+  --data '{ "trigger_types": ["message.created", "message.updated", "message.deleted", "folder.created", "folder.updated", "folder.deleted"], "description": "MangoRTS dev communications", "webhook_url": "https://api.dev.<domain>/nylas/webhook", "notification_email_addresses": ["ops@example.com"] }'
+```
+
+Store the returned `webhook_secret` in Secrets Manager, set `TF_NYLAS_WEBHOOK_SECRET_ARN`, and redeploy:
+
+```powershell
+aws secretsmanager create-secret `
+  --region $env:AWS_REGION `
+  --name mangorts/dev/nylas-webhook-secret `
+  --secret-string "<webhook-secret-from-nylas>"
 ```
 
 ## Normal Deploy
@@ -134,9 +162,11 @@ For Communications, confirm the callback route is forwarded to the backend and n
 
 ```powershell
 curl -i https://api.dev.<domain>/nylas/oauth/callback
+curl -i "https://api.dev.<domain>/nylas/webhook?challenge=smoke"
 ```
 
 The expected result without OAuth query parameters is a redirect back to the frontend with a `nylas_error` query parameter, not a CloudFront/S3 404.
+The webhook challenge should return HTTP 200 with a plain `smoke` body and no extra JSON or HTML.
 
 ## Rollback
 

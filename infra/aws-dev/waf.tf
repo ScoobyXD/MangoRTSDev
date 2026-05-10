@@ -8,6 +8,36 @@ resource "aws_wafv2_web_acl" "cloudfront" {
   }
 
   rule {
+    name     = "AllowNylasWebhook"
+    priority = 5
+
+    action {
+      allow {}
+    }
+
+    statement {
+      byte_match_statement {
+        field_to_match {
+          uri_path {}
+        }
+        positional_constraint = "EXACTLY"
+        search_string         = "/nylas/webhook"
+
+        text_transformation {
+          priority = 0
+          type     = "NONE"
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name_prefix}-nylas-webhook-allow"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
     name     = "AWSManagedRulesCommonRuleSet"
     priority = 10
 

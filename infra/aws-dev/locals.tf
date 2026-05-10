@@ -11,7 +11,9 @@ locals {
   origin_verify_header_value     = sha256("${local.name_prefix}:${local.effective_origin_verify_secret}")
   nylas_enabled                  = trimspace(var.nylas_client_id) != "" && trimspace(var.nylas_api_key_secret_arn) != "" && trimspace(var.nylas_state_secret_arn) != ""
   nylas_redirect_uri             = "https://${local.api_domain}/nylas/oauth/callback"
+  nylas_webhook_url              = "https://${local.api_domain}/nylas/webhook"
   nylas_frontend_redirect_url    = "https://${local.app_domain}/communications"
+  nylas_realtime_enabled         = local.nylas_enabled && trimspace(var.nylas_webhook_secret_arn) != ""
 
   managed_ecs_private_subnet_count = var.create_private_ecs_subnets ? length(var.ecs_private_subnet_cidrs) : 0
   managed_nat_gateway_count        = var.create_private_ecs_subnets ? (var.ecs_nat_gateway_mode == "per_az" ? local.managed_ecs_private_subnet_count : 1) : 0

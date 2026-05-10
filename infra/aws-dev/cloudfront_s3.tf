@@ -54,7 +54,7 @@ function isFrontendRoute(uri) {
   if (uri === "/") {
     return true;
   }
-  if (uri.indexOf("/v1/") === 0 || uri.indexOf("/nylas/oauth/") === 0 || uri === "/healthz") {
+  if (uri.indexOf("/v1/") === 0 || uri.indexOf("/nylas/") === 0 || uri === "/healthz") {
     return false;
   }
   var lastSegment = uri.substring(uri.lastIndexOf("/") + 1);
@@ -129,6 +129,17 @@ resource "aws_cloudfront_distribution" "app" {
     target_origin_id         = "backend-alb"
     viewer_protocol_policy   = "redirect-to-https"
     allowed_methods          = ["GET", "HEAD", "OPTIONS"]
+    cached_methods           = ["GET", "HEAD", "OPTIONS"]
+    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    compress                 = true
+  }
+
+  ordered_cache_behavior {
+    path_pattern             = "/nylas/webhook"
+    target_origin_id         = "backend-alb"
+    viewer_protocol_policy   = "redirect-to-https"
+    allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
     cached_methods           = ["GET", "HEAD", "OPTIONS"]
     cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
     origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id

@@ -25,7 +25,8 @@ data "aws_iam_policy_document" "ecs_execution_secrets" {
     resources = compact([
       var.existing_db_password_secret_arn,
       var.nylas_api_key_secret_arn,
-      var.nylas_state_secret_arn
+      var.nylas_state_secret_arn,
+      var.nylas_webhook_secret_arn
     ])
   }
 }
