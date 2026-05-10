@@ -101,8 +101,8 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	ch := s.hub.subscribe()
-	defer s.hub.unsubscribe(ch)
+	ch := s.hub.subscribe(companyID)
+	defer s.hub.unsubscribe(companyID, ch)
 
 	fmt.Fprintf(w, "event: ready\ndata: {\"company_id\":%q}\n\n", companyID)
 	flusher.Flush()
@@ -118,13 +118,6 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, "event: ping\ndata: {}\n\n")
 			flusher.Flush()
 		case payload := <-ch:
-			var envelope workspaceEventEnvelope
-			if err := json.Unmarshal(payload, &envelope); err != nil {
-				continue
-			}
-			if envelope.CompanyID != companyID {
-				continue
-			}
 			fmt.Fprintf(w, "event: workspace\ndata: %s\n\n", payload)
 			flusher.Flush()
 		}
@@ -140,32 +133,42 @@ type workspaceEventEnvelope struct {
 
 type workspaceEventHub struct {
 	mu          sync.RWMutex
-	subscribers map[chan []byte]struct{}
+	subscribers map[string]map[chan []byte]struct{}
 }
 
 func newWorkspaceEventHub() *workspaceEventHub {
-	return &workspaceEventHub{subscribers: map[chan []byte]struct{}{}}
+	return &workspaceEventHub{subscribers: map[string]map[chan []byte]struct{}{}}
 }
 
-func (h *workspaceEventHub) subscribe() chan []byte {
+func (h *workspaceEventHub) subscribe(companyID string) chan []byte {
 	ch := make(chan []byte, 24)
 	h.mu.Lock()
-	h.subscribers[ch] = struct{}{}
+	bucket := h.subscribers[companyID]
+	if bucket == nil {
+		bucket = map[chan []byte]struct{}{}
+		h.subscribers[companyID] = bucket
+	}
+	bucket[ch] = struct{}{}
 	h.mu.Unlock()
 	return ch
 }
 
-func (h *workspaceEventHub) unsubscribe(ch chan []byte) {
+func (h *workspaceEventHub) unsubscribe(companyID string, ch chan []byte) {
 	h.mu.Lock()
-	delete(h.subscribers, ch)
+	if bucket := h.subscribers[companyID]; bucket != nil {
+		delete(bucket, ch)
+		if len(bucket) == 0 {
+			delete(h.subscribers, companyID)
+		}
+	}
 	h.mu.Unlock()
 	close(ch)
 }
 
-func (h *workspaceEventHub) publish(payload []byte) {
+func (h *workspaceEventHub) publish(companyID string, payload []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for ch := range h.subscribers {
+	for ch := range h.subscribers[companyID] {
 		select {
 		case ch <- payload:
 		default:
@@ -183,5 +186,5 @@ func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[str
 	if err != nil {
 		return
 	}
-	s.hub.publish(payload)
+	s.hub.publish(companyID, payload)
 }

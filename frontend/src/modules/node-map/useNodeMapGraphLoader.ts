@@ -7,7 +7,7 @@ import {
   refreshNodeRelationshipGraphSnapshot,
   subscribeNodeRelationshipGraph,
 } from "./NodeRelationshipGraph";
-import type { NodePosition, NodeRecord, NodeRelationship, PersistedMapPosition } from "./shared";
+import type { NodeRecord, NodeRelationship, PersistedMapPosition } from "./shared";
 
 type ExplorerSelectionOriginRef = React.RefObject<{ selectedEntityID: string } | null>;
 

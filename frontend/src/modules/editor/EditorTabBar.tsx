@@ -15,20 +15,6 @@ const EditorCheckIcon: React.FC<{ color: string }> = ({ color }) => (
   </svg>
 );
 
-const FontSizeIcon: React.FC<{ color: string; direction: "increase" | "decrease" }> = ({ color, direction }) => (
-  <svg aria-hidden="true" width="18" height="14" viewBox="0 0 18 14" style={{ display: "block" }}>
-    <path d="M2.2 11.5 5.7 2.4h1.2l3.5 9.1" fill="none" stroke={color} strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M3.35 8.75h5.9" fill="none" stroke={color} strokeWidth="1.25" strokeLinecap="round" />
-    {direction === "increase" ? (
-      <>
-        <path d="M13.5 3.15v5.7" fill="none" stroke={color} strokeWidth="1.45" strokeLinecap="round" />
-        <path d="M10.65 6h5.7" fill="none" stroke={color} strokeWidth="1.45" strokeLinecap="round" />
-      </>
-    ) : (
-      <path d="M10.65 6h5.7" fill="none" stroke={color} strokeWidth="1.45" strokeLinecap="round" />
-    )}
-  </svg>
-);
 
 function colorWithAlpha(color: string, alpha: number): string {
   const rgbMatch = /^rgba?\(([^)]+)\)$/i.exec(color.trim());

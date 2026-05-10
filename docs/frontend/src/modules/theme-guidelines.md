@@ -20,4 +20,4 @@ All frame modules must honor the frame colorway (`theme`) consistently.
 
 ## Current rollout note
 
-This rule is now applied to Editor, Stats, and Company Explorer modules and should be treated as required for all future module work.
+This rule is now applied to Editor and Company Explorer modules and should be treated as required for all future module work.

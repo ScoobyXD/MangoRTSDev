@@ -1,0 +1,468 @@
+This startup is building B2B software for:
+- millions of companies
+- millions of users and AI agents per company
+- millions of UI elements and simultaneous background operations
+- strict latency culture with sub-100ms targets
+- strict robustness and reliability
+- future headless AI-agent operation through APIs. This will be the main way entities will interact with MangoRTS in the future
+- millions of AI agents using APIs concurrently
+- AWS-hosted app and database infrastructure, with code written efficiently to minimize cloud cost
+Default engineering rule:
+Find the simplest solution possible. Only increase complexity when needed.
+Write code in an architecture where it would be possible for 20 agents to develop on this app simultaneously. (We have already been making efforts in this)
+
+======
+pages:
+ /login, /accept-invite, /forgot-password, /reset-password, /communications
+ 
+BUGS/FIXES:
+2. the header bar itself needs to be a module, also the way the tabs look right now is ugly.
+3. Does not work in half screen and probably not in minimized or anything.
+4. for faster ui Please do that trick where you load the ui part first instantly, and then process it out in the backend later.
+5. Still a problem where when I create a new frame and it's not fully sized, it's like a small size. When I try to create a node it spazzes out and gets created at some random location. Also when I try to resize the small frame into a larger frame, some of the nodes don't show up visibly. 
+7. weird bug, after deleting multiple nodes and relationship lines there is an error: relationship not found. 
+8. after a child frame exits and goes back to being a normal frame, it doesnt line up with the canvas maps grids well.
+10. in dark mode node map has slighly different shade of dark than everyone else
+	a. also thin strip of different shades of dark when company explorer and stats are side by side.
+3. There is a bug when the node map is not in full screen, the scope optimization thing messes up and i cant see nodes properly even though it exists. 
+	b. I think this only happens for node map frames that are not large.
+12. Still need to add all the default view (i think the node map name needs to change)
+13. Sure you can click-drag information between different modules and make them very very linked together.
+5. While I have an object selected in the company explorer, let's say I click and I have node folder or folder or node or logic gate or Kanban board selected. I should be able to still be able to use my mouse Wheel to navigate up and down the Company Explorer  
+11. The Universal Convention where I could delete backspace or right-click delete anything 
+17. dont forget to delete some usless enums in the database
+6. Checkout AG Grid, its pretty cool. 
+=======
+
+New Features:
+1. Extra functionality is just like visual studio code, i can drag something out of my screen and automatically create an new instance of the app on another screen
+	a. might be hard to do on a browser
+2. maybe in the future be able to create sub sections in the editor where you can basically scroll around or have a scroll bar
+	and you can navigate through a whole series of different lists on your own kind of like what the teal glass plane used to have.
+4. Probably should add minimap on the maps
+5. still need history, kpi, metrics, all that shit eventually
+6. you know what the aesthetic should be for the node boxes, it should be a thin rectangle strip that wrap around making a square shape. yes thats so much better than this crap. ACtually, the background of this node canvas should not have a visible grid
+		Mango should really feel like an iphone home screen.
+7. i think we need to refactor the backend and testing suite, its about that time lol
+8. On include hotkey editors where you could change the hotkeys of the editor, the company Explorer, or the node map or something. This is particularly for the editor. They wanted maybe they don't want to use Shift+Tab to go back a tab. Whatever the user wants but this is much later down the line.
+9. Don't forget to occasionally nuke branches and work trees besdies main because you have a lot right now. 
+11 get hardware TOTP for aws mfa
+12. Nesting map view
+13. For the Company Explorer search functionality optimization Let's have it where when I select into a folder and I type something where we only search inside that folder. Let's turn it into We first search into that folder and try to get results but if we don't find anything then we will search the rest of the company folders and files.
+14. I should change my Google password one day. 
+========
+
+LATER: need to do an audit on how well equiped the app is for multiple people using it from different accounts all at once.
+
+
+Settings:
+
+Later:
+1. When you have successfuly accepted invite and you are now a user, you should get some kind of confirmation email saying you have successfully signed up with <name of company>
+
+Communications:
+
+
+Email:
+1. Need filters, i need the same filters Gmail has on my phone to just give me the important stuff i want instead of all of the spam and advertising stuff my email gets bombarded with.
+	a. Right now its configured for the "All Mail" settings so I see a bunch of garbages
+2. Try to create a shared inbox feature with other users in the same company like how Front (the tech company) has it.
+	a. same goes for read receipts
+	b. team comments.
+	c. shared drafts
+3. Is it possible for the communications page to update itself whenever it gets a new email without having to poll the server all the time?
+	a. if you can do this please get rid of the Refresh button
+4. Please make the Compose button much smaller and a narrow horizontal rectangle below the MAIL (user's email name) on the top left.
+5. Have a feature where I can right click on an email card and there should be an option to "turn to a node and send to a logic gate" and there should emerge this space on the right hand of the screen where i can see the editor module pre-filled with information from the email and then an option to search and select which logic gate i want to put this into and autoamtically put it into its "pending" column.
+6. There should be a button in communications to show an email kanban board on the right side of the screen. In it should be very similar to the group by mode of the logic gate arena kanban board.
+	a. The columns should default be the RACI matrix which is from left to right: Responsible, Accountable, Consulted, and Informed.
+	b. the rows should default be 5 Urgent all the way to 0 unnassigned on the bottom.
+	c. So you see this is much like the structure of rows and columns on the logic gate arena kanban board.
+	d.of course this means were going to implemetn the x and y axis grouping and the ascending and descending features.
+	e. IMPORTANT: ultimately i can drag an email and drag it into one of these cells and it automatically turns it into a node with the characteristics given to it by the psotion of the row and column its in.
+		i. Of course, that means when i double click on a node here, it will pop open the editor with the node's information in it, much much like the popup node in the logic gate arena kanban board when you double click on a node.
+	f. an extra bonus would be if here too on the email kanban board you can right click on a node card and send to a logic gate where you can search pick a logic gate to send it to and it will uatomatically send it to the pending column of that logic gate.
+7. Keep the UI consistent to the font and colors and styling that we have right now.
+
+after that:
+1. 3 inboxes, triage (external/all) ||| shared inboxes, internal inboxes (internal notifications).
+2. mentions with @
+3. Chats (team commenting) and emails attached to the literal node itself and a timeline of those
+4. Shared inboxes and email sharing
+5. Internal and external read receipts.
+
+
+Triage inbox (regular boring inbox view for email)
+	Chat is a mandatory preset field on nodes in logic gates. 
+	Super important to have a space to discuss how this process is working at a high level. 
+	Communications should have chats or posts that can be uploaded or downloaded but definitely not something for an MVP right now. 
+	communications tab should have Triage inbox, logic gate inbox and chat section that looks like a combination of ours and linear'sacred
+Logic gate inbox
+Can group by and organize by columns (I have 2 photos for the 2 groupings)
+On the right side of the kanban board will be the email and chat communications of that thing. Same will occur for the node popup. 
+
+
+Things to do bar:
+1. Have a pinned node section.
+
+AUTH and Login:
+1. Need to get rid of the cognito sign in requirement in other machine
+	a. for some reason i have mangorts-dev as username and the Hakmin419!
+
+
+General Bugs:
+3.  On another note when I have multi-select on for node or logic gates and I right-click, I should not automatically select one node or logic gate. I should keep all of the selected stuff selected. I should only be able to deselect when I single-click on another part of the map without dragging. 
+4. theres all sorts of bullshit issues with the frames, how theyre linked, and module linking stuff i know it.
+	1.Frame selection: It's kind of a pain in the ass to select stuff, select different frames, and then link them together. We're gonna fix this. 
+					this had a bunch of issues and merge conflicts and cursor issues and map not selecting for some reason
+	2. When I right click on a frame and I see the frame right click list options, that list should show the name of the frame or the name of the module that I have right clicked on.
+1. when there are two people on the same account, weird stuff happens, its like 1 gets command and the other watches as 1 controls, gets to click on stuff on the company explorer and the other cant. but sometimes they switch places.
+
+Company Explorer:
+2. The search bar needs to be better at searching the first and second words.
+
+Map:
+
+Text Editor Changes
+1. The font size change does not get applied to the next character(s) after typing new text. also, Although the font sizing increase and decrease work very well when I have multiple characters and words selected, it does not work when I have no selection. When I have no selection the font size can only range between 14 and 16 for some reason. 
+	I'm probably not explaining this well enough. Everything works fine when I am selecting multiple characters and words. I can increase and decrease the font size and it stays and it works. If I were to move my caret into a certain point and I start typing, the font size does not get applied to that new text. Actually for them font range is only between 14 and 16 but if I multi-select them then font range can go wherever. 
+2. Control Z is actually garbage. 
+3. Need to solve issue where the editor changes the size of the text inside of it based on how much space it has because it can be resized. I need the internal size of the text to change, kind of like what Company Explorer does right now. 
+4. from the node side, you should be able to also see the list of logic gates remaining on its path. Kind of like directions on google maps.
+5. Need to have it update immediately like the kanban board nodes change immediately	
+	a. have multiple people be able to edit it at once.
+6. Also when typing theres this weird giant blob of red error text on the bottom.
+7. Image resize, be able to fluidly place images and text together.
+
+
+Kanban Board Changes:
+
+
+Later feature
+Department is on the logic gate and the node inherits that. Logic gates can be grouped into departments. 
+	but a department is really just a parent logic gate. this grouping stuff can come later
+1. The search board list is too far to the right of the search bar, it should just be right underneath it.
+
+
+Multi agent workflow:
+also what i could have done better with the agents:
+	running experiment if going straight to planning mode is better or having plan agent Break it up into four to five projects then create an integration branch Hi. 
+	Then give Each project into an agent then merge it all back to integration. 
+	What I could have done better here is have the initial plan agent create a project source of truth or project document guideline, put that into some MD file, and have the integration branch in every project instance take a look at that file so it knows what it's doing. I don't think it had great context with what one project agent was doing compared to other agents. Literally it was more siloed than I should have. 
+
+
+
+HUUUGE IDEA FROM MOM
+1. I should be able to upload files from my computer's file explorer to mango, and mango to computer's file explorer.
+
+=====
+1. There should be a separate history module and a separate metrics/kpi module that can all be combined into something like what company explorer is right now. Also I do not want to see the tab guides. 
+=====
+
+(WHEN WE ARE DOING USER LOGIN AND CREDENTIALS AND MATCHING THAT WITH COMPANY ID)
+Audit how we are making create,delete,and updates based and audit if it is actually well protected and well defined. so we dont ever accidentally touch another company's data or see it on accident. 
+
+=====
+Eventually need to do an audit on how well the system is set up for agentic apis
+
+eventually need to do backend tests
+
+eventually do an audit on the sacred text itself.
+
+dont forget to do indexing in database.
+
+remebmer we are trying to create the bloomberg terminal for companies. Can see the entirety of their business, where they are sourcing material,
+where the shipping container is, what is in which warehouse, how much of which product is going to which customers. everything. 
+
+While deploying this with 180Snacks, you really really really need to check the AWS usage because I have a suspicion it's going to come out to be a lot more than we think. 
+
+when you get to agents, read some of the chats and replies you got on reddit on how they use hermes
+===========
+
+Hot keys:
+1. Be able to navigate through the company explorer with just arrow keys, pressing -> arrow key automatically opens up editor and the contents of that thing. 
+MiraeRTS==============================
+DB cluster identified: MiraeRTS-NorthernCalifornia-DevCluster
+Serverless v2
+	min ACU: 0
+	max ACU: 1
+Engine Version: Aurora PostgreSQL (Compatible with PostgreSQL 17.7)
+DB cluster identifier: MiraeRTS-Dev-NorthernCalifornia
+Credentials:
+	ScoobyXD
+	GH829!
+Aurora Standard
+No Aurora Replica
+Don't connect to EC2 compute
+IPv4 only
+Virtual private cloud (VPC): Default VPC (vpc-091ee99d4afb8bec5)
+VPC security group (firewall): MiraeRTS-VPCSecurityGroup-Dev
+No RDS Proxy
+Certificate authority: rds-ca-rsa2048-g1 (default) Expiry: May 19, 2061
+Database port: 5432
+No Read replice write forwarding
+Database Insights Advanced
+AWS KMS key: arn:aws:kms:us-west-1:686458136219:alias/aws/rds
+Alias: (default) aws/rds
+Account: 686458136219
+KMS key ID: aws/rds
+Enabled Enhanced Monitoring
+OS metrics granularity: 60 seconds
+Monitoring role for OS metrics: rds-monitoring-role
+Log Exports: PostgreSQL log
+Initial Database name: MiraeRTSDevDatabase
+DB cluster parameter group: default.aurora-postgresql17
+DB parameter group: default.aurora-postgresql17
+Failover priority: No preference
+Backup retention period: 7 days
+Backup window: No preference
+Backup tags: Copy tags to snapshots
+Encryption key: AWS owned KMS key (SSE-RDS)
+Maintenance: Enable auto minor version upgrade
+Maintenance window: No preference
+Cost: $0 - $116 per month
+
+IAM ScoobyXD:
+sign in link: https://686458136219.signin.aws.amazon.com/console
+arn:aws:iam::686458136219:user/ScoobyXD
+access key: AKIAZ7VAX42N5JYR6AG6
+secret access key: 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
+default region name: us-west-1
+Default output format: json
+
+iam identity center: "Arn": "arn:aws:sts::686458136219:assumed-role/AWSReservedSSO_AdministratorAccess_9dc9077959c6397f/ScoobyXD"
+
+"UserId": "686458136219",
+"Account": "686458136219",
+"Arn": "arn:aws:iam::686458136219:root"
+
+IAM Identity Center
+IPv4 only: https://d-916771bd28.awsapps.com/start
+pass:GH829!
+
+==============================================================
+ORCHESTRATOR PROMPT:
+Spin up new Codex instance with its own branch and worktree:
+You are my codex cli composer in main. Please create a new git worktree for a Codex worker from main. Name the branch codex/<name> and place it at ..\MangoOSDev-<name>. Before creating it, make sure main is up to date with origin/main using ff-only. When done, start a new codex instance at that new branch in another powershell window
+
+Commit branch, merge with main, and run schema scripts, stop before pushing to github (i did this on purpose):
+You are my codex cli composer in main. Please commit the worker branch and make sure its clean. Then update main with origin/main using --ff-only. Merge with --no-ff using message "Merge branch 'codex/<name>'". Resolve straightforward conflicts, run the relevant tests/build, and stop before pushing. Make sure to give me a copy-pastable script to run a DB schema script on the terminal that has DB env vars set. 
+
+
+==============================================================
+
+commands to get started:
+aws sso login --profile ScoobyXD
+$env:AWS_PROFILE="ScoobyXD"
+$env:AWS_REGION="us-west-1"
+$env:AWS_DEFAULT_REGION="us-west-1"
+aws sts get-caller-identity
+
+BACKEND:
+cd backend
+
+aws configure --profile mangorts-dev
+
+	access key: AKIAZ7VAX42N5JYR6AG6
+	secret access key: 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
+	default region name: us-west-1
+	Default output format: json
+
+
+-----new copy-pastable:
+
+aws sso login --profile mangorts-dev
+
+.\scripts\start_local_cognito_backend.ps1 -AwsProfile mangorts-dev -StopExisting
+
+
+-----
+
+----- this is one copy-pastable
+
+$dbHost = aws rds describe-db-clusters `
+  --region us-west-1 `
+  --db-cluster-identifier miraerts-northerncalifornia-devcluster `
+  --query "DBClusters[0].Endpoint" `
+  --output text
+
+$env:DB_HOST=$dbHost
+$env:DB_PORT="5432"
+$env:DB_NAME="MiraeRTSDevDatabase"
+$env:DB_USER="ScoobyXD"
+$env:DB_SSLMODE="require"
+$env:DB_PASSWORD = aws secretsmanager get-secret-value `
+  --region us-west-1 `
+  --secret-id "mangorts/dev/db-password" `
+  --query SecretString `
+  --output text
+
+go run ./cmd/miraeopus-api
+
+----- this is one copy-pastable
+
+
+./scripts/apply_canonical_schema.ps1
+./scripts/check_db_ready.ps1
+
+go run ./cmd/miraeopus-api
+
+$env:PGPASSWORD=$env:DB_PASSWORD
+psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\<name of file>.sql
+
+
+FRONTEND:
+npm install (not needed most of the time)
+npm run dev
+
+Tests:
+from MangoOSDev run  node scripts/run_all_tests.mjs
+=====================
+Terraform:
+infra\aws-dev\backend.hcl:1:bucket  = "mangorts-dev-terraform-state-scoobyxd-686458136219"
+AWS_DEV_DEPLOY_ROLE_ARN = arn:aws:iam::686458136219:role/mangorts-dev-github-deploy
+arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/db-password-Icu8p0
+=====================
+
+GITHUB
+run after manual deployment:
+
+$basic="mangorts-dev:Hakmin419!"
+
+curl.exe -i -u $basic https://dev.mangorts.com/healthz
+curl.exe -i -u $basic https://api.dev.mangorts.com/healthz
+
+ALL FOLDER RESET:
+git fetch --all
+git reset --hard <commit hash>
+git clean -fd
+git push --force origin HEAD:main
+
+1 FOLDER RESET:
+git checkout <commit-hash> -- path/to/folder
+OR 
+git checkout 370af154c9d1221576428431959221658137949a -- . (in the folder you want to reset in)
+git commit -m "Revert only this folder"
+git push
+
+UPDATE BRANCH BEFORE CLICKING CREATE PR:
+git fetch origin
+git rebase origin/main
+git add .
+git rebase --continue
+git push --force-with-lease
+
+GIT WORKTREES
+git worktree add ..\MangoOSDev-task-a -b codex/task-a
+git worktree add ..\MangoOSDev-task-b -b codex/task-b
+
+git worktree remove ..\MangoOSDev-task-a
+
+git worktree remove --force ..\MangoOSDev-task-a
+
+git branch -D codex/task-a
+
+
+git worktree list
+=============
+logging into the app:
+username: mangorts-dev
+pass: Hakmin419!
+
+Cognito
+Login email: my email
+Pass: TempPass123!
+
+see list of users on cognito:
+aws cognito-idp list-users `
+  --profile $profile `
+  --region $region `
+  --user-pool-id $pool `
+  --query "Users[].{Username:Username,Status:UserStatus,Enabled:Enabled}" `
+  --output table
+
+to delete a user on cognito:
+aws cognito-idp admin-delete-user --region us-west-1 --user-pool-id us-west-1_g4Iavy1aU --username 'PASTE_USER_ID_HERE'
+
+
+
+id shit:
+aws_profile: mangorts-dev
+{
+    "UserId": "AIDAZ7VAX42N7YIMV64ZR",
+    "Account": "686458136219",
+    "Arn": "arn:aws:iam::686458136219:user/ScoobyXD"
+}
+
+===========
+
+new dev_admin:--------------------
+
+cd C:\Users\Jonat\MangoRTSDev\backend
+
+$env:AWS_REGION="us-west-1"
+$env:COGNITO_USER_POOL_ID="us-west-1_g4Iavy1aU"
+$env:COGNITO_CLIENT_ID="2a3i1n88t0jl9crll68tds4fhe"
+$env:DEV_USER_EMAIL="jonathankim829@gmail.com"
+
+try {
+  aws cognito-idp admin-get-user `
+    --region $env:AWS_REGION `
+    --user-pool-id $env:COGNITO_USER_POOL_ID `
+    --username $env:DEV_USER_EMAIL | Out-Null
+} catch {
+  aws cognito-idp admin-create-user `
+    --region $env:AWS_REGION `
+    --user-pool-id $env:COGNITO_USER_POOL_ID `
+    --username $env:DEV_USER_EMAIL `
+    --user-attributes Name=email,Value=$env:DEV_USER_EMAIL Name=email_verified,Value=true `
+    --message-action SUPPRESS
+}
+
+$pw = Read-Host "New Cognito password"
+
+aws cognito-idp admin-set-user-password `
+  --region $env:AWS_REGION `
+  --user-pool-id $env:COGNITO_USER_POOL_ID `
+  --username $env:DEV_USER_EMAIL `
+  --password $pw `
+  --permanent
+
+$user = aws cognito-idp admin-get-user `
+  --region $env:AWS_REGION `
+  --user-pool-id $env:COGNITO_USER_POOL_ID `
+  --username $env:DEV_USER_EMAIL | ConvertFrom-Json
+
+$env:COGNITO_SUBJECT = ($user.UserAttributes | Where-Object { $_.Name -eq "sub" }).Value
+
+$env:DB_HOST = aws rds describe-db-clusters `
+  --region $env:AWS_REGION `
+  --db-cluster-identifier miraerts-northerncalifornia-devcluster `
+  --query "DBClusters[0].Endpoint" `
+  --output text
+
+$env:DB_PORT="5432"
+$env:DB_NAME="MiraeRTSDevDatabase"
+$env:DB_USER="ScoobyXD"
+$env:PGSSLMODE="require"
+$env:PGPASSWORD = aws secretsmanager get-secret-value `
+  --region $env:AWS_REGION `
+  --secret-id "mangorts/dev/db-password" `
+  --query SecretString `
+  --output text
+
+$env:DEV_COMPANY_ID="11111111-1111-1111-1111-111111111111"
+$env:DEV_COMPANY_NAME="MangoRTS Dev Company"
+$env:DEV_ROLE="dev_admin"
+
+..\scripts\seed_dev_auth_membership.ps1
+
+---------------------------
+
+Nylas
+ClientID: f974c5e5-82e8-434d-8ba5-86f9ca338737
+GrantID: 906d9af3-ede3-4c0a-8b46-101aeaecbb97
+API key: nyk_v0_U7NVuxYwMXsHkI8EgQGsjQCOzU90KhOCrDWy0r5zaaumblrOQOHeQeSlqUqzgawA
+
+API key arn version: arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/nylas-api-key-Ig3ZDA
+state secret arn version: arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/nylas-state-secret-ytLKXO

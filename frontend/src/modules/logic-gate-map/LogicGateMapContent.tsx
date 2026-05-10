@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LOGIC_GATE_MAP_STATE_KEY_PREFIX, LogicGateRecord, LogicGateRelationship, MINI_GRID, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeMapState, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, PersistedMapPosition, RelationshipAnchor, SESSION_NODE_MAP_STATE, buildPlusGridBackgroundStyle, changedPersistedMapPositions, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, toLogicGateCanvasRecord, toLogicGateCanvasRelationship, trimOrEmpty } from "./shared";
+import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, LOGIC_GATE_MAP_STATE_KEY_PREFIX, LogicGateRecord, LogicGateRelationship, MINI_GRID, NODE_H, NODE_W, NodeDetails, NodeDirection, NodePosition, NodeRecord, NodeRelationship, PersistedMapPosition, RelationshipAnchor, buildPlusGridBackgroundStyle, clamp, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, toLogicGateCanvasRecord, toLogicGateCanvasRelationship, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeLogicGateRelationshipGraphNode, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "./LogicGateRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, canStartRelationshipFromSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { summarizeRelationshipDeleteResults } from "../node-map/relationshipDeleteSummary";
-import { invalidateLogicGateRecordStoreCaches, primeLogicGateRecordStoreCaches } from "./LogicGateRecordStore";
+import { primeLogicGateRecordStoreCaches } from "./LogicGateRecordStore";
 import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
-import { NODE_MAP_CLIPBOARD_STORAGE_KEY, beginNodeMapMultiSelectSession, buildNodeMapClipboardPayload, parseNodeMapClipboardPayload, shouldIgnoreMapDeleteKeyTarget, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, resolveNodeMapDragStartSelection, resolveNodeMapPointerSelection, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
+import { NODE_MAP_CLIPBOARD_STORAGE_KEY, beginNodeMapMultiSelectSession, buildNodeMapClipboardPayload, parseNodeMapClipboardPayload, shouldIgnoreMapDeleteKeyTarget, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "../node-map/NodeMapControls";
 import { filterLogicGateGraphToFolderScope, resolveMapSelectionAfterGraphLoad, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
@@ -63,26 +63,21 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const [folders, setFolders] = useState<CompanyExplorerFolder[]>([]);
   const [folderItems, setFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [activeFolderID, setActiveFolderID] = useState("");
-  const [activeFolderLabel, setActiveFolderLabel] = useState("");
+  const [, setActiveFolderLabel] = useState("");
   const [relationshipAnchors, setRelationshipAnchors] = useState<Record<string, RelationshipAnchor>>({});
   const [selectedNodeID, setSelectedNodeID] = useState<string>("");
   const [selectedNodeIDs, setSelectedNodeIDs] = useState<Set<string>>(new Set());
   const [details, setDetails] = useState<NodeDetails | null>(null);
   const [newNodeTitle, setNewNodeTitle] = useState("");
-  const [infoType, setInfoType] = useState<(typeof INFO_TYPES)[number]>("Text box");
-  const [infoDraft, setInfoDraft] = useState("");
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [detailsPanelNodeID, setDetailsPanelNodeID] = useState<string>("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
   const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeID: string } | null>(null);
   const [relationshipContextMenu, setRelationshipContextMenu] = useState<{ x: number; y: number; relationshipID: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[]; relationshipIDs: string[] } | null>(null);
   const [canvasActive, setCanvasActive] = useState(false);
-  const [panelRect, setPanelRect] = useState({ x: 0, y: 10, width: 340, height: 360 });
-  const [panelDrag, setPanelDrag] = useState<NodeMapPanelDragState | null>(null);
-  const [panelResize, setPanelResize] = useState<NodeMapPanelResizeState | null>(null);
 
   const [dragState, setDragState] = useState<NodeMapDragState | null>(null);
   const [nodeResizeState, setNodeResizeState] = useState<{
@@ -1071,41 +1066,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [activeFolderID, canvasActive, nodePositions, nodeSizes, nodes, relationships, relationshipAnchors, selectedNodeID, selectedNodeIDs, visibleInsertionPosition]);
 
-  // Delete-node action with selection/context cleanup and snapshot refresh.
-  const deleteNode = async (nodeID: string) => {
-    if (!nodeID) return;
-    setError("");
-    try {
-      await requestJSON<{ status: string }>(`/v1/logic-gates/${nodeID}?company_id=${encodeURIComponent(companyID)}`, {
-        method: "DELETE",
-      });
-      removeLogicGateRelationshipGraphNode(apiBase, companyID, nodeID);
-      setDetails((current) => (current?.node.node_id === nodeID ? null : current));
-      if (detailsPanelNodeID === nodeID) setDetailsPanelNodeID("");
-      setSelectedNodeIDs((previous) => {
-        const next = new Set(previous);
-        next.delete(nodeID);
-        return next;
-      });
-      setSelectedNodeID((previous) => {
-        if (previous !== nodeID) return previous;
-        const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-        const fallback = (snapshot.nodes ?? [])[0]?.node_id ?? "";
-        return fallback;
-      });
-      setNodePositions((previous) => {
-        const next = { ...previous };
-        delete next[nodeID];
-        return next;
-      });
-      const persisted = { ...lastPersistedNodePositionsRef.current };
-      delete persisted[nodeID];
-      lastPersistedNodePositionsRef.current = persisted;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_delete_logic_gate");
-    }
-  };
-
+  // Delete-nodes action with selection/context cleanup and snapshot refresh.
   const deleteNodes = async (nodeIDs: string[]) => {
     const unique = Array.from(new Set(nodeIDs.filter(Boolean)));
     if (unique.length === 0) return;

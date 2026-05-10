@@ -1,4 +1,4 @@
-import type { CompanyExplorerFolderKind, CompanyExplorerItemType, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
+import type { CompanyExplorerFolderKind, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
 import type {
   ExplorerCreationTargets,
   ExplorerDropPayload,

@@ -501,9 +501,8 @@ Primary implementation is in:
 - `frontend/src/app/applayout.tsx` (frame/menu integration and link action wiring)
 
 
-## 16) Explorer + Editor + Stats responsibility split (2026-04-28)
+## 16) Explorer + Editor responsibility split (2026-04-28)
 
 - **Company Explorer** is now navigation/context handoff focused (tree selection + linked-context broadcast), not a node-details surface.
 - **Editor** is now the canonical module for node metadata + history context alongside text-box information editing.
-- **Stats** is now a dedicated module (`stats`) for KPI/stat cards derived from the nearest linked context source (node support is implemented now; additional source adapters can be added).
 - The old Company Explorer **Related Artifacts** placeholder section has been removed.

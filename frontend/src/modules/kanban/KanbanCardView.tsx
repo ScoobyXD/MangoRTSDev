@@ -42,7 +42,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   selected,
   dragBefore,
   dragAfter,
-  line,
+  line: _line,
   cardBackground,
   text,
   subtext,

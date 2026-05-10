@@ -19,6 +19,16 @@ import {
 const VIEWS_KEY = "grid-dashboard-views-v1";
 const SETTINGS_KEY = "grid-dashboard-settings";
 const LEGACY_DEFAULT_NODE_VIEW_FRAME_ID_SET = new Set<string>(Object.values(LEGACY_DEFAULT_NODE_VIEW_FRAME_IDS));
+const SUPPORTED_PERSISTED_FRAME_KINDS = new Set<string>([
+  "company-explorer",
+  "communications",
+  "editor",
+  "kanban",
+  "logic-map",
+  "map",
+  "nodes",
+  "nodes-map",
+]);
 
 export interface DashboardSettings {
   bgColor?: string;
@@ -52,6 +62,7 @@ function coerceFrame(value: unknown): FrameDataModel | null {
 
   const normalizedKind = kind === "node-doc" ? "editor" : kind;
   const normalizedTitle = normalizedKind === "kanban" && title === "Kanban" ? "Kanban board" : title;
+  if (!SUPPORTED_PERSISTED_FRAME_KINDS.has(normalizedKind)) return null;
 
   return {
     id,
@@ -163,8 +174,7 @@ export function loadViews(): { tabs: ViewTab[]; activeId: string } {
 
 export function saveViews(tabs: ViewTab[], activeId: string) {
   try {
-    const serializedTabs = tabs.map((tab) => ({ ...tab, widgets: tab.frames }));
-    localStorage.setItem(VIEWS_KEY, JSON.stringify({ tabs: serializedTabs, activeId }));
+    localStorage.setItem(VIEWS_KEY, JSON.stringify({ tabs, activeId }));
   } catch {}
 }
 

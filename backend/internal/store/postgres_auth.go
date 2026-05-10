@@ -18,13 +18,27 @@ func (r *PostgresRepo) UpsertAuthUser(cognitoSubject, email, displayName string)
 
 	var user domain.User
 	err := r.db.QueryRow(
-		`insert into users (user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4, now(), now())
-		 on conflict (cognito_subject) do update set
-		   email = case when excluded.email <> '' then excluded.email else users.email end,
-		   display_name = case when excluded.display_name <> '' then excluded.display_name else users.display_name end,
-		   updated_timestamp = now()
-		 returning user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp`,
+		`with input(cognito_subject, email, display_name) as (
+		   values ($2::text, $3::text, $4::text)
+		 ), upsert as (
+		   insert into users (user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp)
+		   select $1, cognito_subject, email, display_name, now(), now()
+		   from input
+		   on conflict (cognito_subject) do update set
+		     email = case when excluded.email <> '' then excluded.email else users.email end,
+		     display_name = case when excluded.display_name <> '' then excluded.display_name else users.display_name end,
+		     updated_timestamp = now()
+		   where users.email is distinct from case when excluded.email <> '' then excluded.email else users.email end
+		      or users.display_name is distinct from case when excluded.display_name <> '' then excluded.display_name else users.display_name end
+		   returning user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp
+		 )
+		 select user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp
+		 from upsert
+		 union all
+		 select u.user_id, u.cognito_subject, u.email, u.display_name, u.created_timestamp, u.updated_timestamp
+		 from users u
+		 join input i on i.cognito_subject = u.cognito_subject
+		 where not exists (select 1 from upsert)`,
 		newUUIDv7String(),
 		cognitoSubject,
 		email,

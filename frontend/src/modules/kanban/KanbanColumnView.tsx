@@ -8,7 +8,6 @@ import {
   hexToRgba,
   normalizeKanbanColumnItemColor,
   type KanbanCard,
-  type KanbanCardDropPlacement,
   type KanbanColumn,
 } from "./shared";
 
@@ -59,7 +58,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
   columnCards: _columnCards,
   renderedCards,
   accent,
-  line,
+  line: _line,
   subtext,
   text,
   laneBackground,

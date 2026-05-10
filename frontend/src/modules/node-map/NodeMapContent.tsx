@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { INFO_TYPES, MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, PANEL_MIN_HEIGHT, PANEL_MIN_WIDTH, panelResizeHandles, NodeDetails, NodeDirection, NodeInformation, NodePosition, NodeRecord, NodeRelationship, PersistedMapPosition, RelationshipAnchor, buildPlusGridBackgroundStyle, clamp, divider, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, trimOrEmpty } from "./shared";
+import { MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, NodeDetails, NodeDirection, NodePosition, NodeRecord, NodeRelationship, PersistedMapPosition, RelationshipAnchor, buildPlusGridBackgroundStyle, clamp, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_NODE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
-import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
+import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
 import { createMapEntityBatchClientID, createMapEntityBatchCommand, deleteNodeMapRelationshipsCommand, normalizeNodeMapRelationshipIDs } from "./nodeMapCommands";
-import { invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches } from "./NodeRecordStore";
-import { NODE_MAP_CLIPBOARD_STORAGE_KEY, beginNodeMapMultiSelectSession, buildNodeMapClipboardPayload, parseNodeMapClipboardPayload, shouldIgnoreMapDeleteKeyTarget, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, NodeMapPanelDragState, NodeMapPanelResizeState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanelControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
+import { primeNodeRecordStoreCaches } from "./NodeRecordStore";
+import { NODE_MAP_CLIPBOARD_STORAGE_KEY, beginNodeMapMultiSelectSession, buildNodeMapClipboardPayload, parseNodeMapClipboardPayload, shouldIgnoreMapDeleteKeyTarget, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
 import { NodeMapContextMenus, type NodeMapCanvasContextMenuState, type NodeMapDeleteConfirmationState, type NodeMapNodeContextMenuState, type NodeMapRelationshipContextMenuState, type NodeMapRelationshipRole } from "./NodeMapContextMenus";
 import { NodeMapNodeCard } from "./NodeMapNodeCard";
 import { NodeMapRelationshipHitLines } from "./NodeMapRelationshipHitLines";
@@ -14,7 +14,7 @@ import { buildNodeMapRelationshipRoutingGrid, getNodeMapAnchorPoint, routeNodeMa
 import { useNodeMapGraphPersistence } from "./useNodeMapGraphPersistence";
 import { useNodeMapGraphLoader } from "./useNodeMapGraphLoader";
 import { useNodeMapViewportHandlers } from "./useNodeMapViewportHandlers";
-import { filterNodeGraphToFolderScope, resolveMapSelectionAfterGraphLoad, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
+import { filterNodeGraphToFolderScope, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { getActiveCompanyID } from "../../auth/currentCompany";
@@ -62,26 +62,21 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const [folders, setFolders] = useState<CompanyExplorerFolder[]>([]);
   const [folderItems, setFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [activeFolderID, setActiveFolderID] = useState("");
-  const [activeFolderLabel, setActiveFolderLabel] = useState("");
+  const [, setActiveFolderLabel] = useState("");
   const [relationshipAnchors, setRelationshipAnchors] = useState<Record<string, RelationshipAnchor>>({});
   const [selectedNodeID, setSelectedNodeID] = useState<string>("");
   const [selectedNodeIDs, setSelectedNodeIDs] = useState<Set<string>>(new Set());
   const [details, setDetails] = useState<NodeDetails | null>(null);
   const [newNodeTitle, setNewNodeTitle] = useState("");
-  const [infoType, setInfoType] = useState<(typeof INFO_TYPES)[number]>("Text box");
-  const [infoDraft, setInfoDraft] = useState("");
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [detailsPanelNodeID, setDetailsPanelNodeID] = useState<string>("");
   const [contextMenu, setContextMenu] = useState<NodeMapCanvasContextMenuState | null>(null);
   const [nodeContextMenu, setNodeContextMenu] = useState<NodeMapNodeContextMenuState | null>(null);
   const [relationshipContextMenu, setRelationshipContextMenu] = useState<NodeMapRelationshipContextMenuState | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<NodeMapDeleteConfirmationState | null>(null);
   const [canvasActive, setCanvasActive] = useState(false);
-  const [panelRect, setPanelRect] = useState({ x: 0, y: 10, width: 340, height: 360 });
-  const [panelDrag, setPanelDrag] = useState<NodeMapPanelDragState | null>(null);
-  const [panelResize, setPanelResize] = useState<NodeMapPanelResizeState | null>(null);
 
   const [dragState, setDragState] = useState<NodeMapDragState | null>(null);
   const [nodeResizeState, setNodeResizeState] = useState<{
@@ -1017,41 +1012,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [activeFolderID, canvasActive, nodePositions, nodeSizes, nodes, relationships, relationshipAnchors, selectedNodeID, selectedNodeIDs, visibleInsertionPosition]);
 
-  // Delete-node action with selection/context cleanup and snapshot refresh.
-  const deleteNode = async (nodeID: string) => {
-    if (!nodeID) return;
-    setError("");
-    try {
-      await requestJSON<{ status: string }>(`/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}`, {
-        method: "DELETE",
-      });
-      removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
-      setDetails((current) => (current?.node.node_id === nodeID ? null : current));
-      if (detailsPanelNodeID === nodeID) setDetailsPanelNodeID("");
-      setSelectedNodeIDs((previous) => {
-        const next = new Set(previous);
-        next.delete(nodeID);
-        return next;
-      });
-      setSelectedNodeID((previous) => {
-        if (previous !== nodeID) return previous;
-        const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-        const fallback = (snapshot.nodes ?? [])[0]?.node_id ?? "";
-        return fallback;
-      });
-      setNodePositions((previous) => {
-        const next = { ...previous };
-        delete next[nodeID];
-        return next;
-      });
-      const persisted = { ...lastPersistedNodePositionsRef.current };
-      delete persisted[nodeID];
-      lastPersistedNodePositionsRef.current = persisted;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_delete_node");
-    }
-  };
-
+  // Delete-nodes action with selection/context cleanup and snapshot refresh.
   const deleteNodes = async (nodeIDs: string[]) => {
     const unique = Array.from(new Set(nodeIDs.filter(Boolean)));
     if (unique.length === 0) return;

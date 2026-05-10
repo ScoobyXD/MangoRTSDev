@@ -41,7 +41,6 @@ const logicMapModule = createLazyModule(() => import("./map/MapContent").then((m
 })));
 const editorModule = createLazyModule(() => import("./editor/EditorContent").then((module) => ({ default: module.EditorContent as ModuleComponent })));
 const companyExplorerModule = createLazyModule(() => import("./company-explorer/CompanyExplorerContent").then((module) => ({ default: module.CompanyExplorerContent as ModuleComponent })));
-const statsModule = createLazyModule(() => import("./stats/StatsContent").then((module) => ({ default: module.StatsContent as ModuleComponent })));
 const kanbanModule = createLazyModule(() => import("./kanban/KanbanContent").then((module) => ({ default: module.KanbanContent as ModuleComponent })));
 const communicationsModule = createLazyModule(() => import("../pages/communications/CommunicationsPage").then((module) => ({ default: module.CommunicationsFrameContent as ModuleComponent })));
 
@@ -51,7 +50,6 @@ const moduleEntries = [
   { kind: "kanban", label: "Kanban board", defaultW: 18, defaultH: 7, ...kanbanModule },
   { kind: "communications", label: "Communications", defaultW: 24, defaultH: 16, ...communicationsModule },
   { kind: "map", label: "Map", defaultW: 16, defaultH: 14, ...mapModule },
-  { kind: "stats", label: "Stats", defaultW: 12, defaultH: 10, ...statsModule },
 ];
 
 // Master module library used by add-module flow and module-picker context menu.
