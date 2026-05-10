@@ -312,6 +312,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const activeBoardIDRef = useRef(activeBoardID);
   const frameBoardIDRef = useRef(frameBoardID);
   const boardsRef = useRef<KanbanBoard[]>([]);
+  const columnsRef = useRef<KanbanColumn[]>([]);
   const cardsRef = useRef<KanbanCard[]>([]);
   const boardRefreshRequestRef = useRef(0);
   const lastLocalBoardSelectionChangedAtRef = useRef(0);
@@ -372,6 +373,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   useEffect(() => {
     boardsRef.current = boards;
   }, [boards]);
+
+  useEffect(() => {
+    columnsRef.current = columns;
+  }, [columns]);
 
   useEffect(() => {
     cardsRef.current = cards;
@@ -495,6 +500,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const syncNodeStatusesFromCards = useCallback((statusCards: KanbanCard[], columnSource: KanbanColumn[] = columns) => {
     if (statusCards.length === 0) return;
     const columnByID = new Map(columnSource.map((column) => [column.column_id, column]));
+    const statusColorByColumnID = new Map(columnSource.map((column) => [column.column_id, normalizeKanbanColumnItemColor(column.item_color)]));
     const nodeByID = new Map((getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes ?? []).map((node) => [node.node_id, node]));
     const seenNodeIDs = new Set<string>();
     for (const card of statusCards) {
@@ -504,11 +510,11 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       if (!node) continue;
       const column = columnByID.get(card.column_id);
       const status = card.is_issue ? "Issue" : (column?.title.trim() || "Unknown");
-      const statusColor = getKanbanConditionalColor(card, columnColorByID);
+      const statusColor = getKanbanConditionalColor(card, statusColorByColumnID);
       invalidateNodeRecordStoreCaches(apiBase, companyID, card.node_id);
       upsertNodeRelationshipGraphNode(apiBase, companyID, { ...node, status, status_color: statusColor });
     }
-  }, [apiBase, columnColorByID, columns, companyID]);
+  }, [apiBase, columns, companyID]);
 
   const upsertBoardInList = useCallback((board: KanbanBoard) => {
     const next = sortKanbanBoards([
@@ -765,7 +771,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             if (!streamBoardID) return;
             invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
             if (streamBoardID !== activeBoardIDRef.current || !column?.column_id) return;
-            setColumns((previous) => sortColumns([...previous.filter((item) => item.column_id !== column.column_id), column]));
+            const nextColumns = sortColumns([...columnsRef.current.filter((item) => item.column_id !== column.column_id), column]);
+            columnsRef.current = nextColumns;
+            setColumns(nextColumns);
+            syncNodeStatusesFromCards(cardsRef.current.filter((card) => card.column_id === column.column_id), nextColumns);
             return;
           }
           if (envelope.type === "kanban_column_deleted") {
