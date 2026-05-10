@@ -175,3 +175,32 @@ button, input, textarea {
 .editor-document-scroll::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+.editor-document-scroll span[data-mango-editor-image="true"] {
+  max-width: calc(100% - 32px);
+  min-width: 48px;
+  min-height: 36px;
+  user-select: none;
+  touch-action: none;
+}
+
+.editor-document-scroll span[data-mango-editor-image="true"] img {
+  user-select: none;
+}
+
+.editor-document-scroll span[data-mango-editor-image="true"]::after {
+  content: "";
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 12px;
+  height: 12px;
+  border-right: 2px solid rgba(17, 17, 17, 0.55);
+  border-bottom: 2px solid rgba(17, 17, 17, 0.55);
+  pointer-events: none;
+}
+
+.editor-document-scroll span[data-mango-editor-image-selected="true"] {
+  outline: 2px solid var(--editor-document-scroll-accent);
+  outline-offset: 2px;
+}
