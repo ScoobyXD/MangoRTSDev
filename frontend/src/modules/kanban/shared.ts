@@ -141,6 +141,12 @@ export type KanbanGroupUser = {
   display_name?: string;
 };
 
+export type KanbanStatusNode = {
+  node_id: string;
+  status?: string | null;
+  status_color?: string | null;
+};
+
 export type KanbanGroupedBoardRow = {
   key: string;
   label: string;
@@ -586,6 +592,29 @@ export function groupCardsByColumn(cards: KanbanCard[]): Map<string, KanbanCard[
     list.sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp));
   }
   return grouped;
+}
+
+function normalizeKanbanStatusLabel(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+export function shouldRefreshKanbanBoardForNodeStatusChange(args: {
+  node: KanbanStatusNode;
+  columns: Pick<KanbanColumn, "column_id" | "title">[];
+  cards: Pick<KanbanCard, "node_id" | "column_id" | "is_issue">[];
+}): boolean {
+  const nodeID = args.node.node_id.trim();
+  if (!nodeID) return false;
+  const visibleCards = args.cards.filter((card) => card.node_id === nodeID);
+  if (visibleCards.length === 0) return false;
+
+  const status = normalizeKanbanStatusLabel(args.node.status);
+  if (!status) return false;
+  if (status === "issue") return visibleCards.some((card) => !card.is_issue);
+
+  const targetColumn = args.columns.find((column) => normalizeKanbanStatusLabel(column.title) === status);
+  if (!targetColumn) return false;
+  return visibleCards.some((card) => card.column_id !== targetColumn.column_id || card.is_issue);
 }
 
 function kanbanStatusGroupFromColumn(column: Pick<KanbanColumn, "title" | "position">): KanbanGroupedBoardRow {

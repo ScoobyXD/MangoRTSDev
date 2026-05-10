@@ -55,6 +55,7 @@ import {
   parseExplorerEntityDragItems,
   parseKanbanCardDragPayload,
   parseKanbanColumnDragPayload,
+  shouldRefreshKanbanBoardForNodeStatusChange,
   sortColumns,
   sortKanbanBoards,
   type KanbanBoard,
@@ -497,10 +498,11 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     return Array.from(groups, ([folderLabel, items]) => ({ folderLabel, items }));
   }, [boardFolderLabelByID, filteredBoardRows]);
 
-  const syncNodeStatusesFromCards = useCallback((statusCards: KanbanCard[], columnSource: KanbanColumn[] = columns) => {
+  const syncNodeStatusesFromCards = useCallback((statusCards: KanbanCard[], columnSource?: KanbanColumn[]) => {
     if (statusCards.length === 0) return;
-    const columnByID = new Map(columnSource.map((column) => [column.column_id, column]));
-    const statusColorByColumnID = new Map(columnSource.map((column) => [column.column_id, normalizeKanbanColumnItemColor(column.item_color)]));
+    const columnsForStatus = columnSource ?? columnsRef.current;
+    const columnByID = new Map(columnsForStatus.map((column) => [column.column_id, column]));
+    const statusColorByColumnID = new Map(columnsForStatus.map((column) => [column.column_id, normalizeKanbanColumnItemColor(column.item_color)]));
     const nodeByID = new Map((getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes ?? []).map((node) => [node.node_id, node]));
     const seenNodeIDs = new Set<string>();
     for (const card of statusCards) {
@@ -514,7 +516,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       invalidateNodeRecordStoreCaches(apiBase, companyID, card.node_id);
       upsertNodeRelationshipGraphNode(apiBase, companyID, { ...node, status, status_color: statusColor });
     }
-  }, [apiBase, columns, companyID]);
+  }, [apiBase, companyID]);
 
   const upsertBoardInList = useCallback((board: KanbanBoard) => {
     const next = sortKanbanBoards([
@@ -783,8 +785,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             if (!streamBoardID || !columnID) return;
             invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
             if (streamBoardID !== activeBoardIDRef.current) return;
-            setColumns((previous) => previous.filter((column) => column.column_id !== columnID));
-            setCards((previous) => previous.filter((card) => card.column_id !== columnID));
+            const nextColumns = columnsRef.current.filter((column) => column.column_id !== columnID);
+            const nextCards = cardsRef.current.filter((card) => card.column_id !== columnID);
+            columnsRef.current = nextColumns;
+            cardsRef.current = nextCards;
+            setColumns(nextColumns);
+            setCards(nextCards);
             return;
           }
           if (envelope.type === "kanban_card_upserted" || envelope.type === "kanban_card_moved") {
@@ -793,7 +799,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             if (!streamBoardID) return;
             invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
             if (streamBoardID !== activeBoardIDRef.current || !card?.card_id) return;
-            setCards((previous) => [...previous.filter((item) => item.card_id !== card.card_id), card]);
+            const nextCards = [...cardsRef.current.filter((item) => item.card_id !== card.card_id), card];
+            cardsRef.current = nextCards;
+            setCards(nextCards);
             syncNodeStatusesFromCards([card]);
             return;
           }
@@ -803,9 +811,22 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             if (!streamBoardID || !cardID) return;
             invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
             if (streamBoardID !== activeBoardIDRef.current) return;
-            setCards((previous) => previous.filter((card) => card.card_id !== cardID));
+            const nextCards = cardsRef.current.filter((card) => card.card_id !== cardID);
+            cardsRef.current = nextCards;
+            setCards(nextCards);
             setSelectedCardIDs((previous) => new Set(Array.from(previous).filter((selectedCardID) => selectedCardID !== cardID)));
             setSelectionAnchorCardID((current) => current === cardID ? "" : current);
+            return;
+          }
+          if (envelope.type === "node_updated") {
+            const node = data.node as NodeRecord | undefined;
+            const nodeID = typeof node?.node_id === "string" ? node.node_id : (typeof data.node_id === "string" ? data.node_id : "");
+            if (!nodeID) return;
+            if (node?.node_id && shouldRefreshKanbanBoardForNodeStatusChange({ node, columns: columnsRef.current, cards: cardsRef.current })) {
+              const currentBoardID = activeBoardIDRef.current;
+              invalidateKanbanBoardContentsCache(apiBase, companyID, currentBoardID);
+              void refreshBoard(currentBoardID);
+            }
             return;
           }
           if (envelope.type === "node_deleted") {
@@ -813,7 +834,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             if (!nodeID) return;
             invalidateKanbanBoardContentsCache(apiBase, companyID, activeBoardIDRef.current);
             const removedCardIDs = new Set(cardsRef.current.filter((card) => card.node_id === nodeID).map((card) => card.card_id));
-            setCards((previous) => previous.filter((card) => card.node_id !== nodeID));
+            const nextCards = cardsRef.current.filter((card) => card.node_id !== nodeID);
+            cardsRef.current = nextCards;
+            setCards(nextCards);
             setSelectedCardIDs((previous) => {
               return new Set(Array.from(previous).filter((selectedCardID) => !removedCardIDs.has(selectedCardID)));
             });
@@ -842,7 +865,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         }
       },
     });
-  }, [apiBase, companyID, removeBoardFromList, syncNodeStatusesFromCards, upsertBoardInList]);
+  }, [apiBase, companyID, refreshBoard, removeBoardFromList, syncNodeStatusesFromCards, upsertBoardInList]);
 
   const syncCardTitlesFromNodeGraph = useCallback(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);

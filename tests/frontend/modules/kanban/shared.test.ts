@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_GROUP_FIELDS, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, buildKanbanGroupedBoardLayout, clampColumnHeight, clampColumnWidth, getDefaultKanbanYAxisSortDirection, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, sanitizeExplorerEntityDragPayload, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_GROUP_FIELDS, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, buildKanbanGroupedBoardLayout, clampColumnHeight, clampColumnWidth, getDefaultKanbanYAxisSortDirection, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, sanitizeExplorerEntityDragPayload, shouldRefreshKanbanBoardForNodeStatusChange, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
 
 function card(overrides: Partial<KanbanCard>): KanbanCard {
   return {
@@ -105,6 +105,48 @@ test("groupCardsByColumn sorts each column by stable board position", () => {
     }),
   ]);
   assert.deepEqual((grouped.get("todo") ?? []).map((card) => card.card_id), ["early", "late"]);
+});
+
+test("node status reconciliation detects when a visible card missed its move event", () => {
+  const columns = [
+    column({ column_id: "todo", title: "Todo", position: 1000 }),
+    column({ column_id: "done", title: "Done", position: 2000 }),
+  ];
+  const cards = [
+    card({ card_id: "task", node_id: "node-task", column_id: "todo", position: 1000 }),
+  ];
+
+  assert.equal(shouldRefreshKanbanBoardForNodeStatusChange({
+    node: { node_id: "node-task", status: "Done" },
+    columns,
+    cards,
+  }), true);
+  assert.equal(shouldRefreshKanbanBoardForNodeStatusChange({
+    node: { node_id: "node-task", status: "Todo" },
+    columns,
+    cards,
+  }), false);
+  assert.equal(shouldRefreshKanbanBoardForNodeStatusChange({
+    node: { node_id: "other-node", status: "Done" },
+    columns,
+    cards,
+  }), false);
+});
+
+test("node status reconciliation handles Issue status without guessing columns", () => {
+  const columns = [column({ column_id: "todo", title: "Todo", position: 1000 })];
+  const cards = [card({ card_id: "task", node_id: "node-task", column_id: "todo", is_issue: false })];
+
+  assert.equal(shouldRefreshKanbanBoardForNodeStatusChange({
+    node: { node_id: "node-task", status: "Issue" },
+    columns,
+    cards,
+  }), true);
+  assert.equal(shouldRefreshKanbanBoardForNodeStatusChange({
+    node: { node_id: "node-task", status: "Issue" },
+    columns,
+    cards: [card({ card_id: "task", node_id: "node-task", column_id: "todo", is_issue: true })],
+  }), false);
 });
 
 test("grouped board layout uses one global Y-axis row order across X-axis columns", () => {
