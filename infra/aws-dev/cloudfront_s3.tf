@@ -36,10 +36,10 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   signing_protocol                  = "sigv4"
 }
 
-resource "aws_cloudfront_function" "frontend_router" {
-  name    = "${local.name_prefix}-frontend-router"
+resource "aws_cloudfront_function" "basic_auth" {
+  name    = "${local.name_prefix}-basic-auth"
   runtime = "cloudfront-js-1.0"
-  comment = "MangoRTS frontend route rewrite"
+  comment = "MangoRTS frontend route rewrite; legacy function name avoids CloudFront replacement ordering issues"
   publish = true
   code    = <<-JS
 function handler(event) {
@@ -108,7 +108,7 @@ resource "aws_cloudfront_distribution" "app" {
 
     function_association {
       event_type   = "viewer-request"
-      function_arn = aws_cloudfront_function.frontend_router.arn
+      function_arn = aws_cloudfront_function.basic_auth.arn
     }
   }
 
