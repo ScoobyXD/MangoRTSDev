@@ -63,13 +63,20 @@ function iconForTab(tab: ViewTab): React.ReactNode {
   return null;
 }
 
+function routeForPage(page: PrimaryPage): string {
+  if (page === "communications") return "/communication";
+  if (page === "logic-gate-arena") return "/logic-gate-arena";
+  return "/";
+}
+
 type AppProps = {
   accountChrome?: React.ReactNode;
   initialPage?: "map" | "communications" | "logic-gate-arena";
+  onNavigate?: (path: string) => void;
   overrideContent?: React.ReactNode;
 };
 
-const App: React.FC<AppProps> = ({ accountChrome, initialPage, overrideContent }) => {
+const App: React.FC<AppProps> = ({ accountChrome, initialPage, onNavigate, overrideContent }) => {
   const loaded = useMemo(() => loadViews(), []);
   const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(loaded.activeId);
@@ -107,6 +114,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, overrideContent }
   const redoStackRef = useRef<DashboardSnapshot[]>([]);
   const lastSnapshotRef = useRef<DashboardSnapshot | null>(null);
   const restoringRef = useRef(false);
+  const appliedInitialPageRef = useRef<PrimaryPage | null>(null);
   const lastFrameRegistrySignatureRef = useRef("");
   const frameLinkRevisionRef = useRef(0);
 
@@ -118,7 +126,13 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, overrideContent }
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
 
   useEffect(() => {
-    if (!initialPage || overrideContent) return;
+    if (!initialPage || overrideContent) {
+      appliedInitialPageRef.current = null;
+      return;
+    }
+    if (appliedInitialPageRef.current === initialPage) return;
+    appliedInitialPageRef.current = initialPage;
+
     const existing = tabs.find((tab) => pageForTab(tab) === initialPage);
     if (existing) {
       if (existing.id !== activeTabId) setActiveTabId(existing.id);
@@ -614,8 +628,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, overrideContent }
         onContextMenu={(e) => { e.preventDefault(); setHeaderMenu({ x: e.clientX, y: e.clientY }); setCanvasMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
       >
         <div style={{ width: "100%", minWidth: 0, height: 36, display: "grid", gridTemplateColumns: "auto minmax(180px, 1fr) auto", alignItems: "center", gap: 12, padding: "0 12px", borderRadius: 999, background: headerBgColor && headerBgColor !== UI_THEME.panel ? headerBgColor : "rgba(255, 255, 255, 0.94)", boxShadow: "0 9px 24px rgba(74, 36, 16, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)", backdropFilter: "blur(14px)" }}>
-          <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
-            <h1 style={{ margin: 0, lineHeight: 1 }}><MangoWordmark size={20} weight={500} /></h1>
+          <div style={{ display: "flex", alignItems: "center", minWidth: 0, height: "100%" }}>
+            <h1 style={{ margin: 0, height: "100%", display: "flex", alignItems: "center", lineHeight: 0, fontSize: 0 }}><MangoWordmark size={20} weight={500} /></h1>
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 4, justifySelf: "center", minWidth: 0, maxWidth: "100%", overflowX: "auto", padding: "2px 0", scrollbarWidth: "none" }}>
@@ -647,7 +661,16 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, overrideContent }
                   }}
                   onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
                   onDoubleClick={() => startRenamingTab(tab.id)}
-                  onClick={(e) => { if (e.button !== 0 || isDraggingTab) return; setActiveTabId(tab.id); setEditMode(false); }}
+                  onClick={(e) => {
+                    if (e.button !== 0 || isDraggingTab) return;
+                    const nextPage = pageForTab(tab) ?? "map";
+                    setActiveTabId(tab.id);
+                    setEditMode(false);
+                    if (onNavigate) {
+                      saveViews(tabs, tab.id);
+                      onNavigate(routeForPage(nextPage));
+                    }
+                  }}
                   style={{ height: 28, display: "inline-flex", alignItems: "center", gap: 6, padding: "0 12px", border: selected ? "1px solid rgba(255, 136, 32, 0.22)" : "1px solid transparent", background: selected ? "rgba(255, 136, 32, 0.13)" : "transparent", color: selected ? "#ff8820" : "#60646c", borderRadius: 999, fontSize: 12, fontWeight: 500, letterSpacing: 0, cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease, background 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
                 >
                   {renamingTabId === tab.id ? (

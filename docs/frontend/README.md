@@ -5,37 +5,41 @@ This folder contains architecture, product behavior, and migration documentation
 ## Where to look
 
 ### App layer
-- `docs/frontend/app/applayout.md`
+- `docs/frontend/src/app/applayout.md`
   - top-level composition
   - frame canvas + menu orchestration
   - state ownership and follow-up refactor notes
-- `docs/frontend/app/nested-frames.md`
+- `docs/frontend/src/app/nested-frames.md`
   - Nested Frame terminology (`Parent Frame`, `Child Frame`)
   - drag-to-frame overlay + preview behavior
   - linking/de-linking semantics
   - default view + template interactions
 
 ### Modules
-- `docs/frontend/modules/nodes.md`
+- `docs/frontend/src/modules/nodes.md`
   - Node Map + Node Doc behavior
   - API contracts
   - persistence model
   - file ownership for node runtime
-- `docs/frontend/modules/logic-gates.md`
+- `docs/frontend/src/modules/logic-gates.md`
   - Logic Gate Map behavior
   - Input/Output relationship semantics
   - API-first/headless contracts
   - Editor and Company Explorer linking behavior
-- `docs/frontend/modules/company-explorer.md`
+- `docs/frontend/src/modules/company-explorer.md`
   - Company Explorer standalone behavior
   - 3-pane responsibilities (tree/details/context)
   - default view menu requirements
   - linked Node workspace behavior
-- `docs/frontend/modules/kanban.md`
+- `docs/frontend/src/modules/kanban.md`
   - Kanban board behavior
   - Explorer drag payload contract
   - headless Kanban API contract
   - linkable frame behavior
+- `docs/frontend/src/modules/editor.md`
+  - Editor document behavior
+  - outline mode behavior
+  - mandatory Indent Guides visual rules
 - `docs/frontend/src/modules/settings.md`
   - Settings company scope behavior
   - dev-admin company search and invite targeting

@@ -17,6 +17,7 @@ Teal remains a selectable legacy colorway, but it is not the default.
 - Product wordmark: use the hexagon Mango mark and `MangoRTS` casing from `frontend/src/app/MangoLogo.tsx`.
 - Typography weight: default UI labels should stay in the 400-600 range. Do not force module names, header text, tab labels, or panel headings into all-caps.
 - Authenticated pages must keep the shared rounded Mango taskbar header. Do not add separate page-specific headers that replace it.
+- Editor exception: `Indent Guides` is not a brand-font surface. It must use the shared editor monospace stack for both text and guide overlay metrics so five-space tabs align with the vertical guide columns.
 
 ## Rule
 

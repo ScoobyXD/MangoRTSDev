@@ -21,6 +21,7 @@ type EditorLinkedDocumentPanelsProps = {
   editingTitleRef: React.RefObject<HTMLSpanElement>;
   editingTitleDraftRef: React.MutableRefObject<string>;
   accent: string;
+  titleTextColor: string;
   panelBackground: string;
   ruleColor: string;
   onSetIsEditingTitle: React.Dispatch<React.SetStateAction<boolean>>;
@@ -100,6 +101,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   editingTitleRef,
   editingTitleDraftRef,
   accent,
+  titleTextColor,
   panelBackground,
   ruleColor,
   onSetIsEditingTitle,
@@ -165,7 +167,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     <>
       {(activeTab === "editor" || activeTab === "outline-styles") && (
         <div style={{ display: "grid", gap: 8, pointerEvents: "auto" }}>
-          <div style={{ minWidth: 0, fontSize: 18, fontWeight: 500, letterSpacing: 0, color: accent, cursor: "text", overflowWrap: "anywhere", wordBreak: "break-word" }}>
+          <div style={{ minWidth: 0, fontSize: 18, fontWeight: 500, letterSpacing: 0, color: titleTextColor, cursor: "text", overflowWrap: "anywhere", wordBreak: "break-word" }}>
             <span>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>&nbsp;
             <span
               ref={editingTitleRef}
@@ -200,7 +202,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   onSetIsEditingTitle(false);
                 }
               }}
-              style={{ outline: "none", cursor: "text", overflowWrap: "anywhere", wordBreak: "break-word" }}
+              style={{ outline: "none", cursor: "text", caretColor: titleTextColor, overflowWrap: "anywhere", wordBreak: "break-word" }}
             >
               {linkedNodeTitle || "\u00A0"}
             </span>

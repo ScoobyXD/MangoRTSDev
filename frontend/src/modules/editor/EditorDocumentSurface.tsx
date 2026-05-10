@@ -17,7 +17,7 @@ export type EditorDocumentSurfaceProps = {
   indentGuideSegments: EditorIndentGuideSegment[];
   indentGuideColor: string;
   surfaceText: string;
-  accent: string;
+  caretColor: string;
   scrollbarAccent: string;
   scrollbarTrack: string;
   onBeforeInput: React.FormEventHandler<HTMLDivElement>;
@@ -46,7 +46,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
   indentGuideSegments,
   indentGuideColor,
   surfaceText,
-  accent,
+  caretColor,
   scrollbarAccent,
   scrollbarTrack,
   onBeforeInput,
@@ -148,7 +148,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
         tabSize: EDITOR_TAB_TEXT.length,
         letterSpacing: 0,
         fontVariantLigatures: "none",
-        caretColor: accent,
+        caretColor,
         cursor: "text",
         overflowY: "auto",
         overflowX: "hidden",

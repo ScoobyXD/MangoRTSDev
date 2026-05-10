@@ -35,6 +35,7 @@ import {
 import {
   EDITOR_DOCUMENT_FONT_SIZE_PX,
   EDITOR_DOCUMENT_LINE_HEIGHT,
+  getEditorDocumentFontFamily,
   EDITOR_DOCUMENT_TOP_PX,
   EDITOR_DOCUMENT_MAX_FONT_SIZE_PX,
   EDITOR_DOCUMENT_MIN_FONT_SIZE_PX,
@@ -984,6 +985,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const scrollbarAccent = theme === "light" ? "rgb(255, 136, 32)" : accent;
   const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 136, 32, 0.08)";
   const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(36,18,10,0.2)";
+  const editorPrimaryText = isDarkTheme ? surfaceText : "#111111";
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
   const hasLinkedDocument = linkedNodeID.trim().length > 0;
   const emptyMessage = forcedEntityKind && !hasLinkedDocument ? forcedEmptyMessage : "";
@@ -991,7 +993,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const documentTopPx = linkedEntityKind === "node" ? 150 : EDITOR_DOCUMENT_TOP_PX;
   const documentLineHeightPx = documentFontSize * EDITOR_DOCUMENT_LINE_HEIGHT;
   const documentBottomBufferPx = Math.round(documentLineHeightPx * EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES);
-  const documentFontFamily = "var(--mango-font-family)";
+  const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
   const documentSurfaceHandlers = useEditorDocumentSurfaceHandlers({
     restoringScrollRef,
     currentDocumentTargetKeyRef,
@@ -1058,6 +1060,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             editingTitleRef={editingTitleRef}
             editingTitleDraftRef={editingTitleDraftRef}
             accent={accent}
+            titleTextColor={editorPrimaryText}
             panelBackground={panelBackground}
             ruleColor={ruleColor}
             onSetIsEditingTitle={setIsEditingTitle}
@@ -1087,7 +1090,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             indentGuideSegments={indentGuideSegments}
             indentGuideColor={indentGuideColor}
             surfaceText={surfaceText}
-            accent={accent}
+            caretColor={editorPrimaryText}
             scrollbarAccent={scrollbarAccent}
             scrollbarTrack={scrollbarTrack}
             {...documentSurfaceHandlers}

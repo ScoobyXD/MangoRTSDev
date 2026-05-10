@@ -39,14 +39,14 @@ type MangoWordmarkProps = {
 };
 
 export const MangoWordmark: React.FC<MangoWordmarkProps> = ({ size = 22, weight = 500, showMark = true }) => (
-  <span style={{ display: "inline-flex", alignItems: "center", gap: Math.max(7, Math.round(size * 0.36)), minWidth: 0 }}>
+  <span style={{ display: "inline-flex", alignItems: "center", gap: Math.max(7, Math.round(size * 0.36)), minWidth: 0, lineHeight: 1 }}>
     {showMark && <MangoLogoMark size={Math.round(size * 1.35)} />}
     <span
       style={{
         fontFamily: "var(--mango-font-family)",
         fontSize: size,
         fontWeight: weight,
-        lineHeight: 1,
+        lineHeight: `${size}px`,
         letterSpacing: 0,
         textTransform: "none",
         background: "var(--mango-gradient)",

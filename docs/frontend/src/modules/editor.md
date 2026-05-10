@@ -57,7 +57,8 @@ The Editor module is the linked document workspace for MangoRTS. It gives the se
 - The Format tab stays next to the Editor tab as an icon-only font size control. A selection keeps its selection while repeated plus/minus clicks resize that text; a collapsed caret sets the font size for the next typed character.
 - The Outline Styles header tab is a themed popover with `Automatic Numbering` and `Indent Guides`, hover highlighting, and a check mark for the active mode. Picking a mode changes future input behavior only; it does not rewrite the existing document or hide the node title.
 - `Automatic Numbering` affects new Enter/Tab/Shift+Tab presses after outline markers. Enter continues the current marker family, Tab nests to the next marker family, and Shift+Tab returns to the parent flow. Marker families rotate by depth: decimal, alphabetic, roman, then repeat.
-- `Indent Guides` keeps text input plain and draws lightweight vertical indentation guides only for actual indented lines. It uses the same monospace document metrics as the rich editor and places guides on VS Code-style indent boundaries instead of centered inside the space run.
+- `Indent Guides` keeps text input plain and draws lightweight vertical indentation guides only for actual indented lines. When this mode is active, both the editable document text and guide overlay must use the same monospace font stack so five literal spaces line up with `5ch` guide positions. Do not switch this mode to the Mango proportional UI font.
+- `Indent Guides` places guides on VS Code-style indent boundaries, meaning the depth-1 guide sits at the left text edge, the depth-2 guide sits one tab width in, and each deeper guide advances by exactly one five-space tab width.
 - In `Indent Guides`, Enter copies the current line indentation, Shift+Tab removes one indent level, and Backspace deletes a preceding tab-sized five-space run in one edit.
 - Clearing all text calls the projection delete API. This keeps reload behavior correct while preserving append-only nonblank history for audit and scale.
 - The same document APIs work for headless agents: agents can post latest document content with a stable `information_id`, read projections for sub-100ms hot paths, and delete a projection to clear the latest document value. Outline helpers remain pure frontend functions so future agent-facing command APIs can reuse the same text-edit rules without needing a browser.
@@ -66,6 +67,8 @@ The Editor module is the linked document workspace for MangoRTS. It gives the se
 - Keep the editor feeling like this: a simple, fast, rich document surface with natural typing, preserved document viewport, vertical and horizontal scrolling, and projection-backed autosave.
 - Outline behavior must stay input-only. Switching outline modes must never scan and transform the whole existing document.
 - Tab is intentionally five literal spaces. This is UI-only text input behavior; the backend remains the same headless API contract for users and agents.
+- Node and logic-gate title text stays neutral black in light mode, not the Mango accent. The document insertion caret also stays neutral black in light mode, not orange.
+- Indent Guides are a monospace plain-text mode. Any UI refresh that changes editor typography must preserve `getEditorDocumentFontFamily("indent-guides")` returning the monospace stack and must keep the guide overlay and editable surface on identical font metrics.
 - Rich formatting is intentionally kept inline and sanitized at the document boundary. This keeps writes append-only, API-friendly, and cheap to serve through projection hot paths while allowing document-level formatting in the UI.
 
 ## Semantic vs layout persistence policy (2026-04-27)

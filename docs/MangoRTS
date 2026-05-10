@@ -61,9 +61,12 @@ Email:
 1. By default the primary emails showing on the email list should be the same as my primary inbox on my gmail app. It automatically filters out the email marketing and junk stuff.
 	a. There should be a selectable drop down menu, which has the same conventions as all the other drop downs on our app) on the email list between Primary Inbox (filtered), Sent mail, and All mail.
 2. Remove the box on the left, we dont need that at all. Create a compose button near the top section of the email list section.
-	
-1. Need filters, i need the same filters Gmail has on my phone to just give me the important stuff i want instead of all of the spam and advertising stuff my email gets bombarded with.
-	a. Right now its configured for the "All Mail" settings so I see a bunch of garbages
+3. Have the communication email list update itself whenever the email account gets a new email, having a refresh button on the ui is dumb and this email list should be live.
+	a. however polling would be a really shit option so figure something else out.
+4.
+
+
+
 2. Try to create a shared inbox feature with other users in the same company like how Front (the tech company) has it.
 	a. same goes for read receipts
 	b. team comments.

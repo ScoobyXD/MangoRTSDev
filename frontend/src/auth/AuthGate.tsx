@@ -142,9 +142,12 @@ export default function AuthGate() {
   const [pendingChallenge, setPendingChallenge] = useState<PendingChallenge>(null);
 
   const navigate = useCallback((nextPath: string) => {
-    preloadRouteSurface(nextPath);
-    window.history.pushState({}, "", nextPath);
-    setPath(nextPath);
+    const normalizedNextPath = nextPath.trim() || "/";
+    preloadRouteSurface(normalizedNextPath);
+    if (window.location.pathname !== normalizedNextPath) {
+      window.history.pushState({}, "", normalizedNextPath);
+    }
+    setPath(normalizedNextPath);
   }, []);
 
   const loadMe = useCallback(async () => {
@@ -206,20 +209,20 @@ export default function AuthGate() {
   }
 
   if (normalizedPath === "/settings" || normalizedPath === "/admin/users") {
-    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} overrideContent={<SettingsPage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} embedded />} /></React.Suspense>;
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} onNavigate={navigate} overrideContent={<SettingsPage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} embedded />} /></React.Suspense>;
   }
 
   if (normalizedPath === "/logic-gate-arena") {
-    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} initialPage="logic-gate-arena" /></React.Suspense>;
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} onNavigate={navigate} initialPage="logic-gate-arena" /></React.Suspense>;
   }
 
   if (normalizedPath === "/communications" || normalizedPath === "/communication") {
-    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} initialPage="communications" /></React.Suspense>;
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} onNavigate={navigate} initialPage="communications" /></React.Suspense>;
   }
 
   return (
     <>
-      <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} /></React.Suspense>
+      <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} onNavigate={navigate} /></React.Suspense>
     </>
   );
 }
@@ -1050,14 +1053,13 @@ function AccountBar({ me, onNavigate }: { me: CurrentUserResponse; onNavigate: (
     display: "inline-flex",
     alignItems: "center",
     gap: 6,
-    border: "1px solid rgba(96, 100, 108, 0.1)",
-    borderRadius: 999,
-    background: "rgba(244, 245, 247, 0.78)",
+    border: "none",
+    background: "transparent",
     color: "#60646c",
     cursor: "pointer",
     font: "inherit",
     fontWeight: 500,
-    padding: "0 10px",
+    padding: "0 2px",
     whiteSpace: "nowrap",
   };
   return (
@@ -1297,9 +1299,9 @@ const settingsScopeUUIDStyle: React.CSSProperties = {
 };
 
 const settingsActiveScopeStyle: React.CSSProperties = {
-  border: "1px solid rgba(101, 247, 167, 0.34)",
+  border: "1px solid rgba(255, 136, 32, 0.34)",
   borderRadius: 6,
-  background: "#ffffff",
+  background: "#fff7ed",
   color: "#000000",
   fontSize: 11,
   fontWeight: 600,
@@ -1387,9 +1389,9 @@ const successBoxStyle: React.CSSProperties = {
   color: "#000000",
   fontSize: 12,
   fontWeight: 600,
-  border: "1px solid rgba(101, 247, 167, 0.36)",
+  border: "1px solid rgba(255, 136, 32, 0.32)",
   borderRadius: 6,
-  background: "#ffffff",
+  background: "#fff7ed",
   padding: 8,
 };
 

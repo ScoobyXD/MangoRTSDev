@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildEditorIndentGuideSegments } from "../../../../frontend/src/modules/editor/editorIndentGuides.js";
+import { EDITOR_DOCUMENT_MONOSPACE_FONT_FAMILY, EDITOR_DOCUMENT_PROPORTIONAL_FONT_FAMILY, getEditorDocumentFontFamily } from "../../../../frontend/src/modules/editor/useEditorPreferences.js";
 
 test("indent guides are empty for unindented text", () => {
   assert.deepEqual(buildEditorIndentGuideSegments("alpha\nbeta", 5), []);
@@ -37,4 +38,10 @@ test("indent guides include newly inserted whitespace-only indented lines", () =
   assert.deepEqual(buildEditorIndentGuideSegments(text, 5), [
     { depth: 1, lineStart: 1, lineEnd: 1 },
   ]);
+});
+
+test("indent guides use monospace document metrics", () => {
+  assert.equal(getEditorDocumentFontFamily("indent-guides"), EDITOR_DOCUMENT_MONOSPACE_FONT_FAMILY);
+  assert.match(getEditorDocumentFontFamily("indent-guides"), /monospace/);
+  assert.equal(getEditorDocumentFontFamily("automatic-outline-numbering"), EDITOR_DOCUMENT_PROPORTIONAL_FONT_FAMILY);
 });
