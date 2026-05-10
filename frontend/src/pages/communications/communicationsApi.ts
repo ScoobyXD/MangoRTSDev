@@ -54,10 +54,13 @@ export type EmailMessage = {
 export type ListMessagesParams = {
   limit?: number;
   pageToken?: string;
+  mailbox?: EmailMailbox;
   folderID?: string;
   q?: string;
   unread?: boolean;
 };
+
+export type EmailMailbox = "primary" | "sent" | "all";
 
 export type MessagePage = {
   messages: EmailMessage[];
@@ -124,6 +127,7 @@ export function createMessageQuery(params: ListMessagesParams): string {
   const query = new URLSearchParams();
   if (params.limit && params.limit > 0) query.set("limit", String(params.limit));
   if (params.pageToken) query.set("page_token", params.pageToken);
+  if (params.mailbox) query.set("mailbox", params.mailbox);
   if (params.folderID) query.set("folder_id", params.folderID);
   if (params.q?.trim()) query.set("q", params.q.trim());
   if (params.unread !== undefined) query.set("unread", String(params.unread));

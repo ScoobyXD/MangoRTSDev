@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CurrentUserResponse } from "../../auth/cognitoAuth";
 import { MangoWordmark } from "../../app/MangoLogo";
 import { preloadLogicGateArenaSurface } from "../../app/preloadDashboardModules";
@@ -15,9 +15,11 @@ import {
   updateEmailMessage,
   type EmailAddress,
   type EmailFolder,
+  type EmailMailbox,
   type EmailMessage,
   type CommunicationsStatus,
 } from "./communicationsApi";
+import { subscribeCommunicationsStream } from "./communicationsStream";
 
 type CommunicationsPageProps = {
   me?: CurrentUserResponse;
@@ -45,11 +47,22 @@ const emptyCompose: ComposeState = {
   body: "",
 };
 
+type MailboxOption = {
+  value: EmailMailbox;
+  label: string;
+};
+
+const MAILBOX_OPTIONS: MailboxOption[] = [
+  { value: "primary", label: "Primary Inbox" },
+  { value: "sent", label: "Sent mail" },
+  { value: "all", label: "All mail" },
+];
+
 export function CommunicationsPage({ me, onNavigate, embedded = false }: CommunicationsPageProps) {
   const [status, setStatus] = useState<CommunicationsStatus | null>(null);
   const [folders, setFolders] = useState<EmailFolder[]>([]);
   const [messages, setMessages] = useState<EmailMessage[]>([]);
-  const [selectedFolderID, setSelectedFolderID] = useState("");
+  const [mailbox, setMailbox] = useState<EmailMailbox>("primary");
   const [selectedMessageID, setSelectedMessageID] = useState("");
   const [selectedMessage, setSelectedMessage] = useState<EmailMessage | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
@@ -66,6 +79,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const streamReloadTimerRef = useRef<number | null>(null);
+  const streamReloadRef = useRef<() => void>(() => {});
 
   const isNarrow = viewportWidth < 980;
 
@@ -109,14 +124,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     try {
       const next = await listEmailFolders();
       setFolders(next);
-      if (!selectedFolderID) {
-        const inbox = findSystemFolder(next, "inbox");
-        if (inbox) setSelectedFolderID(inbox.id);
-      }
     } catch (folderError) {
       setError(formatError(folderError, "Failed to load folders"));
     }
-  }, [selectedFolderID]);
+  }, []);
 
   const loadMessages = useCallback(async () => {
     if (!status?.connected) return;
@@ -126,7 +137,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       const page = await listEmailMessages({
         limit: 25,
         pageToken,
-        folderID: selectedFolderID,
+        mailbox,
         q: searchQuery,
         unread: unreadOnly ? true : undefined,
       });
@@ -141,11 +152,42 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     } finally {
       setLoadingMessages(false);
     }
-  }, [pageToken, searchQuery, selectedFolderID, selectedMessageID, status?.connected, unreadOnly]);
+  }, [mailbox, pageToken, searchQuery, selectedMessageID, status?.connected, unreadOnly]);
 
   useEffect(() => { void loadStatus(); }, [loadStatus]);
   useEffect(() => { if (status?.connected) void loadFolders(); }, [loadFolders, status?.connected]);
   useEffect(() => { void loadMessages(); }, [loadMessages]);
+
+  useEffect(() => {
+    streamReloadRef.current = () => {
+      void loadFolders();
+      void loadMessages();
+    };
+  }, [loadFolders, loadMessages]);
+
+  useEffect(() => {
+    if (!status?.connected) return undefined;
+    const unsubscribe = subscribeCommunicationsStream({
+      onEvent(event) {
+        if (event.event !== "communications") return;
+        if (streamReloadTimerRef.current !== null) window.clearTimeout(streamReloadTimerRef.current);
+        streamReloadTimerRef.current = window.setTimeout(() => {
+          streamReloadTimerRef.current = null;
+          streamReloadRef.current();
+        }, 200);
+      },
+      onError() {
+        // SSE reconnects automatically; keep the UI quiet unless an API reload fails.
+      },
+    });
+    return () => {
+      unsubscribe();
+      if (streamReloadTimerRef.current !== null) {
+        window.clearTimeout(streamReloadTimerRef.current);
+        streamReloadTimerRef.current = null;
+      }
+    };
+  }, [status?.connected]);
 
   useEffect(() => {
     if (!selectedMessageID) return;
@@ -166,16 +208,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   }, [selectedMessageID]);
 
   const archiveFolder = useMemo(() => findSystemFolder(folders, "archive"), [folders]);
-  const selectedFolder = folders.find((folder) => folder.id === selectedFolderID) ?? null;
   const connection = status?.connection;
-
-  const refreshAll = async () => {
-    await loadStatus();
-    if (status?.connected) {
-      await loadFolders();
-      await loadMessages();
-    }
-  };
 
   const startConnection = async (provider: "google" | "microsoft") => {
     setBusy(provider);
@@ -203,19 +236,19 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     }
   };
 
-  const setFolder = (folderID: string) => {
-    setSelectedFolderID(folderID);
-    setPageToken("");
-    setPageStack([]);
-    setSelectedMessageID("");
-    setSelectedMessage(null);
-  };
-
   const submitSearch = (event: React.FormEvent) => {
     event.preventDefault();
     setSearchQuery(searchDraft.trim());
     setPageToken("");
     setPageStack([]);
+  };
+
+  const selectMailbox = (nextMailbox: EmailMailbox) => {
+    setMailbox(nextMailbox);
+    setPageToken("");
+    setPageStack([]);
+    setSelectedMessageID("");
+    setSelectedMessage(null);
   };
 
   const patchSelectedMessage = async (update: { unread?: boolean; starred?: boolean; folders?: string[] }) => {
@@ -355,31 +388,16 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
           </section>
         </main>
       ) : (
-        <main style={{ ...workspaceStyle, gridTemplateColumns: isNarrow ? "1fr" : "220px minmax(300px, 390px) minmax(0, 1fr)" }}>
-          <aside style={panelStyle}>
-            <div style={panelHeaderStyle}>
-              <div>
-                <h2 style={panelTitleStyle}>Mail</h2>
-                {connection && <div style={mutedSmallStyle}>{connection.account_email}</div>}
-              </div>
+        <main style={{ ...workspaceStyle, gridTemplateColumns: isNarrow ? "1fr" : "minmax(320px, 430px) minmax(0, 1fr)" }}>
+          <section style={panelStyle}>
+            <div style={mailListToolbarStyle}>
+              <MailboxSelect value={mailbox} options={MAILBOX_OPTIONS} onChange={selectMailbox} />
+              <button style={primaryButtonStyle} onClick={openNewCompose}>Compose</button>
+            </div>
+            <div style={accountRowStyle}>
+              <span style={mutedSmallStyle}>{connection?.account_email}</span>
               <button style={smallButtonStyle} disabled={busy === "disconnect"} onClick={disconnect}>Disconnect</button>
             </div>
-            <button style={primaryButtonStyle} onClick={openNewCompose}>Compose</button>
-            <button style={smallButtonStyle} onClick={refreshAll}>Refresh</button>
-            <nav style={folderListStyle}>
-              <button style={folderButtonStyle(!selectedFolderID)} onClick={() => setFolder("")}>
-                <span>All mail</span>
-              </button>
-              {folders.map((folder) => (
-                <button key={folder.id} style={folderButtonStyle(selectedFolderID === folder.id)} onClick={() => setFolder(folder.id)}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{folderLabel(folder)}</span>
-                  {folder.unread_count ? <span>{folder.unread_count}</span> : null}
-                </button>
-              ))}
-            </nav>
-          </aside>
-
-          <section style={panelStyle}>
             <form style={searchRowStyle} onSubmit={submitSearch}>
               <input
                 style={inputStyle}
@@ -402,7 +420,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
               <span>Unread only</span>
             </label>
             <div style={listHeaderStyle}>
-              <span>{selectedFolder ? folderLabel(selectedFolder) : "All mail"}</span>
+              <span>{mailboxLabel(mailbox)}</span>
               {loadingMessages && <span>Loading</span>}
             </div>
             <div style={messageListStyle}>
@@ -484,6 +502,96 @@ export const CommunicationsFrameContent: React.FC<{ accent: string; widgetId?: s
   <CommunicationsPage embedded />
 );
 
+function MailboxSelect({ value, options, onChange }: {
+  value: EmailMailbox;
+  options: MailboxOption[];
+  onChange: (value: EmailMailbox) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useClosePopover(open, rootRef, close);
+  const selected = options.find((option) => option.value === value) ?? options[0];
+  return (
+    <span ref={rootRef} style={{ position: "relative", display: "block", minWidth: 0 }}>
+      <button
+        type="button"
+        aria-label="Mailbox"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((nextOpen) => !nextOpen)}
+        style={{ ...selectButtonStyle, borderColor: open ? "rgba(255, 136, 32, 0.92)" : selectButtonStyle.borderColor }}
+      >
+        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected?.label ?? "Mailbox"}</span>
+        <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: "rgb(255, 136, 32)" }}>
+          <DisclosureIcon open={open} />
+        </span>
+      </button>
+      {open && (
+        <div role="listbox" aria-label="Mailbox" className="company-explorer-scroll" style={selectMenuStyle}>
+          {options.map((option) => {
+            const selectedOption = option.value === value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="option"
+                aria-selected={selectedOption}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+                style={{ ...selectOptionButtonStyle, background: selectedOption ? "rgba(255, 136, 32, 0.18)" : "#ffffff" }}
+              >
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
+                <span aria-hidden="true" style={{ display: "grid", placeItems: "center" }}>
+                  {selectedOption ? <CheckIcon /> : null}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </span>
+  );
+}
+
+function useClosePopover(open: boolean, ref: React.RefObject<HTMLElement>, onClose: () => void): void {
+  useEffect(() => {
+    if (!open) return;
+    const onMouseDown = (event: MouseEvent) => {
+      if (ref.current?.contains(event.target as Node)) return;
+      onClose();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    const timer = window.setTimeout(() => window.addEventListener("mousedown", onMouseDown, true), 0);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("mousedown", onMouseDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [open, onClose, ref]);
+}
+
+function DisclosureIcon({ open, color = "currentColor" }: { open: boolean; color?: string }) {
+  return (
+    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", transform: open ? "rotate(180deg)" : "none", transition: "transform 120ms ease" }}>
+      <path d="M4 6.2 8 10.2 12 6.2" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CheckIcon({ color = "rgb(255, 136, 32)" }: { color?: string }) {
+  return (
+    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
+      <path d="M3.2 8.2 6.4 11.4 12.9 4.6" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function ComposePanel({ compose, busy, onChange, onCancel, onSubmit }: {
   compose: ComposeState;
   busy: boolean;
@@ -550,8 +658,8 @@ function findSystemFolder(folders: EmailFolder[], system: string): EmailFolder |
   }) ?? null;
 }
 
-function folderLabel(folder: EmailFolder): string {
-  return folder.display_name || folder.name || folder.id;
+function mailboxLabel(mailbox: EmailMailbox): string {
+  return MAILBOX_OPTIONS.find((option) => option.value === mailbox)?.label ?? "Mail";
 }
 
 function formatAddressList(addresses?: EmailAddress[]): string {
@@ -763,32 +871,73 @@ const textareaStyle: React.CSSProperties = {
   lineHeight: 1.45,
 };
 
-const folderListStyle: React.CSSProperties = {
-  minHeight: 0,
-  overflowY: "auto",
+const mailListToolbarStyle: React.CSSProperties = {
   display: "grid",
-  alignContent: "start",
-  gap: 4,
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  gap: 8,
+  alignItems: "center",
 };
 
-function folderButtonStyle(active: boolean): React.CSSProperties {
-  return {
-    minHeight: 32,
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto",
-    gap: 8,
-    alignItems: "center",
-    border: `1px solid ${active ? "#ff8820" : "rgba(255, 136, 32, 0.18)"}`,
-    borderRadius: 6,
-    background: active ? "#fff2e0" : "#ffffff",
-    color: "#24120a",
-    cursor: "pointer",
-    font: "inherit",
-    fontSize: 11,
-    padding: "0 8px",
-    textAlign: "left",
-  };
-}
+const accountRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  gap: 8,
+  alignItems: "center",
+};
+
+const selectButtonStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 34,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 18px",
+  alignItems: "center",
+  gap: 8,
+  border: "1px solid rgba(255, 136, 32, 0.44)",
+  borderRadius: 6,
+  background: "#ffffff",
+  color: "#24120a",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 500,
+  padding: "0 10px",
+  textAlign: "left",
+};
+
+const selectMenuStyle: React.CSSProperties = {
+  position: "absolute",
+  zIndex: 40,
+  top: "calc(100% + 6px)",
+  left: 0,
+  width: "min(260px, 78vw)",
+  maxHeight: 220,
+  overflowY: "auto",
+  overflowX: "hidden",
+  padding: 5,
+  border: "1px solid rgba(255, 136, 32, 0.58)",
+  borderRadius: 8,
+  background: "#ffffff",
+  color: "#24120a",
+  boxShadow: "0 12px 28px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(255, 136, 32, 0.12) inset",
+};
+
+const selectOptionButtonStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 32,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 18px",
+  alignItems: "center",
+  gap: 8,
+  border: "none",
+  borderRadius: 6,
+  color: "#24120a",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 500,
+  padding: "7px 8px",
+  textAlign: "left",
+};
 
 const searchRowStyle: React.CSSProperties = {
   display: "grid",

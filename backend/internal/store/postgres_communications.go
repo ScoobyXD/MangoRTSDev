@@ -34,6 +34,33 @@ func (r *PostgresRepo) GetUserEmailConnection(userID string) (domain.UserEmailCo
 	return connection, err
 }
 
+func (r *PostgresRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error) {
+	grantID = strings.TrimSpace(grantID)
+	if grantID == "" {
+		return domain.UserEmailConnection{}, ErrInvalid
+	}
+
+	var connection domain.UserEmailConnection
+	err := r.db.QueryRow(
+		`select user_id, provider, account_email, grant_id, status, created_timestamp, updated_timestamp
+		 from user_email_connections
+		 where grant_id = $1`,
+		grantID,
+	).Scan(
+		&connection.UserID,
+		&connection.Provider,
+		&connection.AccountEmail,
+		&connection.GrantID,
+		&connection.Status,
+		&connection.CreatedTimestamp,
+		&connection.UpdatedTimestamp,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.UserEmailConnection{}, ErrNotFound
+	}
+	return connection, err
+}
+
 func (r *PostgresRepo) UpsertUserEmailConnection(input UserEmailConnectionInput) (domain.UserEmailConnection, error) {
 	userID := strings.TrimSpace(input.UserID)
 	provider := normalizeEmailProvider(input.Provider)

@@ -20,6 +20,7 @@ type NylasConfig struct {
 	RedirectURI         string
 	FrontendRedirectURL string
 	StateSecret         string
+	WebhookSecret       string
 	GoogleScopes        []string
 	MicrosoftScopes     []string
 }
@@ -201,11 +202,13 @@ type NylasMessage struct {
 }
 
 type NylasMessageQuery struct {
-	Limit     int
-	PageToken string
-	FolderID  string
-	Query     string
-	Unread    *bool
+	Limit             int
+	PageToken         string
+	FolderID          string
+	Query             string
+	SearchQueryNative string
+	Mailbox           string
+	Unread            *bool
 }
 
 type NylasMessagePage struct {
@@ -285,10 +288,13 @@ func (c *NylasRESTClient) ListMessages(ctx context.Context, grantID string, quer
 		values.Set("page_token", strings.TrimSpace(query.PageToken))
 	}
 	if strings.TrimSpace(query.FolderID) != "" {
-		values.Set("folder_id", strings.TrimSpace(query.FolderID))
+		values.Set("in", strings.TrimSpace(query.FolderID))
 	}
 	if strings.TrimSpace(query.Query) != "" {
 		values.Set("q", strings.TrimSpace(query.Query))
+	}
+	if strings.TrimSpace(query.SearchQueryNative) != "" {
+		values.Set("search_query_native", strings.TrimSpace(query.SearchQueryNative))
 	}
 	if query.Unread != nil {
 		values.Set("unread", strconv.FormatBool(*query.Unread))

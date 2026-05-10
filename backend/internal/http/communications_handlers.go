@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"time"
 )
+
+var errInvalidCommunicationsMailbox = errors.New("invalid communications mailbox")
 
 func (s *Server) handleCommunicationsStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -151,6 +154,15 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 		if !valid {
 			return
 		}
+		query, err := s.applyCommunicationsMailboxQuery(r.Context(), connection, query)
+		if err != nil {
+			if errors.Is(err, errInvalidCommunicationsMailbox) {
+				writeError(w, http.StatusBadRequest, "invalid_email_mailbox")
+				return
+			}
+			s.writeNylasError(w, r, connection, err)
+			return
+		}
 		page, err := s.nylasClient.ListMessages(r.Context(), connection.GrantID, query)
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
@@ -215,12 +227,14 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
+		s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", message.ID)
 		writeJSON(w, http.StatusOK, map[string]any{"message": message})
 	case http.MethodDelete:
 		if err := s.nylasClient.DeleteMessage(r.Context(), connection.GrantID, messageID); err != nil {
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
+		s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.deleted", messageID)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -252,6 +266,7 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		s.writeNylasError(w, r, connection, err)
 		return
 	}
+	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.created", message.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{"message": message})
 }
 
@@ -375,7 +390,7 @@ func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connect
 
 func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessageQuery, bool) {
 	for key := range r.URL.Query() {
-		if key != "limit" && key != "page_token" && key != "folder_id" && key != "q" && key != "unread" {
+		if key != "limit" && key != "page_token" && key != "folder_id" && key != "q" && key != "mailbox" && key != "unread" {
 			writeError(w, http.StatusBadRequest, "unsupported_email_query_param")
 			return NylasMessageQuery{}, false
 		}
@@ -397,6 +412,11 @@ func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessag
 		PageToken: strings.TrimSpace(r.URL.Query().Get("page_token")),
 		FolderID:  strings.TrimSpace(r.URL.Query().Get("folder_id")),
 		Query:     strings.TrimSpace(r.URL.Query().Get("q")),
+		Mailbox:   normalizeCommunicationsMailbox(r.URL.Query().Get("mailbox")),
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("mailbox")); raw != "" && query.Mailbox == "" {
+		writeError(w, http.StatusBadRequest, "invalid_email_mailbox")
+		return NylasMessageQuery{}, false
 	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("unread")); raw != "" {
 		parsed, err := strconv.ParseBool(raw)
@@ -407,6 +427,90 @@ func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessag
 		query.Unread = &parsed
 	}
 	return query, true
+}
+
+func (s *Server) applyCommunicationsMailboxQuery(ctx context.Context, connection domain.UserEmailConnection, query NylasMessageQuery) (NylasMessageQuery, error) {
+	switch query.Mailbox {
+	case "", "all":
+		return query, nil
+	case "primary":
+		if connection.Provider == "google" {
+			query.SearchQueryNative = gmailPrimarySearch(query.Query, query.Unread)
+			query.Query = ""
+			query.Unread = nil
+			query.FolderID = ""
+			return query, nil
+		}
+		return s.applySystemFolderMailbox(ctx, connection, query, "inbox")
+	case "sent":
+		if strings.TrimSpace(query.FolderID) != "" {
+			return query, nil
+		}
+		if connection.Provider == "google" {
+			query.FolderID = "SENT"
+			return query, nil
+		}
+		return s.applySystemFolderMailbox(ctx, connection, query, "sent")
+	default:
+		return NylasMessageQuery{}, errInvalidCommunicationsMailbox
+	}
+}
+
+func (s *Server) applySystemFolderMailbox(ctx context.Context, connection domain.UserEmailConnection, query NylasMessageQuery, system string) (NylasMessageQuery, error) {
+	if strings.TrimSpace(query.FolderID) != "" {
+		return query, nil
+	}
+	folders, err := s.nylasClient.ListFolders(ctx, connection.GrantID)
+	if err != nil {
+		return NylasMessageQuery{}, err
+	}
+	folderID := findNylasSystemFolderID(folders, system)
+	if folderID == "" {
+		return query, nil
+	}
+	query.FolderID = folderID
+	return query, nil
+}
+
+func gmailPrimarySearch(userQuery string, unread *bool) string {
+	parts := []string{"category:primary", "in:inbox"}
+	if trimmed := strings.TrimSpace(userQuery); trimmed != "" {
+		parts = append(parts, trimmed)
+	}
+	if unread != nil && *unread {
+		parts = append(parts, "is:unread")
+	}
+	return strings.Join(parts, " ")
+}
+
+func findNylasSystemFolderID(folders []NylasFolder, system string) string {
+	normalized := strings.TrimSpace(strings.ToLower(system))
+	for _, folder := range folders {
+		systemFolder := strings.ToLower(strings.TrimSpace(folder.SystemFolder))
+		name := strings.ToLower(strings.TrimSpace(firstNonBlank(folder.Name, folder.DisplayName)))
+		if systemFolder == normalized || name == normalized {
+			return strings.TrimSpace(folder.ID)
+		}
+		for _, attribute := range folder.Attributes {
+			if strings.Trim(strings.ToLower(strings.TrimSpace(attribute)), "\\") == normalized {
+				return strings.TrimSpace(folder.ID)
+			}
+		}
+	}
+	return ""
+}
+
+func normalizeCommunicationsMailbox(mailbox string) string {
+	switch strings.TrimSpace(strings.ToLower(mailbox)) {
+	case "", "primary", "primary_inbox", "primary inbox":
+		return "primary"
+	case "sent", "sent_mail", "sent mail":
+		return "sent"
+	case "all", "all_mail", "all mail":
+		return "all"
+	default:
+		return ""
+	}
 }
 
 func emailConnectionResponse(connection domain.UserEmailConnection) map[string]any {

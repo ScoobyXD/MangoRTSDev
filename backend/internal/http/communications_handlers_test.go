@@ -2,8 +2,11 @@ package httpapi
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +24,7 @@ type fakeNylasClient struct {
 	message       NylasMessage
 	sent          NylasSendMessageRequest
 	update        NylasMessageUpdate
+	lastQuery     NylasMessageQuery
 	listErr       error
 	exchangeErr   error
 }
@@ -41,7 +45,8 @@ func (f *fakeNylasClient) ListFolders(_ context.Context, _ string) ([]NylasFolde
 	return f.folders, nil
 }
 
-func (f *fakeNylasClient) ListMessages(_ context.Context, _ string, _ NylasMessageQuery) (NylasMessagePage, error) {
+func (f *fakeNylasClient) ListMessages(_ context.Context, _ string, query NylasMessageQuery) (NylasMessagePage, error) {
+	f.lastQuery = query
 	if f.listErr != nil {
 		return NylasMessagePage{}, f.listErr
 	}
@@ -299,6 +304,102 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	}
 }
 
+func TestCommunicationsPrimaryMailboxUsesGmailNativeSearch(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&q=from%3Aops%40example.com&unread=true", "", token, http.StatusOK)
+	if nylas.lastQuery.SearchQueryNative != "category:primary in:inbox from:ops@example.com is:unread" {
+		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
+	}
+	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.FolderID != "" {
+		t.Fatalf("query = %+v, want Gmail-native primary search only", nylas.lastQuery)
+	}
+}
+
+func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	user, err := repo.UpsertAuthUser("subject", "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	config := testNylasConfig()
+	config.WebhookSecret = "webhook-secret"
+	server := NewServerWithOptions(repo, ServerOptions{NylasConfig: config})
+	handler := server.Routes()
+
+	ch := server.emailHub.subscribe(user.UserID)
+	defer server.emailHub.unsubscribe(user.UserID, ch)
+
+	challengeReq := httptest.NewRequest(http.MethodGet, "/nylas/webhook?challenge=abc123", nil)
+	challengeRec := httptest.NewRecorder()
+	handler.ServeHTTP(challengeRec, challengeReq)
+	if challengeRec.Code != http.StatusOK || challengeRec.Body.String() != "abc123" {
+		t.Fatalf("challenge status=%d body=%q", challengeRec.Code, challengeRec.Body.String())
+	}
+
+	body := `{"type":"message.created","data":{"object":{"id":"message-1","grant_id":"grant-1"}}}`
+	req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
+	req.Header.Set("X-Nylas-Signature", signWebhookBody("webhook-secret", body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("webhook status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	select {
+	case raw := <-ch:
+		var event communicationsEventEnvelope
+		if err := json.Unmarshal(raw, &event); err != nil {
+			t.Fatal(err)
+		}
+		if event.UserID != user.UserID || event.Type != "mailbox_changed" || event.Trigger != "message.created" || event.MessageID != "message-1" {
+			t.Fatalf("event = %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for mailbox event")
+	}
+
+	badReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
+	badReq.Header.Set("X-Nylas-Signature", "bad")
+	badRec := httptest.NewRecorder()
+	handler.ServeHTTP(badRec, badReq)
+	if badRec.Code != http.StatusUnauthorized {
+		t.Fatalf("bad signature status = %d", badRec.Code)
+	}
+}
+
 func TestCommunicationsNylasAuthErrorMarksReauthRequired(t *testing.T) {
 	t.Parallel()
 
@@ -338,6 +439,12 @@ func TestCommunicationsNylasAuthErrorMarksReauthRequired(t *testing.T) {
 	if connection.Status != "reauth_required" {
 		t.Fatalf("connection status = %q, want reauth_required", connection.Status)
 	}
+}
+
+func signWebhookBody(secret, body string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(body))
+	return fmt.Sprintf("%x", mac.Sum(nil))
 }
 
 func assertJSONStatus(t *testing.T, handler http.Handler, method, path, body, authHeader string, want int) {

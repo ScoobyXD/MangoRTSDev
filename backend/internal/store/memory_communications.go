@@ -22,6 +22,23 @@ func (r *MemoryRepo) GetUserEmailConnection(userID string) (domain.UserEmailConn
 	return connection, nil
 }
 
+func (r *MemoryRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error) {
+	grantID = strings.TrimSpace(grantID)
+	if grantID == "" {
+		return domain.UserEmailConnection{}, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, connection := range r.emailConnections {
+		if connection.GrantID == grantID {
+			return connection, nil
+		}
+	}
+	return domain.UserEmailConnection{}, ErrNotFound
+}
+
 func (r *MemoryRepo) UpsertUserEmailConnection(input UserEmailConnectionInput) (domain.UserEmailConnection, error) {
 	userID := strings.TrimSpace(input.UserID)
 	provider := normalizeEmailProvider(input.Provider)

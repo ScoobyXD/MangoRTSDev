@@ -20,6 +20,7 @@ type AuthEmailSender interface {
 type Server struct {
 	repo          store.Repository
 	hub           *workspaceEventHub
+	emailHub      *workspaceEventHub
 	authValidator *auth.Validator
 	cognitoAdmin  CognitoAdminClient
 	emailSender   AuthEmailSender
@@ -45,6 +46,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	return &Server{
 		repo:          repo,
 		hub:           newWorkspaceEventHub(),
+		emailHub:      newWorkspaceEventHub(),
 		authValidator: options.AuthValidator,
 		cognitoAdmin:  options.CognitoAdmin,
 		emailSender:   options.EmailSender,
@@ -70,7 +72,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/communications/folders", s.handleCommunicationsFolders)
 	mux.HandleFunc("/v1/communications/messages", s.handleCommunicationsMessages)
 	mux.HandleFunc("/v1/communications/messages/", s.handleCommunicationsMessageByID)
+	mux.HandleFunc("/v1/communications/stream", s.handleCommunicationsStream)
 	mux.HandleFunc("/nylas/oauth/callback", s.handleNylasOAuthCallback)
+	mux.HandleFunc("/nylas/webhook", s.handleNylasWebhook)
 	mux.HandleFunc("/v1/nodes", s.handleNodes)
 	mux.HandleFunc("/v1/nodes/", s.handleNodeSubresource)
 	mux.HandleFunc("/v1/node-relationships", s.handleNodeRelationships)
