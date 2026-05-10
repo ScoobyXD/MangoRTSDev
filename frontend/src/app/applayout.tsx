@@ -37,6 +37,8 @@ import { useFrameDragResize } from "./useFrameDragResize";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
+const PAGE_EDGE_GAP = 10;
+const PAGE_SURFACE_RADIUS = 16;
 
 type PrimaryPage = "map" | "communications" | "logic-gate-arena";
 
@@ -239,10 +241,11 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, onNavigate, overr
     lastSnapshotRef.current = snapshot;
   }, [buildSnapshot]);
 
-  const canvasH = viewSize.h - HEADER_H;
-  const gridCols = Math.max(1, Math.round(viewSize.w / CELL_SIZE));
+  const canvasW = Math.max(1, viewSize.w - PAGE_EDGE_GAP * 2);
+  const canvasH = Math.max(1, viewSize.h - HEADER_H - PAGE_EDGE_GAP);
+  const gridCols = Math.max(1, Math.round(canvasW / CELL_SIZE));
   const gridRows = Math.max(1, Math.round(canvasH / CELL_SIZE));
-  const stepX = viewSize.w / gridCols;
+  const stepX = canvasW / gridCols;
   const stepY = canvasH / gridRows;
 
   useEffect(() => {
@@ -612,7 +615,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, onNavigate, overr
   });
 
   return (
-    <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: bgColor || UI_THEME.surface }}>
+    <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "var(--mango-gradient)" }}>
       <style>{`
         @keyframes frame-edge-bump-x {
           0% { opacity: 0.75; transform: scaleX(1); }
@@ -704,14 +707,46 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, onNavigate, overr
       </header>
 
       {overrideContent ? (
-        <main style={{ position: "relative", width: "100%", height: canvasH, overflow: "auto", background: "#ffffff" }}>
+        <main
+          style={{
+            position: "relative",
+            width: canvasW,
+            height: canvasH,
+            margin: `0 ${PAGE_EDGE_GAP}px ${PAGE_EDGE_GAP}px`,
+            overflow: "auto",
+            background: "#ffffff",
+            borderRadius: PAGE_SURFACE_RADIUS,
+            boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(132, 51, 0, 0.18)",
+          }}
+        >
           {overrideContent}
         </main>
       ) : (
       <FrameCanvas
-        style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }}
+        style={{
+          position: "relative",
+          width: canvasW,
+          height: canvasH,
+          margin: `0 ${PAGE_EDGE_GAP}px ${PAGE_EDGE_GAP}px`,
+          overflow: "hidden",
+          background: bgColor || UI_THEME.surface,
+          borderRadius: PAGE_SURFACE_RADIUS,
+          boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(132, 51, 0, 0.18)",
+        }}
         onClick={isFullPageView ? undefined : () => { setSelectedFrameId(null); setSelectedFrameIds(new Set()); }}
-        onContextMenu={isFullPageView ? (e) => e.preventDefault() : (e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY, gridX: Math.floor(e.clientX / stepX), gridY: Math.floor((e.clientY - HEADER_H) / stepY) }); setHeaderMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
+        onContextMenu={isFullPageView ? (e) => e.preventDefault() : (e) => {
+          e.preventDefault();
+          const bounds = e.currentTarget.getBoundingClientRect();
+          setCanvasMenu({
+            x: e.clientX,
+            y: e.clientY,
+            gridX: clamp(Math.floor((e.clientX - bounds.left) / stepX), 0, gridCols - 1),
+            gridY: clamp(Math.floor((e.clientY - bounds.top) / stepY), 0, gridRows - 1),
+          });
+          setHeaderMenu(null);
+          setFrameRightClickMenu(null);
+          setModuleTypeMenu(null);
+        }}
       >
         {isLogicGateArenaView ? (
           <React.Suspense fallback={fullPageFallback}><LazyLogicGateArenaPage frames={frames} updateFrames={updateActiveFrames} /></React.Suspense>
@@ -719,7 +754,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, onNavigate, overr
           <React.Suspense fallback={fullPageFallback}><LazyCommunicationsPage embedded /></React.Suspense>
         ) : (
           <>
-        <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
+        <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={canvasW} height={canvasH} color={crossColor} />
         {editMode && draggingId && (() => {
           const activeFrame = frames.find((w) => w.id === draggingId);
           if (!activeFrame || activeFrame.parentId) return null;
