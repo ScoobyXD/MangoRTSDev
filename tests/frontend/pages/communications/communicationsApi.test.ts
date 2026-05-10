@@ -4,8 +4,8 @@ import { createMessageQuery, parseEmailAddressList } from "../../../../frontend/
 
 test("communications message query omits empty values and encodes filters", () => {
   assert.equal(
-    createMessageQuery({ limit: 25, folderID: "inbox", q: " invoice #42 ", unread: true, pageToken: "next/token" }),
-    "?limit=25&page_token=next%2Ftoken&folder_id=inbox&q=invoice+%2342&unread=true",
+    createMessageQuery({ limit: 25, mailbox: "primary", folderID: "inbox", q: " invoice #42 ", unread: true, pageToken: "next/token" }),
+    "?limit=25&page_token=next%2Ftoken&mailbox=primary&folder_id=inbox&q=invoice+%2342&unread=true",
   );
   assert.equal(createMessageQuery({ q: "   " }), "");
 });
