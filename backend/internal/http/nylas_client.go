@@ -149,6 +149,7 @@ type NylasAPIError struct {
 	StatusCode int
 	Code       string
 	Message    string
+	RetryAfter string
 }
 
 func (e NylasAPIError) Error() string {
@@ -380,7 +381,7 @@ func (c *NylasRESTClient) do(ctx context.Context, method, path string, query url
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return parseNylasAPIError(resp.StatusCode, raw)
+		return parseNylasAPIError(resp.StatusCode, resp.Header, raw)
 	}
 	if out == nil || len(strings.TrimSpace(string(raw))) == 0 {
 		return nil
@@ -391,7 +392,7 @@ func (c *NylasRESTClient) do(ctx context.Context, method, path string, query url
 	return nil
 }
 
-func parseNylasAPIError(statusCode int, raw []byte) error {
+func parseNylasAPIError(statusCode int, headers http.Header, raw []byte) error {
 	var payload struct {
 		Error   string `json:"error"`
 		Code    string `json:"code"`
@@ -404,7 +405,7 @@ func parseNylasAPIError(statusCode int, raw []byte) error {
 	if code == "" && len(strings.TrimSpace(string(raw))) > 0 {
 		message = strings.TrimSpace(string(raw))
 	}
-	return NylasAPIError{StatusCode: statusCode, Code: code, Message: message}
+	return NylasAPIError{StatusCode: statusCode, Code: code, Message: message, RetryAfter: strings.TrimSpace(headers.Get("Retry-After"))}
 }
 
 func grantPath(grantID string, parts ...string) string {

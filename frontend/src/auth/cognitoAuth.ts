@@ -413,6 +413,16 @@ function friendlyApiError(code: string): string {
       return "You are not a user.";
     case "cognito_admin_not_configured":
       return "Cognito admin actions are not configured.";
+    case "nylas_rate_limited":
+      return "Nylas is rate limiting this mailbox. Wait a moment, then refresh.";
+    case "nylas_request_failed":
+      return "Nylas could not load this mailbox right now. Wait a moment, then refresh.";
+    case "nylas_request_rejected":
+      return "Nylas rejected the mailbox request. Reconnect email if this keeps happening.";
+    case "nylas_reauth_required":
+      return "Email access expired. Disconnect and reconnect your mailbox.";
+    case "nylas_not_connected":
+      return "Connect your mailbox before opening communications.";
     case "failed_to_delete_cognito_user":
       return "The user could not be deleted in Cognito. Try again shortly.";
     case "failed_to_delete_company_user":
