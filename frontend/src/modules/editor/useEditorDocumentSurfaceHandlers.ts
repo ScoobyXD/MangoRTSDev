@@ -21,6 +21,16 @@ import {
   EDITOR_DOCUMENT_MAX_FONT_SIZE_PX,
   EDITOR_DOCUMENT_MIN_FONT_SIZE_PX,
 } from "./useEditorPreferences";
+import {
+  clampEditorImageOffset,
+  clampEditorImageSize,
+  clearEditorImageSelection,
+  createEditorImageDataFromFile,
+  createEditorImageFrame,
+  findEditorImageFrame,
+  getSelectedEditorImageFrame,
+  selectEditorImageFrame,
+} from "./editorImages";
 
 export type EditorDocumentSurfaceHandlers = Pick<
   EditorDocumentSurfaceProps,
@@ -30,6 +40,7 @@ export type EditorDocumentSurfaceHandlers = Pick<
   | "onInput"
   | "onSelect"
   | "onClick"
+  | "onPointerDown"
   | "onKeyUp"
   | "onBlur"
   | "onScroll"
@@ -198,6 +209,58 @@ function replaceSelectionWithHTML(root: HTMLElement, html: string): boolean {
   selection?.removeAllRanges();
   selection?.addRange(range);
   return true;
+}
+
+function getImageFileFromDataTransfer(dataTransfer: DataTransfer): File | null {
+  for (let index = 0; index < dataTransfer.items.length; index += 1) {
+    const item = dataTransfer.items[index];
+    if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+    const file = item.getAsFile();
+    if (file) return file;
+  }
+  for (let index = 0; index < dataTransfer.files.length; index += 1) {
+    const file = dataTransfer.files[index];
+    if (file.type.startsWith("image/")) return file;
+  }
+  return null;
+}
+
+function rangeIsStillInsideRoot(root: HTMLElement, range: Range | null): range is Range {
+  if (!range) return false;
+  try {
+    return rootContainsRange(root, range);
+  } catch {
+    return false;
+  }
+}
+
+async function insertEditorImageFile(
+  root: HTMLElement,
+  file: File,
+  savedRange: Range | null,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+) {
+  const maxDisplayWidth = Math.max(120, Math.min(720, root.clientWidth - 56));
+  const imageData = await createEditorImageDataFromFile(file, maxDisplayWidth);
+  const frame = createEditorImageFrame(root.ownerDocument, imageData);
+  removeEditorTerminalBreaks(root);
+  const range = rangeIsStillInsideRoot(root, savedRange) ? savedRange : getEditorSelectionRange(root);
+  if (range) {
+    range.deleteContents();
+    range.insertNode(frame);
+    range.setStartAfter(frame);
+    range.collapse(true);
+  } else {
+    root.appendChild(frame);
+  }
+  const selection = root.ownerDocument.getSelection();
+  if (range) {
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+  selectEditorImageFrame(root, frame);
+  commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
 }
 
 function replaceSelectionWithStyledText(root: HTMLElement, text: string, fontSize: number): boolean {
@@ -376,6 +439,73 @@ function syncSelectionFontSize(root: HTMLElement, onSelectionFontSizeChange: (fo
   if (Number.isFinite(parsed)) onSelectionFontSizeChange(clampEditorFontSize(parsed));
 }
 
+function readStylePixels(value: string, fallback: number): number {
+  const parsed = Number.parseFloat(value.trim());
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function removeSelectedEditorImage(root: HTMLElement): boolean {
+  const frame = getSelectedEditorImageFrame(root);
+  if (!frame) return false;
+  frame.remove();
+  return true;
+}
+
+function startEditorImagePointerInteraction(
+  root: HTMLElement,
+  frame: HTMLSpanElement,
+  pointerEvent: React.PointerEvent<HTMLDivElement>,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+) {
+  const ownerDocument = root.ownerDocument;
+  const frameRect = frame.getBoundingClientRect();
+  const rootRect = root.getBoundingClientRect();
+  const resizeGripSize = 18;
+  const mode = pointerEvent.clientX >= frameRect.right - resizeGripSize && pointerEvent.clientY >= frameRect.bottom - resizeGripSize
+    ? "resize"
+    : "drag";
+  const start = {
+    x: pointerEvent.clientX,
+    y: pointerEvent.clientY,
+    width: frameRect.width,
+    height: frameRect.height,
+    marginLeft: readStylePixels(frame.style.marginLeft, 0),
+    marginTop: readStylePixels(frame.style.marginTop, 4),
+  };
+  const previousCursor = ownerDocument.body.style.cursor;
+  ownerDocument.body.style.cursor = mode === "resize" ? "nwse-resize" : "move";
+
+  const onPointerMove = (event: PointerEvent) => {
+    event.preventDefault();
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (mode === "resize") {
+      const maxWidth = Math.max(96, root.clientWidth - 48);
+      frame.style.width = `${clampEditorImageSize(start.width + dx, 48, maxWidth)}px`;
+      frame.style.height = `${clampEditorImageSize(start.height + dy, 36, 1_600)}px`;
+      return;
+    }
+
+    const maxLeft = Math.max(0, root.clientWidth - frameRect.width - 48);
+    const maxTop = Math.max(0, Math.max(root.scrollHeight, rootRect.height) - frameRect.height - 24);
+    frame.style.marginLeft = `${clampEditorImageOffset(start.marginLeft + dx, maxLeft)}px`;
+    frame.style.marginTop = `${clampEditorImageOffset(start.marginTop + dy, maxTop)}px`;
+  };
+
+  const finish = () => {
+    ownerDocument.removeEventListener("pointermove", onPointerMove);
+    ownerDocument.removeEventListener("pointerup", finish);
+    ownerDocument.removeEventListener("pointercancel", finish);
+    ownerDocument.body.style.cursor = previousCursor;
+    commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+  };
+
+  ownerDocument.addEventListener("pointermove", onPointerMove);
+  ownerDocument.addEventListener("pointerup", finish, { once: true });
+  ownerDocument.addEventListener("pointercancel", finish, { once: true });
+}
+
 export function useEditorDocumentSurfaceHandlers({
   restoringScrollRef,
   currentDocumentTargetKeyRef,
@@ -437,19 +567,40 @@ export function useEditorDocumentSurfaceHandlers({
       }
     },
     onPaste(event) {
+      const imageFile = getImageFileFromDataTransfer(event.clipboardData);
+      if (imageFile) {
+        event.preventDefault();
+        pendingEditorFontSizeRef.current = null;
+        const savedRange = getEditorSelectionRange(event.currentTarget)?.cloneRange() ?? null;
+        void insertEditorImageFile(event.currentTarget, imageFile, savedRange, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        return;
+      }
+
       const text = event.clipboardData.getData("text/plain");
       if (!text) return;
       event.preventDefault();
       pendingEditorFontSizeRef.current = null;
+      clearEditorImageSelection(event.currentTarget);
       if (replaceSelectionWithHTML(event.currentTarget, linkifyEditorPlainTextToHTML(text))) {
         commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
       }
     },
     onDrop(event) {
+      const imageFile = getImageFileFromDataTransfer(event.dataTransfer);
+      if (imageFile) {
+        event.preventDefault();
+        pendingEditorFontSizeRef.current = null;
+        event.currentTarget.focus({ preventScroll: true });
+        const savedRange = getEditorSelectionRange(event.currentTarget)?.cloneRange() ?? null;
+        void insertEditorImageFile(event.currentTarget, imageFile, savedRange, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        return;
+      }
+
       const text = event.dataTransfer.getData("text/plain");
       if (!text) return;
       event.preventDefault();
       pendingEditorFontSizeRef.current = null;
+      clearEditorImageSelection(event.currentTarget);
       event.currentTarget.focus({ preventScroll: true });
       if (replaceSelectionWithHTML(event.currentTarget, linkifyEditorPlainTextToHTML(text))) {
         commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
@@ -473,6 +624,9 @@ export function useEditorDocumentSurfaceHandlers({
       syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
     },
     onClick(event) {
+      if (!findEditorImageFrame(event.currentTarget, event.target)) {
+        clearEditorImageSelection(event.currentTarget);
+      }
       pendingEditorFontSizeRef.current = null;
       syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
       const anchor = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
@@ -480,6 +634,18 @@ export function useEditorDocumentSurfaceHandlers({
       event.preventDefault();
       event.stopPropagation();
       if (event.ctrlKey || event.metaKey) window.open(anchor.href, "_blank", "noopener,noreferrer");
+    },
+    onPointerDown(event) {
+      const frame = findEditorImageFrame(event.currentTarget, event.target);
+      if (!frame) return;
+      event.preventDefault();
+      event.stopPropagation();
+      pendingEditorFontSizeRef.current = null;
+      event.currentTarget.focus({ preventScroll: true });
+      selectEditorImageFrame(event.currentTarget, frame);
+      if (event.button === 0) {
+        startEditorImagePointerInteraction(event.currentTarget, frame, event, scheduleDocumentSave, scheduleIndentGuideUpdate);
+      }
     },
     onKeyUp(event) {
       if (pendingEditorFontSizeRef.current !== null) {
@@ -506,15 +672,23 @@ export function useEditorDocumentSurfaceHandlers({
       if (event.key === "Escape") {
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
+        clearEditorImageSelection(event.currentTarget);
         event.currentTarget.blur();
         return;
       }
 
       if (PENDING_FONT_SIZE_CANCEL_KEYS.has(event.key)) pendingEditorFontSizeRef.current = null;
 
+      if ((event.key === "Backspace" || event.key === "Delete") && removeSelectedEditorImage(event.currentTarget)) {
+        event.preventDefault();
+        commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        return;
+      }
+
       if (event.key === "Enter") {
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
+        clearEditorImageSelection(event.currentTarget);
         const offsets = getEditorSelectionOffsets(event.currentTarget);
         if (!offsets) return;
         const currentText = readEditorDocumentText(event.currentTarget);
@@ -539,6 +713,7 @@ export function useEditorDocumentSurfaceHandlers({
         if (!edit) return;
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
+        clearEditorImageSelection(event.currentTarget);
         if (deleteTextByOffsets(event.currentTarget, edit.selectionStart, offsets.start)) {
           commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
         }
@@ -548,6 +723,7 @@ export function useEditorDocumentSurfaceHandlers({
       if (event.key !== "Tab") return;
       event.preventDefault();
       pendingEditorFontSizeRef.current = null;
+      clearEditorImageSelection(event.currentTarget);
       const offsets = getEditorSelectionOffsets(event.currentTarget);
       if (!offsets) return;
       const anchor = !event.shiftKey ? getCollapsedAnchorAtSelectionEnd(event.currentTarget) : null;

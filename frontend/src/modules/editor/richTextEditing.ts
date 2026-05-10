@@ -1,3 +1,9 @@
+import {
+  createEditorImageFrame,
+  EDITOR_IMAGE_NODE_ATTRIBUTE,
+  readEditorImageData,
+} from "./editorImages.js";
+
 export const EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES = 20;
 export const EDITOR_RICH_TEXT_PREFIX = "<!-- mango-editor-html-v1 -->";
 export const EDITOR_LINK_COLOR = "rgb(0, 86, 214)";
@@ -115,6 +121,11 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
   }
 
   if (tagName === "span") {
+    const imageData = readEditorImageData(element);
+    if (imageData) {
+      target.appendChild(createEditorImageFrame(ownerDocument, imageData));
+      return;
+    }
     const span = ownerDocument.createElement("span");
     applySafeFontSize(element, span);
     appendSanitizedChildren(element, span, ownerDocument);
@@ -153,6 +164,7 @@ function collapseRedundantFontSizeSpans(root: HTMLElement) {
     changed = false;
     const spans = Array.from(root.querySelectorAll("span")) as HTMLSpanElement[];
     for (const span of spans) {
+      if (span.getAttribute(EDITOR_IMAGE_NODE_ATTRIBUTE) === "true") continue;
       if (!hasSafeFontSize(span)) continue;
       const meaningfulChildren = Array.from(span.childNodes).filter((child) => !isEmptyTextNode(child));
       if (meaningfulChildren.length !== 1) continue;

@@ -81,6 +81,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/node-relationships/", s.handleNodeRelationshipByID)
 	mux.HandleFunc("/v1/workspace/snapshot", s.handleWorkspaceSnapshot)
 	mux.HandleFunc("/v1/workspace/stream", s.handleWorkspaceStream)
+	mux.HandleFunc("/v1/editor/collaboration/events", s.handleEditorCollaborationEvents)
 	mux.HandleFunc("/v1/company-explorer/folders", s.handleCompanyExplorerFolders)
 	mux.HandleFunc("/v1/company-explorer/folders/", s.handleCompanyExplorerFolderByID)
 	mux.HandleFunc("/v1/company-explorer/delete-batch", s.handleCompanyExplorerDeleteBatch)

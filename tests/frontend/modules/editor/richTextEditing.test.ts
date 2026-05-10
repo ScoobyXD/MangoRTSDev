@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, deserializeEditorDocumentHTML, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
+import { isSafeEditorImageSource } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
   assert.equal(EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, 20);
@@ -37,4 +38,10 @@ test("editor sanitizer collapses nested font-size wrappers to the final size", (
   const html = sanitizeEditorDocumentHTML('<span style="font-size: 14px;"><span style="font-size: 15px;"><span style="font-size: 16px;">nice</span></span></span>');
 
   assert.equal(html, '<span style="font-size: 16px;">nice</span>');
+});
+
+test("editor image source sanitizer only accepts raster data images", () => {
+  assert.equal(isSafeEditorImageSource("data:image/png;base64,iVBORw0KGgo="), true);
+  assert.equal(isSafeEditorImageSource("data:image/svg+xml;base64,PHN2Zy8+"), false);
+  assert.equal(isSafeEditorImageSource("https://example.test/image.png"), false);
 });

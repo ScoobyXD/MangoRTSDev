@@ -44,6 +44,16 @@ import {
 import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHandlers";
 import { useEditorDocumentPersistence } from "./useEditorDocumentPersistence";
 import { getActiveCompanyID } from "../../auth/currentCompany";
+import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
+import {
+  createEditorCollaborationClientID,
+  editorCollaborationLabel,
+  editorCollaboratorColor,
+  parseEditorCollaborationWorkspaceEvent,
+  publishEditorCollaborationEvent,
+  sameEditorCollaborationTarget,
+  type EditorCollaborationEventPayload,
+} from "./editorCollaboration";
 
 function clampEditorSelectionFontSize(value: number): number {
   return Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, Math.round(value)));
@@ -114,7 +124,17 @@ type CompanyUser = {
   role?: string;
 };
 
+type EditorCollaboratorPresence = {
+  clientID: string;
+  name: string;
+  color: string;
+  lastSeen: number;
+};
+
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const EDITOR_COLLABORATOR_TTL_MS = 30_000;
+const EDITOR_COLLABORATION_SEND_DELAY_MS = 140;
+const EDITOR_REMOTE_APPLY_IDLE_MS = 900;
 
 function companyUserOptionLabel(user: CompanyUser): string {
   const name = (user.display_name ?? "").trim();
@@ -158,7 +178,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [nodeAssigneeDraft, setNodeAssigneeDraft] = useState("");
   const [nodeAssigneeUserID, setNodeAssigneeUserID] = useState("");
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
-  const [, setDocumentInformationID] = useState("");
+  const [documentInformationID, setDocumentInformationID] = useState("");
+  const [collaborators, setCollaborators] = useState<EditorCollaboratorPresence[]>([]);
+  const [collaborationStatus, setCollaborationStatus] = useState("");
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(outlineStyleStorageKey);
@@ -189,6 +211,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const lastAppliedSelectionChangedAtRef = useRef(0);
   const shouldFocusEditorForSelectionRef = useRef(true);
   const pendingEditorFontSizeRef = useRef<number | null>(null);
+  const collaborationClientIDRef = useRef(createEditorCollaborationClientID());
+  const collaborationSendTimerRef = useRef<number | null>(null);
+  const collaborationStatusTimerRef = useRef<number | null>(null);
+  const pendingCollaborationHTMLRef = useRef<string | null>(null);
+  const applyingRemoteCollaborationRef = useRef(false);
+  const lastLocalCollaborationEditAtRef = useRef(0);
+  const pendingRemoteCollaborationRef = useRef<EditorCollaborationEventPayload | null>(null);
+  const remoteCollaborationTimerRef = useRef<number | null>(null);
+  const remoteRevisionByClientRef = useRef(new Map<string, number>());
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -343,6 +374,110 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     invalidateDocumentTargetCaches,
   });
 
+  const publishCollaborationEvent = useCallback((eventType: EditorCollaborationEventPayload["eventType"], documentHTML?: string) => {
+    if (!companyID || !linkedNodeID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) return;
+    const revision = Date.now();
+    void publishEditorCollaborationEvent(apiBase, companyID, {
+      eventType,
+      entityKind: linkedEntityKind,
+      entityID: linkedNodeID,
+      informationID: documentInformationIDRef.current || documentInformationID,
+      clientID: collaborationClientIDRef.current,
+      documentHTML,
+      revision,
+    }).catch(() => {
+      // Collaboration is opportunistic; durable autosave remains the source of truth.
+    });
+  }, [apiBase, companyID, documentInformationID, linkedEntityKind, linkedNodeID]);
+
+  const queueCollaborationDocumentUpdate = useCallback((documentHTML: string, immediate = false) => {
+    if (applyingRemoteCollaborationRef.current) return;
+    lastLocalCollaborationEditAtRef.current = Date.now();
+    pendingCollaborationHTMLRef.current = documentHTML;
+    if (collaborationSendTimerRef.current !== null) {
+      window.clearTimeout(collaborationSendTimerRef.current);
+      collaborationSendTimerRef.current = null;
+    }
+    const publishPending = () => {
+      collaborationSendTimerRef.current = null;
+      const pendingHTML = pendingCollaborationHTMLRef.current;
+      pendingCollaborationHTMLRef.current = null;
+      if (pendingHTML !== null) publishCollaborationEvent("document_update", pendingHTML);
+    };
+    if (immediate) {
+      publishPending();
+      return;
+    }
+    collaborationSendTimerRef.current = window.setTimeout(publishPending, EDITOR_COLLABORATION_SEND_DELAY_MS);
+  }, [publishCollaborationEvent]);
+
+  const scheduleCollaborativeDocumentSave = useCallback((nextText: string, immediate = false) => {
+    scheduleDocumentSave(nextText, immediate);
+    queueCollaborationDocumentUpdate(nextText, immediate);
+  }, [queueCollaborationDocumentUpdate, scheduleDocumentSave]);
+
+  const flashCollaborationStatus = useCallback((message: string) => {
+    setCollaborationStatus(message);
+    if (collaborationStatusTimerRef.current !== null) window.clearTimeout(collaborationStatusTimerRef.current);
+    collaborationStatusTimerRef.current = window.setTimeout(() => {
+      collaborationStatusTimerRef.current = null;
+      setCollaborationStatus("");
+    }, 2_400);
+  }, []);
+
+  const applyRemoteCollaborationUpdate = useCallback((payload: EditorCollaborationEventPayload) => {
+    const element = editorDocumentRef.current;
+    if (!element || payload.documentHTML === undefined) return;
+    if (linkedEntityKind !== payload.entityKind || linkedNodeID !== payload.entityID) return;
+    const lastRevision = remoteRevisionByClientRef.current.get(payload.clientID) ?? 0;
+    if (payload.revision <= lastRevision) return;
+    remoteRevisionByClientRef.current.set(payload.clientID, payload.revision);
+
+    const currentHTML = serializeEditorDocumentHTML(element);
+    if (currentHTML === payload.documentHTML) return;
+    applyingRemoteCollaborationRef.current = true;
+    try {
+      const nextHTML = deserializeEditorDocumentHTML(payload.documentHTML);
+      element.innerHTML = nextHTML;
+      documentDraftRef.current = payload.documentHTML;
+      if (payload.informationID && !documentInformationIDRef.current) {
+        documentInformationIDRef.current = payload.informationID;
+        setDocumentInformationID(payload.informationID);
+      }
+      const informationID = payload.informationID || documentInformationIDRef.current;
+      if (informationID) {
+        persistedDocumentRef.current = payload.documentHTML;
+        persistedDocumentTargetKeyRef.current = documentTargetKey({ entityKind: payload.entityKind, entityID: payload.entityID, informationID });
+      }
+      scheduleIndentGuideUpdate(readEditorDocumentText(element));
+      flashCollaborationStatus(`${editorCollaborationLabel(payload.clientID, payload.clientName)} edited`);
+    } finally {
+      window.requestAnimationFrame(() => {
+        applyingRemoteCollaborationRef.current = false;
+      });
+    }
+  }, [flashCollaborationStatus, linkedEntityKind, linkedNodeID, scheduleIndentGuideUpdate]);
+
+  const applyOrDeferRemoteCollaborationUpdate = useCallback((payload: EditorCollaborationEventPayload) => {
+    const localEditorIsActive = Date.now() - lastLocalCollaborationEditAtRef.current < EDITOR_REMOTE_APPLY_IDLE_MS
+      || pendingSaveRef.current !== null
+      || saveInFlightRef.current;
+    if (localEditorIsActive) {
+      pendingRemoteCollaborationRef.current = payload;
+      flashCollaborationStatus(`${editorCollaborationLabel(payload.clientID, payload.clientName)} edited`);
+      if (remoteCollaborationTimerRef.current !== null) return;
+      remoteCollaborationTimerRef.current = window.setTimeout(() => {
+        remoteCollaborationTimerRef.current = null;
+        const pending = pendingRemoteCollaborationRef.current;
+        pendingRemoteCollaborationRef.current = null;
+        if (pending) applyOrDeferRemoteCollaborationUpdate(pending);
+      }, EDITOR_REMOTE_APPLY_IDLE_MS);
+      return;
+    }
+    pendingRemoteCollaborationRef.current = null;
+    applyRemoteCollaborationUpdate(payload);
+  }, [applyRemoteCollaborationUpdate, flashCollaborationStatus, pendingSaveRef, saveInFlightRef]);
+
   const applyEditorSelectionFontSizeValue = useCallback((nextFontSizeInput: number) => {
     const element = editorDocumentRef.current;
     if (!element) return;
@@ -368,9 +503,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     range.insertNode(span);
     selectElementContents(span);
     pendingEditorFontSizeRef.current = null;
-    scheduleDocumentSave(serializeEditorDocumentHTML(element));
+    scheduleCollaborativeDocumentSave(serializeEditorDocumentHTML(element));
     scheduleIndentGuideUpdate(readEditorDocumentText(element));
-  }, [scheduleDocumentSave, scheduleIndentGuideUpdate]);
+  }, [scheduleCollaborativeDocumentSave, scheduleIndentGuideUpdate]);
 
   const updateSelectionFontSize = useCallback((nextFontSize: number) => {
     setSelectionFontSize(clampEditorSelectionFontSize(nextFontSize));
@@ -702,6 +837,69 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [isEditingTitle]);
 
   useEffect(() => {
+    if (!companyID || !linkedNodeID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) {
+      setCollaborators([]);
+      return;
+    }
+    const currentTarget = { entityKind: linkedEntityKind, entityID: linkedNodeID };
+    return subscribeWorkspaceStream(apiBase, companyID, {
+      onEvent(event) {
+        if (event.event !== "workspace") return;
+        const payload = parseEditorCollaborationWorkspaceEvent(event.data);
+        if (!payload || payload.clientID === collaborationClientIDRef.current) return;
+        if (!sameEditorCollaborationTarget(payload, currentTarget)) return;
+
+        if (payload.eventType === "leave") {
+          setCollaborators((current) => current.filter((item) => item.clientID !== payload.clientID));
+          return;
+        }
+
+        const seenAt = Date.now();
+        setCollaborators((current) => {
+          const remaining = current.filter((item) => item.clientID !== payload.clientID && seenAt - item.lastSeen < EDITOR_COLLABORATOR_TTL_MS);
+          return [
+            ...remaining,
+            {
+              clientID: payload.clientID,
+              name: editorCollaborationLabel(payload.clientID, payload.clientName),
+              color: editorCollaboratorColor(payload.clientID),
+              lastSeen: seenAt,
+            },
+          ];
+        });
+
+        if (payload.eventType === "document_update") {
+          applyOrDeferRemoteCollaborationUpdate(payload);
+        }
+      },
+    });
+  }, [apiBase, applyOrDeferRemoteCollaborationUpdate, companyID, linkedEntityKind, linkedNodeID]);
+
+  useEffect(() => {
+    if (!companyID || !linkedNodeID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) return;
+    publishCollaborationEvent("presence");
+    const intervalID = window.setInterval(() => publishCollaborationEvent("presence"), 10_000);
+    return () => {
+      window.clearInterval(intervalID);
+      publishCollaborationEvent("leave");
+    };
+  }, [companyID, linkedEntityKind, linkedNodeID, publishCollaborationEvent]);
+
+  useEffect(() => {
+    const intervalID = window.setInterval(() => {
+      const now = Date.now();
+      setCollaborators((current) => current.filter((item) => now - item.lastSeen < EDITOR_COLLABORATOR_TTL_MS));
+    }, 5_000);
+    return () => window.clearInterval(intervalID);
+  }, []);
+
+  useEffect(() => () => {
+    if (collaborationSendTimerRef.current !== null) window.clearTimeout(collaborationSendTimerRef.current);
+    if (collaborationStatusTimerRef.current !== null) window.clearTimeout(collaborationStatusTimerRef.current);
+    if (remoteCollaborationTimerRef.current !== null) window.clearTimeout(remoteCollaborationTimerRef.current);
+  }, []);
+
+  useEffect(() => {
     const refresh = () => {
       setLinkedMapWidgetID(readLinkedMapWidgetID());
       setLinkedLogicMapWidgetID(readLinkedLogicMapWidgetID());
@@ -1001,12 +1199,16 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     pendingEditorFontSizeRef,
     outlineStyle,
     setDocumentScrollTop,
-    scheduleDocumentSave,
+    scheduleDocumentSave: scheduleCollaborativeDocumentSave,
     scheduleIndentGuideUpdate,
     rememberCurrentDocumentScroll,
     flushPendingDocumentSave,
     onSelectionFontSizeChange: updateSelectionFontSize,
   });
+  const visibleCollaborators = useMemo(() => {
+    const now = Date.now();
+    return collaborators.filter((item) => now - item.lastSeen < EDITOR_COLLABORATOR_TTL_MS);
+  }, [collaborators]);
 
   return (
     <div
@@ -1073,6 +1275,26 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onCommitNodeDueDateDraft={commitNodeDueDateDraft}
           />
 
+          </div>
+        )}
+
+        {hasLinkedDocument && (visibleCollaborators.length > 0 || collaborationStatus) && (
+          <div style={{ position: "absolute", top: 42, right: 12, zIndex: 6, display: "flex", alignItems: "center", gap: 6, maxWidth: "58%", pointerEvents: "none", justifyContent: "flex-end", flexWrap: "wrap" }}>
+            {collaborationStatus && (
+              <div style={{ border: `1px solid ${strokeColor}`, background: tabSelectedBackground, color: surfaceText, borderRadius: 6, padding: "4px 7px", fontSize: 10, fontWeight: 700, boxShadow: "0 6px 18px rgba(0,0,0,0.08)" }}>
+                {collaborationStatus}
+              </div>
+            )}
+            {visibleCollaborators.map((collaborator) => (
+              <div
+                key={collaborator.clientID}
+                title={collaborator.name}
+                style={{ display: "inline-flex", alignItems: "center", gap: 5, minWidth: 0, maxWidth: 150, border: `1px solid ${strokeColor}`, background: tabSelectedBackground, color: surfaceText, borderRadius: 6, padding: "3px 7px 3px 4px", fontSize: 10, fontWeight: 800, boxShadow: "0 6px 18px rgba(0,0,0,0.08)" }}
+              >
+                <span aria-hidden="true" style={{ width: 14, height: 14, borderRadius: 999, background: collaborator.color, flex: "0 0 auto" }} />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{collaborator.name}</span>
+              </div>
+            ))}
           </div>
         )}
 
