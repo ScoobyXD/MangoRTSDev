@@ -70,6 +70,14 @@ func parseKanbanCardQueryParams(r *http.Request) (store.KanbanCardQuery, bool, s
 	return query, true, ""
 }
 
+func (s *Server) publishKanbanDerivedNodeUpdate(companyID, nodeID string) {
+	node, err := s.repo.GetNode(companyID, nodeID)
+	if err != nil {
+		return
+	}
+	s.publishWorkspaceEvent(companyID, "node_updated", map[string]any{"node_id": node.NodeID, "node": node})
+}
+
 func (s *Server) handleKanbanBoards(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
@@ -392,6 +400,9 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 		"card_id":  item.CardID,
 		"card":     item,
 	})
+	if item.LogicGateID != nil {
+		s.publishKanbanDerivedNodeUpdate(req.CompanyID, item.NodeID)
+	}
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -448,6 +459,9 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			"card_id":  cardID,
 			"card":     item,
 		})
+		if item.LogicGateID != nil {
+			s.publishKanbanDerivedNodeUpdate(req.CompanyID, item.NodeID)
+		}
 		writeJSON(w, http.StatusOK, item)
 		return
 	}

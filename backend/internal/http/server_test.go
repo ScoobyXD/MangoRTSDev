@@ -7,9 +7,25 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"miraeopus/backend/internal/store"
 )
+
+func readWorkspaceEventForTest(t *testing.T, ch chan []byte) workspaceEventEnvelope {
+	t.Helper()
+	select {
+	case payload := <-ch:
+		var event workspaceEventEnvelope
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatalf("decode workspace event: %v", err)
+		}
+		return event
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for workspace event")
+		return workspaceEventEnvelope{}
+	}
+}
 
 func TestIsLegalNodeRelationshipPositionPair(t *testing.T) {
 	t.Parallel()
@@ -1691,6 +1707,9 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 		t.Fatalf("created logic-gate card = %+v", createdCard)
 	}
 
+	stream := server.hub.subscribe(companyID)
+	defer server.hub.unsubscribe(companyID, stream)
+
 	issueBody, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
 		"board_id":   boardID,
@@ -1712,6 +1731,18 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 	}
 	if !issueCard.IsIssue || issueCard.ColumnID != columnID {
 		t.Fatalf("issue card = %+v, want issue without move", issueCard)
+	}
+	cardEvent := readWorkspaceEventForTest(t, stream)
+	nodeEvent := readWorkspaceEventForTest(t, stream)
+	if cardEvent.Type != "kanban_card_moved" {
+		t.Fatalf("first workspace event type = %q, want kanban_card_moved", cardEvent.Type)
+	}
+	if nodeEvent.Type != "node_updated" || nodeEvent.Data["node_id"] != node.NodeID {
+		t.Fatalf("second workspace event = %+v, want node_updated for %q", nodeEvent, node.NodeID)
+	}
+	nodePayload, ok := nodeEvent.Data["node"].(map[string]any)
+	if !ok || nodePayload["status"] != "Issue" {
+		t.Fatalf("node_updated payload = %+v, want derived Issue status", nodeEvent.Data["node"])
 	}
 
 	updateNodeBody, _ := json.Marshal(map[string]any{
