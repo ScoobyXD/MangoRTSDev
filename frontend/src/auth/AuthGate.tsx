@@ -3,6 +3,7 @@ import { createLogicGateArenaFrames } from "../app/DefaultViews";
 import { preloadCommunicationsSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface } from "../app/preloadDashboardModules";
 import { LazyCommunicationsPage, LazyLogicGateArenaPage } from "../pages/lazyPages";
 import { computeLinkPlan, mergeLinkPlan } from "../app/frameLinking";
+import { MangoWordmark } from "../app/MangoLogo";
 import { UI_THEME } from "../app/frameLayoutTypes";
 import { loadFrameLinks, loadSettings, persistFrameLinks, persistFrameRegistry } from "../app/useFramePersistence";
 import type { FrameDataModel } from "../types";
@@ -169,7 +170,7 @@ const buttonStyle: React.CSSProperties = {
   background: "linear-gradient(90deg, rgba(251, 177, 82, 1), rgba(254, 169, 78, 1), rgba(254, 155, 70, 1), rgba(255, 136, 32, 1))",
   color: "#24120a",
   cursor: "pointer",
-  fontWeight: 800,
+  fontWeight: 600,
 };
 
 export default function AuthGate() {
@@ -522,7 +523,7 @@ function CompanySearchSelect({
                 style={{ ...settingsCompanyOptionButtonStyle, background: selectedOption ? "rgba(255, 136, 32, 0.18)" : "transparent" }}
               >
                 <span style={{ minWidth: 0, display: "grid", gap: 2 }}>
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#000000", fontWeight: 900 }}>{companyName(company)}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#000000", fontWeight: 600 }}>{companyName(company)}</span>
                   <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#000000", fontSize: 10 }}>{company.company_id}</span>
                 </span>
                 <span aria-hidden="true" style={{ display: "grid", placeItems: "center" }}>
@@ -715,7 +716,7 @@ function ForgotPasswordPage({ onNavigate, initialCodeEntryOpen = false }: { onNa
             setBusy(false);
           }
         }}>
-          <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 800 }}>
+          <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 600 }}>
             Enter reset code in here
             <input style={inputStyle} value={code} onChange={(event) => setCode(event.target.value)} placeholder="Reset code" autoComplete="one-time-code" />
           </label>
@@ -1016,7 +1017,7 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
       {deleteConfirmation && (
         <div style={modalBackdropStyle}>
           <div style={modalStyle}>
-            <div style={{ fontSize: 12, fontWeight: 800, color: "#000000" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#000000" }}>
               Are you sure you want to delete this user?
             </div>
             <div style={{ fontSize: 11, lineHeight: 1.4, color: "#000000", overflowWrap: "anywhere" }}>
@@ -1047,7 +1048,7 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
                     setDeleteBusy(false);
                   }
                 }}
-                style={{ ...smallButtonStyle, minHeight: 34, fontWeight: 800 }}
+                style={{ ...smallButtonStyle, minHeight: 34, fontWeight: 600 }}
               >
                 {deleteBusy ? "Deleting" : "Yes"}
               </button>
@@ -1073,7 +1074,7 @@ function AuthPanel({ title, error, children }: { title: string; error?: string; 
   return (
     <div style={panelStyle}>
       <div style={formStyle}>
-        <h1 style={{ margin: 0, fontSize: 22, textTransform: "uppercase" }}>{title}</h1>
+        <h1 style={{ margin: 0, lineHeight: 1 }}>{title === "MangoRTS" ? <MangoWordmark size={28} weight={500} /> : title}</h1>
         {error && <div style={{ color: "#9c1b1b", fontSize: 12 }}>{error}</div>}
         {children}
       </div>
@@ -1085,10 +1086,10 @@ function AccountBar({ me, onNavigate }: { me: CurrentUserResponse; onNavigate: (
   const displayName = me.user.display_name?.trim() || me.user.email;
   const headerBackground = loadSettings().headerBgColor || UI_THEME.panel;
   const headerText = loadSettings().headerTextColor || UI_THEME.text;
-  const navButtonStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 5, height: 28, border: "none", background: "transparent", color: headerText, cursor: "pointer", font: "inherit", fontWeight: 900, padding: 0, whiteSpace: "nowrap" };
+  const navButtonStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 5, height: 28, border: "none", background: "transparent", color: headerText, cursor: "pointer", font: "inherit", fontWeight: 500, padding: 0, whiteSpace: "nowrap" };
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, height: "100%", padding: "0 8px", background: headerBackground, color: headerText, fontFamily: "var(--mango-font-family)", fontSize: 11 }}>
-      <span style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, maxWidth: 160, color: headerText, fontWeight: 800 }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, maxWidth: 160, color: headerText, fontWeight: 500 }}>
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
         <PersonIcon />
       </span>
@@ -1128,7 +1129,7 @@ const smallButtonStyle: React.CSSProperties = {
   color: "#000000",
   cursor: "pointer",
   font: "inherit",
-  fontWeight: 800,
+  fontWeight: 600,
   padding: "0 10px",
   boxShadow: "0 0 0 1px rgba(255, 136, 32, 0.12) inset",
 };
@@ -1154,7 +1155,7 @@ const settingsPageTitleStyle: React.CSSProperties = {
   margin: 0,
   fontSize: 18,
   color: "#000000",
-  textTransform: "uppercase",
+  fontWeight: 500,
 };
 
 const settingsNavStyle: React.CSSProperties = {
@@ -1168,7 +1169,7 @@ const settingsErrorStyle: React.CSSProperties = {
   color: "#000000",
   marginBottom: 10,
   fontSize: 12,
-  fontWeight: 800,
+  fontWeight: 600,
 };
 
 const settingsErrorSmallStyle: React.CSSProperties = {
@@ -1185,8 +1186,7 @@ const settingsInfoTextStyle: React.CSSProperties = {
 const settingsFieldLabelStyle: React.CSSProperties = {
   color: "#000000",
   fontSize: 10,
-  fontWeight: 900,
-  textTransform: "uppercase",
+  fontWeight: 500,
 };
 
 const settingsInputStyle: React.CSSProperties = {
@@ -1199,7 +1199,7 @@ const settingsInputStyle: React.CSSProperties = {
   color: "#000000",
   font: "inherit",
   fontSize: 12,
-  fontWeight: 800,
+  fontWeight: 500,
   padding: "0 10px",
   outline: "none",
   boxShadow: "0 0 0 1px rgba(255, 136, 32, 0.08) inset",
@@ -1213,7 +1213,7 @@ const settingsPrimaryButtonStyle: React.CSSProperties = {
   color: "#000000",
   cursor: "pointer",
   font: "inherit",
-  fontWeight: 900,
+  fontWeight: 600,
   padding: "0 12px",
   boxShadow: "0 0 18px rgba(255, 136, 32, 0.22)",
 };
@@ -1232,7 +1232,7 @@ const settingsSelectButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   font: "inherit",
   fontSize: 12,
-  fontWeight: 900,
+  fontWeight: 500,
   padding: "0 10px",
   textAlign: "left",
 };
@@ -1281,7 +1281,7 @@ const settingsOptionButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   font: "inherit",
   fontSize: 12,
-  fontWeight: 900,
+  fontWeight: 500,
   padding: "7px 8px",
   textAlign: "left",
 };
@@ -1295,7 +1295,7 @@ const settingsEmptyOptionStyle: React.CSSProperties = {
   padding: "8px 10px",
   color: "#000000",
   fontSize: 11,
-  fontWeight: 800,
+  fontWeight: 500,
 };
 
 const settingsScopePlateStyle: React.CSSProperties = {
@@ -1310,15 +1310,14 @@ const settingsScopePlateStyle: React.CSSProperties = {
 const settingsScopeKickerStyle: React.CSSProperties = {
   color: "#000000",
   fontSize: 10,
-  fontWeight: 900,
-  textTransform: "uppercase",
+  fontWeight: 500,
 };
 
 const settingsScopeNameStyle: React.CSSProperties = {
   minWidth: 0,
   color: "#000000",
   fontSize: 15,
-  fontWeight: 900,
+  fontWeight: 600,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
@@ -1336,7 +1335,7 @@ const settingsActiveScopeStyle: React.CSSProperties = {
   background: "#ffffff",
   color: "#000000",
   fontSize: 11,
-  fontWeight: 900,
+  fontWeight: 600,
   padding: "7px 8px",
 };
 
@@ -1351,8 +1350,7 @@ const settingsSubsectionTitleStyle: React.CSSProperties = {
   margin: 0,
   color: "#000000",
   fontSize: 11,
-  fontWeight: 900,
-  textTransform: "uppercase",
+  fontWeight: 600,
 };
 
 const settingsTokenStyle: React.CSSProperties = {
@@ -1371,7 +1369,7 @@ const settingsSectionScopeStyle: React.CSSProperties = {
   minWidth: 0,
   color: "#000000",
   fontSize: 11,
-  fontWeight: 800,
+  fontWeight: 500,
 };
 
 const sectionStyle: React.CSSProperties = {
@@ -1395,9 +1393,9 @@ const settingsTopRowStyle: React.CSSProperties = {
 const sectionTitleStyle: React.CSSProperties = {
   margin: 0,
   fontSize: 13,
-  textTransform: "uppercase",
   color: "#000000",
   letterSpacing: 0,
+  fontWeight: 600,
 };
 
 const settingsProfileHeaderStyle: React.CSSProperties = {
@@ -1413,7 +1411,7 @@ const successMessageStyle: React.CSSProperties = {
   gap: 8,
   color: "#000000",
   fontSize: 13,
-  fontWeight: 800,
+  fontWeight: 600,
 };
 
 const successBoxStyle: React.CSSProperties = {
@@ -1421,7 +1419,7 @@ const successBoxStyle: React.CSSProperties = {
   gap: 4,
   color: "#000000",
   fontSize: 12,
-  fontWeight: 800,
+  fontWeight: 600,
   border: "1px solid rgba(101, 247, 167, 0.36)",
   borderRadius: 6,
   background: "#ffffff",
@@ -1457,8 +1455,7 @@ const profileGridStyle: React.CSSProperties = {
 
 const profileLabelStyle: React.CSSProperties = {
   color: "#000000",
-  fontWeight: 800,
-  textTransform: "uppercase",
+  fontWeight: 500,
 };
 
 const profileValueStyle: React.CSSProperties = {

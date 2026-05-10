@@ -114,7 +114,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
               onRefreshBoards();
             }
           }}
-          style={{ minWidth: 0, height: 25, border: "none", borderBottom: `1px solid ${accent}`, background: "transparent", color: text, fontSize: 14, fontWeight: 900, padding: "0 2px", outline: "none" }}
+          style={{ minWidth: 0, height: 25, border: "none", borderBottom: `1px solid ${accent}`, background: "transparent", color: text, fontSize: 14, fontWeight: 500, padding: "0 2px", outline: "none" }}
         />
       ) : (
         <button
@@ -125,7 +125,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
             onSetBoardTitleDraft(activeBoardTitle);
             onSetEditingBoardTitle(true);
           }}
-          style={{ minWidth: 0, height: 25, border: "none", background: "transparent", color: text, cursor: boardTitleReadOnly ? "default" : "text", fontSize: 14, fontWeight: 900, textAlign: "left", padding: "0 2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          style={{ minWidth: 0, height: 25, border: "none", background: "transparent", color: text, cursor: boardTitleReadOnly ? "default" : "text", fontSize: 14, fontWeight: 500, textAlign: "left", padding: "0 2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
         >
           {activeBoardTitle}
         </button>
@@ -136,7 +136,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
           value={boardSearchQuery}
           onChange={(event) => onSetBoardSearchQuery(event.target.value)}
           placeholder="Search boards"
-          style={{ width: "100%", height: "100%", boxSizing: "border-box", border: `1px solid ${line}`, background: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.92)", color: text, fontSize: 11, fontWeight: 700, padding: "0 28px 0 8px", outline: "none" }}
+          style={{ width: "100%", height: "100%", boxSizing: "border-box", border: `1px solid ${line}`, background: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.92)", color: text, fontSize: 11, fontWeight: 500, padding: "0 28px 0 8px", outline: "none" }}
         />
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ position: "absolute", right: 8, top: 5, color: subtext, pointerEvents: "none" }}>
           <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -146,14 +146,14 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
       <button
         type="button"
         onClick={onToggleAllBoards}
-        style={{ height: 25, display: "flex", alignItems: "center", gap: 6, border: `1px solid ${allBoardsOpen ? accent : line}`, background: allBoardsOpen ? (isDark ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.98)") : (isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)"), color: text, fontSize: 10, fontWeight: 800, letterSpacing: 0, textTransform: "uppercase", padding: "0 9px", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
+        style={{ height: 25, display: "flex", alignItems: "center", gap: 6, border: `1px solid ${allBoardsOpen ? accent : line}`, background: allBoardsOpen ? (isDark ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.98)") : (isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)"), color: text, fontSize: 10, fontWeight: 500, letterSpacing: 0, padding: "0 9px", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
       >
         <span aria-hidden="true" style={{ width: 12, display: "grid", gap: 2 }}>
           <span style={{ height: 2, background: text }} />
           <span style={{ height: 2, background: text }} />
           <span style={{ height: 2, background: text }} />
         </span>
-        All Boards
+        All boards
       </button>
     </div>
     {boardPickerOpen && (
@@ -162,7 +162,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
           {!boardsLoading && filteredBoardRowsLength === 0 && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>No saved boards</div>}
           {filteredBoardGroups.map((group) => (
             <div key={group.folderLabel}>
-              <div style={{ padding: "8px 12px 4px", color: subtext, fontSize: 10, fontWeight: 800, letterSpacing: 0, textTransform: "uppercase" }}>
+              <div style={{ padding: "8px 12px 4px", color: subtext, fontSize: 10, fontWeight: 500, letterSpacing: 0 }}>
                 {group.folderLabel}
               </div>
               {group.items.map((board) => {
@@ -176,7 +176,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
                     style={{ width: "100%", display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, minHeight: 30, padding: "5px 12px 5px 24px", border: "none", background: selected ? (isDark ? "rgba(255,136,32,0.2)" : "rgba(255, 136, 32, 0.22)") : "transparent", color: text, cursor: "pointer", textAlign: "left" }}
                   >
                     <KanbanBoardIcon />
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 800 : 700 }}>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 600 : 500 }}>
                       {getKanbanBoardDisplayTitle(board)}
                     </span>
                   </button>

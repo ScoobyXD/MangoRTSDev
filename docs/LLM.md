@@ -179,6 +179,8 @@ React 18 · TypeScript strict · Vite · Zero deps beyond React
 - Default Mango gradient, left to right: `rgba(251, 177, 82, 1)`, `rgba(254, 169, 78, 1)`, `rgba(254, 155, 70, 1)`, `rgba(255, 136, 32, 1)`.
 - Header/top bar, selection, scrollbars, buttons, and default accents should use the Mango orange scheme. White backgrounds should remain white.
 - Approved widget colorways: **mango / teal / white / black**.
+- Use the shared `MangoWordmark` / `MangoLogoMark` for product branding. Preserve `MangoRTS` casing.
+- UI text should not be forced into all-caps. Keep header, module, tab, and panel label weights lighter by default (usually 400-600).
 
 ## UI Rules (Text Editing)
 

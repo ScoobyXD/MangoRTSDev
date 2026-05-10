@@ -114,9 +114,8 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
           background: selected ? tabSelectedBackground : tabBackground,
           color: surfaceText,
           fontSize: 10,
-          fontWeight: 800,
+          fontWeight: 500,
           letterSpacing: 0,
-          textTransform: "uppercase",
           padding: "4px 10px",
           borderRadius: 4,
           cursor: "pointer",
@@ -158,7 +157,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                     event.currentTarget.blur();
                   }
                 }}
-                style={{ width: 34, height: 24, border: 0, borderRight: `1px solid ${strokeColor}`, background: "transparent", color: surfaceText, textAlign: "center", outline: "none", font: "inherit", fontSize: 10, fontWeight: 800, padding: 0 }}
+                style={{ width: 34, height: 24, border: 0, borderRight: `1px solid ${strokeColor}`, background: "transparent", color: surfaceText, textAlign: "center", outline: "none", font: "inherit", fontSize: 10, fontWeight: 500, padding: 0 }}
               />
               <button
                 type="button"

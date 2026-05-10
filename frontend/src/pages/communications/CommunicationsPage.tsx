@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { CurrentUserResponse } from "../../auth/cognitoAuth";
+import { MangoWordmark } from "../../app/MangoLogo";
 import { preloadLogicGateArenaSurface } from "../../app/preloadDashboardModules";
 import {
   deleteEmailMessage,
@@ -311,7 +312,9 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       {!embedded && (
       <header style={headerStyle}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-          <h1 style={brandStyle}>MangoRTS</h1>
+          <h1 style={brandStyle}>
+            <MangoWordmark size={22} weight={500} />
+          </h1>
           <span style={headerDividerStyle} />
           <span style={titleStyle}>Communications</span>
         </div>
@@ -612,16 +615,15 @@ const headerStyle: React.CSSProperties = {
 
 const brandStyle: React.CSSProperties = {
   margin: 0,
-  fontSize: 18,
-  fontWeight: 800,
-  letterSpacing: 0,
-  textTransform: "uppercase",
+  display: "flex",
+  alignItems: "center",
+  minWidth: 0,
+  lineHeight: 1,
 };
 
 const titleStyle: React.CSSProperties = {
   fontSize: 13,
-  fontWeight: 800,
-  textTransform: "uppercase",
+  fontWeight: 500,
 };
 
 const headerDividerStyle: React.CSSProperties = {
@@ -688,8 +690,7 @@ const panelHeaderStyle: React.CSSProperties = {
 const panelTitleStyle: React.CSSProperties = {
   margin: 0,
   fontSize: 13,
-  fontWeight: 800,
-  textTransform: "uppercase",
+  fontWeight: 600,
 };
 
 const mutedTextStyle: React.CSSProperties = {
@@ -721,7 +722,7 @@ const headerButtonStyle: React.CSSProperties = {
   border: "1px solid rgba(255, 136, 32, 0.62)",
   background: "linear-gradient(180deg, rgba(9, 31, 38, 0.84), rgba(5, 18, 23, 0.72))",
   color: "#e8fbff",
-  fontWeight: 800,
+  fontWeight: 500,
   boxShadow: "0 0 0 1px rgba(255, 136, 32, 0.12) inset, 0 8px 20px rgba(0, 0, 0, 0.18)",
 };
 
@@ -734,7 +735,7 @@ const primaryButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   font: "inherit",
   fontSize: 11,
-  fontWeight: 800,
+  fontWeight: 600,
   padding: "0 10px",
 };
 
@@ -807,8 +808,7 @@ const listHeaderStyle: React.CSSProperties = {
   justifyContent: "space-between",
   gap: 8,
   fontSize: 11,
-  fontWeight: 800,
-  textTransform: "uppercase",
+  fontWeight: 600,
 };
 
 const messageListStyle: React.CSSProperties = {
@@ -919,5 +919,5 @@ const noticeStyle: React.CSSProperties = {
   color: "#0f7b3f",
   borderBottom: "1px solid rgba(15, 123, 63, 0.22)",
   fontSize: 12,
-  fontWeight: 800,
+  fontWeight: 600,
 };

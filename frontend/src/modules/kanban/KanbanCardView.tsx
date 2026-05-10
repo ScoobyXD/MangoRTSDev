@@ -97,7 +97,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
         <span title="Node" style={{ width: 16, height: 16, marginTop: 1, display: "grid", placeItems: "center" }}>
           <NodeDocumentIcon color={color} />
         </span>
-        <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.node_title}</div>
+        <div style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.node_title}</div>
       </div>
       {description && (
         <div style={{ marginTop: 7, color: isIssue ? "#3b2d00" : subtext, fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere" }}>

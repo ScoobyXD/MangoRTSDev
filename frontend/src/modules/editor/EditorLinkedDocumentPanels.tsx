@@ -165,8 +165,8 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     <>
       {(activeTab === "editor" || activeTab === "outline-styles") && (
         <div style={{ display: "grid", gap: 8, pointerEvents: "auto" }}>
-          <div style={{ minWidth: 0, fontSize: 18, fontWeight: 800, letterSpacing: 0, color: accent, cursor: "text", overflowWrap: "anywhere", wordBreak: "break-word" }}>
-            <span style={{ textTransform: "uppercase" }}>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>&nbsp;
+          <div style={{ minWidth: 0, fontSize: 18, fontWeight: 500, letterSpacing: 0, color: accent, cursor: "text", overflowWrap: "anywhere", wordBreak: "break-word" }}>
+            <span>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>&nbsp;
             <span
               ref={editingTitleRef}
               contentEditable={isEditingTitle}
@@ -238,7 +238,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                     padding: "1px 7px",
                     color: statusColor || "inherit",
                     background: statusColor ? hexWithAlpha(statusColor, "1f") : "transparent",
-                    fontWeight: 800,
+                    fontWeight: 600,
                   }}
                 >
                   {nodePresetFields.status || "None"}
@@ -277,7 +277,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                     aria-haspopup="listbox"
                     aria-expanded={assigneeMenuOpen}
                     aria-controls={`${assigneeListID}-options`}
-                    style={{ width: "100%", minWidth: 0, minHeight: 25, boxSizing: "border-box", border: `1px solid ${assigneeMenuOpen ? accent : ruleColor}`, borderRadius: 6, background: "rgba(255,255,255,0.92)", color: "#111827", font: "inherit", fontSize: 11.5, fontWeight: 800, padding: "3px 27px 3px 8px", outline: "none" }}
+                    style={{ width: "100%", minWidth: 0, minHeight: 25, boxSizing: "border-box", border: `1px solid ${assigneeMenuOpen ? accent : ruleColor}`, borderRadius: 6, background: "rgba(255,255,255,0.92)", color: "#111827", font: "inherit", fontSize: 11.5, fontWeight: 500, padding: "3px 27px 3px 8px", outline: "none" }}
                   />
                   <span aria-hidden="true" style={{ position: "absolute", right: 7, top: 5, color: accent, pointerEvents: "none" }}>
                     <PersonIcon color={accent} />
@@ -290,7 +290,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                       style={{ position: "absolute", zIndex: 30, top: "calc(100% + 5px)", left: 0, width: "min(330px, 86vw)", maxHeight: 250, overflowY: "auto", padding: "4px 0", border: `1px solid ${ruleColor}`, borderRadius: 8, background: "#ffffff", boxShadow: "0 14px 30px rgba(15,23,42,0.18)", color: "#111827" }}
                     >
                       {assigneeMatches.length === 0 ? (
-                        <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 800 }}>No matches</div>
+                        <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 500 }}>No matches</div>
                       ) : assigneeMatches.map((user) => {
                         const label = companyUserOptionLabel(user);
                         const name = (user.display_name ?? "").trim() || label;
@@ -313,8 +313,8 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                               <PersonIcon color={accent} />
                             </span>
                             <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
-                              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800 }}>{name}</span>
-                              {email && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 9.5, fontWeight: 800 }}>{email}</span>}
+                              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 500 }}>{name}</span>
+                              {email && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 9.5, fontWeight: 500 }}>{email}</span>}
                             </span>
                           </button>
                         );
@@ -344,7 +344,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                       color: selectedPriority.color,
                       font: "inherit",
                       fontSize: 11.5,
-                      fontWeight: 800,
+                      fontWeight: 600,
                       padding: "3px 8px",
                       cursor: "pointer",
                       textAlign: "left",
@@ -398,7 +398,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                               color: selected ? option.color : "#1f2937",
                               font: "inherit",
                               fontSize: 11.5,
-                              fontWeight: 800,
+                              fontWeight: 500,
                               padding: "7px 8px",
                               cursor: "pointer",
                               textAlign: "left",
@@ -466,7 +466,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
 
       {activeTab === "metadata" && linkedNodeMetadataRows.length > 0 && (
         <section style={{ display: "grid", gap: 6, maxWidth: 520, pointerEvents: "auto" }}>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0, color: accent }}>Metadata</div>
+          <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: 0, color: accent }}>Metadata</div>
           <div style={{ display: "grid", gap: 4 }}>
             {linkedNodeMetadataRows.map((row) => (
               <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "4px 6px" }}>
@@ -480,7 +480,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
 
       {activeTab === "history" && linkedNodeHistoryRows.length > 0 && (
         <section style={{ display: "grid", gap: 6, maxWidth: 640, pointerEvents: "auto" }}>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0, color: accent }}>History</div>
+          <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: 0, color: accent }}>History</div>
           <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "6px 8px 6px 22px" }}>
             {linkedNodeHistoryRows.map((row, index) => <li key={`${row}-${index}`}>{row}</li>)}
           </ul>

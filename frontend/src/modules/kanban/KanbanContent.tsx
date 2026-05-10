@@ -1398,11 +1398,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           color: text,
           font: "inherit",
           fontSize: compact ? 9 : 10.5,
-          fontWeight: 900,
+          fontWeight: 500,
           cursor: "pointer",
           padding: compact ? "0 5px" : "0 8px",
           textAlign: "center",
-          textTransform: "uppercase",
         }}
       >
         {sortLabel}
@@ -1428,7 +1427,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             color: menuOpen ? groupMenuAccent : text,
             font: "inherit",
             fontSize: 11,
-            fontWeight: 900,
+            fontWeight: 500,
             padding: compact ? "4px 6px" : "4px 8px",
             cursor: "pointer",
             textAlign: "left",
@@ -1482,7 +1481,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
                     color: selected ? groupMenuAccent : menuText,
                     font: "inherit",
                     fontSize: 11,
-                    fontWeight: selected ? 900 : 800,
+                    fontWeight: selected ? 600 : 500,
                     padding: "7px 8px",
                     cursor: "pointer",
                     textAlign: "left",
@@ -1508,9 +1507,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
     if (compact) {
       return (
-        <label style={{ width: "100%", minWidth: 0, display: "grid", gridTemplateRows: "20px 28px", alignItems: "end", gap: 4, fontSize: 11, fontWeight: 900 }}>
+        <label style={{ width: "100%", minWidth: 0, display: "grid", gridTemplateRows: "20px 28px", alignItems: "end", gap: 4, fontSize: 11, fontWeight: 500 }}>
           <span style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: subtext, textTransform: "uppercase" }}>{label}</span>
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: subtext }}>{label}</span>
             {sortButton}
           </span>
           {selectButton}
@@ -1519,8 +1518,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     }
 
     return (
-      <label style={{ display: "inline-grid", gridTemplateColumns: "max-content minmax(136px, 190px) 56px", alignItems: "center", gap: 7, fontSize: 11, fontWeight: 900 }}>
-        <span style={{ color: subtext, textTransform: "uppercase" }}>{label}</span>
+      <label style={{ display: "inline-grid", gridTemplateColumns: "max-content minmax(136px, 190px) 56px", alignItems: "center", gap: 7, fontSize: 11, fontWeight: 500 }}>
+        <span style={{ color: subtext }}>{label}</span>
         {selectButton}
         {sortButton}
       </label>
@@ -1533,7 +1532,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         <button
           type="button"
           onClick={() => setArenaGroupingOpen((open) => !open)}
-          style={{ justifySelf: "start", height: 28, border: `1px solid ${arenaGroupingOpen ? accent : line}`, borderRadius: 6, background: arenaGroupingOpen ? `${accent}22` : cardBackground, color: arenaGroupingOpen ? accent : text, fontSize: 11, fontWeight: 900, cursor: "pointer", padding: "0 10px" }}
+          style={{ justifySelf: "start", height: 28, border: `1px solid ${arenaGroupingOpen ? accent : line}`, borderRadius: 6, background: arenaGroupingOpen ? `${accent}22` : cardBackground, color: arenaGroupingOpen ? accent : text, fontSize: 11, fontWeight: 500, cursor: "pointer", padding: "0 10px" }}
         >
           Group
         </button>
@@ -1548,7 +1547,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const rowCount = groupRows.length;
     if (columnCount === 0 || rowCount === 0) {
       return (
-        <div style={{ minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX, display: "grid", placeItems: "center", color: subtext, fontSize: 12, fontWeight: 800, opacity: loading ? 0.72 : 1 }}>
+        <div style={{ minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX, display: "grid", placeItems: "center", color: subtext, fontSize: 12, fontWeight: 500, opacity: loading ? 0.72 : 1 }}>
           No grouped cards
         </div>
       );
@@ -1612,7 +1611,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
                 boxShadow: groupFrameShadow,
                 padding: "0 9px",
                 fontSize: 12,
-                fontWeight: 900,
+                fontWeight: 600,
               }}
             >
               <span style={{ minWidth: 0, overflowWrap: "anywhere", whiteSpace: "normal", lineHeight: 1.2 }}>{groupColumn.label}</span>
@@ -1633,11 +1632,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
               borderTop: `1px solid ${line}`,
               color: subtext,
               fontSize: 10,
-              fontWeight: 900,
+              fontWeight: 500,
               lineHeight: 1.2,
               padding: "9px 8px 9px 0",
               textAlign: "right",
-              textTransform: "uppercase",
               overflowWrap: "anywhere",
             }}
           >
@@ -1917,7 +1915,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
               background: "#ff1f1f",
               color: "#ffffff",
               fontSize: 16,
-              fontWeight: 900,
+              fontWeight: 600,
               lineHeight: "20px",
               cursor: "pointer",
             }}

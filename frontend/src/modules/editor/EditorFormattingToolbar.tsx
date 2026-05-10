@@ -60,7 +60,7 @@ export const EditorFormattingToolbar: React.FC<EditorFormattingToolbarProps> = (
           borderRadius: 4,
           cursor: "pointer",
           fontSize: 12,
-          fontWeight: 800,
+          fontWeight: 600,
           ...item.style,
         }}
       >
@@ -83,7 +83,7 @@ export const EditorFormattingToolbar: React.FC<EditorFormattingToolbarProps> = (
             event.currentTarget.blur();
           }
         }}
-        style={{ width: 38, height: "100%", border: 0, background: "transparent", color: surfaceText, textAlign: "center", fontSize: 12, fontWeight: 800, outline: "none", fontFamily: "inherit", padding: 0 }}
+        style={{ width: 38, height: "100%", border: 0, background: "transparent", color: surfaceText, textAlign: "center", fontSize: 12, fontWeight: 500, outline: "none", fontFamily: "inherit", padding: 0 }}
       />
       <button type="button" title="Increase font size" onMouseDown={(event) => event.preventDefault()} onClick={() => onAdjustDocumentFontSize(1)} style={{ width: 28, height: "100%", border: 0, borderLeft: `1px solid ${ruleColor}`, background: "transparent", color: surfaceText, cursor: "pointer", fontSize: 15, lineHeight: 1 }}>+</button>
     </div>

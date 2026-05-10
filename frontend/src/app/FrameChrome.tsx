@@ -362,7 +362,7 @@ export const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChi
           <span
             data-module-name-switcher="true"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onModuleNameClick(e, frame.id); }}
-            style={{ fontSize: 12, fontWeight: 800, color: theme.tagText, textTransform: "uppercase", letterSpacing: 0, background: theme.tagBg, padding: "3px 8px", cursor: "pointer", lineHeight: 1.1 }}
+            style={{ fontSize: 12, fontWeight: 500, color: theme.tagText, textTransform: "none", letterSpacing: 0, background: theme.tagBg, padding: "3px 8px", cursor: "pointer", lineHeight: 1.1 }}
           >
             {frame.title}
           </span>

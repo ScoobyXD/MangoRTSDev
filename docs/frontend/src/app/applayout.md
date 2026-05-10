@@ -111,3 +111,9 @@ The app layout keeps compatibility for persisted payloads:
 - Right-clicking anywhere in the header section opens the frame action menu with Duplicate, Link modules, Delink modules, color choices, and Delete.
 - Dragging no longer starts from the general section; the body remains available for text editing, Kanban card work, map selection, explorer rows, and other module interactions.
 - Selected frames render a persistent Mango orange frame ring using `FRAME_SELECTION_COLOR`, confirming which frame is active for link, delete, copy, and related frame-level actions.
+
+## Mango wordmark and lighter label update (2026-05-10)
+
+- The app header uses the shared `MangoWordmark` component from `frontend/src/app/MangoLogo.tsx`.
+- Header, module name, tab, and colorway labels preserve natural casing instead of forced uppercase.
+- Default header/module label typography is intentionally lighter, with normal UI labels generally using `fontWeight` 400-600.

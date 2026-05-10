@@ -158,13 +158,13 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
             }}
             // Column titles are user-authored board data. Preserve casing so
             // names keep the exact meaning users and agents assigned.
-            style={{ height: 40, width: "100%", minWidth: 0, border: "none", background: "transparent", color: text, fontSize: 12, fontWeight: 800, padding: "0 5px", outline: "none", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM }}
+            style={{ height: 40, width: "100%", minWidth: 0, border: "none", background: "transparent", color: text, fontSize: 12, fontWeight: 500, padding: "0 5px", outline: "none", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM }}
           />
         ) : (
           <div
             title={column.title}
             onClick={() => onSetEditingColumnID(column.column_id)}
-            style={{ minWidth: 0, color: text, fontSize: 12, fontWeight: 800, padding: "0 5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, cursor: "text" }}
+            style={{ minWidth: 0, color: text, fontSize: 12, fontWeight: 500, padding: "0 5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, cursor: "text" }}
           >
             {column.title}
           </div>

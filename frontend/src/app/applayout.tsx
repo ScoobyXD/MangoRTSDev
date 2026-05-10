@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import FrameCanvas from "./framecanvas";
 import FrameRightClickMenu from "./framerightclickmenu";
+import { MangoWordmark } from "./MangoLogo";
 import ModulePickerMenu from "./menus/ModulePickerMenu";
 import { MODULE_LIBRARY as FRAME_MODULE_LIBRARY, preloadModuleKind } from "../modules";
 import type { FrameDataModel, DragState } from "../types";
@@ -567,9 +568,9 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
         onContextMenu={(e) => { e.preventDefault(); setHeaderMenu({ x: e.clientX, y: e.clientY }); setCanvasMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-          <h1 style={{ fontWeight: 800, color: headerTextColor, letterSpacing: 0, textTransform: "uppercase", margin: 0, lineHeight: 1 }}><span style={{ fontSize: 18 }}>Mango</span><span style={{ fontSize: 23, marginLeft: 2 }}>RTS</span></h1>
-          <button onClick={() => setEditMode((v) => !v)} style={{ height: 32, padding: "0 10px", background: editMode ? "#fff2e0" : tabBgColor, color: tabTextColor, border: `1px solid ${editMode ? UI_THEME.panel : UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
-            {editMode ? "EDIT: ON" : "EDIT: OFF"}
+          <h1 style={{ margin: 0, lineHeight: 1 }}><MangoWordmark size={22} weight={500} /></h1>
+          <button onClick={() => setEditMode((v) => !v)} style={{ height: 32, padding: "0 10px", background: editMode ? "#fff2e0" : tabBgColor, color: tabTextColor, border: `1px solid ${editMode ? UI_THEME.panel : UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 500 }}>
+            {editMode ? "Edit on" : "Edit off"}
           </button>
           <button onClick={() => { addFrame(); setEditMode(true); }} title="Add extra frame" aria-label="Add extra frame" style={{ width: 32, height: 32, background: tabBgColor, color: tabTextColor, border: `1px solid ${UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 20 }}>+</button>
         </div>
@@ -601,7 +602,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
               onDoubleClick={() => startRenamingTab(tab.id)}
               onClick={(e) => { if (e.button !== 0 || isDraggingTab) return; setActiveTabId(tab.id); setEditMode(false); }}
-              style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? `1px solid ${tabTextColor}` : "1px solid rgba(255,136,32,0.35)", background: activeTabId === tab.id ? tabBgColor : `${tabBgColor}B3`, color: tabTextColor, borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: 0, cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
+              style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? `1px solid ${tabTextColor}` : "1px solid rgba(255,136,32,0.35)", background: activeTabId === tab.id ? tabBgColor : `${tabBgColor}B3`, color: tabTextColor, borderRadius: 8, fontSize: 11, fontWeight: 500, letterSpacing: 0, cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
             >
               {renamingTabId === tab.id ? (
                 <input
@@ -614,7 +615,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
                     if (e.key === "Escape") cancelRenameTab();
                   }}
                   onClick={(e) => e.stopPropagation()}
-                  style={{ width: 92, border: `1px solid ${UI_THEME.panel}`, background: "#fff", borderRadius: 4, padding: "2px 5px", fontSize: 11, fontWeight: 700 }}
+                  style={{ width: 92, border: `1px solid ${UI_THEME.panel}`, background: "#fff", borderRadius: 4, padding: "2px 5px", fontSize: 11, fontWeight: 500 }}
                 />
               ) : tab.name}
             </button>
@@ -834,7 +835,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
               updateActiveFrames((prev) => prev.map((w) => (w.id === frameRightClickMenu.id ? applyColorway(w, theme) : w)));
               closeMenus();
             }} {...hoverHandlers}>
-              <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} /> {theme === "light" ? "LIGHT" : theme.toUpperCase()}
+              <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} /> {theme.charAt(0).toUpperCase() + theme.slice(1)}
             </button>
           ))}
           <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { confirmDeleteFrameSelection([frameRightClickMenu.id]); closeMenus(); }} {...hoverHandlers}>Delete</button>
