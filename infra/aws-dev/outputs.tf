@@ -13,6 +13,11 @@ output "nylas_callback_url" {
   value       = local.nylas_redirect_uri
 }
 
+output "nylas_webhook_url" {
+  description = "Nylas webhook destination URL for Communications realtime updates."
+  value       = local.nylas_webhook_url
+}
+
 output "nylas_frontend_redirect_url" {
   description = "Frontend URL the backend redirects to after a successful Nylas OAuth callback."
   value       = local.nylas_frontend_redirect_url

@@ -81,6 +81,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const foldersRequestInFlightRef = useRef(false);
   const messageRequestKeyRef = useRef("");
+  const pendingMessageReloadRef = useRef(false);
   const messageRequestSeqRef = useRef(0);
   const selectedMessageIDRef = useRef("");
   const streamReloadTimerRef = useRef<number | null>(null);
@@ -148,7 +149,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const loadMessages = useCallback(async () => {
     if (!status?.connected) return;
     const requestKey = JSON.stringify([mailbox, pageToken, searchQuery, unreadOnly]);
-    if (messageRequestKeyRef.current === requestKey) return;
+    if (messageRequestKeyRef.current === requestKey) {
+      pendingMessageReloadRef.current = true;
+      return;
+    }
     messageRequestKeyRef.current = requestKey;
     const requestSeq = messageRequestSeqRef.current + 1;
     messageRequestSeqRef.current = requestSeq;
@@ -178,6 +182,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       if (messageRequestSeqRef.current === requestSeq) {
         setLoadingMessages(false);
         messageRequestKeyRef.current = "";
+        if (pendingMessageReloadRef.current) {
+          pendingMessageReloadRef.current = false;
+          window.setTimeout(() => { void loadMessages(); }, 0);
+        }
       }
     }
   }, [mailbox, pageToken, searchQuery, status?.connected, unreadOnly]);
