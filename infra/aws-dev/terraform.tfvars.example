@@ -50,8 +50,9 @@ nylas_microsoft_scopes     = "offline_access User.Read Mail.ReadWrite Mail.Send"
 # Deprecated from the Hosted UI flow; keep a placeholder until the variable is removed.
 cognito_domain_prefix = "unused-custom-auth"
 
-dev_basic_auth_username = "mangorts-dev"
-dev_basic_auth_password = "replace-with-a-temporary-dev-password"
+# Shared secret material used only for CloudFront-to-ALB origin verification.
+# This does not create a browser-visible Basic Auth gate.
+origin_verify_secret = "replace-with-a-random-origin-secret"
 
 github_owner      = "your-github-owner"
 github_repository = "MangoRTSDev"

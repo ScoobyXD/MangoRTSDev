@@ -20,7 +20,7 @@ terraform apply tfplan
 This phase creates ECR, Cognito, S3, CloudFront, ALB, Route 53, ACM, WAF, IAM/OIDC, and shared networking/security resources. It intentionally does not create the ECS task definition or service until a backend image URI exists.
 
 8. Save the `github_deploy_role_arn` output as GitHub secret `AWS_DEV_DEPLOY_ROLE_ARN`.
-9. Set GitHub variables/secrets used by `.github/workflows/deploy-dev.yml`, including state backend values, Terraform inputs, `AWS_REGION`, and `DEV_BASIC_AUTH_PASSWORD`.
+9. Set GitHub variables/secrets used by `.github/workflows/deploy-dev.yml`, including state backend values, Terraform inputs, `AWS_REGION`, and `ORIGIN_VERIFY_SECRET`.
 10. To enable Communications, store the Nylas API key and OAuth state secret in AWS Secrets Manager, then set the GitHub Nylas variables listed below.
 11. Apply database schema/migrations from a machine that can reach the DB, then seed the dev company membership after the first Cognito user exists.
 
@@ -29,7 +29,9 @@ This phase creates ECR, Cognito, S3, CloudFront, ALB, Route 53, ACM, WAF, IAM/OI
 Required secrets:
 
 - `AWS_DEV_DEPLOY_ROLE_ARN`
-- `DEV_BASIC_AUTH_PASSWORD`
+- `ORIGIN_VERIFY_SECRET`
+
+During migration from the old dev Basic Auth setup, the workflow can fall back to the existing `DEV_BASIC_AUTH_PASSWORD` secret as origin-verification secret material. Prefer creating `ORIGIN_VERIFY_SECRET` and removing the old secret after a successful deploy.
 
 Required variables:
 
@@ -51,7 +53,7 @@ For ECS networking, use one of these:
 - Existing private subnets: set `TF_PRIVATE_SUBNET_IDS` as a JSON string array and leave `TF_CREATE_PRIVATE_ECS_SUBNETS=false`.
 - Terraform-managed private subnets: set `TF_CREATE_PRIVATE_ECS_SUBNETS=true` and `TF_ECS_PRIVATE_SUBNET_CIDRS` as a JSON string array.
 
-Optional variables have workflow defaults: `TF_STATE_KEY`, `TF_STATE_REGION`, `TF_APP_SUBDOMAIN`, `TF_API_SUBDOMAIN`, `TF_ORIGIN_SUBDOMAIN`, `TF_EXISTING_DB_PORT`, `TF_PRIVATE_SUBNET_IDS`, `TF_CREATE_PRIVATE_ECS_SUBNETS`, `TF_ECS_PRIVATE_SUBNET_CIDRS`, `TF_ECS_NAT_GATEWAY_MODE`, `TF_DEV_BASIC_AUTH_USERNAME`, `TF_GITHUB_OWNER`, `TF_GITHUB_REPOSITORY`, and `TF_GITHUB_BRANCH`.
+Optional variables have workflow defaults: `TF_STATE_KEY`, `TF_STATE_REGION`, `TF_APP_SUBDOMAIN`, `TF_API_SUBDOMAIN`, `TF_ORIGIN_SUBDOMAIN`, `TF_EXISTING_DB_PORT`, `TF_PRIVATE_SUBNET_IDS`, `TF_CREATE_PRIVATE_ECS_SUBNETS`, `TF_ECS_PRIVATE_SUBNET_CIDRS`, `TF_ECS_NAT_GATEWAY_MODE`, `TF_GITHUB_OWNER`, `TF_GITHUB_REPOSITORY`, and `TF_GITHUB_BRANCH`.
 
 Nylas Communications variables:
 
@@ -107,7 +109,8 @@ It performs:
 ## Current Dev Shortcuts
 
 - Dev deploys are manual-only for now: `Actions -> Deploy MangoRTS Dev -> Run workflow`.
-- The dev site is still protected by temporary CloudFront basic auth. The password is stored as GitHub secret `DEV_BASIC_AUTH_PASSWORD` and Terraform variable `dev_basic_auth_password`.
+- The dev site no longer has a CloudFront Basic Auth gate. Public pages load normally; app data remains protected by Cognito and backend company-membership authorization.
+- CloudFront still sends a private origin-verification header to the ALB so direct origin requests are rejected.
 - The dev company ID is intentionally hardcoded as `11111111-1111-1111-1111-111111111111` until tenant onboarding and company selection exist.
 - Before real company onboarding, seed Cognito user membership against the hardcoded dev company ID so authenticated API calls pass company authorization.
 - Replace the hardcoded dev company flow with backend-driven tenant discovery before onboarding external companies.
@@ -125,7 +128,7 @@ curl -i https://dev.<domain>/healthz
 curl -i https://api.dev.<domain>/healthz
 ```
 
-Both URLs are protected by temporary CloudFront basic auth. API calls to `/v1/*` also require Cognito Bearer tokens.
+Both URLs should be reachable without a browser-level Basic Auth challenge. API calls to protected `/v1/*` routes still require Cognito Bearer tokens.
 
 For Communications, confirm the callback route is forwarded to the backend and not served by S3:
 

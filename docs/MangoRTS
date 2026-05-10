@@ -332,10 +332,8 @@ arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/db-password-Ic
 GITHUB
 run after manual deployment:
 
-$basic="mangorts-dev:Hakmin419!"
-
-curl.exe -i -u $basic https://dev.mangorts.com/healthz
-curl.exe -i -u $basic https://api.dev.mangorts.com/healthz
+curl.exe -i https://dev.mangorts.com/healthz
+curl.exe -i https://api.dev.mangorts.com/healthz
 
 ALL FOLDER RESET:
 git fetch --all

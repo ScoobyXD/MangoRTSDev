@@ -61,11 +61,11 @@ Update `docs/README.md` to say V2 means the `infra/aws-dev` platform with Cognit
 - Keep ECR, Cognito, CloudFront/S3, ALB, Route 53, ACM, WAF, IAM/OIDC creatable before any backend image exists.
 
 ### Phase 4: Harden Edge/API Behavior
-- Allow `OPTIONS /v1/*` through CloudFront without basic auth so browser preflight works.
+- Keep CloudFront free of browser-visible Basic Auth gates so dev behaves like production from the user's browser.
 - Keep actual `/v1/*` protected by Cognito in the backend.
 - Add CloudFront-to-ALB custom origin header.
 - Add ALB listener rule requiring that header before forwarding to ECS.
-- Keep temporary CloudFront basic auth for dev static pages and health checks.
+- Keep frontend route rewrites at CloudFront so static Vite routes land on `index.html`.
 
 ### Phase 5: Fix Authenticated Streaming
 - Replace raw `EventSource` calls with an authenticated fetch-based SSE helper.
@@ -151,7 +151,7 @@ Update `docs/README.md` to say V2 means the `infra/aws-dev` platform with Cognit
 
 9. Configure GitHub vars/secrets.
    - `AWS_REGION`
-   - Terraform input values for domain, VPC/subnets, DB metadata, secret ARN, Cognito domain prefix, dev company ID, basic-auth password, GitHub owner/repo/branch.
+   - Terraform input values for domain, VPC/subnets, DB metadata, secret ARN, Cognito domain prefix, dev company ID, origin-verification secret, GitHub owner/repo/branch.
 
 10. Apply database schema/migrations.
     - Run from a machine that can reach the DB.
