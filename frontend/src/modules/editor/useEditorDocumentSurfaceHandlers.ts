@@ -22,12 +22,20 @@ import {
   EDITOR_DOCUMENT_MIN_FONT_SIZE_PX,
 } from "./useEditorPreferences";
 import {
+  applyEditorImageFloatLayout,
   clampEditorImageOffset,
   clampEditorImageSize,
+  clampEditorImageVerticalOffset,
   clearEditorImageSelection,
   createEditorImageDataFromFile,
   createEditorImageFrame,
   findEditorImageFrame,
+  getEditorImageCursorForInteraction,
+  getEditorImageFloatSideForVisualLeft,
+  getEditorImageHorizontalLimit,
+  getEditorImageInlineOffsetForVisualLeft,
+  getEditorImagePointerInteraction,
+  readEditorImageFloatSide,
   getSelectedEditorImageFrame,
   selectEditorImageFrame,
 } from "./editorImages";
@@ -444,6 +452,18 @@ function readStylePixels(value: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function getEditorRootContentMetrics(root: HTMLElement): { left: number; width: number } {
+  const rootRect = root.getBoundingClientRect();
+  const view = root.ownerDocument.defaultView;
+  const style = view?.getComputedStyle(root);
+  const paddingLeft = style ? readStylePixels(style.paddingLeft, 0) : 0;
+  const paddingRight = style ? readStylePixels(style.paddingRight, 0) : 0;
+  return {
+    left: rootRect.left + paddingLeft,
+    width: Math.max(0, root.clientWidth - paddingLeft - paddingRight),
+  };
+}
+
 function removeSelectedEditorImage(root: HTMLElement): boolean {
   const frame = getSelectedEditorImageFrame(root);
   if (!frame) return false;
@@ -460,37 +480,81 @@ function startEditorImagePointerInteraction(
 ) {
   const ownerDocument = root.ownerDocument;
   const frameRect = frame.getBoundingClientRect();
-  const rootRect = root.getBoundingClientRect();
-  const resizeGripSize = 18;
-  const mode = pointerEvent.clientX >= frameRect.right - resizeGripSize && pointerEvent.clientY >= frameRect.bottom - resizeGripSize
-    ? "resize"
-    : "drag";
+  const rootMetrics = getEditorRootContentMetrics(root);
+  const interaction = getEditorImagePointerInteraction(
+    frameRect.width,
+    frameRect.height,
+    pointerEvent.clientX - frameRect.left,
+    pointerEvent.clientY - frameRect.top,
+  );
+  const visualLeft = clampEditorImageOffset(
+    frameRect.left - rootMetrics.left,
+    getEditorImageHorizontalLimit(rootMetrics.width, frameRect.width),
+  );
   const start = {
     x: pointerEvent.clientX,
     y: pointerEvent.clientY,
     width: frameRect.width,
     height: frameRect.height,
-    marginLeft: readStylePixels(frame.style.marginLeft, 0),
+    visualLeft,
     marginTop: readStylePixels(frame.style.marginTop, 4),
+    floatSide: readEditorImageFloatSide(frame),
   };
   const previousCursor = ownerDocument.body.style.cursor;
-  ownerDocument.body.style.cursor = mode === "resize" ? "nwse-resize" : "move";
+  ownerDocument.body.style.cursor = getEditorImageCursorForInteraction(interaction);
 
   const onPointerMove = (event: PointerEvent) => {
     event.preventDefault();
     const dx = event.clientX - start.x;
     const dy = event.clientY - start.y;
-    if (mode === "resize") {
-      const maxWidth = Math.max(96, root.clientWidth - 48);
-      frame.style.width = `${clampEditorImageSize(start.width + dx, 48, maxWidth)}px`;
-      frame.style.height = `${clampEditorImageSize(start.height + dy, 36, 1_600)}px`;
+    const nextMetrics = getEditorRootContentMetrics(root);
+    if (interaction.kind === "resize") {
+      const minWidth = 48;
+      const minHeight = 36;
+      let nextVisualLeft = start.visualLeft;
+      let nextWidth = start.width;
+      if (interaction.horizontal < 0) {
+        const fixedRight = Math.min(nextMetrics.width, start.visualLeft + start.width);
+        const maxLeft = Math.max(0, fixedRight - minWidth);
+        nextVisualLeft = Math.max(0, Math.min(maxLeft, start.visualLeft + dx));
+        nextWidth = fixedRight - nextVisualLeft;
+      } else if (interaction.horizontal > 0) {
+        const maxWidth = Math.max(minWidth, nextMetrics.width - start.visualLeft);
+        nextWidth = clampEditorImageSize(start.width + dx, minWidth, maxWidth);
+      }
+
+      let nextMarginTop = start.marginTop;
+      let nextHeight = start.height;
+      if (interaction.vertical < 0) {
+        const fixedBottom = start.marginTop + start.height;
+        const maxTop = fixedBottom - minHeight;
+        nextMarginTop = clampEditorImageVerticalOffset(start.marginTop + dy, -5_000, maxTop);
+        nextHeight = clampEditorImageSize(fixedBottom - nextMarginTop, minHeight, 1_600);
+        nextMarginTop = fixedBottom - nextHeight;
+      } else if (interaction.vertical > 0) {
+        nextHeight = clampEditorImageSize(start.height + dy, minHeight, 1_600);
+      }
+
+      nextWidth = clampEditorImageSize(nextWidth, minWidth, Math.max(minWidth, nextMetrics.width));
+      nextHeight = clampEditorImageSize(nextHeight, minHeight, 1_600);
+      nextVisualLeft = clampEditorImageOffset(
+        nextVisualLeft,
+        getEditorImageHorizontalLimit(nextMetrics.width, nextWidth),
+      );
+      const inlineOffset = getEditorImageInlineOffsetForVisualLeft(nextMetrics.width, nextWidth, start.floatSide, nextVisualLeft);
+      applyEditorImageFloatLayout(frame, start.floatSide, inlineOffset);
+      frame.style.width = `${nextWidth}px`;
+      frame.style.height = `${nextHeight}px`;
+      frame.style.marginTop = `${clampEditorImageVerticalOffset(nextMarginTop, -5_000, 5_000)}px`;
       return;
     }
 
-    const maxLeft = Math.max(0, root.clientWidth - frameRect.width - 48);
-    const maxTop = Math.max(0, Math.max(root.scrollHeight, rootRect.height) - frameRect.height - 24);
-    frame.style.marginLeft = `${clampEditorImageOffset(start.marginLeft + dx, maxLeft)}px`;
-    frame.style.marginTop = `${clampEditorImageOffset(start.marginTop + dy, maxTop)}px`;
+    const maxLeft = getEditorImageHorizontalLimit(nextMetrics.width, start.width);
+    const nextVisualLeft = clampEditorImageOffset(start.visualLeft + dx, maxLeft);
+    const nextFloatSide = getEditorImageFloatSideForVisualLeft(nextMetrics.width, start.width, nextVisualLeft);
+    const inlineOffset = getEditorImageInlineOffsetForVisualLeft(nextMetrics.width, start.width, nextFloatSide, nextVisualLeft);
+    applyEditorImageFloatLayout(frame, nextFloatSide, inlineOffset);
+    frame.style.marginTop = `${clampEditorImageVerticalOffset(start.marginTop + dy, -5_000, 5_000)}px`;
   };
 
   const finish = () => {
