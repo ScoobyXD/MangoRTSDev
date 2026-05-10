@@ -627,7 +627,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, onNavigate, overr
         }
       `}</style>
       <header
-        style={{ height: HEADER_H, padding: "6px 14px", display: "flex", alignItems: "center", background: "var(--mango-gradient)", borderBottom: "1px solid rgba(255, 255, 255, 0.5)", boxShadow: "0 8px 22px rgba(132, 51, 0, 0.2)" }}
+        style={{ height: HEADER_H, padding: "6px 14px", display: "flex", alignItems: "center", background: "transparent", borderBottom: "none", boxShadow: "none" }}
         onContextMenu={(e) => { e.preventDefault(); setHeaderMenu({ x: e.clientX, y: e.clientY }); setCanvasMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
       >
         <div style={{ width: "100%", minWidth: 0, height: 36, display: "grid", gridTemplateColumns: "auto minmax(180px, 1fr) auto", alignItems: "center", gap: 12, padding: "0 12px", borderRadius: 999, background: headerBgColor && headerBgColor !== UI_THEME.panel ? headerBgColor : "rgba(255, 255, 255, 0.94)", boxShadow: "0 9px 24px rgba(74, 36, 16, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)", backdropFilter: "blur(14px)" }}>
