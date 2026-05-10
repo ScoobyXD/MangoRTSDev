@@ -1,3 +1,4 @@
+import { requestJSON } from "../api/requestJSON.js";
 import { NodeDetails, NodeRecord, NodeRelationship } from "./shared";
 
 export type NodeProjectionItem = {
@@ -24,15 +25,6 @@ const projectionInflight = new Map<string, Promise<NodeProjectionItem[]>>();
 
 function key(apiBase: string, companyID: string, nodeID: string): string {
   return `${apiBase}:${companyID}:${nodeID}`;
-}
-
-async function requestJSON<T>(apiBase: string, path: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers);
-  if (init?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const response = await fetch(`${apiBase}${path}`, { ...init, headers });
-  if (!response.ok) throw new Error(await response.text() || `Request failed (${response.status})`);
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
 }
 
 export function invalidateNodeRecordStoreCaches(apiBase: string, companyID: string, nodeID: string): void {

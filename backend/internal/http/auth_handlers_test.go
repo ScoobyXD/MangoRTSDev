@@ -56,6 +56,9 @@ func TestCreateInvitationRejectsExistingMangoUser(t *testing.T) {
 	if _, err := repo.UpsertAuthUser(existingSubject, "existing@example.com", ""); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := repo.AddCompanyMembership(existingSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
 	cognito := &recordingCognitoAdmin{}
 	handler := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
@@ -85,6 +88,71 @@ func TestCreateInvitationRejectsExistingMangoUser(t *testing.T) {
 	}
 	if payload.Error != "user_already_exists" {
 		t.Fatalf("error = %q, want user_already_exists", payload.Error)
+	}
+}
+
+func TestCreateInvitationForExistingMangoUserSkipsCognitoCreate(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	const adminSubject = "admin-subject"
+	const existingSubject = "existing-subject"
+	const existingEmail = "existing@example.com"
+	repo.EnsureCompany(companyID, "MangoRTS Dev")
+	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(adminSubject, companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	existingUser, err := repo.UpsertAuthUser(existingSubject, existingEmail, "Existing User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cognito := &recordingCognitoAdmin{}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		CognitoAdmin:  cognito,
+	}).Routes()
+
+	inviteReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/invitations",
+		strings.NewReader(`{"company_id":"`+companyID+`","email":"`+existingEmail+`","role":"company_user"}`),
+	)
+	inviteReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", adminSubject, "admin@example.com"))
+	inviteRes := httptest.NewRecorder()
+	handler.ServeHTTP(inviteRes, inviteReq)
+	if inviteRes.Code != http.StatusCreated {
+		t.Fatalf("invite status = %d, want %d, body=%s", inviteRes.Code, http.StatusCreated, strings.TrimSpace(inviteRes.Body.String()))
+	}
+	if len(cognito.emails) != 0 {
+		t.Fatalf("cognito invite calls = %v, want none for existing Mango user", cognito.emails)
+	}
+	var invitePayload struct {
+		CognitoInviteStatus string `json:"cognito_invite_status"`
+		Invitation          struct {
+			Token string `json:"token"`
+		} `json:"invitation"`
+	}
+	if err := json.NewDecoder(inviteRes.Body).Decode(&invitePayload); err != nil {
+		t.Fatal(err)
+	}
+	if invitePayload.CognitoInviteStatus != "existing_mango_user" {
+		t.Fatalf("cognito status = %q, want existing_mango_user", invitePayload.CognitoInviteStatus)
+	}
+
+	acceptReq := httptest.NewRequest(http.MethodPost, "/v1/invitations/accept", strings.NewReader(`{"token":"`+invitePayload.Invitation.Token+`","display_name":"Existing User"}`))
+	acceptReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", existingSubject, existingEmail))
+	acceptRes := httptest.NewRecorder()
+	handler.ServeHTTP(acceptRes, acceptReq)
+	if acceptRes.Code != http.StatusOK {
+		t.Fatalf("accept status = %d, want %d, body=%s", acceptRes.Code, http.StatusOK, strings.TrimSpace(acceptRes.Body.String()))
+	}
+	if _, err := repo.GetCompanyUser(companyID, existingUser.UserID); err != nil {
+		t.Fatalf("existing user membership was not created: %v", err)
 	}
 }
 
@@ -481,6 +549,65 @@ func TestDeleteCompanyUserDeletesCognitoAndAllowsReinvite(t *testing.T) {
 	}
 	if len(cognito.emails) != 1 || cognito.emails[0] != targetEmail {
 		t.Fatalf("cognito invites = %v, want [%s]", cognito.emails, targetEmail)
+	}
+}
+
+func TestDeleteCompanyUserWithRemainingMembershipKeepsIdentity(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	const otherCompanyID = "22222222-2222-2222-2222-222222222222"
+	const adminSubject = "admin-subject"
+	const targetSubject = "target-subject"
+	const targetEmail = "target@example.com"
+	repo.EnsureCompany(companyID, "MangoRTS Dev")
+	repo.EnsureCompany(otherCompanyID, "Second Company")
+	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(adminSubject, companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	target, err := repo.UpsertAuthUser(targetSubject, targetEmail, "Target User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(targetSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(targetSubject, otherCompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+	}).Routes()
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/companies/"+companyID+"/users/"+target.UserID, nil)
+	deleteReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", adminSubject, "admin@example.com"))
+	deleteRes := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRes, deleteReq)
+	if deleteRes.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want %d, body=%s", deleteRes.Code, http.StatusOK, strings.TrimSpace(deleteRes.Body.String()))
+	}
+	var payload struct {
+		CognitoUserDeleted bool `json:"cognito_user_deleted"`
+	}
+	if err := json.NewDecoder(deleteRes.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.CognitoUserDeleted {
+		t.Fatal("cognito_user_deleted = true, want false for user with remaining company membership")
+	}
+	if _, err := repo.GetCompanyUser(companyID, target.UserID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("removed company membership error = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.GetCompanyUser(otherCompanyID, target.UserID); err != nil {
+		t.Fatalf("other company membership was not preserved: %v", err)
+	}
+	if _, err := repo.GetAuthUser(targetSubject); err != nil {
+		t.Fatalf("target identity was not preserved: %v", err)
 	}
 }
 

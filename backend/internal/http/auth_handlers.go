@@ -136,16 +136,7 @@ func (s *Server) handleCompanySubresource(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusConflict, "cannot_delete_self")
 		return
 	}
-	if s.cognitoAdmin == nil {
-		writeError(w, http.StatusServiceUnavailable, "cognito_admin_not_configured")
-		return
-	}
-	if err := s.cognitoAdmin.AdminDeleteUser(r.Context(), target.CognitoSubject); err != nil {
-		log.Printf("failed to delete cognito user email=%s cognito_subject=%s user_id=%s: %v", target.Email, target.CognitoSubject, target.UserID, err)
-		writeError(w, http.StatusBadGateway, "failed_to_delete_cognito_user")
-		return
-	}
-	deleted, err := s.repo.DeleteCompanyUser(companyID, userID)
+	result, err := s.repo.DeleteCompanyUser(companyID, userID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "company_user_not_found")
 		return
@@ -154,7 +145,25 @@ func (s *Server) handleCompanySubresource(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed_to_delete_company_user")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "user": deleted})
+	cognitoDeleted := false
+	if result.DeleteExternalIdentity {
+		if s.cognitoAdmin == nil {
+			log.Printf("queued cognito user deletion because cognito admin is not configured email=%s cognito_subject=%s user_id=%s", result.User.Email, result.User.CognitoSubject, result.User.UserID)
+		} else if err := s.cognitoAdmin.AdminDeleteUser(r.Context(), result.User.CognitoSubject); err != nil {
+			log.Printf("queued cognito user deletion after delete failure email=%s cognito_subject=%s user_id=%s: %v", result.User.Email, result.User.CognitoSubject, result.User.UserID, err)
+		} else {
+			cognitoDeleted = true
+			if err := s.repo.CompleteExternalIdentityDeletion(result.User.CognitoSubject); err != nil {
+				log.Printf("failed to mark cognito deletion complete email=%s cognito_subject=%s user_id=%s: %v", result.User.Email, result.User.CognitoSubject, result.User.UserID, err)
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":                            "deleted",
+		"user":                              result.User,
+		"cognito_user_deleted":              cognitoDeleted,
+		"external_identity_deletion_queued": result.DeleteExternalIdentity && !cognitoDeleted,
+	})
 }
 
 func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
@@ -203,13 +212,24 @@ func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, existingUserErr := s.repo.GetAuthUserByEmail(invitation.Email)
+	existingMangoUser := existingUserErr == nil
+	if existingUserErr != nil && !errors.Is(existingUserErr, store.ErrNotFound) {
+		writeError(w, http.StatusInternalServerError, "failed_to_lookup_user")
+		return
+	}
+
 	cognitoStatus := "not_configured"
 	if s.cognitoAdmin != nil {
-		cognitoStatus = "sent"
-		if err := s.cognitoAdmin.AdminCreateUser(r.Context(), invitation.Email); err != nil {
-			log.Printf("failed to create cognito invitation user email=%s: %v", invitation.Email, err)
-			writeError(w, http.StatusBadGateway, "failed_to_create_cognito_user")
-			return
+		if existingMangoUser {
+			cognitoStatus = "existing_mango_user"
+		} else {
+			cognitoStatus = "sent"
+			if err := s.cognitoAdmin.AdminCreateUser(r.Context(), invitation.Email); err != nil {
+				log.Printf("failed to create cognito invitation user email=%s: %v", invitation.Email, err)
+				writeError(w, http.StatusBadGateway, "failed_to_create_cognito_user")
+				return
+			}
 		}
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{

@@ -29,6 +29,8 @@ coalesce(
 n.due_date::text,
 n.priority,
 n.assignee_user_id::text,
+nullif(assignee.display_name, '') as assignee_name,
+nullif(assignee.email, '') as assignee_email,
 n.created_timestamp`
 
 const nodeStatusJoin = `
@@ -39,7 +41,12 @@ left join kanban_cards card
 left join kanban_columns column_row
   on column_row.company_id = card.company_id
  and column_row.board_id = card.board_id
- and column_row.column_id = card.column_id`
+ and column_row.column_id = card.column_id
+left join company_memberships assignee_membership
+  on assignee_membership.company_id = n.company_id
+ and assignee_membership.user_id = n.assignee_user_id
+left join users assignee
+  on assignee.user_id = assignee_membership.user_id`
 
 func scanNode(row interface {
 	Scan(dest ...any) error
@@ -50,6 +57,8 @@ func scanNode(row interface {
 	var dueDate sql.NullString
 	var priority sql.NullInt64
 	var assigneeUserID sql.NullString
+	var assigneeName sql.NullString
+	var assigneeEmail sql.NullString
 	err := row.Scan(
 		&item.CompanyID,
 		&item.NodeID,
@@ -59,6 +68,8 @@ func scanNode(row interface {
 		&dueDate,
 		&priority,
 		&assigneeUserID,
+		&assigneeName,
+		&assigneeEmail,
 		&item.CreatedTimestamp,
 	)
 	if status.Valid {
@@ -76,6 +87,12 @@ func scanNode(row interface {
 	}
 	if assigneeUserID.Valid {
 		item.AssigneeUserID = &assigneeUserID.String
+	}
+	if assigneeName.Valid {
+		item.AssigneeName = &assigneeName.String
+	}
+	if assigneeEmail.Valid {
+		item.AssigneeEmail = &assigneeEmail.String
 	}
 	return item, err
 }
@@ -122,6 +139,20 @@ func (r *PostgresRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {
 	if input.AssigneeUserID != nil {
 		value := strings.TrimSpace(*input.AssigneeUserID)
 		assigneeUserID = &value
+	}
+	if input.AssigneeUserIDSet && assigneeUserID != nil && *assigneeUserID != "" {
+		var ok bool
+		if err := tx.QueryRowContext(ctx, `
+select exists(
+  select 1
+  from company_memberships
+  where company_id=$1 and user_id::text=$2
+)`, input.CompanyID, *assigneeUserID).Scan(&ok); err != nil {
+			return domain.Node{}, err
+		}
+		if !ok {
+			return domain.Node{}, ErrAssigneeNotInCompany
+		}
 	}
 	_, err = tx.ExecContext(ctx, `
 update nodes

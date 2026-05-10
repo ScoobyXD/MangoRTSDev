@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"database/sql"
 	"fmt"
 	"log"
 	"miraeopus/backend/internal/auth"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,8 +39,11 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           withLogging(withCORS(server.Routes())),
-		ReadHeaderTimeout: 5 * time.Second,
+		Handler:           withSecurityHeaders(withLogging(withCORS(server.Routes()))),
+		ReadHeaderTimeout: envDurationDefault("HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
+		ReadTimeout:       envDurationDefault("HTTP_READ_TIMEOUT", 15*time.Second),
+		IdleTimeout:       envDurationDefault("HTTP_IDLE_TIMEOUT", 60*time.Second),
+		MaxHeaderBytes:    envIntDefault("HTTP_MAX_HEADER_BYTES", 1<<20),
 	}
 
 	log.Printf("miraeopus-api listening on %s", addr)
@@ -64,8 +70,9 @@ func buildRepository() (store.Repository, func()) {
 	password := os.Getenv("DB_PASSWORD")
 	dbName := getenvDefault("DB_NAME", "postgres")
 	sslMode := getenvDefault("DB_SSLMODE", "require")
+	connectTimeoutSeconds := envIntDefault("DB_CONNECT_TIMEOUT_SECONDS", 5)
 
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s", host, port, user, password, dbName, sslMode)
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s connect_timeout=%d", host, port, user, password, dbName, sslMode, connectTimeoutSeconds)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		if appEnv == "dev" || allowFallback {
@@ -82,6 +89,7 @@ func buildRepository() (store.Repository, func()) {
 		}
 		log.Fatalf("failed to connect postgres in %s: %v", appEnv, err)
 	}
+	configureDatabasePool(db)
 
 	log.Printf("using postgres repository host=%s db=%s sslmode=%s", host, dbName, sslMode)
 	return store.NewPostgresRepo(db), func() { _ = db.Close() }
@@ -93,6 +101,48 @@ func getenvDefault(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func envIntDefault(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		log.Printf("invalid %s=%q, using %d", key, raw, fallback)
+		return fallback
+	}
+	return value
+}
+
+func envDurationDefault(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value <= 0 {
+		log.Printf("invalid %s=%q, using %s", key, raw, fallback)
+		return fallback
+	}
+	return value
+}
+
+func configureDatabasePool(db *sql.DB) {
+	maxOpen := envIntDefault("DB_MAX_OPEN_CONNS", 20)
+	maxIdle := envIntDefault("DB_MAX_IDLE_CONNS", 10)
+	if maxIdle > maxOpen {
+		maxIdle = maxOpen
+	}
+	connMaxLifetime := envDurationDefault("DB_CONN_MAX_LIFETIME", 30*time.Minute)
+	connMaxIdleTime := envDurationDefault("DB_CONN_MAX_IDLE_TIME", 5*time.Minute)
+
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxIdle)
+	db.SetConnMaxLifetime(connMaxLifetime)
+	db.SetConnMaxIdleTime(connMaxIdleTime)
+	log.Printf("postgres pool max_open=%d max_idle=%d conn_max_lifetime=%s conn_max_idle_time=%s", maxOpen, maxIdle, connMaxLifetime, connMaxIdleTime)
 }
 
 func buildAuthValidator() *auth.Validator {
@@ -180,9 +230,53 @@ func splitScopes(raw string) []string {
 func withLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		next.ServeHTTP(w, r)
-		log.Printf("%s %s (%s)", r.Method, r.URL.Path, time.Since(start))
+		rec := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		log.Printf("%s %s status=%d bytes=%d duration=%s", r.Method, r.URL.Path, rec.status, rec.bytes, time.Since(start))
 	})
+}
+
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	status      int
+	bytes       int
+	wroteHeader bool
+}
+
+func (w *loggingResponseWriter) WriteHeader(status int) {
+	if w.wroteHeader {
+		return
+	}
+	w.status = status
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *loggingResponseWriter) Write(body []byte) (int, error) {
+	if !w.wroteHeader {
+		w.wroteHeader = true
+	}
+	n, err := w.ResponseWriter.Write(body)
+	w.bytes += n
+	return n, err
+}
+
+func (w *loggingResponseWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (w *loggingResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+func (w *loggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return hijacker.Hijack()
 }
 
 func withCORS(next http.Handler) http.Handler {
@@ -191,7 +285,10 @@ func withCORS(next http.Handler) http.Handler {
 		allowedOrigin = getenvDefault("MIRAEOPUS_ALLOWED_ORIGIN", "*")
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+		if origin := corsAllowedOrigin(r.Header.Get("Origin"), allowedOrigin); origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Add("Vary", "Origin")
+		}
 		// Keep CORS allow-list aligned with hot-path API verbs used by frontend modules.
 		// Node title updates use PUT and require successful preflight to avoid browser fetch failures.
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
@@ -202,6 +299,32 @@ func withCORS(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func corsAllowedOrigin(origin, allowedOrigin string) string {
+	allowedOrigin = strings.TrimSpace(allowedOrigin)
+	if allowedOrigin == "*" {
+		return "*"
+	}
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return ""
+	}
+	for _, candidate := range strings.Split(allowedOrigin, ",") {
+		if strings.TrimSpace(candidate) == origin {
+			return origin
+		}
+	}
+	return ""
+}
+
+func withSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		next.ServeHTTP(w, r)
 	})
 }

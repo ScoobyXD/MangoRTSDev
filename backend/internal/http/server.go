@@ -25,14 +25,16 @@ type Server struct {
 	emailSender   AuthEmailSender
 	nylasClient   NylasClient
 	nylasConfig   NylasConfig
+	maxBodyBytes  int64
 }
 
 type ServerOptions struct {
-	AuthValidator *auth.Validator
-	CognitoAdmin  CognitoAdminClient
-	EmailSender   AuthEmailSender
-	NylasClient   NylasClient
-	NylasConfig   NylasConfig
+	AuthValidator       *auth.Validator
+	CognitoAdmin        CognitoAdminClient
+	EmailSender         AuthEmailSender
+	NylasClient         NylasClient
+	NylasConfig         NylasConfig
+	MaxRequestBodyBytes int64
 }
 
 func NewServer(repo store.Repository) *Server {
@@ -48,6 +50,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		emailSender:   options.EmailSender,
 		nylasClient:   options.NylasClient,
 		nylasConfig:   options.NylasConfig,
+		maxBodyBytes:  options.MaxRequestBodyBytes,
 	}
 }
 
@@ -81,6 +84,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/company-explorer/folder-items", s.handleCompanyExplorerFolderItems)
 	mux.HandleFunc("/v1/map-layout", s.handleMapLayout)
 	mux.HandleFunc("/v1/map-entity-batches", s.handleMapEntityBatches)
+	mux.HandleFunc("/v1/logic-gate-arena", s.handleLogicGateArena)
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
 	mux.HandleFunc("/v1/logic-gates/", s.handleLogicGateSubresource)
 	mux.HandleFunc("/v1/logic-gate-relationships", s.handleLogicGateRelationships)
@@ -93,7 +97,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/kanban/columns/", s.handleKanbanColumnByID)
 	mux.HandleFunc("/v1/kanban/cards", s.handleKanbanCards)
 	mux.HandleFunc("/v1/kanban/cards/", s.handleKanbanCardByID)
-	return s.withAuth(mux)
+	return s.withRequestLimits(s.withAuth(mux))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

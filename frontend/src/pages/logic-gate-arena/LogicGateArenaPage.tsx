@@ -83,18 +83,20 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
 
   useEffect(() => {
     if (!editorFrame?.id) return;
-    const initialSelections = [editorFrame.id, kanbanFrame?.id ?? ""]
+    const initialSelections = [explorerFrame?.id ?? "", editorFrame.id, kanbanFrame?.id ?? ""]
       .map((frameID) => frameID ? readLiveSelectionForFrame(companyID, frameID) : null)
       .filter((selection): selection is LiveSelectionChange => Boolean(selection))
       .sort((a, b) => a.changedAt - b.changedAt);
     for (const selection of initialSelections) applySelection(selection);
+    const unsubscribeExplorer = explorerFrame?.id ? subscribeLiveSelection(explorerFrame.id, applySelection) : () => {};
     const unsubscribeEditor = subscribeLiveSelection(editorFrame.id, applySelection);
     const unsubscribeKanban = kanbanFrame?.id ? subscribeLiveSelection(kanbanFrame.id, applySelection) : () => {};
     return () => {
+      unsubscribeExplorer();
       unsubscribeEditor();
       unsubscribeKanban();
     };
-  }, [applySelection, companyID, editorFrame?.id, kanbanFrame?.id]);
+  }, [applySelection, companyID, editorFrame?.id, explorerFrame?.id, kanbanFrame?.id]);
 
   useEffect(() => {
     const onPointerMove = (event: PointerEvent) => {
@@ -208,7 +210,14 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
         style={{ cursor: "col-resize", background: "transparent" }}
       />
       <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden" }}>
-        <KanbanContent accent={kanbanFrame.accent} widgetId={kanbanFrame.id} theme={kanbanFrame.theme} arenaMode />
+        <KanbanContent
+          accent={kanbanFrame.accent}
+          widgetId={kanbanFrame.id}
+          theme={kanbanFrame.theme}
+          arenaMode
+          forcedLogicGateID={selectedLogicGate.id}
+          forcedLogicGateLabel={selectedLogicGate.label}
+        />
       </section>
     </div>
   );

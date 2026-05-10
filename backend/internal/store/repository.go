@@ -16,6 +16,7 @@ var (
 	ErrInvitationAlreadyAccepted = errors.New("invitation already accepted")
 	ErrInvitationReplaced        = errors.New("invitation replaced")
 	ErrInvitationEmailMismatch   = errors.New("invitation email mismatch")
+	ErrAssigneeNotInCompany      = errors.New("assignee not in company")
 )
 
 type Repository interface {
@@ -28,7 +29,8 @@ type Repository interface {
 	ListCompanies(query string, limit int) ([]domain.Company, error)
 	ListCompanyUsers(companyID string) ([]domain.CompanyUser, error)
 	GetCompanyUser(companyID, userID string) (domain.CompanyUser, error)
-	DeleteCompanyUser(companyID, userID string) (domain.CompanyUser, error)
+	DeleteCompanyUser(companyID, userID string) (DeleteCompanyUserResult, error)
+	CompleteExternalIdentityDeletion(cognitoSubject string) error
 	CreateInvitation(input CreateInvitationInput) (domain.Invitation, error)
 	ValidateInvitationToken(token string) (domain.Invitation, error)
 	AcceptInvitation(token, cognitoSubject, email, displayName string) (domain.Invitation, error)
@@ -89,6 +91,11 @@ type Repository interface {
 	UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error)
 	MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error)
 	DeleteKanbanCard(companyID, boardID, cardID string) error
+}
+
+type DeleteCompanyUserResult struct {
+	User                   domain.CompanyUser `json:"user"`
+	DeleteExternalIdentity bool               `json:"delete_external_identity"`
 }
 
 const MapEntityBatchMaxItems = 200
