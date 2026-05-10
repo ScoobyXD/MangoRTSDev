@@ -115,7 +115,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
           color: surfaceText,
           fontSize: 10,
           fontWeight: 800,
-          letterSpacing: "0.1em",
+          letterSpacing: 0,
           textTransform: "uppercase",
           padding: "4px 10px",
           borderRadius: 4,

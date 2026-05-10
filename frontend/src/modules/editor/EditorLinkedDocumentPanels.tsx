@@ -35,10 +35,10 @@ type EditorLinkedDocumentPanelsProps = {
 
 const NODE_PRIORITY_OPTIONS = [
   { value: "0", label: "0 Unassigned", color: "#64748b" },
-  { value: "1", label: "1 Low Priority", color: "#2f7d62" },
-  { value: "2", label: "2 Medium-Low Priority", color: "#4776b5" },
-  { value: "3", label: "3 Medium Priority", color: "#9a6a1a" },
-  { value: "4", label: "4 High Priority", color: "#b45309" },
+  { value: "1", label: "1 Low Priority", color: "#fbb152" },
+  { value: "2", label: "2 Medium-Low Priority", color: "#fea94e" },
+  { value: "3", label: "3 Medium Priority", color: "#fe9b46" },
+  { value: "4", label: "4 High Priority", color: "#ff8820" },
   { value: "5", label: "5 URGENT", color: "#b91c1c" },
 ] as const;
 
@@ -215,7 +215,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                 maxWidth: "min(720px, 100%)",
                 padding: "2px 0 8px",
                 borderBottom: `1px dashed ${ruleColor}`,
-                fontFamily: "'IBM Plex Mono', 'Consolas', monospace",
+                fontFamily: "var(--mango-font-family)",
                 fontSize: 13,
                 lineHeight: 1.35,
                 color: "inherit",
@@ -307,9 +307,9 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                               onCommitNodeAssigneeDraft(label);
                               setAssigneeMenuOpen(false);
                             }}
-                            style={{ width: "100%", minHeight: 32, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "none", background: label === nodePresetFields.assigneeDraft ? "rgba(0, 233, 255, 0.18)" : "transparent", color: "#111827", cursor: "pointer", padding: "5px 10px", textAlign: "left", font: "inherit" }}
+                            style={{ width: "100%", minHeight: 32, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "none", background: label === nodePresetFields.assigneeDraft ? "rgba(255, 136, 32, 0.18)" : "transparent", color: "#111827", cursor: "pointer", padding: "5px 10px", textAlign: "left", font: "inherit" }}
                           >
-                            <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: "rgba(0, 233, 255, 0.13)", color: accent }}>
+                            <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: "rgba(255, 136, 32, 0.13)", color: accent }}>
                               <PersonIcon color={accent} />
                             </span>
                             <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
@@ -466,7 +466,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
 
       {activeTab === "metadata" && linkedNodeMetadataRows.length > 0 && (
         <section style={{ display: "grid", gap: 6, maxWidth: 520, pointerEvents: "auto" }}>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>Metadata</div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0, color: accent }}>Metadata</div>
           <div style={{ display: "grid", gap: 4 }}>
             {linkedNodeMetadataRows.map((row) => (
               <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "4px 6px" }}>
@@ -480,7 +480,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
 
       {activeTab === "history" && linkedNodeHistoryRows.length > 0 && (
         <section style={{ display: "grid", gap: 6, maxWidth: 640, pointerEvents: "auto" }}>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: accent }}>History</div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0, color: accent }}>History</div>
           <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3, fontSize: 11, background: panelBackground, border: `1px solid ${ruleColor}`, borderRadius: 6, padding: "6px 8px 6px 22px" }}>
             {linkedNodeHistoryRows.map((row, index) => <li key={`${row}-${index}`}>{row}</li>)}
           </ul>

@@ -162,7 +162,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
 
   if (!explorerFrame || !editorFrame || !kanbanFrame) {
     return (
-      <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", background: "#ffffff", color: "#111111", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}>
+      <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", background: "#ffffff", color: "#111111", fontFamily: "var(--mango-font-family)", fontSize: 12 }}>
         Logic Gate Arena requires Company Explorer, Editor, and Kanban frames.
       </div>
     );

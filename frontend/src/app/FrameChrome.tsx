@@ -7,6 +7,7 @@ import {
   COLORWAYS,
   CORNER_SIZE,
   CROSS_ARM,
+  DEFAULT_COLORWAY,
   FRAME_SELECTION_COLOR,
   HANDLE,
   clamp,
@@ -146,8 +147,8 @@ export const PlacementSplash: React.FC<{
               top: cell.y * stepY + 1.5,
               width: Math.max(2, stepX - 3),
               height: Math.max(2, stepY - 3),
-              border: "1px solid rgba(0, 233, 255, 0.72)",
-              background: `rgba(0, 233, 255, ${opacity})`,
+              border: "1px solid rgba(255, 136, 32, 0.72)",
+              background: `rgba(255, 136, 32, ${opacity})`,
               boxShadow: "0 0 0 1px rgba(255,255,255,0.18) inset",
             }}
           />
@@ -189,7 +190,7 @@ export interface FrameCardProps {
 
 export const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChild, nestedChildren, isDragging, isSelected, editMode, onDragStart, onResizeStart, onContextMenu, onModuleNameClick, onSelect, isLinked, edgeHit }) => {
   const Content = CONTENT_MAP[frame.kind];
-  const theme = COLORWAYS[frame.theme ?? "teal"];
+  const theme = COLORWAYS[frame.theme ?? DEFAULT_COLORWAY];
   const isNodesFrame = frame.kind === "nodes" || frame.kind === "nodes-map" || frame.kind === "logic-map" || frame.kind === "editor" || frame.kind === "node-doc";
   const isEdgeToEdgeContentFrame = isNodesFrame || frame.kind === "company-explorer" || frame.kind === "kanban" || frame.kind === "communications";
   const left = frame.x * stepX;
@@ -355,13 +356,13 @@ export const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChi
           borderBottom: "none",
           background: frame.color,
           cursor: isDragging ? "grabbing" : "grab",
-          fontFamily: "'IBM Plex Mono', monospace",
+          fontFamily: "var(--mango-font-family)",
         }}
       >
           <span
             data-module-name-switcher="true"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onModuleNameClick(e, frame.id); }}
-            style={{ fontSize: 12, fontWeight: 800, color: theme.tagText, textTransform: "uppercase", letterSpacing: "0.09em", background: theme.tagBg, padding: "3px 8px", cursor: "pointer", lineHeight: 1.1 }}
+            style={{ fontSize: 12, fontWeight: 800, color: theme.tagText, textTransform: "uppercase", letterSpacing: 0, background: theme.tagBg, padding: "3px 8px", cursor: "pointer", lineHeight: 1.1 }}
           >
             {frame.title}
           </span>
@@ -374,7 +375,7 @@ export const FrameCard: React.FC<FrameCardProps> = ({ frame, stepX, stepY, isChi
       </div>
       <div
         onContextMenu={(e) => e.stopPropagation()}
-        style={{ flex: 1, minHeight: 0, padding: isEdgeToEdgeContentFrame ? 0 : "8px 10px", overflow: frame.kind === "company-explorer" || frame.kind === "kanban" || frame.kind === "communications" ? "hidden" : "auto", fontFamily: "'IBM Plex Mono', monospace" }}
+        style={{ flex: 1, minHeight: 0, padding: isEdgeToEdgeContentFrame ? 0 : "8px 10px", overflow: frame.kind === "company-explorer" || frame.kind === "kanban" || frame.kind === "communications" ? "hidden" : "auto", fontFamily: "var(--mango-font-family)" }}
       >
         <div style={{ width: `${100 / contentScale}%`, height: `${100 / contentScale}%`, transform: `scale(${contentScale})`, transformOrigin: "top left" }}>
           {Content ? <Content accent={frame.accent} widgetId={frame.id} hideTopControls={isNodesFrame} theme={frame.theme} /> : <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.3 }}><span style={{ fontSize: 13, color: frame.accent }}>{frame.title}</span></div>}

@@ -108,7 +108,7 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
   const gateFill = isSelected ? nodeCardSelectedBackground : nodeCardBackground;
   const gateStroke = isSelected ? selectionColor : nodeCardBorder;
   const gateShadow = isSelected
-    ? "drop-shadow(0 0 4px rgba(0,233,255,0.45)) drop-shadow(0 8px 20px rgba(0,0,0,0.2))"
+    ? "drop-shadow(0 0 4px rgba(255,136,32,0.45)) drop-shadow(0 8px 20px rgba(0,0,0,0.2))"
     : "drop-shadow(0 4px 12px rgba(0,0,0,0.12))";
 
   return (
@@ -276,8 +276,8 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
               fontSize: 18,
               fontWeight: 800,
               lineHeight: 1.15,
-              letterSpacing: "0.03em",
-              fontFamily: "'IBM Plex Mono', monospace",
+              letterSpacing: 0,
+              fontFamily: "var(--mango-font-family)",
               outline: "none",
             }}
           >
@@ -298,8 +298,8 @@ export const LogicGateMapNodeCard: React.FC<LogicGateMapNodeCardProps> = ({
               fontSize: 18,
               fontWeight: 800,
               lineHeight: 1.15,
-              letterSpacing: "0.03em",
-              fontFamily: "'IBM Plex Mono', monospace",
+              letterSpacing: 0,
+              fontFamily: "var(--mango-font-family)",
             }}
           >
             {getNodeTitle(node)}

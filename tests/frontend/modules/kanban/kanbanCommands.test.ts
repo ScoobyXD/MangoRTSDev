@@ -32,7 +32,7 @@ function column(overrides: Partial<KanbanColumn>): KanbanColumn {
     position: 1000,
     width_px: KANBAN_DEFAULT_COLUMN_WIDTH_PX,
     height_px: KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
-    item_color: "#2f7d62",
+    item_color: "#fbb152",
     created_timestamp: "2026-05-01T00:00:00.000Z",
     updated_timestamp: "2026-05-01T00:00:00.000Z",
     ...overrides,
@@ -83,7 +83,7 @@ function createClient(): {
         position: position ?? 0,
         width_px: widthPx ?? 0,
         height_px: heightPx ?? 0,
-        item_color: itemColor ?? "#2f7d62",
+        item_color: itemColor ?? "#fbb152",
       });
     },
     async updateColumn(args) {
@@ -94,7 +94,7 @@ function createClient(): {
         position: args.position ?? 1000,
         width_px: args.widthPx ?? KANBAN_DEFAULT_COLUMN_WIDTH_PX,
         height_px: args.heightPx ?? KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
-        item_color: args.itemColor ?? "#2f7d62",
+        item_color: args.itemColor ?? "#fbb152",
       });
     },
     async deleteColumn(_apiBase, _companyID, _boardID, columnID) {

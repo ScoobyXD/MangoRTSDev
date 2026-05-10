@@ -167,7 +167,7 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
     style={{ overflowY: "auto", overflowX: "hidden", minWidth: 0, outline: "none", scrollbarGutter: "stable", ["--company-explorer-scroll-accent" as string]: scrollbarAccent, ["--company-explorer-scroll-track" as string]: scrollbarTrack }}
   >
     <div style={{ position: "sticky", top: 0, zIndex: 5, padding: "13px 10px 8px", borderBottom: `1px solid ${ruleColor}`, background: surfaceBackground, display: "grid", gap: 7 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>Company Explorer</div>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0, textTransform: "uppercase", color: accent }}>Company Explorer</div>
       <div data-frame-interactive="true" style={{ position: "relative", display: "block", minWidth: 0, height: 25 }}>
         <input
           aria-label="Search Company Explorer"
@@ -208,14 +208,14 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
               >
                 <ExplorerRowIcon kind={row.kind} systemKey={row.systemKey} />
                 <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: row.systemKey ? 800 : 700, color: row.systemKey ? "rgb(0, 233, 255)" : undefined }}>{row.label}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: row.systemKey ? 800 : 700, color: row.systemKey ? "rgb(255, 136, 32)" : undefined }}>{row.label}</span>
                   {row.folderLabel && (
                     <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: folderToggleColor, fontSize: 9, fontWeight: 700 }}>
                       {row.folderLabel}
                     </span>
                   )}
                 </span>
-                <span style={{ color: folderToggleColor, fontSize: 9, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase" }}>{row.kind === "logic_gate" ? "Logic" : row.kind}</span>
+                <span style={{ color: folderToggleColor, fontSize: 9, fontWeight: 800, letterSpacing: 0, textTransform: "uppercase" }}>{row.kind === "logic_gate" ? "Logic" : row.kind}</span>
               </button>
             ))}
           </section>

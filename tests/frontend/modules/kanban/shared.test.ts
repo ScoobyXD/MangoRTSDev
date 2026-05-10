@@ -27,7 +27,7 @@ function column(overrides: Partial<KanbanColumn>): KanbanColumn {
     position: 1000,
     width_px: 260,
     height_px: 240,
-    item_color: "#2f7d62",
+    item_color: "#fbb152",
     created_timestamp: "2026-05-01T00:00:00.000Z",
     updated_timestamp: "2026-05-01T00:00:00.000Z",
     ...overrides,
@@ -326,9 +326,9 @@ test("card batch reorder helper moves selected cards together", () => {
 
 test("column layout helpers keep reorder and resize writes bounded", () => {
   const columns = [
-    { company_id: "c", board_id: "b", column_id: "left", title: "Left", position: 1000, width_px: 260, height_px: 240, item_color: "#2f7d62", created_timestamp: "2026-05-01T00:00:01.000Z", updated_timestamp: "2026-05-01T00:00:01.000Z" },
-    { company_id: "c", board_id: "b", column_id: "middle", title: "Middle", position: 2000, width_px: 260, height_px: 240, item_color: "#245c9f", created_timestamp: "2026-05-01T00:00:02.000Z", updated_timestamp: "2026-05-01T00:00:02.000Z" },
-    { company_id: "c", board_id: "b", column_id: "right", title: "Right", position: 3000, width_px: 260, height_px: 240, item_color: "#9a5b16", created_timestamp: "2026-05-01T00:00:03.000Z", updated_timestamp: "2026-05-01T00:00:03.000Z" },
+    { company_id: "c", board_id: "b", column_id: "left", title: "Left", position: 1000, width_px: 260, height_px: 240, item_color: "#fbb152", created_timestamp: "2026-05-01T00:00:01.000Z", updated_timestamp: "2026-05-01T00:00:01.000Z" },
+    { company_id: "c", board_id: "b", column_id: "middle", title: "Middle", position: 2000, width_px: 260, height_px: 240, item_color: "#fea94e", created_timestamp: "2026-05-01T00:00:02.000Z", updated_timestamp: "2026-05-01T00:00:02.000Z" },
+    { company_id: "c", board_id: "b", column_id: "right", title: "Right", position: 3000, width_px: 260, height_px: 240, item_color: "#fe9b46", created_timestamp: "2026-05-01T00:00:03.000Z", updated_timestamp: "2026-05-01T00:00:03.000Z" },
   ];
   const plan = buildColumnReorderPlan(columns, "left", null);
   assert.deepEqual(plan.columns.map((column) => column.column_id), ["middle", "right", "left"]);

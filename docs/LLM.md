@@ -32,7 +32,7 @@ A half-decent analogy is an internal Bloombergy terminal on steroids with video 
 - **Nested relationship visuals** — for list-like nested UI (including right-click menus), use Boxy Hierarchical: Company Explorer-inspired boxy rows with child rows indented under the parent row.
 - **Hierarchy list styling convention** — Boxy Hierarchical lists are fully boxy (top-level and nested rows), without triangle expand/collapse icons or decorative connector lines unless explicitly requested.
 - **Hierarchy spacing rule** — in Boxy Hierarchical lists, stacked hierarchy boxes touch with no vertical gaps between adjacent rows (top-level and nested).
-- **Settings dropdown convention** — Settings must not use native `<select>` dropdowns. Use the MangoRTS custom dropdown pattern: teal RGB(0, 233, 255) frame, glass/dark menu surface, searchable input for large option sets, and a checkmark on the selected option.
+- **Settings dropdown convention** - Settings must not use native `<select>` dropdowns. Use the MangoRTS custom dropdown pattern: Mango orange frame/accent, glass/dark menu surface where appropriate, searchable input for large option sets, and a checkmark on the selected option.
 - **Module-name click switcher** — single-click the module name tag (not the full header row) to open a module-type picker and swap kind/title in place. Works in edit and non-edit mode.
 - **Add widget (+)** — always-visible button in header. Works in any mode.
 - **Nothing auto-moves, instant snapping, no transitions**
@@ -55,7 +55,7 @@ Use this checklist before editing features so existing behavior is not accidenta
 - Module cards support:
   - title tag
   - content area
-  - theme colors (`teal/orange/white/black`)
+  - theme colors (`mango/teal/white/black`)
   - selection border when selected.
 - Add new module via `+` in header.
 - Duplicate module via module context menu.
@@ -174,10 +174,11 @@ React 18 · TypeScript strict · Vite · Zero deps beyond React
 ## Visual Direction (Important)
 
 - Do **not** use muted / desaturated “sad” color palettes.
-- Primary brand direction is **vibrant teal-blue + bright neon orange**.
-- Header/top bar should emphasize neon orange.
-- Use teal-blue as the main complementary accent across grid/widget UI elements.
-- Approved widget colorways (until changed): **teal / neon orange / white / black** only.
+- Primary brand direction is **Mango orange by default** with teal retained only as an optional legacy colorway.
+- Default typography throughout the app is `Helvetica Neue` with the fallback stack `"Helvetica Neue", Helvetica, Arial, sans-serif`.
+- Default Mango gradient, left to right: `rgba(251, 177, 82, 1)`, `rgba(254, 169, 78, 1)`, `rgba(254, 155, 70, 1)`, `rgba(255, 136, 32, 1)`.
+- Header/top bar, selection, scrollbars, buttons, and default accents should use the Mango orange scheme. White backgrounds should remain white.
+- Approved widget colorways: **mango / teal / white / black**.
 
 ## UI Rules (Text Editing)
 

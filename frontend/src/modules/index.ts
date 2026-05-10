@@ -4,7 +4,7 @@ type ModuleProps = {
   accent: string;
   widgetId?: string;
   hideTopControls?: boolean;
-  theme?: "teal" | "light" | "dark";
+  theme?: "mango" | "teal" | "light" | "dark";
 };
 
 type ModuleComponent = React.FC<ModuleProps>;

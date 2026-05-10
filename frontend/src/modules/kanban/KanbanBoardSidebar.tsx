@@ -26,7 +26,7 @@ type KanbanBoardSidebarProps = {
   text: string;
   subtext: string;
   isDark: boolean;
-  theme: "teal" | "light" | "dark";
+  theme: "mango" | "teal" | "light" | "dark";
   editingBoardTitle: boolean;
   boardTitleReadOnly?: boolean;
   headerLeftPaddingPx?: number;
@@ -146,7 +146,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
       <button
         type="button"
         onClick={onToggleAllBoards}
-        style={{ height: 25, display: "flex", alignItems: "center", gap: 6, border: `1px solid ${allBoardsOpen ? accent : line}`, background: allBoardsOpen ? (isDark ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.98)") : (isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)"), color: text, fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", padding: "0 9px", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
+        style={{ height: 25, display: "flex", alignItems: "center", gap: 6, border: `1px solid ${allBoardsOpen ? accent : line}`, background: allBoardsOpen ? (isDark ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.98)") : (isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)"), color: text, fontSize: 10, fontWeight: 800, letterSpacing: 0, textTransform: "uppercase", padding: "0 9px", borderRadius: 4, cursor: "pointer", whiteSpace: "nowrap" }}
       >
         <span aria-hidden="true" style={{ width: 12, display: "grid", gap: 2 }}>
           <span style={{ height: 2, background: text }} />
@@ -158,11 +158,11 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
     </div>
     {boardPickerOpen && (
       <section ref={popoverRef} data-frame-interactive="true" style={{ position: "absolute", top: topClearancePx + 2, right: 12, width: "min(360px, calc(100% - 24px))", maxHeight: "min(360px, calc(100% - 52px))", display: "grid", gridTemplateRows: "minmax(0, 1fr)", border: isDark ? "1px solid rgba(255,255,255,0.16)" : "1px solid #e0e0e0", borderRadius: 10, background: isDark ? "rgba(17,22,27,0.98)" : "#ffffff", boxShadow: isDark ? "0 12px 28px rgba(0,0,0,0.42)" : "0 6px 24px rgba(0,0,0,0.12)", padding: "4px 0", zIndex: 8, overflow: "hidden" }}>
-        <div className="company-explorer-scroll" style={{ overflowY: "auto", overflowX: "hidden", minHeight: 0, ["--company-explorer-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--company-explorer-scroll-track" as string]: "transparent" }}>
+        <div className="company-explorer-scroll" style={{ overflowY: "auto", overflowX: "hidden", minHeight: 0, ["--company-explorer-scroll-accent" as string]: theme === "light" ? "rgb(255, 136, 32)" : accent, ["--company-explorer-scroll-track" as string]: "transparent" }}>
           {!boardsLoading && filteredBoardRowsLength === 0 && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>No saved boards</div>}
           {filteredBoardGroups.map((group) => (
             <div key={group.folderLabel}>
-              <div style={{ padding: "8px 12px 4px", color: subtext, fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              <div style={{ padding: "8px 12px 4px", color: subtext, fontSize: 10, fontWeight: 800, letterSpacing: 0, textTransform: "uppercase" }}>
                 {group.folderLabel}
               </div>
               {group.items.map((board) => {
@@ -173,7 +173,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
                     type="button"
                     title={board.board_id}
                     onClick={() => onSelectBoard(board.board_id)}
-                    style={{ width: "100%", display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, minHeight: 30, padding: "5px 12px 5px 24px", border: "none", background: selected ? (isDark ? "rgba(0,233,255,0.2)" : "rgba(0, 233, 255, 0.22)") : "transparent", color: text, cursor: "pointer", textAlign: "left" }}
+                    style={{ width: "100%", display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, minHeight: 30, padding: "5px 12px 5px 24px", border: "none", background: selected ? (isDark ? "rgba(255,136,32,0.2)" : "rgba(255, 136, 32, 0.22)") : "transparent", color: text, cursor: "pointer", textAlign: "left" }}
                   >
                     <KanbanBoardIcon />
                     <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 800 : 700 }}>

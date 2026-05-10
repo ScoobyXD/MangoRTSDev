@@ -1,10 +1,19 @@
-@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=IBM+Plex+Mono:wght@500;700&display=swap");
-
 /* Global reset and predictable box model for full-canvas dashboard layout. */
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+:root {
+  --mango-font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mango-orange-1: rgba(251, 177, 82, 1);
+  --mango-orange-2: rgba(254, 169, 78, 1);
+  --mango-orange-3: rgba(254, 155, 70, 1);
+  --mango-orange-4: rgba(255, 136, 32, 1);
+  --mango-accent-rgb: 255, 136, 32;
+  --mango-gradient: linear-gradient(90deg, var(--mango-orange-1), var(--mango-orange-2), var(--mango-orange-3), var(--mango-orange-4));
+  --mango-text: #24120a;
 }
 
 /* Lock app viewport to full-screen and prevent browser scrollbars. */
@@ -16,10 +25,10 @@ html, body, #root {
 
 /* Base typography and neutral background for module theming contrast. */
 body {
-  font-family: "Manrope", "Helvetica Neue", sans-serif;
+  font-family: var(--mango-font-family);
   color: #101010;
   background: #ececea;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
 }
 
 button, input, textarea {
@@ -28,7 +37,7 @@ button, input, textarea {
 
 /* Company Explorer scrollbar treatment: match the Editor's thin scrollbar. */
 .company-explorer-scroll {
-  --company-explorer-scroll-accent: #00b8cc;
+  --company-explorer-scroll-accent: rgb(255, 136, 32);
   --company-explorer-scroll-track: transparent;
   scrollbar-width: thin;
   scrollbar-color: var(--company-explorer-scroll-accent) transparent;
@@ -62,7 +71,7 @@ button, input, textarea {
 
 /* Kanban board uses the same thin scrollbars as Editor and Company Explorer, including horizontal overflow. */
 .kanban-board-scroll {
-  --kanban-board-scroll-accent: #00b8cc;
+  --kanban-board-scroll-accent: rgb(255, 136, 32);
   --kanban-board-scroll-track: transparent;
   scrollbar-width: thin;
   scrollbar-color: var(--kanban-board-scroll-accent) transparent;
@@ -96,7 +105,7 @@ button, input, textarea {
 
 /* Individual Kanban columns use slimmer color-matched scrollbars for card lanes. */
 .kanban-column-scroll {
-  --kanban-column-scroll-accent: #2f7d62;
+  --kanban-column-scroll-accent: #fbb152;
   --kanban-column-scroll-track: transparent;
   scrollbar-width: thin;
   scrollbar-color: var(--kanban-column-scroll-accent) transparent;
@@ -126,12 +135,12 @@ button, input, textarea {
 
 /* Hover is visual-only; real selection stays click/key/API driven. */
 .company-explorer-row:hover {
-  background: var(--company-explorer-hover-bg, rgba(0, 233, 255, 0.13));
+  background: var(--company-explorer-hover-bg, rgba(255, 136, 32, 0.13));
 }
 
 /* Editor document scrollbar: slim, edge-aligned, and driven by the frame theme. */
 .editor-document-scroll {
-  --editor-document-scroll-accent: rgb(0, 233, 255);
+  --editor-document-scroll-accent: rgb(255, 136, 32);
   --editor-document-scroll-track: transparent;
   scrollbar-width: thin;
   scrollbar-color: var(--editor-document-scroll-accent) transparent;

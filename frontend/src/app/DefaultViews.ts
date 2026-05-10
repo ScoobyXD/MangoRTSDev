@@ -1,7 +1,8 @@
 import type { FrameDataModel } from "../types.js";
+import { MANGO_ACCENT_HEX } from "../theme.js";
 import { createFrameId } from "./frameLayoutTypes.js";
 
-const WHITE_FRAME = { theme: "light" as const, color: "#ffffff", accent: "#111111" };
+const WHITE_FRAME = { theme: "light" as const, color: "#ffffff", accent: MANGO_ACCENT_HEX };
 
 export const LEGACY_DEFAULT_NODE_VIEW_FRAME_IDS = {
   map: "w-node-map",

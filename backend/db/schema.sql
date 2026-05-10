@@ -321,7 +321,7 @@ create table if not exists kanban_columns (
   position integer not null,
   width_px integer not null default 260,
   height_px integer not null default 240,
-  item_color text not null default '#2f7d62',
+  item_color text not null default '#fbb152',
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   constraint kanban_columns_title_nonblank_chk check (btrim(title) <> ''),

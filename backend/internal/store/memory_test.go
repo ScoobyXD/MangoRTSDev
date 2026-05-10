@@ -129,7 +129,7 @@ func TestMemoryRepo_DeleteNode_RemovesKanbanCardsAndKeepsOperations(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateNode failed: %v", err)
 	}
-	column, err := repo.CreateKanbanColumn(companyID, boardID, "Ready", 0, 260, 240, "#2f7d62")
+	column, err := repo.CreateKanbanColumn(companyID, boardID, "Ready", 0, 260, 240, "#fbb152")
 	if err != nil {
 		t.Fatalf("CreateKanbanColumn failed: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestMemoryRepo_UpdateNodeTitleRefreshesKanbanCardSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNode failed: %v", err)
 	}
-	column, err := repo.CreateKanbanColumn(companyID, boardID, "Ready", 0, 260, 240, "#2f7d62")
+	column, err := repo.CreateKanbanColumn(companyID, boardID, "Ready", 0, 260, 240, "#fbb152")
 	if err != nil {
 		t.Fatalf("CreateKanbanColumn failed: %v", err)
 	}

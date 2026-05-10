@@ -98,7 +98,7 @@ type EditorContentProps = {
   accent: string;
   widgetId?: string;
   hideTopControls?: boolean;
-  theme?: "teal" | "light" | "dark";
+  theme?: "mango" | "teal" | "light" | "dark";
   forcedEntityKind?: "node" | "logic_gate";
   forcedEntityID?: string;
   forcedLabel?: string;
@@ -137,7 +137,7 @@ function findCompanyUserByAssigneeDraft(users: CompanyUser[], draft: string): Co
 }
 
 // Editor module: linked document canvas for node or logic-gate context.
-export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "teal", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "" }) => {
+export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -975,15 +975,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
-  const surfaceText = isDarkTheme ? "#f4f7fa" : "#0d1a1e";
+  const surfaceText = isDarkTheme ? "#f4f7fa" : "#24120a";
   const tabBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.86)";
   const tabSelectedBackground = isDarkTheme ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.98)";
-  const strokeColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(3,25,30,0.22)";
-  const ruleColor = isDarkTheme ? "rgba(255,255,255,0.16)" : "rgba(3,25,30,0.14)";
+  const strokeColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(36,18,10,0.22)";
+  const ruleColor = isDarkTheme ? "rgba(255,255,255,0.16)" : "rgba(36,18,10,0.14)";
   const panelBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 255, 255, 0.8)";
-  const scrollbarAccent = theme === "light" ? "rgb(0, 233, 255)" : accent;
-  const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)";
-  const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(3,25,30,0.2)";
+  const scrollbarAccent = theme === "light" ? "rgb(255, 136, 32)" : accent;
+  const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 136, 32, 0.08)";
+  const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(36,18,10,0.2)";
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
   const hasLinkedDocument = linkedNodeID.trim().length > 0;
   const emptyMessage = forcedEntityKind && !hasLinkedDocument ? forcedEmptyMessage : "";
@@ -991,7 +991,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const documentTopPx = linkedEntityKind === "node" ? 150 : EDITOR_DOCUMENT_TOP_PX;
   const documentLineHeightPx = documentFontSize * EDITOR_DOCUMENT_LINE_HEIGHT;
   const documentBottomBufferPx = Math.round(documentLineHeightPx * EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES);
-  const documentFontFamily = "'IBM Plex Mono', 'Consolas', 'Liberation Mono', monospace";
+  const documentFontFamily = "var(--mango-font-family)";
   const documentSurfaceHandlers = useEditorDocumentSurfaceHandlers({
     restoringScrollRef,
     currentDocumentTargetKeyRef,

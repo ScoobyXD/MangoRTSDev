@@ -329,13 +329,13 @@ func normalizeKanbanColumnHeight(heightPx int) int {
 func normalizeKanbanColumnItemColor(itemColor string) string {
 	itemColor = strings.TrimSpace(itemColor)
 	if len(itemColor) != 7 || itemColor[0] != '#' {
-		return "#2f7d62"
+		return "#fbb152"
 	}
 	for _, char := range itemColor[1:] {
 		if (char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F') {
 			continue
 		}
-		return "#2f7d62"
+		return "#fbb152"
 	}
 	return itemColor
 }

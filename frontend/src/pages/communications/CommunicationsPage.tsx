@@ -477,7 +477,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   );
 }
 
-export const CommunicationsFrameContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = () => (
+export const CommunicationsFrameContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "mango" | "teal" | "light" | "dark" }> = () => (
   <CommunicationsPage embedded />
 );
 
@@ -566,7 +566,7 @@ function formatMessageDate(epochSeconds?: number): string {
 function messageDocument(body: string): string {
   const value = body.trim();
   const content = /<\/?[a-z][\s\S]*>/i.test(value) ? value : `<pre>${escapeHTML(value)}</pre>`;
-  return `<!doctype html><html><head><meta charset="utf-8"><style>body{font:14px/1.5 Arial,sans-serif;color:#111;margin:0;padding:14px;overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 Arial,sans-serif}</style></head><body>${content}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><style>body{font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#111;margin:0;padding:14px;overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}</style></head><body>${content}</body></html>`;
 }
 
 function escapeHTML(value: string): string {
@@ -595,9 +595,9 @@ const pageStyle: React.CSSProperties = {
   overflow: "hidden",
   display: "flex",
   flexDirection: "column",
-  background: "#f7fffe",
-  color: "#041d22",
-  fontFamily: "'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace",
+  background: "#ffffff",
+  color: "#24120a",
+  fontFamily: "var(--mango-font-family)",
 };
 
 const headerStyle: React.CSSProperties = {
@@ -606,7 +606,7 @@ const headerStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 14,
   padding: "0 18px",
-  borderBottom: "1px solid rgba(12, 67, 74, 0.25)",
+  borderBottom: "1px solid rgba(255, 136, 32, 0.25)",
   background: "#ffffff",
 };
 
@@ -627,7 +627,7 @@ const titleStyle: React.CSSProperties = {
 const headerDividerStyle: React.CSSProperties = {
   width: 1,
   height: 22,
-  background: "rgba(12, 67, 74, 0.25)",
+  background: "rgba(255, 136, 32, 0.25)",
 };
 
 const userPillStyle: React.CSSProperties = {
@@ -653,7 +653,7 @@ const panelStyle: React.CSSProperties = {
   gridTemplateRows: "auto",
   gap: 10,
   padding: 10,
-  border: "1px solid rgba(12, 67, 74, 0.22)",
+  border: "1px solid rgba(255, 136, 32, 0.22)",
   background: "#ffffff",
   borderRadius: 8,
   overflow: "hidden",
@@ -664,7 +664,7 @@ const connectPanelStyle: React.CSSProperties = {
   display: "grid",
   gap: 12,
   padding: 16,
-  border: "1px solid rgba(12, 67, 74, 0.24)",
+  border: "1px solid rgba(255, 136, 32, 0.24)",
   background: "#ffffff",
   borderRadius: 8,
 };
@@ -693,23 +693,23 @@ const panelTitleStyle: React.CSSProperties = {
 };
 
 const mutedTextStyle: React.CSSProperties = {
-  color: "rgba(4, 29, 34, 0.68)",
+  color: "rgba(36, 18, 10, 0.68)",
   fontSize: 12,
   lineHeight: 1.45,
 };
 
 const mutedSmallStyle: React.CSSProperties = {
-  color: "rgba(4, 29, 34, 0.62)",
+  color: "rgba(36, 18, 10, 0.62)",
   fontSize: 11,
   overflowWrap: "anywhere",
 };
 
 const smallButtonStyle: React.CSSProperties = {
   minHeight: 30,
-  border: "1px solid rgba(12, 67, 74, 0.32)",
+  border: "1px solid rgba(255, 136, 32, 0.32)",
   borderRadius: 6,
   background: "#fff",
-  color: "#041d22",
+  color: "#24120a",
   cursor: "pointer",
   font: "inherit",
   fontSize: 11,
@@ -718,19 +718,19 @@ const smallButtonStyle: React.CSSProperties = {
 
 const headerButtonStyle: React.CSSProperties = {
   ...smallButtonStyle,
-  border: "1px solid rgba(0, 233, 255, 0.62)",
+  border: "1px solid rgba(255, 136, 32, 0.62)",
   background: "linear-gradient(180deg, rgba(9, 31, 38, 0.84), rgba(5, 18, 23, 0.72))",
   color: "#e8fbff",
   fontWeight: 800,
-  boxShadow: "0 0 0 1px rgba(0, 233, 255, 0.12) inset, 0 8px 20px rgba(0, 0, 0, 0.18)",
+  boxShadow: "0 0 0 1px rgba(255, 136, 32, 0.12) inset, 0 8px 20px rgba(0, 0, 0, 0.18)",
 };
 
 const primaryButtonStyle: React.CSSProperties = {
   minHeight: 34,
-  border: "1px solid #07545d",
+  border: "1px solid #ff8820",
   borderRadius: 6,
-  background: "#00e9ff",
-  color: "#041d22",
+  background: "linear-gradient(90deg, rgba(251, 177, 82, 1), rgba(254, 169, 78, 1), rgba(254, 155, 70, 1), rgba(255, 136, 32, 1))",
+  color: "#24120a",
   cursor: "pointer",
   font: "inherit",
   fontSize: 11,
@@ -747,7 +747,7 @@ const inputStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
   height: 34,
-  border: "1px solid rgba(12, 67, 74, 0.28)",
+  border: "1px solid rgba(255, 136, 32, 0.28)",
   borderRadius: 6,
   padding: "0 9px",
   font: "inherit",
@@ -777,10 +777,10 @@ function folderButtonStyle(active: boolean): React.CSSProperties {
     gridTemplateColumns: "minmax(0, 1fr) auto",
     gap: 8,
     alignItems: "center",
-    border: `1px solid ${active ? "#07545d" : "rgba(12, 67, 74, 0.18)"}`,
+    border: `1px solid ${active ? "#ff8820" : "rgba(255, 136, 32, 0.18)"}`,
     borderRadius: 6,
-    background: active ? "#dffcff" : "#ffffff",
-    color: "#041d22",
+    background: active ? "#fff2e0" : "#ffffff",
+    color: "#24120a",
     cursor: "pointer",
     font: "inherit",
     fontSize: 11,
@@ -824,11 +824,11 @@ function messageRowStyle(active: boolean, unread: boolean): React.CSSProperties 
     display: "grid",
     gap: 4,
     minHeight: 78,
-    border: `1px solid ${active ? "#07545d" : unread ? "rgba(0, 184, 204, 0.45)" : "rgba(12, 67, 74, 0.16)"}`,
+    border: `1px solid ${active ? "#ff8820" : unread ? "rgba(255, 136, 32, 0.45)" : "rgba(255, 136, 32, 0.16)"}`,
     borderRadius: 7,
-    background: active ? "#dffcff" : unread ? "#f2feff" : "#ffffff",
+    background: active ? "#fff2e0" : unread ? "#fff7ed" : "#ffffff",
     cursor: "pointer",
-    color: "#041d22",
+    color: "#24120a",
     font: "inherit",
     fontSize: 12,
     padding: 9,
@@ -850,7 +850,7 @@ const snippetStyle: React.CSSProperties = {
   display: "-webkit-box",
   WebkitBoxOrient: "vertical",
   WebkitLineClamp: 2,
-  color: "rgba(4, 29, 34, 0.62)",
+  color: "rgba(36, 18, 10, 0.62)",
   fontSize: 11,
   lineHeight: 1.35,
 };
@@ -885,7 +885,7 @@ const iframeStyle: React.CSSProperties = {
   width: "100%",
   minHeight: 0,
   height: "100%",
-  border: "1px solid rgba(12, 67, 74, 0.16)",
+  border: "1px solid rgba(255, 136, 32, 0.16)",
   borderRadius: 6,
   background: "#fff",
 };
@@ -901,7 +901,7 @@ const emptyStateStyle: React.CSSProperties = {
   minHeight: 120,
   display: "grid",
   placeItems: "center",
-  color: "rgba(4, 29, 34, 0.56)",
+  color: "rgba(36, 18, 10, 0.56)",
   fontSize: 12,
 };
 

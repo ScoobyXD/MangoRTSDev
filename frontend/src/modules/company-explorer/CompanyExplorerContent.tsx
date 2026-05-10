@@ -165,7 +165,7 @@ function findProtectedSystemFolderInDeleteTargets(targets: ExplorerDeleteTargetW
 }
 
 // Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
-export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "teal" }) => {
+export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "mango" | "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "mango" }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -1476,15 +1476,15 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : "#ffffff";
-  const surfaceText = isDarkTheme ? "#f4f7fa" : "#0f1f23";
-  const ruleColor = isDarkTheme ? "rgba(255,255,255,0.16)" : "rgba(3,25,30,0.14)";
-  const rowRuleColor = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(3,25,30,0.06)";
-  const selectedRowBackground = isDarkTheme ? "rgba(0,233,255,0.2)" : "rgba(0, 233, 255, 0.28)";
+  const surfaceText = isDarkTheme ? "#f4f7fa" : "#24120a";
+  const ruleColor = isDarkTheme ? "rgba(255,255,255,0.16)" : "rgba(36,18,10,0.14)";
+  const rowRuleColor = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(36,18,10,0.06)";
+  const selectedRowBackground = isDarkTheme ? "rgba(255,136,32,0.2)" : "rgba(255, 136, 32, 0.28)";
   const dropRowBackground = isDarkTheme ? "rgba(109, 240, 211, 0.18)" : "rgba(30, 160, 120, 0.16)";
-  const folderToggleColor = isDarkTheme ? "#95c7d1" : "#326872";
-  const rowIconColor = isDarkTheme ? "#b8d9e1" : "#315f68";
-  const scrollbarAccent = theme === "light" ? "rgb(0, 233, 255)" : accent;
-  const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)";
+  const folderToggleColor = isDarkTheme ? "#fbb152" : "#8a3b10";
+  const rowIconColor = isDarkTheme ? "#ffd8a6" : "#8a3b10";
+  const scrollbarAccent = theme === "light" ? "rgb(255, 136, 32)" : accent;
+  const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255, 136, 32, 0.08)";
   const explorerMenuButtonStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
@@ -1493,7 +1493,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     border: "none",
     background: "transparent",
     cursor: "pointer",
-    fontFamily: "'IBM Plex Mono', monospace",
+    fontFamily: "var(--mango-font-family)",
     fontSize: 12,
     fontWeight: 700,
     textAlign: "left",
@@ -1593,13 +1593,13 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
       {deleteBlockedMessage && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(255,136,32,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 700 }}>Folder cannot be deleted</div>
             <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#d6e0e6" : "#222222" }}>{deleteBlockedMessage}</div>
             <button
               type="button"
               onClick={() => setDeleteBlockedMessage("")}
-              style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", color: "#111111", cursor: "pointer", fontWeight: 700, minHeight: 28 }}
+              style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#fff", color: "#111111", cursor: "pointer", fontWeight: 700, minHeight: 28 }}
             >
               OK
             </button>
@@ -1609,7 +1609,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
 
       {deleteConfirmation && deleteSummary && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(255,136,32,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 700 }}>
               {deleteSummary.title}
             </div>
@@ -1640,7 +1640,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
                   void deleteExplorerTargets(targets);
                 }}
                 disabled={deleteSummary.requiresFolderAcknowledgement && !deleteFolderAcknowledged}
-                style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", color: "#111111", cursor: deleteSummary.requiresFolderAcknowledgement && !deleteFolderAcknowledged ? "not-allowed" : "pointer", fontWeight: 700, opacity: deleteSummary.requiresFolderAcknowledgement && !deleteFolderAcknowledged ? 0.55 : 1 }}
+                style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#fff", color: "#111111", cursor: deleteSummary.requiresFolderAcknowledgement && !deleteFolderAcknowledged ? "not-allowed" : "pointer", fontWeight: 700, opacity: deleteSummary.requiresFolderAcknowledgement && !deleteFolderAcknowledged ? 0.55 : 1 }}
               >
                 Yes
               </button>

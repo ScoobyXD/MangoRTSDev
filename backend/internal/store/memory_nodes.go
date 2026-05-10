@@ -57,7 +57,7 @@ func (r *MemoryRepo) deriveNodeStatusLocked(companyID, nodeID string) (*string, 
 				status = "Unknown"
 			}
 			if statusColor == "" {
-				statusColor = "#2f7d62"
+				statusColor = "#fbb152"
 			}
 			return &status, &statusColor
 		}

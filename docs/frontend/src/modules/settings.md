@@ -10,7 +10,7 @@
 ## Dropdown Convention
 
 - Settings must not use native `<select>` dropdowns.
-- Settings dropdowns must use the MangoRTS custom dropdown pattern: teal frame, glass/dark surface, searchable input when the option set is large, and a checkmark on the selected option.
+- Settings dropdowns must use the MangoRTS custom dropdown pattern: Mango orange frame/accent, glass/dark surface where appropriate, searchable input when the option set is large, and a checkmark on the selected option.
 - Role selection in Settings uses the same custom dropdown pattern even though it is a small fixed list.
 
 ## Invite Flow

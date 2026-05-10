@@ -1,5 +1,5 @@
 alter table kanban_columns
-  add column if not exists item_color text not null default '#2f7d62';
+  add column if not exists item_color text not null default '#fbb152';
 
 do $$
 begin

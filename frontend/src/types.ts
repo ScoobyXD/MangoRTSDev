@@ -1,9 +1,11 @@
 // Canonical frame/module geometry model shared by dashboard editing and persistence.
+export type FrameTheme = "mango" | "teal" | "light" | "dark";
+
 export interface FrameDataModel {
   id: string;
   kind: string;
   parentId?: string;
-  theme?: "teal" | "light" | "dark";
+  theme?: FrameTheme;
   x: number;
   y: number;
   w: number;

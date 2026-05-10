@@ -977,7 +977,7 @@ func TestKanbanColumnAndCardAPIFlow(t *testing.T) {
 			"title":      title,
 			"width_px":   280,
 			"height_px":  240,
-			"item_color": "#245c9f",
+			"item_color": "#fea94e",
 		})
 		req := httptest.NewRequest(http.MethodPost, "/v1/kanban/columns", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")

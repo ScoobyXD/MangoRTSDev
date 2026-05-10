@@ -8,6 +8,7 @@ import {
 } from "./frameLinking";
 import {
   COLORWAYS,
+  DEFAULT_COLORWAY,
   MIN_H,
   MIN_W,
   createFrameId,
@@ -51,6 +52,10 @@ function isHexColor(value: unknown): value is string {
   return typeof value === "string" && /^#[0-9A-F]{6}$/i.test(value);
 }
 
+function isLegacyDefaultSetting(value: unknown, legacyDefaults: string[]): boolean {
+  return typeof value === "string" && legacyDefaults.some((legacy) => legacy.toLowerCase() === value.toLowerCase());
+}
+
 // Storage migration guard: sanitize persisted frame payloads from localStorage.
 function coerceFrame(value: unknown): FrameDataModel | null {
   if (!isObject(value)) return null;
@@ -64,18 +69,26 @@ function coerceFrame(value: unknown): FrameDataModel | null {
   const normalizedTitle = normalizedKind === "kanban" && title === "Kanban" ? "Kanban board" : title;
   if (!SUPPORTED_PERSISTED_FRAME_KINDS.has(normalizedKind)) return null;
 
+  const normalizedTheme: ColorwayKey = isColorway(theme)
+    ? theme
+    : theme === "white" ? "light"
+      : theme === "black" ? "dark"
+        : theme === "orange" ? "mango"
+          : DEFAULT_COLORWAY;
+  const swatch = COLORWAYS[normalizedTheme];
+
   return {
     id,
     kind: normalizedKind,
     parentId: typeof parentId === "string" && parentId.trim() ? parentId : undefined,
-    theme: isColorway(theme) ? theme : theme === "white" ? "light" : theme === "black" ? "dark" : theme === "orange" ? "light" : "teal",
+    theme: normalizedTheme,
     x: Math.max(0, snapToHalfStep(x)),
     y: Math.max(0, snapToHalfStep(y)),
     w: Math.max(MIN_W, Math.round(w)),
     h: Math.max(MIN_H, Math.round(h)),
     title: normalizedTitle,
-    color,
-    accent,
+    color: swatch.color || color,
+    accent: swatch.accent || accent,
   };
 }
 
@@ -186,12 +199,12 @@ export function loadSettings(): DashboardSettings {
     const parsed = JSON.parse(raw);
     if (!isObject(parsed)) return {};
     return {
-      bgColor: isHexColor(parsed.bgColor) ? parsed.bgColor : undefined,
-      crossColor: isHexColor(parsed.crossColor) ? parsed.crossColor : undefined,
-      headerBgColor: isHexColor(parsed.headerBgColor) ? parsed.headerBgColor : undefined,
+      bgColor: isHexColor(parsed.bgColor) && !isLegacyDefaultSetting(parsed.bgColor, ["#f7fffe", "#ffffff"]) ? parsed.bgColor : undefined,
+      crossColor: isHexColor(parsed.crossColor) && !isLegacyDefaultSetting(parsed.crossColor, ["#00a8b8", "#ff8820"]) ? parsed.crossColor : undefined,
+      headerBgColor: isHexColor(parsed.headerBgColor) && !isLegacyDefaultSetting(parsed.headerBgColor, ["#00e9ff", "#ff8820"]) ? parsed.headerBgColor : undefined,
       headerTextColor: isHexColor(parsed.headerTextColor) ? parsed.headerTextColor : undefined,
       tabBgColor: isHexColor(parsed.tabBgColor) ? parsed.tabBgColor : undefined,
-      tabTextColor: isHexColor(parsed.tabTextColor) ? parsed.tabTextColor : undefined,
+      tabTextColor: isHexColor(parsed.tabTextColor) && !isLegacyDefaultSetting(parsed.tabTextColor, ["#08343a", "#24120a"]) ? parsed.tabTextColor : undefined,
     };
   } catch {
     return {};

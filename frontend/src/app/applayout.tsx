@@ -14,13 +14,13 @@ import {
   CHILD_EDGE_GAP,
   COLORWAYS,
   COLORWAY_ORDER,
+  DEFAULT_COLORWAY,
   HEADER_H,
   UI_THEME,
   clamp,
   clampToRangeWithInset,
   createFrameId,
   createTabId,
-  getFrameCreationCounter,
   getPointer,
   hoverHandlers,
   menuBtnBase,
@@ -52,12 +52,12 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
   const [selectedFrameIds, setSelectedFrameIds] = useState<Set<string>>(new Set());
   const [editMode, setEditMode] = useState(false);
   const initialSettingsRef = useRef(loadSettings());
-  const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || "#f7fffe");
-  const [crossColor, setCrossColor] = useState(() => initialSettingsRef.current.crossColor || "#00a8b8");
+  const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || UI_THEME.surface);
+  const [crossColor, setCrossColor] = useState(() => initialSettingsRef.current.crossColor || UI_THEME.panel);
   const [headerBgColor, setHeaderBgColor] = useState(() => initialSettingsRef.current.headerBgColor || UI_THEME.panel);
   const [headerTextColor, setHeaderTextColor] = useState(() => initialSettingsRef.current.headerTextColor || UI_THEME.text);
   const [tabBgColor, setTabBgColor] = useState(() => initialSettingsRef.current.tabBgColor || "#ffffff");
-  const [tabTextColor, setTabTextColor] = useState(() => initialSettingsRef.current.tabTextColor || "#08343a");
+  const [tabTextColor, setTabTextColor] = useState(() => initialSettingsRef.current.tabTextColor || UI_THEME.text);
   const [frameLinks, setFrameLinks] = useState<FrameLinkEdge[]>(() => {
     const loadedFrameIDs = new Set(loaded.tabs.flatMap((tab) => tab.frames.map((frame) => frame.id)));
     return loadFrameLinks().filter((edge) => loadedFrameIDs.has(edge.a) && loadedFrameIDs.has(edge.b));
@@ -226,7 +226,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
     const template = FRAME_MODULE_LIBRARY.find((item) => item.kind === kind) ?? FRAME_MODULE_LIBRARY[0];
     if (!template) return;
     const id = createFrameId();
-    const theme = COLORWAY_ORDER[(getFrameCreationCounter() + 1) % COLORWAY_ORDER.length];
+    const theme = DEFAULT_COLORWAY;
     const nextX = preferred ? clamp(preferred.x, 0, Math.max(0, gridCols - template.defaultW)) : 1;
     const nextY = preferred ? clamp(preferred.y, 0, Math.max(0, gridRows - template.defaultH)) : 1;
     updateActiveFrames((prev) => [...prev, { id, kind, theme, x: nextX, y: nextY, w: template.defaultW, h: template.defaultH, title: template.label, color: COLORWAYS[theme].color, accent: COLORWAYS[theme].accent }]);
@@ -567,8 +567,8 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
         onContextMenu={(e) => { e.preventDefault(); setHeaderMenu({ x: e.clientX, y: e.clientY }); setCanvasMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-          <h1 style={{ fontWeight: 800, color: headerTextColor, letterSpacing: "0.04em", textTransform: "uppercase", margin: 0, lineHeight: 1 }}><span style={{ fontSize: 18 }}>Mango</span><span style={{ fontSize: 23, marginLeft: 2 }}>RTS</span></h1>
-          <button onClick={() => setEditMode((v) => !v)} style={{ height: 32, padding: "0 10px", background: editMode ? "#9df8ff" : tabBgColor, color: tabTextColor, border: `1px solid ${editMode ? "#0f7f8b" : UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+          <h1 style={{ fontWeight: 800, color: headerTextColor, letterSpacing: 0, textTransform: "uppercase", margin: 0, lineHeight: 1 }}><span style={{ fontSize: 18 }}>Mango</span><span style={{ fontSize: 23, marginLeft: 2 }}>RTS</span></h1>
+          <button onClick={() => setEditMode((v) => !v)} style={{ height: 32, padding: "0 10px", background: editMode ? "#fff2e0" : tabBgColor, color: tabTextColor, border: `1px solid ${editMode ? UI_THEME.panel : UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
             {editMode ? "EDIT: ON" : "EDIT: OFF"}
           </button>
           <button onClick={() => { addFrame(); setEditMode(true); }} title="Add extra frame" aria-label="Add extra frame" style={{ width: 32, height: 32, background: tabBgColor, color: tabTextColor, border: `1px solid ${UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 20 }}>+</button>
@@ -601,7 +601,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
               onDoubleClick={() => startRenamingTab(tab.id)}
               onClick={(e) => { if (e.button !== 0 || isDraggingTab) return; setActiveTabId(tab.id); setEditMode(false); }}
-              style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? `1px solid ${tabTextColor}` : "1px solid rgba(8,52,58,0.35)", background: activeTabId === tab.id ? tabBgColor : `${tabBgColor}B3`, color: tabTextColor, borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
+              style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? `1px solid ${tabTextColor}` : "1px solid rgba(255,136,32,0.35)", background: activeTabId === tab.id ? tabBgColor : `${tabBgColor}B3`, color: tabTextColor, borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: 0, cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
             >
               {renamingTabId === tab.id ? (
                 <input
@@ -614,12 +614,12 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
                     if (e.key === "Escape") cancelRenameTab();
                   }}
                   onClick={(e) => e.stopPropagation()}
-                  style={{ width: 92, border: "1px solid #0a6c78", background: "#fff", borderRadius: 4, padding: "2px 5px", fontSize: 11, fontWeight: 700 }}
+                  style={{ width: 92, border: `1px solid ${UI_THEME.panel}`, background: "#fff", borderRadius: 4, padding: "2px 5px", fontSize: 11, fontWeight: 700 }}
                 />
               ) : tab.name}
             </button>
           ))}
-          <button onClick={addTab} title="New view tab" style={{ width: 30, height: 30, border: "1px solid rgba(8,52,58,0.35)", borderRadius: 8, background: tabBgColor, color: tabTextColor, cursor: "pointer", fontSize: 20, lineHeight: 1 }}>+</button>
+          <button onClick={addTab} title="New view tab" style={{ width: 30, height: 30, border: "1px solid rgba(255,136,32,0.35)", borderRadius: 8, background: tabBgColor, color: tabTextColor, cursor: "pointer", fontSize: 20, lineHeight: 1 }}>+</button>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end", minWidth: 0 }}>
@@ -843,7 +843,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
 
       {frameDeleteConfirmation && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(255,136,32,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 700 }}>
               Are you sure you want to delete {frameDeleteConfirmation.frameIDs.length} frame{frameDeleteConfirmation.frameIDs.length === 1 ? "" : "s"}?
             </div>
@@ -851,7 +851,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
               This removes the selected frame from the active view immediately. Use Undo (Ctrl/Cmd + Z) if this was accidental.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <button onClick={() => { applyConfirmedFrameDelete(frameDeleteConfirmation.frameIDs); setFrameDeleteConfirmation(null); }} style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}>Yes</button>
+              <button onClick={() => { applyConfirmedFrameDelete(frameDeleteConfirmation.frameIDs); setFrameDeleteConfirmation(null); }} style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}>Yes</button>
               <button onClick={() => setFrameDeleteConfirmation(null)} style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
             </div>
           </div>

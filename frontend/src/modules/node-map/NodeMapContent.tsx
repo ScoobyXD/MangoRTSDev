@@ -35,8 +35,8 @@ type ExplorerSelectionOrigin = {
 };
 
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
-export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "teal" }) => {
-  const SELECTION_CYAN = "rgb(0, 233, 255)";
+export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "mango" | "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "mango" }) => {
+  const SELECTION_CYAN = "rgb(255, 136, 32)";
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const mapScope = widgetId?.trim() ? widgetId : "global";

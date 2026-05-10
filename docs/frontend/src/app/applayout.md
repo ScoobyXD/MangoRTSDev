@@ -71,8 +71,8 @@ The app layout keeps compatibility for persisted payloads:
 - Context-menu linking can directly connect Company Explorer and Editor to each other, and now includes additional module kinds such as Logic Gate Map and Kanban.
 - Existing module contracts are preserved by deriving legacy editor/explorer -> map link keys from the link graph (compatibility bridge for current module internals).
 - Right-clicking empty canvas now includes `Create new frame`, which spawns a frame at the clicked grid location.
-- Selected frames now use a common web-app convention: blue focus outline + focus ring shadow for stronger visibility.
-- Selection ring, teal frame option, and drag placement splash now use the unified RGB `0,233,255` accent to match the canvas/header accent direction.
+- Selected frames now use the Mango orange focus outline + focus ring shadow for stronger visibility.
+- Selection ring, Mango default frame option, and drag placement splash now use `rgb(255, 136, 32)` / `#ff8820` to match the canvas/header accent direction. Teal remains a selectable colorway.
 
 ## Frame-link graph hardening + full migration (2026-04-26)
 
@@ -110,4 +110,4 @@ The app layout keeps compatibility for persisted payloads:
 - Child frames can be selected from the header section and dragged within their parent frame from that full header section.
 - Right-clicking anywhere in the header section opens the frame action menu with Duplicate, Link modules, Delink modules, color choices, and Delete.
 - Dragging no longer starts from the general section; the body remains available for text editing, Kanban card work, map selection, explorer rows, and other module interactions.
-- Selected frames render a persistent cyan frame ring using `FRAME_SELECTION_COLOR`, confirming which frame is active for link, delete, copy, and related frame-level actions.
+- Selected frames render a persistent Mango orange frame ring using `FRAME_SELECTION_COLOR`, confirming which frame is active for link, delete, copy, and related frame-level actions.

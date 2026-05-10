@@ -12,7 +12,7 @@ type MapProps = {
   accent: string;
   widgetId?: string;
   hideTopControls?: boolean;
-  theme?: "teal" | "light" | "dark";
+  theme?: "mango" | "teal" | "light" | "dark";
   initialMode?: MapMode;
 };
 

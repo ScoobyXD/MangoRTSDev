@@ -12,7 +12,7 @@ export const KANBAN_MAX_COLUMN_WIDTH_PX = 2000;
 export const KANBAN_DEFAULT_COLUMN_HEIGHT_PX = 240;
 export const KANBAN_MIN_COLUMN_HEIGHT_PX = 160;
 export const KANBAN_MAX_COLUMN_HEIGHT_PX = 10000;
-export const KANBAN_DEFAULT_COLUMN_ITEM_COLOR = "#2f7d62";
+export const KANBAN_DEFAULT_COLUMN_ITEM_COLOR = "#fbb152";
 export const KANBAN_DEFAULT_BOARD_TITLE = "Kanban board";
 export const KANBAN_LOGIC_GATE_PENDING_COLOR = "#808080";
 export const KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR = "#ff9500";
@@ -210,7 +210,7 @@ export function sortKanbanBoards(boards: KanbanBoard[]): KanbanBoard[] {
 
 export function hexToRgba(hex: string, alpha: number): string {
   const clean = hex.trim().replace("#", "");
-  if (!/^[0-9a-f]{6}$/i.test(clean)) return `rgba(47,125,98,${alpha})`;
+  if (!/^[0-9a-f]{6}$/i.test(clean)) return `rgba(251,177,82,${alpha})`;
   const value = Number.parseInt(clean, 16);
   const red = (value >> 16) & 255;
   const green = (value >> 8) & 255;
@@ -228,10 +228,10 @@ export function attachStackedDragPreview(dataTransfer: DataTransfer, items: Kanb
   container.style.width = "230px";
   container.style.padding = "8px";
   container.style.border = `1px solid ${accentColor}`;
-  container.style.background = "rgba(10, 14, 18, 0.94)";
+  container.style.background = "rgba(36, 18, 10, 0.94)";
   container.style.color = "#f6f8fb";
   container.style.boxShadow = `0 10px 26px rgba(0,0,0,0.28), 0 0 18px ${hexToRgba(accentColor, 0.28)}`;
-  container.style.fontFamily = "'IBM Plex Mono', monospace";
+  container.style.fontFamily = "var(--mango-font-family)";
   container.style.pointerEvents = "none";
   container.style.zIndex = "99999";
 
@@ -270,7 +270,7 @@ export function attachStackedDragPreview(dataTransfer: DataTransfer, items: Kanb
     more.style.marginTop = "5px";
     more.style.fontSize = "10px";
     more.style.fontWeight = "800";
-    more.style.color = "#d7f8ff";
+    more.style.color = "#fff2e0";
     container.appendChild(more);
   }
 
@@ -763,7 +763,7 @@ export function getKanbanConditionalColor(card: KanbanCard, columnColorByID: Map
   const columnColor = columnColorByID.get(card.column_id);
   if (isKanbanColumnItemColor(columnColor)) return columnColor;
 
-  const palette = ["#2f7d62", "#245c9f", "#9a5b16", "#8f3d56", "#4f6f1f", "#66752c", "#7d4ea3", "#0f766e"];
+  const palette = ["#fbb152", "#fea94e", "#fe9b46", "#ff8820"];
   const value = card.node_id || card.column_id || "empty";
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {

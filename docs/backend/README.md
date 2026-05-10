@@ -343,7 +343,7 @@ curl -X POST http://localhost:8080/v1/kanban/boards \
 
 curl -X POST http://localhost:8080/v1/kanban/columns \
   -H 'content-type: application/json' \
-  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","title":"Ready","width_px":260,"height_px":240,"item_color":"#245c9f"}'
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","board_id":"frame-kanban-1","title":"Ready","width_px":260,"height_px":240,"item_color":"#fea94e"}'
 
 curl -X POST http://localhost:8080/v1/kanban/cards \
   -H 'content-type: application/json' \

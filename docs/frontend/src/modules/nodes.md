@@ -471,15 +471,17 @@ Layout safety note:
 
 ---
 
-## 11) Teal theme update
+## 11) Mango default theme update
 
-App-level `teal` colorway currently uses:
+App-level `mango` is the default colorway. Teal remains available as a selectable legacy colorway.
 
-- `color: #00d5ff` (RGB `0, 213, 255`)
-- `accent: #006f85`
-- `text/tagBg: #042028`
+Default Mango tokens:
 
-This is the requested teal update used by teal-themed modules.
+- Font: `Helvetica Neue`
+- Gradient left to right: `rgba(251, 177, 82, 1)`, `rgba(254, 169, 78, 1)`, `rgba(254, 155, 70, 1)`, `rgba(255, 136, 32, 1)`
+- Accent fallback: `#ff8820`
+
+White module surfaces should remain white while selection, scrollbars, chips, and default accents use Mango orange.
 
 ---
 

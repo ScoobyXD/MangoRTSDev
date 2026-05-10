@@ -36,8 +36,8 @@ type ExplorerSelectionOrigin = {
 
 // Logic Gate Map module: node-map canvas behavior with logic-gate persistence and Input/Output edges.
 
-export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "teal" }) => {
-  const SELECTION_CYAN = "rgb(0, 233, 255)";
+export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "mango" | "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "mango" }) => {
+  const SELECTION_CYAN = "rgb(255, 136, 32)";
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const mapScope = widgetId?.trim() ? widgetId : "global";

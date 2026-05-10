@@ -1,10 +1,18 @@
 import type React from "react";
 import type { FrameDataModel } from "../types.js";
+import {
+  MANGO_ACCENT,
+  MANGO_ACCENT_HEX,
+  MANGO_GRADIENT,
+  MANGO_SURFACE,
+  MANGO_TEXT,
+  TEAL_COLORWAY,
+} from "../theme.js";
 
 export const CELL_SIZE = 28;
 export const HEADER_H = 48;
 export const FRAME_HEADER_SECTION_HEIGHT = 38;
-export const FRAME_SELECTION_COLOR = "rgb(0, 233, 255)";
+export const FRAME_SELECTION_COLOR = MANGO_ACCENT;
 export const CROSS_ARM = 2;
 export const MIN_W = 3;
 export const MIN_H = 3;
@@ -15,20 +23,22 @@ export const CHILD_EDGE_GAP = 0.5;
 export const HALF_STEP = 0.5;
 
 export const COLORWAYS = {
-  teal: { color: "#00e9ff", accent: "#006f85", text: "#042028", tagBg: "#042028", tagText: "#ffffff" },
-  light: { color: "#ffffff", accent: "#111111", text: "#111111", tagBg: "rgb(0, 233, 255)", tagText: "#041d22" },
+  mango: { color: MANGO_GRADIENT, accent: MANGO_ACCENT_HEX, text: MANGO_TEXT, tagBg: MANGO_GRADIENT, tagText: "#ffffff" },
+  teal: TEAL_COLORWAY,
+  light: { color: MANGO_SURFACE, accent: MANGO_ACCENT_HEX, text: "#111111", tagBg: MANGO_GRADIENT, tagText: "#ffffff" },
   dark: { color: "#101214", accent: "#ffffff", text: "#ffffff", tagBg: "#ffffff", tagText: "#050505" },
 } as const;
 
 export type ColorwayKey = keyof typeof COLORWAYS;
-export const COLORWAY_ORDER: ColorwayKey[] = ["teal", "light", "dark"];
+export const DEFAULT_COLORWAY: ColorwayKey = "mango";
+export const COLORWAY_ORDER: ColorwayKey[] = ["mango", "light", "teal", "dark"];
 
 export const UI_THEME = {
-  surface: "#f7fffe",
-  panel: "#00e9ff",
-  line: "rgba(12, 67, 74, 0.45)",
-  text: "#041d22",
-  subtext: "#0b5058",
+  surface: MANGO_SURFACE,
+  panel: MANGO_ACCENT_HEX,
+  line: "rgba(255, 136, 32, 0.45)",
+  text: MANGO_TEXT,
+  subtext: "#8a3b10",
 };
 
 export interface ViewTab {
@@ -91,8 +101,8 @@ export const menuBtnBase: React.CSSProperties = {
   padding: "9px 16px",
   fontSize: 12,
   fontWeight: 600,
-  letterSpacing: "0.04em",
-  fontFamily: "'IBM Plex Mono', monospace",
+  letterSpacing: 0,
+  fontFamily: "var(--mango-font-family)",
   background: "none",
   border: "none",
   color: "#333",

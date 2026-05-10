@@ -103,7 +103,7 @@ type KanbanContentProps = {
   accent: string;
   widgetId?: string;
   hideTopControls?: boolean;
-  theme?: "teal" | "light" | "dark";
+  theme?: "mango" | "teal" | "light" | "dark";
   arenaMode?: boolean;
   forcedLogicGateID?: string;
   forcedLogicGateLabel?: string;
@@ -143,8 +143,8 @@ const contextMenuButtonStyle: React.CSSProperties = {
   padding: "9px 16px",
   fontSize: 12,
   fontWeight: 600,
-  letterSpacing: "0.04em",
-  fontFamily: "'IBM Plex Mono', monospace",
+  letterSpacing: 0,
+  fontFamily: "var(--mango-font-family)",
   background: "none",
   border: "none",
   color: "#333",
@@ -161,8 +161,8 @@ const ARENA_GROUP_COLUMN_WIDTH_PX = 300;
 const ARENA_GROUP_ROW_LABEL_WIDTH_PX = 104;
 const ARENA_GROUP_MIN_CELL_HEIGHT_PX = 86;
 const ARENA_GROUP_FRAME_BACKGROUND = "#ffffff";
-const ARENA_GROUP_GLASS_BORDER_LIGHT = "rgba(0, 180, 210, 0.32)";
-const ARENA_GROUP_GLASS_BORDER_DARK = "rgba(0, 233, 255, 0.28)";
+const ARENA_GROUP_GLASS_BORDER_LIGHT = "rgba(255, 136, 32, 0.32)";
+const ARENA_GROUP_GLASS_BORDER_DARK = "rgba(255, 136, 32, 0.28)";
 const ARENA_GROUP_FRAME_SHADOW = "0 1px 2px rgba(15,23,42,0.06)";
 
 const KanbanDisclosureIcon: React.FC<{ color: string }> = ({ color }) => (
@@ -256,7 +256,7 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
 export const KanbanContent: React.FC<KanbanContentProps> = ({
   accent,
   widgetId,
-  theme = "teal",
+  theme = "mango",
   arenaMode = false,
   forcedLogicGateID = "",
   forcedLogicGateLabel = "",
@@ -344,9 +344,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   const isDark = theme === "dark";
   const surface = isDark ? "#11161b" : "#ffffff";
-  const text = isDark ? "#f6f8fb" : "#102226";
-  const subtext = isDark ? "#b8c4cc" : "#52666c";
-  const line = isDark ? "rgba(255,255,255,0.16)" : "rgba(8, 52, 58, 0.16)";
+  const text = isDark ? "#f6f8fb" : "#24120a";
+  const subtext = isDark ? "#b8c4cc" : "#7c3a12";
+  const line = isDark ? "rgba(255,255,255,0.16)" : "rgba(255, 136, 32, 0.16)";
   const laneBackground = isDark ? "#1a2229" : "#ffffff";
   const laneBorder = isDark ? "rgba(255,255,255,0.18)" : "rgba(17,17,17,0.78)";
   const laneShadow = isDark ? "none" : "0 4px 12px rgba(16,24,40,0.08)";
@@ -1378,10 +1378,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   ) => {
     const selectedField = KANBAN_GROUP_FIELDS.find((field) => field.value === value) ?? KANBAN_GROUP_FIELDS[0];
     const menuOpen = arenaGroupMenuOpen === axis;
-    const groupMenuAccent = theme === "light" ? "rgb(0, 164, 190)" : "rgb(0, 233, 255)";
-    const selectedBackground = isDark ? "rgba(0, 233, 255, 0.18)" : "rgba(0, 233, 255, 0.22)";
-    const hoveredBackground = "rgba(0, 233, 255, 0.14)";
-    const menuText = "#102226";
+    const groupMenuAccent = theme === "light" ? "rgb(255, 136, 32)" : "rgb(255, 136, 32)";
+    const selectedBackground = isDark ? "rgba(255, 136, 32, 0.18)" : "rgba(255, 136, 32, 0.22)";
+    const hoveredBackground = "rgba(255, 136, 32, 0.14)";
+    const menuText = "#24120a";
     const sortLabel = sortDirection === "asc" ? "Asc" : "Desc";
     const compact = layout === "compact";
     const sortButton = (
@@ -1432,7 +1432,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             padding: compact ? "4px 6px" : "4px 8px",
             cursor: "pointer",
             textAlign: "left",
-            boxShadow: menuOpen ? `0 0 0 2px rgba(0, 233, 255, 0.14)` : "none",
+            boxShadow: menuOpen ? `0 0 0 2px rgba(255, 136, 32, 0.14)` : "none",
           }}
         >
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedField.label}</span>
@@ -1451,7 +1451,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
               left: 0,
               width: "min(220px, 78vw)",
               padding: 5,
-              border: `1px solid rgba(0, 180, 210, 0.34)`,
+              border: `1px solid rgba(255, 136, 32, 0.34)`,
               borderRadius: 6,
               background: "#ffffff",
               boxShadow: "0 12px 28px rgba(0,16,20,0.18)",
@@ -1556,7 +1556,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const groupFrameBackground = ARENA_GROUP_FRAME_BACKGROUND;
     const glassBorder = isDark ? ARENA_GROUP_GLASS_BORDER_DARK : ARENA_GROUP_GLASS_BORDER_LIGHT;
     const groupFrameShadow = ARENA_GROUP_FRAME_SHADOW;
-    const groupFrameText = "#102226";
+    const groupFrameText = "#24120a";
     const gridWidth = ARENA_GROUP_ROW_LABEL_WIDTH_PX + (columnCount * ARENA_GROUP_COLUMN_WIDTH_PX) + (columnCount * 8);
     const xAxisControlColumn = Math.min(columnCount, 2) + 1;
     const axisControlCellStyle: React.CSSProperties = {
@@ -1730,7 +1730,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           void refreshBoard(nextBoardID);
         }}
       />
-      <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "8px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(0, 233, 255)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(0, 233, 255, 0.08)" }}>
+      <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "8px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(255, 136, 32)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(255, 136, 32, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#c62828", fontSize: 11, fontWeight: 700 }}>{error}</div>}
         {arenaMode && renderArenaGroupingControls()}
         {arenaMode && arenaGroupingOpen ? renderArenaGroupedBoard() : (
@@ -1961,7 +1961,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       )}
       {deleteNodeConfirmation && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(255,136,32,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#111111" }}>
               Are you sure you want to delete {deleteNodeConfirmation.nodeIDs.length} node{deleteNodeConfirmation.nodeIDs.length === 1 ? "" : "s"}?
             </div>
@@ -1975,7 +1975,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
                   void removeNodes(deleteNodeConfirmation.nodeIDs);
                   setDeleteNodeConfirmation(null);
                 }}
-                style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}
+                style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}
               >
                 Yes
               </button>
@@ -1992,7 +1992,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       )}
       {deleteCardConfirmation && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(255,136,32,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#111111" }}>
               Are you sure you want to remove {deleteCardConfirmation.cardIDs.length} node{deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"} from this Kanban Board?
             </div>
@@ -2006,7 +2006,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
                   void removeCards(deleteCardConfirmation.cardIDs);
                   setDeleteCardConfirmation(null);
                 }}
-                style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}
+                style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}
               >
                 Yes
               </button>
@@ -2023,7 +2023,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       )}
       {deleteColumnConfirmation && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(0,233,255,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(255,136,32,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#111111" }}>
               Are you sure you want to delete this Kanban column?
             </div>
@@ -2037,7 +2037,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
                   void removeColumn(deleteColumnConfirmation.columnID);
                   setDeleteColumnConfirmation(null);
                 }}
-                style={{ border: "1px solid rgba(0,233,255,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}
+                style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}
               >
                 Yes
               </button>
