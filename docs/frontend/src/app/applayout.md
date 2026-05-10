@@ -122,5 +122,7 @@ The app layout keeps compatibility for persisted payloads:
 
 - The visible dashboard header is now a Mango-gradient strip with a rounded translucent taskbar surface layered on top.
 - The top-level Edit and add-frame buttons were removed from the header; frame creation and edit mode remain available from the canvas context menu.
-- Logic Gate Arena, Communications, and Settings are rendered as individual icon-left navigation buttons in the header account chrome.
+- The default center header order is Communication, Logic Gate Arena, then Map, each with an icon on the left.
+- The right header account chrome is reserved for the person icon + user name and Settings.
 - The visible new-tab plus button was removed from the header; new view tabs remain available from the header context menu.
+- Hard UI rule: authenticated pages must use this same rounded Mango taskbar header instead of standalone page-specific headers.

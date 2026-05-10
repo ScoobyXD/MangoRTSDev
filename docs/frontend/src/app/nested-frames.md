@@ -81,13 +81,13 @@ The following tab actions are required:
 
 - Rename View
 - Delete View
-- Default Node View
+- Map
 - Default Company Explorer View
 - Save Current as Template
 
 Preset behavior:
 
-- `Default Node View` opens hardcoded baseline Node workspace.
+- `Map` opens the hardcoded baseline Node workspace.
 - `Default Company Explorer View` opens hardcoded baseline Explorer workspace.
 - Both can be edited by users after opening.
 - `Save Current as Template` captures current nested arrangement and module placement for reuse.

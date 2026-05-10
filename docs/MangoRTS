@@ -16,22 +16,16 @@ pages:
  /login, /accept-invite, /forgot-password, /reset-password, /communications
  
 BUGS/FIXES:
-2. the header bar itself needs to be a module, also the way the tabs look right now is ugly.
-3. Does not work in half screen and probably not in minimized or anything.
-4. for faster ui Please do that trick where you load the ui part first instantly, and then process it out in the backend later.
-5. Still a problem where when I create a new frame and it's not fully sized, it's like a small size. When I try to create a node it spazzes out and gets created at some random location. Also when I try to resize the small frame into a larger frame, some of the nodes don't show up visibly. 
-7. weird bug, after deleting multiple nodes and relationship lines there is an error: relationship not found. 
-8. after a child frame exits and goes back to being a normal frame, it doesnt line up with the canvas maps grids well.
-10. in dark mode node map has slighly different shade of dark than everyone else
+1. for faster ui Please do that trick where you load the ui part first instantly, and then process it out in the backend later.
+2. weird bug, after deleting multiple nodes and relationship lines there is an error: relationship not found. 
+3. in dark mode node map has slighly different shade of dark than everyone else
 	a. also thin strip of different shades of dark when company explorer and stats are side by side.
-3. There is a bug when the node map is not in full screen, the scope optimization thing messes up and i cant see nodes properly even though it exists. 
-	b. I think this only happens for node map frames that are not large.
-12. Still need to add all the default view (i think the node map name needs to change)
-13. Sure you can click-drag information between different modules and make them very very linked together.
+4. Sure you can click-drag information between different modules and make them very very linked together.
 5. While I have an object selected in the company explorer, let's say I click and I have node folder or folder or node or logic gate or Kanban board selected. I should be able to still be able to use my mouse Wheel to navigate up and down the Company Explorer  
-11. The Universal Convention where I could delete backspace or right-click delete anything 
-17. dont forget to delete some usless enums in the database
-6. Checkout AG Grid, its pretty cool. 
+6. The Universal Convention where I could delete backspace or right-click delete anything 
+7. dont forget to delete some usless enums in the database
+8. Checkout AG Grid, its pretty cool. 
+9. If youre going to do keep the map icon, have it look more like the actual map in Mango and show an arrow with pathway  from logic gate to logic gate.
 =======
 
 New Features:

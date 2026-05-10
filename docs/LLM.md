@@ -182,6 +182,8 @@ React 18 · TypeScript strict · Vite · Zero deps beyond React
 - Use the shared `MangoWordmark` / `MangoLogoMark` for product branding. Preserve `MangoRTS` casing.
 - UI text should not be forced into all-caps. Keep header, module, tab, and panel label weights lighter by default (usually 400-600).
 - The dashboard header should read as a Mango-gradient strip with a rounded translucent taskbar surface on top; primary app links use icon-left pill buttons.
+- HARD UI RULE: the exact Mango-gradient rounded taskbar header must persist across authenticated pages. Do not reintroduce standalone page headers for Settings, Communications, Logic Gate Arena, or future app pages.
+- Center header order is `Communication`, `Logic Gate Arena`, then `Map` by default. Each primary tab uses an icon on the left of the label. The right header section is reserved for user identity and Settings.
 
 ## UI Rules (Text Editing)
 

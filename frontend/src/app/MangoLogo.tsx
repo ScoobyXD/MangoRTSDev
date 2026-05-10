@@ -21,10 +21,12 @@ export const MangoLogoMark: React.FC<MangoLogoMarkProps> = ({ size = 28 }) => {
         </clipPath>
       </defs>
       <polygon points="32,5.5 55,18.75 55,45.25 32,58.5 9,45.25 9,18.75" fill="none" stroke={`url(#${gradientID})`} strokeWidth="7" strokeLinejoin="round" />
+      <polygon points="32,11 50,21.5 50,42.5 32,53 14,42.5 14,21.5" fill="none" stroke="#ffffff" strokeWidth="4.5" strokeLinejoin="round" />
       <g clipPath={`url(#${clipID})`}>
-        {[8, 20, 32, 44].map((x) => (
-          <rect key={x} x={x} y="12" width="8" height="43" rx="1.2" transform={`skewX(-19) translate(${x > 8 ? -6 : 0} 0)`} fill={`url(#${gradientID})`} />
-        ))}
+        <polygon points="18,44 25,19 31,16 24,47" fill={`url(#${gradientID})`} />
+        <polygon points="27,48 35,15 41,16 33,51" fill={`url(#${gradientID})`} />
+        <polygon points="36,50 44,18 49,21 42,47" fill={`url(#${gradientID})`} />
+        <polygon points="14,42 20,23 25,20 19,45" fill={`url(#${gradientID})`} />
       </g>
     </svg>
   );

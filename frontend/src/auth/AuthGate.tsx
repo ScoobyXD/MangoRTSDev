@@ -1,11 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createLogicGateArenaFrames } from "../app/DefaultViews";
 import { preloadCommunicationsSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface } from "../app/preloadDashboardModules";
-import { LazyCommunicationsPage, LazyLogicGateArenaPage } from "../pages/lazyPages";
-import { computeLinkPlan, mergeLinkPlan } from "../app/frameLinking";
+import { HeaderPersonIcon, HeaderSettingsIcon } from "../app/HeaderIcons";
 import { MangoWordmark } from "../app/MangoLogo";
-import { loadFrameLinks, loadSettings, persistFrameLinks, persistFrameRegistry } from "../app/useFramePersistence";
-import type { FrameDataModel } from "../types";
+import { loadSettings } from "../app/useFramePersistence";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
 import {
   acceptInvitation,
@@ -66,28 +63,6 @@ function prefetchHandlers(preload: () => void) {
 const logicGateArenaPrefetch = prefetchHandlers(preloadLogicGateArenaSurface);
 const communicationsPrefetch = prefetchHandlers(preloadCommunicationsSurface);
 
-function persistStandaloneFrameGraph(frames: FrameDataModel[]): void {
-  const registry = Object.fromEntries(frames.map((frame) => [frame.id, { kind: frame.kind }]));
-  persistFrameRegistry(registry);
-  persistFrameLinks(mergeLinkPlan(loadFrameLinks(), computeLinkPlan(frames)));
-}
-
-function createStandaloneLogicGateArenaFrames(): FrameDataModel[] {
-  const frames = createLogicGateArenaFrames();
-  persistStandaloneFrameGraph(frames);
-  return frames;
-}
-
-function LogicGateArenaStandalonePage() {
-  const [frames, setFrames] = useState<FrameDataModel[]>(createStandaloneLogicGateArenaFrames);
-  useEffect(() => { persistStandaloneFrameGraph(frames); }, [frames]);
-  return (
-    <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "#ffffff" }}>
-      <React.Suspense fallback={routeFallback}><LazyLogicGateArenaPage frames={frames} updateFrames={setFrames} /></React.Suspense>
-    </div>
-  );
-}
-
 type CompanyUser = {
   company_id: string;
   user_id: string;
@@ -112,36 +87,6 @@ type SettingsSelectOption = {
   label: string;
   detail?: string;
 };
-
-const PersonIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
-  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
-    <circle cx="8" cy="5.1" r="2.75" fill="none" stroke={color} strokeWidth="1.45" />
-    <path d="M3.3 13.15c.72-2.15 2.37-3.35 4.7-3.35s3.98 1.2 4.7 3.35" fill="none" stroke={color} strokeWidth="1.45" strokeLinecap="round" />
-  </svg>
-);
-
-const GearIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
-  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
-    <path d="M6.9 1.8h2.2l.38 1.45c.34.12.66.26.96.43l1.3-.75 1.55 1.55-.75 1.3c.17.3.31.62.43.96l1.45.38v2.2l-1.45.38c-.12.34-.26.66-.43.96l.75 1.3-1.55 1.55-1.3-.75c-.3.17-.62.31-.96.43l-.38 1.45H6.9l-.38-1.45a5.16 5.16 0 0 1-.96-.43l-1.3.75-1.55-1.55.75-1.3a5.16 5.16 0 0 1-.43-.96l-1.45-.38v-2.2l1.45-.38c.12-.34.26-.66.43-.96l-.75-1.3 1.55-1.55 1.3.75c.3-.17.62-.31.96-.43L6.9 1.8Z" fill="none" stroke={color} strokeWidth="1.15" strokeLinejoin="round" />
-    <circle cx="8" cy="8.2" r="1.85" fill="none" stroke={color} strokeWidth="1.15" />
-  </svg>
-);
-
-const LogicGateNavIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
-  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
-    <rect x="2" y="2.2" width="4.2" height="4.2" rx="1" fill="none" stroke={color} strokeWidth="1.35" />
-    <rect x="9.8" y="2.2" width="4.2" height="4.2" rx="1" fill="none" stroke={color} strokeWidth="1.35" />
-    <rect x="5.9" y="9.8" width="4.2" height="4.2" rx="1" fill="none" stroke={color} strokeWidth="1.35" />
-    <path d="M6.2 4.3h3.6M8 6.4v3.4" fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" />
-  </svg>
-);
-
-const CommunicationsNavIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
-  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
-    <rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1.5" fill="none" stroke={color} strokeWidth="1.35" />
-    <path d="m3.2 4.8 4.8 3.6 4.8-3.6" fill="none" stroke={color} strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
 
 const INVITE_ROLE_OPTIONS: SettingsSelectOption[] = [
   { value: "company_user", label: "company_user" },
@@ -261,15 +206,15 @@ export default function AuthGate() {
   }
 
   if (normalizedPath === "/settings" || normalizedPath === "/admin/users") {
-    return <SettingsPage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} />;
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} overrideContent={<SettingsPage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} embedded />} /></React.Suspense>;
   }
 
   if (normalizedPath === "/logic-gate-arena") {
-    return <LogicGateArenaStandalonePage />;
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} initialPage="logic-gate-arena" /></React.Suspense>;
   }
 
   if (normalizedPath === "/communications" || normalizedPath === "/communication") {
-    return <React.Suspense fallback={routeFallback}><LazyCommunicationsPage me={me} onNavigate={navigate} /></React.Suspense>;
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} initialPage="communications" /></React.Suspense>;
   }
 
   return (
@@ -745,7 +690,7 @@ function ForgotPasswordPage({ onNavigate, initialCodeEntryOpen = false }: { onNa
   );
 }
 
-function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; onNavigate: (path: string) => void; onLogout: () => void }) {
+function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: CurrentUserResponse; onNavigate: (path: string) => void; onLogout: () => void; embedded?: boolean }) {
   const membershipOptions = useMemo<CompanyOption[]>(
     () => me.memberships.map((item) => ({ company_id: item.company_id, name: item.company_name || "Company", role: item.role })),
     [me],
@@ -826,14 +771,14 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
   }, [companyID, inviteCompanyID, me.is_dev_admin]);
 
   return (
-    <div style={settingsPageStyle}>
+    <div style={embedded ? { ...settingsPageStyle, minHeight: "100%", boxSizing: "border-box" } : settingsPageStyle}>
       <div style={settingsHeaderStyle}>
         <h1 style={settingsPageTitleStyle}>Settings</h1>
-        <div style={settingsNavStyle}>
+        {!embedded && <div style={settingsNavStyle}>
           <button style={smallButtonStyle} onClick={() => onNavigate("/")}>MangoRTS</button>
           <button style={smallButtonStyle} onClick={() => onNavigate("/logic-gate-arena")} {...logicGateArenaPrefetch}>Logic Gate Arena</button>
           <button style={smallButtonStyle} onClick={() => onNavigate("/communication")} {...communicationsPrefetch}>Communication</button>
-        </div>
+        </div>}
       </div>
       {error && <div style={settingsErrorStyle}>{error}</div>}
       <div style={settingsTopRowStyle}>
@@ -1116,21 +1061,13 @@ function AccountBar({ me, onNavigate }: { me: CurrentUserResponse; onNavigate: (
     whiteSpace: "nowrap",
   };
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, height: "100%", color: headerText, fontFamily: "var(--mango-font-family)", fontSize: 12 }}>
-      <span style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, maxWidth: 150, marginRight: 2, color: headerText, fontWeight: 500 }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, minWidth: 0, height: "100%", color: headerText, fontFamily: "var(--mango-font-family)", fontSize: 12 }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, maxWidth: 180, color: "#ff8820", fontWeight: 500 }}>
+        <HeaderPersonIcon />
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
-        <PersonIcon />
       </span>
-      <button type="button" style={navButtonStyle} onClick={() => onNavigate("/logic-gate-arena")} {...logicGateArenaPrefetch}>
-        <LogicGateNavIcon />
-        <span>Logic Gate Arena</span>
-      </button>
-      <button type="button" style={navButtonStyle} onClick={() => onNavigate("/communication")} {...communicationsPrefetch}>
-        <CommunicationsNavIcon />
-        <span>Communications</span>
-      </button>
       <button type="button" style={navButtonStyle} onClick={() => onNavigate("/settings")}>
-        <GearIcon />
+        <HeaderSettingsIcon />
         <span>Settings</span>
       </button>
     </div>

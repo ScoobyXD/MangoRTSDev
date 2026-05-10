@@ -16,6 +16,7 @@ Teal remains a selectable legacy colorway, but it is not the default.
 - White surfaces should remain white unless a dark theme explicitly applies.
 - Product wordmark: use the hexagon Mango mark and `MangoRTS` casing from `frontend/src/app/MangoLogo.tsx`.
 - Typography weight: default UI labels should stay in the 400-600 range. Do not force module names, header text, tab labels, or panel headings into all-caps.
+- Authenticated pages must keep the shared rounded Mango taskbar header. Do not add separate page-specific headers that replace it.
 
 ## Rule
 

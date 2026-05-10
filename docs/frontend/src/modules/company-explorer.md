@@ -95,19 +95,19 @@ Tab right-click menu should include:
 
 - Rename View
 - Delete View
-- Default Node View
+- Map
 - Default Company Explorer View
 - Save Current as Template
 
 Notes:
 
-- `Default Node View` and `Default Company Explorer View` are hardcoded baseline view entries.
+- `Map` and `Default Company Explorer View` are hardcoded baseline view entries.
 - Both defaults remain user-editable after opening.
 - `Save Current as Template` persists the current arrangement as reusable user-defined layout.
 
 ---
 
-## 5) Linked behavior in the Default Node View
+## 5) Linked behavior in Map
 
 In the default Node-oriented workspace (Explorer + Canvas + Doc):
 

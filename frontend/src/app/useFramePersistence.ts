@@ -1,6 +1,6 @@
 import type { FrameDataModel } from "../types";
 import { FRAME_REGISTRY_KEY } from "../modules/linkingGraph";
-import { createDefaultNodeViewFrames, LEGACY_DEFAULT_NODE_VIEW_FRAME_IDS } from "./DefaultViews";
+import { createCommunicationsViewFrames, createDefaultNodeViewFrames, createLogicGateArenaFrames, LEGACY_DEFAULT_NODE_VIEW_FRAME_IDS } from "./DefaultViews";
 import {
   FRAME_LINKS_KEY,
   sanitizeFrameLinks,
@@ -117,6 +117,51 @@ function createUniqueFrameID(usedFrameIDs: Set<string>): string {
   return nextID;
 }
 
+function isCommunicationsTab(tab: ViewTab): boolean {
+  return tab.page === "communications" || /^communications?$/i.test(tab.name.trim());
+}
+
+function isLogicGateArenaTab(tab: ViewTab): boolean {
+  return tab.page === "logic-gate-arena" || /^logic gate arena$/i.test(tab.name.trim());
+}
+
+function isPrimaryMapTab(tab: ViewTab): boolean {
+  return !tab.page && /^(default node view|default map view|map)$/i.test(tab.name.trim());
+}
+
+function normalizePrimaryTab(tab: ViewTab): ViewTab {
+  if (isCommunicationsTab(tab)) return { ...tab, name: "Communication", page: "communications" };
+  if (isLogicGateArenaTab(tab)) return { ...tab, name: "Logic Gate Arena", page: "logic-gate-arena" };
+  if (isPrimaryMapTab(tab)) return { ...tab, name: "Map", page: undefined };
+  return tab;
+}
+
+function createPrimaryTabs(): ViewTab[] {
+  return [
+    { id: "view-communication", name: "Communication", page: "communications", frames: createCommunicationsViewFrames() },
+    { id: "view-logic-gate-arena", name: "Logic Gate Arena", page: "logic-gate-arena", frames: createLogicGateArenaFrames() },
+    { id: "view-default", name: "Map", frames: createDefaultNodeViewFrames() },
+  ];
+}
+
+function ensurePrimaryHeaderTabs(tabs: ViewTab[]): ViewTab[] {
+  const normalized = tabs.map(normalizePrimaryTab);
+  const next = [...normalized];
+  const defaults = createPrimaryTabs();
+  if (!next.some(isCommunicationsTab)) next.push(defaults[0]);
+  if (!next.some(isLogicGateArenaTab)) next.push(defaults[1]);
+  if (!next.some(isPrimaryMapTab)) next.push(defaults[2]);
+
+  return next
+    .map((tab, index) => ({ tab, index }))
+    .sort((a, b) => {
+      const rank = (tab: ViewTab) => isCommunicationsTab(tab) ? 0 : isLogicGateArenaTab(tab) ? 1 : isPrimaryMapTab(tab) ? 2 : 3;
+      const rankDelta = rank(a.tab) - rank(b.tab);
+      return rankDelta || a.index - b.index;
+    })
+    .map(({ tab }) => tab);
+}
+
 function ensureGloballyUniqueFrameIDs(tabs: ViewTab[]): ViewTab[] {
   const usedFrameIDs = new Set<string>();
   return tabs.map((tab) => {
@@ -160,7 +205,8 @@ export function persistFrameLinks(next: FrameLinkEdge[]) {
 
 // Load saved dashboard views/tabs with legacy widget compatibility fallback.
 export function loadViews(): { tabs: ViewTab[]; activeId: string } {
-  const fallback = { tabs: [{ id: "view-default", name: "Default Node View", frames: createDefaultNodeViewFrames() }], activeId: "view-default" };
+  const fallbackTabs = createPrimaryTabs();
+  const fallback = { tabs: fallbackTabs, activeId: "view-default" };
   try {
     const raw = localStorage.getItem(VIEWS_KEY);
     if (!raw) return fallback;
@@ -177,8 +223,8 @@ export function loadViews(): { tabs: ViewTab[]; activeId: string } {
       .filter((tab): tab is ViewTab => !!tab);
 
     if (tabs.length === 0) return fallback;
-    const normalizedTabs = ensureGloballyUniqueFrameIDs(tabs);
-    const activeId = tabs.some((tab) => tab.id === parsed.activeId) ? parsed.activeId : tabs[0].id;
+    const normalizedTabs = ensurePrimaryHeaderTabs(ensureGloballyUniqueFrameIDs(tabs));
+    const activeId = normalizedTabs.some((tab) => tab.id === parsed.activeId) ? parsed.activeId : (normalizedTabs.find(isPrimaryMapTab)?.id ?? normalizedTabs[0].id);
     return { tabs: normalizedTabs, activeId };
   } catch {
     return fallback;

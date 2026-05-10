@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { HeaderCommunicationsIcon, HeaderLogicGateArenaIcon, HeaderMapIcon } from "./HeaderIcons";
 import FrameCanvas from "./framecanvas";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { MangoWordmark } from "./MangoLogo";
@@ -37,11 +38,38 @@ import { useFrameDragResize } from "./useFrameDragResize";
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
 
+type PrimaryPage = "map" | "communications" | "logic-gate-arena";
+
+function pageForTab(tab: ViewTab): PrimaryPage | null {
+  if (tab.page === "communications") return "communications";
+  if (tab.page === "logic-gate-arena") return "logic-gate-arena";
+  if (!tab.page && /^(map|default node view|default map view)$/i.test(tab.name.trim())) return "map";
+  return null;
+}
+
+function labelForTab(tab: ViewTab): string {
+  const page = pageForTab(tab);
+  if (page === "communications") return "Communication";
+  if (page === "logic-gate-arena") return "Logic Gate Arena";
+  if (page === "map") return "Map";
+  return tab.name;
+}
+
+function iconForTab(tab: ViewTab): React.ReactNode {
+  const page = pageForTab(tab);
+  if (page === "communications") return <HeaderCommunicationsIcon />;
+  if (page === "logic-gate-arena") return <HeaderLogicGateArenaIcon />;
+  if (page === "map") return <HeaderMapIcon />;
+  return null;
+}
+
 type AppProps = {
   accountChrome?: React.ReactNode;
+  initialPage?: "map" | "communications" | "logic-gate-arena";
+  overrideContent?: React.ReactNode;
 };
 
-const App: React.FC<AppProps> = ({ accountChrome }) => {
+const App: React.FC<AppProps> = ({ accountChrome, initialPage, overrideContent }) => {
   const loaded = useMemo(() => loadViews(), []);
   const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(loaded.activeId);
@@ -88,6 +116,24 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
   const isCommunicationsView = activeTab?.page === "communications";
   const isFullPageView = isLogicGateArenaView || isCommunicationsView;
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
+
+  useEffect(() => {
+    if (!initialPage || overrideContent) return;
+    const existing = tabs.find((tab) => pageForTab(tab) === initialPage);
+    if (existing) {
+      if (existing.id !== activeTabId) setActiveTabId(existing.id);
+      return;
+    }
+
+    const id = createTabId();
+    const nextTab: ViewTab = initialPage === "communications"
+      ? { id, name: "Communication", page: "communications", frames: createCommunicationsViewFrames() }
+      : initialPage === "logic-gate-arena"
+        ? { id, name: "Logic Gate Arena", page: "logic-gate-arena", frames: createLogicGateArenaFrames() }
+        : { id, name: "Map", frames: createDefaultNodeViewFrames() };
+    setTabs((previous) => [...previous, nextTab]);
+    setActiveTabId(id);
+  }, [activeTabId, initialPage, overrideContent, tabs]);
   useEffect(() => {
     if (isLogicGateArenaView) {
       preloadLogicGateArenaSurface();
@@ -475,7 +521,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
     preloadDefaultDashboardModules();
     const framesForView = createDefaultNodeViewFrames();
     const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
-    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Default Node View", page: undefined, frames: framesForView } : tab)));
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Map", page: undefined, frames: framesForView } : tab)));
     setFrameLinks((previous) => mergeLinkPlan(previous.filter((edge) => !replacedFrameIDs.has(edge.a) && !replacedFrameIDs.has(edge.b)), computeLinkPlan(framesForView)));
     setActiveTabId(tabID);
     setEditMode(true);
@@ -495,7 +541,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
     preloadCommunicationsSurface();
     const framesForView = createCommunicationsViewFrames();
     const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
-    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Communications", page: "communications", frames: framesForView } : tab)));
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Communication", page: "communications", frames: framesForView } : tab)));
     setFrameLinks((previous) => previous.filter((edge) => !replacedFrameIDs.has(edge.a) && !replacedFrameIDs.has(edge.b)));
     setActiveTabId(tabID);
     setEditMode(false);
@@ -575,6 +621,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
           <div style={{ display: "flex", alignItems: "center", gap: 4, justifySelf: "center", minWidth: 0, maxWidth: "100%", overflowX: "auto", padding: "2px 0", scrollbarWidth: "none" }}>
             {tabs.map((tab) => {
               const selected = activeTabId === tab.id;
+              const tabIcon = iconForTab(tab);
               return (
                 <button
                   key={tab.id}
@@ -601,7 +648,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
                   onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
                   onDoubleClick={() => startRenamingTab(tab.id)}
                   onClick={(e) => { if (e.button !== 0 || isDraggingTab) return; setActiveTabId(tab.id); setEditMode(false); }}
-                  style={{ height: 28, padding: "0 12px", border: selected ? "1px solid rgba(255, 136, 32, 0.22)" : "1px solid transparent", background: selected ? "rgba(255, 136, 32, 0.13)" : "transparent", color: selected ? "#ff8820" : "#60646c", borderRadius: 999, fontSize: 12, fontWeight: 500, letterSpacing: 0, cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease, background 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
+                  style={{ height: 28, display: "inline-flex", alignItems: "center", gap: 6, padding: "0 12px", border: selected ? "1px solid rgba(255, 136, 32, 0.22)" : "1px solid transparent", background: selected ? "rgba(255, 136, 32, 0.13)" : "transparent", color: selected ? "#ff8820" : "#60646c", borderRadius: 999, fontSize: 12, fontWeight: 500, letterSpacing: 0, cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease, background 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
                 >
                   {renamingTabId === tab.id ? (
                     <input
@@ -616,7 +663,12 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
                       onClick={(e) => e.stopPropagation()}
                       style={{ width: 92, border: "1px solid rgba(255, 136, 32, 0.24)", background: "#fff", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 500 }}
                     />
-                  ) : tab.name}
+                  ) : (
+                    <>
+                      {tabIcon}
+                      <span>{labelForTab(tab)}</span>
+                    </>
+                  )}
                 </button>
               );
             })}
@@ -628,6 +680,11 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
         </div>
       </header>
 
+      {overrideContent ? (
+        <main style={{ position: "relative", width: "100%", height: canvasH, overflow: "auto", background: "#ffffff" }}>
+          {overrideContent}
+        </main>
+      ) : (
       <FrameCanvas
         style={{ position: "relative", width: "100%", height: canvasH, overflow: "hidden" }}
         onClick={isFullPageView ? undefined : () => { setSelectedFrameId(null); setSelectedFrameIds(new Set()); }}
@@ -775,14 +832,15 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
           </>
         )}
       </FrameCanvas>
+      )}
 
       {tabMenu && (
         <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
-          <button style={menuBtnBase} onClick={() => { openDefaultNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Default Node View</button>
+          <button style={menuBtnBase} onClick={() => { openDefaultNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Map</button>
           <button style={menuBtnBase} onPointerEnter={preloadLogicGateArenaSurface} onFocus={preloadLogicGateArenaSurface} onPointerDown={preloadLogicGateArenaSurface} onClick={() => { openLogicGateArena(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Logic Gate Arena</button>
-          <button style={menuBtnBase} onPointerEnter={preloadCommunicationsSurface} onFocus={preloadCommunicationsSurface} onPointerDown={preloadCommunicationsSurface} onClick={() => { openCommunicationsView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Communications</button>
+          <button style={menuBtnBase} onPointerEnter={preloadCommunicationsSurface} onFocus={preloadCommunicationsSurface} onPointerDown={preloadCommunicationsSurface} onClick={() => { openCommunicationsView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Communication</button>
           <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>
         </FrameRightClickMenu>
       )}
