@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import AppLayout from "../app/applayout";
 import { createLogicGateArenaFrames } from "../app/DefaultViews";
+import { preloadCommunicationsSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface } from "../app/preloadDashboardModules";
+import { LazyCommunicationsPage, LazyLogicGateArenaPage } from "../pages/lazyPages";
 import { computeLinkPlan, mergeLinkPlan } from "../app/frameLinking";
 import { UI_THEME } from "../app/frameLayoutTypes";
 import { loadFrameLinks, loadSettings, persistFrameLinks, persistFrameRegistry } from "../app/useFramePersistence";
@@ -24,10 +25,46 @@ import {
   type LoginResult,
 } from "./cognitoAuth";
 import { isAuthPath, nextPathForAuthState } from "./authRoutes";
-import { CommunicationsPage } from "../pages/communications/CommunicationsPage";
-import { LogicGateArenaPage } from "../pages/logic-gate-arena";
 
 type PendingChallenge = Extract<LoginResult, { status: "new_password_required" }> | null;
+type AppLayoutModule = typeof import("../app/applayout");
+
+let appLayoutPromise: Promise<AppLayoutModule> | null = null;
+
+function loadAppLayout() {
+  appLayoutPromise ??= import("../app/applayout");
+  return appLayoutPromise;
+}
+
+function preloadAppLayout(): void {
+  void loadAppLayout();
+}
+
+const LazyAppLayout = React.lazy(() => loadAppLayout().then((module) => ({ default: module.default })));
+const routeFallback = <div aria-busy="true" style={{ width: "100vw", height: "100vh", background: "#ffffff" }} />;
+
+function preloadAuthenticatedShell(): void {
+  preloadAppLayout();
+  preloadLikelyDashboardModules();
+}
+
+function preloadRouteSurface(path: string): void {
+  if (path === "/logic-gate-arena") {
+    preloadLogicGateArenaSurface();
+    return;
+  }
+  if (path === "/communication" || path === "/communications") preloadCommunicationsSurface();
+}
+function prefetchHandlers(preload: () => void) {
+  return {
+    onPointerEnter: preload,
+    onFocus: preload,
+    onPointerDown: preload,
+  };
+}
+
+const logicGateArenaPrefetch = prefetchHandlers(preloadLogicGateArenaSurface);
+const communicationsPrefetch = prefetchHandlers(preloadCommunicationsSurface);
 
 function persistStandaloneFrameGraph(frames: FrameDataModel[]): void {
   const registry = Object.fromEntries(frames.map((frame) => [frame.id, { kind: frame.kind }]));
@@ -46,7 +83,7 @@ function LogicGateArenaStandalonePage() {
   useEffect(() => { persistStandaloneFrameGraph(frames); }, [frames]);
   return (
     <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "#ffffff" }}>
-      <LogicGateArenaPage frames={frames} updateFrames={setFrames} />
+      <React.Suspense fallback={routeFallback}><LazyLogicGateArenaPage frames={frames} updateFrames={setFrames} /></React.Suspense>
     </div>
   );
 }
@@ -144,12 +181,15 @@ export default function AuthGate() {
   const [pendingChallenge, setPendingChallenge] = useState<PendingChallenge>(null);
 
   const navigate = useCallback((nextPath: string) => {
+    preloadRouteSurface(nextPath);
     window.history.pushState({}, "", nextPath);
     setPath(nextPath);
   }, []);
 
   const loadMe = useCallback(async () => {
     if (!authEnabled) return;
+    preloadAuthenticatedShell();
+    preloadRouteSurface(window.location.pathname);
     setLoading(true);
     setError("");
     try {
@@ -187,7 +227,7 @@ export default function AuthGate() {
     void loadMe();
   }, [authEnabled, loadMe, navigate]);
 
-  if (!authEnabled) return <AppLayout />;
+  if (!authEnabled) return <React.Suspense fallback={routeFallback}><LazyAppLayout /></React.Suspense>;
   if (loading) return <AuthPanel title="MangoRTS" error={error}><div>Loading</div></AuthPanel>;
 
   const normalizedPath = path;
@@ -213,12 +253,12 @@ export default function AuthGate() {
   }
 
   if (normalizedPath === "/communications" || normalizedPath === "/communication") {
-    return <CommunicationsPage me={me} onNavigate={navigate} />;
+    return <React.Suspense fallback={routeFallback}><LazyCommunicationsPage me={me} onNavigate={navigate} /></React.Suspense>;
   }
 
   return (
     <>
-      <AppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} />
+      <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} /></React.Suspense>
     </>
   );
 }
@@ -775,8 +815,8 @@ function SettingsPage({ me, onNavigate, onLogout }: { me: CurrentUserResponse; o
         <h1 style={settingsPageTitleStyle}>Settings</h1>
         <div style={settingsNavStyle}>
           <button style={smallButtonStyle} onClick={() => onNavigate("/")}>MangoRTS</button>
-          <button style={smallButtonStyle} onClick={() => onNavigate("/logic-gate-arena")}>Logic Gate Arena</button>
-          <button style={smallButtonStyle} onClick={() => onNavigate("/communication")}>Communication</button>
+          <button style={smallButtonStyle} onClick={() => onNavigate("/logic-gate-arena")} {...logicGateArenaPrefetch}>Logic Gate Arena</button>
+          <button style={smallButtonStyle} onClick={() => onNavigate("/communication")} {...communicationsPrefetch}>Communication</button>
         </div>
       </div>
       {error && <div style={settingsErrorStyle}>{error}</div>}
@@ -1052,10 +1092,10 @@ function AccountBar({ me, onNavigate }: { me: CurrentUserResponse; onNavigate: (
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
         <PersonIcon />
       </span>
-      <button type="button" style={navButtonStyle} onClick={() => onNavigate("/logic-gate-arena")}>
+      <button type="button" style={navButtonStyle} onClick={() => onNavigate("/logic-gate-arena")} {...logicGateArenaPrefetch}>
         <span>Logic Gate Arena</span>
       </button>
-      <button type="button" style={navButtonStyle} onClick={() => onNavigate("/communication")}>
+      <button type="button" style={navButtonStyle} onClick={() => onNavigate("/communication")} {...communicationsPrefetch}>
         <span>Communication</span>
       </button>
       <button type="button" style={navButtonStyle} onClick={() => onNavigate("/settings")}>

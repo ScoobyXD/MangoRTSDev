@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useEffect, useMemo } from "react"
 import FrameCanvas from "./framecanvas";
 import FrameRightClickMenu from "./framerightclickmenu";
 import ModulePickerMenu from "./menus/ModulePickerMenu";
-import { MODULE_LIBRARY as FRAME_MODULE_LIBRARY } from "../modules";
+import { MODULE_LIBRARY as FRAME_MODULE_LIBRARY, preloadModuleKind } from "../modules";
 import type { FrameDataModel, DragState } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { emitDashboardEvent, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
@@ -29,11 +29,12 @@ import {
   type ViewTab,
 } from "./frameLayoutTypes";
 import { loadFrameLinks, loadSettings, loadViews, persistFrameLinks, persistFrameRegistry, saveSettings, saveViews } from "./useFramePersistence";
+import { preloadCommunicationsSurface, preloadDefaultDashboardModules, preloadLogicGateArenaSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
+import { LazyCommunicationsPage, LazyLogicGateArenaPage } from "../pages/lazyPages";
 import { useFrameDragResize } from "./useFrameDragResize";
-import { LogicGateArenaPage } from "../pages/logic-gate-arena";
-import { CommunicationsPage } from "../pages/communications/CommunicationsPage";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
+const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
 
 type AppProps = {
   accountChrome?: React.ReactNode;
@@ -86,6 +87,17 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
   const isCommunicationsView = activeTab?.page === "communications";
   const isFullPageView = isLogicGateArenaView || isCommunicationsView;
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
+  useEffect(() => {
+    if (isLogicGateArenaView) {
+      preloadLogicGateArenaSurface();
+      return;
+    }
+    if (isCommunicationsView) {
+      preloadCommunicationsSurface();
+      return;
+    }
+    preloadVisibleFrameModules(frames);
+  }, [frames, isCommunicationsView, isLogicGateArenaView]);
   const childrenByParent = useMemo(() => {
     const grouped = new Map<string, FrameDataModel[]>();
     for (const frame of frames) {
@@ -210,6 +222,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
   }, []);
 
   const addFrame = useCallback((kind = DEFAULT_FRAME_KIND, preferred?: { x: number; y: number }) => {
+    preloadModuleKind(kind);
     const template = FRAME_MODULE_LIBRARY.find((item) => item.kind === kind) ?? FRAME_MODULE_LIBRARY[0];
     if (!template) return;
     const id = createFrameId();
@@ -458,6 +471,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
 
 
   const openDefaultNodeView = useCallback((tabID: string) => {
+    preloadDefaultDashboardModules();
     const framesForView = createDefaultNodeViewFrames();
     const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
     setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Default Node View", page: undefined, frames: framesForView } : tab)));
@@ -467,6 +481,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
   }, [tabs]);
 
   const openLogicGateArena = useCallback((tabID: string) => {
+    preloadLogicGateArenaSurface();
     const framesForView = createLogicGateArenaFrames();
     const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
     setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Logic Gate Arena", page: "logic-gate-arena", frames: framesForView } : tab)));
@@ -476,6 +491,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
   }, [tabs]);
 
   const openCommunicationsView = useCallback((tabID: string) => {
+    preloadCommunicationsSurface();
     const framesForView = createCommunicationsViewFrames();
     const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
     setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Communications", page: "communications", frames: framesForView } : tab)));
@@ -617,9 +633,9 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
         onContextMenu={isFullPageView ? (e) => e.preventDefault() : (e) => { e.preventDefault(); setCanvasMenu({ x: e.clientX, y: e.clientY, gridX: Math.floor(e.clientX / stepX), gridY: Math.floor((e.clientY - HEADER_H) / stepY) }); setHeaderMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
       >
         {isLogicGateArenaView ? (
-          <LogicGateArenaPage frames={frames} updateFrames={updateActiveFrames} />
+          <React.Suspense fallback={fullPageFallback}><LazyLogicGateArenaPage frames={frames} updateFrames={updateActiveFrames} /></React.Suspense>
         ) : isCommunicationsView ? (
-          <CommunicationsPage embedded />
+          <React.Suspense fallback={fullPageFallback}><LazyCommunicationsPage embedded /></React.Suspense>
         ) : (
           <>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={viewSize.w} height={canvasH} color={crossColor} />
@@ -764,8 +780,8 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
           <button style={menuBtnBase} onClick={() => { openDefaultNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Default Node View</button>
-          <button style={menuBtnBase} onClick={() => { openLogicGateArena(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Logic Gate Arena</button>
-          <button style={menuBtnBase} onClick={() => { openCommunicationsView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Communications</button>
+          <button style={menuBtnBase} onPointerEnter={preloadLogicGateArenaSurface} onFocus={preloadLogicGateArenaSurface} onPointerDown={preloadLogicGateArenaSurface} onClick={() => { openLogicGateArena(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Logic Gate Arena</button>
+          <button style={menuBtnBase} onPointerEnter={preloadCommunicationsSurface} onFocus={preloadCommunicationsSurface} onPointerDown={preloadCommunicationsSurface} onClick={() => { openCommunicationsView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Communications</button>
           <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>
         </FrameRightClickMenu>
       )}
@@ -852,6 +868,7 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
           hoverHandlers={hoverHandlers}
           onClose={closeMenus}
           onChangeModuleKind={(id, kind, label) => {
+            preloadModuleKind(kind);
             updateActiveFrames((prev) => prev.map((w) => (w.id === id ? { ...w, kind, title: label } : w)));
           }}
         />

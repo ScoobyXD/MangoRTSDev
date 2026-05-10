@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { CurrentUserResponse } from "../../auth/cognitoAuth";
+import { preloadLogicGateArenaSurface } from "../../app/preloadDashboardModules";
 import {
   deleteEmailMessage,
   disconnectCommunications,
@@ -317,7 +318,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           {me && <span style={userPillStyle}>{me.user.display_name?.trim() || me.user.email}</span>}
           <button style={headerButtonStyle} onClick={() => onNavigate?.("/")}>MangoRTS</button>
-          <button style={headerButtonStyle} onClick={() => onNavigate?.("/logic-gate-arena")}>Logic Gate Arena</button>
+          <button style={headerButtonStyle} onPointerEnter={preloadLogicGateArenaSurface} onFocus={preloadLogicGateArenaSurface} onPointerDown={preloadLogicGateArenaSurface} onClick={() => onNavigate?.("/logic-gate-arena")}>Logic Gate Arena</button>
           <button style={headerButtonStyle} onClick={() => onNavigate?.("/settings")}>Settings</button>
         </div>
       </header>
