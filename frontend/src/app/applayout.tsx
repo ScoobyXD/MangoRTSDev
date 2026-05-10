@@ -92,7 +92,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, onNavigate, overr
   const initialSettingsRef = useRef(loadSettings());
   const [bgColor, setBgColor] = useState(() => initialSettingsRef.current.bgColor || UI_THEME.surface);
   const [crossColor, setCrossColor] = useState(() => initialSettingsRef.current.crossColor || UI_THEME.panel);
-  const [headerBgColor, setHeaderBgColor] = useState(() => initialSettingsRef.current.headerBgColor || UI_THEME.panel);
+  const [headerBgColor, setHeaderBgColor] = useState(() => initialSettingsRef.current.headerBgColor || UI_THEME.surface);
   const [headerTextColor, setHeaderTextColor] = useState(() => initialSettingsRef.current.headerTextColor || UI_THEME.text);
   const [tabBgColor, setTabBgColor] = useState(() => initialSettingsRef.current.tabBgColor || "#ffffff");
   const [tabTextColor, setTabTextColor] = useState(() => initialSettingsRef.current.tabTextColor || UI_THEME.text);
@@ -630,7 +630,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, onNavigate, overr
         style={{ height: HEADER_H, padding: "6px 14px", display: "flex", alignItems: "center", background: "transparent", borderBottom: "none", boxShadow: "none" }}
         onContextMenu={(e) => { e.preventDefault(); setHeaderMenu({ x: e.clientX, y: e.clientY }); setCanvasMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
       >
-        <div style={{ width: "100%", minWidth: 0, height: 36, display: "grid", gridTemplateColumns: "auto minmax(180px, 1fr) auto", alignItems: "center", gap: 12, padding: "0 12px", borderRadius: 999, background: headerBgColor && headerBgColor !== UI_THEME.panel ? headerBgColor : "rgba(255, 255, 255, 0.94)", boxShadow: "0 9px 24px rgba(74, 36, 16, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)", backdropFilter: "blur(14px)" }}>
+        <div style={{ width: "100%", minWidth: 0, height: 36, display: "grid", gridTemplateColumns: "auto minmax(180px, 1fr) auto", alignItems: "center", gap: 12, padding: "0 12px", borderRadius: 999, background: headerBgColor || UI_THEME.surface, boxShadow: "0 8px 20px rgba(15, 23, 42, 0.10), inset 0 0 0 1px rgba(15, 23, 42, 0.08)" }}>
           <div style={{ display: "flex", alignItems: "center", minWidth: 0, height: "100%" }}>
             <h1 style={{ margin: 0, height: "100%", display: "flex", alignItems: "center", lineHeight: 0, fontSize: 0 }}><MangoWordmark size={20} weight={500} /></h1>
           </div>
