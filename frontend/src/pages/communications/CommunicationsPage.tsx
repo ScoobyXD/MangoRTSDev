@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CurrentUserResponse } from "../../auth/cognitoAuth";
 import { MangoWordmark } from "../../app/MangoLogo";
 import { preloadLogicGateArenaSurface } from "../../app/preloadDashboardModules";
@@ -62,12 +62,21 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [foldersReady, setFoldersReady] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const foldersRequestInFlightRef = useRef(false);
+  const messageRequestKeyRef = useRef("");
+  const messageRequestSeqRef = useRef(0);
+  const selectedMessageIDRef = useRef("");
 
   const isNarrow = viewportWidth < 980;
+
+  useEffect(() => {
+    selectedMessageIDRef.current = selectedMessageID;
+  }, [selectedMessageID]);
 
   useEffect(() => {
     const onResize = () => setViewportWidth(window.innerWidth);
@@ -86,7 +95,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     }
   }, []);
 
-  const loadStatus = useCallback(async () => {
+  const loadStatus = useCallback(async (): Promise<CommunicationsStatus | null> => {
     setLoadingStatus(true);
     setError("");
     try {
@@ -97,29 +106,47 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         setMessages([]);
         setSelectedMessage(null);
         setSelectedMessageID("");
+        setFoldersReady(false);
       }
+      return next;
     } catch (statusError) {
       setError(formatError(statusError, "Failed to load email connection"));
+      return null;
     } finally {
       setLoadingStatus(false);
     }
   }, []);
 
-  const loadFolders = useCallback(async () => {
+  const loadFolders = useCallback(async (): Promise<boolean> => {
+    if (foldersRequestInFlightRef.current) return false;
+    foldersRequestInFlightRef.current = true;
+    setFoldersReady(false);
     try {
       const next = await listEmailFolders();
       setFolders(next);
-      if (!selectedFolderID) {
+      setSelectedFolderID((currentFolderID) => {
+        if (currentFolderID) return currentFolderID;
         const inbox = findSystemFolder(next, "inbox");
-        if (inbox) setSelectedFolderID(inbox.id);
-      }
+        return inbox?.id ?? "";
+      });
+      setFoldersReady(true);
+      return true;
     } catch (folderError) {
       setError(formatError(folderError, "Failed to load folders"));
+      setFoldersReady(false);
+      return false;
+    } finally {
+      foldersRequestInFlightRef.current = false;
     }
-  }, [selectedFolderID]);
+  }, []);
 
   const loadMessages = useCallback(async () => {
-    if (!status?.connected) return;
+    if (!status?.connected || !foldersReady) return;
+    const requestKey = JSON.stringify([pageToken, selectedFolderID, searchQuery, unreadOnly]);
+    if (messageRequestKeyRef.current === requestKey) return;
+    messageRequestKeyRef.current = requestKey;
+    const requestSeq = messageRequestSeqRef.current + 1;
+    messageRequestSeqRef.current = requestSeq;
     setLoadingMessages(true);
     setError("");
     try {
@@ -130,18 +157,25 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         q: searchQuery,
         unread: unreadOnly ? true : undefined,
       });
+      if (messageRequestSeqRef.current !== requestSeq) return;
       setMessages(page.messages ?? []);
       setNextPageToken(page.next_page_token ?? "");
-      if (selectedMessageID && !(page.messages ?? []).some((message) => message.id === selectedMessageID)) {
+      const currentSelectedMessageID = selectedMessageIDRef.current;
+      if (currentSelectedMessageID && !(page.messages ?? []).some((message) => message.id === currentSelectedMessageID)) {
         setSelectedMessageID("");
         setSelectedMessage(null);
       }
     } catch (messageError) {
-      setError(formatError(messageError, "Failed to load messages"));
+      if (messageRequestSeqRef.current === requestSeq) {
+        setError(formatError(messageError, "Failed to load messages"));
+      }
     } finally {
-      setLoadingMessages(false);
+      if (messageRequestSeqRef.current === requestSeq) {
+        setLoadingMessages(false);
+        messageRequestKeyRef.current = "";
+      }
     }
-  }, [pageToken, searchQuery, selectedFolderID, selectedMessageID, status?.connected, unreadOnly]);
+  }, [foldersReady, pageToken, searchQuery, selectedFolderID, status?.connected, unreadOnly]);
 
   useEffect(() => { void loadStatus(); }, [loadStatus]);
   useEffect(() => { if (status?.connected) void loadFolders(); }, [loadFolders, status?.connected]);
@@ -170,10 +204,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const connection = status?.connection;
 
   const refreshAll = async () => {
-    await loadStatus();
-    if (status?.connected) {
+    const nextStatus = await loadStatus();
+    if (nextStatus?.connected) {
+      messageRequestKeyRef.current = "";
       await loadFolders();
-      await loadMessages();
     }
   };
 

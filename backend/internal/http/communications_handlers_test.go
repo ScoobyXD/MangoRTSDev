@@ -340,6 +340,50 @@ func TestCommunicationsNylasAuthErrorMarksReauthRequired(t *testing.T) {
 	}
 }
 
+func TestCommunicationsNylasRateLimitPreservesRetryAfter(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient: &fakeNylasClient{listErr: NylasAPIError{
+			StatusCode: http.StatusTooManyRequests,
+			Code:       "rate_limited",
+			RetryAfter: "3",
+		}},
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages", nil)
+	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429 body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Retry-After"); got != "3" {
+		t.Fatalf("Retry-After = %q, want 3", got)
+	}
+	if !strings.Contains(rec.Body.String(), "nylas_rate_limited") {
+		t.Fatalf("body = %s, want nylas_rate_limited", rec.Body.String())
+	}
+}
+
 func assertJSONStatus(t *testing.T, handler http.Handler, method, path, body, authHeader string, want int) {
 	t.Helper()
 	var reader *strings.Reader

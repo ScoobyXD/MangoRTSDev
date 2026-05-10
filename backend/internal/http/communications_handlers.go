@@ -361,6 +361,9 @@ func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connect
 			return
 		}
 		if apiErr.StatusCode == http.StatusTooManyRequests {
+			if strings.TrimSpace(apiErr.RetryAfter) != "" {
+				w.Header().Set("Retry-After", strings.TrimSpace(apiErr.RetryAfter))
+			}
 			writeError(w, http.StatusTooManyRequests, "nylas_rate_limited")
 			return
 		}
