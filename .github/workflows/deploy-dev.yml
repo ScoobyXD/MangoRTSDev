@@ -80,8 +80,7 @@ jobs:
           TF_NYLAS_STATE_SECRET_ARN: ${{ vars.TF_NYLAS_STATE_SECRET_ARN || '' }}
           TF_NYLAS_GOOGLE_SCOPES: ${{ vars.TF_NYLAS_GOOGLE_SCOPES || 'https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.labels' }}
           TF_NYLAS_MICROSOFT_SCOPES: ${{ vars.TF_NYLAS_MICROSOFT_SCOPES || 'offline_access User.Read Mail.ReadWrite Mail.Send' }}
-          TF_DEV_BASIC_AUTH_USERNAME: ${{ vars.TF_DEV_BASIC_AUTH_USERNAME || 'mangorts-dev' }}
-          TF_DEV_BASIC_AUTH_PASSWORD: ${{ secrets.DEV_BASIC_AUTH_PASSWORD }}
+          TF_ORIGIN_VERIFY_SECRET: ${{ secrets.ORIGIN_VERIFY_SECRET || secrets.DEV_BASIC_AUTH_PASSWORD }}
           TF_GITHUB_OWNER: ${{ vars.TF_GITHUB_OWNER || github.repository_owner }}
           TF_GITHUB_REPOSITORY: ${{ vars.TF_GITHUB_REPOSITORY || github.event.repository.name }}
           TF_GITHUB_BRANCH: ${{ vars.TF_GITHUB_BRANCH || 'main' }}
@@ -96,7 +95,7 @@ jobs:
           : "${TF_EXISTING_DB_SECURITY_GROUP_ID:?Set GitHub variable TF_EXISTING_DB_SECURITY_GROUP_ID}"
           : "${TF_DEV_COMPANY_ID:?Set GitHub variable TF_DEV_COMPANY_ID}"
           : "${TF_COGNITO_DOMAIN_PREFIX:?Set GitHub variable TF_COGNITO_DOMAIN_PREFIX}"
-          : "${TF_DEV_BASIC_AUTH_PASSWORD:?Set GitHub secret DEV_BASIC_AUTH_PASSWORD}"
+          : "${TF_ORIGIN_VERIFY_SECRET:?Set GitHub secret ORIGIN_VERIFY_SECRET. Existing DEV_BASIC_AUTH_PASSWORD is accepted as a migration fallback.}"
           if [[ "$TF_CREATE_PRIVATE_ECS_SUBNETS" != "true" && "$TF_CREATE_PRIVATE_ECS_SUBNETS" != "false" ]]; then
             echo "TF_CREATE_PRIVATE_ECS_SUBNETS must be true or false" >&2
             exit 1
@@ -160,8 +159,7 @@ jobs:
           nylas_state_secret_arn = $(json_string "$TF_NYLAS_STATE_SECRET_ARN")
           nylas_google_scopes = $(json_string "$TF_NYLAS_GOOGLE_SCOPES")
           nylas_microsoft_scopes = $(json_string "$TF_NYLAS_MICROSOFT_SCOPES")
-          dev_basic_auth_username = $(json_string "$TF_DEV_BASIC_AUTH_USERNAME")
-          dev_basic_auth_password = $(json_string "$TF_DEV_BASIC_AUTH_PASSWORD")
+          origin_verify_secret = $(json_string "$TF_ORIGIN_VERIFY_SECRET")
           github_owner = $(json_string "$TF_GITHUB_OWNER")
           github_repository = $(json_string "$TF_GITHUB_REPOSITORY")
           github_branch = $(json_string "$TF_GITHUB_BRANCH")
@@ -241,8 +239,8 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         env:
-          # Keep browser API calls on the app origin so public auth endpoints can
-          # pass the dev CloudFront Basic Auth gate before a Cognito token exists.
+          # Keep browser API calls on the app origin so public auth endpoints and
+          # authenticated API calls share the same CloudFront distribution.
           VITE_API_BASE_URL: ${{ env.APP_URL }}
           VITE_AUTH_MODE: cognito
           VITE_COGNITO_REGION: ${{ env.COGNITO_REGION }}
@@ -279,12 +277,8 @@ jobs:
           aws cloudfront wait invalidation-completed --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --id "$INVALIDATION_ID"
 
       - name: Post-deploy smoke tests
-        env:
-          DEV_BASIC_AUTH_USERNAME: ${{ vars.TF_DEV_BASIC_AUTH_USERNAME || 'mangorts-dev' }}
-          DEV_BASIC_AUTH_PASSWORD: ${{ secrets.DEV_BASIC_AUTH_PASSWORD }}
         run: |
           set -euo pipefail
-          curl_auth=(--user "${DEV_BASIC_AUTH_USERNAME}:${DEV_BASIC_AUTH_PASSWORD}")
           tmp_body="$(mktemp)"
 
           require_status() {
@@ -299,16 +293,16 @@ jobs:
             fi
           }
 
-          status="$(curl --silent --show-error "${curl_auth[@]}" --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/deploy-info.json")"
+          status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/deploy-info.json")"
           require_status "frontend deploy-info" "200" "$status" "$tmp_body"
           jq -e --arg revision "$GITHUB_SHA" --arg app_url "$APP_URL" '.revision == $revision and .api_base_url == $app_url' "$tmp_body" >/dev/null
 
-          status="$(curl --silent --show-error "${curl_auth[@]}" --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/accept-invite")"
+          status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/accept-invite")"
           require_status "frontend route rewrite" "200" "$status" "$tmp_body"
           grep -q '<div id="root"></div>' "$tmp_body"
 
           for attempt in {1..18}; do
-            status="$(curl --silent --show-error "${curl_auth[@]}" --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/healthz" || true)"
+            status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/healthz" || true)"
             if [[ "$status" == "200" ]] && jq -e --arg revision "$GITHUB_SHA" '.ok == true and .deploy_revision == $revision' "$tmp_body" >/dev/null 2>&1; then
               break
             fi
@@ -328,7 +322,7 @@ jobs:
             "${APP_URL}/v1/invitations/validate")"
           require_status "invite validate preflight" "204" "$status" "$tmp_body"
 
-          status="$(curl --silent --show-error "${curl_auth[@]}" --output "$tmp_body" --write-out "%{http_code}" \
+          status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" \
             --request POST \
             --header "Content-Type: application/json" \
             --data '{"token":"deploy-smoke-invalid-token"}' \
@@ -336,7 +330,7 @@ jobs:
           require_status "invite validate backend route" "404" "$status" "$tmp_body"
           jq -e '.error == "invitation_bad_token"' "$tmp_body" >/dev/null
 
-          status="$(curl --silent --show-error "${curl_auth[@]}" --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/v1/me")"
+          status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/v1/me")"
           require_status "backend unauthorized route" "401" "$status" "$tmp_body"
           jq -e '.error == "unauthorized"' "$tmp_body" >/dev/null
 

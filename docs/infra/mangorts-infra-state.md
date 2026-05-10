@@ -13,7 +13,7 @@ The old `infra/terraform` root is historical reference. Do not apply it for Mang
 - ALB, target group, listener, and service security groups.
 - S3 frontend bucket.
 - CloudFront distribution and Origin Access Control.
-- CloudFront temporary basic-auth function.
+- CloudFront frontend route-rewrite function.
 - WAF Web ACL.
 - Cognito User Pool, domain, app clients, and reserved machine client.
 - Route 53 records under the root hosted zone.

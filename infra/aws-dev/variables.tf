@@ -202,15 +202,23 @@ variable "cognito_domain_prefix" {
   type        = string
 }
 
-variable "dev_basic_auth_username" {
-  description = "Dev edge basic-auth username."
+variable "origin_verify_secret" {
+  description = "Secret material used to derive the CloudFront-to-ALB origin verification header. Prefer setting this instead of deprecated dev_basic_auth_password."
   type        = string
-  default     = "mangorts-dev"
+  default     = ""
+  sensitive   = true
+}
+
+variable "dev_basic_auth_username" {
+  description = "Deprecated. Dev CloudFront Basic Auth has been removed; this is kept temporarily so older tfvars files continue to load."
+  type        = string
+  default     = ""
 }
 
 variable "dev_basic_auth_password" {
-  description = "Dev edge basic-auth password. Stored in Terraform state; use only for temporary dev gating."
+  description = "Deprecated. No longer gates dev traffic; kept temporarily so older tfvars can still derive the origin verification header."
   type        = string
+  default     = ""
   sensitive   = true
 }
 

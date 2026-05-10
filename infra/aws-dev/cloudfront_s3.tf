@@ -36,36 +36,18 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   signing_protocol                  = "sigv4"
 }
 
-resource "aws_cloudfront_function" "basic_auth" {
-  name    = "${local.name_prefix}-basic-auth"
+resource "aws_cloudfront_function" "frontend_router" {
+  name    = "${local.name_prefix}-frontend-router"
   runtime = "cloudfront-js-1.0"
-  comment = "Temporary MangoRTS dev edge auth"
+  comment = "MangoRTS frontend route rewrite"
   publish = true
   code    = <<-JS
 function handler(event) {
   var request = event.request;
-  var expected = "${local.basic_auth_header}";
-  var auth = request.headers.authorization ? request.headers.authorization.value : "";
-  if (request.uri.indexOf("/v1/") === 0 && request.method === "OPTIONS") {
-    return request;
+  if (isFrontendRoute(request.uri)) {
+    request.uri = "/index.html";
   }
-  if (request.uri.indexOf("/v1/") === 0 && auth.indexOf("Bearer ") === 0) {
-    return request;
-  }
-  if (request.headers.authorization && request.headers.authorization.value === expected) {
-    if (isFrontendRoute(request.uri)) {
-      request.uri = "/index.html";
-    }
-    return request;
-  }
-  return {
-    statusCode: 401,
-    statusDescription: "Unauthorized",
-    headers: {
-      "www-authenticate": { value: "Basic realm=\"MangoRTS Dev\"" },
-      "cache-control": { value: "no-store" }
-    }
-  };
+  return request;
 }
 
 function isFrontendRoute(uri) {
@@ -126,7 +108,7 @@ resource "aws_cloudfront_distribution" "app" {
 
     function_association {
       event_type   = "viewer-request"
-      function_arn = aws_cloudfront_function.basic_auth.arn
+      function_arn = aws_cloudfront_function.frontend_router.arn
     }
   }
 
@@ -140,10 +122,6 @@ resource "aws_cloudfront_distribution" "app" {
     origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
     compress                 = true
 
-    function_association {
-      event_type   = "viewer-request"
-      function_arn = aws_cloudfront_function.basic_auth.arn
-    }
   }
 
   ordered_cache_behavior {
@@ -167,10 +145,6 @@ resource "aws_cloudfront_distribution" "app" {
     origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
     compress                 = true
 
-    function_association {
-      event_type   = "viewer-request"
-      function_arn = aws_cloudfront_function.basic_auth.arn
-    }
   }
 
   restrictions {
@@ -187,6 +161,13 @@ resource "aws_cloudfront_distribution" "app" {
   }
 
   depends_on = [aws_route53_record.origin]
+
+  lifecycle {
+    precondition {
+      condition     = local.effective_origin_verify_secret != ""
+      error_message = "Set origin_verify_secret. During migration, the deprecated dev_basic_auth_password can be used as the same secret material."
+    }
+  }
 }
 
 data "aws_iam_policy_document" "frontend_bucket" {

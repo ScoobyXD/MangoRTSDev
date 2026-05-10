@@ -7,12 +7,12 @@ MangoRTS dev is a production-shaped AWS environment for development and demos. I
 ```text
 Browser
   -> Route 53: dev.<domain>
-  -> CloudFront + WAF + temporary basic auth
+  -> CloudFront + WAF
   -> S3 private frontend bucket
 
 Browser/API client
   -> Route 53: api.dev.<domain> or dev.<domain>/v1/*
-  -> CloudFront + WAF + temporary basic auth
+  -> CloudFront + WAF
   -> ALB HTTPS origin
   -> ECS Fargate backend task
   -> existing dev PostgreSQL/Aurora database
@@ -22,6 +22,7 @@ Browser/API client
 
 - **Route 53** owns DNS records for `dev.<domain>`, `api.dev.<domain>`, and `origin.dev.<domain>`.
 - **CloudFront** is the public edge for both frontend and API traffic.
+- **CloudFront Functions** rewrite frontend routes to `index.html`; they do not add a browser-visible Basic Auth gate.
 - **S3** stores static Vite build output from `frontend/dist`.
 - **WAF** applies AWS managed edge protections.
 - **Cognito** owns user login and token issuance.
