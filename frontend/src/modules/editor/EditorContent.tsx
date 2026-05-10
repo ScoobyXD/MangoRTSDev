@@ -7,6 +7,7 @@ import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, in
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches } from "../logic-gate-map/LogicGateRecordStore";
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
+import { sanitizeAPIErrorMessage } from "../api/requestJSON";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
 import { getEditorDocumentIsolationState, type EditorTabID } from "./editorTabs";
@@ -305,7 +306,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const headers = new Headers(init?.headers);
     if (init?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
     const response = await fetch(`${apiBase}${path}`, { ...init, headers });
-    if (!response.ok) throw new Error(await response.text() || `Request failed (${response.status})`);
+    if (!response.ok) throw new Error(sanitizeAPIErrorMessage(response.status, response.statusText, await response.text()));
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
   }, [apiBase]);

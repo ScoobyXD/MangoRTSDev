@@ -9,6 +9,7 @@ const MAX_EDITOR_IMAGE_DIMENSION_PX = 960;
 const MIN_EDITOR_IMAGE_WIDTH_PX = 48;
 const MIN_EDITOR_IMAGE_HEIGHT_PX = 36;
 const EDITOR_IMAGE_INLINE_TEXT_GAP_PX = 12;
+export const DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX = 4;
 
 export type EditorImageFloatSide = "left" | "right";
 export type EditorImagePointerInteraction =
@@ -38,7 +39,7 @@ export function createEditorImageFrame(ownerDocument: Document, data: EditorImag
   applyEditorImageFloatLayout(frame, data.floatSide ?? "left", data.marginLeft ?? 0);
   frame.style.width = `${clampImageDimension(data.width, MIN_EDITOR_IMAGE_WIDTH_PX)}px`;
   frame.style.height = `${clampImageDimension(data.height, MIN_EDITOR_IMAGE_HEIGHT_PX)}px`;
-  frame.style.marginTop = `${clampImageVerticalOffset(data.marginTop ?? 4)}px`;
+  frame.style.marginTop = `${clampImageVerticalOffset(data.marginTop ?? DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX)}px`;
   frame.style.marginBottom = "8px";
   frame.style.resize = "none";
   frame.style.overflow = "hidden";
@@ -69,7 +70,7 @@ export function readEditorImageData(source: HTMLElement): EditorImageData | null
   const height = readSafeStylePixels(source.style.height, 160, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_DIMENSION_PX);
   const floatSide = readEditorImageFloatSide(source);
   const marginLeft = readEditorImageInlineOffset(source);
-  const marginTop = readSafeStylePixels(source.style.marginTop, 4, -5_000, 5_000);
+  const marginTop = readSafeStylePixels(source.style.marginTop, DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX, -5_000, 5_000);
   return {
     src,
     id: source.getAttribute(EDITOR_IMAGE_ID_ATTRIBUTE) ?? undefined,

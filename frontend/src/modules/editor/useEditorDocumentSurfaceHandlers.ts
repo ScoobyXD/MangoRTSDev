@@ -22,6 +22,7 @@ import {
   EDITOR_DOCUMENT_MIN_FONT_SIZE_PX,
 } from "./useEditorPreferences";
 import {
+  DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX,
   applyEditorImageFloatLayout,
   clampEditorImageOffset,
   clampEditorImageSize,
@@ -49,6 +50,7 @@ export type EditorDocumentSurfaceHandlers = Pick<
   | "onSelect"
   | "onClick"
   | "onPointerDown"
+  | "onPointerMove"
   | "onKeyUp"
   | "onBlur"
   | "onScroll"
@@ -464,6 +466,84 @@ function getEditorRootContentMetrics(root: HTMLElement): { left: number; width: 
   };
 }
 
+function getDocumentCaretRangeFromPoint(ownerDocument: Document, x: number, y: number): Range | null {
+  const documentWithCaret = ownerDocument as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  const caretPosition = documentWithCaret.caretPositionFromPoint?.(x, y);
+  if (caretPosition) {
+    const range = ownerDocument.createRange();
+    range.setStart(caretPosition.offsetNode, caretPosition.offset);
+    range.collapse(true);
+    return range;
+  }
+  return documentWithCaret.caretRangeFromPoint?.(x, y) ?? null;
+}
+
+function createRootBoundaryRange(root: HTMLElement, atEnd: boolean): Range {
+  const range = root.ownerDocument.createRange();
+  range.selectNodeContents(root);
+  range.collapse(!atEnd);
+  return range;
+}
+
+function restoreImageFrame(frame: HTMLSpanElement, parent: Node, nextSibling: ChildNode | null) {
+  if (nextSibling && nextSibling.parentNode === parent) {
+    parent.insertBefore(frame, nextSibling);
+    return;
+  }
+  parent.appendChild(frame);
+}
+
+function reanchorEditorImageForVisualTop(root: HTMLElement, frame: HTMLSpanElement, visualTop: number): boolean {
+  const originalParent = frame.parentNode;
+  if (!originalParent) return false;
+  const originalNextSibling = frame.nextSibling;
+  const ownerDocument = root.ownerDocument;
+  const rootRect = root.getBoundingClientRect();
+  const rootMetrics = getEditorRootContentMetrics(root);
+  const x = rootMetrics.left + Math.max(1, Math.min(rootMetrics.width - 1, 8));
+  frame.remove();
+
+  let range: Range | null = null;
+  if (visualTop <= rootRect.top) {
+    range = createRootBoundaryRange(root, false);
+  } else if (visualTop >= rootRect.bottom) {
+    range = createRootBoundaryRange(root, true);
+  } else {
+    const y = Math.max(rootRect.top + 1, Math.min(rootRect.bottom - 1, visualTop));
+    range = getDocumentCaretRangeFromPoint(ownerDocument, x, y);
+    if (!range || !rootContainsRange(root, range)) range = createRootBoundaryRange(root, visualTop > rootRect.top + rootRect.height / 2);
+  }
+
+  if (!range) {
+    restoreImageFrame(frame, originalParent, originalNextSibling);
+    return false;
+  }
+
+  try {
+    range.insertNode(frame);
+    return true;
+  } catch {
+    restoreImageFrame(frame, originalParent, originalNextSibling);
+    return false;
+  }
+}
+
+function updateEditorImageCursor(root: HTMLElement, target: EventTarget | null, clientX: number, clientY: number) {
+  const frame = findEditorImageFrame(root, target);
+  if (!frame) return;
+  const frameRect = frame.getBoundingClientRect();
+  const interaction = getEditorImagePointerInteraction(
+    frameRect.width,
+    frameRect.height,
+    clientX - frameRect.left,
+    clientY - frameRect.top,
+  );
+  frame.style.cursor = getEditorImageCursorForInteraction(interaction);
+}
+
 function removeSelectedEditorImage(root: HTMLElement): boolean {
   const frame = getSelectedEditorImageFrame(root);
   if (!frame) return false;
@@ -497,11 +577,14 @@ function startEditorImagePointerInteraction(
     width: frameRect.width,
     height: frameRect.height,
     visualLeft,
-    marginTop: readStylePixels(frame.style.marginTop, 4),
+    visualTop: frameRect.top,
+    marginTop: readStylePixels(frame.style.marginTop, DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX),
     floatSide: readEditorImageFloatSide(frame),
   };
   const previousCursor = ownerDocument.body.style.cursor;
   ownerDocument.body.style.cursor = getEditorImageCursorForInteraction(interaction);
+  let latestDragVisualTop = start.visualTop;
+  let shouldReanchorAfterDrag = false;
 
   const onPointerMove = (event: PointerEvent) => {
     event.preventDefault();
@@ -554,6 +637,8 @@ function startEditorImagePointerInteraction(
     const nextFloatSide = getEditorImageFloatSideForVisualLeft(nextMetrics.width, start.width, nextVisualLeft);
     const inlineOffset = getEditorImageInlineOffsetForVisualLeft(nextMetrics.width, start.width, nextFloatSide, nextVisualLeft);
     applyEditorImageFloatLayout(frame, nextFloatSide, inlineOffset);
+    latestDragVisualTop = start.visualTop + dy;
+    shouldReanchorAfterDrag = Math.abs(dy) >= 6;
     frame.style.marginTop = `${clampEditorImageVerticalOffset(start.marginTop + dy, -5_000, 5_000)}px`;
   };
 
@@ -562,6 +647,9 @@ function startEditorImagePointerInteraction(
     ownerDocument.removeEventListener("pointerup", finish);
     ownerDocument.removeEventListener("pointercancel", finish);
     ownerDocument.body.style.cursor = previousCursor;
+    if (interaction.kind === "drag" && shouldReanchorAfterDrag && reanchorEditorImageForVisualTop(root, frame, latestDragVisualTop)) {
+      frame.style.marginTop = `${DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX}px`;
+    }
     commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
   };
 
@@ -710,6 +798,9 @@ export function useEditorDocumentSurfaceHandlers({
       if (event.button === 0) {
         startEditorImagePointerInteraction(event.currentTarget, frame, event, scheduleDocumentSave, scheduleIndentGuideUpdate);
       }
+    },
+    onPointerMove(event) {
+      updateEditorImageCursor(event.currentTarget, event.target, event.clientX, event.clientY);
     },
     onKeyUp(event) {
       if (pendingEditorFontSizeRef.current !== null) {

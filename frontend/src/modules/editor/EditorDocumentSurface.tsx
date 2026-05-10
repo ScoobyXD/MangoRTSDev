@@ -27,6 +27,7 @@ export type EditorDocumentSurfaceProps = {
   onSelect: React.ReactEventHandler<HTMLDivElement>;
   onClick: React.MouseEventHandler<HTMLDivElement>;
   onPointerDown: React.PointerEventHandler<HTMLDivElement>;
+  onPointerMove: React.PointerEventHandler<HTMLDivElement>;
   onKeyUp: React.KeyboardEventHandler<HTMLDivElement>;
   onBlur: React.FocusEventHandler<HTMLDivElement>;
   onScroll: React.UIEventHandler<HTMLDivElement>;
@@ -57,6 +58,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
   onSelect,
   onClick,
   onPointerDown,
+  onPointerMove,
   onKeyUp,
   onBlur,
   onScroll,
@@ -121,6 +123,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
       onSelect={onSelect}
       onClick={onClick}
       onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
       onKeyUp={onKeyUp}
       onBlur={onBlur}
       onScroll={onScroll}
