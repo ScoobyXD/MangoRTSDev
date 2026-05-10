@@ -177,6 +177,27 @@ func TestNylasGoogleScopesNormalizeShorthandEnvValues(t *testing.T) {
 	}
 }
 
+func TestNylasFolderUnmarshalAcceptsBooleanSystemFolder(t *testing.T) {
+	t.Parallel()
+
+	var payload struct {
+		Data []NylasFolder `json:"data"`
+	}
+	err := json.Unmarshal([]byte(`{"data":[{"id":"inbox","name":"Inbox","system_folder":"inbox"},{"id":"label-1","name":"Label","system_folder":false}]}`), &payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Data) != 2 {
+		t.Fatalf("folders = %d, want 2", len(payload.Data))
+	}
+	if payload.Data[0].SystemFolder != "inbox" {
+		t.Fatalf("string system_folder = %q, want inbox", payload.Data[0].SystemFolder)
+	}
+	if payload.Data[1].SystemFolder != "" {
+		t.Fatalf("boolean system_folder = %q, want empty", payload.Data[1].SystemFolder)
+	}
+}
+
 func TestNylasCallbackStoresGrantAndRejectsEmailMismatch(t *testing.T) {
 	t.Parallel()
 

@@ -183,6 +183,34 @@ type NylasFolder struct {
 	TotalCount   int      `json:"total_count,omitempty"`
 }
 
+func (f *NylasFolder) UnmarshalJSON(raw []byte) error {
+	type folderAlias NylasFolder
+	var payload struct {
+		folderAlias
+		SystemFolder json.RawMessage `json:"system_folder"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return err
+	}
+	*f = NylasFolder(payload.folderAlias)
+	f.SystemFolder = ""
+
+	rawSystemFolder := strings.TrimSpace(string(payload.SystemFolder))
+	if rawSystemFolder == "" || rawSystemFolder == "null" {
+		return nil
+	}
+	var systemFolder string
+	if err := json.Unmarshal(payload.SystemFolder, &systemFolder); err == nil {
+		f.SystemFolder = strings.TrimSpace(systemFolder)
+		return nil
+	}
+	var isSystemFolder bool
+	if err := json.Unmarshal(payload.SystemFolder, &isSystemFolder); err == nil {
+		return nil
+	}
+	return fmt.Errorf("invalid nylas folder system_folder value: %s", rawSystemFolder)
+}
+
 type NylasMessage struct {
 	ID        string              `json:"id"`
 	ThreadID  string              `json:"thread_id,omitempty"`
