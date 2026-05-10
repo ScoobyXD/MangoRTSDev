@@ -181,6 +181,7 @@ React 18 · TypeScript strict · Vite · Zero deps beyond React
 - Approved widget colorways: **mango / teal / white / black**.
 - Use the shared `MangoWordmark` / `MangoLogoMark` for product branding. Preserve `MangoRTS` casing.
 - UI text should not be forced into all-caps. Keep header, module, tab, and panel label weights lighter by default (usually 400-600).
+- The dashboard header should read as a Mango-gradient strip with a rounded translucent taskbar surface on top; primary app links use icon-left pill buttons.
 
 ## UI Rules (Text Editing)
 

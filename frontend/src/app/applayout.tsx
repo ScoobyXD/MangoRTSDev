@@ -564,67 +564,67 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
         }
       `}</style>
       <header
-        style={{ height: HEADER_H, padding: "0 20px", display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", background: headerBgColor, borderBottom: `1px solid ${UI_THEME.line}` }}
+        style={{ height: HEADER_H, padding: "6px 14px", display: "flex", alignItems: "center", background: "var(--mango-gradient)", borderBottom: "1px solid rgba(255, 255, 255, 0.5)", boxShadow: "0 8px 22px rgba(132, 51, 0, 0.2)" }}
         onContextMenu={(e) => { e.preventDefault(); setHeaderMenu({ x: e.clientX, y: e.clientY }); setCanvasMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-          <h1 style={{ margin: 0, lineHeight: 1 }}><MangoWordmark size={22} weight={500} /></h1>
-          <button onClick={() => setEditMode((v) => !v)} style={{ height: 32, padding: "0 10px", background: editMode ? "#fff2e0" : tabBgColor, color: tabTextColor, border: `1px solid ${editMode ? UI_THEME.panel : UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 500 }}>
-            {editMode ? "Edit on" : "Edit off"}
-          </button>
-          <button onClick={() => { addFrame(); setEditMode(true); }} title="Add extra frame" aria-label="Add extra frame" style={{ width: 32, height: 32, background: tabBgColor, color: tabTextColor, border: `1px solid ${UI_THEME.line}`, borderRadius: 8, cursor: "pointer", fontSize: 20 }}>+</button>
-        </div>
+        <div style={{ width: "100%", minWidth: 0, height: 36, display: "grid", gridTemplateColumns: "auto minmax(180px, 1fr) auto", alignItems: "center", gap: 12, padding: "0 12px", borderRadius: 999, background: headerBgColor && headerBgColor !== UI_THEME.panel ? headerBgColor : "rgba(255, 255, 255, 0.94)", boxShadow: "0 9px 24px rgba(74, 36, 16, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)", backdropFilter: "blur(14px)" }}>
+          <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
+            <h1 style={{ margin: 0, lineHeight: 1 }}><MangoWordmark size={20} weight={500} /></h1>
+          </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 6, justifySelf: "center", maxWidth: "68vw", overflowX: "auto", padding: "2px 4px" }}>
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onMouseDown={(e) => {
-                if (e.button !== 0) return;
-                if ((e.target as HTMLElement).tagName === "INPUT") return;
-                tabDragRef.current = { id: tab.id, startX: e.clientX, startY: e.clientY };
-                setMovingTabId(tab.id);
-                setActiveTabId(tab.id);
-                setEditMode(false);
-              }}
-              onMouseEnter={() => {
-                if (!isDraggingTab || !movingTabId || movingTabId === tab.id) return;
-                setTabs((prev) => {
-                  const list = [...prev];
-                  const from = list.findIndex((t) => t.id === movingTabId);
-                  const to = list.findIndex((t) => t.id === tab.id);
-                  if (from < 0 || to < 0) return prev;
-                  const [item] = list.splice(from, 1);
-                  list.splice(to, 0, item);
-                  return list;
-                });
-              }}
-              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
-              onDoubleClick={() => startRenamingTab(tab.id)}
-              onClick={(e) => { if (e.button !== 0 || isDraggingTab) return; setActiveTabId(tab.id); setEditMode(false); }}
-              style={{ height: 30, padding: "0 12px", border: activeTabId === tab.id ? `1px solid ${tabTextColor}` : "1px solid rgba(255,136,32,0.35)", background: activeTabId === tab.id ? tabBgColor : `${tabBgColor}B3`, color: tabTextColor, borderRadius: 8, fontSize: 11, fontWeight: 500, letterSpacing: 0, cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
-            >
-              {renamingTabId === tab.id ? (
-                <input
-                  autoFocus
-                  value={renamingValue}
-                  onChange={(e) => setRenamingValue(e.target.value)}
-                  onBlur={commitRenameTab}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") commitRenameTab();
-                    if (e.key === "Escape") cancelRenameTab();
+          <div style={{ display: "flex", alignItems: "center", gap: 4, justifySelf: "center", minWidth: 0, maxWidth: "100%", overflowX: "auto", padding: "2px 0", scrollbarWidth: "none" }}>
+            {tabs.map((tab) => {
+              const selected = activeTabId === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onMouseDown={(e) => {
+                    if (e.button !== 0) return;
+                    if ((e.target as HTMLElement).tagName === "INPUT") return;
+                    tabDragRef.current = { id: tab.id, startX: e.clientX, startY: e.clientY };
+                    setMovingTabId(tab.id);
+                    setActiveTabId(tab.id);
+                    setEditMode(false);
                   }}
-                  onClick={(e) => e.stopPropagation()}
-                  style={{ width: 92, border: `1px solid ${UI_THEME.panel}`, background: "#fff", borderRadius: 4, padding: "2px 5px", fontSize: 11, fontWeight: 500 }}
-                />
-              ) : tab.name}
-            </button>
-          ))}
-          <button onClick={addTab} title="New view tab" style={{ width: 30, height: 30, border: "1px solid rgba(255,136,32,0.35)", borderRadius: 8, background: tabBgColor, color: tabTextColor, cursor: "pointer", fontSize: 20, lineHeight: 1 }}>+</button>
-        </div>
+                  onMouseEnter={() => {
+                    if (!isDraggingTab || !movingTabId || movingTabId === tab.id) return;
+                    setTabs((prev) => {
+                      const list = [...prev];
+                      const from = list.findIndex((t) => t.id === movingTabId);
+                      const to = list.findIndex((t) => t.id === tab.id);
+                      if (from < 0 || to < 0) return prev;
+                      const [item] = list.splice(from, 1);
+                      list.splice(to, 0, item);
+                      return list;
+                    });
+                  }}
+                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setTabMenu({ x: e.clientX, y: e.clientY, id: tab.id }); }}
+                  onDoubleClick={() => startRenamingTab(tab.id)}
+                  onClick={(e) => { if (e.button !== 0 || isDraggingTab) return; setActiveTabId(tab.id); setEditMode(false); }}
+                  style={{ height: 28, padding: "0 12px", border: selected ? "1px solid rgba(255, 136, 32, 0.22)" : "1px solid transparent", background: selected ? "rgba(255, 136, 32, 0.13)" : "transparent", color: selected ? "#ff8820" : "#60646c", borderRadius: 999, fontSize: 12, fontWeight: 500, letterSpacing: 0, cursor: "pointer", whiteSpace: "nowrap", transition: "transform 120ms ease, opacity 120ms ease, background 120ms ease", opacity: movingTabId === tab.id ? 0.8 : 1, transform: movingTabId === tab.id ? "translateY(-1px)" : "translateY(0px)" }}
+                >
+                  {renamingTabId === tab.id ? (
+                    <input
+                      autoFocus
+                      value={renamingValue}
+                      onChange={(e) => setRenamingValue(e.target.value)}
+                      onBlur={commitRenameTab}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitRenameTab();
+                        if (e.key === "Escape") cancelRenameTab();
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ width: 92, border: "1px solid rgba(255, 136, 32, 0.24)", background: "#fff", borderRadius: 999, padding: "2px 8px", fontSize: 11, fontWeight: 500 }}
+                    />
+                  ) : tab.name}
+                </button>
+              );
+            })}
+          </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end", minWidth: 0 }}>
-          {accountChrome}
+          <div style={{ display: "flex", alignItems: "center", justifySelf: "end", minWidth: 0, overflow: "hidden" }}>
+            {accountChrome}
+          </div>
         </div>
       </header>
 
@@ -896,8 +896,11 @@ const App: React.FC<AppProps> = ({ accountChrome }) => {
 
       {headerMenu && (
         <FrameRightClickMenu x={headerMenu.x} y={headerMenu.y} onClose={closeMenus}>
+          <button style={menuBtnBase} onClick={() => { addTab(); closeMenus(); }} {...hoverHandlers}>
+            New view tab
+          </button>
           <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>
-            Header Bar
+            Taskbar Tint
             <input type="color" value={headerBgColor} onChange={(e) => setHeaderBgColor(e.target.value)} />
           </label>
           <label style={{ ...menuBtnBase, cursor: "default", justifyContent: "space-between" }}>

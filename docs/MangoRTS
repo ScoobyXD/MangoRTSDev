@@ -66,7 +66,8 @@ Communications:
 Email:
 1. By default the primary emails showing on the email list should be the same as my primary inbox on my gmail app. It automatically filters out the email marketing and junk stuff.
 	a. There should be a selectable drop down menu, which has the same conventions as all the other drop downs on our app) on the email list between Primary Inbox (filtered), Sent mail, and All mail.
-	b. 
+2. Remove the box on the left, we dont need that at all. Create a compose button near the top section of the email list section.
+	
 1. Need filters, i need the same filters Gmail has on my phone to just give me the important stuff i want instead of all of the spam and advertising stuff my email gets bombarded with.
 	a. Right now its configured for the "All Mail" settings so I see a bunch of garbages
 2. Try to create a shared inbox feature with other users in the same company like how Front (the tech company) has it.
@@ -110,6 +111,8 @@ On the right side of the kanban board will be the email and chat communications 
 Things to do bar:
 1. Have a pinned node section.
 
+the bottom of the page should be the thing to do task bar which is chronologically ordered left to right for the day today. basically its a schedule bar
+
 AUTH and Login:
 1. Need to get rid of the cognito sign in requirement in other machine
 	a. for some reason i have mangorts-dev as username and the Hakmin419!
@@ -138,7 +141,7 @@ Text Editor Changes
 	a. have multiple people be able to edit it at once.
 6. Also when typing theres this weird giant blob of red error text on the bottom.
 7. Image resize, be able to fluidly place images and text together.
-
+8. hey remember that after the mango changes the indent guidelines are broken again
 
 Kanban Board Changes:
 

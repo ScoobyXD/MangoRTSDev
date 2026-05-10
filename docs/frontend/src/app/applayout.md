@@ -117,3 +117,10 @@ The app layout keeps compatibility for persisted payloads:
 - The app header uses the shared `MangoWordmark` component from `frontend/src/app/MangoLogo.tsx`.
 - Header, module name, tab, and colorway labels preserve natural casing instead of forced uppercase.
 - Default header/module label typography is intentionally lighter, with normal UI labels generally using `fontWeight` 400-600.
+
+## Rounded Mango taskbar header (2026-05-10)
+
+- The visible dashboard header is now a Mango-gradient strip with a rounded translucent taskbar surface layered on top.
+- The top-level Edit and add-frame buttons were removed from the header; frame creation and edit mode remain available from the canvas context menu.
+- Logic Gate Arena, Communications, and Settings are rendered as individual icon-left navigation buttons in the header account chrome.
+- The visible new-tab plus button was removed from the header; new view tabs remain available from the header context menu.

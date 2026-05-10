@@ -4,7 +4,6 @@ import { preloadCommunicationsSurface, preloadLikelyDashboardModules, preloadLog
 import { LazyCommunicationsPage, LazyLogicGateArenaPage } from "../pages/lazyPages";
 import { computeLinkPlan, mergeLinkPlan } from "../app/frameLinking";
 import { MangoWordmark } from "../app/MangoLogo";
-import { UI_THEME } from "../app/frameLayoutTypes";
 import { loadFrameLinks, loadSettings, persistFrameLinks, persistFrameRegistry } from "../app/useFramePersistence";
 import type { FrameDataModel } from "../types";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
@@ -125,6 +124,22 @@ const GearIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
   <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
     <path d="M6.9 1.8h2.2l.38 1.45c.34.12.66.26.96.43l1.3-.75 1.55 1.55-.75 1.3c.17.3.31.62.43.96l1.45.38v2.2l-1.45.38c-.12.34-.26.66-.43.96l.75 1.3-1.55 1.55-1.3-.75c-.3.17-.62.31-.96.43l-.38 1.45H6.9l-.38-1.45a5.16 5.16 0 0 1-.96-.43l-1.3.75-1.55-1.55.75-1.3a5.16 5.16 0 0 1-.43-.96l-1.45-.38v-2.2l1.45-.38c.12-.34.26-.66.43-.96l-.75-1.3 1.55-1.55 1.3.75c.3-.17.62-.31.96-.43L6.9 1.8Z" fill="none" stroke={color} strokeWidth="1.15" strokeLinejoin="round" />
     <circle cx="8" cy="8.2" r="1.85" fill="none" stroke={color} strokeWidth="1.15" />
+  </svg>
+);
+
+const LogicGateNavIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
+    <rect x="2" y="2.2" width="4.2" height="4.2" rx="1" fill="none" stroke={color} strokeWidth="1.35" />
+    <rect x="9.8" y="2.2" width="4.2" height="4.2" rx="1" fill="none" stroke={color} strokeWidth="1.35" />
+    <rect x="5.9" y="9.8" width="4.2" height="4.2" rx="1" fill="none" stroke={color} strokeWidth="1.35" />
+    <path d="M6.2 4.3h3.6M8 6.4v3.4" fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" />
+  </svg>
+);
+
+const CommunicationsNavIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
+    <rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1.5" fill="none" stroke={color} strokeWidth="1.35" />
+    <path d="m3.2 4.8 4.8 3.6 4.8-3.6" fill="none" stroke={color} strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
@@ -1084,24 +1099,39 @@ function AuthPanel({ title, error, children }: { title: string; error?: string; 
 
 function AccountBar({ me, onNavigate }: { me: CurrentUserResponse; onNavigate: (path: string) => void }) {
   const displayName = me.user.display_name?.trim() || me.user.email;
-  const headerBackground = loadSettings().headerBgColor || UI_THEME.panel;
-  const headerText = loadSettings().headerTextColor || UI_THEME.text;
-  const navButtonStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 5, height: 28, border: "none", background: "transparent", color: headerText, cursor: "pointer", font: "inherit", fontWeight: 500, padding: 0, whiteSpace: "nowrap" };
+  const headerText = loadSettings().headerTextColor || "#60646c";
+  const navButtonStyle: React.CSSProperties = {
+    height: 28,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    border: "1px solid rgba(96, 100, 108, 0.1)",
+    borderRadius: 999,
+    background: "rgba(244, 245, 247, 0.78)",
+    color: "#60646c",
+    cursor: "pointer",
+    font: "inherit",
+    fontWeight: 500,
+    padding: "0 10px",
+    whiteSpace: "nowrap",
+  };
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, height: "100%", padding: "0 8px", background: headerBackground, color: headerText, fontFamily: "var(--mango-font-family)", fontSize: 11 }}>
-      <span style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, maxWidth: 160, color: headerText, fontWeight: 500 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, height: "100%", color: headerText, fontFamily: "var(--mango-font-family)", fontSize: 12 }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, maxWidth: 150, marginRight: 2, color: headerText, fontWeight: 500 }}>
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
         <PersonIcon />
       </span>
       <button type="button" style={navButtonStyle} onClick={() => onNavigate("/logic-gate-arena")} {...logicGateArenaPrefetch}>
+        <LogicGateNavIcon />
         <span>Logic Gate Arena</span>
       </button>
       <button type="button" style={navButtonStyle} onClick={() => onNavigate("/communication")} {...communicationsPrefetch}>
-        <span>Communication</span>
+        <CommunicationsNavIcon />
+        <span>Communications</span>
       </button>
       <button type="button" style={navButtonStyle} onClick={() => onNavigate("/settings")}>
-        <span>Settings</span>
         <GearIcon />
+        <span>Settings</span>
       </button>
     </div>
   );
