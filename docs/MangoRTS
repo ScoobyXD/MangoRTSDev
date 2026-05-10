@@ -58,22 +58,18 @@ Communications:
 
 
 Email:
-1. By default the primary emails showing on the email list should be the same as my primary inbox on my gmail app. It automatically filters out the email marketing and junk stuff.
-	a. There should be a selectable drop down menu, which has the same conventions as all the other drop downs on our app) on the email list between Primary Inbox (filtered), Sent mail, and All mail.
-2. Remove the box on the left, we dont need that at all. Create a compose button near the top section of the email list section.
-3. Have the communication email list update itself whenever the email account gets a new email, having a refresh button on the ui is dumb and this email list should be live.
+1. There was an effort to make the communication email list update itself whenever the email account gets a new email, however, it does not not work. i tested it and it does not autoupdate the email list, i have to manually refresh it
 	a. however polling would be a really shit option so figure something else out.
-4.
-
+2. I think you need to switch to a dev environment instead of sandbox.
+	a. see if that fixes rate limit problem, if it doesnt then youll have to do caching instead of querrying a bunch each time.
 
 
 2. Try to create a shared inbox feature with other users in the same company like how Front (the tech company) has it.
 	a. same goes for read receipts
 	b. team comments.
 	c. shared drafts
-3. Is it possible for the communications page to update itself whenever it gets a new email without having to poll the server all the time?
-	a. if you can do this please get rid of the Refresh button
-4. Please make the Compose button much smaller and a narrow horizontal rectangle below the MAIL (user's email name) on the top left.
+
+
 5. Have a feature where I can right click on an email card and there should be an option to "turn to a node and send to a logic gate" and there should emerge this space on the right hand of the screen where i can see the editor module pre-filled with information from the email and then an option to search and select which logic gate i want to put this into and autoamtically put it into its "pending" column.
 6. There should be a button in communications to show an email kanban board on the right side of the screen. In it should be very similar to the group by mode of the logic gate arena kanban board.
 	a. The columns should default be the RACI matrix which is from left to right: Responsible, Accountable, Consulted, and Informed.
@@ -110,17 +106,8 @@ Things to do bar:
 
 the bottom of the page should be the thing to do task bar which is chronologically ordered left to right for the day today. basically its a schedule bar
 
-AUTH and Login:
-1. Need to get rid of the cognito sign in requirement in other machine
-	a. for some reason i have mangorts-dev as username and the Hakmin419!
-
-
 General Bugs:
 3.  On another note when I have multi-select on for node or logic gates and I right-click, I should not automatically select one node or logic gate. I should keep all of the selected stuff selected. I should only be able to deselect when I single-click on another part of the map without dragging. 
-4. theres all sorts of bullshit issues with the frames, how theyre linked, and module linking stuff i know it.
-	1.Frame selection: It's kind of a pain in the ass to select stuff, select different frames, and then link them together. We're gonna fix this. 
-					this had a bunch of issues and merge conflicts and cursor issues and map not selecting for some reason
-	2. When I right click on a frame and I see the frame right click list options, that list should show the name of the frame or the name of the module that I have right clicked on.
 1. when there are two people on the same account, weird stuff happens, its like 1 gets command and the other watches as 1 controls, gets to click on stuff on the company explorer and the other cant. but sometimes they switch places.
 
 Company Explorer:
@@ -129,24 +116,35 @@ Company Explorer:
 Map:
 
 Text Editor Changes
-1. The font size change does not get applied to the next character(s) after typing new text. also, Although the font sizing increase and decrease work very well when I have multiple characters and words selected, it does not work when I have no selection. When I have no selection the font size can only range between 14 and 16 for some reason. 
-	I'm probably not explaining this well enough. Everything works fine when I am selecting multiple characters and words. I can increase and decrease the font size and it stays and it works. If I were to move my caret into a certain point and I start typing, the font size does not get applied to that new text. Actually for them font range is only between 14 and 16 but if I multi-select them then font range can go wherever. 
-2. Control Z is actually garbage. 
-3. Need to solve issue where the editor changes the size of the text inside of it based on how much space it has because it can be resized. I need the internal size of the text to change, kind of like what Company Explorer does right now. 
-4. from the node side, you should be able to also see the list of logic gates remaining on its path. Kind of like directions on google maps.
-5. Need to have it update immediately like the kanban board nodes change immediately	
+NEED TO TEST:I need editor to be able to be worked on by multiple people at the same time, like google docs.
+
+pretty much fail
+	1. The image should be resizable from any edge, from any corner.
+	2. The image can't be moved up, it can only move it down, left, or right
+	3. The text wrap doesnt work well, it can make text wrap to the right of the image and below it, but not above it or to its left.
+
+
+5. After writing some text on the editor, it needs to update.
 	a. have multiple people be able to edit it at once.
 6. Also when typing theres this weird giant blob of red error text on the bottom.
 7. Image resize, be able to fluidly place images and text together.
-8. hey remember that after the mango changes the indent guidelines are broken again
+
+Later:
+1. The font size change does not get applied to the next character(s) after typing new text. also, Although the font sizing increase and decrease work very well when I have multiple characters and words selected, it does not work when I have no selection. When I have no selection the font size can only range between 14 and 16 for some reason. 
+	I'm probably not explaining this well enough. Everything works fine when I am selecting multiple characters and words. I can increase and decrease the font size and it stays and it works. If I were to move my caret into a certain point and I start typing, the font size does not get applied to that new text. Actually for them font range is only between 14 and 16 but if I multi-select them then font range can go wherever. 
+2. Control Z is actually garbage. 
+4. from the node side, you should be able to also see the list of logic gates remaining on its path. Kind of like directions on google maps.
+
 
 Kanban Board Changes:
-
+FAIL: When i move a card from one column to another, that card's placement does not get updated on another user's account. However, when i open the node and see the contents of the popup node, the status has changed and does reflect the change, its just that visually on the ui the physical location of the card has not changed.
+		a. fyi, im saying this fails between my local host and dev.mangorts.com
+2. (not sure if we even need this feature, can be deleted) The search board list is too far to the right of the search bar, it should just be right underneath it.
 
 Later feature
 Department is on the logic gate and the node inherits that. Logic gates can be grouped into departments. 
 	but a department is really just a parent logic gate. this grouping stuff can come later
-1. The search board list is too far to the right of the search bar, it should just be right underneath it.
+
 
 
 Multi agent workflow:
