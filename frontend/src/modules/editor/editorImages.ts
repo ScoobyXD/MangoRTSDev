@@ -8,6 +8,12 @@ const MAX_STORED_IMAGE_BYTES = 680_000;
 const MAX_EDITOR_IMAGE_DIMENSION_PX = 960;
 const MIN_EDITOR_IMAGE_WIDTH_PX = 48;
 const MIN_EDITOR_IMAGE_HEIGHT_PX = 36;
+const EDITOR_IMAGE_INLINE_TEXT_GAP_PX = 12;
+
+export type EditorImageFloatSide = "left" | "right";
+export type EditorImagePointerInteraction =
+  | { kind: "drag" }
+  | { kind: "resize"; horizontal: -1 | 0 | 1; vertical: -1 | 0 | 1 };
 
 export type EditorImageData = {
   src: string;
@@ -16,7 +22,7 @@ export type EditorImageData = {
   height: number;
   marginLeft?: number;
   marginTop?: number;
-  floatSide?: "left" | "right";
+  floatSide?: EditorImageFloatSide;
 };
 
 export function isSafeEditorImageSource(src: string): boolean {
@@ -29,14 +35,12 @@ export function createEditorImageFrame(ownerDocument: Document, data: EditorImag
   frame.setAttribute(EDITOR_IMAGE_ID_ATTRIBUTE, data.id?.trim() || createEditorImageID());
   frame.setAttribute(EDITOR_IMAGE_WRAP_ATTRIBUTE, "true");
   frame.setAttribute("contenteditable", "false");
-  frame.style.float = data.floatSide ?? "left";
+  applyEditorImageFloatLayout(frame, data.floatSide ?? "left", data.marginLeft ?? 0);
   frame.style.width = `${clampImageDimension(data.width, MIN_EDITOR_IMAGE_WIDTH_PX)}px`;
   frame.style.height = `${clampImageDimension(data.height, MIN_EDITOR_IMAGE_HEIGHT_PX)}px`;
-  frame.style.marginTop = `${clampImageOffset(data.marginTop ?? 4)}px`;
-  frame.style.marginRight = "12px";
+  frame.style.marginTop = `${clampImageVerticalOffset(data.marginTop ?? 4)}px`;
   frame.style.marginBottom = "8px";
-  frame.style.marginLeft = `${clampImageOffset(data.marginLeft ?? 0)}px`;
-  frame.style.resize = "both";
+  frame.style.resize = "none";
   frame.style.overflow = "hidden";
   frame.style.position = "relative";
   frame.style.lineHeight = "0";
@@ -63,9 +67,9 @@ export function readEditorImageData(source: HTMLElement): EditorImageData | null
   if (!isSafeEditorImageSource(src)) return null;
   const width = readSafeStylePixels(source.style.width, 220, MIN_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_DIMENSION_PX);
   const height = readSafeStylePixels(source.style.height, 160, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_DIMENSION_PX);
-  const marginLeft = readSafeStylePixels(source.style.marginLeft, 0, 0, 5_000);
-  const marginTop = readSafeStylePixels(source.style.marginTop, 4, 0, 5_000);
-  const floatSide = source.style.float === "right" ? "right" : "left";
+  const floatSide = readEditorImageFloatSide(source);
+  const marginLeft = readEditorImageInlineOffset(source);
+  const marginTop = readSafeStylePixels(source.style.marginTop, 4, -5_000, 5_000);
   return {
     src,
     id: source.getAttribute(EDITOR_IMAGE_ID_ATTRIBUTE) ?? undefined,
@@ -104,9 +108,77 @@ export function clampEditorImageOffset(value: number, maxValue: number): number 
   return Math.max(0, Math.min(maxValue, Math.round(value)));
 }
 
+export function clampEditorImageVerticalOffset(value: number, minValue: number, maxValue: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(minValue, Math.min(maxValue, Math.round(value)));
+}
+
 export function clampEditorImageSize(value: number, minValue: number, maxValue: number): number {
   if (!Number.isFinite(value)) return minValue;
   return Math.max(minValue, Math.min(maxValue, Math.round(value)));
+}
+
+export function readEditorImageFloatSide(source: HTMLElement): EditorImageFloatSide {
+  return source.style.float === "right" ? "right" : "left";
+}
+
+export function readEditorImageInlineOffset(source: HTMLElement): number {
+  const floatSide = readEditorImageFloatSide(source);
+  const primaryValue = floatSide === "right" ? source.style.marginRight : source.style.marginLeft;
+  const fallbackValue = floatSide === "right" ? source.style.marginLeft : source.style.marginRight;
+  return readSafeStylePixels(primaryValue || fallbackValue, 0, 0, 5_000);
+}
+
+export function applyEditorImageFloatLayout(frame: HTMLElement, floatSide: EditorImageFloatSide, inlineOffset: number) {
+  const offset = clampImageOffset(inlineOffset);
+  frame.style.float = floatSide;
+  if (floatSide === "right") {
+    frame.style.marginLeft = `${EDITOR_IMAGE_INLINE_TEXT_GAP_PX}px`;
+    frame.style.marginRight = `${offset}px`;
+    return;
+  }
+  frame.style.marginLeft = `${offset}px`;
+  frame.style.marginRight = `${EDITOR_IMAGE_INLINE_TEXT_GAP_PX}px`;
+}
+
+export function getEditorImageHorizontalLimit(containerWidth: number, imageWidth: number): number {
+  if (!Number.isFinite(containerWidth) || !Number.isFinite(imageWidth)) return 0;
+  return Math.max(0, Math.round(containerWidth - imageWidth));
+}
+
+export function getEditorImageFloatSideForVisualLeft(containerWidth: number, imageWidth: number, visualLeft: number): EditorImageFloatSide {
+  if (!Number.isFinite(containerWidth) || !Number.isFinite(imageWidth) || !Number.isFinite(visualLeft)) return "left";
+  return visualLeft + imageWidth / 2 > containerWidth / 2 ? "right" : "left";
+}
+
+export function getEditorImageInlineOffsetForVisualLeft(containerWidth: number, imageWidth: number, floatSide: EditorImageFloatSide, visualLeft: number): number {
+  const maxLeft = getEditorImageHorizontalLimit(containerWidth, imageWidth);
+  const left = clampEditorImageOffset(visualLeft, maxLeft);
+  return floatSide === "right"
+    ? clampEditorImageOffset(maxLeft - left, maxLeft)
+    : left;
+}
+
+export function getEditorImageVisualLeftForInlineOffset(containerWidth: number, imageWidth: number, floatSide: EditorImageFloatSide, inlineOffset: number): number {
+  const maxLeft = getEditorImageHorizontalLimit(containerWidth, imageWidth);
+  const offset = clampEditorImageOffset(inlineOffset, maxLeft);
+  return floatSide === "right" ? maxLeft - offset : offset;
+}
+
+export function getEditorImagePointerInteraction(width: number, height: number, pointerX: number, pointerY: number, edgeSize = 14): EditorImagePointerInteraction {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return { kind: "drag" };
+  const safeEdgeSize = Math.max(6, Math.min(edgeSize, width / 2, height / 2));
+  const horizontal = pointerX <= safeEdgeSize ? -1 : pointerX >= width - safeEdgeSize ? 1 : 0;
+  const vertical = pointerY <= safeEdgeSize ? -1 : pointerY >= height - safeEdgeSize ? 1 : 0;
+  return horizontal || vertical ? { kind: "resize", horizontal, vertical } : { kind: "drag" };
+}
+
+export function getEditorImageCursorForInteraction(interaction: EditorImagePointerInteraction): string {
+  if (interaction.kind === "drag") return "move";
+  const { horizontal, vertical } = interaction;
+  if (horizontal && vertical) return horizontal === vertical ? "nwse-resize" : "nesw-resize";
+  if (horizontal) return "ew-resize";
+  return "ns-resize";
 }
 
 export async function createEditorImageDataFromFile(file: File, maxDisplayWidth: number): Promise<EditorImageData> {
@@ -146,6 +218,10 @@ function clampImageDimension(value: number, minValue: number): number {
 
 function clampImageOffset(value: number): number {
   return clampEditorImageOffset(value, 5_000);
+}
+
+function clampImageVerticalOffset(value: number): number {
+  return clampEditorImageVerticalOffset(value, -5_000, 5_000);
 }
 
 function readFileAsDataURL(file: File): Promise<string> {

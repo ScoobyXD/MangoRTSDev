@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, deserializeEditorDocumentHTML, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
-import { isSafeEditorImageSource } from "../../../../frontend/src/modules/editor/editorImages.js";
+import { clampEditorImageVerticalOffset, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, isSafeEditorImageSource } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
   assert.equal(EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, 20);
@@ -44,4 +44,28 @@ test("editor image source sanitizer only accepts raster data images", () => {
   assert.equal(isSafeEditorImageSource("data:image/png;base64,iVBORw0KGgo="), true);
   assert.equal(isSafeEditorImageSource("data:image/svg+xml;base64,PHN2Zy8+"), false);
   assert.equal(isSafeEditorImageSource("https://example.test/image.png"), false);
+});
+
+test("editor image pointer zones support every edge and corner", () => {
+  assert.deepEqual(getEditorImagePointerInteraction(200, 120, 4, 60), { kind: "resize", horizontal: -1, vertical: 0 });
+  assert.deepEqual(getEditorImagePointerInteraction(200, 120, 196, 60), { kind: "resize", horizontal: 1, vertical: 0 });
+  assert.deepEqual(getEditorImagePointerInteraction(200, 120, 100, 4), { kind: "resize", horizontal: 0, vertical: -1 });
+  assert.deepEqual(getEditorImagePointerInteraction(200, 120, 100, 116), { kind: "resize", horizontal: 0, vertical: 1 });
+  assert.deepEqual(getEditorImagePointerInteraction(200, 120, 4, 4), { kind: "resize", horizontal: -1, vertical: -1 });
+  assert.deepEqual(getEditorImagePointerInteraction(200, 120, 196, 4), { kind: "resize", horizontal: 1, vertical: -1 });
+  assert.deepEqual(getEditorImagePointerInteraction(200, 120, 4, 116), { kind: "resize", horizontal: -1, vertical: 1 });
+  assert.deepEqual(getEditorImagePointerInteraction(200, 120, 196, 116), { kind: "resize", horizontal: 1, vertical: 1 });
+  assert.deepEqual(getEditorImagePointerInteraction(200, 120, 100, 60), { kind: "drag" });
+});
+
+test("editor image wrapping flips to the side nearest the image", () => {
+  assert.equal(getEditorImageFloatSideForVisualLeft(800, 200, 200), "left");
+  assert.equal(getEditorImageFloatSideForVisualLeft(800, 200, 500), "right");
+  assert.equal(getEditorImageInlineOffsetForVisualLeft(800, 200, "left", 160), 160);
+  assert.equal(getEditorImageInlineOffsetForVisualLeft(800, 200, "right", 500), 100);
+});
+
+test("editor image vertical offset allows moving above the insertion point", () => {
+  assert.equal(clampEditorImageVerticalOffset(-240, -5_000, 5_000), -240);
+  assert.equal(clampEditorImageVerticalOffset(-6_000, -5_000, 5_000), -5_000);
 });
