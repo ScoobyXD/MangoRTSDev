@@ -196,6 +196,14 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusNotFound, "node_not_found")
 				return
 			}
+			if errors.Is(err, store.ErrAssigneeNotInCompany) {
+				writeError(w, http.StatusBadRequest, "assignee_user_not_in_company")
+				return
+			}
+			if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusBadRequest, "invalid_node_update")
+				return
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_update_node")
 				return

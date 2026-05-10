@@ -313,11 +313,11 @@ func (r *MemoryRepo) GetCompanyUser(companyID, userID string) (domain.CompanyUse
 	return domain.CompanyUser{}, ErrNotFound
 }
 
-func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (domain.CompanyUser, error) {
+func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyUserResult, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
 	if companyID == "" || userID == "" {
-		return domain.CompanyUser{}, ErrInvalid
+		return DeleteCompanyUserResult{}, ErrInvalid
 	}
 
 	r.mu.Lock()
@@ -325,7 +325,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (domain.Company
 
 	membership, ok := r.memberships[membershipKey(companyID, userID)]
 	if !ok {
-		return domain.CompanyUser{}, ErrNotFound
+		return DeleteCompanyUserResult{}, ErrNotFound
 	}
 	var user domain.User
 	for _, candidate := range r.users {
@@ -335,7 +335,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (domain.Company
 		}
 	}
 	if user.UserID == "" {
-		return domain.CompanyUser{}, ErrNotFound
+		return DeleteCompanyUserResult{}, ErrNotFound
 	}
 	deleted := domain.CompanyUser{
 		CompanyID:        membership.CompanyID,
@@ -348,15 +348,29 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (domain.Company
 		UpdatedTimestamp: membership.UpdatedTimestamp,
 	}
 
+	delete(r.memberships, membershipKey(companyID, userID))
+	for key, node := range r.nodes {
+		if node.CompanyID == companyID && node.AssigneeUserID != nil && *node.AssigneeUserID == userID {
+			node.AssigneeUserID = nil
+			r.nodes[key] = node
+		}
+	}
+
+	hasRemainingMembership := false
+	for _, membership := range r.memberships {
+		if membership.UserID == userID {
+			hasRemainingMembership = true
+			break
+		}
+	}
+	if hasRemainingMembership {
+		return DeleteCompanyUserResult{User: deleted, DeleteExternalIdentity: false}, nil
+	}
+
 	email := normalizeEmail(user.Email)
 	for key, invitation := range r.invitations {
 		if normalizeEmail(invitation.Email) == email || invitation.InvitedByUserID == userID || (invitation.AcceptedByUserID != nil && *invitation.AcceptedByUserID == userID) {
 			delete(r.invitations, key)
-		}
-	}
-	for key, membership := range r.memberships {
-		if membership.UserID == userID {
-			delete(r.memberships, key)
 		}
 	}
 	delete(r.emailConnections, userID)
@@ -367,9 +381,12 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (domain.Company
 		}
 	}
 	delete(r.users, user.CognitoSubject)
-	return deleted, nil
+	return DeleteCompanyUserResult{User: deleted, DeleteExternalIdentity: true}, nil
 }
 
+func (r *MemoryRepo) CompleteExternalIdentityDeletion(cognitoSubject string) error {
+	return nil
+}
 func (r *MemoryRepo) CreateInvitation(input CreateInvitationInput) (domain.Invitation, error) {
 	companyID := strings.TrimSpace(input.CompanyID)
 	email := normalizeEmail(input.Email)
@@ -394,7 +411,10 @@ func (r *MemoryRepo) CreateInvitation(input CreateInvitationInput) (domain.Invit
 	}
 	for _, user := range r.users {
 		if normalizeEmail(user.Email) == email {
-			return domain.Invitation{}, ErrAlreadyExists
+			if _, ok := r.memberships[membershipKey(companyID, user.UserID)]; ok {
+				return domain.Invitation{}, ErrAlreadyExists
+			}
+			break
 		}
 	}
 	token, tokenHash, err := newInvitationToken()

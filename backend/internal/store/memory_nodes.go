@@ -3,6 +3,7 @@ package store
 import (
 	"miraeopus/backend/internal/domain"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -75,6 +76,29 @@ func (r *MemoryRepo) withDerivedNodeStatusLocked(node domain.Node) domain.Node {
 	return node
 }
 
+func (r *MemoryRepo) withNodeReadModelLocked(node domain.Node) domain.Node {
+	node = r.withDerivedNodeStatusLocked(node)
+	if node.AssigneeUserID == nil || strings.TrimSpace(*node.AssigneeUserID) == "" {
+		return node
+	}
+	if _, ok := r.memberships[membershipKey(node.CompanyID, *node.AssigneeUserID)]; !ok {
+		return node
+	}
+	for _, user := range r.users {
+		if user.UserID != *node.AssigneeUserID {
+			continue
+		}
+		if name := strings.TrimSpace(user.DisplayName); name != "" {
+			node.AssigneeName = &name
+		}
+		if email := strings.TrimSpace(user.Email); email != "" {
+			node.AssigneeEmail = &email
+		}
+		break
+	}
+	return node
+}
+
 func (r *MemoryRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -109,10 +133,18 @@ func (r *MemoryRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {
 		node.Priority = input.Priority
 	}
 	if input.AssigneeUserIDSet {
-		node.AssigneeUserID = input.AssigneeUserID
+		if input.AssigneeUserID == nil || strings.TrimSpace(*input.AssigneeUserID) == "" {
+			node.AssigneeUserID = nil
+		} else {
+			value := strings.TrimSpace(*input.AssigneeUserID)
+			if _, ok := r.memberships[membershipKey(input.CompanyID, value)]; !ok {
+				return domain.Node{}, ErrAssigneeNotInCompany
+			}
+			node.AssigneeUserID = &value
+		}
 	}
 	r.nodes[k] = node
-	return r.withDerivedNodeStatusLocked(node), nil
+	return r.withNodeReadModelLocked(node), nil
 }
 
 func (r *MemoryRepo) UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error) {
@@ -126,7 +158,7 @@ func (r *MemoryRepo) ListNodes(companyID string) ([]domain.Node, error) {
 	items := make([]domain.Node, 0)
 	for _, node := range r.nodes {
 		if node.CompanyID == companyID {
-			items = append(items, r.withDerivedNodeStatusLocked(node))
+			items = append(items, r.withNodeReadModelLocked(node))
 		}
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -143,7 +175,7 @@ func (r *MemoryRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	if !ok {
 		return domain.Node{}, ErrNotFound
 	}
-	return r.withDerivedNodeStatusLocked(n), nil
+	return r.withNodeReadModelLocked(n), nil
 }
 
 func (r *MemoryRepo) ListNodeRelationships(companyID string) ([]domain.NodeRelationship, error) {
@@ -397,7 +429,7 @@ func (r *MemoryRepo) GetNodeDetails(companyID, nodeID string) (domain.NodeDetail
 	})
 
 	return domain.NodeDetails{
-		Node:          node,
+		Node:          r.withNodeReadModelLocked(node),
 		Information:   info,
 		Relationships: relationships,
 	}, nil

@@ -82,6 +82,21 @@ export type KanbanCard = {
   updated_timestamp: string;
 };
 
+export type LogicGateArenaLogicGate = {
+  company_id: string;
+  logic_gate_id: string;
+  header: string;
+  created_timestamp: string;
+};
+
+export type LogicGateArenaView = {
+  logic_gate: LogicGateArenaLogicGate;
+  board: KanbanBoard;
+  columns: KanbanColumn[];
+  cards: KanbanCard[];
+  cards_limit: number;
+};
+
 export type KanbanCardDragPayload = {
   cardID: string;
   cardIDs: string[];

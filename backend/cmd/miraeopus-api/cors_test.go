@@ -46,3 +46,40 @@ func TestCORSAllowsWorkspaceStreamAndSnapshotHeaders(t *testing.T) {
 		t.Fatal("preflight max age is empty")
 	}
 }
+
+func TestCORSMatchesCommaSeparatedOrigins(t *testing.T) {
+	t.Setenv("MANGORTS_ALLOWED_ORIGIN", "https://app.example.com, https://admin.example.com")
+
+	handler := withCORS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Origin", "https://admin.example.com")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://admin.example.com" {
+		t.Fatalf("allow origin = %q, want matched request origin", got)
+	}
+	if got := rec.Header().Values("Vary"); !strings.Contains(strings.Join(got, ","), "Origin") {
+		t.Fatalf("vary headers = %v, want Origin", got)
+	}
+}
+
+func TestCORSOmitsUnlistedOrigin(t *testing.T) {
+	t.Setenv("MANGORTS_ALLOWED_ORIGIN", "https://app.example.com")
+
+	handler := withCORS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("allow origin = %q, want empty for unlisted origin", got)
+	}
+}

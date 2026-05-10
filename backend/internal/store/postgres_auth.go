@@ -230,16 +230,16 @@ func (r *PostgresRepo) GetCompanyUser(companyID, userID string) (domain.CompanyU
 	return item, err
 }
 
-func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string) (domain.CompanyUser, error) {
+func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyUserResult, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
 	if companyID == "" || userID == "" {
-		return domain.CompanyUser{}, ErrInvalid
+		return DeleteCompanyUserResult{}, ErrInvalid
 	}
 
 	tx, err := r.db.Begin()
 	if err != nil {
-		return domain.CompanyUser{}, err
+		return DeleteCompanyUserResult{}, err
 	}
 	defer tx.Rollback()
 
@@ -255,37 +255,80 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string) (domain.Compa
 		userID,
 	).Scan(&item.CompanyID, &item.UserID, &item.CognitoSubject, &item.Email, &item.DisplayName, &item.Role, &item.CreatedTimestamp, &item.UpdatedTimestamp)
 	if errors.Is(err, sql.ErrNoRows) {
-		return domain.CompanyUser{}, ErrNotFound
+		return DeleteCompanyUserResult{}, ErrNotFound
 	}
 	if err != nil {
-		return domain.CompanyUser{}, err
+		return DeleteCompanyUserResult{}, err
 	}
 
-	if _, err = tx.Exec(`update nodes set assignee_user_id = null where assignee_user_id = $1`, userID); err != nil {
-		return domain.CompanyUser{}, err
+	if _, err = tx.Exec(`update nodes set assignee_user_id = null where company_id = $1 and assignee_user_id = $2`, companyID, userID); err != nil {
+		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(
-		`delete from invitations
-		 where ($1 <> '' and email = $1)
-		    or invited_by_user_id = $2
-		    or accepted_by_user_id = $2`,
-		normalizeEmail(item.Email),
-		userID,
-	); err != nil {
-		return domain.CompanyUser{}, err
+	if _, err = tx.Exec(`delete from company_memberships where company_id = $1 and user_id = $2`, companyID, userID); err != nil {
+		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`delete from company_memberships where user_id = $1`, userID); err != nil {
-		return domain.CompanyUser{}, err
+
+	var hasRemainingMembership bool
+	if err = tx.QueryRow(`select exists(select 1 from company_memberships where user_id = $1)`, userID).Scan(&hasRemainingMembership); err != nil {
+		return DeleteCompanyUserResult{}, err
 	}
-	if _, err = tx.Exec(`delete from users where user_id = $1`, userID); err != nil {
-		return domain.CompanyUser{}, err
+	if !hasRemainingMembership {
+		if _, err = tx.Exec(
+			`insert into auth_external_identity_deletions
+			 (provider, external_subject, user_id, email, status, attempts, last_error, created_timestamp, updated_timestamp)
+			 values ('cognito', $1, $2, $3, 'pending', 0, '', now(), now())
+			 on conflict (provider, external_subject) do update set
+			   user_id=excluded.user_id,
+			   email=excluded.email,
+			   status='pending',
+			   last_error='',
+			   updated_timestamp=now(),
+			   completed_timestamp=null`,
+			item.CognitoSubject,
+			userID,
+			normalizeEmail(item.Email),
+		); err != nil {
+			return DeleteCompanyUserResult{}, err
+		}
+		if _, err = tx.Exec(
+			`delete from invitations
+			 where ($1 <> '' and email = $1)
+			    or invited_by_user_id = $2
+			    or accepted_by_user_id = $2`,
+			normalizeEmail(item.Email),
+			userID,
+		); err != nil {
+			return DeleteCompanyUserResult{}, err
+		}
+		if _, err = tx.Exec(`delete from user_email_connections where user_id = $1`, userID); err != nil {
+			return DeleteCompanyUserResult{}, err
+		}
+		if _, err = tx.Exec(`update nodes set assignee_user_id = null where assignee_user_id = $1`, userID); err != nil {
+			return DeleteCompanyUserResult{}, err
+		}
+		if _, err = tx.Exec(`delete from users where user_id = $1`, userID); err != nil {
+			return DeleteCompanyUserResult{}, err
+		}
 	}
 	if err = tx.Commit(); err != nil {
-		return domain.CompanyUser{}, err
+		return DeleteCompanyUserResult{}, err
 	}
-	return item, nil
+	return DeleteCompanyUserResult{User: item, DeleteExternalIdentity: !hasRemainingMembership}, nil
 }
 
+func (r *PostgresRepo) CompleteExternalIdentityDeletion(cognitoSubject string) error {
+	cognitoSubject = strings.TrimSpace(cognitoSubject)
+	if cognitoSubject == "" {
+		return ErrInvalid
+	}
+	_, err := r.db.Exec(
+		`update auth_external_identity_deletions
+		 set status='completed', last_error='', updated_timestamp=now(), completed_timestamp=now()
+		 where provider='cognito' and external_subject=$1`,
+		cognitoSubject,
+	)
+	return err
+}
 func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Invitation, error) {
 	companyID := strings.TrimSpace(input.CompanyID)
 	email := normalizeEmail(input.Email)
@@ -329,18 +372,21 @@ func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Inv
 	if !inviterCanManage {
 		return domain.Invitation{}, ErrInvalid
 	}
-	var existingUser bool
+	var existingCompanyUser bool
 	if err = tx.QueryRow(
 		`select exists(
 		   select 1
-		   from users
-		   where lower(email) = $1
+		   from users u
+		   join company_memberships cm on cm.user_id = u.user_id
+		   where lower(u.email) = $1
+		     and cm.company_id = $2
 		 )`,
 		email,
-	).Scan(&existingUser); err != nil {
+		companyID,
+	).Scan(&existingCompanyUser); err != nil {
 		return domain.Invitation{}, err
 	}
-	if existingUser {
+	if existingCompanyUser {
 		return domain.Invitation{}, ErrAlreadyExists
 	}
 	token, tokenHash, err := newInvitationToken()

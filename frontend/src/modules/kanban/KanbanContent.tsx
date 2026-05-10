@@ -8,7 +8,7 @@ import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subs
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
-import { createKanbanBoard, listKanbanBoards, updateKanbanBoard } from "./kanbanApi";
+import { createKanbanBoard, getLogicGateArenaView, listKanbanBoards, updateKanbanBoard } from "./kanbanApi";
 import {
   getKanbanBoardContentsSingleFlight,
   hasKanbanBoardContentsCache,
@@ -97,6 +97,16 @@ type ColumnResizeState = {
 type NodeEditorOverlayState = {
   nodeID: string;
   nodeTitle: string;
+};
+
+type KanbanContentProps = {
+  accent: string;
+  widgetId?: string;
+  hideTopControls?: boolean;
+  theme?: "teal" | "light" | "dark";
+  arenaMode?: boolean;
+  forcedLogicGateID?: string;
+  forcedLogicGateLabel?: string;
 };
 
 type OverlayResizeState = {
@@ -243,7 +253,14 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   return target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
 }
 
-export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "teal" | "light" | "dark"; arenaMode?: boolean }> = ({ accent, widgetId, theme = "teal", arenaMode = false }) => {
+export const KanbanContent: React.FC<KanbanContentProps> = ({
+  accent,
+  widgetId,
+  theme = "teal",
+  arenaMode = false,
+  forcedLogicGateID = "",
+  forcedLogicGateLabel = "",
+}) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const frameBoardID = widgetId?.trim() ? widgetId : "global-kanban";
@@ -519,6 +536,53 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
       setActiveBoardID(next[0]?.board_id ?? frameBoardIDRef.current);
     }
   }, [apiBase, companyID]);
+
+  const loadLogicGateArenaView = useCallback((logicGateID: string, expectedBoardID: string) => {
+    if (!logicGateID || !expectedBoardID) return;
+    setLoading(!hasKanbanBoardContentsCache(apiBase, companyID, expectedBoardID));
+    void getLogicGateArenaView(apiBase, companyID, logicGateID)
+      .then((view) => {
+        if (activeBoardIDRef.current !== expectedBoardID) return;
+        upsertBoardInList(view.board);
+        const nextColumns = sortColumns(view.columns ?? []);
+        const nextCards = view.cards ?? [];
+        setColumns(nextColumns);
+        setCards(nextCards);
+        primeKanbanBoardContentsCache(apiBase, companyID, view.board.board_id, { columns: nextColumns, cards: nextCards });
+        setError("");
+        setLoading(false);
+      })
+      .catch(() => {
+        if (activeBoardIDRef.current !== expectedBoardID) return;
+        setError("Logic gate arena API unavailable");
+        setLoading(false);
+      });
+  }, [apiBase, companyID, upsertBoardInList]);
+
+  useEffect(() => {
+    if (!arenaMode) return;
+    const logicGateID = forcedLogicGateID.trim();
+    if (!logicGateID) {
+      if (activeLogicGateID) {
+        setActiveLogicGateID("");
+        setActiveLogicGateLabel("");
+      }
+      return;
+    }
+    const nextBoardID = logicGateKanbanBoardID(logicGateID);
+    if (activeBoardIDRef.current === nextBoardID && activeLogicGateID === logicGateID) return;
+    activeBoardIDRef.current = nextBoardID;
+    setSelectedCardIDs(new Set());
+    setSelectionAnchorCardID("");
+    setHighlightedEntity(null);
+    setActiveLogicGateID(logicGateID);
+    setActiveLogicGateLabel(forcedLogicGateLabel.trim() || "Logic Gate Kanban");
+    setNodeEditorOverlay(null);
+    setActiveBoardID(nextBoardID);
+    const cachedBoard = boardsRef.current.find((board) => board.board_id === nextBoardID || board.logic_gate_id === logicGateID);
+    if (cachedBoard) upsertBoardInList(cachedBoard);
+    loadLogicGateArenaView(logicGateID, nextBoardID);
+  }, [activeLogicGateID, arenaMode, forcedLogicGateID, forcedLogicGateLabel, loadLogicGateArenaView, upsertBoardInList]);
 
   const refreshBoards = useCallback(async () => {
     setBoardsLoading(true);
@@ -810,6 +874,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         setActiveLogicGateLabel(logicGateID ? (selection.label?.trim() || "Logic Gate Kanban") : "");
         setNodeEditorOverlay(null);
         setActiveBoardID(selection.entityID.trim());
+        if (logicGateID) loadLogicGateArenaView(logicGateID, selection.entityID.trim());
         return;
       }
       if (selection.entityKind === "logic_gate" && selection.entityID.trim()) {
@@ -827,15 +892,8 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
         const cachedBoard = boardsRef.current.find((board) => board.board_id === nextBoardID || board.logic_gate_id === logicGateID);
         if (cachedBoard) {
           upsertBoardInList(cachedBoard);
-          return;
         }
-        void listKanbanBoards(apiBase, companyID, 10, 0, logicGateID)
-          .then((nextBoards) => {
-            if (nextBoards.length > 0) upsertBoardInList(nextBoards[0]);
-          })
-          .catch(() => {
-            setError("Logic gate board API unavailable");
-          });
+        loadLogicGateArenaView(logicGateID, nextBoardID);
         return;
       }
       if (selection.entityKind === "node" && selection.entityID.trim()) {
@@ -853,7 +911,7 @@ export const KanbanContent: React.FC<{ accent: string; widgetId?: string; hideTo
     const liveSelection = readLiveSelectionForFrame(companyID, frameID);
     if (liveSelection) applyLiveSelection(liveSelection);
     return subscribeLiveSelection(frameID, applyLiveSelection);
-  }, [apiBase, companyID, frameID, upsertBoardInList]);
+  }, [companyID, frameID, loadLogicGateArenaView, upsertBoardInList]);
 
   const addColumn = useCallback(async () => {
     setError("");

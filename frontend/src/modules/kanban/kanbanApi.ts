@@ -1,4 +1,5 @@
-import type { KanbanBoard, KanbanCard, KanbanColumn } from "./shared.js";
+import { requestJSON } from "../api/requestJSON.js";
+import type { KanbanBoard, KanbanCard, KanbanColumn, LogicGateArenaView } from "./shared.js";
 
 type FetchJSONOptions = {
   method?: string;
@@ -6,15 +7,10 @@ type FetchJSONOptions = {
 };
 
 async function fetchJSON<T>(apiBase: string, path: string, options: FetchJSONOptions = {}): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, {
+  return requestJSON<T>(apiBase, path, {
     method: options.method ?? "GET",
-    headers: options.body ? { "Content-Type": "application/json" } : undefined,
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    json: options.body,
   });
-  if (!response.ok) {
-    throw new Error(`kanban_api_${response.status}`);
-  }
-  return response.json() as Promise<T>;
 }
 
 function query(params: Record<string, string | number | undefined>): string {
@@ -36,6 +32,11 @@ export async function listKanbanBoards(apiBase: string, companyID: string, limit
   const params = query({ company_id: companyID, limit, after_position: afterPosition > 0 ? afterPosition : undefined, logic_gate_id: logicGateID });
   const payload = await fetchJSON<{ boards?: KanbanBoard[] }>(apiBase, `/v1/kanban/boards?${params}`);
   return payload.boards ?? [];
+}
+
+export async function getLogicGateArenaView(apiBase: string, companyID: string, logicGateID: string): Promise<LogicGateArenaView> {
+  const params = query({ company_id: companyID, logic_gate_id: logicGateID });
+  return fetchJSON<LogicGateArenaView>(apiBase, `/v1/logic-gate-arena?${params}`);
 }
 
 export async function createKanbanBoard(apiBase: string, companyID: string, title: string, boardID = "", position?: number): Promise<KanbanBoard> {

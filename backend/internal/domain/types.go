@@ -107,6 +107,8 @@ type Node struct {
 	DueDate          *string   `json:"due_date"`
 	Priority         *int      `json:"priority"`
 	AssigneeUserID   *string   `json:"assignee_user_id"`
+	AssigneeName     *string   `json:"assignee_name,omitempty"`
+	AssigneeEmail    *string   `json:"assignee_email,omitempty"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
@@ -187,6 +189,14 @@ type LogicGateDetails struct {
 	LogicGate     LogicGate               `json:"logic_gate"`
 	Information   []LogicGateInformation  `json:"information"`
 	Relationships []LogicGateRelationship `json:"relationships"`
+}
+
+type LogicGateArenaView struct {
+	LogicGate  LogicGate      `json:"logic_gate"`
+	Board      KanbanBoard    `json:"board"`
+	Columns    []KanbanColumn `json:"columns"`
+	Cards      []KanbanCard   `json:"cards"`
+	CardsLimit int            `json:"cards_limit"`
 }
 
 type CompanyExplorerFolder struct {

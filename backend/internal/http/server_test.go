@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"miraeopus/backend/internal/store"
@@ -1519,6 +1520,99 @@ func TestUpdateNodeTitleViaPut(t *testing.T) {
 	}
 }
 
+func TestUpdateNodeAssigneeRequiresCompanyMembership(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-node-assignee-test"
+	otherCompanyID := "company-node-assignee-other"
+	repo.EnsureCompany(companyID, "Assignee Test Company")
+	repo.EnsureCompany(otherCompanyID, "Other Company")
+	node, err := repo.CreateNode(companyID, "assigned node")
+	if err != nil {
+		t.Fatalf("CreateNode() error = %v", err)
+	}
+	assignee, err := repo.UpsertAuthUser("assignee-subject", "assignee@example.com", "Assignee User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser assignee error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("assignee-subject", companyID, "company_user"); err != nil {
+		t.Fatalf("AddCompanyMembership assignee error = %v", err)
+	}
+	outsider, err := repo.UpsertAuthUser("outsider-subject", "outsider@example.com", "Outsider User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser outsider error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("outsider-subject", otherCompanyID, "company_user"); err != nil {
+		t.Fatalf("AddCompanyMembership outsider error = %v", err)
+	}
+
+	assignBody, _ := json.Marshal(map[string]any{
+		"company_id":       companyID,
+		"assignee_user_id": assignee.UserID,
+	})
+	assignReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(assignBody))
+	assignReq.Header.Set("Content-Type", "application/json")
+	assignRec := httptest.NewRecorder()
+	handler.ServeHTTP(assignRec, assignReq)
+	if assignRec.Code != http.StatusOK {
+		t.Fatalf("PUT node assignee status = %d body=%s", assignRec.Code, assignRec.Body.String())
+	}
+	var assigned struct {
+		AssigneeUserID *string `json:"assignee_user_id"`
+		AssigneeName   *string `json:"assignee_name"`
+		AssigneeEmail  *string `json:"assignee_email"`
+	}
+	if err := json.NewDecoder(assignRec.Body).Decode(&assigned); err != nil {
+		t.Fatalf("decode assigned node: %v", err)
+	}
+	if assigned.AssigneeUserID == nil || *assigned.AssigneeUserID != assignee.UserID || assigned.AssigneeName == nil || *assigned.AssigneeName != "Assignee User" || assigned.AssigneeEmail == nil || *assigned.AssigneeEmail != "assignee@example.com" {
+		t.Fatalf("assigned node = %+v, want assignee read model", assigned)
+	}
+	details, err := repo.GetNodeDetails(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetNodeDetails() error = %v", err)
+	}
+	if details.Node.AssigneeName == nil || *details.Node.AssigneeName != "Assignee User" {
+		t.Fatalf("details node assignee = %+v, want enriched assignee", details.Node)
+	}
+
+	outsiderBody, _ := json.Marshal(map[string]any{
+		"company_id":       companyID,
+		"assignee_user_id": outsider.UserID,
+	})
+	outsiderReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(outsiderBody))
+	outsiderReq.Header.Set("Content-Type", "application/json")
+	outsiderRec := httptest.NewRecorder()
+	handler.ServeHTTP(outsiderRec, outsiderReq)
+	if outsiderRec.Code != http.StatusBadRequest || !strings.Contains(outsiderRec.Body.String(), "assignee_user_not_in_company") {
+		t.Fatalf("PUT outsider assignee status = %d body=%s, want assignee_user_not_in_company", outsiderRec.Code, outsiderRec.Body.String())
+	}
+
+	clearBody, _ := json.Marshal(map[string]any{
+		"company_id":       companyID,
+		"assignee_user_id": nil,
+	})
+	clearReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(clearBody))
+	clearReq.Header.Set("Content-Type", "application/json")
+	clearRec := httptest.NewRecorder()
+	handler.ServeHTTP(clearRec, clearReq)
+	if clearRec.Code != http.StatusOK {
+		t.Fatalf("PUT clear assignee status = %d body=%s", clearRec.Code, clearRec.Body.String())
+	}
+	var cleared struct {
+		AssigneeUserID *string `json:"assignee_user_id"`
+	}
+	if err := json.NewDecoder(clearRec.Body).Decode(&cleared); err != nil {
+		t.Fatalf("decode cleared node: %v", err)
+	}
+	if cleared.AssigneeUserID != nil {
+		t.Fatalf("cleared assignee_user_id = %v, want nil", *cleared.AssigneeUserID)
+	}
+}
+
 func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *testing.T) {
 	t.Parallel()
 
@@ -1642,6 +1736,38 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 	}
 	if updatedNode.Status == nil || *updatedNode.Status != "Issue" || updatedNode.DueDate == nil || *updatedNode.DueDate != "2026-05-06" || updatedNode.Priority == nil || *updatedNode.Priority != 4 {
 		t.Fatalf("updated node = %+v, want derived status and metadata", updatedNode)
+	}
+
+	arenaReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gate-arena?company_id="+companyID+"&logic_gate_id="+logicGate.LogicGateID, nil)
+	arenaRec := httptest.NewRecorder()
+	handler.ServeHTTP(arenaRec, arenaReq)
+	if arenaRec.Code != http.StatusOK {
+		t.Fatalf("GET logic gate arena status = %d body=%s", arenaRec.Code, arenaRec.Body.String())
+	}
+	var arenaPayload struct {
+		LogicGate struct {
+			LogicGateID string `json:"logic_gate_id"`
+		} `json:"logic_gate"`
+		Board struct {
+			BoardID     string  `json:"board_id"`
+			LogicGateID *string `json:"logic_gate_id"`
+		} `json:"board"`
+		Columns []struct{ ColumnID string } `json:"columns"`
+		Cards   []struct {
+			CardID      string  `json:"card_id"`
+			LogicGateID *string `json:"logic_gate_id"`
+			IsIssue     bool    `json:"is_issue"`
+		} `json:"cards"`
+		CardsLimit int `json:"cards_limit"`
+	}
+	if err := json.NewDecoder(arenaRec.Body).Decode(&arenaPayload); err != nil {
+		t.Fatalf("decode logic gate arena: %v", err)
+	}
+	if arenaPayload.LogicGate.LogicGateID != logicGate.LogicGateID || arenaPayload.Board.BoardID != boardID || arenaPayload.Board.LogicGateID == nil || *arenaPayload.Board.LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("arena identity = %+v, want selected logic gate and attached board", arenaPayload)
+	}
+	if len(arenaPayload.Columns) != len(columns) || len(arenaPayload.Cards) != 1 || arenaPayload.Cards[0].CardID != createdCard.CardID || arenaPayload.Cards[0].LogicGateID == nil || *arenaPayload.Cards[0].LogicGateID != logicGate.LogicGateID || !arenaPayload.Cards[0].IsIssue || arenaPayload.CardsLimit != store.KanbanMaxCardsLimit {
+		t.Fatalf("arena contents = %+v, want bounded composed board view", arenaPayload)
 	}
 
 	deleteBoardReq := httptest.NewRequest(http.MethodDelete, "/v1/kanban/boards/"+boardID+"?company_id="+companyID, nil)
@@ -1903,5 +2029,30 @@ func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *test
 	}
 	if payload.FolderItems[0].Position != 4242 {
 		t.Fatalf("folder item position = %d, want 4242", payload.FolderItems[0].Position)
+	}
+}
+
+func TestRequestBodyLimitRejectsOversizedPayload(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServerWithOptions(repo, ServerOptions{MaxRequestBodyBytes: 32})
+	req := httptest.NewRequest(http.MethodPost, "/v1/nodes", strings.NewReader(`{"company_id":"company","title":"`+strings.Repeat("x", 64)+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusRequestEntityTooLarge, strings.TrimSpace(rec.Body.String()))
+	}
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error != "request_body_too_large" {
+		t.Fatalf("error = %q, want request_body_too_large", payload.Error)
 	}
 }
