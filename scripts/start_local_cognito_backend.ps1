@@ -14,9 +14,17 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$localConfigPath = Join-Path $PSScriptRoot "start_local_cognito_backend.local.ps1"
 $tfvarsPath = Join-Path $repoRoot "infra/aws-dev/terraform.tfvars"
 if (-not (Test-Path -LiteralPath $tfvarsPath)) {
   throw "Missing infra/aws-dev/terraform.tfvars"
+}
+
+$MangoLocalTunnelURL = ""
+$MangoLocalNylasWebhookSecret = ""
+$MangoLocalNylasWebhookSecretArn = ""
+if (Test-Path -LiteralPath $localConfigPath) {
+  . $localConfigPath
 }
 
 function Get-TfvarString {
@@ -141,6 +149,20 @@ function Get-SecretStringValue {
   return $secret.Trim()
 }
 
+function Join-URLPath {
+  param(
+    [string]$BaseURL,
+    [string]$Path
+  )
+
+  $base = $BaseURL.Trim().TrimEnd("/")
+  $pathValue = $Path.Trim()
+  if (-not $pathValue.StartsWith("/")) {
+    $pathValue = "/" + $pathValue
+  }
+  return $base + $pathValue
+}
+
 function Get-LatestBackendContainerDefinition {
   param(
     [string]$ProjectName,
@@ -230,6 +252,11 @@ if (-not $SkipCredentialExport) {
   }
 }
 
+$localTunnelURL = First-NonBlank @($env:MANGORTS_LOCAL_TUNNEL_URL, $MangoLocalTunnelURL)
+if (-not [string]::IsNullOrWhiteSpace($localTunnelURL) -and -not $PSBoundParameters.ContainsKey("NylasRedirectURI")) {
+  $NylasRedirectURI = Join-URLPath -BaseURL $localTunnelURL -Path "/nylas/oauth/callback"
+}
+
 $dbHost = Get-TfvarString -Name "existing_db_host" -Path $tfvarsPath
 $dbName = Get-TfvarString -Name "existing_db_name" -Path $tfvarsPath
 $dbUser = Get-TfvarString -Name "existing_db_user" -Path $tfvarsPath
@@ -289,8 +316,12 @@ $nylasStateSecret = First-NonBlank @($env:NYLAS_STATE_SECRET)
 if ([string]::IsNullOrWhiteSpace($nylasStateSecret) -and -not [string]::IsNullOrWhiteSpace($nylasStateSecretArn)) {
   $nylasStateSecret = Get-SecretStringValue -SecretID $nylasStateSecretArn -PropertyNames @("state_secret", "NYLAS_STATE_SECRET", "nylas_state_secret")
 }
-$nylasWebhookSecret = First-NonBlank @($env:NYLAS_WEBHOOK_SECRET)
-if ([string]::IsNullOrWhiteSpace($nylasWebhookSecret) -and -not [string]::IsNullOrWhiteSpace($nylasWebhookSecretArn)) {
+$nylasWebhookSecret = First-NonBlank @($env:NYLAS_WEBHOOK_SECRET, $env:MANGORTS_LOCAL_NYLAS_WEBHOOK_SECRET, $MangoLocalNylasWebhookSecret)
+$localNylasWebhookSecretArn = First-NonBlank @($env:MANGORTS_LOCAL_NYLAS_WEBHOOK_SECRET_ARN, $MangoLocalNylasWebhookSecretArn)
+if ([string]::IsNullOrWhiteSpace($nylasWebhookSecret) -and -not [string]::IsNullOrWhiteSpace($localNylasWebhookSecretArn)) {
+  $nylasWebhookSecret = Get-SecretStringValue -SecretID $localNylasWebhookSecretArn -PropertyNames @("webhook_secret", "NYLAS_WEBHOOK_SECRET", "nylas_webhook_secret")
+}
+if ([string]::IsNullOrWhiteSpace($nylasWebhookSecret) -and [string]::IsNullOrWhiteSpace($localTunnelURL) -and -not [string]::IsNullOrWhiteSpace($nylasWebhookSecretArn)) {
   $nylasWebhookSecret = Get-SecretStringValue -SecretID $nylasWebhookSecretArn -PropertyNames @("webhook_secret", "NYLAS_WEBHOOK_SECRET", "nylas_webhook_secret")
 }
 
@@ -364,6 +395,12 @@ Write-Host "Allowed origin: $AllowedOrigin"
 if ($nylasConfigured) {
   Write-Host "Nylas: configured from local env, tfvars, or deployed ECS secret references."
   Write-Host "Nylas redirect URI: $NylasRedirectURI"
+  if (-not [string]::IsNullOrWhiteSpace($localTunnelURL)) {
+    Write-Host "Nylas local tunnel: $($localTunnelURL.Trim().TrimEnd('/'))"
+    if ([string]::IsNullOrWhiteSpace($nylasWebhookSecret)) {
+      Write-Host "Nylas local webhook secret: missing. OAuth works, but local webhook POSTs will be rejected until this is set."
+    }
+  }
 } elseif ($SkipNylas) {
   Write-Host "Nylas: skipped by -SkipNylas."
 } else {
