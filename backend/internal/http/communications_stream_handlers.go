@@ -132,6 +132,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusInternalServerError, "failed_to_load_email_connection")
 			return
 		}
+		s.commCache.invalidateUser(connection.UserID)
 		s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", change.Trigger, change.MessageID)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

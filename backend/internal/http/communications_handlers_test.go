@@ -25,6 +25,9 @@ type fakeNylasClient struct {
 	sent          NylasSendMessageRequest
 	update        NylasMessageUpdate
 	lastQuery     NylasMessageQuery
+	folderCalls   int
+	messageCalls  int
+	detailCalls   int
 	listErr       error
 	exchangeErr   error
 }
@@ -42,10 +45,12 @@ func (f *fakeNylasClient) DeleteGrant(_ context.Context, grantID string) error {
 }
 
 func (f *fakeNylasClient) ListFolders(_ context.Context, _ string) ([]NylasFolder, error) {
+	f.folderCalls++
 	return f.folders, nil
 }
 
 func (f *fakeNylasClient) ListMessages(_ context.Context, _ string, query NylasMessageQuery) (NylasMessagePage, error) {
+	f.messageCalls++
 	f.lastQuery = query
 	if f.listErr != nil {
 		return NylasMessagePage{}, f.listErr
@@ -54,6 +59,7 @@ func (f *fakeNylasClient) ListMessages(_ context.Context, _ string, query NylasM
 }
 
 func (f *fakeNylasClient) GetMessage(_ context.Context, _, _ string) (NylasMessage, error) {
+	f.detailCalls++
 	return f.message, nil
 }
 
@@ -322,6 +328,59 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/disconnect", "", token, http.StatusOK)
 	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("connection after disconnect error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCommunicationsCacheAvoidsRepeatedNylasReads(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "microsoft",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{
+		folders:  []NylasFolder{{ID: "inbox", Name: "Inbox", Attributes: []string{"\\Inbox"}}},
+		messages: []NylasMessage{{ID: "message-1", Subject: "Hello", Unread: true}},
+		message:  NylasMessage{ID: "message-1", Subject: "Hello", Body: "Body", Unread: true},
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders", "", token, http.StatusOK)
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/folders", "", token, http.StatusOK)
+	if nylas.folderCalls != 1 {
+		t.Fatalf("folder calls = %d, want 1", nylas.folderCalls)
+	}
+
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5", "", token, http.StatusOK)
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5", "", token, http.StatusOK)
+	if nylas.folderCalls != 1 {
+		t.Fatalf("folder calls after mailbox resolution = %d, want 1", nylas.folderCalls)
+	}
+	if nylas.messageCalls != 1 {
+		t.Fatalf("message list calls = %d, want 1", nylas.messageCalls)
+	}
+
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages/message-1", "", token, http.StatusOK)
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages/message-1", "", token, http.StatusOK)
+	if nylas.detailCalls != 1 {
+		t.Fatalf("message detail calls = %d, want 1", nylas.detailCalls)
 	}
 }
 

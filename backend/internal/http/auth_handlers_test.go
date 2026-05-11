@@ -436,6 +436,169 @@ func TestInvitationAcceptStoresDisplayNameAndSendsConfirmation(t *testing.T) {
 	}
 }
 
+func TestCompanyExplorerFolderShareExistingMember(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	const adminSubject = "admin-subject"
+	const memberSubject = "member-subject"
+	const memberEmail = "member@example.com"
+	repo.EnsureCompany(companyID, "Acme Systems")
+	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com", "Admin User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(adminSubject, companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	member, err := repo.UpsertAuthUser(memberSubject, memberEmail, "Member User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(memberSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Shared Work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+	}).Routes()
+	adminToken := "Bearer " + testJWT(t, key, "kid", adminSubject, "admin@example.com")
+
+	shareReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders/"+folder.FolderID+"/shares", strings.NewReader(`{"company_id":"`+companyID+`","email":"`+memberEmail+`"}`))
+	shareReq.Header.Set("Authorization", adminToken)
+	shareReq.Header.Set("Content-Type", "application/json")
+	shareRes := httptest.NewRecorder()
+	handler.ServeHTTP(shareRes, shareReq)
+	if shareRes.Code != http.StatusCreated {
+		t.Fatalf("share status = %d, want %d, body=%s", shareRes.Code, http.StatusCreated, strings.TrimSpace(shareRes.Body.String()))
+	}
+	var sharePayload struct {
+		Share               domain.CompanyExplorerFolderShare `json:"share"`
+		Invitation          *domain.Invitation                `json:"invitation"`
+		CognitoInviteStatus string                            `json:"cognito_invite_status"`
+	}
+	if err := json.NewDecoder(shareRes.Body).Decode(&sharePayload); err != nil {
+		t.Fatal(err)
+	}
+	if sharePayload.Invitation != nil {
+		t.Fatalf("invitation = %+v, want nil for existing company member", sharePayload.Invitation)
+	}
+	if sharePayload.CognitoInviteStatus != "not_needed" {
+		t.Fatalf("cognito status = %q, want not_needed", sharePayload.CognitoInviteStatus)
+	}
+	if sharePayload.Share.Status != "active" || sharePayload.Share.UserID == nil || *sharePayload.Share.UserID != member.UserID {
+		t.Fatalf("share = %+v, want active member share", sharePayload.Share)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders/"+folder.FolderID+"/shares?company_id="+companyID, nil)
+	listReq.Header.Set("Authorization", adminToken)
+	listRes := httptest.NewRecorder()
+	handler.ServeHTTP(listRes, listReq)
+	if listRes.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d, body=%s", listRes.Code, http.StatusOK, strings.TrimSpace(listRes.Body.String()))
+	}
+	var listPayload struct {
+		Shares []domain.CompanyExplorerFolderShare `json:"shares"`
+	}
+	if err := json.NewDecoder(listRes.Body).Decode(&listPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(listPayload.Shares) != 1 || listPayload.Shares[0].Email != memberEmail {
+		t.Fatalf("shares = %+v, want member share", listPayload.Shares)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/company-explorer/folders/"+folder.FolderID+"/shares?company_id="+companyID+"&email="+memberEmail, nil)
+	deleteReq.Header.Set("Authorization", adminToken)
+	deleteRes := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRes, deleteReq)
+	if deleteRes.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want %d, body=%s", deleteRes.Code, http.StatusOK, strings.TrimSpace(deleteRes.Body.String()))
+	}
+	shares, err := repo.ListCompanyExplorerFolderShares(companyID, folder.FolderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shares) != 0 {
+		t.Fatalf("shares after delete = %+v, want none", shares)
+	}
+}
+
+func TestCompanyExplorerFolderSharePendingActivatesOnInviteAccept(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	const adminSubject = "admin-subject"
+	const inviteeSubject = "folder-share-invitee"
+	const inviteeEmail = "folder-share@example.com"
+	repo.EnsureCompany(companyID, "Acme Systems")
+	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com", "Admin User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(adminSubject, companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Shared Work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+	}).Routes()
+	adminToken := "Bearer " + testJWT(t, key, "kid", adminSubject, "admin@example.com")
+
+	shareReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders/"+folder.FolderID+"/shares", strings.NewReader(`{"company_id":"`+companyID+`","email":"`+inviteeEmail+`"}`))
+	shareReq.Header.Set("Authorization", adminToken)
+	shareReq.Header.Set("Content-Type", "application/json")
+	shareRes := httptest.NewRecorder()
+	handler.ServeHTTP(shareRes, shareReq)
+	if shareRes.Code != http.StatusCreated {
+		t.Fatalf("share status = %d, want %d, body=%s", shareRes.Code, http.StatusCreated, strings.TrimSpace(shareRes.Body.String()))
+	}
+	var sharePayload struct {
+		Share               domain.CompanyExplorerFolderShare `json:"share"`
+		Invitation          *domain.Invitation                `json:"invitation"`
+		CognitoInviteStatus string                            `json:"cognito_invite_status"`
+	}
+	if err := json.NewDecoder(shareRes.Body).Decode(&sharePayload); err != nil {
+		t.Fatal(err)
+	}
+	if sharePayload.Share.Status != "pending" || sharePayload.Share.UserID != nil {
+		t.Fatalf("share = %+v, want pending external invite", sharePayload.Share)
+	}
+	if sharePayload.Invitation == nil || sharePayload.Invitation.Token == "" {
+		t.Fatalf("invitation = %+v, want token", sharePayload.Invitation)
+	}
+	if sharePayload.CognitoInviteStatus != "not_configured" {
+		t.Fatalf("cognito status = %q, want not_configured", sharePayload.CognitoInviteStatus)
+	}
+
+	acceptReq := httptest.NewRequest(http.MethodPost, "/v1/invitations/accept", strings.NewReader(`{"token":"`+sharePayload.Invitation.Token+`","display_name":"Folder Share User"}`))
+	acceptReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", inviteeSubject, inviteeEmail))
+	acceptReq.Header.Set("Content-Type", "application/json")
+	acceptRes := httptest.NewRecorder()
+	handler.ServeHTTP(acceptRes, acceptReq)
+	if acceptRes.Code != http.StatusOK {
+		t.Fatalf("accept status = %d, want %d, body=%s", acceptRes.Code, http.StatusOK, strings.TrimSpace(acceptRes.Body.String()))
+	}
+	user, err := repo.GetAuthUser(inviteeSubject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shares, err := repo.ListCompanyExplorerFolderShares(companyID, folder.FolderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shares) != 1 || shares[0].Status != "active" || shares[0].UserID == nil || *shares[0].UserID != user.UserID {
+		t.Fatalf("shares after accept = %+v, want active share for accepted user %s", shares, user.UserID)
+	}
+}
+
 func TestPasswordResetRequestChecksMangoUser(t *testing.T) {
 	t.Parallel()
 

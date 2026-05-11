@@ -69,6 +69,9 @@ type Repository interface {
 	MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error)
 	RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error)
 	DeleteCompanyExplorerFolder(companyID, folderID string) error
+	ListCompanyExplorerFolderShares(companyID, folderID string) ([]domain.CompanyExplorerFolderShare, error)
+	UpsertCompanyExplorerFolderShare(input CompanyExplorerFolderShareInput) (domain.CompanyExplorerFolderShare, error)
+	DeleteCompanyExplorerFolderShare(companyID, folderID, email string) error
 	AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error)
 	AssignCompanyExplorerFolderItems(companyID string, assignments []CompanyExplorerFolderItemAssignmentInput) ([]domain.CompanyExplorerFolderItem, []CompanyExplorerRelationshipDeleteResult, error)
 	ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error)
@@ -153,6 +156,14 @@ type CompanyExplorerFolderItemAssignmentInput struct {
 	ItemType string `json:"item_type"`
 	ItemID   string `json:"item_id"`
 	Position int    `json:"position,omitempty"`
+}
+
+type CompanyExplorerFolderShareInput struct {
+	CompanyID       string
+	FolderID        string
+	Email           string
+	UserID          string
+	InvitedByUserID string
 }
 
 type CompanyExplorerRelationshipDeleteResult struct {

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -66,8 +67,18 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.Request) {
-	folderID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/company-explorer/folders/"))
-	if folderID == "" || strings.Contains(folderID, "/") {
+	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/company-explorer/folders/"), "/")
+	parts := strings.Split(trimmed, "/")
+	folderID := strings.TrimSpace(parts[0])
+	if folderID == "" {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if len(parts) == 2 && parts[1] == "shares" {
+		s.handleCompanyExplorerFolderShares(w, r, folderID)
+		return
+	}
+	if len(parts) != 1 {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
@@ -160,6 +171,213 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 	}
 
 	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+}
+
+func (s *Server) handleCompanyExplorerFolderShares(w http.ResponseWriter, r *http.Request, folderID string) {
+	switch r.Method {
+	case http.MethodGet:
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if !requireCompanyAccess(w, r, companyID) {
+			return
+		}
+		shares, err := s.repo.ListCompanyExplorerFolderShares(companyID, folderID)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "company_id_folder_id_required")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_shares")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"shares": shares})
+	case http.MethodPost:
+		s.inviteCompanyExplorerFolderShare(w, r, folderID)
+	case http.MethodDelete:
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		email := normalizeEmailForCompare(r.URL.Query().Get("email"))
+		if !requireCompanyManager(w, r, companyID) {
+			return
+		}
+		if email == "" {
+			writeError(w, http.StatusBadRequest, "email_required")
+			return
+		}
+		err := s.repo.DeleteCompanyExplorerFolderShare(companyID, folderID, email)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "company_id_folder_email_required")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "company_explorer_folder_share_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_folder_share")
+			return
+		}
+		s.publishWorkspaceEvent(companyID, "company_explorer_folder_share_deleted", map[string]any{"folder_id": folderID, "email": email})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+	}
+}
+
+func (s *Server) inviteCompanyExplorerFolderShare(w http.ResponseWriter, r *http.Request, folderID string) {
+	var req struct {
+		CompanyID string `json:"company_id"`
+		Email     string `json:"email"`
+		UserID    string `json:"user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	req.CompanyID = strings.TrimSpace(req.CompanyID)
+	req.Email = normalizeEmailForCompare(req.Email)
+	req.UserID = strings.TrimSpace(req.UserID)
+	if !requireCompanyManager(w, r, req.CompanyID) {
+		return
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if req.Email == "" && req.UserID == "" {
+		writeError(w, http.StatusBadRequest, "email_or_user_id_required")
+		return
+	}
+	if _, err := s.repo.ListCompanyExplorerFolderShares(req.CompanyID, folderID); errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_company_explorer_folder")
+		return
+	}
+
+	targetEmail, targetUserID, existingMangoUser, err := s.resolveCompanyExplorerFolderShareTarget(req.CompanyID, req.UserID, req.Email)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_company_explorer_folder_share_target")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_resolve_company_explorer_folder_share_target")
+		return
+	}
+
+	var invitation *domain.Invitation
+	cognitoStatus := "not_needed"
+	if targetUserID == "" {
+		created, err := s.repo.CreateInvitation(store.CreateInvitationInput{
+			CompanyID:       req.CompanyID,
+			Email:           targetEmail,
+			Role:            domain.RoleCompanyUser,
+			InvitedByUserID: actor.User.UserID,
+		})
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_invitation")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "company_not_found")
+			return
+		}
+		if errors.Is(err, store.ErrAlreadyExists) {
+			writeError(w, http.StatusConflict, "user_already_exists")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_create_invitation")
+			return
+		}
+		invitation = &created
+		cognitoStatus = s.sendCognitoInvitation(r, created.Email, existingMangoUser)
+		if cognitoStatus == "failed" {
+			writeError(w, http.StatusBadGateway, "failed_to_create_cognito_user")
+			return
+		}
+	}
+
+	share, err := s.repo.UpsertCompanyExplorerFolderShare(store.CompanyExplorerFolderShareInput{
+		CompanyID:       req.CompanyID,
+		FolderID:        folderID,
+		Email:           targetEmail,
+		UserID:          targetUserID,
+		InvitedByUserID: actor.User.UserID,
+	})
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_company_explorer_folder_share")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "company_explorer_folder_or_user_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_create_company_explorer_folder_share")
+		return
+	}
+	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_share_upserted", map[string]any{"folder_id": folderID, "share": share})
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"share":                 share,
+		"invitation":            invitation,
+		"cognito_invite_status": cognitoStatus,
+	})
+}
+
+func (s *Server) resolveCompanyExplorerFolderShareTarget(companyID, userID, email string) (string, string, bool, error) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	email = normalizeEmailForCompare(email)
+	if companyID == "" {
+		return "", "", false, store.ErrInvalid
+	}
+	if userID != "" {
+		user, err := s.repo.GetCompanyUser(companyID, userID)
+		if errors.Is(err, store.ErrNotFound) {
+			return "", "", false, store.ErrInvalid
+		}
+		if err != nil {
+			return "", "", false, err
+		}
+		return user.Email, user.UserID, true, nil
+	}
+	if email == "" {
+		return "", "", false, store.ErrInvalid
+	}
+	user, err := s.repo.GetAuthUserByEmail(email)
+	if errors.Is(err, store.ErrNotFound) {
+		return email, "", false, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	companyUser, err := s.repo.GetCompanyUser(companyID, user.UserID)
+	if errors.Is(err, store.ErrNotFound) {
+		return email, "", true, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	return companyUser.Email, companyUser.UserID, true, nil
+}
+
+func (s *Server) sendCognitoInvitation(r *http.Request, email string, existingMangoUser bool) string {
+	if existingMangoUser {
+		return "existing_mango_user"
+	}
+	if s.cognitoAdmin == nil {
+		return "not_configured"
+	}
+	if err := s.cognitoAdmin.AdminCreateUser(r.Context(), email); err != nil {
+		log.Printf("failed to create cognito invitation user email=%s: %v", email, err)
+		return "failed"
+	}
+	return "sent"
 }
 
 func (s *Server) handleCompanyExplorerDeleteBatch(w http.ResponseWriter, r *http.Request) {

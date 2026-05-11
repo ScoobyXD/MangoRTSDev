@@ -123,6 +123,7 @@ func (s *Server) handleCommunicationsDisconnect(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "failed_to_delete_email_connection")
 		return
 	}
+	s.commCache.invalidateUser(actor.User.UserID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 }
 
@@ -135,7 +136,7 @@ func (s *Server) handleCommunicationsFolders(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	folders, err := s.nylasClient.ListFolders(r.Context(), connection.GrantID)
+	folders, err := s.communicationsFolders(r.Context(), connection)
 	if err != nil {
 		s.writeNylasError(w, r, connection, err)
 		return
@@ -163,7 +164,7 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
-		page, err := s.nylasClient.ListMessages(r.Context(), connection.GrantID, query)
+		page, err := s.communicationsMessagePage(r.Context(), connection, query)
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
 			return
@@ -197,7 +198,7 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 
 	switch r.Method {
 	case http.MethodGet:
-		message, err := s.nylasClient.GetMessage(r.Context(), connection.GrantID, messageID)
+		message, err := s.communicationsMessage(r.Context(), connection, messageID)
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
 			return
@@ -227,6 +228,7 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
+		s.commCache.invalidateUser(connection.UserID)
 		s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", message.ID)
 		writeJSON(w, http.StatusOK, map[string]any{"message": message})
 	case http.MethodDelete:
@@ -234,6 +236,7 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
+		s.commCache.invalidateUser(connection.UserID)
 		s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.deleted", messageID)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 	default:
@@ -266,6 +269,7 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		s.writeNylasError(w, r, connection, err)
 		return
 	}
+	s.commCache.invalidateUser(connection.UserID)
 	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.created", message.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{"message": message})
 }
@@ -330,6 +334,7 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 		s.redirectCommunications(w, r, "nylas_connection_store_failed")
 		return
 	}
+	s.commCache.invalidateUser(state.UserID)
 	s.redirectCommunicationsSuccess(w, r)
 }
 
@@ -389,6 +394,65 @@ func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connect
 	}
 	log.Printf("nylas proxy error user_id=%s provider=%s path=%s: %v", connection.UserID, connection.Provider, r.URL.Path, err)
 	writeError(w, http.StatusBadGateway, "nylas_request_failed")
+}
+
+func (s *Server) communicationsFolders(ctx context.Context, connection domain.UserEmailConnection) ([]NylasFolder, error) {
+	now := time.Now().UTC()
+	if folders, ok := s.commCache.getFolders(connection.UserID, communicationsFoldersCacheTTL, now); ok {
+		return folders, nil
+	}
+	folders, err := s.nylasClient.ListFolders(ctx, connection.GrantID)
+	if err != nil {
+		if shouldServeStaleCommunicationsCache(err) {
+			if cached, ok := s.commCache.getFolders(connection.UserID, communicationsFoldersCacheTTL+communicationsMaxStaleTTL, now); ok {
+				return cached, nil
+			}
+		}
+		return nil, err
+	}
+	s.commCache.setFolders(connection.UserID, folders, now)
+	return folders, nil
+}
+
+func (s *Server) communicationsMessagePage(ctx context.Context, connection domain.UserEmailConnection, query NylasMessageQuery) (NylasMessagePage, error) {
+	now := time.Now().UTC()
+	if page, ok := s.commCache.getMessagePage(connection.UserID, query, communicationsMessagesCacheTTL, now); ok {
+		return page, nil
+	}
+	page, err := s.nylasClient.ListMessages(ctx, connection.GrantID, query)
+	if err != nil {
+		if shouldServeStaleCommunicationsCache(err) {
+			if cached, ok := s.commCache.getMessagePage(connection.UserID, query, communicationsMessagesCacheTTL+communicationsMaxStaleTTL, now); ok {
+				return cached, nil
+			}
+		}
+		return NylasMessagePage{}, err
+	}
+	s.commCache.setMessagePage(connection.UserID, query, page, now)
+	return page, nil
+}
+
+func (s *Server) communicationsMessage(ctx context.Context, connection domain.UserEmailConnection, messageID string) (NylasMessage, error) {
+	now := time.Now().UTC()
+	if message, ok := s.commCache.getMessage(connection.UserID, messageID, communicationsMessageCacheTTL, now); ok {
+		return message, nil
+	}
+	message, err := s.nylasClient.GetMessage(ctx, connection.GrantID, messageID)
+	if err != nil {
+		if shouldServeStaleCommunicationsCache(err) {
+			if cached, ok := s.commCache.getMessage(connection.UserID, messageID, communicationsMessageCacheTTL+communicationsMaxStaleTTL, now); ok {
+				return cached, nil
+			}
+		}
+		return NylasMessage{}, err
+	}
+	s.commCache.setMessage(connection.UserID, message, now)
+	return message, nil
+}
+
+func shouldServeStaleCommunicationsCache(err error) bool {
+	var apiErr NylasAPIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusTooManyRequests
 }
 
 func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessageQuery, bool) {
@@ -463,7 +527,7 @@ func (s *Server) applySystemFolderMailbox(ctx context.Context, connection domain
 	if strings.TrimSpace(query.FolderID) != "" {
 		return query, nil
 	}
-	folders, err := s.nylasClient.ListFolders(ctx, connection.GrantID)
+	folders, err := s.communicationsFolders(ctx, connection)
 	if err != nil {
 		return NylasMessageQuery{}, err
 	}

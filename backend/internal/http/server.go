@@ -21,6 +21,7 @@ type Server struct {
 	repo          store.Repository
 	hub           *workspaceEventHub
 	emailHub      *workspaceEventHub
+	commCache     *communicationsCache
 	authValidator *auth.Validator
 	cognitoAdmin  CognitoAdminClient
 	emailSender   AuthEmailSender
@@ -47,6 +48,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		repo:          repo,
 		hub:           newWorkspaceEventHub(),
 		emailHub:      newWorkspaceEventHub(),
+		commCache:     newCommunicationsCache(),
 		authValidator: options.AuthValidator,
 		cognitoAdmin:  options.CognitoAdmin,
 		emailSender:   options.EmailSender,

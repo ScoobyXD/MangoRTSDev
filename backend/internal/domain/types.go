@@ -221,6 +221,17 @@ type CompanyExplorerFolderItem struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
+type CompanyExplorerFolderShare struct {
+	CompanyID        string    `json:"company_id"`
+	FolderID         string    `json:"folder_id"`
+	Email            string    `json:"email"`
+	UserID           *string   `json:"user_id,omitempty"`
+	Status           string    `json:"status"`
+	InvitedByUserID  string    `json:"invited_by_user_id"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
 type NodeMapPosition struct {
 	CompanyID        string    `json:"company_id"`
 	NodeID           string    `json:"node_id"`

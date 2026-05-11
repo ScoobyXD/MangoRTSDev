@@ -3,6 +3,7 @@ import FrameRightClickMenu from "../../app/framerightclickmenu";
 import type { CompanyExplorerFolderKind } from "../folders/companyExplorerFolders";
 import type {
   CompanyExplorerContextMenuState,
+  CompanyExplorerShareTarget,
   ExplorerDeleteTargetWithLabel,
   ExplorerFindTarget,
   ExplorerRenameTarget,
@@ -16,6 +17,7 @@ type CompanyExplorerContextMenuProps = {
   onCreateNode: (parentFolderID: string, position?: number) => void;
   onCreateLogicGate: (parentFolderID: string, position?: number) => void;
   onFindTarget: (target: ExplorerFindTarget) => void;
+  onShareFolder: (target: CompanyExplorerShareTarget) => void;
   onRenameTarget: (treeID: string, target: ExplorerRenameTarget, value: string) => void;
   onDeleteTargets: (targets: ExplorerDeleteTargetWithLabel[]) => void;
 };
@@ -28,13 +30,14 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   onCreateNode,
   onCreateLogicGate,
   onFindTarget,
+  onShareFolder,
   onRenameTarget,
   onDeleteTargets,
 }) => {
   if (!menu) return null;
   const hasCreateAction = menu.canCreateFolder || menu.canCreateNode || menu.canCreateLogicGate;
   const hasDeleteAction = menu.deleteTargets.length > 0 || Boolean(menu.deleteTarget);
-  if (!hasCreateAction && !menu.findTarget && !menu.renameTarget && !hasDeleteAction) return null;
+  if (!hasCreateAction && !menu.findTarget && !menu.shareTarget && !menu.renameTarget && !hasDeleteAction) return null;
 
   return (
     <FrameRightClickMenu x={menu.x} y={menu.y} onClose={onClose}>
@@ -78,6 +81,11 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
       {menu.findTarget && (
         <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onFindTarget(menu.findTarget!)}>
           {menu.findTarget.kind === "logic_gate" ? "Find Logic Gate" : "Find Node"}
+        </button>
+      )}
+      {menu.shareTarget && (
+        <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onShareFolder(menu.shareTarget!)}>
+          Share Folder
         </button>
       )}
       {menu.renameTarget && (

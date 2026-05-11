@@ -29,6 +29,7 @@ import {
 } from "./companyExplorerDragDrop";
 import {
   type CompanyExplorerContextMenuState,
+  type CompanyExplorerShareTarget,
   type ExplorerDeleteTarget,
   type ExplorerDeleteTargetWithLabel,
   type ExplorerDragPayload,
@@ -72,6 +73,39 @@ type CompanyExplorerMapEntityBatchResponse = {
 type CompanyExplorerDeleteBatchResponse = {
   status?: string;
   targets?: Array<{ kind: string; id: string }>;
+};
+
+type CompanyExplorerFolderShare = {
+  company_id: string;
+  folder_id: string;
+  email: string;
+  user_id?: string;
+  status: string;
+  invited_by_user_id: string;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
+type CompanyExplorerFolderSharesResponse = {
+  shares?: CompanyExplorerFolderShare[];
+};
+
+type CompanyExplorerFolderShareInviteResponse = {
+  share?: CompanyExplorerFolderShare;
+  invitation?: { token?: string; email?: string };
+  cognito_invite_status?: string;
+};
+
+type CompanyExplorerFolderShareDialog = {
+  folderID: string;
+  label: string;
+  email: string;
+  shares: CompanyExplorerFolderShare[];
+  loading: boolean;
+  busy: boolean;
+  error: string;
+  message: string;
+  invitationToken: string;
 };
 
 const SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX: Array<[string, CompanyExplorerSystemFolderKey]> = [
@@ -208,6 +242,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ targets: ExplorerDeleteTargetWithLabel[] } | null>(null);
   const [deleteBlockedMessage, setDeleteBlockedMessage] = useState("");
   const [deleteFolderAcknowledged, setDeleteFolderAcknowledged] = useState(false);
+  const [folderShareDialog, setFolderShareDialog] = useState<CompanyExplorerFolderShareDialog | null>(null);
   const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
   const [explorerSearchFocused, setExplorerSearchFocused] = useState(false);
   const [linkRevision, setLinkRevision] = useState(0);
@@ -509,6 +544,116 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     }
     return response.json() as Promise<T>;
   }, [apiBase]);
+
+  const folderSharesPath = useCallback((folderID: string): string => (
+    `/v1/company-explorer/folders/${encodeURIComponent(folderID)}/shares?company_id=${encodeURIComponent(companyID)}`
+  ), [companyID]);
+
+  const loadFolderShares = useCallback(async (folderID: string) => {
+    const payload = await requestJSON<CompanyExplorerFolderSharesResponse>(folderSharesPath(folderID));
+    return payload.shares ?? [];
+  }, [folderSharesPath, requestJSON]);
+
+  const openFolderShareDialog = useCallback((target: CompanyExplorerShareTarget) => {
+    setFolderShareDialog({
+      folderID: target.folderID,
+      label: target.label,
+      email: "",
+      shares: [],
+      loading: true,
+      busy: false,
+      error: "",
+      message: "",
+      invitationToken: "",
+    });
+    void (async () => {
+      try {
+        const shares = await loadFolderShares(target.folderID);
+        setFolderShareDialog((current) => (
+          current?.folderID === target.folderID
+            ? { ...current, shares, loading: false, error: "" }
+            : current
+        ));
+      } catch (err) {
+        setFolderShareDialog((current) => (
+          current?.folderID === target.folderID
+            ? { ...current, loading: false, error: err instanceof Error ? err.message : "failed_to_load_folder_shares" }
+            : current
+        ));
+      }
+    })();
+  }, [loadFolderShares]);
+
+  const submitFolderShare = useCallback(async () => {
+    const current = folderShareDialog;
+    if (!current) return;
+    const email = current.email.trim().toLowerCase();
+    if (!email) {
+      setFolderShareDialog({ ...current, error: "email_required", message: "", invitationToken: "" });
+      return;
+    }
+    setFolderShareDialog({ ...current, busy: true, error: "", message: "", invitationToken: "" });
+    try {
+      const payload = await requestJSON<CompanyExplorerFolderShareInviteResponse>(folderSharesPath(current.folderID), {
+        method: "POST",
+        body: JSON.stringify({ company_id: companyID, email }),
+      });
+      const share = payload.share;
+      setFolderShareDialog((latest) => {
+        if (!latest || latest.folderID !== current.folderID) return latest;
+        const shares = share
+          ? [
+            ...latest.shares.filter((item) => item.email !== share.email),
+            share,
+          ].sort((a, b) => (a.status === b.status ? a.email.localeCompare(b.email) : a.status.localeCompare(b.status)))
+          : latest.shares;
+        return {
+          ...latest,
+          email: "",
+          shares,
+          busy: false,
+          error: "",
+          message: share?.status === "active" ? "Folder shared." : "Invitation created.",
+          invitationToken: payload.invitation?.token ?? "",
+        };
+      });
+    } catch (err) {
+      setFolderShareDialog((latest) => (
+        latest?.folderID === current.folderID
+          ? { ...latest, busy: false, error: err instanceof Error ? err.message : "failed_to_share_folder", message: "", invitationToken: "" }
+          : latest
+      ));
+    }
+  }, [companyID, folderShareDialog, folderSharesPath, requestJSON]);
+
+  const removeFolderShare = useCallback(async (share: CompanyExplorerFolderShare) => {
+    const current = folderShareDialog;
+    if (!current) return;
+    setFolderShareDialog({ ...current, busy: true, error: "", message: "", invitationToken: "" });
+    try {
+      await requestJSON<{ status?: string }>(`${folderSharesPath(current.folderID)}&email=${encodeURIComponent(share.email)}`, {
+        method: "DELETE",
+      });
+      setFolderShareDialog((latest) => (
+        latest?.folderID === current.folderID
+          ? {
+            ...latest,
+            shares: latest.shares.filter((item) => item.email !== share.email),
+            busy: false,
+            error: "",
+            message: "Share removed.",
+            invitationToken: "",
+          }
+          : latest
+      ));
+    } catch (err) {
+      setFolderShareDialog((latest) => (
+        latest?.folderID === current.folderID
+          ? { ...latest, busy: false, error: err instanceof Error ? err.message : "failed_to_remove_folder_share", message: "", invitationToken: "" }
+          : latest
+      ));
+    }
+  }, [folderShareDialog, folderSharesPath, requestJSON]);
 
   const createFolder = useCallback(async (folderKind: CompanyExplorerFolderKind, parentFolderID: string, position?: number) => {
     setError("");
@@ -1393,6 +1538,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     const targets = resolveExplorerCreationTargets(row ?? null);
     const deleteRows = row ? (selectedTreeIDs.has(row.id) ? treeRows.filter((candidate) => selectedTreeIDs.has(candidate.id)) : [row]) : [];
     const deleteTargets = getDeleteTargetsForRows(deleteRows);
+    const shareTarget = row?.kind === "folder" && row.folderID && !row.systemKey
+      ? { folderID: row.folderID, label: row.label }
+      : null;
     setExplorerContextMenu({
       x: event.clientX,
       y: event.clientY,
@@ -1401,6 +1549,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
       deleteTargets,
       renameTarget: resolveExplorerRenameTarget(row ?? null),
       findTarget: getExplorerFindTarget(row ?? null),
+      shareTarget,
       renameTreeID: row?.id ?? "",
       renameLabel: row?.label ?? "",
       contextKind,
@@ -1580,6 +1729,10 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           setExplorerContextMenu(null);
           requestMapFind(target);
         }}
+        onShareFolder={(target) => {
+          setExplorerContextMenu(null);
+          openFolderShareDialog(target);
+        }}
         onRenameTarget={(treeID, target, value) => {
           setExplorerContextMenu(null);
           cancelRenameOnBlurRef.current = false;
@@ -1590,6 +1743,99 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
         }}
         onDeleteTargets={requestDeleteTargets}
       />
+
+      {folderShareDialog && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center", padding: 12 }}>
+          <div style={{ width: "min(520px, 94%)", maxHeight: "min(680px, 92vh)", overflow: "auto", borderRadius: 8, border: "1px solid rgba(255,136,32,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.96)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 14, display: "grid", gap: 12, boxShadow: "0 18px 44px rgba(0,0,0,0.22)" }}>
+            <div style={{ display: "grid", gap: 4 }}>
+              <div style={{ fontSize: 13, fontWeight: 800 }}>Share folder</div>
+              <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#b8c4cc" : "#333333", overflowWrap: "anywhere" }}>{folderShareDialog.label}</div>
+            </div>
+            <form
+              style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, alignItems: "stretch" }}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitFolderShare();
+              }}
+            >
+              <input
+                value={folderShareDialog.email}
+                onChange={(event) => setFolderShareDialog((current) => current ? { ...current, email: event.target.value.toLowerCase(), error: "", message: "", invitationToken: "" } : current)}
+                type="email"
+                placeholder="Email"
+                disabled={folderShareDialog.busy}
+                style={{ minHeight: 32, minWidth: 0, border: `1px solid ${ruleColor}`, background: isDarkTheme ? "#0f1216" : "#ffffff", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: "0 9px", fontSize: 12, boxSizing: "border-box" }}
+              />
+              <button
+                type="submit"
+                disabled={folderShareDialog.busy || !folderShareDialog.email.trim()}
+                style={{ minHeight: 32, border: "1px solid rgba(255,136,32,0.55)", background: "#ff8820", color: "#111111", cursor: folderShareDialog.busy || !folderShareDialog.email.trim() ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 800, padding: "0 12px", opacity: folderShareDialog.busy || !folderShareDialog.email.trim() ? 0.6 : 1 }}
+              >
+                {folderShareDialog.busy ? "Sharing" : "Invite"}
+              </button>
+            </form>
+            {folderShareDialog.error && <div style={{ fontSize: 11, color: "#c62828", lineHeight: 1.35 }}>{folderShareDialog.error}</div>}
+            {folderShareDialog.message && <div style={{ fontSize: 11, color: isDarkTheme ? "#9be7c1" : "#0b6b43", lineHeight: 1.35 }}>{folderShareDialog.message}</div>}
+            {folderShareDialog.invitationToken && (
+              <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#d6e0e6" : "#222222", border: `1px solid ${rowRuleColor}`, padding: 8, overflowWrap: "anywhere" }}>
+                Invite token: {folderShareDialog.invitationToken}
+              </div>
+            )}
+            <div style={{ display: "grid", gap: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: isDarkTheme ? "#d6e0e6" : "#222222" }}>People</div>
+              {folderShareDialog.loading ? (
+                <div style={{ fontSize: 11, color: isDarkTheme ? "#b8c4cc" : "#333333" }}>Loading</div>
+              ) : folderShareDialog.shares.length === 0 ? (
+                <div style={{ fontSize: 11, color: isDarkTheme ? "#b8c4cc" : "#333333" }}>No shares yet.</div>
+              ) : (
+                <div style={{ display: "grid", border: `1px solid ${rowRuleColor}` }}>
+                  {folderShareDialog.shares.map((share) => (
+                    <div key={share.email} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", gap: 8, alignItems: "center", minHeight: 34, padding: "6px 8px", borderTop: `1px solid ${rowRuleColor}` }}>
+                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 }}>{share.email}</span>
+                      <span style={{ fontSize: 10, fontWeight: 800, color: share.status === "active" ? (isDarkTheme ? "#9be7c1" : "#0b6b43") : (isDarkTheme ? "#ffd8a6" : "#8a3b10") }}>{share.status}</span>
+                      <button
+                        type="button"
+                        onClick={() => void removeFolderShare(share)}
+                        disabled={folderShareDialog.busy}
+                        style={{ minHeight: 24, border: "1px solid rgba(198,40,40,0.35)", background: isDarkTheme ? "#191216" : "#fff", color: "#c62828", cursor: folderShareDialog.busy ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 800, padding: "0 8px", opacity: folderShareDialog.busy ? 0.6 : 1 }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setFolderShareDialog(null)}
+                style={{ minHeight: 30, border: "1px solid rgba(255,136,32,0.45)", background: "#fff", color: "#111111", cursor: "pointer", fontSize: 12, fontWeight: 800 }}
+              >
+                Done
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFolderShareDialog((current) => current ? { ...current, loading: true, error: "", message: "", invitationToken: "" } : current);
+                  void (async () => {
+                    try {
+                      const shares = await loadFolderShares(folderShareDialog.folderID);
+                      setFolderShareDialog((current) => current?.folderID === folderShareDialog.folderID ? { ...current, shares, loading: false } : current);
+                    } catch (err) {
+                      setFolderShareDialog((current) => current?.folderID === folderShareDialog.folderID ? { ...current, loading: false, error: err instanceof Error ? err.message : "failed_to_load_folder_shares" } : current);
+                    }
+                  })();
+                }}
+                disabled={folderShareDialog.loading || folderShareDialog.busy}
+                style={{ minHeight: 30, border: `1px solid ${ruleColor}`, background: isDarkTheme ? "#0f1216" : "#ffffff", color: isDarkTheme ? "#f6f8fb" : "#111111", cursor: folderShareDialog.loading || folderShareDialog.busy ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 800, opacity: folderShareDialog.loading || folderShareDialog.busy ? 0.6 : 1 }}
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteBlockedMessage && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>

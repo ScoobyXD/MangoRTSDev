@@ -373,6 +373,11 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 			delete(r.invitations, key)
 		}
 	}
+	for key, share := range r.folderShares {
+		if share.Email == email || share.InvitedByUserID == userID || (share.UserID != nil && *share.UserID == userID) {
+			delete(r.folderShares, key)
+		}
+	}
 	delete(r.emailConnections, userID)
 	for key, node := range r.nodes {
 		if node.AssigneeUserID != nil && *node.AssigneeUserID == userID {
@@ -523,6 +528,7 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName 
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
+	r.activateCompanyExplorerFolderSharesLocked(invitation.CompanyID, invitation.Email, user.UserID, now)
 	invitation.Status = domain.InvitationStatusAccepted
 	invitation.AcceptedByUserID = &user.UserID
 	invitation.AcceptedTimestamp = &now

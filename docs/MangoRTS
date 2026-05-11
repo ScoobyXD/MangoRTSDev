@@ -118,22 +118,15 @@ Map:
 Text Editor Changes
 NEED TO TEST:I need editor to be able to be worked on by multiple people at the same time, like google docs.
 
-pretty much fail
-	1. The image should be resizable from any edge, from any corner.
-	2. The image can't be moved up, it can only move it down, left, or right
-	3. The text wrap doesnt work well, it can make text wrap to the right of the image and below it, but not above it or to its left.
 
-
-5. After writing some text on the editor, it needs to update.
-	a. have multiple people be able to edit it at once.
-6. Also when typing theres this weird giant blob of red error text on the bottom.
-7. Image resize, be able to fluidly place images and text together.
 
 Later:
 1. The font size change does not get applied to the next character(s) after typing new text. also, Although the font sizing increase and decrease work very well when I have multiple characters and words selected, it does not work when I have no selection. When I have no selection the font size can only range between 14 and 16 for some reason. 
 	I'm probably not explaining this well enough. Everything works fine when I am selecting multiple characters and words. I can increase and decrease the font size and it stays and it works. If I were to move my caret into a certain point and I start typing, the font size does not get applied to that new text. Actually for them font range is only between 14 and 16 but if I multi-select them then font range can go wherever. 
 2. Control Z is actually garbage. 
-4. from the node side, you should be able to also see the list of logic gates remaining on its path. Kind of like directions on google maps.
+3. top text wrap is kind of ghetto. text wrap in general not all that great.
+4. weird gray lines coming out of the sides. 
+5. from the node side, you should be able to also see the list of logic gates remaining on its path. Kind of like directions on google maps.
 
 
 Kanban Board Changes:
@@ -262,6 +255,11 @@ $env:AWS_DEFAULT_REGION="us-west-1"
 aws sts get-caller-identity
 
 BACKEND:
+
+running new sql schema:
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/db/migrations/<name>.sql
+
+----------------------------------
 cd backend
 
 aws configure --profile mangorts-dev

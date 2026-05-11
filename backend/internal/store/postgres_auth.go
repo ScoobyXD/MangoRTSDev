@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"miraeopus/backend/internal/domain"
@@ -314,6 +315,16 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompan
 		); err != nil {
 			return DeleteCompanyUserResult{}, err
 		}
+		if _, err = tx.Exec(
+			`delete from company_explorer_folder_shares
+			 where ($1 <> '' and email = $1)
+			    or invited_by_user_id = $2
+			    or user_id = $2`,
+			normalizeEmail(item.Email),
+			userID,
+		); err != nil {
+			return DeleteCompanyUserResult{}, err
+		}
 		if _, err = tx.Exec(`delete from user_email_connections where user_id = $1`, userID); err != nil {
 			return DeleteCompanyUserResult{}, err
 		}
@@ -608,6 +619,10 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 		invitation.Role,
 	)
 	if err != nil {
+		return domain.Invitation{}, err
+	}
+
+	if err = activateCompanyExplorerFolderSharesSQL(context.Background(), tx, invitation.CompanyID, invitation.Email, user.UserID); err != nil {
 		return domain.Invitation{}, err
 	}
 

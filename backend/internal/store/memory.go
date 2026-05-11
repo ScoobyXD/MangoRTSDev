@@ -17,6 +17,7 @@ type MemoryRepo struct {
 	logicGateRels     map[string][]domain.LogicGateRelationship
 	folders           map[string]domain.CompanyExplorerFolder
 	folderItems       map[string]domain.CompanyExplorerFolderItem
+	folderShares      map[string]domain.CompanyExplorerFolderShare
 	defaultFolderSeed map[string]bool
 	nodeMapPositions  map[string]domain.NodeMapPosition
 	logicMapPositions map[string]domain.LogicGateMapPosition
@@ -43,6 +44,7 @@ func NewMemoryRepo() *MemoryRepo {
 		logicGateRels:     map[string][]domain.LogicGateRelationship{},
 		folders:           map[string]domain.CompanyExplorerFolder{},
 		folderItems:       map[string]domain.CompanyExplorerFolderItem{},
+		folderShares:      map[string]domain.CompanyExplorerFolderShare{},
 		defaultFolderSeed: map[string]bool{},
 		nodeMapPositions:  map[string]domain.NodeMapPosition{},
 		logicMapPositions: map[string]domain.LogicGateMapPosition{},
@@ -64,6 +66,10 @@ func key(companyID, id string) string {
 
 func folderItemKey(companyID, itemType, itemID string) string {
 	return companyID + ":" + itemType + ":" + itemID
+}
+
+func folderShareKey(companyID, folderID, email string) string {
+	return companyID + ":" + folderID + ":" + email
 }
 
 func boardKey(companyID, boardID string) string {
