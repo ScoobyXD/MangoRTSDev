@@ -44,8 +44,12 @@ New Features:
 12. Nesting map view
 13. For the Company Explorer search functionality optimization Let's have it where when I select into a folder and I type something where we only search inside that folder. Let's turn it into We first search into that folder and try to get results but if we don't find anything then we will search the rest of the company folders and files.
 14. I should change my Google password one day. 
+15. Should be able to do @ to summon ai agent like shopify and grok
 ========
 
+PROBLEM:
+1. The aws site logic gate arena is not loading
+2. Look at Nylas api call logs to see how much were actually pulling
 LATER: need to do an audit on how well equiped the app is for multiple people using it from different accounts all at once.
 
 
@@ -88,6 +92,10 @@ after that:
 4. Shared inboxes and email sharing
 5. Internal and external read receipts.
 
+
+conversation:
+	have a way to just easily shift multi select and delete many emails
+	also users are very vey used to to having the navigation column on the left
 
 the internal messaging system has to look very official because many legacy companies make it an official way of doing things.
 
@@ -460,6 +468,9 @@ $env:DEV_ROLE="dev_admin"
 ---------------------------
 
 Nylas
+mangorts sandbox US clientID: b079d358-1f5c-47b5-a23b-910ac94d2872
+
+idk what the clientid below is? But its the one im pretty sure we configured our app for.
 ClientID: f974c5e5-82e8-434d-8ba5-86f9ca338737
 GrantID: 906d9af3-ede3-4c0a-8b46-101aeaecbb97
 API key: nyk_v0_U7NVuxYwMXsHkI8EgQGsjQCOzU90KhOCrDWy0r5zaaumblrOQOHeQeSlqUqzgawA
