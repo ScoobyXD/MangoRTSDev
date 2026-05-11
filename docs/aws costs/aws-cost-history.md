@@ -4,29 +4,31 @@ This tracker records AWS billing screenshots over time in append-only CSV files.
 
 ## Latest Snapshot
 
-Captured date: 2026-05-10
+Captured date: 2026-05-11
 
 Billing month: 2026-05
 
-Current month total: USD 43.82
+Current month total: USD 50.36
 
-Month change: +22,963%
+Month change: +11,612%
 
 Forecasted month end: Data unavailable
 
 Savings opportunities: Not enabled
 
+Notes: AWS chart label displayed May 26, but this snapshot is recorded as 2026-05-11 per the capture date.
+
 ## Service Breakdown
 
 | Billing month | Service | Amount | Share of total |
 | --- | --- | ---: | ---: |
-| 2026-05 | Registrar | USD 15.00 | 34.23% |
-| 2026-05 | Relational Database Service | USD 13.75 | 31.38% |
-| 2026-05 | EC2 - Other | USD 5.06 | 11.55% |
-| 2026-05 | Elastic Container Service | USD 2.89 | 6.60% |
-| 2026-05 | Elastic Load Balancing | USD 2.65 | 6.05% |
-| 2026-05 | Others | USD 4.47 | 10.20% |
-| 2026-05 | **Total** | **USD 43.82** | **100.00%** |
+| 2026-05 | Relational Database Service | USD 15.45 | 30.68% |
+| 2026-05 | Registrar | USD 15.00 | 29.79% |
+| 2026-05 | EC2 - Other | USD 6.80 | 13.50% |
+| 2026-05 | Elastic Container Service | USD 3.92 | 7.78% |
+| 2026-05 | Elastic Load Balancing | USD 3.55 | 7.05% |
+| 2026-05 | Others | USD 5.64 | 11.20% |
+| 2026-05 | **Total** | **USD 50.36** | **100.00%** |
 
 ## Data Files
 
@@ -73,4 +75,3 @@ When a new AWS screenshot is provided:
 2. Add one row per exact service amount to `aws-cost-services.csv`.
 3. Update the Latest Snapshot and Service Breakdown sections above.
 4. Do not estimate chart bars without tooltip values. Leave unknown values blank and explain them in `notes`.
-

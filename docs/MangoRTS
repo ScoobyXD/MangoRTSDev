@@ -117,7 +117,8 @@ Map:
 
 Text Editor Changes
 NEED TO TEST:I need editor to be able to be worked on by multiple people at the same time, like google docs.
-
+1. The image messes up the indent guides
+2. Id like the auto text wrapping to work while i am dragging up. right now it only works with going side to side or down.
 
 
 Later:

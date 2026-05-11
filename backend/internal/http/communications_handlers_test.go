@@ -384,6 +384,48 @@ func TestCommunicationsCacheAvoidsRepeatedNylasReads(t *testing.T) {
 	}
 }
 
+func TestCommunicationsCacheEvictsBoundedEntries(t *testing.T) {
+	t.Parallel()
+
+	cache := newCommunicationsCache()
+	now := time.Unix(1000, 0).UTC()
+
+	for i := 0; i < communicationsMaxMessagePagesPerUser+2; i++ {
+		query := NylasMessageQuery{Limit: 5, PageToken: fmt.Sprintf("page-%d", i)}
+		page := NylasMessagePage{Messages: []NylasMessage{{ID: fmt.Sprintf("message-%d", i)}}}
+		cache.setMessagePage("user-1", query, page, now.Add(time.Duration(i)*time.Second))
+	}
+	if len(cache.messagePages) != communicationsMaxMessagePagesPerUser {
+		t.Fatalf("message page cache size = %d, want %d", len(cache.messagePages), communicationsMaxMessagePagesPerUser)
+	}
+	if _, ok := cache.getMessagePage("user-1", NylasMessageQuery{Limit: 5, PageToken: "page-0"}, communicationsMaxStaleTTL, now.Add(time.Minute)); ok {
+		t.Fatal("oldest message page was not evicted")
+	}
+	if _, ok := cache.getMessagePage("user-1", NylasMessageQuery{Limit: 5, PageToken: fmt.Sprintf("page-%d", communicationsMaxMessagePagesPerUser+1)}, communicationsMaxStaleTTL, now.Add(time.Minute)); !ok {
+		t.Fatal("newest message page was evicted")
+	}
+
+	for i := 0; i < communicationsMaxMessageEntries+4; i++ {
+		cache.setMessage(fmt.Sprintf("global-user-%d", i), NylasMessage{ID: "message-1", Body: "body"}, now.Add(time.Duration(i)*time.Second))
+	}
+	if len(cache.messages) != communicationsMaxMessageEntries {
+		t.Fatalf("message detail cache size = %d, want %d", len(cache.messages), communicationsMaxMessageEntries)
+	}
+	if _, ok := cache.getMessage("global-user-0", "message-1", communicationsMaxStaleTTL, now.Add(time.Minute)); ok {
+		t.Fatal("oldest message detail was not globally evicted")
+	}
+
+	for i := 0; i < communicationsMaxMessageDetailsPerUser+2; i++ {
+		cache.setMessage("detail-user", NylasMessage{ID: fmt.Sprintf("detail-%d", i), Body: "body"}, now.Add(time.Duration(i)*time.Second))
+	}
+	if _, ok := cache.getMessage("detail-user", "detail-0", communicationsMaxStaleTTL, now.Add(time.Minute)); ok {
+		t.Fatal("oldest per-user message detail was not evicted")
+	}
+	if _, ok := cache.getMessage("detail-user", fmt.Sprintf("detail-%d", communicationsMaxMessageDetailsPerUser+1), communicationsMaxStaleTTL, now.Add(time.Minute)); !ok {
+		t.Fatal("newest per-user message detail was evicted")
+	}
+}
+
 func TestCommunicationsPrimaryMailboxUsesGmailNativeSearch(t *testing.T) {
 	t.Parallel()
 

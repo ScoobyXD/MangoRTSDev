@@ -12,7 +12,15 @@ const (
 	communicationsMessagesCacheTTL = 5 * time.Minute
 	communicationsMessageCacheTTL  = 10 * time.Minute
 	communicationsMaxStaleTTL      = 6 * time.Hour
+
+	communicationsMaxCachedFolderUsers     = 1024
+	communicationsMaxMessagePageEntries    = 2048
+	communicationsMaxMessageEntries        = 512
+	communicationsMaxMessagePagesPerUser   = 8
+	communicationsMaxMessageDetailsPerUser = 16
 )
+
+const communicationsCacheKeySeparator = "\x1f"
 
 type communicationsCache struct {
 	mu           sync.RWMutex
@@ -72,6 +80,8 @@ func (c *communicationsCache) setFolders(userID string, folders []NylasFolder, n
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.folders[userID] = cachedCommunicationsFolders{folders: cloneNylasFolders(folders), fetchedAt: now}
+	c.evictExpiredFoldersLocked(now, communicationsFoldersCacheTTL+communicationsMaxStaleTTL)
+	c.evictOldestFoldersLocked(communicationsMaxCachedFolderUsers)
 }
 
 func (c *communicationsCache) getMessagePage(userID string, query NylasMessageQuery, maxAge time.Duration, now time.Time) (NylasMessagePage, bool) {
@@ -102,6 +112,9 @@ func (c *communicationsCache) setMessagePage(userID string, query NylasMessageQu
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.messagePages[key] = cachedCommunicationsMessagePage{page: cloneNylasMessagePage(page), fetchedAt: now}
+	c.evictExpiredMessagePagesLocked(now, communicationsMessagesCacheTTL+communicationsMaxStaleTTL)
+	c.evictOldestMessagePagesForUserLocked(userID, communicationsMaxMessagePagesPerUser)
+	c.evictOldestMessagePagesLocked(communicationsMaxMessagePageEntries)
 }
 
 func (c *communicationsCache) getMessage(userID, messageID string, maxAge time.Duration, now time.Time) (NylasMessage, bool) {
@@ -132,6 +145,9 @@ func (c *communicationsCache) setMessage(userID string, message NylasMessage, no
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.messages[key] = cachedCommunicationsMessage{message: cloneNylasMessage(message), fetchedAt: now}
+	c.evictExpiredMessagesLocked(now, communicationsMessageCacheTTL+communicationsMaxStaleTTL)
+	c.evictOldestMessagesForUserLocked(userID, communicationsMaxMessageDetailsPerUser)
+	c.evictOldestMessagesLocked(communicationsMaxMessageEntries)
 }
 
 func (c *communicationsCache) invalidateUser(userID string) {
@@ -142,7 +158,7 @@ func (c *communicationsCache) invalidateUser(userID string) {
 	if userID == "" {
 		return
 	}
-	prefix := userID + "\x1f"
+	prefix := userID + communicationsCacheKeySeparator
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.folders, userID)
@@ -176,7 +192,7 @@ func communicationsMessagePageCacheKey(userID string, query NylasMessageQuery) s
 		strings.TrimSpace(query.SearchQueryNative),
 		strings.TrimSpace(query.Mailbox),
 		unread,
-	}, "\x1f")
+	}, communicationsCacheKeySeparator)
 }
 
 func communicationsMessageCacheKey(userID, messageID string) string {
@@ -185,7 +201,144 @@ func communicationsMessageCacheKey(userID, messageID string) string {
 	if userID == "" || messageID == "" {
 		return ""
 	}
-	return userID + "\x1f" + messageID
+	return userID + communicationsCacheKeySeparator + messageID
+}
+
+func communicationsCacheKeyUserID(key string) string {
+	index := strings.Index(key, communicationsCacheKeySeparator)
+	if index <= 0 {
+		return ""
+	}
+	return key[:index]
+}
+
+func (c *communicationsCache) evictExpiredFoldersLocked(now time.Time, maxAge time.Duration) {
+	for key, entry := range c.folders {
+		if now.Sub(entry.fetchedAt) > maxAge {
+			delete(c.folders, key)
+		}
+	}
+}
+
+func (c *communicationsCache) evictOldestFoldersLocked(maxEntries int) {
+	for len(c.folders) > maxEntries {
+		oldestKey := ""
+		var oldestTime time.Time
+		for key, entry := range c.folders {
+			if oldestKey == "" || entry.fetchedAt.Before(oldestTime) {
+				oldestKey = key
+				oldestTime = entry.fetchedAt
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(c.folders, oldestKey)
+	}
+}
+
+func (c *communicationsCache) evictExpiredMessagePagesLocked(now time.Time, maxAge time.Duration) {
+	for key, entry := range c.messagePages {
+		if now.Sub(entry.fetchedAt) > maxAge {
+			delete(c.messagePages, key)
+		}
+	}
+}
+
+func (c *communicationsCache) evictOldestMessagePagesForUserLocked(userID string, maxEntries int) {
+	for countCommunicationsCacheEntriesForUser(c.messagePages, userID) > maxEntries {
+		oldestKey := ""
+		var oldestTime time.Time
+		for key, entry := range c.messagePages {
+			if communicationsCacheKeyUserID(key) != userID {
+				continue
+			}
+			if oldestKey == "" || entry.fetchedAt.Before(oldestTime) {
+				oldestKey = key
+				oldestTime = entry.fetchedAt
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(c.messagePages, oldestKey)
+	}
+}
+
+func (c *communicationsCache) evictOldestMessagePagesLocked(maxEntries int) {
+	for len(c.messagePages) > maxEntries {
+		oldestKey := ""
+		var oldestTime time.Time
+		for key, entry := range c.messagePages {
+			if oldestKey == "" || entry.fetchedAt.Before(oldestTime) {
+				oldestKey = key
+				oldestTime = entry.fetchedAt
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(c.messagePages, oldestKey)
+	}
+}
+
+func (c *communicationsCache) evictExpiredMessagesLocked(now time.Time, maxAge time.Duration) {
+	for key, entry := range c.messages {
+		if now.Sub(entry.fetchedAt) > maxAge {
+			delete(c.messages, key)
+		}
+	}
+}
+
+func (c *communicationsCache) evictOldestMessagesForUserLocked(userID string, maxEntries int) {
+	for countCommunicationsCacheEntriesForUser(c.messages, userID) > maxEntries {
+		oldestKey := ""
+		var oldestTime time.Time
+		for key, entry := range c.messages {
+			if communicationsCacheKeyUserID(key) != userID {
+				continue
+			}
+			if oldestKey == "" || entry.fetchedAt.Before(oldestTime) {
+				oldestKey = key
+				oldestTime = entry.fetchedAt
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(c.messages, oldestKey)
+	}
+}
+
+func (c *communicationsCache) evictOldestMessagesLocked(maxEntries int) {
+	for len(c.messages) > maxEntries {
+		oldestKey := ""
+		var oldestTime time.Time
+		for key, entry := range c.messages {
+			if oldestKey == "" || entry.fetchedAt.Before(oldestTime) {
+				oldestKey = key
+				oldestTime = entry.fetchedAt
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(c.messages, oldestKey)
+	}
+}
+
+type communicationsCacheEntry interface {
+	cachedCommunicationsMessagePage | cachedCommunicationsMessage
+}
+
+func countCommunicationsCacheEntriesForUser[T communicationsCacheEntry](entries map[string]T, userID string) int {
+	count := 0
+	for key := range entries {
+		if communicationsCacheKeyUserID(key) == userID {
+			count++
+		}
+	}
+	return count
 }
 
 func cloneNylasFolders(folders []NylasFolder) []NylasFolder {
