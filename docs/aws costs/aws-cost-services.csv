@@ -1,13 +1,4 @@
-snapshot_id,captured_date,billing_month,currency,service,amount,share_of_total_percent,source,notes
-aws-cost-2026-05-09-001,2026-05-09,2026-05,USD,Registrar,15.00,34.23,AWS Console Cost and usage screenshot,"Tooltip value for May 2026."
-aws-cost-2026-05-09-001,2026-05-09,2026-05,USD,Relational Database Service,13.75,31.38,AWS Console Cost and usage screenshot,"Tooltip value for May 2026."
-aws-cost-2026-05-09-001,2026-05-09,2026-05,USD,EC2 - Other,5.06,11.55,AWS Console Cost and usage screenshot,"Tooltip value for May 2026."
-aws-cost-2026-05-09-001,2026-05-09,2026-05,USD,Elastic Container Service,2.89,6.60,AWS Console Cost and usage screenshot,"Tooltip value for May 2026."
-aws-cost-2026-05-09-001,2026-05-09,2026-05,USD,Elastic Load Balancing,2.65,6.05,AWS Console Cost and usage screenshot,"Tooltip value for May 2026."
-aws-cost-2026-05-09-001,2026-05-09,2026-05,USD,Others,4.47,10.20,AWS Console Cost and usage screenshot,"Tooltip value for May 2026."
-aws-cost-2026-05-11-001,2026-05-11,2026-05,USD,Relational Database Service,15.45,30.68,AWS Console Cost and usage screenshot,"Tooltip value for May 2026. AWS chart label displayed May 26, which the user identified as incorrect."
-aws-cost-2026-05-11-001,2026-05-11,2026-05,USD,Registrar,15.00,29.79,AWS Console Cost and usage screenshot,"Tooltip value for May 2026. AWS chart label displayed May 26, which the user identified as incorrect."
-aws-cost-2026-05-11-001,2026-05-11,2026-05,USD,EC2 - Other,6.80,13.50,AWS Console Cost and usage screenshot,"Tooltip value for May 2026. AWS chart label displayed May 26, which the user identified as incorrect."
-aws-cost-2026-05-11-001,2026-05-11,2026-05,USD,Elastic Container Service,3.92,7.78,AWS Console Cost and usage screenshot,"Tooltip value for May 2026. AWS chart label displayed May 26, which the user identified as incorrect."
-aws-cost-2026-05-11-001,2026-05-11,2026-05,USD,Elastic Load Balancing,3.55,7.05,AWS Console Cost and usage screenshot,"Tooltip value for May 2026. AWS chart label displayed May 26, which the user identified as incorrect."
-aws-cost-2026-05-11-001,2026-05-11,2026-05,USD,Others,5.64,11.20,AWS Console Cost and usage screenshot,"Tooltip value for May 2026. AWS chart label displayed May 26, which the user identified as incorrect."
+captured_date,billing_month,currency,Relational Database Service,Registrar,EC2 - Other,Elastic Container Service,Elastic Load Balancing,Others,Total
+2026-05-09,2026-05,USD,13.75,15.00,5.06,2.89,2.65,4.47,43.82
+2026-05-11,2026-05,USD,15.45,15.00,6.80,3.92,3.55,5.64,50.36
+2026-05-12,2026-05,USD,16.21,15.00,7.96,4.60,4.17,6.48,54.41

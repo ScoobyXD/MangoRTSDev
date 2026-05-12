@@ -1,17 +1,3 @@
-This startup is building B2B software for:
-- millions of companies
-- millions of users and AI agents per company
-- millions of UI elements and simultaneous background operations
-- strict latency culture with sub-100ms targets
-- strict robustness and reliability
-- future headless AI-agent operation through APIs. This will be the main way entities will interact with MangoRTS in the future
-- millions of AI agents using APIs concurrently
-- AWS-hosted app and database infrastructure, with code written efficiently to minimize cloud cost
-Default engineering rule:
-Find the simplest solution possible. Only increase complexity when needed.
-Write code in an architecture where it would be possible for 20 agents to develop on this app simultaneously. (We have already been making efforts in this)
-
-======
 pages:
  /login, /accept-invite, /forgot-password, /reset-password, /communications
  
@@ -48,37 +34,32 @@ New Features:
 16. Really really need to check the security measures and dangers of idle machine or if someone can do damage or sql injections if the computer is left unattended
 17. I HATE BAD SOFTWARE I HATE IT. Make sure every thing, every feature, every possible thing is searchable. Especially in settings and setup.
 18. I like the micro graphics from foxrockettstudio from instagram
-
+19. the internal messaging system has to look very official because many legacy companies make it an official way of doing things.
 ========
-
+General changes:
+1. the caching still doesnt work well on company explorer logic gate arena, it doesnt work for nodes in logic gate arena kanban board, i still get whenever i move around pages including email. 
+	s. nylas still does inbound posting but much rarer and not as consistenly
 PROBLEM:
-1. The aws site logic gate arena is not loading
-2. Look at Nylas api call logs to see how much were actually pulling
+1. Getting cucked my Nylas. can definitely make efficiencies pulling stuff from them .Look at Nylas api call logs to see how much were actually pulling. 
 LATER: need to do an audit on how well equiped the app is for multiple people using it from different accounts all at once.
 
 
-Settings:
-
-Later:
-1. When you have successfuly accepted invite and you are now a user, you should get some kind of confirmation email saying you have successfully signed up with <name of company>
-
-Communications:
-
+Editor changes
+1. Outbound email when node is done.
+2. @ mentions summoning or notifying user.
 
 Email:
-1. There was an effort to make the communication email list update itself whenever the email account gets a new email, however, it does not not work. i tested it and it does not autoupdate the email list, i have to manually refresh it
-	a. however polling would be a really shit option so figure something else out.
-2. I think you need to switch to a dev environment instead of sandbox.
-	a. see if that fixes rate limit problem, if it doesnt then youll have to do caching instead of querrying a bunch each time.
-
+1. We need to capture history of what email from primary moved to what triage and then to what logic gate so we can fine tune hermes agent
+2. have a way to just easily shift multi select and delete many emails
+3. I think we put wayyyyy too much code in the communications page alone and needs to be broken apart. also for nodes.
+	a. for example nodeworkspacesurface keeps getting a merge conflict.
+4. Need the email list to be able to keep scrolling down lol
 
 2. Try to create a shared inbox feature with other users in the same company like how Front (the tech company) has it.
 	a. same goes for read receipts
 	b. team comments.
 	c. shared drafts
-
-
-5. Have a feature where I can right click on an email card and there should be an option to "turn to a node and send to a logic gate" and there should emerge this space on the right hand of the screen where i can see the editor module pre-filled with information from the email and then an option to search and select which logic gate i want to put this into and autoamtically put it into its "pending" column.
+	
 6. There should be a button in communications to show an email kanban board on the right side of the screen. In it should be very similar to the group by mode of the logic gate arena kanban board.
 	a. The columns should default be the RACI matrix which is from left to right: Responsible, Accountable, Consulted, and Informed.
 	b. the rows should default be 5 Urgent all the way to 0 unnassigned on the bottom.
@@ -88,33 +69,22 @@ Email:
 		i. Of course, that means when i double click on a node here, it will pop open the editor with the node's information in it, much much like the popup node in the logic gate arena kanban board when you double click on a node.
 	f. an extra bonus would be if here too on the email kanban board you can right click on a node card and send to a logic gate where you can search pick a logic gate to send it to and it will uatomatically send it to the pending column of that logic gate.
 7. Keep the UI consistent to the font and colors and styling that we have right now.
+1. When you have successfuly accepted invite and you are now a user, you should get some kind of confirmation email saying you have successfully signed up with <name of company>
 
 after that:
-1. 3 inboxes, triage (external/all) ||| shared inboxes, internal inboxes (internal notifications).
 2. mentions with @
-3. Chats (team commenting) and emails attached to the literal node itself and a timeline of those
 4. Shared inboxes and email sharing
 5. Internal and external read receipts.
 
 
-conversation:
-	have a way to just easily shift multi select and delete many emails
-	also users are very vey used to to having the navigation column on the left
-	make left side bar collapse
-the internal messaging system has to look very official because many legacy companies make it an official way of doing things.
-
-Triage inbox (regular boring inbox view for email)
-	Chat is a mandatory preset field on nodes in logic gates. 
-	Super important to have a space to discuss how this process is working at a high level. 
-	Communications should have chats or posts that can be uploaded or downloaded but definitely not something for an MVP right now. 
-	communications tab should have Triage inbox, logic gate inbox and chat section that looks like a combination of ours and linear'sacred
 Logic gate inbox
 Can group by and organize by columns (I have 2 photos for the 2 groupings)
 On the right side of the kanban board will be the email and chat communications of that thing. Same will occur for the node popup. 
 
-
 Things to do bar:
 1. Have a pinned node section.
+2. There should be a notion board like thing where you can see all nodes in a timeline view.
+3. This 
 
 the bottom of the page should be the thing to do task bar which is chronologically ordered left to right for the day today. basically its a schedule bar
 
@@ -255,15 +225,6 @@ IPv4 only: https://d-916771bd28.awsapps.com/start
 pass:GH829!
 
 ==============================================================
-ORCHESTRATOR PROMPT:
-Spin up new Codex instance with its own branch and worktree:
-You are my codex cli composer in main. Please create a new git worktree for a Codex worker from main. Name the branch codex/<name> and place it at ..\MangoOSDev-<name>. Before creating it, make sure main is up to date with origin/main using ff-only. When done, start a new codex instance at that new branch in another powershell window
-
-Commit branch, merge with main, and run schema scripts, stop before pushing to github (i did this on purpose):
-You are my codex cli composer in main. Please commit the worker branch and make sure its clean. Then update main with origin/main using --ff-only. Merge with --no-ff using message "Merge branch 'codex/<name>'". Resolve straightforward conflicts, run the relevant tests/build, and stop before pushing. Make sure to give me a copy-pastable script to run a DB schema script on the terminal that has DB env vars set. 
-
-
-==============================================================
 
 commands to get started:
 aws sso login --profile ScoobyXD
@@ -273,6 +234,13 @@ $env:AWS_DEFAULT_REGION="us-west-1"
 aws sts get-caller-identity
 
 BACKEND:
+
+-----!!!!!!copy-pastable!!!!!!!!!:
+
+aws sso login --profile mangorts-dev
+.\scripts\start_local_cognito_backend.ps1 -AwsProfile mangorts-dev -StopExisting
+
+--------------------------
 
 running new sql schema:
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/db/migrations/<name>.sql
@@ -288,11 +256,7 @@ aws configure --profile mangorts-dev
 	Default output format: json
 
 
------new copy-pastable:
 
-aws sso login --profile mangorts-dev
-
-.\scripts\start_local_cognito_backend.ps1 -AwsProfile mangorts-dev -StopExisting
 
 -----
 
@@ -341,6 +305,13 @@ infra\aws-dev\backend.hcl:1:bucket  = "mangorts-dev-terraform-state-scoobyxd-686
 AWS_DEV_DEPLOY_ROLE_ARN = arn:aws:iam::686458136219:role/mangorts-dev-github-deploy
 arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/db-password-Icu8p0
 =====================
+
+Visual Studio Local Tunneling:
+Port: 8080
+Forwarded Address: https://z7tp8lx0-8080.usw3.devtunnels.ms/
+Visibility: Public
+Origin: User Forwarded
+
 
 GITHUB
 run after manual deployment:
@@ -484,6 +455,9 @@ API Arn key: arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/n
 state secret arn: arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/nylas-state-secret-ytLKXO
 
 local env:
+local tunneling URL: https://z7tp8lx0-8080.usw3.devtunnels.ms/  
+local tunneling port: 8080
+
 webhook secret: 2rCQGsD4oB-HARSEWbFE
 webhook secret arn: arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/local/nylas-webhook-secret-GqLFxK
 

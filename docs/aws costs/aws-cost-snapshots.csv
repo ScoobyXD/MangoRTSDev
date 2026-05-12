@@ -1,3 +1,0 @@
-snapshot_id,captured_date,billing_month,currency,current_month_total,month_change_percent,forecast_month_end_total,forecast_status,savings_opportunities_status,source,notes
-aws-cost-2026-05-09-001,2026-05-09,2026-05,USD,43.82,22963,,data_unavailable,not_enabled,AWS Console Cost and usage screenshot,"Initial snapshot from user-provided screenshot. Forecasted month end displayed Data unavailable."
-aws-cost-2026-05-11-001,2026-05-11,2026-05,USD,50.36,11612,,data_unavailable,not_enabled,AWS Console Cost and usage screenshot,"User-provided screenshot captured on 2026-05-11. AWS chart label displayed May 26, which the user identified as incorrect. Forecasted month end displayed Data unavailable."

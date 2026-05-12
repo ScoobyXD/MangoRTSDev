@@ -63,10 +63,8 @@ type ChatThreadNode = {
 };
 
 const EMAIL_DRAG_MIME = "application/x-mango-email-message";
-const TIMELINE_OPTIONS: TimelineGranularity[] = ["day", "week", "month", "year"];
 const CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 const CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES = 12 * 1024 * 1024;
-const CHAT_PANE_DEFAULT_HEIGHT = 320;
 const CHAT_PANE_MIN_HEIGHT = 220;
 const CHAT_PANE_MAX_HEIGHT = 760;
 const TEXT_BLOCK_MIN_HEIGHT = CHAT_PANE_MIN_HEIGHT;
@@ -77,6 +75,9 @@ const TEXT_BLOCK_PADDING_TOP = 12;
 const TEXT_BLOCK_PADDING_RIGHT = 13;
 const TEXT_BLOCK_PADDING_BOTTOM = 12;
 const TEXT_BLOCK_PADDING_LEFT = 13;
+const TEXT_BLOCK_HEADER_CHROME_HEIGHT = 38;
+const TEXT_BLOCK_DEFAULT_CARD_HEIGHT = TEXT_BLOCK_MIN_HEIGHT + TEXT_BLOCK_HEADER_CHROME_HEIGHT;
+const CHAT_PANE_DEFAULT_HEIGHT = TEXT_BLOCK_DEFAULT_CARD_HEIGHT;
 const DEFAULT_TEXT_BLOCK_TITLE = "Hello I am a title";
 
 function projectionsKey(items: NodeProjectionItem[]): string {
@@ -288,141 +289,12 @@ const ArrowRightIcon: React.FC<{ color: string }> = ({ color }) => (
   </svg>
 );
 
-const DisclosureIcon: React.FC<{ open: boolean; color: string }> = ({ open, color }) => (
-  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", transform: open ? "rotate(180deg)" : "none", transition: "transform 120ms ease" }}>
-    <path d="M4 6.2 8 10.2 12 6.2" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const CheckIcon: React.FC<{ color: string }> = ({ color }) => (
-  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
-    <path d="M3.2 8.2 6.4 11.4 12.9 4.6" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
 const MailIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="15" height="15" viewBox="0 0 18 18" style={{ display: "block" }}>
     <path d="M2.8 5.1h12.4v8H2.8z" fill="none" stroke={color} strokeWidth="1.45" />
     <path d="m3.4 5.7 5.6 4.1 5.6-4.1" fill="none" stroke={color} strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
-
-type TimelineGranularitySelectProps = {
-  value: TimelineGranularity;
-  onChange: (value: TimelineGranularity) => void;
-  accent: string;
-  surfaceText: string;
-  panelBackground: string;
-};
-
-const TimelineGranularitySelect: React.FC<TimelineGranularitySelectProps> = ({
-  value,
-  onChange,
-  accent,
-  surfaceText,
-  panelBackground,
-}) => {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  useCloseFloatingMenu(open, rootRef, close);
-  return (
-    <div ref={rootRef} style={{ position: "relative", minWidth: 0 }}>
-      <button
-        type="button"
-        aria-label="Timeline granularity"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((nextOpen) => !nextOpen)}
-        style={{
-          width: "100%",
-          minHeight: 30,
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 1fr) 16px",
-          alignItems: "center",
-          gap: 5,
-          border: `1px solid ${open ? accent : "rgba(255, 136, 32, 0.44)"}`,
-          borderRadius: 6,
-          background: panelBackground,
-          color: surfaceText,
-          cursor: "pointer",
-          fontSize: 11,
-          fontWeight: 800,
-          letterSpacing: 0,
-          padding: "0 8px",
-          textAlign: "left",
-          textTransform: "capitalize",
-        }}
-      >
-        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</span>
-        <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: accent }}>
-          <DisclosureIcon open={open} color={accent} />
-        </span>
-      </button>
-      {open && (
-        <div
-          role="listbox"
-          aria-label="Timeline granularity"
-          className="company-explorer-scroll"
-          style={{
-            position: "absolute",
-            zIndex: 40,
-            top: "calc(100% + 6px)",
-            left: 0,
-            width: "min(148px, 64vw)",
-            maxHeight: 220,
-            overflowY: "auto",
-            overflowX: "hidden",
-            padding: 5,
-            border: "1px solid rgba(255, 136, 32, 0.58)",
-            borderRadius: 8,
-            background: "#ffffff",
-            color: "#000000",
-            boxShadow: "0 12px 28px rgba(0,0,0,0.14), 0 0 0 1px rgba(255,136,32,0.12) inset",
-          }}
-        >
-          {TIMELINE_OPTIONS.map((option) => {
-            const selected = option === value;
-            return (
-              <button
-                key={option}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                onClick={() => {
-                  onChange(option);
-                  setOpen(false);
-                }}
-                style={{
-                  width: "100%",
-                  minHeight: 32,
-                  display: "grid",
-                  gridTemplateColumns: "minmax(0, 1fr) 18px",
-                  alignItems: "center",
-                  gap: 8,
-                  border: "none",
-                  borderRadius: 6,
-                  background: selected ? "rgba(255, 136, 32, 0.18)" : "#ffffff",
-                  color: "#000000",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  letterSpacing: 0,
-                  padding: "7px 8px",
-                  textAlign: "left",
-                  textTransform: "capitalize",
-                }}
-              >
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option}</span>
-                <span aria-hidden="true" style={{ display: "grid", placeItems: "center" }}>{selected ? <CheckIcon color={accent} /> : null}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-};
 
 export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   companyID,
@@ -456,7 +328,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [activeChatBlockID, setActiveChatBlockID] = useState("");
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set());
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
-  const [timelineGranularity, setTimelineGranularity] = useState<TimelineGranularity>("day");
   const [emailPickerOpen, setEmailPickerOpen] = useState(false);
   const [selectedEmailID, setSelectedEmailID] = useState("");
   const [dropActive, setDropActive] = useState(false);
@@ -879,15 +750,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       }}
     >
       <div style={{ display: "grid", gridTemplateColumns: compact ? "58px minmax(0, 1fr)" : "62px minmax(0, 1fr) minmax(0, 0.42fr)", columnGap: 8, rowGap: 12, alignItems: "start", minWidth: 0 }}>
-        <div style={{ position: "sticky", top: 0, zIndex: 2, padding: "2px 0 10px", background: "inherit" }}>
-          <TimelineGranularitySelect
-            value={timelineGranularity}
-            onChange={setTimelineGranularity}
-            accent={accent}
-            surfaceText={surfaceText}
-            panelBackground={panelBackground}
-          />
-        </div>
+        <div aria-hidden="true" style={{ position: "sticky", top: 0, zIndex: 2, minHeight: 32, padding: "2px 0 10px", background: "inherit" }} />
 
         <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", alignItems: "center", gap: 8, padding: "2px 0 10px", background: "inherit" }}>
           <button
