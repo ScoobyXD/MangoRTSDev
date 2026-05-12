@@ -1,4 +1,8 @@
 import { apiFetchJSON } from "../../auth/cognitoAuth.js";
+import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders.js";
+import type { KanbanBoard, KanbanCard } from "../../modules/kanban/shared.js";
+import type { NodeRecord } from "../../modules/node-map/shared.js";
+import type { LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 
 export type EmailProvider = "google" | "microsoft";
 
@@ -68,6 +72,23 @@ export type CommunicationsSharedInbox = {
   parent_folder_id?: string;
   folder_kind: "communications";
   name: string;
+  position: number;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
+export type CommunicationsTriageItem = {
+  user_id: string;
+  message_id: string;
+  message: EmailMessage;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
+export type UserLogicGateShortcut = {
+  user_id: string;
+  company_id: string;
+  logic_gate_id: string;
   position: number;
   created_timestamp: string;
   updated_timestamp: string;
@@ -208,6 +229,110 @@ export async function createCommunicationsSharedInbox(input: {
     }),
   });
   return cloneSharedInbox(folder);
+}
+
+export async function listCommunicationsTriageItems(): Promise<CommunicationsTriageItem[]> {
+  const payload = await apiFetchJSON<{ items?: CommunicationsTriageItem[] }>("/v1/communications/triage");
+  return (payload.items ?? []).map(cloneTriageItem);
+}
+
+export async function addMessagesToMyTriage(messageIDs: string[]): Promise<CommunicationsTriageItem[]> {
+  const payload = await apiFetchJSON<{ items?: CommunicationsTriageItem[] }>("/v1/communications/triage", {
+    method: "POST",
+    body: JSON.stringify({ message_ids: cleanIDs(messageIDs) }),
+  });
+  return (payload.items ?? []).map(cloneTriageItem);
+}
+
+export async function removeMessageFromMyTriage(messageID: string): Promise<void> {
+  await apiFetchJSON<{ status?: string }>(`/v1/communications/triage/${encodeURIComponent(messageID)}`, { method: "DELETE" });
+}
+
+export async function listLogicGates(companyID: string): Promise<LogicGateRecord[]> {
+  const params = new URLSearchParams({ company_id: companyID });
+  const payload = await apiFetchJSON<{ logic_gates?: LogicGateRecord[] }>(`/v1/logic-gates?${params.toString()}`);
+  return (payload.logic_gates ?? []).map((logicGate) => ({ ...logicGate }));
+}
+
+export async function listLogicGateFolders(companyID: string): Promise<CompanyExplorerFolder[]> {
+  const params = new URLSearchParams({ company_id: companyID, folder_kind: "logic_gate" });
+  const payload = await apiFetchJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?${params.toString()}`);
+  return (payload.folders ?? []).map((folder) => ({ ...folder }));
+}
+
+export async function listLogicGateFolderItems(companyID: string): Promise<CompanyExplorerFolderItem[]> {
+  const params = new URLSearchParams({ company_id: companyID, item_type: "logic_gate" });
+  const payload = await apiFetchJSON<{ folder_items?: CompanyExplorerFolderItem[] }>(`/v1/company-explorer/folder-items?${params.toString()}`);
+  return (payload.folder_items ?? []).map((item) => ({ ...item }));
+}
+
+export async function listMyLogicGateShortcuts(companyID: string): Promise<UserLogicGateShortcut[]> {
+  const params = new URLSearchParams({ company_id: companyID });
+  const payload = await apiFetchJSON<{ shortcuts?: UserLogicGateShortcut[] }>(`/v1/communications/my-logic-gates?${params.toString()}`);
+  return (payload.shortcuts ?? []).map((item) => ({ ...item }));
+}
+
+export async function addMyLogicGateShortcuts(companyID: string, logicGateIDs: string[]): Promise<UserLogicGateShortcut[]> {
+  const payload = await apiFetchJSON<{ shortcuts?: UserLogicGateShortcut[] }>("/v1/communications/my-logic-gates", {
+    method: "POST",
+    body: JSON.stringify({ company_id: companyID, logic_gate_ids: cleanIDs(logicGateIDs) }),
+  });
+  return (payload.shortcuts ?? []).map((item) => ({ ...item }));
+}
+
+export async function removeMyLogicGateShortcut(companyID: string, logicGateID: string): Promise<void> {
+  const params = new URLSearchParams({ company_id: companyID });
+  await apiFetchJSON<{ status?: string }>(`/v1/communications/my-logic-gates/${encodeURIComponent(logicGateID)}?${params.toString()}`, { method: "DELETE" });
+}
+
+export async function convertTriageMessagesToLogicGate(input: {
+  companyID: string;
+  logicGateID: string;
+  messageIDs: string[];
+}): Promise<{
+  board: KanbanBoard;
+  cards: KanbanCard[];
+  nodes: NodeRecord[];
+  deleted_message_ids: string[];
+}> {
+  return apiFetchJSON<{
+    board: KanbanBoard;
+    cards: KanbanCard[];
+    nodes: NodeRecord[];
+    deleted_message_ids: string[];
+  }>("/v1/communications/triage/convert", {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      logic_gate_id: input.logicGateID,
+      message_ids: cleanIDs(input.messageIDs),
+    }),
+  });
+}
+
+export async function revertKanbanCardToMyTriage(input: {
+  companyID: string;
+  boardID: string;
+  cardID: string;
+}): Promise<{
+  triage_item: CommunicationsTriageItem;
+  deleted_node_id: string;
+  deleted_card_id: string;
+  board_id: string;
+}> {
+  return apiFetchJSON<{
+    triage_item: CommunicationsTriageItem;
+    deleted_node_id: string;
+    deleted_card_id: string;
+    board_id: string;
+  }>("/v1/communications/triage/revert-card", {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      board_id: input.boardID,
+      card_id: input.cardID,
+    }),
+  });
 }
 
 export function invalidateCommunicationsCache(scope?: { status?: boolean; folders?: boolean; messagePages?: boolean; messages?: boolean }): void {
@@ -374,6 +499,25 @@ function cloneSharedInboxes(inboxes: CommunicationsSharedInbox[]): Communication
 
 function cloneSharedInbox(inbox: CommunicationsSharedInbox): CommunicationsSharedInbox {
   return { ...inbox };
+}
+
+function cloneTriageItem(item: CommunicationsTriageItem): CommunicationsTriageItem {
+  return {
+    ...item,
+    message: cloneMessage(item.message),
+  };
+}
+
+function cleanIDs(values: string[]): string[] {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const value of values) {
+    const clean = value.trim();
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    ids.push(clean);
+  }
+  return ids;
 }
 
 function listMessageParamsFromCacheKey(path: string): ListMessagesParams {

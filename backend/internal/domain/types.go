@@ -97,6 +97,46 @@ type UserEmailConnection struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
+type EmailAddressSnapshot struct {
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email"`
+}
+
+type EmailMessageSnapshot struct {
+	ID        string                 `json:"id"`
+	ThreadID  string                 `json:"thread_id,omitempty"`
+	Subject   string                 `json:"subject"`
+	Snippet   string                 `json:"snippet,omitempty"`
+	Body      string                 `json:"body,omitempty"`
+	Date      int64                  `json:"date,omitempty"`
+	Unread    bool                   `json:"unread"`
+	Starred   bool                   `json:"starred"`
+	From      []EmailAddressSnapshot `json:"from,omitempty"`
+	To        []EmailAddressSnapshot `json:"to,omitempty"`
+	Cc        []EmailAddressSnapshot `json:"cc,omitempty"`
+	Bcc       []EmailAddressSnapshot `json:"bcc,omitempty"`
+	ReplyTo   []EmailAddressSnapshot `json:"reply_to,omitempty"`
+	Folders   []string               `json:"folders,omitempty"`
+	FolderIDs []string               `json:"folder_ids,omitempty"`
+}
+
+type CommunicationsTriageItem struct {
+	UserID           string               `json:"user_id"`
+	MessageID        string               `json:"message_id"`
+	Message          EmailMessageSnapshot `json:"message"`
+	CreatedTimestamp time.Time            `json:"created_timestamp"`
+	UpdatedTimestamp time.Time            `json:"updated_timestamp"`
+}
+
+type UserLogicGateShortcut struct {
+	UserID           string    `json:"user_id"`
+	CompanyID        string    `json:"company_id"`
+	LogicGateID      string    `json:"logic_gate_id"`
+	Position         int       `json:"position"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
 type Node struct {
 	CompanyID string `json:"company_id"`
 	NodeID    string `json:"node_id"`

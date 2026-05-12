@@ -39,6 +39,14 @@ type Repository interface {
 	UpsertUserEmailConnection(input UserEmailConnectionInput) (domain.UserEmailConnection, error)
 	UpdateUserEmailConnectionStatus(userID, status string) (domain.UserEmailConnection, error)
 	DeleteUserEmailConnection(userID string) error
+	ListCommunicationsTriageItems(userID string) ([]domain.CommunicationsTriageItem, error)
+	UpsertCommunicationsTriageItem(userID string, message domain.EmailMessageSnapshot) (domain.CommunicationsTriageItem, error)
+	DeleteCommunicationsTriageItem(userID, messageID string) error
+	ConvertCommunicationsTriageItems(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error)
+	RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error)
+	ListUserLogicGateShortcuts(userID, companyID string) ([]domain.UserLogicGateShortcut, error)
+	UpsertUserLogicGateShortcuts(userID, companyID string, logicGateIDs []string) ([]domain.UserLogicGateShortcut, error)
+	DeleteUserLogicGateShortcut(userID, companyID, logicGateID string) error
 	CreateNode(companyID, title string) (domain.Node, error)
 	UpdateNode(input UpdateNodeInput) (domain.Node, error)
 	UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error)
@@ -106,6 +114,8 @@ const MapEntityBatchMaxItems = 200
 const MapEntityBatchMaxRelationships = 500
 
 const CompanyExplorerFolderItemBatchMaxItems = 200
+const CommunicationsTriageBatchMaxItems = 50
+const UserLogicGateShortcutBatchMaxItems = 200
 
 type MapEntityBatchItemInput struct {
 	ClientID string
@@ -169,6 +179,34 @@ type CompanyExplorerRelationshipDeleteResult struct {
 	ItemType        string   `json:"item_type"`
 	ItemID          string   `json:"item_id"`
 	RelationshipIDs []string `json:"relationship_ids"`
+}
+
+type CommunicationsTriageConversionInput struct {
+	UserID      string
+	CompanyID   string
+	LogicGateID string
+	MessageIDs  []string
+}
+
+type CommunicationsTriageConversionResult struct {
+	Board             domain.KanbanBoard  `json:"board"`
+	Cards             []domain.KanbanCard `json:"cards"`
+	Nodes             []domain.Node       `json:"nodes"`
+	DeletedMessageIDs []string            `json:"deleted_message_ids"`
+}
+
+type CommunicationsTriageRevertInput struct {
+	UserID    string
+	CompanyID string
+	BoardID   string
+	CardID    string
+}
+
+type CommunicationsTriageRevertResult struct {
+	TriageItem    domain.CommunicationsTriageItem `json:"triage_item"`
+	DeletedNodeID string                          `json:"deleted_node_id"`
+	DeletedCardID string                          `json:"deleted_card_id"`
+	BoardID       string                          `json:"board_id"`
 }
 
 const KanbanMaxCardsLimit = 500

@@ -1238,6 +1238,41 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     }
   }, [cards, kanbanCommandContext]);
 
+  const revertCardsToMyTriage = useCallback(async (cardIDs: string[]) => {
+    const ids = new Set(cardIDs);
+    if (ids.size === 0) return;
+    const targetCards = cards.filter((card) => ids.has(card.card_id));
+    if (targetCards.length === 0) return;
+    const previousCards = cards;
+    setCards((current) => current.filter((card) => !ids.has(card.card_id)));
+    setSelectedCardIDs((current) => new Set(Array.from(current).filter((cardID) => !ids.has(cardID))));
+    setSelectionAnchorCardID((current) => (ids.has(current) ? "" : current));
+    setCardContextMenu(null);
+    setError("");
+    try {
+      for (const card of targetCards) {
+        const result = await requestJSON<{ deleted_node_id?: string; board_id?: string; deleted_card_id?: string }>("/v1/communications/triage/revert-card", {
+          method: "POST",
+          body: JSON.stringify({
+            company_id: companyID,
+            board_id: card.board_id,
+            card_id: card.card_id,
+          }),
+        });
+        const deletedNodeID = result.deleted_node_id?.trim();
+        if (deletedNodeID) {
+          invalidateNodeRecordStoreCaches(apiBase, companyID, deletedNodeID);
+          removeNodeRelationshipGraphNode(apiBase, companyID, deletedNodeID);
+        }
+        invalidateKanbanBoardContentsCache(apiBase, companyID, result.board_id?.trim() || card.board_id);
+      }
+      invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
+    } catch {
+      setError("Only cards created from My Triage can be reverted.");
+      setCards(previousCards);
+    }
+  }, [apiBase, boardID, cards, companyID, requestJSON]);
+
   const removeNodes = useCallback(async (nodeIDs: string[]) => {
     const ids = new Set(nodeIDs.map((nodeID) => nodeID.trim()).filter(Boolean));
     if (ids.size === 0) return;
@@ -1967,6 +2002,14 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
               {contextCard.is_issue ? "Clear Issue" : "Mark Issue"}
             </button>
           )}
+          <button
+            type="button"
+            style={contextMenuButtonStyle}
+            onClick={() => void revertCardsToMyTriage(contextCardSelectionIDs)}
+            {...contextMenuHoverHandlers}
+          >
+            Revert back to My Triage
+          </button>
           <button
             type="button"
             style={{ ...contextMenuButtonStyle, color: "#c62828" }}
