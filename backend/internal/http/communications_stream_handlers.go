@@ -120,13 +120,24 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, "invalid_webhook_json")
 		return
 	}
+	receiptKey, duplicate := s.nylasWebhooks.remember(body, time.Now().UTC())
+	if duplicate {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
 	grantUserIDs := map[string]string{}
 	missingGrants := map[string]struct{}{}
+	processedChanges := map[string]struct{}{}
 	for _, change := range changes {
 		grantID := strings.TrimSpace(change.GrantID)
 		if !isCommunicationsMailboxTrigger(change.Trigger) || grantID == "" {
 			continue
 		}
+		changeKey := nylasWebhookChangeKey(grantID, change)
+		if _, processed := processedChanges[changeKey]; processed {
+			continue
+		}
+		processedChanges[changeKey] = struct{}{}
 		if _, missing := missingGrants[grantID]; missing {
 			continue
 		}
@@ -138,6 +149,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 				continue
 			}
 			if err != nil {
+				s.nylasWebhooks.forget(receiptKey)
 				writeError(w, http.StatusInternalServerError, "failed_to_load_email_connection")
 				return
 			}
@@ -207,14 +219,36 @@ func parseNylasWebhookChanges(body []byte) ([]nylasWebhookChange, error) {
 	}}, nil
 }
 
+func nylasWebhookChangeKey(grantID string, change nylasWebhookChange) string {
+	return strings.Join([]string{
+		strings.TrimSpace(grantID),
+		normalizedNylasMailboxTrigger(change.Trigger),
+		strings.TrimSpace(change.MessageID),
+	}, communicationsCacheKeySeparator)
+}
+
 func isCommunicationsMailboxTrigger(trigger string) bool {
+	return normalizedNylasMailboxTrigger(trigger) != ""
+}
+
+func normalizedNylasMailboxTrigger(trigger string) string {
 	trigger = strings.TrimSpace(strings.ToLower(trigger))
-	return strings.HasPrefix(trigger, "message.created") ||
-		strings.HasPrefix(trigger, "message.updated") ||
-		strings.HasPrefix(trigger, "message.deleted") ||
-		strings.HasPrefix(trigger, "folder.created") ||
-		strings.HasPrefix(trigger, "folder.updated") ||
-		strings.HasPrefix(trigger, "folder.deleted")
+	switch {
+	case strings.HasPrefix(trigger, "message.created"):
+		return "message.created"
+	case strings.HasPrefix(trigger, "message.updated"):
+		return "message.updated"
+	case strings.HasPrefix(trigger, "message.deleted"):
+		return "message.deleted"
+	case strings.HasPrefix(trigger, "folder.created"):
+		return "folder.created"
+	case strings.HasPrefix(trigger, "folder.updated"):
+		return "folder.updated"
+	case strings.HasPrefix(trigger, "folder.deleted"):
+		return "folder.deleted"
+	default:
+		return ""
+	}
 }
 
 func (s *Server) applyNylasWebhookCacheInvalidation(userID string, change nylasWebhookChange) {

@@ -83,3 +83,23 @@ func TestCORSOmitsUnlistedOrigin(t *testing.T) {
 		t.Fatalf("allow origin = %q, want empty for unlisted origin", got)
 	}
 }
+
+func TestShouldLogRequestSuppressesSuccessfulNylasWebhookPosts(t *testing.T) {
+	t.Setenv("LOG_SUCCESSFUL_NYLAS_WEBHOOKS", "")
+
+	req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", nil)
+	if shouldLogRequest(req, http.StatusOK) {
+		t.Fatal("successful Nylas webhook POST should be suppressed by default")
+	}
+	if !shouldLogRequest(req, http.StatusUnauthorized) {
+		t.Fatal("failed Nylas webhook POST should still be logged")
+	}
+	if !shouldLogRequest(httptest.NewRequest(http.MethodGet, "/nylas/webhook", nil), http.StatusOK) {
+		t.Fatal("Nylas webhook challenge GET should still be logged")
+	}
+
+	t.Setenv("LOG_SUCCESSFUL_NYLAS_WEBHOOKS", "true")
+	if !shouldLogRequest(req, http.StatusOK) {
+		t.Fatal("LOG_SUCCESSFUL_NYLAS_WEBHOOKS=true should log successful webhook posts")
+	}
+}

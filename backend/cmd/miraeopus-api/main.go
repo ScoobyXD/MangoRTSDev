@@ -253,8 +253,32 @@ func withLogging(next http.Handler) http.Handler {
 		start := time.Now()
 		rec := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		log.Printf("%s %s status=%d bytes=%d duration=%s", r.Method, r.URL.Path, rec.status, rec.bytes, time.Since(start))
+		if shouldLogRequest(r, rec.status) {
+			log.Printf("%s %s status=%d bytes=%d duration=%s", r.Method, r.URL.Path, rec.status, rec.bytes, time.Since(start))
+		}
 	})
+}
+
+func shouldLogRequest(r *http.Request, status int) bool {
+	if r.Method == http.MethodPost && r.URL.Path == "/nylas/webhook" && status < http.StatusBadRequest {
+		return envBoolDefault("LOG_SUCCESSFUL_NYLAS_WEBHOOKS", false)
+	}
+	return true
+}
+
+func envBoolDefault(key string, fallback bool) bool {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 type loggingResponseWriter struct {
