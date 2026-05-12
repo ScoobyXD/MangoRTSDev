@@ -2093,6 +2093,14 @@ func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *test
 		t.Fatalf("folder item position = %d, want 4242", payload.FolderItems[0].Position)
 	}
 
+	boardsBeforeArena, err := repo.ListKanbanBoards(companyID, store.KanbanBoardQuery{LogicGateID: createdID, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListKanbanBoards before arena load failed: %v", err)
+	}
+	if len(boardsBeforeArena) != 0 {
+		t.Fatalf("batch create eagerly created %d arena boards, want lazy arena repair", len(boardsBeforeArena))
+	}
+
 	arenaReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gate-arena?company_id="+companyID+"&logic_gate_id="+createdID, nil)
 	arenaRec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(arenaRec, arenaReq)

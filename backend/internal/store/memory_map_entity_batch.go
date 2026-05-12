@@ -93,7 +93,8 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 			CreatedTimestamp: now,
 		}
 		r.logicGates[key(input.CompanyID, created.LogicGateID)] = created
-		r.ensureLogicGateKanbanBoardLocked(input.CompanyID, created.LogicGateID, created.Header)
+		// Logic Gate Arena boards are derived state repaired by /v1/logic-gate-arena.
+		// Keep batch creation on canonical map/explorer rows so arena repair cannot block creates.
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID
 		result.EntityMappings = append(result.EntityMappings, MapEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.LogicGateID})
