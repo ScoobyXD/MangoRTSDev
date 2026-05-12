@@ -8,7 +8,14 @@ import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subs
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
-import { createKanbanBoard, getLogicGateArenaView, listKanbanBoards, updateKanbanBoard } from "./kanbanApi";
+import {
+  createKanbanBoard,
+  getLogicGateArenaView,
+  invalidateKanbanBoardListCache,
+  invalidateLogicGateArenaViewCache,
+  listKanbanBoards,
+  updateKanbanBoard,
+} from "./kanbanApi";
 import {
   getKanbanBoardContentsSingleFlight,
   hasKanbanBoardContentsCache,
@@ -527,8 +534,15 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setBoards(next);
   }, []);
 
+  const invalidateArenaViewForBoard = useCallback((streamBoardID: string, logicGateID = "") => {
+    const cleanLogicGateID = logicGateID.trim() || logicGateIDFromKanbanBoardID(streamBoardID);
+    if (cleanLogicGateID) invalidateLogicGateArenaViewCache(apiBase, companyID, cleanLogicGateID);
+  }, [apiBase, companyID]);
+
   const removeBoardFromList = useCallback((deletedBoardID: string) => {
     if (!deletedBoardID) return;
+    invalidateKanbanBoardListCache(apiBase, companyID);
+    invalidateArenaViewForBoard(deletedBoardID);
     invalidateKanbanBoardContentsCache(apiBase, companyID, deletedBoardID);
     const next = sortKanbanBoards(boardsRef.current.filter((board) => board.board_id !== deletedBoardID));
     boardsRef.current = next;
@@ -543,7 +557,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       setNodeEditorOverlay(null);
       setActiveBoardID(next[0]?.board_id ?? frameBoardIDRef.current);
     }
-  }, [apiBase, companyID]);
+  }, [apiBase, companyID, invalidateArenaViewForBoard]);
 
   const loadLogicGateArenaView = useCallback((logicGateID: string, expectedBoardID: string) => {
     if (!logicGateID || !expectedBoardID) return;
@@ -722,14 +736,17 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         return;
       }
       if (detail?.board) {
+        invalidateKanbanBoardListCache(apiBase, companyID);
+        invalidateArenaViewForBoard(detail.board.board_id, detail.board.logic_gate_id ?? "");
         upsertBoardInList(detail.board);
         return;
       }
+      invalidateKanbanBoardListCache(apiBase, companyID);
       void refreshBoards();
     };
     window.addEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
     return () => window.removeEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
-  }, [companyID, refreshBoards, removeBoardFromList, upsertBoardInList]);
+  }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoards, removeBoardFromList, upsertBoardInList]);
 
   useEffect(() => {
     return subscribeWorkspaceStream(apiBase, companyID, {
@@ -742,6 +759,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           if (envelope.type === "kanban_board_saved" || envelope.type === "kanban_board_updated") {
             const board = data.board as KanbanBoard | undefined;
             if (!board || typeof board.board_id !== "string") return;
+            invalidateKanbanBoardListCache(apiBase, companyID);
+            invalidateArenaViewForBoard(board.board_id, board.logic_gate_id ?? "");
             upsertBoardInList(board);
             return;
           }
@@ -754,6 +773,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             const logicGate = data.logic_gate as { logic_gate_id?: unknown; header?: unknown } | undefined;
             const logicGateID = typeof logicGate?.logic_gate_id === "string" ? logicGate.logic_gate_id : (typeof data.logic_gate_id === "string" ? data.logic_gate_id : "");
             if (!logicGateID) return;
+            invalidateKanbanBoardListCache(apiBase, companyID);
+            invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
             const boardID = logicGateKanbanBoardID(logicGateID);
             const title = typeof logicGate?.header === "string" && logicGate.header.trim() ? logicGate.header.trim() : boardID;
             const nextBoards = boardsRef.current.map((board) => (board.board_id === boardID ? { ...board, title, updated_timestamp: new Date().toISOString() } : board));
@@ -764,13 +785,18 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           }
           if (envelope.type === "logic_gate_deleted") {
             const logicGateID = typeof data.logic_gate_id === "string" ? data.logic_gate_id : "";
-            if (logicGateID) removeBoardFromList(logicGateKanbanBoardID(logicGateID));
+            if (logicGateID) {
+              invalidateKanbanBoardListCache(apiBase, companyID);
+              invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
+              removeBoardFromList(logicGateKanbanBoardID(logicGateID));
+            }
             return;
           }
           if (envelope.type === "kanban_column_created" || envelope.type === "kanban_column_updated") {
             const streamBoardID = typeof data.board_id === "string" ? data.board_id : "";
             const column = data.column as KanbanColumn | undefined;
             if (!streamBoardID) return;
+            invalidateArenaViewForBoard(streamBoardID);
             invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
             if (streamBoardID !== activeBoardIDRef.current || !column?.column_id) return;
             const nextColumns = sortColumns([...columnsRef.current.filter((item) => item.column_id !== column.column_id), column]);
@@ -783,6 +809,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             const streamBoardID = typeof data.board_id === "string" ? data.board_id : "";
             const columnID = typeof data.column_id === "string" ? data.column_id : "";
             if (!streamBoardID || !columnID) return;
+            invalidateArenaViewForBoard(streamBoardID);
             invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
             if (streamBoardID !== activeBoardIDRef.current) return;
             const nextColumns = columnsRef.current.filter((column) => column.column_id !== columnID);
@@ -797,6 +824,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             const streamBoardID = typeof data.board_id === "string" ? data.board_id : "";
             const card = data.card as KanbanCard | undefined;
             if (!streamBoardID) return;
+            invalidateArenaViewForBoard(streamBoardID, card?.logic_gate_id ?? "");
             invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
             if (streamBoardID !== activeBoardIDRef.current || !card?.card_id) return;
             const nextCards = [...cardsRef.current.filter((item) => item.card_id !== card.card_id), card];
@@ -809,6 +837,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             const streamBoardID = typeof data.board_id === "string" ? data.board_id : "";
             const cardID = typeof data.card_id === "string" ? data.card_id : "";
             if (!streamBoardID || !cardID) return;
+            invalidateArenaViewForBoard(streamBoardID);
             invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
             if (streamBoardID !== activeBoardIDRef.current) return;
             const nextCards = cardsRef.current.filter((card) => card.card_id !== cardID);
@@ -824,6 +853,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             if (!nodeID) return;
             if (node?.node_id && shouldRefreshKanbanBoardForNodeStatusChange({ node, columns: columnsRef.current, cards: cardsRef.current })) {
               const currentBoardID = activeBoardIDRef.current;
+              invalidateArenaViewForBoard(currentBoardID);
               invalidateKanbanBoardContentsCache(apiBase, companyID, currentBoardID);
               void refreshBoard(currentBoardID);
             }
@@ -832,7 +862,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           if (envelope.type === "node_deleted") {
             const nodeID = typeof data.node_id === "string" ? data.node_id : "";
             if (!nodeID) return;
-            invalidateKanbanBoardContentsCache(apiBase, companyID, activeBoardIDRef.current);
+            const currentBoardID = activeBoardIDRef.current;
+            invalidateArenaViewForBoard(currentBoardID);
+            invalidateKanbanBoardContentsCache(apiBase, companyID, currentBoardID);
             const removedCardIDs = new Set(cardsRef.current.filter((card) => card.node_id === nodeID).map((card) => card.card_id));
             const nextCards = cardsRef.current.filter((card) => card.node_id !== nodeID);
             cardsRef.current = nextCards;
@@ -865,7 +897,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         }
       },
     });
-  }, [apiBase, companyID, refreshBoard, removeBoardFromList, syncNodeStatusesFromCards, upsertBoardInList]);
+  }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoard, removeBoardFromList, syncNodeStatusesFromCards, upsertBoardInList]);
 
   const syncCardTitlesFromNodeGraph = useCallback(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);

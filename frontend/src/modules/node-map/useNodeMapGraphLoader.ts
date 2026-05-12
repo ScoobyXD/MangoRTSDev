@@ -4,6 +4,7 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folder
 import { resolveMapSelectionAfterGraphLoad } from "../folders/companyExplorerFolders";
 import {
   getNodeRelationshipGraphSnapshot,
+  hasNodeRelationshipGraphSnapshot,
   refreshNodeRelationshipGraphSnapshot,
   subscribeNodeRelationshipGraph,
 } from "./NodeRelationshipGraph";
@@ -64,7 +65,9 @@ export function useNodeMapGraphLoader({
     setLoading(true);
     setError("");
     try {
-      await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+      if (!hasNodeRelationshipGraphSnapshot(apiBase, companyID)) {
+        await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+      }
       const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
       const snapshotNodes = snapshot.nodes ?? [];
       const nextNodes = applyFolderScope(snapshotNodes, snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? [], activeFolderIDRef.current);

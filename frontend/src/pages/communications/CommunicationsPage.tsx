@@ -3,14 +3,22 @@ import type { CurrentUserResponse } from "../../auth/cognitoAuth";
 import { MangoWordmark } from "../../app/MangoLogo";
 import { preloadLogicGateArenaSurface } from "../../app/preloadDashboardModules";
 import {
+  applyEmailMessageToCachedPages,
   deleteEmailMessage,
   disconnectCommunications,
+  emailMessageMatchesListFilters,
   fetchCommunicationsAuthURL,
   fetchCommunicationsStatus,
   getEmailMessage,
+  invalidateCommunicationsCache,
+  invalidateCommunicationsFolderCache,
+  invalidateEmailMessageCache,
   listEmailFolders,
   listEmailMessages,
+  mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
+  primeEmailMessageCache,
+  removeEmailMessageFromCache,
   sendEmail,
   updateEmailMessage,
   type EmailAddress,
@@ -52,6 +60,12 @@ type MailboxOption = {
   label: string;
 };
 
+type CommunicationsStreamEnvelope = {
+  type?: string;
+  trigger?: string;
+  message_id?: string;
+};
+
 const MAILBOX_OPTIONS: MailboxOption[] = [
   { value: "primary", label: "Primary Inbox" },
   { value: "sent", label: "Sent mail" },
@@ -84,14 +98,38 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const pendingMessageReloadRef = useRef(false);
   const messageRequestSeqRef = useRef(0);
   const selectedMessageIDRef = useRef("");
-  const streamReloadTimerRef = useRef<number | null>(null);
-  const streamReloadRef = useRef<() => void>(() => {});
+  const folderReloadTimerRef = useRef<number | null>(null);
+  const messagesRef = useRef<EmailMessage[]>([]);
+  const mailboxRef = useRef<EmailMailbox>("primary");
+  const pageTokenRef = useRef("");
+  const searchQueryRef = useRef("");
+  const unreadOnlyRef = useRef(false);
 
   const isNarrow = viewportWidth < 980;
 
   useEffect(() => {
     selectedMessageIDRef.current = selectedMessageID;
   }, [selectedMessageID]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    mailboxRef.current = mailbox;
+  }, [mailbox]);
+
+  useEffect(() => {
+    pageTokenRef.current = pageToken;
+  }, [pageToken]);
+
+  useEffect(() => {
+    searchQueryRef.current = searchQuery;
+  }, [searchQuery]);
+
+  useEffect(() => {
+    unreadOnlyRef.current = unreadOnly;
+  }, [unreadOnly]);
 
   useEffect(() => {
     const onResize = () => setViewportWidth(window.innerWidth);
@@ -103,7 +141,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     const params = new URLSearchParams(window.location.search);
     const connected = params.get("nylas");
     const oauthError = params.get("nylas_error");
-    if (connected === "connected") setNotice("Email connected.");
+    if (connected === "connected") {
+      invalidateCommunicationsCache();
+      setNotice("Email connected.");
+    }
     if (oauthError) setError(formatErrorCode(oauthError));
     if (connected || oauthError) {
       window.history.replaceState({}, "", window.location.pathname);
@@ -133,6 +174,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
 
   const handleEmailAccessExpired = useCallback(async (accessError: unknown) => {
     setNotice("");
+    invalidateCommunicationsCache();
     setFolders([]);
     setMessages([]);
     setSelectedMessage(null);
@@ -213,22 +255,79 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   useEffect(() => { void loadMessages(); }, [loadMessages]);
 
   useEffect(() => {
-    streamReloadRef.current = () => {
-      void loadFolders();
-      void loadMessages();
-    };
-  }, [loadFolders, loadMessages]);
-
-  useEffect(() => {
     if (!status?.connected) return undefined;
+    const currentMessageListParams = () => ({
+      limit: 25,
+      pageToken: pageTokenRef.current,
+      mailbox: mailboxRef.current,
+      q: searchQueryRef.current,
+      unread: unreadOnlyRef.current ? true : undefined,
+    });
+    const scheduleFolderRefresh = () => {
+      invalidateCommunicationsFolderCache();
+      if (folderReloadTimerRef.current !== null) window.clearTimeout(folderReloadTimerRef.current);
+      folderReloadTimerRef.current = window.setTimeout(() => {
+        folderReloadTimerRef.current = null;
+        void loadFolders();
+      }, 300);
+    };
+    const applyMessageToCurrentView = (message: EmailMessage, prependIfMissing: boolean) => {
+      const params = currentMessageListParams();
+      applyEmailMessageToCachedPages(message, { prependIfMissing, maxMessages: 25 });
+      setMessages((previous) => mergeEmailMessageIntoMessageList(previous, message, params, {
+        prependIfMissing: prependIfMissing && !params.pageToken,
+        maxMessages: 25,
+      }));
+      if (selectedMessageIDRef.current === message.id) setSelectedMessage(message);
+    };
     const unsubscribe = subscribeCommunicationsStream({
       onEvent(event) {
         if (event.event !== "communications") return;
-        if (streamReloadTimerRef.current !== null) window.clearTimeout(streamReloadTimerRef.current);
-        streamReloadTimerRef.current = window.setTimeout(() => {
-          streamReloadTimerRef.current = null;
-          streamReloadRef.current();
-        }, 200);
+        let envelope: CommunicationsStreamEnvelope;
+        try {
+          envelope = JSON.parse(event.data) as CommunicationsStreamEnvelope;
+        } catch {
+          return;
+        }
+        const trigger = envelope.trigger?.trim().toLowerCase() ?? "";
+        const messageID = envelope.message_id?.trim() ?? "";
+        if (trigger.startsWith("folder.")) {
+          scheduleFolderRefresh();
+          return;
+        }
+        if (!trigger.startsWith("message.") || !messageID) return;
+        if (trigger.startsWith("message.deleted")) {
+          removeEmailMessageFromCache(messageID);
+          setMessages((previous) => previous.filter((message) => message.id !== messageID));
+          if (selectedMessageIDRef.current === messageID) {
+            setSelectedMessageID("");
+            setSelectedMessage(null);
+          }
+          return;
+        }
+        invalidateEmailMessageCache(messageID);
+        const params = currentMessageListParams();
+        const visible = messagesRef.current.some((message) => message.id === messageID);
+        const selected = selectedMessageIDRef.current === messageID;
+        const shouldFetchCreated = trigger.startsWith("message.created") && !params.pageToken && emailMessageMatchesListFilters({
+          id: messageID,
+          subject: "",
+          unread: true,
+          starred: false,
+        }, params);
+        if (!visible && !selected && !shouldFetchCreated) return;
+        void getEmailMessage(messageID)
+          .then((message) => {
+            primeEmailMessageCache(message);
+            applyMessageToCurrentView(message, trigger.startsWith("message.created"));
+          })
+          .catch((messageError) => {
+            if (isEmailAccessExpiredError(messageError)) {
+              void handleEmailAccessExpired(messageError);
+              return;
+            }
+            if (trigger.startsWith("message.deleted")) removeEmailMessageFromCache(messageID);
+          });
       },
       onError() {
         // SSE reconnects automatically; keep the UI quiet unless an API reload fails.
@@ -236,12 +335,12 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     });
     return () => {
       unsubscribe();
-      if (streamReloadTimerRef.current !== null) {
-        window.clearTimeout(streamReloadTimerRef.current);
-        streamReloadTimerRef.current = null;
+      if (folderReloadTimerRef.current !== null) {
+        window.clearTimeout(folderReloadTimerRef.current);
+        folderReloadTimerRef.current = null;
       }
     };
-  }, [status?.connected]);
+  }, [handleEmailAccessExpired, loadFolders, status?.connected]);
 
   useEffect(() => {
     if (!selectedMessageID) return;

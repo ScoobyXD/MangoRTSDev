@@ -877,16 +877,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [apiBase, applyOrDeferRemoteCollaborationUpdate, companyID, linkedEntityKind, linkedNodeID]);
 
   useEffect(() => {
-    if (!companyID || !linkedNodeID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) return;
-    publishCollaborationEvent("presence");
-    const intervalID = window.setInterval(() => publishCollaborationEvent("presence"), 10_000);
-    return () => {
-      window.clearInterval(intervalID);
-      publishCollaborationEvent("leave");
-    };
-  }, [companyID, linkedEntityKind, linkedNodeID, publishCollaborationEvent]);
-
-  useEffect(() => {
     const intervalID = window.setInterval(() => {
       const now = Date.now();
       setCollaborators((current) => current.filter((item) => now - item.lastSeen < EDITOR_COLLABORATOR_TTL_MS));
