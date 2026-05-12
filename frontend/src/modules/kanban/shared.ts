@@ -4,6 +4,7 @@ export const EXPLORER_ENTITY_DRAG_MIME = "application/x-mango-explorer-entity";
 export const KANBAN_CARD_DRAG_MIME = "application/x-mango-kanban-card";
 export const KANBAN_COLUMN_DRAG_MIME = "application/x-mango-kanban-column";
 export const EVENT_KANBAN_BOARDS_UPDATED = "mangorts:kanban-boards-updated";
+export const EVENT_KANBAN_BOARD_CONTENTS_UPDATED = "mangorts:kanban-board-contents-updated";
 export const KANBAN_COLUMN_TITLE_TEXT_TRANSFORM = "none";
 export const KANBAN_MODULE_TOP_CLEARANCE_PX = 38;
 export const KANBAN_DEFAULT_COLUMN_WIDTH_PX = 260;
@@ -52,6 +53,12 @@ export type KanbanBoardsUpdatedDetail = {
   companyID?: string;
   board?: KanbanBoard;
   deletedBoardID?: string;
+};
+
+export type KanbanBoardContentsUpdatedDetail = {
+  companyID?: string;
+  boardID: string;
+  logicGateID?: string;
 };
 
 export type KanbanColumn = {
