@@ -455,12 +455,14 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     latestLogicGateSelectionRef.current = { selectedLogicGateID, selectedTreeID };
   }, [selectedLogicGateID, selectedTreeID]);
 
+  const renamingTreeID = renaming?.treeID ?? "";
+
   useEffect(() => {
-    if (!renaming || !renameInputRef.current) return;
+    if (!renamingTreeID || !renameInputRef.current) return;
     const input = renameInputRef.current;
     input.focus();
     input.select();
-  }, [renaming]);
+  }, [renamingTreeID]);
 
   useEffect(() => {
     if (!treeViewportRef.current) return;
