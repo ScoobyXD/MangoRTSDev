@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/domain"
@@ -13,6 +14,10 @@ import (
 
 type authClaimsContextKey struct{}
 type actorContextKey struct{}
+
+const maxCompanyIDPayloadScanBytes int64 = 1 << 20
+
+var errCompanyIDScanLimit = errors.New("company_id_scan_limit_exceeded")
 
 type ActorContext struct {
 	Claims      auth.Claims                `json:"-"`
@@ -128,28 +133,97 @@ func bearerToken(header string) string {
 }
 
 func requestCompanyID(r *http.Request) (string, error) {
+	queryCompanyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 	if r.Body == nil || (r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodPatch) {
-		return strings.TrimSpace(r.URL.Query().Get("company_id")), nil
+		return queryCompanyID, nil
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	bodyCompanyID, found, err := readCompanyIDFromJSONBody(r, maxCompanyIDPayloadScanBytes)
 	if err != nil {
 		return "", err
 	}
-	_ = r.Body.Close()
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	if len(bytes.TrimSpace(body)) == 0 {
-		return "", nil
+	if found && bodyCompanyID != "" {
+		return bodyCompanyID, nil
 	}
-	var payload struct {
-		CompanyID string `json:"company_id"`
+	return queryCompanyID, nil
+}
+
+func readCompanyIDFromJSONBody(r *http.Request, maxScanBytes int64) (string, bool, error) {
+	originalBody := r.Body
+	recorder := &limitedRecordingReader{source: originalBody, maxBytes: maxScanBytes}
+	defer func() {
+		r.Body = replayReadCloser{
+			Reader: io.MultiReader(bytes.NewReader(recorder.recorded.Bytes()), originalBody),
+			closer: originalBody,
+		}
+	}()
+
+	decoder := json.NewDecoder(recorder)
+	token, err := decoder.Token()
+	if errors.Is(err, io.EOF) {
+		return "", false, nil
 	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", err
+	if err != nil {
+		return "", false, err
 	}
-	if value := strings.TrimSpace(payload.CompanyID); value != "" {
-		return value, nil
+	delim, ok := token.(json.Delim)
+	if !ok || delim != '{' {
+		return "", false, errors.New("company_id_payload_must_be_json_object")
 	}
-	return strings.TrimSpace(r.URL.Query().Get("company_id")), nil
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return "", false, err
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return "", false, errors.New("company_id_payload_key_must_be_string")
+		}
+		if key != "company_id" {
+			var discard json.RawMessage
+			if err := decoder.Decode(&discard); err != nil {
+				return "", false, err
+			}
+			continue
+		}
+		var value *string
+		if err := decoder.Decode(&value); err != nil {
+			return "", false, err
+		}
+		if value == nil {
+			return "", true, nil
+		}
+		return strings.TrimSpace(*value), true, nil
+	}
+	return "", false, nil
+}
+
+type limitedRecordingReader struct {
+	source   io.Reader
+	recorded bytes.Buffer
+	maxBytes int64
+}
+
+func (r *limitedRecordingReader) Read(p []byte) (int, error) {
+	if r.maxBytes <= 0 || int64(r.recorded.Len()) >= r.maxBytes {
+		return 0, errCompanyIDScanLimit
+	}
+	if remaining := int(r.maxBytes - int64(r.recorded.Len())); len(p) > remaining {
+		p = p[:remaining]
+	}
+	n, err := r.source.Read(p)
+	if n > 0 {
+		_, _ = r.recorded.Write(p[:n])
+	}
+	return n, err
+}
+
+type replayReadCloser struct {
+	io.Reader
+	closer io.Closer
+}
+
+func (r replayReadCloser) Close() error {
+	return r.closer.Close()
 }
 
 func authenticatedClaims(r *http.Request) (auth.Claims, bool) {

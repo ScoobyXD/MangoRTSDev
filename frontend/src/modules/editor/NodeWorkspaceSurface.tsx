@@ -66,6 +66,7 @@ const CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES = 12 * 1024 * 1024;
 const CHAT_PANE_DEFAULT_HEIGHT = 320;
 const CHAT_PANE_MIN_HEIGHT = 220;
 const CHAT_PANE_MAX_HEIGHT = 760;
+const DEFAULT_TEXT_BLOCK_TITLE = "Hello I am a title";
 
 function projectionsKey(items: NodeProjectionItem[]): string {
   return items.map((item) => `${item.information_id}:${item.type}:${item.updated_timestamp}`).join("|");
@@ -572,20 +573,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const createTextBlock = useCallback(() => {
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
+    const initialContent: EditorTextBlockContent = { title: DEFAULT_TEXT_BLOCK_TITLE, document: "" };
     focusBlockIDRef.current = blockID;
-    contentByBlockRef.current.set(blockID, { title: "", document: "" });
+    contentByBlockRef.current.set(blockID, initialContent);
     setBlocks((current) => [
       {
         id: blockID,
-        title: "",
+        title: initialContent.title,
         document: "",
         createdTimestamp: now,
         updatedTimestamp: now,
-        pending: false,
+        pending: true,
       },
       ...current,
     ]);
-  }, []);
+    void persistTextBlock(blockID, initialContent);
+  }, [persistTextBlock]);
 
   const updateTextBlockContent = useCallback((blockID: string, patch: Partial<EditorTextBlockContent>) => {
     const existing = contentByBlockRef.current.get(blockID) ?? { title: "", document: "" };
@@ -599,6 +602,72 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }));
     scheduleTextBlockSave(blockID, nextContent);
   }, [scheduleTextBlockSave]);
+
+  const renameTextBlock = useCallback((blockID: string) => {
+    const block = blocks.find((item) => item.id === blockID);
+    const nextTitle = window.prompt("Rename title", block?.title || DEFAULT_TEXT_BLOCK_TITLE);
+    if (nextTitle === null) return;
+    const title = nextTitle.trim();
+    if (!title) return;
+    updateTextBlockContent(blockID, { title });
+    flushTextBlockSave(blockID);
+  }, [blocks, flushTextBlockSave, updateTextBlockContent]);
+
+  const deleteTextBlock = useCallback(async (blockID: string) => {
+    if (!nodeID || !companyID) return;
+    if (!window.confirm("Are you sure you want to delete this?")) return;
+    const timer = saveTimersRef.current.get(blockID);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      saveTimersRef.current.delete(blockID);
+    }
+    const relatedChatIDs = chatMessages.filter((message) => message.blockID === blockID).map((message) => message.id);
+    const deletedInformationIDs = [blockID, ...relatedChatIDs];
+    contentByBlockRef.current.delete(blockID);
+    setBlocks((current) => current.filter((block) => block.id !== blockID));
+    setChatMessages((current) => current.filter((message) => message.blockID !== blockID));
+    setChatDrafts((current) => {
+      if (!(blockID in current)) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
+    setChatDraftAttachments((current) => {
+      if (!(blockID in current)) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
+    setChatReplyTargets((current) => {
+      if (!(blockID in current)) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
+    setClosedChatBlockIDs((current) => {
+      if (!current.has(blockID)) return current;
+      const next = new Set(current);
+      next.delete(blockID);
+      return next;
+    });
+    setActiveChatBlockID((current) => current === blockID ? "" : current);
+    setFocusedTextBlockID((current) => current === blockID ? "" : current);
+
+    try {
+      for (const informationID of deletedInformationIDs) {
+        try {
+          await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection/${informationID}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : "";
+          if (!message.includes("node_projection_not_found")) throw cause;
+        }
+      }
+      onProjectionMutation();
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_delete_text_block");
+      onProjectionMutation();
+    }
+  }, [chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
   const submitChat = useCallback(async (blockID: string) => {
     const message = (chatDrafts[blockID] ?? "").trim();
@@ -893,7 +962,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               <TimelineCell label={timelineRows[index]?.label ?? ""} count={timelineRows[index]?.count ?? 0} accent={accent} muted={false} />
               <div style={{ minWidth: 0 }}>
                 <div style={{ border: `1px solid ${textBlockIsFocused ? accent : strokeColor}`, borderRadius: 8, background: "rgba(255,255,255,0.72)", overflow: "hidden", boxShadow: textBlockIsFocused ? "0 0 0 2px rgba(255,136,32,0.14), 0 6px 18px rgba(0,0,0,0.05)" : "0 6px 18px rgba(0,0,0,0.05)" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 8px", background: panelBackground }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, auto) minmax(0, auto) 26px 26px", alignItems: "center", gap: 7, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 8px", background: panelBackground }}>
                     <input
                       value={block.title}
                       onFocus={() => {
@@ -902,7 +971,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       }}
                       onChange={(event) => updateTextBlockContent(block.id, { title: event.currentTarget.value })}
                       onBlur={() => flushTextBlockSave(block.id)}
-                      placeholder={formatTimestamp(block.createdTimestamp) || `Text box ${index + 1}`}
+                      placeholder={DEFAULT_TEXT_BLOCK_TITLE}
                       style={{
                         minWidth: 0,
                         width: "100%",
@@ -916,14 +985,28 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                         letterSpacing: 0,
                       }}
                     />
+                    <span title={`Last updated ${formatTimestamp(block.updatedTimestamp)}`} style={{ minWidth: 0, maxWidth: compact ? 86 : 136, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, opacity: 0.58, fontSize: 10, fontWeight: 800, letterSpacing: 0 }}>
+                      Updated {formatTimestamp(block.updatedTimestamp)}
+                    </span>
+                    <span title={`Created ${formatTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, maxWidth: compact ? 86 : 136, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, opacity: 0.58, fontSize: 10, fontWeight: 800, letterSpacing: 0 }}>
+                      Created {formatTimestamp(block.createdTimestamp)}
+                    </span>
                     <button
                       type="button"
                       title={chatIsVisible ? "Hide chat" : "Open chat"}
                       onClick={toggleChat}
-                      style={{ width: 26, height: 24, borderRadius: 5, border: `1px solid ${chatIsActive ? accent : strokeColor}`, background: chatIsActive ? accent : "#ffffff", color: chatIsActive ? "#ffffff" : accent, display: "grid", placeItems: "center", cursor: "pointer", flex: "0 0 auto" }}
+                      style={{ width: 26, height: 24, borderRadius: 5, border: `1px solid ${chatIsActive ? accent : strokeColor}`, background: chatIsActive ? accent : "#ffffff", color: chatIsActive ? "#ffffff" : accent, display: "grid", placeItems: "center", cursor: "pointer" }}
                     >
                       <ChatIcon color={chatIsActive ? "#ffffff" : accent} />
                     </button>
+                    <TextBlockActionsMenu
+                      accent={accent}
+                      surfaceText={surfaceText}
+                      panelBackground={panelBackground}
+                      strokeColor={strokeColor}
+                      onRename={() => renameTextBlock(block.id)}
+                      onDelete={() => { void deleteTextBlock(block.id); }}
+                    />
                   </div>
                   <NodeTextBlockEditor
                     blockID={block.id}
@@ -1084,6 +1167,101 @@ const TimelineCell: React.FC<TimelineCellProps> = ({ label, count, accent, muted
     )}
   </div>
 );
+
+type TextBlockActionsMenuProps = {
+  accent: string;
+  surfaceText: string;
+  panelBackground: string;
+  strokeColor: string;
+  onRename: () => void;
+  onDelete: () => void;
+};
+
+const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
+  accent,
+  surfaceText,
+  panelBackground,
+  strokeColor,
+  onRename,
+  onDelete,
+}) => {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useCloseFloatingMenu(open, rootRef, close);
+  const menuItemStyle: React.CSSProperties = {
+    width: "100%",
+    minHeight: 30,
+    border: "none",
+    borderRadius: 6,
+    background: "#ffffff",
+    color: surfaceText,
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 700,
+    letterSpacing: 0,
+    padding: "7px 9px",
+    textAlign: "left",
+  };
+  return (
+    <div ref={rootRef} style={{ position: "relative", width: 26, height: 24 }}>
+      <button
+        type="button"
+        aria-label="Text box actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Text box actions"
+        onClick={() => setOpen((nextOpen) => !nextOpen)}
+        style={{ width: 26, height: 24, borderRadius: 5, border: `1px solid ${open ? accent : strokeColor}`, background: open ? "rgba(255,136,32,0.12)" : panelBackground, color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 13, fontWeight: 900, lineHeight: 1, letterSpacing: 0 }}
+      >
+        ...
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label="Text box actions"
+          style={{
+            position: "absolute",
+            zIndex: 50,
+            top: "calc(100% + 6px)",
+            right: 0,
+            width: 148,
+            display: "grid",
+            gap: 3,
+            padding: 5,
+            border: `1px solid ${strokeColor}`,
+            borderRadius: 8,
+            background: "#ffffff",
+            boxShadow: "0 12px 28px rgba(0,0,0,0.14)",
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onRename();
+            }}
+            style={menuItemStyle}
+          >
+            Rename title
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+            style={{ ...menuItemStyle, color: "#b42318" }}
+          >
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
 
 type NodeTextBlockEditorProps = {
   blockID: string;
@@ -1501,29 +1679,27 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, accent, su
   const { message, children } = node;
   const guideColor = "rgba(100,116,139,0.24)";
   return (
-    <div style={{ minWidth: 0, display: "grid", gap: 7 }}>
-      <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "28px minmax(0, 1fr)", gap: 7, alignItems: "start" }}>
-        <div style={{ position: "relative", display: "grid", justifyItems: "center", minHeight: 28 }}>
-          {depth > 0 && <div aria-hidden="true" style={{ position: "absolute", top: -10, bottom: -8, left: 13, width: 1, background: guideColor }} />}
-          <div style={{ position: "relative", zIndex: 1, width: 26, height: 26, borderRadius: 999, border: `1px solid ${ruleColor}`, background: avatarBackgroundForName(message.authorName || message.authorID), color: surfaceText, display: "grid", placeItems: "center", fontSize: 9, fontWeight: 800, letterSpacing: 0 }}>
-            {initialsForName(message.authorName || message.authorID)}
-          </div>
-        </div>
-        <div style={{ minWidth: 0, display: "grid", gap: 4 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 6, minWidth: 0, color: surfaceText, fontSize: 10, fontWeight: 800 }}>
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.authorName}</span>
-            <span style={{ opacity: 0.58, flex: "0 0 auto" }}>{formatTimestamp(message.createdTimestamp)}</span>
-          </div>
-          {message.message && <div style={{ color: surfaceText, fontSize: 12, lineHeight: 1.35, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{message.message}</div>}
-          {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} surfaceText={surfaceText} strokeColor={ruleColor} onPreviewImage={onPreviewImage} />}
-          <button type="button" onClick={() => onReply(message.id)} style={{ justifySelf: "start", display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: accent, cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}>
-            <ChatIcon color={accent} />
-            Reply
-          </button>
+    <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "28px minmax(0, 1fr)", columnGap: 7, alignItems: "start" }}>
+      <div style={{ position: "relative", gridRow: children.length > 0 ? "1 / span 2" : undefined, alignSelf: "stretch", display: "grid", justifyItems: "center", minHeight: 28 }}>
+        {depth > 0 && <div aria-hidden="true" style={{ position: "absolute", top: -10, bottom: -8, left: 13, width: 1, background: guideColor }} />}
+        <div style={{ position: "relative", zIndex: 1, width: 26, height: 26, borderRadius: 999, border: `1px solid ${ruleColor}`, background: avatarBackgroundForName(message.authorName || message.authorID), color: surfaceText, display: "grid", placeItems: "center", fontSize: 9, fontWeight: 800, letterSpacing: 0 }}>
+          {initialsForName(message.authorName || message.authorID)}
         </div>
       </div>
+      <div style={{ minWidth: 0, display: "grid", gap: 4 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 6, minWidth: 0, color: surfaceText, fontSize: 10, fontWeight: 800 }}>
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.authorName}</span>
+          <span style={{ opacity: 0.58, flex: "0 0 auto" }}>{formatTimestamp(message.createdTimestamp)}</span>
+        </div>
+        {message.message && <div style={{ color: surfaceText, fontSize: 12, lineHeight: 1.35, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{message.message}</div>}
+        {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} surfaceText={surfaceText} strokeColor={ruleColor} onPreviewImage={onPreviewImage} />}
+        <button type="button" onClick={() => onReply(message.id)} style={{ justifySelf: "start", display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: accent, cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}>
+          <ChatIcon color={accent} />
+          Reply
+        </button>
+      </div>
       {children.length > 0 && (
-        <div style={{ minWidth: 0, marginLeft: 13, paddingLeft: 18, borderLeft: `1px solid ${guideColor}`, display: "grid", gap: 8 }}>
+        <div style={{ gridColumn: "2", minWidth: 0, marginTop: 4, display: "grid", gap: 8 }}>
           {children.map((child) => (
             <ChatThreadItem
               key={child.message.id}

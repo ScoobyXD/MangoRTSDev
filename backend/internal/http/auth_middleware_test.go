@@ -274,6 +274,41 @@ func TestAuthMiddlewareChecksBodyCompanyBeforeQueryCompany(t *testing.T) {
 	}
 }
 
+func TestAuthMiddlewareAllowsLargeJSONBodyCompanyID(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	const subject = "cognito-user-1"
+	_, err := repo.UpsertAuthUser(subject, "dev@example.com", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.EnsureCompany(companyID, "MangoRTS Dev")
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "image node")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+	}).Routes()
+	largeInformation := strings.Repeat("x", (1<<20)+1024)
+	body := `{"company_id":"` + companyID + `","type":"Text box","information":"` + largeInformation + `","information_id":"large-info"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+node.NodeID+"/information", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, "dev@example.com"))
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d, body=%s", res.Code, http.StatusCreated, strings.TrimSpace(res.Body.String()))
+	}
+}
+
 func TestAuthMiddlewareRejectsMalformedJSONBodySafely(t *testing.T) {
 	t.Parallel()
 
