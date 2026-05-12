@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import {
   createMessageQuery,
   emailMessageMatchesListFilters,
+  getEmailMessage,
+  invalidateCommunicationsCache,
+  listEmailMessages,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
   type EmailMessage,
@@ -57,6 +60,35 @@ test("communications stream helpers remove updated messages that no longer match
   );
 });
 
+test("email detail fetch ignores preview-only list cache entries", async () => {
+  invalidateCommunicationsCache();
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const path = input.toString();
+    calls.push(path);
+    if (path.startsWith("/v1/communications/messages?")) {
+      return jsonResponse({ messages: [message("msg-1", { subject: "Preview only" })] });
+    }
+    if (path === "/v1/communications/messages/msg-1") {
+      return jsonResponse({ message: message("msg-1", { subject: "Preview only", body: "Full email body" }) });
+    }
+    return jsonResponse({ error: "not_found" }, 404);
+  };
+  try {
+    await listEmailMessages({ mailbox: "primary", limit: 25 });
+    const detail = await getEmailMessage("msg-1");
+    assert.equal(detail.body, "Full email body");
+    assert.deepEqual(calls, [
+      "/v1/communications/messages?limit=25&mailbox=primary",
+      "/v1/communications/messages/msg-1",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
 function message(id: string, patch: Partial<EmailMessage> = {}): EmailMessage {
   return {
     id,
@@ -70,4 +102,11 @@ function message(id: string, patch: Partial<EmailMessage> = {}): EmailMessage {
     from: patch.from,
     to: patch.to,
   };
+}
+
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 }
