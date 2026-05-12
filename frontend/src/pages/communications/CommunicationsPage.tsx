@@ -55,6 +55,7 @@ import { buildCompanyExplorerTreeRows } from "../../modules/company-explorer/com
 import { getExplorerDropPayloadItems, resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
+import { attachStackedDragPreview } from "../../modules/kanban/shared";
 
 type CommunicationsPageProps = {
   me?: CurrentUserResponse;
@@ -111,6 +112,18 @@ type CommunicationsColumnResizeDrag = {
   availableWidth: number;
 };
 
+type RaciRole = "responsible" | "accountable" | "consulted" | "informed";
+type RaciPriority = 0 | 1 | 2 | 3 | 4 | 5;
+
+type LogicGateRaciPlacement = {
+  logicGateID: string;
+  role: RaciRole;
+  priority: RaciPriority;
+  updatedAt: number;
+};
+
+type LogicGateRaciPlacementMap = Record<string, LogicGateRaciPlacement>;
+
 const MAILBOX_OPTIONS: MailboxOption[] = [
   { value: "primary", label: "Primary Inbox" },
   { value: "sent", label: "Sent mail" },
@@ -123,6 +136,23 @@ const COMMUNICATIONS_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.communications.column
 const COMMUNICATIONS_COLUMN_RESIZER_WIDTH = 10;
 const COMMUNICATIONS_COLUMN_MIN_WIDTHS: CommunicationsColumnWidths = [170, 280, 220, 280];
 const COMMUNICATIONS_COLUMN_MAX_WIDTHS: CommunicationsColumnWidths = [360, 760, 1600, 1600];
+const LOGIC_GATE_RACI_STORAGE_KEY_PREFIX = "mangorts.communications.logicGateRaciPlacements.v1";
+
+const RACI_COLUMNS: ReadonlyArray<{ role: RaciRole; letter: string; label: string }> = [
+  { role: "responsible", letter: "R", label: "Responsible" },
+  { role: "accountable", letter: "A", label: "Accountable" },
+  { role: "consulted", letter: "C", label: "Consulted" },
+  { role: "informed", letter: "I", label: "Informed" },
+];
+
+const RACI_PRIORITIES: ReadonlyArray<{ value: RaciPriority; label: string }> = [
+  { value: 5, label: "5 Urgent" },
+  { value: 4, label: "4 High" },
+  { value: 3, label: "3 Medium" },
+  { value: 2, label: "2 Medium-Low" },
+  { value: 1, label: "1 Low" },
+  { value: 0, label: "0 Unassigned" },
+];
 
 export function CommunicationsPage({ me, onNavigate, embedded = false }: CommunicationsPageProps) {
   const companyID = getActiveCompanyID();
@@ -158,6 +188,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const [logicGateExpandedIDs, setLogicGateExpandedIDs] = useState<Set<string>>(new Set());
   const [selectedLogicGateRowIDs, setSelectedLogicGateRowIDs] = useState<Set<string>>(new Set());
   const [logicGateSelectionAnchorID, setLogicGateSelectionAnchorID] = useState("");
+  const [logicGateRaciPlacements, setLogicGateRaciPlacements] = useState<LogicGateRaciPlacementMap>(() => readLogicGateRaciPlacements(companyID));
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -408,6 +439,15 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
 
   const loadMessages = useCallback(async () => {
     if (!status?.connected) return;
+    if (activeViewID === "logic-gate") {
+      setMessages([]);
+      setSelectedMessage(null);
+      setSelectedMessageID("");
+      setSelectedMessageIDs(new Set());
+      setSelectionAnchorMessageID("");
+      setNextPageToken("");
+      return;
+    }
     const requestKey = JSON.stringify([activeViewID, mailbox, searchQuery, unreadOnly]);
     messageListFilterKeyRef.current = requestKey;
     if (messageRequestKeyRef.current === requestKey) {
@@ -474,7 +514,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   }, [activeViewID, handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
 
   const loadMoreMessages = useCallback(async () => {
-    if (!status?.connected || activeViewIDRef.current === "my-triage" || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
+    if (!status?.connected || activeViewIDRef.current === "my-triage" || activeViewIDRef.current === "logic-gate" || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
     const pageToken = nextPageTokenRef.current.trim();
     if (!pageToken) return;
     const filterKey = JSON.stringify([mailboxRef.current, searchQueryRef.current, unreadOnlyRef.current]);
@@ -516,6 +556,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
   useEffect(() => { if (status?.connected) void loadLogicGatePanel(); }, [loadLogicGatePanel, status?.connected]);
   useEffect(() => { void loadMessages(); }, [loadMessages]);
+  useEffect(() => { setLogicGateRaciPlacements(readLogicGateRaciPlacements(companyID)); }, [companyID]);
 
   useEffect(() => {
     const list = messageListRef.current;
@@ -816,6 +857,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     folders: logicGateFolders,
     folderItems: logicGateFolderItems,
   }), [logicGateByID, logicGateFolderItems, logicGateFolders, myLogicGateShortcuts]);
+  const myLogicGateOrderedRowIDs = useMemo(() => myLogicGateGroups
+    .flatMap((group) => group.logicGates.map((logicGate) => logicGateTreeID(logicGate.logic_gate_id))), [myLogicGateGroups]);
 
   const selectMessageRow = useCallback((message: EmailMessage, event: React.MouseEvent) => {
     const orderedIDs = messages.map((item) => item.id);
@@ -1016,19 +1059,64 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     }
   }, [companyID, logicGateByID, selectedMessageID]);
 
-  const selectLogicGateRow = useCallback((row: ExplorerTreeNode, event: React.MouseEvent) => {
-    const orderedIDs = visibleLogicGateRows.map((item) => item.id);
+  const selectLogicGateTreeID = useCallback((treeID: string, orderedIDs: string[], event: React.MouseEvent) => {
     const next = resolveExplorerClickSelection({
       orderedIDs,
       previousSelectedIDs: selectedLogicGateRowIDs,
       anchorID: logicGateSelectionAnchorID,
-      clickedID: row.id,
+      clickedID: treeID,
       shiftKey: event.shiftKey,
       ctrlKey: event.ctrlKey || event.metaKey,
     });
     setSelectedLogicGateRowIDs(next.selectedIDs);
     setLogicGateSelectionAnchorID(next.anchorID);
-  }, [logicGateSelectionAnchorID, selectedLogicGateRowIDs, visibleLogicGateRows]);
+  }, [logicGateSelectionAnchorID, selectedLogicGateRowIDs]);
+
+  const selectLogicGateRow = useCallback((row: ExplorerTreeNode, event: React.MouseEvent) => {
+    selectLogicGateTreeID(row.id, visibleLogicGateRows.map((item) => item.id), event);
+  }, [selectLogicGateTreeID, visibleLogicGateRows]);
+
+  const selectLogicGateShortcut = useCallback((logicGateID: string, event: React.MouseEvent) => {
+    selectLogicGateTreeID(logicGateTreeID(logicGateID), myLogicGateOrderedRowIDs, event);
+  }, [myLogicGateOrderedRowIDs, selectLogicGateTreeID]);
+
+  const selectLogicGateMatrixCard = useCallback((logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => {
+    selectLogicGateTreeID(logicGateTreeID(logicGateID), orderedIDs, event);
+  }, [selectLogicGateTreeID]);
+
+  const getLogicGateDragIDs = useCallback((logicGateID: string): string[] => {
+    const cleanLogicGateID = logicGateID.trim();
+    if (!cleanLogicGateID) return [];
+    if (!selectedLogicGateRowIDs.has(logicGateTreeID(cleanLogicGateID))) return [cleanLogicGateID];
+    const selectedLogicGateIDs = cleanIDList(Array.from(selectedLogicGateRowIDs).map(logicGateIDFromTreeID))
+      .filter((id) => logicGateByID.has(id));
+    return selectedLogicGateIDs.length > 0 ? selectedLogicGateIDs : [cleanLogicGateID];
+  }, [logicGateByID, selectedLogicGateRowIDs]);
+
+  const placeLogicGatesInRaci = useCallback((logicGateIDs: string[], role: RaciRole, priority: RaciPriority) => {
+    const ids = cleanIDList(logicGateIDs).filter((id) => logicGateByID.has(id));
+    if (ids.length === 0) return;
+    const now = Date.now();
+    setLogicGateRaciPlacements((previous) => {
+      const next: LogicGateRaciPlacementMap = { ...previous };
+      for (const logicGateID of ids) next[logicGateID] = { logicGateID, role, priority, updatedAt: now };
+      storeLogicGateRaciPlacements(companyID, next);
+      return next;
+    });
+    setNotice(ids.length === 1 ? "Logic Gate placed." : `${ids.length} Logic Gates placed.`);
+  }, [companyID, logicGateByID]);
+
+  const removeLogicGateFromRaci = useCallback((logicGateID: string) => {
+    const cleanLogicGateID = logicGateID.trim();
+    if (!cleanLogicGateID) return;
+    setLogicGateRaciPlacements((previous) => {
+      if (!previous[cleanLogicGateID]) return previous;
+      const next: LogicGateRaciPlacementMap = { ...previous };
+      delete next[cleanLogicGateID];
+      storeLogicGateRaciPlacements(companyID, next);
+      return next;
+    });
+  }, [companyID]);
 
   const startColumnResize = useCallback((dividerIndex: 0 | 1 | 2, event: React.PointerEvent<HTMLButtonElement>) => {
     if (isNarrow) return;
@@ -1043,7 +1131,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
 
   const activeViewLabel = getCommunicationsViewLabel(activeViewID, sharedInboxes);
   const isTriageView = activeViewID === "my-triage";
-  const workspaceGridTemplateColumns = isNarrow ? "1fr" : getCommunicationsGridTemplateColumns(columnWidths);
+  const isLogicGateInboxView = activeViewID === "logic-gate";
+  const workspaceGridTemplateColumns = isNarrow ? "1fr" : isLogicGateInboxView ? getLogicGateInboxGridTemplateColumns(columnWidths) : getCommunicationsGridTemplateColumns(columnWidths);
 
   return (
     <div style={embedded ? { ...pageStyle, height: "100%" } : pageStyle}>
@@ -1093,7 +1182,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
           </section>
         </main>
       ) : (
-        <main ref={workspaceRef} style={{ ...workspaceStyle, gridTemplateColumns: workspaceGridTemplateColumns, gap: isNarrow ? 10 : 0 }}>
+        <main ref={workspaceRef} style={{ ...workspaceStyle, gridTemplateColumns: workspaceGridTemplateColumns, gap: isNarrow || isLogicGateInboxView ? 10 : 0 }}>
           <aside style={sidebarStyle}>
             <nav style={sidebarNavStyle} aria-label="Communication inboxes">
               <CommunicationsNavButton label="Primary Inbox" active={activeViewID === "primary"} onClick={() => selectCommunicationsView("primary", "primary")} />
@@ -1134,6 +1223,50 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
             </nav>
           </aside>
 
+          {isLogicGateInboxView ? (
+            <>
+              <LogicGateRaciMatrix
+                loading={loadingLogicGates}
+                placements={logicGateRaciPlacements}
+                logicGateByID={logicGateByID}
+                folders={logicGateFolders}
+                folderItems={logicGateFolderItems}
+                selectedRowIDs={selectedLogicGateRowIDs}
+                getLogicGateDragIDs={getLogicGateDragIDs}
+                onSelectLogicGate={selectLogicGateMatrixCard}
+                onPlaceLogicGates={placeLogicGatesInRaci}
+                onRemovePlacement={removeLogicGateFromRaci}
+              />
+              <LogicGateRail
+                loading={loadingLogicGates}
+                logicGateByID={logicGateByID}
+                folders={logicGateFolders}
+                folderItems={logicGateFolderItems}
+                allRows={visibleLogicGateRows}
+                selectedRowIDs={selectedLogicGateRowIDs}
+                expandedRowIDs={logicGateExpandedIDs}
+                search={logicGateSearch}
+                myGroups={myLogicGateGroups}
+                busy={!!busy}
+                getLogicGateDragIDs={getLogicGateDragIDs}
+                onSearchChange={setLogicGateSearch}
+                onToggleFolder={(rowID) => {
+                  setLogicGateExpandedIDs((previous) => {
+                    const next = new Set(previous);
+                    if (next.has(rowID)) next.delete(rowID);
+                    else next.add(rowID);
+                    return next;
+                  });
+                }}
+                onSelectRow={selectLogicGateRow}
+                onSelectShortcut={selectLogicGateShortcut}
+                onAddShortcuts={addShortcutsFromExplorerPayload}
+                onRemoveShortcut={removeShortcut}
+                onConvertMessages={convertMessagesToLogicGate}
+              />
+            </>
+          ) : (
+            <>
           {!isNarrow && <CommunicationsColumnResizeHandle dividerIndex={0} onPointerDown={startColumnResize} />}
 
           <section style={mailPanelStyle(isTriageView)}>
@@ -1263,6 +1396,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
             search={logicGateSearch}
             myGroups={myLogicGateGroups}
             busy={!!busy}
+            getLogicGateDragIDs={getLogicGateDragIDs}
             onSearchChange={setLogicGateSearch}
             onToggleFolder={(rowID) => {
               setLogicGateExpandedIDs((previous) => {
@@ -1273,6 +1407,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
               });
             }}
             onSelectRow={selectLogicGateRow}
+            onSelectShortcut={selectLogicGateShortcut}
             onAddShortcuts={addShortcutsFromExplorerPayload}
             onRemoveShortcut={removeShortcut}
             onConvertMessages={convertMessagesToLogicGate}
@@ -1307,6 +1442,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
               }}
               onCancel={() => setDeleteConfirmation(null)}
             />
+          )}
+            </>
           )}
         </main>
       )}
@@ -1402,9 +1539,11 @@ function LogicGateRail({
   search,
   myGroups,
   busy,
+  getLogicGateDragIDs,
   onSearchChange,
   onToggleFolder,
   onSelectRow,
+  onSelectShortcut,
   onAddShortcuts,
   onRemoveShortcut,
   onConvertMessages,
@@ -1419,9 +1558,11 @@ function LogicGateRail({
   search: string;
   myGroups: MyLogicGateGroup[];
   busy: boolean;
+  getLogicGateDragIDs: (logicGateID: string) => string[];
   onSearchChange: (value: string) => void;
   onToggleFolder: (rowID: string) => void;
   onSelectRow: (row: ExplorerTreeNode, event: React.MouseEvent) => void;
+  onSelectShortcut: (logicGateID: string, event: React.MouseEvent) => void;
   onAddShortcuts: (payload: ExplorerDragPayload | null) => void;
   onRemoveShortcut: (logicGateID: string) => void;
   onConvertMessages: (logicGateID: string, messageIDs: string[]) => void;
@@ -1457,54 +1598,17 @@ function LogicGateRail({
               </div>
               <div style={myLogicGateGridStyle}>
                 {group.logicGates.map((logicGate) => (
-                  <button
+                  <MyLogicGateTile
                     key={logicGate.logic_gate_id}
-                    type="button"
-                    draggable
-                    style={myLogicGateTileStyle}
-                    onDragStart={(event) => {
-                      event.dataTransfer.effectAllowed = "copyMove";
-                      event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify({
-                        kind: "logic_gate",
-                        itemID: logicGate.logic_gate_id,
-                        itemType: "logic_gate",
-                        sourceTreeID: `logic-gate-${logicGate.logic_gate_id}`,
-                      }));
-                    }}
-                    onDragOver={(event) => {
-                      if (!hasTriageMessageDrag(event.dataTransfer)) return;
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                    }}
-                    onDrop={(event) => {
-                      const messageIDs = readTriageMessageIDs(event.dataTransfer);
-                      if (messageIDs.length === 0) return;
-                      event.preventDefault();
-                      onConvertMessages(logicGate.logic_gate_id, messageIDs);
-                    }}
-                  >
-                    <span style={myLogicGateTileIconStyle}><ExplorerRowIcon kind="logic_gate" /></span>
-                    <span style={myLogicGateTileTextStyle}>{logicGate.header || "Logic Gate"}</span>
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      aria-label="Remove shortcut"
-                      style={shortcutRemoveStyle}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        if (!busy) onRemoveShortcut(logicGate.logic_gate_id);
-                      }}
-                      onKeyDown={(event) => {
-                        if ((event.key === "Enter" || event.key === " ") && !busy) {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          onRemoveShortcut(logicGate.logic_gate_id);
-                        }
-                      }}
-                    >
-                      x
-                    </span>
-                  </button>
+                    logicGate={logicGate}
+                    selected={selectedRowIDs.has(logicGateTreeID(logicGate.logic_gate_id))}
+                    busy={busy}
+                    getLogicGateDragIDs={getLogicGateDragIDs}
+                    logicGateByID={logicGateByID}
+                    onSelectShortcut={onSelectShortcut}
+                    onRemoveShortcut={onRemoveShortcut}
+                    onConvertMessages={onConvertMessages}
+                  />
                 ))}
               </div>
             </div>
@@ -1580,6 +1684,251 @@ function LogicGateRail({
         </div>
       </section>
     </aside>
+  );
+}
+
+function MyLogicGateTile({
+  logicGate,
+  selected,
+  busy,
+  logicGateByID,
+  getLogicGateDragIDs,
+  onSelectShortcut,
+  onRemoveShortcut,
+  onConvertMessages,
+}: {
+  logicGate: LogicGateRecord;
+  selected: boolean;
+  busy: boolean;
+  logicGateByID: Map<string, LogicGateRecord>;
+  getLogicGateDragIDs: (logicGateID: string) => string[];
+  onSelectShortcut: (logicGateID: string, event: React.MouseEvent) => void;
+  onRemoveShortcut: (logicGateID: string) => void;
+  onConvertMessages: (logicGateID: string, messageIDs: string[]) => void;
+}) {
+  const logicGateID = logicGate.logic_gate_id;
+  return (
+    <button
+      type="button"
+      draggable
+      style={myLogicGateTileStyle(selected)}
+      onClick={(event) => onSelectShortcut(logicGateID, event)}
+      onDragStart={(event) => {
+        const dragIDs = getLogicGateDragIDs(logicGateID);
+        setLogicGateDragData(event.dataTransfer, dragIDs, logicGateByID);
+      }}
+      onDragOver={(event) => {
+        if (!hasTriageMessageDrag(event.dataTransfer)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+      }}
+      onDrop={(event) => {
+        const messageIDs = readTriageMessageIDs(event.dataTransfer);
+        if (messageIDs.length === 0) return;
+        event.preventDefault();
+        onConvertMessages(logicGateID, messageIDs);
+      }}
+    >
+      <span style={myLogicGateTileIconStyle}><ExplorerRowIcon kind="logic_gate" /></span>
+      <span style={myLogicGateTileTextStyle}>{logicGateTitle(logicGate)}</span>
+      <span
+        role="button"
+        tabIndex={0}
+        aria-label="Remove shortcut"
+        style={shortcutRemoveStyle}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (!busy) onRemoveShortcut(logicGateID);
+        }}
+        onKeyDown={(event) => {
+          if ((event.key === "Enter" || event.key === " ") && !busy) {
+            event.preventDefault();
+            event.stopPropagation();
+            onRemoveShortcut(logicGateID);
+          }
+        }}
+      >
+        x
+      </span>
+    </button>
+  );
+}
+
+function LogicGateRaciMatrix({
+  loading,
+  placements,
+  logicGateByID,
+  folders,
+  folderItems,
+  selectedRowIDs,
+  getLogicGateDragIDs,
+  onSelectLogicGate,
+  onPlaceLogicGates,
+  onRemovePlacement,
+}: {
+  loading: boolean;
+  placements: LogicGateRaciPlacementMap;
+  logicGateByID: Map<string, LogicGateRecord>;
+  folders: CompanyExplorerFolder[];
+  folderItems: CompanyExplorerFolderItem[];
+  selectedRowIDs: Set<string>;
+  getLogicGateDragIDs: (logicGateID: string) => string[];
+  onSelectLogicGate: (logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onPlaceLogicGates: (logicGateIDs: string[], role: RaciRole, priority: RaciPriority) => void;
+  onRemovePlacement: (logicGateID: string) => void;
+}) {
+  const [dragOverCell, setDragOverCell] = useState<string>("");
+  const cellLogicGateIDs = useMemo(() => {
+    const byCell = new Map<string, string[]>();
+    for (const placement of Object.values(placements)) {
+      if (!logicGateByID.has(placement.logicGateID)) continue;
+      const cellKey = raciCellKey(placement.role, placement.priority);
+      const ids = byCell.get(cellKey) ?? [];
+      ids.push(placement.logicGateID);
+      byCell.set(cellKey, ids);
+    }
+    for (const ids of byCell.values()) {
+      ids.sort((a, b) => logicGateTitle(logicGateByID.get(a)).localeCompare(logicGateTitle(logicGateByID.get(b)), undefined, { numeric: true, sensitivity: "base" }));
+    }
+    return byCell;
+  }, [logicGateByID, placements]);
+  const orderedRowIDs = useMemo(() => {
+    const ids: string[] = [];
+    for (const priority of RACI_PRIORITIES) {
+      for (const column of RACI_COLUMNS) {
+        ids.push(...(cellLogicGateIDs.get(raciCellKey(column.role, priority.value)) ?? []).map(logicGateTreeID));
+      }
+    }
+    return ids;
+  }, [cellLogicGateIDs]);
+  const placedCount = orderedRowIDs.length;
+
+  const dropIntoCell = (event: React.DragEvent<HTMLElement>, role: RaciRole, priority: RaciPriority) => {
+    const payload = readExplorerDragPayload(event.dataTransfer);
+    const logicGateIDs = logicGateIDsFromExplorerPayload(payload, folders, folderItems);
+    setDragOverCell("");
+    if (logicGateIDs.length === 0) return;
+    event.preventDefault();
+    onPlaceLogicGates(logicGateIDs, role, priority);
+  };
+
+  return (
+    <section style={logicGateRaciPanelStyle}>
+      <div style={logicGateRaciHeaderStyle}>
+        <h2 style={panelTitleStyle}>RACI Matrix</h2>
+        <div style={logicGateRaciMetaStyle}>
+          {placedCount > 0 && <span>{placedCount} placed</span>}
+          {loading && <span>Loading</span>}
+        </div>
+      </div>
+      <div className="kanban-board-scroll" style={logicGateRaciScrollStyle}>
+        <div style={logicGateRaciGridStyle}>
+          <div style={logicGateRaciCornerStyle} />
+          {RACI_COLUMNS.map((column) => (
+            <div key={column.role} style={logicGateRaciColumnHeaderStyle}>
+              <strong style={logicGateRaciColumnLetterStyle}>{column.letter}</strong>
+              <span style={logicGateRaciColumnLabelStyle}>{column.label}</span>
+            </div>
+          ))}
+          {RACI_PRIORITIES.map((priority) => (
+            <React.Fragment key={priority.value}>
+              <div style={logicGateRaciPriorityHeaderStyle}>{priority.label}</div>
+              {RACI_COLUMNS.map((column) => {
+                const cellKey = raciCellKey(column.role, priority.value);
+                const logicGateIDs = cellLogicGateIDs.get(cellKey) ?? [];
+                const activeDrop = dragOverCell === cellKey;
+                return (
+                  <div
+                    key={cellKey}
+                    style={logicGateRaciCellStyle(activeDrop)}
+                    onDragEnter={(event) => {
+                      if (!hasExplorerDrag(event.dataTransfer)) return;
+                      setDragOverCell(cellKey);
+                    }}
+                    onDragOver={(event) => {
+                      if (!hasExplorerDrag(event.dataTransfer)) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "copy";
+                      setDragOverCell(cellKey);
+                    }}
+                    onDragLeave={(event) => {
+                      const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+                      if (related && event.currentTarget.contains(related)) return;
+                      setDragOverCell((current) => (current === cellKey ? "" : current));
+                    }}
+                    onDrop={(event) => dropIntoCell(event, column.role, priority.value)}
+                  >
+                    {logicGateIDs.map((logicGateID) => {
+                      const logicGate = logicGateByID.get(logicGateID);
+                      if (!logicGate) return null;
+                      return (
+                        <LogicGateRaciCard
+                          key={logicGateID}
+                          logicGate={logicGate}
+                          selected={selectedRowIDs.has(logicGateTreeID(logicGateID))}
+                          orderedRowIDs={orderedRowIDs}
+                          logicGateByID={logicGateByID}
+                          getLogicGateDragIDs={getLogicGateDragIDs}
+                          onSelectLogicGate={onSelectLogicGate}
+                          onRemovePlacement={onRemovePlacement}
+                        />
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function LogicGateRaciCard({
+  logicGate,
+  selected,
+  orderedRowIDs,
+  logicGateByID,
+  getLogicGateDragIDs,
+  onSelectLogicGate,
+  onRemovePlacement,
+}: {
+  logicGate: LogicGateRecord;
+  selected: boolean;
+  orderedRowIDs: string[];
+  logicGateByID: Map<string, LogicGateRecord>;
+  getLogicGateDragIDs: (logicGateID: string) => string[];
+  onSelectLogicGate: (logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onRemovePlacement: (logicGateID: string) => void;
+}) {
+  const logicGateID = logicGate.logic_gate_id;
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      draggable
+      style={logicGateRaciCardStyle(selected)}
+      onClick={(event) => onSelectLogicGate(logicGateID, orderedRowIDs, event)}
+      onDragStart={(event) => {
+        const dragIDs = getLogicGateDragIDs(logicGateID);
+        setLogicGateDragData(event.dataTransfer, dragIDs, logicGateByID);
+      }}
+    >
+      <span style={logicGateRaciCardIconStyle}><ExplorerRowIcon kind="logic_gate" /></span>
+      <span style={logicGateRaciCardTextStyle}>{logicGateTitle(logicGate)}</span>
+      <button
+        type="button"
+        aria-label="Remove from RACI matrix"
+        style={logicGateRaciCardRemoveStyle}
+        onClick={(event) => {
+          event.stopPropagation();
+          onRemovePlacement(logicGateID);
+        }}
+      >
+        x
+      </button>
+    </div>
   );
 }
 
@@ -1740,6 +2089,14 @@ function getCommunicationsWorkspaceTrackWidth(element: HTMLElement | null): numb
   return Math.max(1, element.clientWidth - paddingLeft - paddingRight);
 }
 
+function getLogicGateInboxGridTemplateColumns(widths: CommunicationsColumnWidths): string {
+  return [
+    `${widths[0]}px`,
+    "minmax(760px, 1fr)",
+    `${widths[3]}px`,
+  ].join(" ");
+}
+
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
@@ -1774,6 +2131,115 @@ function cleanIDList(values: string[]): string[] {
     ids.push(clean);
   }
   return ids;
+}
+
+function logicGateTreeID(logicGateID: string): string {
+  return `logic-gate-${logicGateID.trim()}`;
+}
+
+function logicGateIDFromTreeID(treeID: string): string {
+  const prefix = "logic-gate-";
+  const value = treeID.trim();
+  return value.startsWith(prefix) ? value.slice(prefix.length).trim() : "";
+}
+
+function logicGateTitle(logicGate?: Pick<LogicGateRecord, "header" | "logic_gate_id">): string {
+  return logicGate?.header?.trim() || logicGate?.logic_gate_id || "Logic Gate";
+}
+
+function buildLogicGateExplorerPayload(logicGateIDs: string[]): ExplorerDragPayload | null {
+  const ids = cleanIDList(logicGateIDs);
+  if (ids.length === 0) return null;
+  if (ids.length === 1) {
+    return {
+      kind: "logic_gate",
+      itemID: ids[0],
+      itemType: "logic_gate",
+      sourceTreeID: logicGateTreeID(ids[0]),
+    };
+  }
+  return {
+    kind: "batch",
+    itemType: "logic_gate",
+    items: ids.map((logicGateID) => ({
+      itemID: logicGateID,
+      itemType: "logic_gate",
+      treeID: logicGateTreeID(logicGateID),
+    })),
+  };
+}
+
+function setLogicGateDragData(dataTransfer: DataTransfer, logicGateIDs: string[], logicGateByID: Map<string, LogicGateRecord>): void {
+  const payload = buildLogicGateExplorerPayload(logicGateIDs);
+  if (!payload) return;
+  const ids = cleanIDList(logicGateIDs);
+  dataTransfer.effectAllowed = "copyMove";
+  dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(payload));
+  dataTransfer.setData("text/plain", ids.length === 1 ? logicGateTitle(logicGateByID.get(ids[0])) : `${ids.length} Logic Gates`);
+  attachStackedDragPreview(
+    dataTransfer,
+    ids.map((logicGateID) => ({ label: logicGateTitle(logicGateByID.get(logicGateID)), color: "#ff8820" })),
+    "#ff8820",
+    "Logic Gates",
+  );
+}
+
+function raciCellKey(role: RaciRole, priority: RaciPriority): string {
+  return `${role}:${priority}`;
+}
+
+function logicGateRaciStorageKey(companyID: string): string {
+  return `${LOGIC_GATE_RACI_STORAGE_KEY_PREFIX}:${companyID.trim() || "default"}`;
+}
+
+function readLogicGateRaciPlacements(companyID: string): LogicGateRaciPlacementMap {
+  try {
+    const raw = localStorage.getItem(logicGateRaciStorageKey(companyID));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    const values = Array.isArray(parsed) ? parsed : Object.values(parsed && typeof parsed === "object" ? parsed : {});
+    const placements: LogicGateRaciPlacementMap = {};
+    for (const value of values) {
+      if (!value || typeof value !== "object") continue;
+      const candidate = value as { logicGateID?: unknown; logic_gate_id?: unknown; role?: unknown; priority?: unknown; updatedAt?: unknown };
+      const logicGateID = typeof candidate.logicGateID === "string"
+        ? candidate.logicGateID.trim()
+        : typeof candidate.logic_gate_id === "string"
+          ? candidate.logic_gate_id.trim()
+          : "";
+      const role = isRaciRole(candidate.role) ? candidate.role : null;
+      const priority = normalizeRaciPriority(candidate.priority);
+      if (!logicGateID || !role || priority === null) continue;
+      placements[logicGateID] = {
+        logicGateID,
+        role,
+        priority,
+        updatedAt: typeof candidate.updatedAt === "number" && Number.isFinite(candidate.updatedAt) ? candidate.updatedAt : 0,
+      };
+    }
+    return placements;
+  } catch {
+    return {};
+  }
+}
+
+function storeLogicGateRaciPlacements(companyID: string, placements: LogicGateRaciPlacementMap): void {
+  try {
+    localStorage.setItem(logicGateRaciStorageKey(companyID), JSON.stringify(Object.values(placements)));
+  } catch {
+    // View placements are non-critical UI state; dropping should remain usable if storage is unavailable.
+  }
+}
+
+function isRaciRole(value: unknown): value is RaciRole {
+  return value === "responsible" || value === "accountable" || value === "consulted" || value === "informed";
+}
+
+function normalizeRaciPriority(value: unknown): RaciPriority | null {
+  const priority = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : Number.NaN;
+  if (!Number.isFinite(priority)) return null;
+  const rounded = Math.round(priority);
+  return rounded >= 0 && rounded <= 5 ? rounded as RaciPriority : null;
 }
 
 function logicGateIDsFromExplorerPayload(payload: ExplorerDragPayload | null, folders: CompanyExplorerFolder[], folderItems: CompanyExplorerFolderItem[]): string[] {
@@ -2195,22 +2661,25 @@ const myLogicGateGridStyle: React.CSSProperties = {
   gap: 8,
 };
 
-const myLogicGateTileStyle: React.CSSProperties = {
-  position: "relative",
-  minHeight: 88,
-  display: "grid",
-  alignContent: "center",
-  justifyItems: "center",
-  gap: 7,
-  border: "1px solid rgba(255, 136, 32, 0.28)",
-  borderRadius: 7,
-  background: "#fffaf3",
-  color: "#24120a",
-  cursor: "grab",
-  font: "inherit",
-  padding: "10px 8px",
-  minWidth: 0,
-};
+function myLogicGateTileStyle(selected: boolean): React.CSSProperties {
+  return {
+    position: "relative",
+    minHeight: 88,
+    display: "grid",
+    alignContent: "center",
+    justifyItems: "center",
+    gap: 7,
+    border: `1px solid ${selected ? "rgba(255, 136, 32, 0.72)" : "rgba(255, 136, 32, 0.28)"}`,
+    borderRadius: 7,
+    background: selected ? "#fff2e0" : "#fffaf3",
+    color: "#24120a",
+    cursor: "grab",
+    font: "inherit",
+    padding: "10px 8px",
+    minWidth: 0,
+    boxShadow: selected ? "0 0 0 2px rgba(255, 136, 32, 0.12) inset" : "none",
+  };
+}
 
 const myLogicGateTileIconStyle: React.CSSProperties = {
   width: 28,
@@ -2294,6 +2763,175 @@ const logicGateTreeRowTextStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
   fontSize: 11,
   fontWeight: 600,
+};
+
+const logicGateRaciPanelStyle: React.CSSProperties = {
+  minHeight: 0,
+  minWidth: 0,
+  display: "grid",
+  gridTemplateRows: "auto minmax(0, 1fr)",
+  gap: 8,
+  padding: 10,
+  border: "1px solid rgba(255, 136, 32, 0.22)",
+  background: "#ffffff",
+  borderRadius: 8,
+  overflow: "hidden",
+};
+
+const logicGateRaciHeaderStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 8,
+};
+
+const logicGateRaciMetaStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  color: "rgba(36, 18, 10, 0.56)",
+  fontSize: 11,
+  fontWeight: 600,
+  whiteSpace: "nowrap",
+};
+
+const logicGateRaciScrollStyle: React.CSSProperties = {
+  minHeight: 0,
+  overflow: "auto",
+  padding: "0 2px 4px 0",
+  ["--kanban-board-scroll-accent" as string]: "rgb(255, 136, 32)",
+  ["--kanban-board-scroll-track" as string]: "rgba(255, 136, 32, 0.08)",
+};
+
+const logicGateRaciGridStyle: React.CSSProperties = {
+  minWidth: 900,
+  display: "grid",
+  gridTemplateColumns: "96px repeat(4, minmax(190px, 1fr))",
+  gridTemplateRows: "46px repeat(6, minmax(112px, auto))",
+  alignItems: "stretch",
+};
+
+const logicGateRaciCornerStyle: React.CSSProperties = {
+  gridColumn: 1,
+  gridRow: 1,
+  borderRight: "1px solid rgba(255, 136, 32, 0.18)",
+  borderBottom: "1px solid rgba(255, 136, 32, 0.18)",
+};
+
+const logicGateRaciColumnHeaderStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  borderBottom: "1px solid rgba(255, 136, 32, 0.24)",
+  borderRight: "1px solid rgba(255, 136, 32, 0.18)",
+  background: "#fff8ef",
+  padding: "0 10px",
+};
+
+const logicGateRaciColumnLetterStyle: React.CSSProperties = {
+  width: 24,
+  height: 24,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(255, 136, 32, 0.42)",
+  borderRadius: 5,
+  color: "#ff8820",
+  fontSize: 13,
+  fontWeight: 800,
+  flexShrink: 0,
+};
+
+const logicGateRaciColumnLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const logicGateRaciPriorityHeaderStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  alignItems: "start",
+  borderRight: "1px solid rgba(255, 136, 32, 0.18)",
+  borderBottom: "1px solid rgba(255, 136, 32, 0.16)",
+  color: "rgba(36, 18, 10, 0.66)",
+  fontSize: 11,
+  fontWeight: 700,
+  lineHeight: 1.2,
+  padding: "10px 8px 0 0",
+  textAlign: "right",
+};
+
+function logicGateRaciCellStyle(activeDrop: boolean): React.CSSProperties {
+  return {
+    minHeight: 112,
+    minWidth: 0,
+    display: "grid",
+    alignContent: "start",
+    gap: 7,
+    borderRight: "1px solid rgba(255, 136, 32, 0.18)",
+    borderBottom: "1px solid rgba(255, 136, 32, 0.16)",
+    background: activeDrop ? "#fff2e0" : "#ffffff",
+    boxShadow: activeDrop ? "inset 0 0 0 2px rgba(255, 136, 32, 0.34)" : "none",
+    padding: 8,
+    transition: "background 120ms ease, box-shadow 120ms ease",
+  };
+}
+
+function logicGateRaciCardStyle(selected: boolean): React.CSSProperties {
+  return {
+    position: "relative",
+    minHeight: 42,
+    display: "grid",
+    gridTemplateColumns: "20px minmax(0, 1fr) 20px",
+    alignItems: "center",
+    gap: 7,
+    border: `1px solid ${selected ? "rgba(255, 136, 32, 0.72)" : "rgba(255, 136, 32, 0.24)"}`,
+    borderRadius: 7,
+    background: selected ? "#fff2e0" : "#fffaf3",
+    color: "#24120a",
+    cursor: "grab",
+    padding: "7px 6px",
+    minWidth: 0,
+    boxShadow: selected ? "0 0 0 2px rgba(255, 136, 32, 0.12) inset" : "0 2px 6px rgba(36, 18, 10, 0.04)",
+  };
+}
+
+const logicGateRaciCardIconStyle: React.CSSProperties = {
+  width: 20,
+  height: 20,
+  display: "grid",
+  placeItems: "center",
+  transform: "scale(1.1)",
+};
+
+const logicGateRaciCardTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 11,
+  fontWeight: 700,
+};
+
+const logicGateRaciCardRemoveStyle: React.CSSProperties = {
+  width: 20,
+  height: 20,
+  display: "grid",
+  placeItems: "center",
+  border: "none",
+  borderRadius: 4,
+  background: "transparent",
+  color: "rgba(36, 18, 10, 0.58)",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  lineHeight: 1,
+  padding: 0,
 };
 
 const emptySmallStyle: React.CSSProperties = {
