@@ -55,7 +55,10 @@ select $1, $2, md5(($1::text || ':' || $2 || ':' || $3))::uuid, $3, $4, 260, 240
 where not exists (
   select 1 from kanban_columns
   where company_id=$1 and board_id=$2 and lower(btrim(title))=lower(btrim($3))
-)`,
+) on conflict (company_id, board_id, column_id)
+do update set
+  title=excluded.title,
+  updated_timestamp=now()`,
 			companyID, boardID, column.title, (index+1)*1000, column.color); err != nil {
 			return err
 		}

@@ -146,7 +146,11 @@ and not exists (
   where kc.company_id = lg.company_id
     and kc.board_id = 'logic-gate:' || lg.logic_gate_id::text
     and lower(btrim(kc.title)) = lower(btrim(defaults.title))
-);
+)
+on conflict (company_id, board_id, column_id)
+do update set
+  title = excluded.title,
+  updated_timestamp = now();
 
 update kanban_cards card
 set logic_gate_id = board.logic_gate_id
