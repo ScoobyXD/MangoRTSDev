@@ -8,6 +8,7 @@ import (
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
+	"time"
 )
 
 func scanCommunicationsTriageItem(row interface {
@@ -237,6 +238,9 @@ insert into communications_email_nodes (
 			input.CompanyID, input.UserID, messageID, nodeID, board.BoardID, card.CardID, input.LogicGateID, string(rawMessage)); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
+		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, nodeID, message, time.Now().UTC()); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
 		if _, err := tx.ExecContext(ctx, `
 delete from communications_triage_items
 where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
@@ -262,6 +266,31 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 		return CommunicationsTriageConversionResult{}, err
 	}
 	return result, nil
+}
+
+func addEmailProjectionSQL(ctx context.Context, tx *sql.Tx, companyID, nodeID string, message domain.EmailMessageSnapshot, attachedAt time.Time) error {
+	informationID := newUUIDv7String()
+	information := attachedEmailProjectionInformation(message, attachedAt)
+	if _, err := tx.ExecContext(ctx, `
+insert into node_information (
+  company_id, information_id, node_id, type, information, created_timestamp, updated_timestamp
+) values ($1, $2, $3, 'Attached email'::information_type, $4, $5, $5)`,
+		companyID, informationID, nodeID, information, attachedAt); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+insert into node_projection_table (
+  company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp
+) values ($1, $2, $3, 'Attached email'::information_type, $4, $5, $5)
+on conflict (company_id, node_id, information_id)
+do update set
+  type=excluded.type,
+  information=excluded.information,
+  updated_timestamp=excluded.updated_timestamp`,
+		companyID, nodeID, informationID, information, attachedAt); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *PostgresRepo) RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error) {

@@ -105,7 +105,7 @@ type CommunicationsViewID =
 type CommunicationsColumnWidths = [number, number, number, number];
 
 type CommunicationsColumnResizeDrag = {
-  dividerIndex: 0 | 1 | 2;
+  dividerIndex: 0 | 1;
   startX: number;
   startWidths: CommunicationsColumnWidths;
 };
@@ -179,8 +179,34 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const loadingMessagesRef = useRef(false);
   const loadingMoreMessagesRef = useRef(false);
   const messageListFilterKeyRef = useRef("");
+  const markingReadMessageIDsRef = useRef<Set<string>>(new Set());
 
   const isNarrow = viewportWidth < 980;
+
+  const markMessageReadOnOpen = useCallback((message: EmailMessage) => {
+    if (activeViewIDRef.current !== "primary" || !message.id || !message.unread) return;
+    if (markingReadMessageIDsRef.current.has(message.id)) return;
+    markingReadMessageIDsRef.current.add(message.id);
+
+    const applyReadState = (readMessage: EmailMessage) => {
+      setMessages((previous) => unreadOnlyRef.current
+        ? previous.filter((item) => item.id !== readMessage.id)
+        : previous.map((item) => (item.id === readMessage.id ? { ...item, ...readMessage, unread: false } : item)));
+      setSelectedMessage((current) => current?.id === readMessage.id ? { ...current, ...readMessage, unread: false } : current);
+    };
+
+    applyReadState({ ...message, unread: false });
+    updateEmailMessage(message.id, { unread: false })
+      .then((updated) => applyReadState(updated))
+      .catch((markReadError) => {
+        if (activeViewIDRef.current === "primary") {
+          setError(formatError(markReadError, "Failed to mark message read"));
+        }
+      })
+      .finally(() => {
+        markingReadMessageIDsRef.current.delete(message.id);
+      });
+  }, []);
 
   useEffect(() => {
     selectedMessageIDRef.current = selectedMessageID;
@@ -598,7 +624,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     setError("");
     getEmailMessage(selectedMessageID)
       .then((message) => {
-        if (!cancelled) setSelectedMessage(message);
+        if (!cancelled) {
+          setSelectedMessage(message);
+          markMessageReadOnOpen(message);
+        }
       })
       .catch((detailError) => {
         if (!cancelled) {
@@ -611,9 +640,9 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       })
       .finally(() => {
         if (!cancelled) setLoadingDetail(false);
-      });
+    });
     return () => { cancelled = true; };
-  }, [activeViewID, handleEmailAccessExpired, selectedMessageID]);
+  }, [activeViewID, handleEmailAccessExpired, markMessageReadOnOpen, selectedMessageID]);
 
   const archiveFolder = useMemo(() => findSystemFolder(folders, "archive"), [folders]);
   const connection = status?.connection;
@@ -806,11 +835,15 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       shiftKey: event.shiftKey,
       ctrlKey: event.ctrlKey || event.metaKey,
     });
-    setSelectedMessageIDs(next.selectedIDs);
+    if (next.selectedIDs.size === 0) next.selectedIDs.add(message.id);
+    const orderedSelectedIDs = orderedIDs.filter((id) => next.selectedIDs.has(id));
+    const primaryID = next.selectedIDs.has(message.id) ? message.id : (orderedSelectedIDs[0] ?? message.id);
+    setSelectedMessageIDs(new Set(orderedSelectedIDs));
     setSelectionAnchorMessageID(next.anchorID);
-    setSelectedMessageID(message.id);
+    setSelectedMessageID(primaryID);
     setMessageContextMenu(null);
-  }, [messages, selectedMessageIDs, selectionAnchorMessageID]);
+    markMessageReadOnOpen(messages.find((item) => item.id === primaryID) ?? message);
+  }, [markMessageReadOnOpen, messages, selectedMessageIDs, selectionAnchorMessageID]);
 
   const openMessageContextMenu = useCallback((message: EmailMessage, event: React.MouseEvent) => {
     event.preventDefault();
@@ -935,13 +968,14 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     setLogicGateSelectionAnchorID(next.anchorID);
   }, [logicGateSelectionAnchorID, selectedLogicGateRowIDs, visibleLogicGateRows]);
 
-  const startColumnResize = useCallback((dividerIndex: 0 | 1 | 2, event: React.PointerEvent<HTMLButtonElement>) => {
+  const startColumnResize = useCallback((dividerIndex: 0 | 1, event: React.PointerEvent<HTMLButtonElement>) => {
     if (isNarrow) return;
     event.preventDefault();
     setColumnResizeDrag({ dividerIndex, startX: event.clientX, startWidths: columnWidths });
   }, [columnWidths, isNarrow]);
 
   const activeViewLabel = getCommunicationsViewLabel(activeViewID, sharedInboxes);
+  const isTriageView = activeViewID === "my-triage";
   const workspaceGridTemplateColumns = isNarrow ? "1fr" : getCommunicationsGridTemplateColumns(columnWidths);
 
   return (
@@ -1035,15 +1069,18 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
 
           {!isNarrow && <CommunicationsColumnResizeHandle dividerIndex={0} onPointerDown={startColumnResize} />}
 
-          <section style={panelStyle}>
-            <div style={mailListToolbarStyle}>
-              <h2 style={panelTitleStyle}>{activeViewLabel}</h2>
-              <button style={primaryButtonStyle} onClick={openNewCompose}>Compose</button>
+          <section style={mailPanelStyle(isTriageView)}>
+            <div style={isTriageView ? triageMailListToolbarStyle : mailListToolbarStyle}>
+              <div style={mailListTitleStackStyle}>
+                <h2 style={panelTitleStyle}>{activeViewLabel}</h2>
+                {isTriageView && <span style={mutedSmallStyle}>{messages.length} message{messages.length === 1 ? "" : "s"}</span>}
+              </div>
+              {!isTriageView && <button style={primaryButtonStyle} onClick={openNewCompose}>Compose</button>}
             </div>
-            <div style={accountRowStyle}>
+            {!isTriageView && <div style={accountRowStyle}>
               <span style={mutedSmallStyle}>{connection?.account_email}</span>
               <button style={smallButtonStyle} disabled={busy === "disconnect"} onClick={disconnect}>Disconnect</button>
-            </div>
+            </div>}
             <form style={searchRowStyle} onSubmit={submitSearch}>
               <input
                 style={inputStyle}
@@ -1051,19 +1088,22 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                 onChange={(event) => setSearchDraft(event.target.value)}
                 placeholder="Search mail"
               />
-              <button style={smallButtonStyle}>Search</button>
+              <button type="submit" style={searchButtonStyle}>Search</button>
             </form>
-            <label style={checkboxStyle}>
-              <input
-                type="checkbox"
-                checked={unreadOnly}
-                onChange={(event) => {
-                  setUnreadOnly(event.target.checked);
-                  setNextPageToken("");
-                }}
-              />
-              <span>Unread only</span>
-            </label>
+            <div style={mailFiltersRowStyle}>
+              <label style={checkboxStyle}>
+                <input
+                  type="checkbox"
+                  checked={unreadOnly}
+                  onChange={(event) => {
+                    setUnreadOnly(event.target.checked);
+                    setNextPageToken("");
+                  }}
+                />
+                <span>Unread only</span>
+              </label>
+              {selectedMessageIDs.size > 1 && <span style={selectedCountStyle}>{selectedMessageIDs.size} selected</span>}
+            </div>
             <div style={listHeaderStyle}>
               <span>{activeViewID === "my-triage" ? "My Triage" : mailboxLabel(mailbox)}</span>
               {(loadingMessages || loadingMoreMessages) && <span>Loading</span>}
@@ -1081,18 +1121,34 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
               ) : messages.map((message) => (
                 <button
                   key={message.id}
-                  style={messageRowStyle(selectedMessageIDs.has(message.id) || selectedMessageID === message.id, message.unread)}
+                  style={isTriageView
+                    ? triageMessageRowStyle(selectedMessageIDs.has(message.id) || selectedMessageID === message.id, message.unread)
+                    : messageRowStyle(selectedMessageIDs.has(message.id) || selectedMessageID === message.id, message.unread)}
                   draggable={activeViewID === "my-triage"}
                   onClick={(event) => selectMessageRow(message, event)}
                   onContextMenu={(event) => openMessageContextMenu(message, event)}
                   onDragStart={(event) => startMessageDrag(message, event)}
                 >
-                  <span style={messageRowTopStyle}>
-                    <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{formatAddressList(message.from) || "Unknown sender"}</strong>
-                    <span>{formatMessageDate(message.date)}</span>
-                  </span>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.subject || "(no subject)"}</span>
-                  <span style={snippetStyle}>{message.snippet || ""}</span>
+                  {isTriageView ? (
+                    <>
+                      <span style={messageSelectDotStyle(selectedMessageIDs.has(message.id) || selectedMessageID === message.id, message.unread)} />
+                      <span style={triageMessageContentStyle}>
+                        <strong style={triageSenderStyle}>{formatAddressList(message.from) || "Unknown sender"}</strong>
+                        <span style={triageSubjectStyle}>{message.subject || "(no subject)"}</span>
+                        <span style={snippetStyle}>{message.snippet || ""}</span>
+                      </span>
+                      <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span style={messageRowTopStyle}>
+                        <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{formatAddressList(message.from) || "Unknown sender"}</strong>
+                        <span>{formatMessageDate(message.date)}</span>
+                      </span>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.subject || "(no subject)"}</span>
+                      <span style={snippetStyle}>{message.snippet || ""}</span>
+                    </>
+                  )}
                 </button>
               ))}
               {loadingMoreMessages && <div style={loadingMoreStyle}>Loading</div>}
@@ -1123,11 +1179,9 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                 onToggleStar={() => patchSelectedMessage({ starred: !selectedMessage.starred })}
               />
             ) : (
-              <div style={emptyStateStyle}>Select a message or compose a new one</div>
+              <div style={emptyStateStyle}>{isTriageView ? "Select a triage message" : "Select a message or compose a new one"}</div>
             )}
           </section>
-
-          {!isNarrow && <CommunicationsColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
 
           <LogicGateRail
             loading={loadingLogicGates}
@@ -1234,8 +1288,8 @@ function CommunicationsColumnResizeHandle({
   dividerIndex,
   onPointerDown,
 }: {
-  dividerIndex: 0 | 1 | 2;
-  onPointerDown: (dividerIndex: 0 | 1 | 2, event: React.PointerEvent<HTMLButtonElement>) => void;
+  dividerIndex: 0 | 1;
+  onPointerDown: (dividerIndex: 0 | 1, event: React.PointerEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <button
@@ -1510,7 +1564,7 @@ function readCommunicationsColumnWidths(): CommunicationsColumnWidths {
 }
 
 function defaultCommunicationsColumnWidths(): CommunicationsColumnWidths {
-  const availableWidth = Math.max(1120, window.innerWidth - 52 - COMMUNICATIONS_COLUMN_RESIZER_WIDTH * 3);
+  const availableWidth = Math.max(1120, window.innerWidth - 52 - COMMUNICATIONS_COLUMN_RESIZER_WIDTH * 2);
   const sidebarWidth = 220;
   const listWidth = 350;
   const logicGateWidth = 340;
@@ -1527,7 +1581,7 @@ function normalizeCommunicationsColumnWidths(widths: CommunicationsColumnWidths)
   ];
 }
 
-function resizeCommunicationsColumns(startWidths: CommunicationsColumnWidths, dividerIndex: 0 | 1 | 2, delta: number): CommunicationsColumnWidths {
+function resizeCommunicationsColumns(startWidths: CommunicationsColumnWidths, dividerIndex: 0 | 1, delta: number): CommunicationsColumnWidths {
   const next: CommunicationsColumnWidths = [startWidths[0], startWidths[1], startWidths[2], startWidths[3]];
   const leftIndex = dividerIndex;
   const rightIndex = dividerIndex + 1;
@@ -1548,7 +1602,6 @@ function getCommunicationsGridTemplateColumns(widths: CommunicationsColumnWidths
     `${widths[1]}px`,
     `${COMMUNICATIONS_COLUMN_RESIZER_WIDTH}px`,
     `${widths[2]}px`,
-    `${COMMUNICATIONS_COLUMN_RESIZER_WIDTH}px`,
     `${widths[3]}px`,
   ].join(" ");
 }
@@ -1930,12 +1983,25 @@ const panelStyle: React.CSSProperties = {
   overflow: "hidden",
 };
 
+function mailPanelStyle(triage: boolean): React.CSSProperties {
+  return {
+    ...panelStyle,
+    gridTemplateRows: triage
+      ? "auto auto auto auto minmax(0, 1fr)"
+      : "auto auto auto auto auto minmax(0, 1fr)",
+  };
+}
+
 const logicGateRailStyle: React.CSSProperties = {
+  position: "sticky",
+  right: 0,
+  zIndex: 2,
   minHeight: 0,
   display: "grid",
   gridTemplateRows: "minmax(0, 1fr) minmax(0, 1fr)",
   gap: 10,
   overflow: "hidden",
+  background: "#ffffff",
 };
 
 const logicGateRailSectionStyle: React.CSSProperties = {
@@ -2233,6 +2299,18 @@ const mailListToolbarStyle: React.CSSProperties = {
   alignItems: "center",
 };
 
+const triageMailListToolbarStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 3,
+  minWidth: 0,
+};
+
+const mailListTitleStackStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 2,
+};
+
 const accountRowStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) auto",
@@ -2242,8 +2320,24 @@ const accountRowStyle: React.CSSProperties = {
 
 const searchRowStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) auto",
+  gridTemplateColumns: "minmax(0, 1fr) 72px",
   gap: 6,
+  alignItems: "center",
+};
+
+const searchButtonStyle: React.CSSProperties = {
+  ...smallButtonStyle,
+  width: "100%",
+  height: 34,
+  alignSelf: "center",
+};
+
+const mailFiltersRowStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 10,
 };
 
 const checkboxStyle: React.CSSProperties = {
@@ -2251,6 +2345,13 @@ const checkboxStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 7,
   fontSize: 11,
+};
+
+const selectedCountStyle: React.CSSProperties = {
+  color: "rgba(36, 18, 10, 0.58)",
+  fontSize: 11,
+  fontWeight: 600,
+  whiteSpace: "nowrap",
 };
 
 const listHeaderStyle: React.CSSProperties = {
@@ -2282,18 +2383,79 @@ function messageRowStyle(active: boolean, unread: boolean): React.CSSProperties 
     display: "grid",
     gap: 4,
     minHeight: 78,
-    border: `1px solid ${active ? "#ff8820" : unread ? "rgba(255, 136, 32, 0.45)" : "rgba(255, 136, 32, 0.16)"}`,
+    border: `1px solid ${active ? "#ff8820" : unread ? "rgba(255, 136, 32, 0.62)" : "rgba(255, 136, 32, 0.16)"}`,
     borderRadius: 7,
-    background: active ? "#fff2e0" : unread ? "#fff7ed" : "#ffffff",
+    background: active ? "#fff2e0" : unread ? "#fff4e8" : "#ffffff",
     cursor: "pointer",
     color: "#24120a",
     font: "inherit",
     fontSize: 12,
+    fontWeight: unread ? 700 : 500,
     padding: 9,
     textAlign: "left",
     minWidth: 0,
   };
 }
+
+function triageMessageRowStyle(active: boolean, unread: boolean): React.CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: "12px minmax(0, 1fr) auto",
+    gap: 9,
+    alignItems: "start",
+    minHeight: 82,
+    border: `1px solid ${active ? "#ff8820" : unread ? "rgba(255, 136, 32, 0.48)" : "rgba(255, 136, 32, 0.16)"}`,
+    borderRadius: 7,
+    background: active ? "#fff2e0" : unread ? "#fff8ef" : "#ffffff",
+    cursor: "grab",
+    color: "#24120a",
+    font: "inherit",
+    fontSize: 12,
+    padding: "10px 10px 9px",
+    textAlign: "left",
+    minWidth: 0,
+  };
+}
+
+function messageSelectDotStyle(active: boolean, unread: boolean): React.CSSProperties {
+  return {
+    width: 9,
+    height: 9,
+    marginTop: 4,
+    borderRadius: 9,
+    background: active ? "#ff8820" : unread ? "rgba(255, 136, 32, 0.72)" : "rgba(36, 18, 10, 0.16)",
+    boxShadow: active ? "0 0 0 3px rgba(255, 136, 32, 0.14)" : undefined,
+  };
+}
+
+const triageMessageContentStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 3,
+};
+
+const triageSenderStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 11,
+};
+
+const triageSubjectStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontWeight: 700,
+};
+
+const triageDateStyle: React.CSSProperties = {
+  color: "rgba(36, 18, 10, 0.62)",
+  fontSize: 11,
+  fontWeight: 700,
+  whiteSpace: "nowrap",
+};
 
 const messageRowTopStyle: React.CSSProperties = {
   display: "grid",
