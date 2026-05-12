@@ -198,11 +198,22 @@ function findProtectedSystemFolderInDeleteTargets(targets: ExplorerDeleteTargetW
   return null;
 }
 
+type CompanyExplorerContentProps = {
+  accent: string;
+  widgetId?: string;
+  hideTopControls?: boolean;
+  theme?: "mango" | "teal" | "light" | "dark";
+  selectionTargetFrameIDs?: string[];
+};
+
 // Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
-export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "mango" | "teal" | "light" | "dark" }> = ({ accent, widgetId, theme = "mango" }) => {
+export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ accent, widgetId, theme = "mango", selectionTargetFrameIDs }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
+  const normalizedSelectionTargetFrameIDs = useMemo(() => (
+    Array.from(new Set((selectionTargetFrameIDs ?? []).map((id) => id.trim()).filter(Boolean)))
+  ), [selectionTargetFrameIDs]);
   const expandedStorageKey = `company-explorer-expanded-v1:${companyID}:${scope}`;
   const scrollStorageKey = `company-explorer-scroll-v1:${companyID}:${scope}`;
   const rootOrderStorageKey = `company-explorer-root-order-v1:${companyID}:${scope}`;
@@ -1602,6 +1613,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     selectedTreeID,
     selectedTreeIDs,
     selectedTree,
+    selectionTargetFrameIDs: normalizedSelectionTargetFrameIDs,
     linkRevision,
     lastMapSelectionRevisionRef,
     lastLogicMapSelectionRevisionRef,

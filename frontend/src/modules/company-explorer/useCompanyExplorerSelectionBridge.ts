@@ -46,6 +46,7 @@ type UseCompanyExplorerSelectionBridgeInput = {
   selectedTreeID: string;
   selectedTreeIDs: Set<string>;
   selectedTree: ExplorerTreeNode | undefined;
+  selectionTargetFrameIDs?: string[];
   linkRevision: number;
   lastMapSelectionRevisionRef: React.MutableRefObject<number>;
   lastLogicMapSelectionRevisionRef: React.MutableRefObject<number>;
@@ -85,6 +86,7 @@ export function useCompanyExplorerSelectionBridge({
   selectedTreeID,
   selectedTreeIDs,
   selectedTree,
+  selectionTargetFrameIDs = [],
   linkRevision,
   lastMapSelectionRevisionRef,
   lastLogicMapSelectionRevisionRef,
@@ -512,6 +514,10 @@ export function useCompanyExplorerSelectionBridge({
       const graph = readFrameLinksFromStorage();
       const registry = readFrameRegistryFromStorage();
       const targetIDs = new Set(resolveConnectedFrameTargets({ sourceFrameID: scope, edges: graph, registry }));
+      for (const targetFrameID of selectionTargetFrameIDs) {
+        const cleanTargetFrameID = targetFrameID.trim();
+        if (cleanTargetFrameID && cleanTargetFrameID !== scope) targetIDs.add(cleanTargetFrameID);
+      }
       if (targetIDs.size === 0) return;
 
       const changedAt = Date.now();
@@ -607,6 +613,7 @@ export function useCompanyExplorerSelectionBridge({
     selectedKanbanBoardLabel,
     selectedLogicGateID,
     selectedNodeID,
+    selectionTargetFrameIDs,
     selectedTree,
     selectedTreeID,
     selectedTreeIDs,

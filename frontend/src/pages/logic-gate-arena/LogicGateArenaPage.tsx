@@ -59,6 +59,9 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
   const explorerUnits = Math.max(1, explorerFrame?.w ?? 22);
   const editorUnits = Math.max(1, editorFrame?.w ?? 34);
   const kanbanUnits = Math.max(1, kanbanFrame?.w ?? 44);
+  const explorerSelectionTargetFrameIDs = useMemo(() => (
+    editorFrame?.id ? [editorFrame.id] : []
+  ), [editorFrame?.id]);
 
   const applySelection = useCallback((selection: LiveSelectionChange | null) => {
     if (!selection || selection.companyID !== companyID) return;
@@ -182,7 +185,12 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
       }}
     >
       <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden" }}>
-        <CompanyExplorerContent accent={explorerFrame.accent} widgetId={explorerFrame.id} theme={explorerFrame.theme} />
+        <CompanyExplorerContent
+          accent={explorerFrame.accent}
+          widgetId={explorerFrame.id}
+          theme={explorerFrame.theme}
+          selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
+        />
       </section>
       <div
         role="separator"
