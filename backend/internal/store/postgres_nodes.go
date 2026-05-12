@@ -583,36 +583,18 @@ func (r *PostgresRepo) AddNodeInformation(companyID, nodeID, infoType, informati
 	if keyValue == "" {
 		keyValue = item.InformationID
 	}
-	if isEditorTextBoxType(item.Type) {
-		// The editor has one document surface per node. History remains
-		// append-only, but the projection is the single current Text box row
-		// used by hot UI/API reads.
-		if _, err := tx.ExecContext(ctx,
-			`insert into node_projection_table
-			 (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
-			 values ($1, $2, $3, $4::information_type, $5, now(), now())
-			 on conflict (company_id, node_id, type) where type = 'Text box'::information_type
-			 do update set
-			   information=excluded.information,
-			   updated_timestamp=now()`,
-			item.CompanyID, item.NodeID, keyValue, item.Type, information,
-		); err != nil {
-			return domain.NodeInformation{}, err
-		}
-	} else {
-		if _, err := tx.ExecContext(ctx,
-			`insert into node_projection_table
-			 (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
-			 values ($1, $2, $3, $4::information_type, $5, now(), now())
-			 on conflict (company_id, node_id, information_id)
-			 do update set
-			   type=excluded.type,
-			   information=excluded.information,
-			   updated_timestamp=now()`,
-			item.CompanyID, item.NodeID, keyValue, item.Type, information,
-		); err != nil {
-			return domain.NodeInformation{}, err
-		}
+	if _, err := tx.ExecContext(ctx,
+		`insert into node_projection_table
+		 (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
+		 values ($1, $2, $3, $4::information_type, $5, now(), now())
+		 on conflict (company_id, node_id, information_id)
+		 do update set
+		   type=excluded.type,
+		   information=excluded.information,
+		   updated_timestamp=now()`,
+		item.CompanyID, item.NodeID, keyValue, item.Type, information,
+	); err != nil {
+		return domain.NodeInformation{}, err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -635,19 +617,10 @@ func (r *PostgresRepo) ListNodeProjections(companyID, nodeID string) ([]domain.N
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		`with ranked as (
-		   select company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp,
-		          row_number() over (
-		            partition by type
-		            order by updated_timestamp desc, created_timestamp desc, information_id desc
-		          ) as rn
+		`select company_id, node_id, information_id, type::text, information, created_timestamp, updated_timestamp
 		   from node_projection_table
-		   where company_id=$1 and node_id=$2
-		 )
-		 select company_id, node_id, information_id, type::text, information, created_timestamp, updated_timestamp
-		 from ranked
-		 where type <> 'Text box'::information_type or rn = 1
-		 order by updated_timestamp asc`,
+		  where company_id=$1 and node_id=$2
+		  order by created_timestamp asc, information_id asc`,
 		companyID, nodeID,
 	)
 	if err != nil {

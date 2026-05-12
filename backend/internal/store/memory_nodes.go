@@ -7,21 +7,6 @@ import (
 	"time"
 )
 
-func newestNodeTextProjectionKey(items map[string]domain.NodeProjection) string {
-	keyValue := ""
-	var newest domain.NodeProjection
-	for key, item := range items {
-		if !isEditorTextBoxType(item.Type) {
-			continue
-		}
-		if keyValue == "" || item.UpdatedTimestamp.After(newest.UpdatedTimestamp) || (item.UpdatedTimestamp.Equal(newest.UpdatedTimestamp) && item.InformationID > newest.InformationID) {
-			keyValue = key
-			newest = item
-		}
-	}
-	return keyValue
-}
-
 func (r *MemoryRepo) CreateNode(companyID, title string) (domain.Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -299,19 +284,6 @@ func (r *MemoryRepo) AddNodeInformation(companyID, nodeID, infoType, information
 	if r.nodeText[k] == nil {
 		r.nodeText[k] = map[string]domain.NodeProjection{}
 	}
-	if isEditorTextBoxType(infoType) {
-		// The current editor has exactly one document surface per node. Keep
-		// history append-only above, but collapse the hot projection to one
-		// current Text box row so UI and headless reads never rotate old drafts.
-		if existingTextKey := newestNodeTextProjectionKey(r.nodeText[k]); existingTextKey != "" {
-			keyValue = existingTextKey
-			for projectionID, projection := range r.nodeText[k] {
-				if projectionID != keyValue && isEditorTextBoxType(projection.Type) {
-					delete(r.nodeText[k], projectionID)
-				}
-			}
-		}
-	}
 	existing, ok := r.nodeText[k][keyValue]
 	created := item.CreatedTimestamp
 	if ok {
@@ -336,15 +308,14 @@ func (r *MemoryRepo) ListNodeProjections(companyID, nodeID string) ([]domain.Nod
 		return nil, ErrNotFound
 	}
 	items := make([]domain.NodeProjection, 0)
-	latestTextKey := newestNodeTextProjectionKey(r.nodeText[key(companyID, nodeID)])
-	for projectionID, item := range r.nodeText[key(companyID, nodeID)] {
-		if isEditorTextBoxType(item.Type) && projectionID != latestTextKey {
-			continue
-		}
+	for _, item := range r.nodeText[key(companyID, nodeID)] {
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].UpdatedTimestamp.Before(items[j].UpdatedTimestamp)
+		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		}
+		return items[i].InformationID < items[j].InformationID
 	})
 	return items, nil
 }

@@ -39,7 +39,7 @@ func TestMemoryRepo_AddNodeInformation_ProjectionKeyStaysStableWhenInformationID
 	}
 }
 
-func TestMemoryRepo_AddNodeInformation_TextBoxProjectionCollapsesToOneCurrentDocument(t *testing.T) {
+func TestMemoryRepo_AddNodeInformation_TextBoxProjectionsRemainIndependent(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"
 
@@ -59,11 +59,11 @@ func TestMemoryRepo_AddNodeInformation_TextBoxProjectionCollapsesToOneCurrentDoc
 	if err != nil {
 		t.Fatalf("ListNodeProjections failed: %v", err)
 	}
-	if len(projections) != 1 {
-		t.Fatalf("expected one current Text box projection, got %d", len(projections))
+	if len(projections) != 2 {
+		t.Fatalf("expected two Text box projections, got %d", len(projections))
 	}
-	if projections[0].Information != "current document" {
-		t.Fatalf("projection information = %q, want current document", projections[0].Information)
+	if projections[0].Information != "old document" || projections[1].Information != "current document" {
+		t.Fatalf("projection information = %+v, want both text boxes in created order", projections)
 	}
 }
 
