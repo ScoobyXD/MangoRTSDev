@@ -4,11 +4,15 @@ export const EDITOR_IMAGE_WRAP_ATTRIBUTE = "data-mango-editor-image-wrap";
 export const EDITOR_IMAGE_SELECTED_ATTRIBUTE = "data-mango-editor-image-selected";
 
 const SAFE_IMAGE_DATA_URL_PATTERN = /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/]+=*$/i;
-const MAX_STORED_IMAGE_BYTES = 680_000;
-const MAX_EDITOR_IMAGE_DIMENSION_PX = 960;
+const MAX_STORED_IMAGE_BYTES = 220_000;
+const MIN_STORED_IMAGE_BYTES = 48_000;
+const TARGET_EDITOR_DOCUMENT_HTML_BYTES = 760_000;
+const MAX_EDITOR_IMAGE_WIDTH_PX = 960;
+const MAX_EDITOR_IMAGE_HEIGHT_PX = 1_600;
 const MIN_EDITOR_IMAGE_WIDTH_PX = 48;
 const MIN_EDITOR_IMAGE_HEIGHT_PX = 36;
 const EDITOR_IMAGE_INLINE_TEXT_GAP_PX = 12;
+export const EDITOR_IMAGE_MAX_WIDTH_INSET_PX = 32;
 export const DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX = 4;
 
 export type EditorImageFloatSide = "left" | "right";
@@ -26,6 +30,11 @@ export type EditorImageData = {
   floatSide?: EditorImageFloatSide;
 };
 
+export type EditorImageClipboardData = Omit<EditorImageData, "width" | "height"> & {
+  width?: number;
+  height?: number;
+};
+
 export function isSafeEditorImageSource(src: string): boolean {
   return SAFE_IMAGE_DATA_URL_PATTERN.test(src.trim());
 }
@@ -37,8 +46,7 @@ export function createEditorImageFrame(ownerDocument: Document, data: EditorImag
   frame.setAttribute(EDITOR_IMAGE_WRAP_ATTRIBUTE, "true");
   frame.setAttribute("contenteditable", "false");
   applyEditorImageFloatLayout(frame, data.floatSide ?? "left", data.marginLeft ?? 0);
-  frame.style.width = `${clampImageDimension(data.width, MIN_EDITOR_IMAGE_WIDTH_PX)}px`;
-  frame.style.height = `${clampImageDimension(data.height, MIN_EDITOR_IMAGE_HEIGHT_PX)}px`;
+  applyEditorImageFrameSize(frame, data.width, data.height);
   frame.style.marginTop = `${clampImageVerticalOffset(data.marginTop ?? DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX)}px`;
   frame.style.marginBottom = "8px";
   frame.style.resize = "none";
@@ -49,7 +57,6 @@ export function createEditorImageFrame(ownerDocument: Document, data: EditorImag
   frame.style.cursor = "move";
 
   const image = ownerDocument.createElement("img");
-  image.src = data.src;
   image.alt = "";
   image.draggable = false;
   image.style.display = "block";
@@ -57,6 +64,10 @@ export function createEditorImageFrame(ownerDocument: Document, data: EditorImag
   image.style.height = "100%";
   image.style.objectFit = "contain";
   image.style.pointerEvents = "none";
+  image.addEventListener("load", () => syncEditorImageFrameToImageAspect(frame, image), { once: true });
+  image.src = data.src;
+  if (image.complete) syncEditorImageFrameToImageAspect(frame, image);
+  ownerDocument.defaultView?.requestAnimationFrame(() => syncEditorImageFrameToImageAspect(frame, image));
   frame.appendChild(image);
   return frame;
 }
@@ -66,8 +77,8 @@ export function readEditorImageData(source: HTMLElement): EditorImageData | null
   const image = source.querySelector("img[src]") as HTMLImageElement | null;
   const src = image?.getAttribute("src")?.trim() ?? "";
   if (!isSafeEditorImageSource(src)) return null;
-  const width = readSafeStylePixels(source.style.width, 220, MIN_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_DIMENSION_PX);
-  const height = readSafeStylePixels(source.style.height, 160, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_DIMENSION_PX);
+  const width = readSafeStylePixels(source.style.width, 220, MIN_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_WIDTH_PX);
+  const height = readSafeStylePixels(source.style.height, 160, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_HEIGHT_PX);
   const floatSide = readEditorImageFloatSide(source);
   const marginLeft = readEditorImageInlineOffset(source);
   const marginTop = readSafeStylePixels(source.style.marginTop, DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX, -5_000, 5_000);
@@ -80,6 +91,33 @@ export function readEditorImageData(source: HTMLElement): EditorImageData | null
     marginTop,
     floatSide,
   };
+}
+
+export function createEditorImageClipboardHTML(ownerDocument: Document, data: EditorImageData): string {
+  const frame = createEditorImageFrame(ownerDocument, { ...data, id: undefined });
+  frame.removeAttribute(EDITOR_IMAGE_SELECTED_ATTRIBUTE);
+  return frame.outerHTML;
+}
+
+export function readEditorImageClipboardDataFromHTML(ownerDocument: Document, html: string): EditorImageClipboardData | null {
+  if (!html.trim()) return null;
+  const template = ownerDocument.createElement("template");
+  template.innerHTML = html;
+
+  const copiedFrame = template.content.querySelector(`span[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"]`);
+  if (copiedFrame instanceof HTMLElement) {
+    const data = readEditorImageData(copiedFrame);
+    return data ? { ...data, id: undefined } : null;
+  }
+
+  const image = template.content.querySelector("img[src]") as HTMLImageElement | null;
+  if (!image) return null;
+  const src = image.getAttribute("src")?.trim() ?? "";
+  if (!isSafeEditorImageSource(src)) return null;
+
+  const width = readOptionalImageDimension(image.getAttribute("width") ?? image.style.width, MIN_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_WIDTH_PX);
+  const height = readOptionalImageDimension(image.getAttribute("height") ?? image.style.height, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_HEIGHT_PX);
+  return { src, width, height };
 }
 
 export function findEditorImageFrame(root: HTMLElement, target: EventTarget | null): HTMLSpanElement | null {
@@ -117,6 +155,18 @@ export function clampEditorImageVerticalOffset(value: number, minValue: number, 
 export function clampEditorImageSize(value: number, minValue: number, maxValue: number): number {
   if (!Number.isFinite(value)) return minValue;
   return Math.max(minValue, Math.min(maxValue, Math.round(value)));
+}
+
+export function getEditorImageStorageBudgetForDocumentBytes(currentDocumentBytes: number): number {
+  if (!Number.isFinite(currentDocumentBytes) || currentDocumentBytes <= 0) return MAX_STORED_IMAGE_BYTES;
+  const remainingHTMLBytes = TARGET_EDITOR_DOCUMENT_HTML_BYTES - Math.round(currentDocumentBytes);
+  const estimatedRawImageBytes = Math.floor(remainingHTMLBytes * 0.68);
+  return clampEditorImageSize(estimatedRawImageBytes, MIN_STORED_IMAGE_BYTES, MAX_STORED_IMAGE_BYTES);
+}
+
+export function estimateEditorDocumentBytes(value: string): number {
+  if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(value).length;
+  return value.length;
 }
 
 export function readEditorImageFloatSide(source: HTMLElement): EditorImageFloatSide {
@@ -182,22 +232,64 @@ export function getEditorImageCursorForInteraction(interaction: EditorImagePoint
   return "ns-resize";
 }
 
-export async function createEditorImageDataFromFile(file: File, maxDisplayWidth: number): Promise<EditorImageData> {
+export function readEditorImageAspectRatio(frame: HTMLElement, fallbackRatio = 1): number {
+  const image = frame.querySelector("img[src]") as HTMLImageElement | null;
+  const naturalWidth = image?.naturalWidth ?? 0;
+  const naturalHeight = image?.naturalHeight ?? 0;
+  if (naturalWidth > 0 && naturalHeight > 0) return naturalWidth / naturalHeight;
+  const width = readSafeStylePixels(frame.style.width, 0, MIN_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_WIDTH_PX);
+  const height = readSafeStylePixels(frame.style.height, 0, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_HEIGHT_PX);
+  if (width > 0 && height > 0) return width / height;
+  return Number.isFinite(fallbackRatio) && fallbackRatio > 0 ? fallbackRatio : 1;
+}
+
+export function createEditorImageBlob(src: string): Blob | null {
+  if (!isSafeEditorImageSource(src) || typeof atob === "undefined" || typeof Blob === "undefined") return null;
+  const commaIndex = src.indexOf(",");
+  if (commaIndex < 0) return null;
+  const mimeMatch = /^data:([^;,]+);base64/i.exec(src.slice(0, commaIndex));
+  const mimeType = mimeMatch?.[1] ?? "image/png";
+  const binary = atob(src.slice(commaIndex + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: mimeType });
+}
+
+export async function createEditorImageDataFromFile(file: File, maxDisplayWidth: number, maxStoredBytes = MAX_STORED_IMAGE_BYTES): Promise<EditorImageData> {
   const rawSource = await readFileAsDataURL(file);
+  return createEditorImageDataFromSource(rawSource, maxDisplayWidth, { maxStoredBytes });
+}
+
+export async function createEditorImageDataFromSource(
+  rawSource: string,
+  maxDisplayWidth: number,
+  options: {
+    maxStoredBytes?: number;
+    preferredWidth?: number;
+    preferredHeight?: number;
+    marginLeft?: number;
+    marginTop?: number;
+    floatSide?: EditorImageFloatSide;
+  } = {},
+): Promise<EditorImageData> {
   const source = isSafeEditorImageSource(rawSource) ? rawSource : "";
   if (!source) throw new Error("unsupported_image_type");
   const image = await loadImage(source);
-  const displayWidth = Math.min(image.naturalWidth || maxDisplayWidth, maxDisplayWidth, MAX_EDITOR_IMAGE_DIMENSION_PX);
-  const scale = displayWidth / Math.max(1, image.naturalWidth || displayWidth);
-  const displayHeight = Math.max(MIN_EDITOR_IMAGE_HEIGHT_PX, Math.round((image.naturalHeight || displayWidth) * scale));
-  const src = imageDataURLByteLength(source) <= MAX_STORED_IMAGE_BYTES
+  const dimensions = resolveEditorImageDisplaySize(image, maxDisplayWidth, options.preferredWidth, options.preferredHeight);
+  const maxImageBytes = clampEditorImageSize(options.maxStoredBytes ?? MAX_STORED_IMAGE_BYTES, MIN_STORED_IMAGE_BYTES, MAX_STORED_IMAGE_BYTES);
+  const src = imageDataURLByteLength(source) <= maxImageBytes
     ? source
-    : compressImageToDataURL(image, displayWidth, displayHeight);
+    : compressImageToDataURL(image, dimensions.width, dimensions.height, maxImageBytes);
   if (!isSafeEditorImageSource(src)) throw new Error("failed_to_prepare_image");
   return {
     src,
-    width: clampEditorImageSize(displayWidth, MIN_EDITOR_IMAGE_WIDTH_PX, maxDisplayWidth),
-    height: clampEditorImageSize(displayHeight, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_DIMENSION_PX),
+    width: dimensions.width,
+    height: dimensions.height,
+    marginLeft: options.marginLeft,
+    marginTop: options.marginTop,
+    floatSide: options.floatSide,
   };
 }
 
@@ -213,8 +305,15 @@ function readSafeStylePixels(value: string, fallback: number, minValue: number, 
   return Math.max(minValue, Math.min(maxValue, Math.round(parsed)));
 }
 
+function readOptionalImageDimension(value: string, minValue: number, maxValue: number): number | undefined {
+  const parsed = Number.parseFloat(value.trim());
+  if (!Number.isFinite(parsed)) return undefined;
+  return Math.max(minValue, Math.min(maxValue, Math.round(parsed)));
+}
+
 function clampImageDimension(value: number, minValue: number): number {
-  return clampEditorImageSize(value, minValue, MAX_EDITOR_IMAGE_DIMENSION_PX);
+  const maxValue = minValue === MIN_EDITOR_IMAGE_HEIGHT_PX ? MAX_EDITOR_IMAGE_HEIGHT_PX : MAX_EDITOR_IMAGE_WIDTH_PX;
+  return clampEditorImageSize(value, minValue, maxValue);
 }
 
 function clampImageOffset(value: number): number {
@@ -223,6 +322,51 @@ function clampImageOffset(value: number): number {
 
 function clampImageVerticalOffset(value: number): number {
   return clampEditorImageVerticalOffset(value, -5_000, 5_000);
+}
+
+function applyEditorImageFrameSize(frame: HTMLElement, width: number, height: number) {
+  const nextWidth = clampImageDimension(width, MIN_EDITOR_IMAGE_WIDTH_PX);
+  const nextHeight = clampImageDimension(height, MIN_EDITOR_IMAGE_HEIGHT_PX);
+  frame.style.width = `${nextWidth}px`;
+  frame.style.height = `${nextHeight}px`;
+  frame.style.aspectRatio = `${nextWidth} / ${nextHeight}`;
+}
+
+function syncEditorImageFrameToImageAspect(frame: HTMLElement, image: HTMLImageElement) {
+  const naturalWidth = image.naturalWidth;
+  const naturalHeight = image.naturalHeight;
+  if (!naturalWidth || !naturalHeight) return;
+  const aspectRatio = naturalWidth / naturalHeight;
+  const renderedWidth = Math.round(frame.getBoundingClientRect().width);
+  const styleWidth = readSafeStylePixels(frame.style.width, naturalWidth, MIN_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_WIDTH_PX);
+  let width = renderedWidth >= MIN_EDITOR_IMAGE_WIDTH_PX ? renderedWidth : styleWidth;
+  let height = Math.round(width / aspectRatio);
+  if (height > MAX_EDITOR_IMAGE_HEIGHT_PX) {
+    height = MAX_EDITOR_IMAGE_HEIGHT_PX;
+    width = Math.round(height * aspectRatio);
+  }
+  applyEditorImageFrameSize(frame, width, height);
+}
+
+function resolveEditorImageDisplaySize(image: HTMLImageElement, maxDisplayWidth: number, preferredWidth?: number, preferredHeight?: number): { width: number; height: number } {
+  const naturalWidth = Math.max(1, image.naturalWidth || preferredWidth || maxDisplayWidth || 220);
+  const naturalHeight = Math.max(1, image.naturalHeight || preferredHeight || naturalWidth);
+  const naturalAspectRatio = naturalWidth / naturalHeight;
+  let width = preferredWidth && preferredWidth > 0 ? preferredWidth : Math.min(naturalWidth, maxDisplayWidth, MAX_EDITOR_IMAGE_WIDTH_PX);
+  let height = preferredHeight && preferredHeight > 0 ? preferredHeight : Math.round(width / naturalAspectRatio);
+
+  if (preferredWidth && preferredWidth > 0 && (!preferredHeight || preferredHeight <= 0)) height = Math.round(preferredWidth / naturalAspectRatio);
+  if (preferredHeight && preferredHeight > 0 && (!preferredWidth || preferredWidth <= 0)) width = Math.round(preferredHeight * naturalAspectRatio);
+
+  const maxWidth = Math.max(MIN_EDITOR_IMAGE_WIDTH_PX, Math.min(maxDisplayWidth || MAX_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_WIDTH_PX));
+  const scale = Math.min(1, maxWidth / Math.max(1, width), MAX_EDITOR_IMAGE_HEIGHT_PX / Math.max(1, height));
+  width = Math.round(width * scale);
+  height = Math.round(height * scale);
+
+  return {
+    width: clampEditorImageSize(width, MIN_EDITOR_IMAGE_WIDTH_PX, maxWidth),
+    height: clampEditorImageSize(height, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_HEIGHT_PX),
+  };
 }
 
 function readFileAsDataURL(file: File): Promise<string> {
@@ -243,12 +387,12 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function compressImageToDataURL(image: HTMLImageElement, width: number, height: number): string {
+function compressImageToDataURL(image: HTMLImageElement, width: number, height: number, maxStoredBytes: number): string {
   let nextWidth = Math.max(MIN_EDITOR_IMAGE_WIDTH_PX, Math.round(width));
   let nextHeight = Math.max(MIN_EDITOR_IMAGE_HEIGHT_PX, Math.round(height));
   let quality = 0.86;
   let output = "";
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  for (let attempt = 0; attempt < 14; attempt += 1) {
     const canvas = document.createElement("canvas");
     canvas.width = nextWidth;
     canvas.height = nextHeight;
@@ -258,12 +402,12 @@ function compressImageToDataURL(image: HTMLImageElement, width: number, height: 
     context.fillRect(0, 0, nextWidth, nextHeight);
     context.drawImage(image, 0, 0, nextWidth, nextHeight);
     output = canvas.toDataURL("image/jpeg", quality);
-    if (imageDataURLByteLength(output) <= MAX_STORED_IMAGE_BYTES) return output;
-    if (quality > 0.58) {
+    if (imageDataURLByteLength(output) <= maxStoredBytes) return output;
+    if (quality > 0.46) {
       quality -= 0.1;
     } else {
-      nextWidth = Math.max(MIN_EDITOR_IMAGE_WIDTH_PX, Math.round(nextWidth * 0.82));
-      nextHeight = Math.max(MIN_EDITOR_IMAGE_HEIGHT_PX, Math.round(nextHeight * 0.82));
+      nextWidth = Math.max(MIN_EDITOR_IMAGE_WIDTH_PX, Math.round(nextWidth * 0.78));
+      nextHeight = Math.max(MIN_EDITOR_IMAGE_HEIGHT_PX, Math.round(nextHeight * 0.78));
     }
   }
   return output;
