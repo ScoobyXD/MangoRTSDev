@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"testing"
@@ -507,5 +508,64 @@ func TestMemoryRepoUserEmailConnectionLifecycle(t *testing.T) {
 	}
 	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("connection after delete error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestMemoryRepoConvertCommunicationsTriageItemsAddsAttachedEmailProjection(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+
+	user, err := repo.UpsertAuthUser("subject-triage", "triage@example.com", "Triage User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser failed: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Support Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate failed: %v", err)
+	}
+	message := domain.EmailMessageSnapshot{
+		ID:       "message-1",
+		ThreadID: "thread-1",
+		Subject:  "Customer escalation",
+		Snippet:  "Need help with onboarding",
+		Date:     1770000000,
+		From:     []domain.EmailAddressSnapshot{{Name: "Customer", Email: "customer@example.com"}},
+		Unread:   true,
+	}
+	if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
+		t.Fatalf("UpsertCommunicationsTriageItem failed: %v", err)
+	}
+
+	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
+		UserID:      user.UserID,
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		MessageIDs:  []string{message.ID},
+	})
+	if err != nil {
+		t.Fatalf("ConvertCommunicationsTriageItems failed: %v", err)
+	}
+	if len(result.Nodes) != 1 {
+		t.Fatalf("expected one converted node, got %d", len(result.Nodes))
+	}
+	projections, err := repo.ListNodeProjections(companyID, result.Nodes[0].NodeID)
+	if err != nil {
+		t.Fatalf("ListNodeProjections failed: %v", err)
+	}
+	if len(projections) != 1 || projections[0].Type != "Attached email" {
+		t.Fatalf("projection rows = %+v, want one Attached email", projections)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(projections[0].Information), &payload); err != nil {
+		t.Fatalf("attached email payload is not JSON: %v", err)
+	}
+	if payload["message_id"] != message.ID || payload["thread_id"] != message.ThreadID || payload["subject"] != message.Subject {
+		t.Fatalf("attached email payload = %+v, want original message identifiers", payload)
+	}
+	if payload["from"] != "Customer <customer@example.com>" {
+		t.Fatalf("from payload = %v, want formatted sender", payload["from"])
+	}
+	if payload["attached_timestamp"] == "" {
+		t.Fatalf("attached_timestamp missing from payload: %+v", payload)
 	}
 }

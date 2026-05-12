@@ -168,6 +168,7 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			CreatedTimestamp: now,
 			UpdatedTimestamp: now,
 		}
+		r.addEmailProjectionLocked(input.CompanyID, nodeID, triageItem.Message, now)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 
 		result.Nodes = append(result.Nodes, node)
@@ -326,14 +327,14 @@ func (r *MemoryRepo) pendingKanbanColumnIDLocked(companyID, boardID string) stri
 }
 
 func (r *MemoryRepo) addEmailProjectionLocked(companyID, nodeID string, message domain.EmailMessageSnapshot, now time.Time) {
-	raw, _ := json.Marshal(message)
+	information := attachedEmailProjectionInformation(message, now)
 	informationID := newUUIDv7String()
 	info := domain.NodeInformation{
 		CompanyID:        companyID,
 		InformationID:    informationID,
 		NodeID:           nodeID,
 		Type:             "Attached email",
-		Information:      string(raw),
+		Information:      information,
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
@@ -346,11 +347,55 @@ func (r *MemoryRepo) addEmailProjectionLocked(companyID, nodeID string, message 
 		CompanyID:        companyID,
 		NodeID:           nodeID,
 		Type:             info.Type,
-		Information:      info.Information,
+		Information:      information,
 		InformationID:    informationID,
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
+}
+
+func attachedEmailProjectionInformation(message domain.EmailMessageSnapshot, attachedAt time.Time) string {
+	var date *int64
+	if message.Date > 0 {
+		value := message.Date
+		date = &value
+	}
+	payload := struct {
+		MessageID         string `json:"message_id"`
+		ThreadID          string `json:"thread_id"`
+		Subject           string `json:"subject"`
+		Snippet           string `json:"snippet"`
+		From              string `json:"from"`
+		Date              *int64 `json:"date"`
+		AttachedTimestamp string `json:"attached_timestamp"`
+	}{
+		MessageID:         strings.TrimSpace(message.ID),
+		ThreadID:          strings.TrimSpace(message.ThreadID),
+		Subject:           emailNodeTitle(message),
+		Snippet:           strings.TrimSpace(message.Snippet),
+		From:              emailAddressSnapshotListLabel(message.From),
+		Date:              date,
+		AttachedTimestamp: attachedAt.UTC().Format(time.RFC3339Nano),
+	}
+	raw, _ := json.Marshal(payload)
+	return string(raw)
+}
+
+func emailAddressSnapshotListLabel(addresses []domain.EmailAddressSnapshot) string {
+	labels := make([]string, 0, len(addresses))
+	for _, address := range addresses {
+		email := strings.TrimSpace(address.Email)
+		if email == "" {
+			continue
+		}
+		name := strings.TrimSpace(address.Name)
+		if name != "" {
+			labels = append(labels, name+" <"+email+">")
+			continue
+		}
+		labels = append(labels, email)
+	}
+	return strings.Join(labels, ", ")
 }
 
 func normalizeEmailMessageSnapshot(message domain.EmailMessageSnapshot) domain.EmailMessageSnapshot {
