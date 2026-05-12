@@ -105,9 +105,10 @@ type CommunicationsViewID =
 type CommunicationsColumnWidths = [number, number, number, number];
 
 type CommunicationsColumnResizeDrag = {
-  dividerIndex: 0 | 1;
+  dividerIndex: 0 | 1 | 2;
   startX: number;
   startWidths: CommunicationsColumnWidths;
+  availableWidth: number;
 };
 
 const MAILBOX_OPTIONS: MailboxOption[] = [
@@ -180,6 +181,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const loadingMoreMessagesRef = useRef(false);
   const messageListFilterKeyRef = useRef("");
   const markingReadMessageIDsRef = useRef<Set<string>>(new Set());
+  const workspaceRef = useRef<HTMLElement | null>(null);
 
   const isNarrow = viewportWidth < 980;
 
@@ -261,7 +263,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     const onPointerMove = (event: PointerEvent) => {
       event.preventDefault();
       const delta = event.clientX - columnResizeDrag.startX;
-      setColumnWidths(resizeCommunicationsColumns(columnResizeDrag.startWidths, columnResizeDrag.dividerIndex, delta));
+      setColumnWidths(resizeCommunicationsColumns(columnResizeDrag.startWidths, columnResizeDrag.dividerIndex, delta, columnResizeDrag.availableWidth));
     };
     const onPointerUp = () => setColumnResizeDrag(null);
     const previousCursor = document.body.style.cursor;
@@ -968,10 +970,15 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     setLogicGateSelectionAnchorID(next.anchorID);
   }, [logicGateSelectionAnchorID, selectedLogicGateRowIDs, visibleLogicGateRows]);
 
-  const startColumnResize = useCallback((dividerIndex: 0 | 1, event: React.PointerEvent<HTMLButtonElement>) => {
+  const startColumnResize = useCallback((dividerIndex: 0 | 1 | 2, event: React.PointerEvent<HTMLButtonElement>) => {
     if (isNarrow) return;
     event.preventDefault();
-    setColumnResizeDrag({ dividerIndex, startX: event.clientX, startWidths: columnWidths });
+    setColumnResizeDrag({
+      dividerIndex,
+      startX: event.clientX,
+      startWidths: columnWidths,
+      availableWidth: getCommunicationsWorkspaceTrackWidth(workspaceRef.current),
+    });
   }, [columnWidths, isNarrow]);
 
   const activeViewLabel = getCommunicationsViewLabel(activeViewID, sharedInboxes);
@@ -1026,7 +1033,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
           </section>
         </main>
       ) : (
-        <main style={{ ...workspaceStyle, gridTemplateColumns: workspaceGridTemplateColumns, gap: isNarrow ? 10 : 0 }}>
+        <main ref={workspaceRef} style={{ ...workspaceStyle, gridTemplateColumns: workspaceGridTemplateColumns, gap: isNarrow ? 10 : 0 }}>
           <aside style={sidebarStyle}>
             <nav style={sidebarNavStyle} aria-label="Communication inboxes">
               <CommunicationsNavButton label="Primary Inbox" active={activeViewID === "primary"} onClick={() => selectCommunicationsView("primary", "primary")} />
@@ -1183,6 +1190,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
             )}
           </section>
 
+          {!isNarrow && <CommunicationsColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
+
           <LogicGateRail
             loading={loadingLogicGates}
             logicGateByID={logicGateByID}
@@ -1288,8 +1297,8 @@ function CommunicationsColumnResizeHandle({
   dividerIndex,
   onPointerDown,
 }: {
-  dividerIndex: 0 | 1;
-  onPointerDown: (dividerIndex: 0 | 1, event: React.PointerEvent<HTMLButtonElement>) => void;
+  dividerIndex: 0 | 1 | 2;
+  onPointerDown: (dividerIndex: 0 | 1 | 2, event: React.PointerEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <button
@@ -1564,7 +1573,7 @@ function readCommunicationsColumnWidths(): CommunicationsColumnWidths {
 }
 
 function defaultCommunicationsColumnWidths(): CommunicationsColumnWidths {
-  const availableWidth = Math.max(1120, window.innerWidth - 52 - COMMUNICATIONS_COLUMN_RESIZER_WIDTH * 2);
+  const availableWidth = Math.max(1120, window.innerWidth - 52 - COMMUNICATIONS_COLUMN_RESIZER_WIDTH * 3);
   const sidebarWidth = 220;
   const listWidth = 350;
   const logicGateWidth = 340;
@@ -1581,17 +1590,26 @@ function normalizeCommunicationsColumnWidths(widths: CommunicationsColumnWidths)
   ];
 }
 
-function resizeCommunicationsColumns(startWidths: CommunicationsColumnWidths, dividerIndex: 0 | 1, delta: number): CommunicationsColumnWidths {
+function resizeCommunicationsColumns(startWidths: CommunicationsColumnWidths, dividerIndex: 0 | 1 | 2, delta: number, availableWidth: number): CommunicationsColumnWidths {
   const next: CommunicationsColumnWidths = [startWidths[0], startWidths[1], startWidths[2], startWidths[3]];
-  const leftIndex = dividerIndex;
-  const rightIndex = dividerIndex + 1;
-  const pairTotal = startWidths[leftIndex] + startWidths[rightIndex];
-  const minLeft = COMMUNICATIONS_COLUMN_MIN_WIDTHS[leftIndex];
-  const maxLeft = Math.min(COMMUNICATIONS_COLUMN_MAX_WIDTHS[leftIndex], pairTotal - COMMUNICATIONS_COLUMN_MIN_WIDTHS[rightIndex]);
-  const nextLeft = clampNumber(startWidths[leftIndex] + delta, minLeft, maxLeft);
+  const resizerTotal = COMMUNICATIONS_COLUMN_RESIZER_WIDTH * 3;
 
-  next[leftIndex] = nextLeft;
-  next[rightIndex] = pairTotal - nextLeft;
+  if (dividerIndex === 0) {
+    const pairTotal = startWidths[0] + startWidths[1];
+    const maxLeft = Math.min(COMMUNICATIONS_COLUMN_MAX_WIDTHS[0], pairTotal - COMMUNICATIONS_COLUMN_MIN_WIDTHS[1]);
+    next[0] = clampNumber(startWidths[0] + delta, COMMUNICATIONS_COLUMN_MIN_WIDTHS[0], maxLeft);
+    next[1] = pairTotal - next[0];
+  } else if (dividerIndex === 1) {
+    const maxListFromViewport = availableWidth - next[0] - next[3] - resizerTotal - COMMUNICATIONS_COLUMN_MIN_WIDTHS[2];
+    const maxList = Math.min(COMMUNICATIONS_COLUMN_MAX_WIDTHS[1], Math.max(COMMUNICATIONS_COLUMN_MIN_WIDTHS[1], maxListFromViewport));
+    next[1] = clampNumber(startWidths[1] + delta, COMMUNICATIONS_COLUMN_MIN_WIDTHS[1], maxList);
+  } else {
+    const maxRailFromViewport = availableWidth - next[0] - next[1] - resizerTotal - COMMUNICATIONS_COLUMN_MIN_WIDTHS[2];
+    const maxRail = Math.min(COMMUNICATIONS_COLUMN_MAX_WIDTHS[3], Math.max(COMMUNICATIONS_COLUMN_MIN_WIDTHS[3], maxRailFromViewport));
+    next[3] = clampNumber(startWidths[3] - delta, COMMUNICATIONS_COLUMN_MIN_WIDTHS[3], maxRail);
+  }
+
+  next[2] = Math.max(COMMUNICATIONS_COLUMN_MIN_WIDTHS[2], availableWidth - next[0] - next[1] - next[3] - resizerTotal);
   return normalizeCommunicationsColumnWidths(next);
 }
 
@@ -1601,9 +1619,18 @@ function getCommunicationsGridTemplateColumns(widths: CommunicationsColumnWidths
     `${COMMUNICATIONS_COLUMN_RESIZER_WIDTH}px`,
     `${widths[1]}px`,
     `${COMMUNICATIONS_COLUMN_RESIZER_WIDTH}px`,
-    `${widths[2]}px`,
+    `minmax(${COMMUNICATIONS_COLUMN_MIN_WIDTHS[2]}px, 1fr)`,
+    `${COMMUNICATIONS_COLUMN_RESIZER_WIDTH}px`,
     `${widths[3]}px`,
   ].join(" ");
+}
+
+function getCommunicationsWorkspaceTrackWidth(element: HTMLElement | null): number {
+  if (!element) return Math.max(1, window.innerWidth - 20);
+  const styles = window.getComputedStyle(element);
+  const paddingLeft = Number.parseFloat(styles.paddingLeft) || 0;
+  const paddingRight = Number.parseFloat(styles.paddingRight) || 0;
+  return Math.max(1, element.clientWidth - paddingLeft - paddingRight);
 }
 
 function clampNumber(value: number, min: number, max: number): number {
