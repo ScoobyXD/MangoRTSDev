@@ -66,6 +66,8 @@ const CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES = 12 * 1024 * 1024;
 const CHAT_PANE_DEFAULT_HEIGHT = 320;
 const CHAT_PANE_MIN_HEIGHT = 220;
 const CHAT_PANE_MAX_HEIGHT = 760;
+const TEXT_BLOCK_MIN_HEIGHT = CHAT_PANE_MIN_HEIGHT;
+const TEXT_BLOCK_MAX_HEIGHT = 900;
 const DEFAULT_TEXT_BLOCK_TITLE = "Hello I am a title";
 
 function projectionsKey(items: NodeProjectionItem[]): string {
@@ -834,12 +836,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return grouped;
   }, [chatMessages]);
 
-  const timelineRows = useMemo(() => blocks.map((block, index) => ({
-    id: block.id,
-    label: formatTimestamp(block.createdTimestamp, timelineGranularity) || `Block ${index + 1}`,
-    count: (chatMessagesByBlock.get(block.id)?.length ?? 0),
-  })), [blocks, chatMessagesByBlock, timelineGranularity]);
-
   return (
     <div
       ref={rootRef}
@@ -860,7 +856,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         ["--editor-document-scroll-track" as string]: scrollbarTrack,
       }}
     >
-      <div style={{ display: "grid", gridTemplateColumns: compact ? "72px minmax(0, 1fr)" : "94px minmax(0, 1fr) minmax(0, 0.42fr)", columnGap: compact ? 10 : 14, rowGap: 12, alignItems: "start", minWidth: 0 }}>
+      <div style={{ display: "grid", gridTemplateColumns: compact ? "58px minmax(0, 1fr)" : "62px minmax(0, 1fr) minmax(0, 0.42fr)", columnGap: 8, rowGap: 12, alignItems: "start", minWidth: 0 }}>
         <div style={{ position: "sticky", top: 0, zIndex: 2, padding: "2px 0 10px", background: "inherit" }}>
           <TimelineGranularitySelect
             value={timelineGranularity}
@@ -921,7 +917,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
         {blocks.length === 0 && (
           <>
-            <TimelineCell label="" count={0} accent={accent} muted />
+            <TimelineCell accent={accent} muted isLast />
             <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, minHeight: 92, display: "grid", placeItems: "center", color: surfaceText, opacity: 0.7, fontSize: 13, fontWeight: 700 }}>
               No text boxes
             </div>
@@ -969,10 +965,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           };
           return (
             <React.Fragment key={block.id}>
-              <TimelineCell label={timelineRows[index]?.label ?? ""} count={timelineRows[index]?.count ?? 0} accent={accent} muted={false} />
+              <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
               <div style={{ minWidth: 0 }}>
                 <div style={{ border: `1px solid ${textBlockIsFocused ? accent : strokeColor}`, borderRadius: 8, background: "rgba(255,255,255,0.72)", overflow: "hidden", boxShadow: textBlockIsFocused ? "0 0 0 2px rgba(255,136,32,0.14), 0 6px 18px rgba(0,0,0,0.05)" : "0 6px 18px rgba(0,0,0,0.05)" }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, auto) minmax(0, auto) 26px 26px", alignItems: "center", gap: 5, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 6px 6px 8px", background: panelBackground }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, auto) 26px 26px", alignItems: "center", gap: 8, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 6px 6px 8px", background: panelBackground }}>
                     <input
                       value={block.title}
                       onFocus={() => {
@@ -995,12 +991,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                         letterSpacing: 0,
                       }}
                     />
-                    <span title={`Last updated ${formatTimestamp(block.updatedTimestamp)}`} style={{ minWidth: 0, maxWidth: compact ? 104 : 174, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, opacity: 0.58, fontSize: 10, fontWeight: 800, letterSpacing: 0 }}>
-                      Updated {formatTimestamp(block.updatedTimestamp)}
-                    </span>
-                    <span title={`Created ${formatTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, maxWidth: compact ? 104 : 174, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, opacity: 0.58, fontSize: 10, fontWeight: 800, letterSpacing: 0 }}>
-                      Created {formatTimestamp(block.createdTimestamp)}
-                    </span>
+                    <div style={{ minWidth: 0, maxWidth: compact ? 210 : 380, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 7, paddingRight: 6, color: surfaceText, opacity: 0.58, fontSize: 10, fontWeight: 800, letterSpacing: 0, whiteSpace: "nowrap" }}>
+                      <span title={`Last updated ${formatTimestamp(block.updatedTimestamp)}`} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        Last updated {formatTimestamp(block.updatedTimestamp)}
+                      </span>
+                      <span aria-hidden="true" style={{ flex: "0 0 auto", opacity: 0.62 }}>|</span>
+                      <span title={`Created ${formatTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        Created {formatTimestamp(block.createdTimestamp)}
+                      </span>
+                    </div>
                     <button
                       type="button"
                       title={chatIsVisible ? "Hide chat" : "Open chat"}
@@ -1022,6 +1021,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     blockID={block.id}
                     nodeID={nodeID}
                     companyID={companyID}
+                    currentUserID={author.userID || "local-user"}
                     documentValue={block.document}
                     surfaceText={surfaceText}
                     accent={accent}
@@ -1175,22 +1175,26 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 };
 
 type TimelineCellProps = {
-  label: string;
-  count: number;
   accent: string;
   muted: boolean;
+  isLast: boolean;
 };
 
-const TimelineCell: React.FC<TimelineCellProps> = ({ label, count, accent, muted }) => (
-  <div style={{ position: "relative", minHeight: 108, paddingTop: 9, color: "inherit" }}>
-    <div aria-hidden="true" style={{ position: "absolute", top: 0, bottom: -16, left: 15, width: 1, background: muted ? "rgba(100,116,139,0.18)" : "rgba(255,136,32,0.35)" }} />
+const TimelineCell: React.FC<TimelineCellProps> = ({ accent, muted, isLast }) => (
+  <div style={{ position: "relative", alignSelf: "stretch", minHeight: TEXT_BLOCK_MIN_HEIGHT, paddingTop: 9, color: "inherit", boxSizing: "border-box" }}>
+    <div
+      aria-hidden="true"
+      style={{
+        position: "absolute",
+        top: 0,
+        bottom: isLast ? "auto" : -12,
+        height: isLast ? 25 : undefined,
+        left: 15,
+        width: 1,
+        background: muted ? "rgba(100,116,139,0.18)" : "rgba(255,136,32,0.35)",
+      }}
+    />
     <div aria-hidden="true" style={{ position: "relative", width: 31, height: 31, borderRadius: 999, border: `2px solid ${muted ? "rgba(100,116,139,0.28)" : accent}`, background: "#ffffff", boxShadow: "0 0 0 4px rgba(255,136,32,0.08)" }} />
-    {label && (
-      <div style={{ marginTop: 6, fontSize: 10, fontWeight: 800, lineHeight: 1.2, letterSpacing: 0, overflowWrap: "anywhere" }}>
-        {label}
-        {count > 0 && <div style={{ opacity: 0.58 }}>{count} chat</div>}
-      </div>
-    )}
   </div>
 );
 
@@ -1334,6 +1338,7 @@ type NodeTextBlockEditorProps = {
   blockID: string;
   nodeID: string;
   companyID: string;
+  currentUserID: string;
   documentValue: string;
   surfaceText: string;
   accent: string;
@@ -1345,20 +1350,21 @@ type NodeTextBlockEditorProps = {
 };
 
 function readStoredTextBlockHeight(storageKey: string): number {
-  if (typeof localStorage === "undefined") return 120;
+  if (typeof localStorage === "undefined") return TEXT_BLOCK_MIN_HEIGHT;
   const parsed = Number.parseInt(localStorage.getItem(storageKey) ?? "", 10);
-  return Number.isFinite(parsed) ? Math.max(120, Math.min(parsed, 900)) : 120;
+  return Number.isFinite(parsed) ? Math.max(TEXT_BLOCK_MIN_HEIGHT, Math.min(parsed, TEXT_BLOCK_MAX_HEIGHT)) : TEXT_BLOCK_MIN_HEIGHT;
 }
 
 function storeTextBlockHeight(storageKey: string, height: number) {
   if (typeof localStorage === "undefined" || !Number.isFinite(height)) return;
-  localStorage.setItem(storageKey, String(Math.max(120, Math.min(Math.round(height), 900))));
+  localStorage.setItem(storageKey, String(Math.max(TEXT_BLOCK_MIN_HEIGHT, Math.min(Math.round(height), TEXT_BLOCK_MAX_HEIGHT))));
 }
 
 const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   blockID,
   nodeID,
   companyID,
+  currentUserID,
   documentValue,
   surfaceText,
   accent,
@@ -1378,7 +1384,7 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const pendingFontSizeRef = useRef<number | null>(null);
   const lastAppliedDocumentRef = useRef("");
   const lastStoredHeightRef = useRef(0);
-  const heightStorageKey = `node-editor-text-block-height-v1:${companyID}:${nodeID}:${blockID}`;
+  const heightStorageKey = `node-editor-text-block-height-v2:${currentUserID}:${companyID}:${nodeID}:${blockID}`;
   const [height, setHeight] = useState(() => readStoredTextBlockHeight(heightStorageKey));
   const [, setDocumentScrollTop] = useState(0);
 
@@ -1475,8 +1481,8 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         display: "block",
         width: "100%",
         height,
-        minHeight: 120,
-        maxHeight: 900,
+        minHeight: TEXT_BLOCK_MIN_HEIGHT,
+        maxHeight: TEXT_BLOCK_MAX_HEIGHT,
         resize: "vertical",
         border: 0,
         outline: "none",
