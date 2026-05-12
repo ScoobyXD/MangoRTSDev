@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -60,6 +61,15 @@ func (s *Server) handleMapEntityBatches(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err != nil {
+		log.Printf(
+			"failed to create map entity batch company_id=%s entity_kind=%s folder_id=%s items=%d relationships=%d: %v",
+			input.CompanyID,
+			input.EntityKind,
+			input.FolderID,
+			len(input.Items),
+			len(input.Relationships),
+			err,
+		)
 		writeError(w, http.StatusInternalServerError, "failed_to_create_map_entity_batch")
 		return
 	}
