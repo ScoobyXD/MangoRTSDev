@@ -39,6 +39,7 @@ import { KanbanCardView } from "./KanbanCardView";
 import { KanbanColumnView } from "./KanbanColumnView";
 import {
   EXPLORER_ENTITY_DRAG_MIME,
+  EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
   EVENT_KANBAN_BOARDS_UPDATED,
   KANBAN_CARD_DRAG_MIME,
   KANBAN_COLUMN_DRAG_MIME,
@@ -66,6 +67,7 @@ import {
   sortColumns,
   sortKanbanBoards,
   type KanbanBoard,
+  type KanbanBoardContentsUpdatedDetail,
   type KanbanBoardsUpdatedDetail,
   type KanbanCard,
   type KanbanCardDropPlacement,
@@ -793,6 +795,20 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     window.addEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
     return () => window.removeEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
   }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoards, removeBoardFromList, upsertBoardInList]);
+
+  useEffect(() => {
+    const onKanbanBoardContentsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<KanbanBoardContentsUpdatedDetail>).detail;
+      if (detail?.companyID && detail.companyID !== companyID) return;
+      const streamBoardID = detail?.boardID?.trim() ?? "";
+      if (!streamBoardID) return;
+      invalidateArenaViewForBoard(streamBoardID, detail.logicGateID ?? "");
+      invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
+      if (streamBoardID === activeBoardIDRef.current) void refreshBoard(streamBoardID);
+    };
+    window.addEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onKanbanBoardContentsUpdated);
+    return () => window.removeEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onKanbanBoardContentsUpdated);
+  }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoard]);
 
   useEffect(() => {
     return subscribeWorkspaceStream(apiBase, companyID, {

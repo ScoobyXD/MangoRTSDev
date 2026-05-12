@@ -233,6 +233,18 @@ function buildChatThreads(messages: EditorTextBlockChatMessage[]): ChatThreadNod
   return roots;
 }
 
+function countChatThreadDescendants(node: ChatThreadNode): number {
+  let total = 0;
+  const stack = [...node.children];
+  while (stack.length > 0) {
+    const child = stack.pop();
+    if (!child) continue;
+    total += 1;
+    stack.push(...child.children);
+  }
+  return total;
+}
+
 function initialsForName(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
@@ -1552,10 +1564,19 @@ const ChatPane: React.FC<ChatPaneProps> = ({
   const canSubmit = draft.trim().length > 0 || draftAttachments.length > 0;
   const [height, setHeight] = useState(() => readStoredChatPaneHeight(heightStorageKey));
   const [previewAttachment, setPreviewAttachment] = useState<EditorChatAttachment | null>(null);
+  const [collapsedThreadIDs, setCollapsedThreadIDs] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     setHeight(readStoredChatPaneHeight(heightStorageKey));
   }, [heightStorageKey]);
+
+  useEffect(() => {
+    const visibleMessageIDs = new Set(messages.map((message) => message.id));
+    setCollapsedThreadIDs((previous) => {
+      const next = new Set(Array.from(previous).filter((messageID) => visibleMessageIDs.has(messageID)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [messages]);
 
   useEffect(() => {
     if (!replyTargetID) return;
@@ -1571,6 +1592,15 @@ const ChatPane: React.FC<ChatPaneProps> = ({
   const handleReply = (messageID: string) => {
     onReply(messageID);
     window.requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const toggleThreadCollapse = (messageID: string) => {
+    setCollapsedThreadIDs((previous) => {
+      const next = new Set(previous);
+      if (next.has(messageID)) next.delete(messageID);
+      else next.add(messageID);
+      return next;
+    });
   };
 
   const attachTransferredImages = (dataTransfer: DataTransfer): boolean => {
@@ -1633,6 +1663,8 @@ const ChatPane: React.FC<ChatPaneProps> = ({
               accent={accent}
               surfaceText={surfaceText}
               ruleColor={ruleColor}
+              collapsedThreadIDs={collapsedThreadIDs}
+              onToggleCollapse={toggleThreadCollapse}
               onReply={handleReply}
               onPreviewImage={setPreviewAttachment}
             />
@@ -1740,20 +1772,54 @@ type ChatThreadItemProps = {
   accent: string;
   surfaceText: string;
   ruleColor: string;
+  collapsedThreadIDs: Set<string>;
+  onToggleCollapse: (messageID: string) => void;
   onReply: (messageID: string) => void;
   onPreviewImage: (attachment: EditorChatAttachment) => void;
 };
 
-const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, accent, surfaceText, ruleColor, onReply, onPreviewImage }) => {
+const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onReply, onPreviewImage }) => {
   const { message, children } = node;
+  const hasChildren = children.length > 0;
+  const collapsed = collapsedThreadIDs.has(message.id);
+  const hiddenReplyCount = collapsed ? countChatThreadDescendants(node) : 0;
   const guideColor = "rgba(100,116,139,0.24)";
   const guideStyle: React.CSSProperties = isLastSibling
     ? { position: "absolute", top: -10, left: 13, width: 1, height: 23, background: guideColor }
     : { position: "absolute", top: -10, bottom: -8, left: 13, width: 1, background: guideColor };
   return (
     <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "28px minmax(0, 1fr)", columnGap: 7, alignItems: "start" }}>
-      <div style={{ position: "relative", gridRow: children.length > 0 ? "1 / span 2" : undefined, alignSelf: "stretch", display: "grid", justifyItems: "center", minHeight: 28 }}>
+      <div style={{ position: "relative", gridRow: hasChildren && !collapsed ? "1 / span 2" : undefined, alignSelf: "stretch", display: "grid", justifyItems: "center", minHeight: 28 }}>
         {depth > 0 && <div aria-hidden="true" style={guideStyle} />}
+        {hasChildren && (
+          <button
+            type="button"
+            aria-label={collapsed ? "Expand replies" : "Collapse replies"}
+            title={collapsed ? "Expand replies" : "Collapse replies"}
+            onClick={() => onToggleCollapse(message.id)}
+            style={{
+              position: "absolute",
+              zIndex: 2,
+              top: -5,
+              left: -2,
+              width: 14,
+              height: 14,
+              border: `1px solid ${ruleColor}`,
+              borderRadius: 999,
+              background: "#ffffff",
+              color: "rgba(36,18,10,0.72)",
+              display: "grid",
+              placeItems: "center",
+              padding: 0,
+              cursor: "pointer",
+              fontSize: 11,
+              fontWeight: 900,
+              lineHeight: 1,
+            }}
+          >
+            {collapsed ? "+" : "-"}
+          </button>
+        )}
         <div style={{ position: "relative", zIndex: 1, width: 26, height: 26, borderRadius: 999, border: `1px solid ${ruleColor}`, background: avatarBackgroundForName(message.authorName || message.authorID), color: surfaceText, display: "grid", placeItems: "center", fontSize: 9, fontWeight: 800, letterSpacing: 0 }}>
           {initialsForName(message.authorName || message.authorID)}
         </div>
@@ -1765,12 +1831,23 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
         </div>
         {message.message && <div style={{ color: surfaceText, fontSize: 12, lineHeight: 1.35, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{message.message}</div>}
         {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} surfaceText={surfaceText} strokeColor={ruleColor} onPreviewImage={onPreviewImage} />}
-        <button type="button" onClick={() => onReply(message.id)} style={{ justifySelf: "start", display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: accent, cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}>
-          <ChatIcon color={accent} />
-          Reply
-        </button>
+        <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" onClick={() => onReply(message.id)} style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: accent, cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}>
+            <ChatIcon color={accent} />
+            Reply
+          </button>
+          {hiddenReplyCount > 0 && (
+            <button
+              type="button"
+              onClick={() => onToggleCollapse(message.id)}
+              style={{ border: "none", background: "transparent", color: "rgba(36,18,10,0.54)", cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}
+            >
+              {hiddenReplyCount} {hiddenReplyCount === 1 ? "reply" : "replies"} hidden
+            </button>
+          )}
+        </div>
       </div>
-      {children.length > 0 && (
+      {hasChildren && !collapsed && (
         <div style={{ gridColumn: "2", minWidth: 0, marginTop: 4, display: "grid", gap: 8 }}>
           {children.map((child, childIndex) => (
             <ChatThreadItem
@@ -1781,6 +1858,8 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
               accent={accent}
               surfaceText={surfaceText}
               ruleColor={ruleColor}
+              collapsedThreadIDs={collapsedThreadIDs}
+              onToggleCollapse={onToggleCollapse}
               onReply={onReply}
               onPreviewImage={onPreviewImage}
             />

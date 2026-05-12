@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CurrentUserResponse } from "../../auth/cognitoAuth";
+import { readAuthConfig, type CurrentUserResponse } from "../../auth/cognitoAuth";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { MangoWordmark } from "../../app/MangoLogo";
 import { preloadLogicGateArenaSurface } from "../../app/preloadDashboardModules";
@@ -55,6 +55,15 @@ import { buildCompanyExplorerTreeRows } from "../../modules/company-explorer/com
 import { getExplorerDropPayloadItems, resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
+import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
+import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache } from "../../modules/kanban/kanbanApi";
+import {
+  EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
+  EVENT_KANBAN_BOARDS_UPDATED,
+  logicGateKanbanBoardID,
+  type KanbanBoardContentsUpdatedDetail,
+  type KanbanBoardsUpdatedDetail,
+} from "../../modules/kanban/shared";
 
 type CommunicationsPageProps = {
   me?: CurrentUserResponse;
@@ -125,6 +134,7 @@ const COMMUNICATIONS_COLUMN_MAX_WIDTHS: CommunicationsColumnWidths = [360, 560, 
 
 export function CommunicationsPage({ me, onNavigate, embedded = false }: CommunicationsPageProps) {
   const companyID = getActiveCompanyID();
+  const apiBase = readAuthConfig().apiBase;
   const [status, setStatus] = useState<CommunicationsStatus | null>(null);
   const [folders, setFolders] = useState<EmailFolder[]>([]);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
@@ -998,6 +1008,13 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     setError("");
     try {
       const result = await convertTriageMessagesToLogicGate({ companyID, logicGateID, messageIDs: ids });
+      const boardID = result.board?.board_id?.trim() || logicGateKanbanBoardID(logicGateID);
+      const boardLogicGateID = result.board?.logic_gate_id?.trim() || logicGateID;
+      invalidateKanbanBoardListCache(apiBase, companyID);
+      invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
+      invalidateLogicGateArenaViewCache(apiBase, companyID, boardLogicGateID);
+      window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, board: result.board } }));
+      window.dispatchEvent(new CustomEvent<KanbanBoardContentsUpdatedDetail>(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, { detail: { companyID, boardID, logicGateID: boardLogicGateID } }));
       const removed = result.deleted_message_ids ?? ids;
       setMessages((previous) => previous.filter((message) => !removed.includes(message.id)));
       if (selectedMessageID && removed.includes(selectedMessageID)) {
@@ -1012,7 +1029,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     } finally {
       setBusy("");
     }
-  }, [companyID, logicGateByID, selectedMessageID]);
+  }, [apiBase, companyID, logicGateByID, selectedMessageID]);
 
   const selectLogicGateRow = useCallback((row: ExplorerTreeNode, event: React.MouseEvent) => {
     const orderedIDs = visibleLogicGateRows.map((item) => item.id);
