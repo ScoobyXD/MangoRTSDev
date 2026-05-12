@@ -163,14 +163,16 @@ export async function listEmailMessages(params: ListMessagesParams): Promise<Mes
   const normalized = cloneMessagePage(page);
   messagePageCache.set(path, { value: normalized, fetchedAt: Date.now() });
   for (const message of normalized.messages) {
-    messageDetailCache.set(message.id, { value: cloneMessage(message), fetchedAt: Date.now() });
+    if (isEmailMessageDetailed(message)) {
+      messageDetailCache.set(message.id, { value: cloneMessage(message), fetchedAt: Date.now() });
+    }
   }
   return page;
 }
 
 export async function getEmailMessage(messageID: string): Promise<EmailMessage> {
   const cached = readCache(messageDetailCache.get(messageID) ?? null, MESSAGE_DETAIL_CACHE_TTL_MS, cloneMessage);
-  if (cached) return cached;
+  if (cached && isEmailMessageDetailed(cached)) return cached;
   const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}`);
   messageDetailCache.set(messageID, { value: cloneMessage(payload.message), fetchedAt: Date.now() });
   return payload.message;
@@ -453,6 +455,10 @@ function readCache<T>(entry: CacheEntry<T> | null, maxAgeMs: number, clone: (val
 
 function primeMessageCaches(message: EmailMessage): void {
   messageDetailCache.set(message.id, { value: cloneMessage(message), fetchedAt: Date.now() });
+}
+
+function isEmailMessageDetailed(message: EmailMessage): boolean {
+  return typeof message.body === "string" && message.body.trim().length > 0;
 }
 
 function cloneStatus(status: CommunicationsStatus): CommunicationsStatus {

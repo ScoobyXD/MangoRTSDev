@@ -137,6 +137,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const [selectionAnchorMessageID, setSelectionAnchorMessageID] = useState("");
   const [selectedMessage, setSelectedMessage] = useState<EmailMessage | null>(null);
   const [messageContextMenu, setMessageContextMenu] = useState<{ x: number; y: number; messageIDs: string[] } | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ messageIDs: string[] } | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -570,6 +571,12 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         if (trigger.startsWith("message.deleted")) {
           removeEmailMessageFromCache(messageID);
           setMessages((previous) => previous.filter((message) => message.id !== messageID));
+          setSelectedMessageIDs((previous) => {
+            if (!previous.has(messageID)) return previous;
+            const next = new Set(previous);
+            next.delete(messageID);
+            return next;
+          });
           if (selectedMessageIDRef.current === messageID) {
             setSelectedMessageID("");
             setSelectedMessage(null);
@@ -715,23 +722,6 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const archiveSelected = async () => {
     if (!selectedMessage || !archiveFolder) return;
     await patchSelectedMessage({ folders: [archiveFolder.id] });
-  };
-
-  const deleteSelected = async () => {
-    if (!selectedMessage) return;
-    setBusy("delete");
-    setError("");
-    try {
-      await deleteEmailMessage(selectedMessage.id);
-      setSelectedMessage(null);
-      setSelectedMessageID("");
-      setNotice("Message deleted.");
-      await loadMessages();
-    } catch (deleteError) {
-      setError(formatError(deleteError, "Failed to delete message"));
-    } finally {
-      setBusy("");
-    }
   };
 
   const openNewCompose = () => {
@@ -902,6 +892,76 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       setBusy("");
     }
   }, [selectedMessageID]);
+
+  const getSelectedMessageIDsForAction = useCallback((): string[] => {
+    const visibleIDs = new Set(messages.map((message) => message.id));
+    const ids = Array.from(selectedMessageIDs).filter((id) => visibleIDs.has(id));
+    if (selectedMessageID && visibleIDs.has(selectedMessageID) && !ids.includes(selectedMessageID)) {
+      ids.unshift(selectedMessageID);
+    }
+    return cleanIDList(ids);
+  }, [messages, selectedMessageID, selectedMessageIDs]);
+
+  const requestDeleteMessages = useCallback((messageIDs: string[]) => {
+    const ids = cleanIDList(messageIDs);
+    if (ids.length === 0) return;
+    setMessageContextMenu(null);
+    setDeleteConfirmation({ messageIDs: ids });
+  }, []);
+
+  const requestDeleteSelection = useCallback(() => {
+    requestDeleteMessages(getSelectedMessageIDsForAction());
+  }, [getSelectedMessageIDsForAction, requestDeleteMessages]);
+
+  const deleteSelected = useCallback(() => {
+    if (!selectedMessage) return;
+    requestDeleteSelection();
+  }, [requestDeleteSelection, selectedMessage]);
+
+  const deleteMessages = useCallback(async (messageIDs: string[]) => {
+    const ids = cleanIDList(messageIDs);
+    if (ids.length === 0) return;
+    const shouldRemoveTriageItems = activeViewIDRef.current === "my-triage";
+    setBusy("delete");
+    setError("");
+    try {
+      await Promise.all(ids.map(deleteEmailMessage));
+      if (shouldRemoveTriageItems) {
+        await Promise.all(ids.map((id) => removeMessageFromMyTriage(id).catch((cause) => {
+          const message = formatError(cause, "failed_to_remove_triage_item").toLowerCase();
+          if (message.includes("triage item not found")) return;
+          throw cause;
+        })));
+      }
+      setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
+      if (selectedMessageID && ids.includes(selectedMessageID)) {
+        setSelectedMessageID("");
+        setSelectedMessage(null);
+      }
+      setSelectedMessageIDs(new Set());
+      setSelectionAnchorMessageID("");
+      setMessageContextMenu(null);
+      setNotice(ids.length === 1 ? "Message deleted." : `${ids.length} messages deleted.`);
+      await loadMessages();
+    } catch (deleteError) {
+      setError(formatError(deleteError, ids.length === 1 ? "Failed to delete message" : "Failed to delete messages"));
+    } finally {
+      setBusy("");
+    }
+  }, [loadMessages, selectedMessageID]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.key !== "Delete" || deleteConfirmation || busy) return;
+      if (isEditableKeyboardTarget(event.target)) return;
+      const ids = getSelectedMessageIDsForAction();
+      if (ids.length === 0) return;
+      event.preventDefault();
+      requestDeleteMessages(ids);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [busy, deleteConfirmation, getSelectedMessageIDsForAction, requestDeleteMessages]);
 
   const addShortcutsFromExplorerPayload = useCallback(async (payload: ExplorerDragPayload | null) => {
     const logicGateIDs = logicGateIDsFromExplorerPayload(payload, logicGateFolders, logicGateFolderItems);
@@ -1227,7 +1287,26 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
               ) : (
                 <button style={contextMenuActionStyle} disabled={busy === "triage"} onClick={() => addSelectedMessagesToTriage(messageContextMenu.messageIDs)}>Add to My Triage</button>
               )}
+              <button
+                style={{ ...contextMenuActionStyle, color: "#8b123f" }}
+                disabled={busy === "delete"}
+                onClick={() => requestDeleteMessages(messageContextMenu.messageIDs)}
+              >
+                Delete
+              </button>
             </div>
+          )}
+          {deleteConfirmation && (
+            <DeleteMessagesConfirmationModal
+              count={deleteConfirmation.messageIDs.length}
+              busy={busy === "delete"}
+              onConfirm={() => {
+                const ids = deleteConfirmation.messageIDs;
+                setDeleteConfirmation(null);
+                void deleteMessages(ids);
+              }}
+              onCancel={() => setDeleteConfirmation(null)}
+            />
           )}
         </main>
       )}
@@ -1560,6 +1639,34 @@ function MessageDetail({ message, loading, archiveAvailable, busy, onReply, onAr
   );
 }
 
+function DeleteMessagesConfirmationModal({ count, busy, onConfirm, onCancel }: {
+  count: number;
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div style={deleteModalBackdropStyle}>
+      <div style={deleteModalStyle}>
+        <div style={{ fontSize: 12, fontWeight: 700 }}>
+          {count === 1 ? "Are you sure you want to delete this?" : `Are you sure you want to delete these ${count} emails?`}
+        </div>
+        <div style={deleteModalDetailStyle}>
+          This deletes the selected email{count === 1 ? "" : "s"} from your mailbox immediately.
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <button type="button" disabled={busy} onClick={onConfirm} style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#ffffff", color: "#111111", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
+            {busy ? "Deleting" : "Yes"}
+          </button>
+          <button type="button" disabled={busy} onClick={onCancel} style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#ffffff", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
+            No
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function readCommunicationsColumnWidths(): CommunicationsColumnWidths {
   try {
     const parsed = JSON.parse(localStorage.getItem(COMMUNICATIONS_COLUMN_WIDTHS_STORAGE_KEY) ?? "null") as unknown;
@@ -1804,6 +1911,12 @@ function escapeHTML(value: string): string {
 
 function formatError(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim() ? error.message : fallback;
+}
+
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return target.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select";
 }
 
 function isEmailAccessExpiredError(error: unknown): boolean {
@@ -2200,6 +2313,33 @@ const messageContextMenuStyle: React.CSSProperties = {
   borderRadius: 7,
   background: "#ffffff",
   boxShadow: "0 12px 28px rgba(0, 0, 0, 0.16)",
+};
+
+const deleteModalBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 120,
+  display: "grid",
+  placeItems: "center",
+  background: "rgba(0,0,0,0.28)",
+};
+
+const deleteModalStyle: React.CSSProperties = {
+  width: "min(420px, 90%)",
+  display: "grid",
+  gap: 10,
+  border: "1px solid rgba(255,136,32,0.45)",
+  borderRadius: 10,
+  background: "#ffffff",
+  color: "#24120a",
+  padding: 12,
+  boxShadow: "0 18px 48px rgba(0,0,0,0.24)",
+};
+
+const deleteModalDetailStyle: React.CSSProperties = {
+  color: "rgba(36, 18, 10, 0.68)",
+  fontSize: 11,
+  lineHeight: 1.35,
 };
 
 const contextMenuActionStyle: React.CSSProperties = {

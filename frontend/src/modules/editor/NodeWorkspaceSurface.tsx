@@ -2000,7 +2000,7 @@ const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surfaceText
     <div
       role="dialog"
       aria-modal="true"
-      style={{ position: "absolute", inset: 0, zIndex: 30, background: "rgba(17, 24, 39, 0.32)", display: "grid", placeItems: "center", padding: 18 }}
+      style={{ position: "fixed", inset: 0, zIndex: 140, background: "rgba(17, 24, 39, 0.32)", display: "grid", placeItems: "center", padding: 18 }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -2091,7 +2091,7 @@ const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ messageID, accent, 
     <div
       role="dialog"
       aria-modal="true"
-      style={{ position: "absolute", inset: 0, zIndex: 32, background: "rgba(17, 24, 39, 0.32)", display: "grid", placeItems: "center", padding: 18 }}
+      style={{ position: "fixed", inset: 0, zIndex: 142, background: "rgba(17, 24, 39, 0.32)", display: "grid", placeItems: "center", padding: 18 }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
