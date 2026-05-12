@@ -27,43 +27,117 @@ on conflict (company_id, board_id) do nothing`,
 
 func ensureLogicGateKanbanBoardSQL(ctx context.Context, exec kanbanBoardEnsurer, companyID, logicGateID, title string) error {
 	boardID := LogicGateKanbanBoardID(logicGateID)
-	if _, err := exec.ExecContext(ctx, `
-insert into kanban_boards (company_id, board_id, logic_gate_id, title, position, created_timestamp, updated_timestamp)
-select $1, $2, $3::uuid, $4, coalesce(max(position), 0) + 1000, now(), now()
-from kanban_boards
-where company_id=$1
-on conflict (company_id, board_id)
-do update set
-  logic_gate_id=excluded.logic_gate_id,
-  title=excluded.title,
-  updated_timestamp=now()`,
-		companyID, boardID, logicGateID, normalizeKanbanBoardTitle(boardID, title)); err != nil {
+	if _, err := exec.ExecContext(ctx,
+		`select pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))`,
+		companyID, logicGateID,
+	); err != nil {
 		return err
 	}
-	defaults := []struct {
-		title string
-		color string
-	}{
-		{title: "Pending", color: KanbanDefaultPendingColor},
-		{title: "In Progress", color: KanbanDefaultInProgressColor},
-		{title: "Done", color: KanbanDefaultDoneColor},
-	}
-	for index, column := range defaults {
-		if _, err := exec.ExecContext(ctx, `
-insert into kanban_columns (company_id, board_id, column_id, title, position, width_px, height_px, item_color, created_timestamp, updated_timestamp)
-select $1, $2, md5(($1::text || ':' || $2 || ':' || $3))::uuid, $3, $4, 260, 240, $5, now(), now()
+	_, err := exec.ExecContext(ctx, `
+with preferred as (
+  select
+    $1::uuid as company_id,
+    $2::text as preferred_board_id,
+    $3::uuid as logic_gate_id,
+    $4::text as title
+),
+existing as (
+  select kb.board_id
+  from kanban_boards kb, preferred p
+  where kb.company_id = p.company_id
+    and kb.logic_gate_id = p.logic_gate_id
+  order by (kb.board_id = p.preferred_board_id) desc, kb.created_timestamp asc, kb.board_id asc
+  limit 1
+),
+inserted as (
+  insert into kanban_boards (company_id, board_id, logic_gate_id, title, position, created_timestamp, updated_timestamp)
+  select
+    p.company_id,
+    p.preferred_board_id,
+    p.logic_gate_id,
+    p.title,
+    coalesce(max(kb.position), 0) + 1000,
+    now(),
+    now()
+  from preferred p
+  left join kanban_boards kb on kb.company_id = p.company_id
+  where not exists (select 1 from existing)
+  group by p.company_id, p.preferred_board_id, p.logic_gate_id, p.title
+  on conflict (company_id, board_id)
+  do update set
+    logic_gate_id = excluded.logic_gate_id,
+    title = excluded.title,
+    updated_timestamp = now()
+  returning board_id
+),
+updated_existing as (
+  update kanban_boards kb
+  set logic_gate_id = p.logic_gate_id,
+      title = p.title,
+      updated_timestamp = now()
+  from preferred p, existing e
+  where kb.company_id = p.company_id
+    and kb.board_id = e.board_id
+  returning kb.board_id
+),
+board_target as (
+  select board_id from updated_existing
+  union all
+  select board_id from inserted
+  limit 1
+),
+defaults(title, position, color) as (
+  values
+    ('Pending', 1000, $5::text),
+    ('In Progress', 2000, $6::text),
+    ('Done', 3000, $7::text)
+)
+insert into kanban_columns (
+  company_id,
+  board_id,
+  column_id,
+  title,
+  position,
+  width_px,
+  height_px,
+  item_color,
+  created_timestamp,
+  updated_timestamp
+)
+select
+  p.company_id,
+  b.board_id,
+  md5((p.company_id::text || ':' || b.board_id || ':' || d.title))::uuid,
+  d.title,
+  d.position,
+  260,
+  240,
+  d.color,
+  now(),
+  now()
+from preferred p
+cross join board_target b
+cross join defaults d
 where not exists (
-  select 1 from kanban_columns
-  where company_id=$1 and board_id=$2 and lower(btrim(title))=lower(btrim($3))
-) on conflict (company_id, board_id, column_id)
+  select 1
+  from kanban_columns kc
+  where kc.company_id = p.company_id
+    and kc.board_id = b.board_id
+    and lower(btrim(kc.title)) = lower(btrim(d.title))
+)
+on conflict (company_id, board_id, column_id)
 do update set
-  title=excluded.title,
-  updated_timestamp=now()`,
-			companyID, boardID, column.title, (index+1)*1000, column.color); err != nil {
-			return err
-		}
-	}
-	return nil
+  title = excluded.title,
+  updated_timestamp = now()`,
+		companyID,
+		boardID,
+		logicGateID,
+		normalizeKanbanBoardTitle(boardID, title),
+		KanbanDefaultPendingColor,
+		KanbanDefaultInProgressColor,
+		KanbanDefaultDoneColor,
+	)
+	return err
 }
 
 func scanKanbanBoard(row interface {
@@ -133,8 +207,10 @@ func (r *PostgresRepo) EnsureLogicGateKanbanBoard(companyID, logicGateID, title 
 	board, err := scanKanbanBoard(tx.QueryRowContext(ctx, `
 select company_id, board_id, logic_gate_id::text, title, position, created_timestamp, updated_timestamp
 from kanban_boards
-where company_id=$1 and board_id=$2`,
-		companyID, LogicGateKanbanBoardID(logicGateID),
+where company_id=$1 and logic_gate_id=$2::uuid
+order by (board_id=$3) desc, created_timestamp asc, board_id asc
+limit 1`,
+		companyID, logicGateID, LogicGateKanbanBoardID(logicGateID),
 	))
 	if err != nil {
 		return domain.KanbanBoard{}, err

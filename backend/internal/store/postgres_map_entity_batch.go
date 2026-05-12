@@ -82,8 +82,9 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 		).Scan(&created.CompanyID, &created.LogicGateID, &created.Header, &created.CreatedTimestamp); err != nil {
 			return MapEntityBatchResult{}, err
 		}
-		// Logic Gate Arena boards are derived state repaired by /v1/logic-gate-arena.
-		// Keep batch creation on canonical map/explorer rows so arena repair cannot block creates.
+		if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, created.LogicGateID, created.Header); err != nil {
+			return MapEntityBatchResult{}, err
+		}
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID
 		result.EntityMappings = append(result.EntityMappings, MapEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.LogicGateID})

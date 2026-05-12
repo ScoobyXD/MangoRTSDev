@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
 
@@ -2097,8 +2098,8 @@ func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *test
 	if err != nil {
 		t.Fatalf("ListKanbanBoards before arena load failed: %v", err)
 	}
-	if len(boardsBeforeArena) != 0 {
-		t.Fatalf("batch create eagerly created %d arena boards, want lazy arena repair", len(boardsBeforeArena))
+	if len(boardsBeforeArena) != 1 || boardsBeforeArena[0].BoardID != store.LogicGateKanbanBoardID(createdID) {
+		t.Fatalf("batch create arena boards = %+v, want one attached board before arena load", boardsBeforeArena)
 	}
 
 	arenaReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gate-arena?company_id="+companyID+"&logic_gate_id="+createdID, nil)
@@ -2124,6 +2125,17 @@ func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *test
 	}
 	if len(arenaPayload.Columns) != 3 {
 		t.Fatalf("arena columns = %d, want default columns", len(arenaPayload.Columns))
+	}
+}
+
+func TestSelectLogicGateArenaBoardFallsBackToAttachedBoard(t *testing.T) {
+	t.Parallel()
+
+	board, ok := selectLogicGateArenaBoard([]domain.KanbanBoard{
+		{BoardID: "legacy-attached-board"},
+	}, "logic-gate:22222222-2222-4222-8222-222222222222")
+	if !ok || board.BoardID != "legacy-attached-board" {
+		t.Fatalf("selected board = %+v ok=%v, want legacy attached board fallback", board, ok)
 	}
 }
 
