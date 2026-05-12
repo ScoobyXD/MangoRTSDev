@@ -56,6 +56,7 @@ test("editor image source sanitizer only accepts raster data images", () => {
 
 test("editor image pointer zones support every edge and corner", () => {
   assert.deepEqual(getEditorImagePointerInteraction(200, 120, 4, 60), { kind: "resize", horizontal: -1, vertical: 0 });
+  assert.deepEqual(getEditorImagePointerInteraction(200, 120, 10, 60), { kind: "drag" });
   assert.deepEqual(getEditorImagePointerInteraction(200, 120, 196, 60), { kind: "resize", horizontal: 1, vertical: 0 });
   assert.deepEqual(getEditorImagePointerInteraction(200, 120, 100, 4), { kind: "resize", horizontal: 0, vertical: -1 });
   assert.deepEqual(getEditorImagePointerInteraction(200, 120, 100, 116), { kind: "resize", horizontal: 0, vertical: 1 });
