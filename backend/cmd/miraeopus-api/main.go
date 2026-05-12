@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"miraeopus/backend/internal/auth"
@@ -201,15 +202,34 @@ func buildEmailSender() *auth.SESEmailSender {
 func buildNylasConfig() httpapi.NylasConfig {
 	return httpapi.NylasConfig{
 		ClientID:            strings.TrimSpace(os.Getenv("NYLAS_CLIENT_ID")),
-		APIKey:              strings.TrimSpace(os.Getenv("NYLAS_API_KEY")),
+		APIKey:              secretEnvValue("NYLAS_API_KEY", "api_key", "nylas_api_key", "NYLAS_API_KEY"),
 		APIBaseURL:          getenvDefault("NYLAS_API_BASE_URL", "https://api.us.nylas.com"),
 		RedirectURI:         strings.TrimSpace(os.Getenv("NYLAS_REDIRECT_URI")),
 		FrontendRedirectURL: strings.TrimSpace(os.Getenv("NYLAS_FRONTEND_REDIRECT_URL")),
-		StateSecret:         strings.TrimSpace(os.Getenv("NYLAS_STATE_SECRET")),
-		WebhookSecret:       strings.TrimSpace(os.Getenv("NYLAS_WEBHOOK_SECRET")),
+		StateSecret:         secretEnvValue("NYLAS_STATE_SECRET", "state_secret", "nylas_state_secret", "NYLAS_STATE_SECRET"),
+		WebhookSecret:       secretEnvValue("NYLAS_WEBHOOK_SECRET", "webhook_secret", "nylas_webhook_secret", "NYLAS_WEBHOOK_SECRET"),
 		GoogleScopes:        splitScopes(os.Getenv("NYLAS_GOOGLE_SCOPES")),
 		MicrosoftScopes:     splitScopes(os.Getenv("NYLAS_MICROSOFT_SCOPES")),
 	}
+}
+
+func secretEnvValue(name string, propertyNames ...string) string {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return raw
+	}
+	for _, propertyName := range propertyNames {
+		if value, ok := payload[propertyName]; ok {
+			if text := strings.TrimSpace(fmt.Sprint(value)); text != "" {
+				return text
+			}
+		}
+	}
+	return raw
 }
 
 func buildNylasClient() httpapi.NylasClient {
