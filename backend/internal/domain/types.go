@@ -248,16 +248,6 @@ type LogicGateMapPosition struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
-type Operation struct {
-	CompanyID      string     `json:"company_id"`
-	OperationID    string     `json:"operation_id"`
-	NodeID         *string    `json:"node_id,omitempty"`
-	LogicGateID    *string    `json:"logic_gate_id,omitempty"`
-	Status         string     `json:"status"`
-	StartTimestamp time.Time  `json:"start_timestamp"`
-	EndTimestamp   *time.Time `json:"end_timestamp,omitempty"`
-}
-
 type KanbanBoard struct {
 	CompanyID        string    `json:"company_id"`
 	BoardID          string    `json:"board_id"`

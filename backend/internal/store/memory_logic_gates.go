@@ -99,13 +99,6 @@ func (r *MemoryRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	delete(r.kanbanColumns, boardKey(companyID, boardID))
 	delete(r.kanbanBoards, boardKey(companyID, boardID))
 	delete(r.folderItems, folderItemKey(companyID, "kanban", boardID))
-	for operationKey, operation := range r.operations {
-		if operation.CompanyID != companyID || operation.LogicGateID == nil || *operation.LogicGateID != logicGateID {
-			continue
-		}
-		operation.LogicGateID = nil
-		r.operations[operationKey] = operation
-	}
 
 	filtered := make([]domain.LogicGateRelationship, 0, len(r.logicGateRels[companyID]))
 	for _, rel := range r.logicGateRels[companyID] {

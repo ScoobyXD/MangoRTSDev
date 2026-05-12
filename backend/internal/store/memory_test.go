@@ -4,7 +4,6 @@ import (
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"testing"
-	"time"
 )
 
 func TestMemoryRepo_AddNodeInformation_ProjectionKeyStaysStableWhenInformationIDProvided(t *testing.T) {
@@ -120,7 +119,7 @@ func TestMemoryRepo_DeleteNodeProjection_ClearsLatestDocumentWithoutDeletingHist
 	}
 }
 
-func TestMemoryRepo_DeleteNode_RemovesKanbanCardsAndKeepsOperations(t *testing.T) {
+func TestMemoryRepo_DeleteNode_RemovesKanbanCards(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"
 	boardID := "board-delete-node"
@@ -142,16 +141,6 @@ func TestMemoryRepo_DeleteNode_RemovesKanbanCardsAndKeepsOperations(t *testing.T
 	}); err != nil {
 		t.Fatalf("UpsertKanbanCard failed: %v", err)
 	}
-	nodeID := node.NodeID
-	operation, err := repo.CreateOperation(CreateOperationInput{
-		CompanyID:      companyID,
-		NodeID:         &nodeID,
-		Status:         "In Progress",
-		StartTimestamp: time.Now().UTC(),
-	})
-	if err != nil {
-		t.Fatalf("CreateOperation failed: %v", err)
-	}
 
 	if err := repo.DeleteNode(companyID, node.NodeID); err != nil {
 		t.Fatalf("DeleteNode failed: %v", err)
@@ -163,13 +152,6 @@ func TestMemoryRepo_DeleteNode_RemovesKanbanCardsAndKeepsOperations(t *testing.T
 	}
 	if len(cards) != 0 {
 		t.Fatalf("expected node kanban card cleanup, got %d cards", len(cards))
-	}
-	storedOperation, err := repo.GetOperation(companyID, operation.OperationID)
-	if err != nil {
-		t.Fatalf("GetOperation failed: %v", err)
-	}
-	if storedOperation.NodeID != nil {
-		t.Fatalf("expected operation node pointer to be cleared, got %q", *storedOperation.NodeID)
 	}
 }
 
@@ -328,38 +310,6 @@ func TestMemoryRepo_DeleteLogicGateProjection_ClearsLatestDocumentWithoutDeletin
 	}
 	if len(details.Information) != 1 {
 		t.Fatalf("expected history to remain append-only, got %d rows", len(details.Information))
-	}
-}
-
-func TestMemoryRepo_DeleteLogicGate_KeepsOperations(t *testing.T) {
-	repo := NewMemoryRepo()
-	companyID := "11111111-1111-1111-1111-111111111111"
-
-	logicGate, err := repo.CreateLogicGate(companyID, "Kanban cleanup logic gate")
-	if err != nil {
-		t.Fatalf("CreateLogicGate failed: %v", err)
-	}
-	logicGateID := logicGate.LogicGateID
-	operation, err := repo.CreateOperation(CreateOperationInput{
-		CompanyID:      companyID,
-		LogicGateID:    &logicGateID,
-		Status:         "In Progress",
-		StartTimestamp: time.Now().UTC(),
-	})
-	if err != nil {
-		t.Fatalf("CreateOperation failed: %v", err)
-	}
-
-	if err := repo.DeleteLogicGate(companyID, logicGate.LogicGateID); err != nil {
-		t.Fatalf("DeleteLogicGate failed: %v", err)
-	}
-
-	storedOperation, err := repo.GetOperation(companyID, operation.OperationID)
-	if err != nil {
-		t.Fatalf("GetOperation failed: %v", err)
-	}
-	if storedOperation.LogicGateID != nil {
-		t.Fatalf("expected operation logic-gate pointer to be cleared, got %q", *storedOperation.LogicGateID)
 	}
 }
 

@@ -198,14 +198,6 @@ func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
 		}
 		r.kanbanCards[board] = next
 	}
-	for operationKey, operation := range r.operations {
-		if operation.CompanyID != companyID || operation.NodeID == nil || *operation.NodeID != nodeID {
-			continue
-		}
-		// Preserve operation history while releasing the FK-shaped in-memory pointer.
-		operation.NodeID = nil
-		r.operations[operationKey] = operation
-	}
 
 	filtered := make([]domain.NodeRelationship, 0, len(r.nodeRels[companyID]))
 	for _, rel := range r.nodeRels[companyID] {

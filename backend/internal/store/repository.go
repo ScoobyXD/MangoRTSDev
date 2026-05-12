@@ -81,9 +81,8 @@ type Repository interface {
 	ListLogicGateMapPositions(companyID string) ([]domain.LogicGateMapPosition, error)
 	UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error)
 	CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityBatchResult, error)
-	CreateOperation(in CreateOperationInput) (domain.Operation, error)
-	GetOperation(companyID, operationID string) (domain.Operation, error)
 	ListKanbanBoards(companyID string, query KanbanBoardQuery) ([]domain.KanbanBoard, error)
+	EnsureLogicGateKanbanBoard(companyID, logicGateID, title string) (domain.KanbanBoard, error)
 	CreateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error)
 	UpdateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error)
 	DeleteKanbanBoard(companyID, boardID string) error
@@ -170,15 +169,6 @@ type CompanyExplorerRelationshipDeleteResult struct {
 	ItemType        string   `json:"item_type"`
 	ItemID          string   `json:"item_id"`
 	RelationshipIDs []string `json:"relationship_ids"`
-}
-
-type CreateOperationInput struct {
-	CompanyID      string
-	NodeID         *string
-	LogicGateID    *string
-	Status         string
-	StartTimestamp time.Time
-	EndTimestamp   *time.Time
 }
 
 const KanbanMaxCardsLimit = 500

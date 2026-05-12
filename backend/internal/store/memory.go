@@ -21,7 +21,6 @@ type MemoryRepo struct {
 	defaultFolderSeed map[string]bool
 	nodeMapPositions  map[string]domain.NodeMapPosition
 	logicMapPositions map[string]domain.LogicGateMapPosition
-	operations        map[string]domain.Operation
 	kanbanBoards      map[string]domain.KanbanBoard
 	kanbanColumns     map[string][]domain.KanbanColumn
 	kanbanCards       map[string][]domain.KanbanCard
@@ -48,7 +47,6 @@ func NewMemoryRepo() *MemoryRepo {
 		defaultFolderSeed: map[string]bool{},
 		nodeMapPositions:  map[string]domain.NodeMapPosition{},
 		logicMapPositions: map[string]domain.LogicGateMapPosition{},
-		operations:        map[string]domain.Operation{},
 		kanbanBoards:      map[string]domain.KanbanBoard{},
 		kanbanColumns:     map[string][]domain.KanbanColumn{},
 		kanbanCards:       map[string][]domain.KanbanCard{},

@@ -96,8 +96,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/logic-gates/", s.handleLogicGateSubresource)
 	mux.HandleFunc("/v1/logic-gate-relationships", s.handleLogicGateRelationships)
 	mux.HandleFunc("/v1/logic-gate-relationships/", s.handleLogicGateRelationshipByID)
-	mux.HandleFunc("/v1/operations", s.handleOperations)
-	mux.HandleFunc("/v1/operations/", s.handleOperationByID)
 	mux.HandleFunc("/v1/kanban/boards", s.handleKanbanBoards)
 	mux.HandleFunc("/v1/kanban/boards/", s.handleKanbanBoardByID)
 	mux.HandleFunc("/v1/kanban/columns", s.handleKanbanColumns)

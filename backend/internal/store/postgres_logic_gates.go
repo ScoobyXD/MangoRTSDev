@@ -163,16 +163,6 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 		return err
 	}
 
-	// Keep operation history but release the gate FK so deleting a gate is not
-	// blocked by old executions or agent activity logs.
-	if _, err := tx.ExecContext(ctx,
-		`update operations
-		 set logic_gate_id=null
-		 where company_id=$1 and logic_gate_id=$2`,
-		companyID, logicGateID,
-	); err != nil {
-		return err
-	}
 	if _, err := tx.ExecContext(ctx,
 		`delete from logic_gate_information
 		 where company_id=$1 and logic_gate_id=$2`,

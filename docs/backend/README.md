@@ -2,7 +2,7 @@
 
 The Go module and binary still use the older `miraeopus` internal name. The product name and AWS resource naming are MangoRTS.
 
-This backend now targets the canonical Aurora PostgreSQL schema (`nodes`, `node_information`, `logic_gates`, `operations`, etc.).
+This backend now targets the canonical Aurora PostgreSQL schema (`nodes`, `node_information`, `logic_gates`, Kanban, communications, etc.).
 
 ## Run locally
 
@@ -219,7 +219,7 @@ This keeps append-only information history, deletes duplicate hot `Text box` pro
 - `GET /v1/logic-gate-relationships?company_id={uuid}`
 - `POST /v1/logic-gate-relationships`
 - `DELETE /v1/logic-gate-relationships/{logic_gate_relationship_id}?company_id={uuid}`
-- `GET /v1/company-explorer/folders?company_id={uuid}&folder_kind=node|logic_gate`
+- `GET /v1/company-explorer/folders?company_id={uuid}&folder_kind=node|logic_gate|communications`
 - `POST /v1/company-explorer/folders`
 - `PUT /v1/company-explorer/folders/{folder_id}` (rename with `name`, move with `parent_folder_id`, reorder with `position`, or combine those fields)
 - `DELETE /v1/company-explorer/folders/{folder_id}?company_id={uuid}`
@@ -229,8 +229,6 @@ This keeps append-only information history, deletes duplicate hot `Text box` pro
 - `GET /v1/map-layout?company_id={uuid}&map_type=node|logic_gate`
 - `PUT /v1/map-layout`
 - `POST /v1/map-entity-batches` (create node/logic-gate map entities with optional folder placement, relationships, and positions in one command)
-- `POST /v1/operations`
-- `GET /v1/operations/{operation_id}?company_id={uuid}`
 - `GET /v1/kanban/boards?company_id={uuid}&after_position=0&limit=100`
 - `POST /v1/kanban/boards`
 - `PUT /v1/kanban/boards/{board_id}`
@@ -245,9 +243,7 @@ This keeps append-only information history, deletes duplicate hot `Text box` pro
 
 Node and logic-gate deletes are API-first cleanup commands. `DELETE /v1/nodes/{node_id}`
 and `DELETE /v1/logic-gates/{logic_gate_id}` remove relationships, explorer placements,
-map positions, projections, and any Kanban card placements for that item. Operation rows
-are retained as history, with the deleted item pointer cleared so old activity cannot block
-the delete command.
+map positions, projections, and any Kanban card placements for that item.
 
 ### Request examples
 
@@ -320,19 +316,6 @@ curl -X PUT http://localhost:8080/v1/company-explorer/folders/<folder_id> \
 Folder rows are API-backed so headless agents can create the same explorer structure as the UI.
 `company_explorer_folder_items` keeps one placement per node or logic gate, matching file-explorer move semantics.
 Folders and folder items carry sparse integer `position` values; agents can reorder with one bounded write in the common case. New folders/items append after both tables in the same parent so API-created rows preserve the mixed folder/item order users see. Folder moves reject self/descendant parents to keep the hierarchy acyclic. Folder-item moves to a different folder level remove relationships for the moved node or logic gate in the same API transaction, using indexed endpoint deletes. Folder renames use the same API path so agents do not need UI-specific behavior.
-
-Create operation:
-
-```bash
-curl -X POST http://localhost:8080/v1/operations \
-  -H 'content-type: application/json' \
-  -d '{
-    "company_id":"11111111-1111-1111-1111-111111111111",
-    "node_id":"<node_id>",
-    "status":"In Progress",
-    "start_timestamp":"2026-04-18T00:00:00Z"
-  }'
-```
 
 Create a Kanban column and place a node card:
 
