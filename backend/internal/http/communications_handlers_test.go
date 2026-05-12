@@ -556,6 +556,19 @@ func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
 		t.Fatal("timed out waiting for mailbox event")
 	}
 
+	duplicateReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
+	duplicateReq.Header.Set("X-Nylas-Signature", signWebhookBody("webhook-secret", body))
+	duplicateRec := httptest.NewRecorder()
+	handler.ServeHTTP(duplicateRec, duplicateReq)
+	if duplicateRec.Code != http.StatusOK {
+		t.Fatalf("duplicate webhook status = %d body=%s", duplicateRec.Code, duplicateRec.Body.String())
+	}
+	select {
+	case raw := <-ch:
+		t.Fatalf("duplicate webhook published mailbox event: %s", string(raw))
+	default:
+	}
+
 	badReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
 	badReq.Header.Set("X-Nylas-Signature", "bad")
 	badRec := httptest.NewRecorder()
