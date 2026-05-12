@@ -1,5 +1,6 @@
 // Node relationship graph cache/sync plane for Node Map + Company Explorer.
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
+import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import { NodeRecord, NodeRelationship, PersistedMapPosition } from "./shared";
 
@@ -17,9 +18,9 @@ type CacheEntry = {
   snapshot: NodeRelationshipGraphSnapshot;
   subscribers: Set<Subscriber>;
   loading: boolean;
+  hydrated: boolean;
   unsubscribeStream?: () => void;
   refreshAfterStreamReconnect?: boolean;
-  etag?: string;
 };
 
 type NodeRelationshipGraphStreamEnvelope = {
@@ -37,7 +38,7 @@ const nodeRelationshipGraphCache = new Map<string, CacheEntry>();
 function getEntry(key: string): CacheEntry {
   const existing = nodeRelationshipGraphCache.get(key);
   if (existing) return existing;
-  const created: CacheEntry = { snapshot: EMPTY_SNAPSHOT, subscribers: new Set(), loading: false };
+  const created: CacheEntry = { snapshot: EMPTY_SNAPSHOT, subscribers: new Set(), loading: false, hydrated: false };
   nodeRelationshipGraphCache.set(key, created);
   return created;
 }
@@ -380,18 +381,13 @@ export async function refreshNodeRelationshipGraphSnapshot(apiBase: string, comp
   if (entry.loading) return;
   entry.loading = true;
   try {
-    const response = await fetch(`${apiBase}/v1/workspace/snapshot?company_id=${encodeURIComponent(companyID)}`, {
-      cache: "no-store",
-      headers: entry.etag ? { "If-None-Match": entry.etag } : undefined,
-    });
-    if (response.status === 304) return;
-    if (!response.ok) return;
-    const payload = (await response.json()) as NodeRelationshipGraphSnapshot;
-    const nextEtag = response.headers.get("ETag");
-    // If the backend says the payload hash is identical to what we already hold, skip
-    // subscriber fan-out entirely. This protects hot paths from unnecessary rerender churn.
-    if (nextEtag && entry.etag === nextEtag) return;
-    if (nextEtag) entry.etag = nextEtag;
+    const result = await fetchWorkspaceSnapshot(apiBase, companyID);
+    if (!result.payload) return;
+    if (!result.changed && entry.hydrated) {
+      entry.hydrated = true;
+      return;
+    }
+    const payload = result.payload as NodeRelationshipGraphSnapshot;
     entry.snapshot = {
       nodes: payload.nodes ?? [],
       relationships: payload.relationships ?? [],
@@ -400,6 +396,7 @@ export async function refreshNodeRelationshipGraphSnapshot(apiBase: string, comp
       node_map_positions: payload.node_map_positions ?? [],
       generated_at: payload.generated_at,
     };
+    entry.hydrated = true;
     notify(entry);
   } finally {
     entry.loading = false;
@@ -448,7 +445,7 @@ export function subscribeNodeRelationshipGraph(apiBase: string, companyID: strin
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
   entry.subscribers.add(subscriber);
-  if (entry.snapshot.nodes.length === 0 && entry.snapshot.relationships.length === 0) {
+  if (!entry.hydrated) {
     void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
   }
   ensureStream(apiBase, companyID);
@@ -467,4 +464,9 @@ export function subscribeNodeRelationshipGraph(apiBase: string, companyID: strin
 export function getNodeRelationshipGraphSnapshot(apiBase: string, companyID: string): NodeRelationshipGraphSnapshot {
   const key = `${apiBase}:${companyID}`;
   return getEntry(key).snapshot;
+}
+
+export function hasNodeRelationshipGraphSnapshot(apiBase: string, companyID: string): boolean {
+  const key = `${apiBase}:${companyID}`;
+  return getEntry(key).hydrated;
 }

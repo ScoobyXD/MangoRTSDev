@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type NodeRecord } from "../node-map/shared";
 import { LogicGateRecord as LogicGateApiRecord, NodeRecord as LogicGateRecord, toLogicGateCanvasRecord } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_FOCUS_REQUESTED } from "../node-map/eventbus";
-import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, removeNodeRelationshipGraphRelationshipsForNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
-import { getLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, removeLogicGateRelationshipGraphRelationshipsForLogicGate, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
+import { getNodeRelationshipGraphSnapshot, hasNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, removeNodeRelationshipGraphRelationshipsForNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
+import { getLogicGateRelationshipGraphSnapshot, hasLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, removeLogicGateRelationshipGraphRelationshipsForLogicGate, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { type ExplorerSelectionState } from "./explorerSync";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerItemType, type CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders";
-import { listKanbanBoards } from "../kanban/kanbanApi";
+import { invalidateKanbanBoardListCache, listKanbanBoards } from "../kanban/kanbanApi";
 import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntityDragItem, type KanbanBoard, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
@@ -264,7 +264,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     let cancelled = false;
     (async () => {
       try {
-        await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+        if (!hasNodeRelationshipGraphSnapshot(apiBase, companyID)) {
+          await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+        }
         if (cancelled) return;
         const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
         setNodes(snapshot.nodes ?? []);
@@ -290,7 +292,9 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     let cancelled = false;
     (async () => {
       try {
-        await refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+        if (!hasLogicGateRelationshipGraphSnapshot(apiBase, companyID)) {
+          await refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+        }
         if (cancelled) return;
         const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
         setLogicGates(snapshot.nodes ?? []);
@@ -334,6 +338,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     const onKanbanBoardsUpdated = (event: Event) => {
       const detail = (event as CustomEvent<KanbanBoardsUpdatedDetail>).detail;
       if (detail?.companyID && detail.companyID !== companyID) return;
+      invalidateKanbanBoardListCache(apiBase, companyID);
       if (detail?.deletedBoardID) {
         setKanbanBoards((previous) => previous.filter((board) => board.board_id !== detail.deletedBoardID));
         setFolderItems((previous) => previous.filter((item) => item.item_type !== "kanban" || item.item_id !== detail.deletedBoardID));
@@ -353,7 +358,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
     };
     window.addEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
     return () => window.removeEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
-  }, [companyID, refreshKanbanBoards]);
+  }, [apiBase, companyID, refreshKanbanBoards]);
 
   useEffect(() => {
     return subscribeWorkspaceStream(apiBase, companyID, {
@@ -366,6 +371,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           if (envelope.type === "kanban_board_saved" || envelope.type === "kanban_board_updated") {
             const board = data.board as KanbanBoard | undefined;
             if (!board || typeof board.board_id !== "string") return;
+            invalidateKanbanBoardListCache(apiBase, companyID);
             setKanbanBoards((previous) => {
               const next = [
                 ...previous.filter((item) => item.board_id !== board.board_id),
@@ -378,6 +384,7 @@ export const CompanyExplorerContent: React.FC<{ accent: string; widgetId?: strin
           if (envelope.type === "kanban_board_deleted") {
             const boardID = typeof data.board_id === "string" ? data.board_id : "";
             if (!boardID) return;
+            invalidateKanbanBoardListCache(apiBase, companyID);
             setKanbanBoards((previous) => previous.filter((board) => board.board_id !== boardID));
             setFolderItems((previous) => previous.filter((item) => item.item_type !== "kanban" || item.item_id !== boardID));
           }

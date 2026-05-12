@@ -67,6 +67,11 @@ export type MessagePage = {
   next_page_token?: string;
 };
 
+export type MergeEmailMessageOptions = {
+  prependIfMissing?: boolean;
+  maxMessages?: number;
+};
+
 export type SendEmailInput = {
   to: EmailAddress[];
   cc?: EmailAddress[];
@@ -76,8 +81,27 @@ export type SendEmailInput = {
   reply_to_message_id?: string;
 };
 
+type CacheEntry<T> = {
+  value: T;
+  fetchedAt: number;
+};
+
+const STATUS_CACHE_TTL_MS = 60_000;
+const FOLDERS_CACHE_TTL_MS = 10 * 60_000;
+const MESSAGE_PAGE_CACHE_TTL_MS = 5 * 60_000;
+const MESSAGE_DETAIL_CACHE_TTL_MS = 10 * 60_000;
+
+let statusCache: CacheEntry<CommunicationsStatus> | null = null;
+let foldersCache: CacheEntry<EmailFolder[]> | null = null;
+const messagePageCache = new Map<string, CacheEntry<MessagePage>>();
+const messageDetailCache = new Map<string, CacheEntry<EmailMessage>>();
+
 export async function fetchCommunicationsStatus(): Promise<CommunicationsStatus> {
-  return apiFetchJSON<CommunicationsStatus>("/v1/communications/status");
+  const cached = readCache(statusCache, STATUS_CACHE_TTL_MS, cloneStatus);
+  if (cached) return cached;
+  const status = await apiFetchJSON<CommunicationsStatus>("/v1/communications/status");
+  statusCache = { value: cloneStatus(status), fetchedAt: Date.now() };
+  return status;
 }
 
 export async function fetchCommunicationsAuthURL(provider: EmailProvider): Promise<string> {
@@ -87,19 +111,36 @@ export async function fetchCommunicationsAuthURL(provider: EmailProvider): Promi
 
 export async function disconnectCommunications(): Promise<void> {
   await apiFetchJSON<{ status: string }>("/v1/communications/disconnect", { method: "POST" });
+  invalidateCommunicationsCache();
 }
 
 export async function listEmailFolders(): Promise<EmailFolder[]> {
+  const cached = readCache(foldersCache, FOLDERS_CACHE_TTL_MS, cloneFolders);
+  if (cached) return cached;
   const payload = await apiFetchJSON<{ folders?: EmailFolder[] }>("/v1/communications/folders");
-  return payload.folders ?? [];
+  const folders = payload.folders ?? [];
+  foldersCache = { value: cloneFolders(folders), fetchedAt: Date.now() };
+  return folders;
 }
 
 export async function listEmailMessages(params: ListMessagesParams): Promise<MessagePage> {
-  return apiFetchJSON<MessagePage>(`/v1/communications/messages${createMessageQuery(params)}`);
+  const path = `/v1/communications/messages${createMessageQuery(params)}`;
+  const cached = readCache(messagePageCache.get(path) ?? null, MESSAGE_PAGE_CACHE_TTL_MS, cloneMessagePage);
+  if (cached) return cached;
+  const page = await apiFetchJSON<MessagePage>(path);
+  const normalized = cloneMessagePage(page);
+  messagePageCache.set(path, { value: normalized, fetchedAt: Date.now() });
+  for (const message of normalized.messages) {
+    messageDetailCache.set(message.id, { value: cloneMessage(message), fetchedAt: Date.now() });
+  }
+  return page;
 }
 
 export async function getEmailMessage(messageID: string): Promise<EmailMessage> {
+  const cached = readCache(messageDetailCache.get(messageID) ?? null, MESSAGE_DETAIL_CACHE_TTL_MS, cloneMessage);
+  if (cached) return cached;
   const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}`);
+  messageDetailCache.set(messageID, { value: cloneMessage(payload.message), fetchedAt: Date.now() });
   return payload.message;
 }
 
@@ -108,11 +149,17 @@ export async function updateEmailMessage(messageID: string, update: { unread?: b
     method: "PUT",
     body: JSON.stringify(update),
   });
+  primeMessageCaches(payload.message);
+  messagePageCache.clear();
+  if (update.folders) foldersCache = null;
   return payload.message;
 }
 
 export async function deleteEmailMessage(messageID: string): Promise<void> {
   await apiFetchJSON<{ status: string }>(`/v1/communications/messages/${encodeURIComponent(messageID)}`, { method: "DELETE" });
+  messageDetailCache.delete(messageID);
+  messagePageCache.clear();
+  foldersCache = null;
 }
 
 export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
@@ -120,7 +167,85 @@ export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
     method: "POST",
     body: JSON.stringify(input),
   });
+  primeMessageCaches(payload.message);
+  messagePageCache.clear();
+  foldersCache = null;
   return payload.message;
+}
+
+export function invalidateCommunicationsCache(scope?: { status?: boolean; folders?: boolean; messagePages?: boolean; messages?: boolean }): void {
+  const full = !scope;
+  if (full || scope?.status) statusCache = null;
+  if (full || scope?.folders) foldersCache = null;
+  if (full || scope?.messagePages) messagePageCache.clear();
+  if (full || scope?.messages) messageDetailCache.clear();
+}
+
+export function invalidateCommunicationsFolderCache(): void {
+  foldersCache = null;
+}
+
+export function invalidateEmailMessageCache(messageID: string): void {
+  if (messageID.trim()) messageDetailCache.delete(messageID.trim());
+}
+
+export function primeEmailMessageCache(message: EmailMessage): void {
+  primeMessageCaches(message);
+}
+
+export function removeEmailMessageFromCache(messageID: string): void {
+  const cleanMessageID = messageID.trim();
+  if (!cleanMessageID) return;
+  messageDetailCache.delete(cleanMessageID);
+  for (const [key, entry] of messagePageCache.entries()) {
+    const messages = entry.value.messages.filter((message) => message.id !== cleanMessageID);
+    if (messages.length !== entry.value.messages.length) {
+      messagePageCache.set(key, { value: { ...entry.value, messages }, fetchedAt: Date.now() });
+    }
+  }
+}
+
+export function applyEmailMessageToCachedPages(message: EmailMessage, options: MergeEmailMessageOptions = {}): void {
+  primeMessageCaches(message);
+  for (const [key, entry] of messagePageCache.entries()) {
+    const params = listMessageParamsFromCacheKey(key);
+    const maxMessages = params.limit ?? options.maxMessages;
+    const messages = mergeEmailMessageIntoMessageList(entry.value.messages, message, params, {
+      ...options,
+      maxMessages,
+    });
+    messagePageCache.set(key, { value: { ...entry.value, messages }, fetchedAt: Date.now() });
+  }
+}
+
+export function mergeEmailMessageIntoMessageList(
+  current: EmailMessage[],
+  message: EmailMessage,
+  params: ListMessagesParams,
+  options: MergeEmailMessageOptions = {},
+): EmailMessage[] {
+  const cleanMessageID = message.id.trim();
+  if (!cleanMessageID) return current.map(cloneMessage);
+  const maxMessages = options.maxMessages && options.maxMessages > 0 ? options.maxMessages : Math.max(current.length, params.limit ?? 25);
+  const existingIndex = current.findIndex((item) => item.id === cleanMessageID);
+  const matches = emailMessageMatchesListFilters(message, params);
+
+  if (existingIndex >= 0) {
+    if (!matches) return current.filter((item) => item.id !== cleanMessageID).map(cloneMessage);
+    return current.map((item) => (item.id === cleanMessageID ? cloneMessage(message) : cloneMessage(item)));
+  }
+
+  if (!options.prependIfMissing || !matches || params.pageToken) return current.map(cloneMessage);
+  return [cloneMessage(message), ...current.map(cloneMessage)].slice(0, maxMessages);
+}
+
+export function emailMessageMatchesListFilters(message: EmailMessage, params: ListMessagesParams): boolean {
+  if (params.unread === true && !message.unread) return false;
+  if (params.folderID && !messageHasFolder(message, params.folderID)) return false;
+  if (!messageMatchesMailbox(message, params.mailbox ?? "primary")) return false;
+  const query = params.q?.trim().toLowerCase() ?? "";
+  if (query && !messageMatchesSearch(message, query)) return false;
+  return true;
 }
 
 export function createMessageQuery(params: ListMessagesParams): string {
@@ -157,4 +282,115 @@ function parseEmailAddress(raw: string): EmailAddress | null {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
   const name = bracketMatch ? bracketMatch[1].trim().replace(/^"|"$/g, "") : "";
   return name ? { name, email } : { email };
+}
+
+function readCache<T>(entry: CacheEntry<T> | null, maxAgeMs: number, clone: (value: T) => T): T | null {
+  if (!entry || Date.now() - entry.fetchedAt > maxAgeMs) return null;
+  return clone(entry.value);
+}
+
+function primeMessageCaches(message: EmailMessage): void {
+  messageDetailCache.set(message.id, { value: cloneMessage(message), fetchedAt: Date.now() });
+}
+
+function cloneStatus(status: CommunicationsStatus): CommunicationsStatus {
+  return {
+    ...status,
+    connection: status.connection ? { ...status.connection } : undefined,
+  };
+}
+
+function cloneFolders(folders: EmailFolder[]): EmailFolder[] {
+  return folders.map((folder) => ({
+    ...folder,
+    attributes: folder.attributes ? [...folder.attributes] : undefined,
+  }));
+}
+
+function cloneMessagePage(page: MessagePage): MessagePage {
+  return {
+    messages: (page.messages ?? []).map(cloneMessage),
+    next_page_token: page.next_page_token,
+  };
+}
+
+function cloneMessage(message: EmailMessage): EmailMessage {
+  return {
+    ...message,
+    from: cloneEmailAddresses(message.from),
+    to: cloneEmailAddresses(message.to),
+    cc: cloneEmailAddresses(message.cc),
+    bcc: cloneEmailAddresses(message.bcc),
+    reply_to: cloneEmailAddresses(message.reply_to),
+    folders: message.folders ? [...message.folders] : undefined,
+    folder_ids: message.folder_ids ? [...message.folder_ids] : undefined,
+  };
+}
+
+function cloneEmailAddresses(addresses: EmailAddress[] | undefined): EmailAddress[] | undefined {
+  return addresses ? addresses.map((address) => ({ ...address })) : undefined;
+}
+
+function listMessageParamsFromCacheKey(path: string): ListMessagesParams {
+  const queryStart = path.indexOf("?");
+  const query = new URLSearchParams(queryStart >= 0 ? path.slice(queryStart + 1) : "");
+  const limit = Number.parseInt(query.get("limit") ?? "", 10);
+  const unread = query.get("unread");
+  return {
+    limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+    pageToken: query.get("page_token") ?? undefined,
+    mailbox: normalizeMailbox(query.get("mailbox") ?? undefined),
+    folderID: query.get("folder_id") ?? undefined,
+    q: query.get("q") ?? undefined,
+    unread: unread === "true" ? true : unread === "false" ? false : undefined,
+  };
+}
+
+function normalizeMailbox(value: string | undefined): EmailMailbox | undefined {
+  if (value === "primary" || value === "sent" || value === "all") return value;
+  return undefined;
+}
+
+function messageMatchesMailbox(message: EmailMessage, mailbox: EmailMailbox): boolean {
+  if (mailbox === "all") return true;
+  if (mailbox === "sent") return messageHasAnyFolder(message, ["sent", "\\sent"]);
+  if (messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"])) return false;
+  return messageFolderTokens(message).length === 0 || messageHasAnyFolder(message, ["inbox", "\\inbox", "primary", "category:primary", "important", "\\important"]);
+}
+
+function messageMatchesSearch(message: EmailMessage, query: string): boolean {
+  const haystack = [
+    message.subject,
+    message.snippet,
+    message.body,
+    formatAddressesForSearch(message.from),
+    formatAddressesForSearch(message.to),
+    formatAddressesForSearch(message.cc),
+    formatAddressesForSearch(message.bcc),
+  ].join(" ").toLowerCase();
+  return haystack.includes(query);
+}
+
+function formatAddressesForSearch(addresses: EmailAddress[] | undefined): string {
+  return (addresses ?? []).map((address) => `${address.name ?? ""} ${address.email}`).join(" ");
+}
+
+function messageHasAnyFolder(message: EmailMessage, candidates: string[]): boolean {
+  return candidates.some((candidate) => messageHasFolder(message, candidate));
+}
+
+function messageHasFolder(message: EmailMessage, folder: string): boolean {
+  const normalized = normalizeFolderToken(folder);
+  if (!normalized) return false;
+  return messageFolderTokens(message).some((token) => token === normalized);
+}
+
+function messageFolderTokens(message: EmailMessage): string[] {
+  return [...(message.folders ?? []), ...(message.folder_ids ?? [])]
+    .map(normalizeFolderToken)
+    .filter(Boolean);
+}
+
+function normalizeFolderToken(value: string): string {
+  return value.trim().toLowerCase();
 }

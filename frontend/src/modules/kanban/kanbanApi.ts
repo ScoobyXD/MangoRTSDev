@@ -1,10 +1,22 @@
 import { requestJSON } from "../api/requestJSON.js";
+import { logicGateIDFromKanbanBoardID } from "./shared.js";
 import type { KanbanBoard, KanbanCard, KanbanColumn, LogicGateArenaView } from "./shared.js";
 
 type FetchJSONOptions = {
   method?: string;
   body?: unknown;
 };
+
+type CacheEntry<T> = {
+  value: T;
+  fetchedAt: number;
+};
+
+const KANBAN_BOARD_LIST_TTL_MS = 2 * 60_000;
+const LOGIC_GATE_ARENA_VIEW_TTL_MS = 5 * 60_000;
+
+const boardListCache = new Map<string, CacheEntry<KanbanBoard[]>>();
+const logicGateArenaViewCache = new Map<string, CacheEntry<LogicGateArenaView>>();
 
 async function fetchJSON<T>(apiBase: string, path: string, options: FetchJSONOptions = {}): Promise<T> {
   return requestJSON<T>(apiBase, path, {
@@ -30,39 +42,58 @@ export async function listKanbanColumns(apiBase: string, companyID: string, boar
 
 export async function listKanbanBoards(apiBase: string, companyID: string, limit = 100, afterPosition = 0, logicGateID = ""): Promise<KanbanBoard[]> {
   const params = query({ company_id: companyID, limit, after_position: afterPosition > 0 ? afterPosition : undefined, logic_gate_id: logicGateID });
+  const cacheKey = `${apiBase}:${params}`;
+  const cached = readCache(boardListCache.get(cacheKey) ?? null, KANBAN_BOARD_LIST_TTL_MS, cloneBoards);
+  if (cached) return cached;
   const payload = await fetchJSON<{ boards?: KanbanBoard[] }>(apiBase, `/v1/kanban/boards?${params}`);
-  return payload.boards ?? [];
+  const boards = payload.boards ?? [];
+  boardListCache.set(cacheKey, { value: cloneBoards(boards), fetchedAt: Date.now() });
+  return boards;
 }
 
 export async function getLogicGateArenaView(apiBase: string, companyID: string, logicGateID: string): Promise<LogicGateArenaView> {
   const params = query({ company_id: companyID, logic_gate_id: logicGateID });
-  return fetchJSON<LogicGateArenaView>(apiBase, `/v1/logic-gate-arena?${params}`);
+  const cacheKey = `${apiBase}:${params}`;
+  const cached = readCache(logicGateArenaViewCache.get(cacheKey) ?? null, LOGIC_GATE_ARENA_VIEW_TTL_MS, cloneLogicGateArenaView);
+  if (cached) return cached;
+  const view = await fetchJSON<LogicGateArenaView>(apiBase, `/v1/logic-gate-arena?${params}`);
+  logicGateArenaViewCache.set(cacheKey, { value: cloneLogicGateArenaView(view), fetchedAt: Date.now() });
+  return view;
 }
 
 export async function createKanbanBoard(apiBase: string, companyID: string, title: string, boardID = "", position?: number): Promise<KanbanBoard> {
-  return fetchJSON<KanbanBoard>(apiBase, "/v1/kanban/boards", {
+  const board = await fetchJSON<KanbanBoard>(apiBase, "/v1/kanban/boards", {
     method: "POST",
     body: { company_id: companyID, board_id: boardID, title, position },
   });
+  invalidateKanbanBoardListCache(apiBase, companyID);
+  return board;
 }
 
 export async function updateKanbanBoard(apiBase: string, companyID: string, boardID: string, title: string, position?: number): Promise<KanbanBoard> {
-  return fetchJSON<KanbanBoard>(apiBase, `/v1/kanban/boards/${encodeURIComponent(boardID)}`, {
+  const board = await fetchJSON<KanbanBoard>(apiBase, `/v1/kanban/boards/${encodeURIComponent(boardID)}`, {
     method: "PUT",
     body: { company_id: companyID, title, position },
   });
+  invalidateKanbanBoardListCache(apiBase, companyID);
+  invalidateLogicGateArenaViewCache(apiBase, companyID, board.logic_gate_id ?? logicGateIDFromKanbanBoardID(board.board_id));
+  return board;
 }
 
 export async function deleteKanbanBoard(apiBase: string, companyID: string, boardID: string): Promise<void> {
   const params = query({ company_id: companyID });
   await fetchJSON<{ status?: string }>(apiBase, `/v1/kanban/boards/${encodeURIComponent(boardID)}?${params}`, { method: "DELETE" });
+  invalidateKanbanBoardListCache(apiBase, companyID);
+  invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateIDFromKanbanBoardID(boardID));
 }
 
 export async function createKanbanColumn(apiBase: string, companyID: string, boardID: string, title: string, position?: number, widthPx?: number, heightPx?: number, itemColor?: string): Promise<KanbanColumn> {
-  return fetchJSON<KanbanColumn>(apiBase, "/v1/kanban/columns", {
+  const column = await fetchJSON<KanbanColumn>(apiBase, "/v1/kanban/columns", {
     method: "POST",
     body: { company_id: companyID, board_id: boardID, title, position, width_px: widthPx, height_px: heightPx, item_color: itemColor },
   });
+  invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateIDFromKanbanBoardID(boardID));
+  return column;
 }
 
 export async function updateKanbanColumn(args: {
@@ -76,7 +107,7 @@ export async function updateKanbanColumn(args: {
   heightPx?: number;
   itemColor?: string;
 }): Promise<KanbanColumn> {
-  return fetchJSON<KanbanColumn>(args.apiBase, `/v1/kanban/columns/${encodeURIComponent(args.columnID)}`, {
+  const column = await fetchJSON<KanbanColumn>(args.apiBase, `/v1/kanban/columns/${encodeURIComponent(args.columnID)}`, {
     method: "PUT",
     body: {
       company_id: args.companyID,
@@ -88,11 +119,14 @@ export async function updateKanbanColumn(args: {
       item_color: args.itemColor,
     },
   });
+  invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
+  return column;
 }
 
 export async function deleteKanbanColumn(apiBase: string, companyID: string, boardID: string, columnID: string): Promise<void> {
   const params = query({ company_id: companyID, board_id: boardID });
   await fetchJSON<{ status?: string }>(apiBase, `/v1/kanban/columns/${encodeURIComponent(columnID)}?${params}`, { method: "DELETE" });
+  invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateIDFromKanbanBoardID(boardID));
 }
 
 export async function listKanbanCards(apiBase: string, companyID: string, boardID: string, columnID = "", limit = 200, afterPosition = 0): Promise<KanbanCard[]> {
@@ -111,7 +145,7 @@ export async function upsertKanbanCard(args: {
   position: number;
   descriptionSnapshot?: string;
 }): Promise<KanbanCard> {
-  return fetchJSON<KanbanCard>(args.apiBase, "/v1/kanban/cards", {
+  const card = await fetchJSON<KanbanCard>(args.apiBase, "/v1/kanban/cards", {
     method: "POST",
     body: {
       company_id: args.companyID,
@@ -123,6 +157,8 @@ export async function upsertKanbanCard(args: {
       description_snapshot: args.descriptionSnapshot,
     },
   });
+  invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
+  return card;
 }
 
 export async function moveKanbanCard(args: {
@@ -134,7 +170,7 @@ export async function moveKanbanCard(args: {
   position?: number;
   isIssue?: boolean;
 }): Promise<KanbanCard> {
-  return fetchJSON<KanbanCard>(args.apiBase, `/v1/kanban/cards/${encodeURIComponent(args.cardID)}`, {
+  const card = await fetchJSON<KanbanCard>(args.apiBase, `/v1/kanban/cards/${encodeURIComponent(args.cardID)}`, {
     method: "PUT",
     body: {
       company_id: args.companyID,
@@ -144,9 +180,49 @@ export async function moveKanbanCard(args: {
       is_issue: args.isIssue,
     },
   });
+  invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
+  return card;
 }
 
 export async function deleteKanbanCard(apiBase: string, companyID: string, boardID: string, cardID: string): Promise<void> {
   const params = query({ company_id: companyID, board_id: boardID });
   await fetchJSON<{ status?: string }>(apiBase, `/v1/kanban/cards/${encodeURIComponent(cardID)}?${params}`, { method: "DELETE" });
+  invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateIDFromKanbanBoardID(boardID));
+}
+
+export function invalidateKanbanBoardListCache(apiBase: string, companyID: string): void {
+  const prefix = `${apiBase}:company_id=${encodeURIComponent(companyID)}`;
+  for (const key of Array.from(boardListCache.keys())) {
+    if (key.startsWith(prefix)) boardListCache.delete(key);
+  }
+}
+
+export function invalidateLogicGateArenaViewCache(apiBase: string, companyID: string, logicGateID = ""): void {
+  const cleanLogicGateID = logicGateID.trim();
+  const prefix = `${apiBase}:company_id=${encodeURIComponent(companyID)}&logic_gate_id=`;
+  for (const key of Array.from(logicGateArenaViewCache.keys())) {
+    if (!key.startsWith(prefix)) continue;
+    if (!cleanLogicGateID || key === `${prefix}${encodeURIComponent(cleanLogicGateID)}`) {
+      logicGateArenaViewCache.delete(key);
+    }
+  }
+}
+
+function readCache<T>(entry: CacheEntry<T> | null, maxAgeMs: number, clone: (value: T) => T): T | null {
+  if (!entry || Date.now() - entry.fetchedAt > maxAgeMs) return null;
+  return clone(entry.value);
+}
+
+function cloneBoards(boards: KanbanBoard[]): KanbanBoard[] {
+  return boards.map((board) => ({ ...board }));
+}
+
+function cloneLogicGateArenaView(view: LogicGateArenaView): LogicGateArenaView {
+  return {
+    logic_gate: { ...view.logic_gate },
+    board: { ...view.board },
+    columns: view.columns.map((column) => ({ ...column })),
+    cards: view.cards.map((card) => ({ ...card })),
+    cards_limit: view.cards_limit,
+  };
 }

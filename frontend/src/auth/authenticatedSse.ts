@@ -19,6 +19,7 @@ type ConnectAuthenticatedSseOptions = {
   getAccessToken?: () => Promise<string>;
   fetchImpl?: typeof fetch;
   retryDelayMs?: number;
+  maxRetryDelayMs?: number;
   setTimeoutImpl?: (handler: () => void, timeout: number) => TimerID;
   clearTimeoutImpl?: (id: TimerID) => void;
 };
@@ -101,21 +102,65 @@ export function connectAuthenticatedSse(url: string, options: ConnectAuthenticat
   const getAccessToken = options.getAccessToken ?? getApiAccessToken;
   const setTimer = options.setTimeoutImpl ?? setTimeout;
   const clearTimer = options.clearTimeoutImpl ?? clearTimeout;
-  let retryDelayMs = options.retryDelayMs ?? 2000;
+  const baseRetryDelayMs = Math.max(250, options.retryDelayMs ?? 2000);
+  const maxRetryDelayMs = Math.max(baseRetryDelayMs, options.maxRetryDelayMs ?? 30000);
+  let retryDelayMs = baseRetryDelayMs;
   let closed = false;
   let retryTimer: TimerID | null = null;
   let abortController: AbortController | null = null;
+  let visibilityListenerInstalled = false;
+
+  const isDocumentHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
+
+  const installVisibilityListener = () => {
+    if (visibilityListenerInstalled || typeof document === "undefined") return;
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    visibilityListenerInstalled = true;
+  };
+
+  const removeVisibilityListener = () => {
+    if (!visibilityListenerInstalled || typeof document === "undefined") return;
+    document.removeEventListener("visibilitychange", onVisibilityChange);
+    visibilityListenerInstalled = false;
+  };
+
+  const waitForVisibleDocument = (): boolean => {
+    if (!isDocumentHidden()) return false;
+    installVisibilityListener();
+    return true;
+  };
+
+  const shouldResetRetryDelay = (event: SseEvent): boolean => event.event !== "ready" && event.event !== "ping";
+
+  function onVisibilityChange() {
+    if (closed) return;
+    if (isDocumentHidden()) {
+      abortController?.abort();
+      return;
+    }
+    if (retryTimer !== null) {
+      clearTimer(retryTimer);
+      retryTimer = null;
+    }
+    if (abortController !== null) return;
+    void run();
+  }
 
   const scheduleReconnect = () => {
     if (closed) return;
+    if (waitForVisibleDocument()) return;
+    const delay = retryDelayMs;
+    retryDelayMs = Math.min(maxRetryDelayMs, Math.max(baseRetryDelayMs, retryDelayMs * 2));
     retryTimer = setTimer(() => {
       retryTimer = null;
       void run();
-    }, retryDelayMs);
+    }, delay);
   };
 
   const run = async () => {
     if (closed) return;
+    if (waitForVisibleDocument()) return;
+    installVisibilityListener();
     abortController = new AbortController();
     const parser = createSseParser();
     try {
@@ -139,11 +184,13 @@ export function connectAuthenticatedSse(url: string, options: ConnectAuthenticat
         if (done) break;
         for (const event of parser.push(decoder.decode(value, { stream: true }))) {
           if (event.retry !== undefined) retryDelayMs = event.retry;
+          else if (shouldResetRetryDelay(event)) retryDelayMs = baseRetryDelayMs;
           options.onEvent(event);
         }
       }
       for (const event of parser.flush()) {
         if (event.retry !== undefined) retryDelayMs = event.retry;
+        else if (shouldResetRetryDelay(event)) retryDelayMs = baseRetryDelayMs;
         options.onEvent(event);
       }
     } catch (error) {
@@ -157,6 +204,7 @@ export function connectAuthenticatedSse(url: string, options: ConnectAuthenticat
     scheduleReconnect();
   };
 
+  installVisibilityListener();
   void run();
 
   return {
@@ -166,6 +214,7 @@ export function connectAuthenticatedSse(url: string, options: ConnectAuthenticat
         clearTimer(retryTimer);
         retryTimer = null;
       }
+      removeVisibilityListener();
       abortController?.abort();
     },
   };

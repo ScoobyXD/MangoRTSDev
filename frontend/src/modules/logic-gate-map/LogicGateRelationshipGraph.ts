@@ -2,6 +2,7 @@ import type {
   CompanyExplorerFolder,
   CompanyExplorerFolderItem,
 } from "../folders/companyExplorerFolders";
+import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import {
   LogicGateRecord,
@@ -29,9 +30,9 @@ type CacheEntry = {
   snapshot: LogicGateRelationshipGraphSnapshot;
   subscribers: Set<Subscriber>;
   loading: boolean;
+  hydrated: boolean;
   unsubscribeStream?: () => void;
   refreshAfterStreamReconnect?: boolean;
-  etag?: string;
 };
 
 type WorkspaceStreamEnvelope = {
@@ -47,7 +48,7 @@ const logicGateRelationshipGraphCache = new Map<string, CacheEntry>();
 function getEntry(key: string): CacheEntry {
   const existing = logicGateRelationshipGraphCache.get(key);
   if (existing) return existing;
-  const created: CacheEntry = { snapshot: EMPTY_SNAPSHOT, subscribers: new Set(), loading: false };
+  const created: CacheEntry = { snapshot: EMPTY_SNAPSHOT, subscribers: new Set(), loading: false, hydrated: false };
   logicGateRelationshipGraphCache.set(key, created);
   return created;
 }
@@ -366,16 +367,13 @@ export async function refreshLogicGateRelationshipGraphSnapshot(apiBase: string,
   if (entry.loading) return;
   entry.loading = true;
   try {
-    const response = await fetch(`${apiBase}/v1/workspace/snapshot?company_id=${encodeURIComponent(companyID)}`, {
-      cache: "no-store",
-      headers: entry.etag ? { "If-None-Match": entry.etag } : undefined,
-    });
-    if (response.status === 304) return;
-    if (!response.ok) return;
-    const payload = (await response.json()) as LogicGateRelationshipGraphSnapshot;
-    const nextEtag = response.headers.get("ETag");
-    if (nextEtag && entry.etag === nextEtag) return;
-    if (nextEtag) entry.etag = nextEtag;
+    const result = await fetchWorkspaceSnapshot(apiBase, companyID);
+    if (!result.payload) return;
+    if (!result.changed && entry.hydrated) {
+      entry.hydrated = true;
+      return;
+    }
+    const payload = result.payload as LogicGateRelationshipGraphSnapshot;
     entry.snapshot = {
       nodes: (payload.logic_gates ?? []).map(toLogicGateCanvasRecord),
       relationships: (payload.logic_gate_relationships ?? []).map(toLogicGateCanvasRelationship),
@@ -386,6 +384,7 @@ export async function refreshLogicGateRelationshipGraphSnapshot(apiBase: string,
       logic_gate_map_positions: payload.logic_gate_map_positions ?? [],
       generated_at: payload.generated_at,
     };
+    entry.hydrated = true;
     notify(entry);
   } finally {
     entry.loading = false;
@@ -433,7 +432,7 @@ export function subscribeLogicGateRelationshipGraph(apiBase: string, companyID: 
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
   entry.subscribers.add(subscriber);
-  if (entry.snapshot.nodes.length === 0 && entry.snapshot.relationships.length === 0) {
+  if (!entry.hydrated) {
     void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
   }
   ensureStream(apiBase, companyID);
@@ -451,4 +450,9 @@ export function subscribeLogicGateRelationshipGraph(apiBase: string, companyID: 
 export function getLogicGateRelationshipGraphSnapshot(apiBase: string, companyID: string): LogicGateRelationshipGraphSnapshot {
   const key = `${apiBase}:${companyID}`;
   return getEntry(key).snapshot;
+}
+
+export function hasLogicGateRelationshipGraphSnapshot(apiBase: string, companyID: string): boolean {
+  const key = `${apiBase}:${companyID}`;
+  return getEntry(key).hydrated;
 }
