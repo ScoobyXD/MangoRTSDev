@@ -21,9 +21,11 @@ import {
 import { EDITOR_AUTOSAVE_DELAY_MS, generateStableInformationID } from "./editorTypes";
 import { createEditorScrollMemory } from "./editorScroll";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
-import { DEFAULT_EDITOR_OUTLINE_STYLE } from "./plainTextEditing";
-import { deserializeEditorDocumentHTML, serializeEditorDocumentHTML } from "./richTextEditing";
+import { EDITOR_TAB_TEXT, type EditorOutlineStyleID } from "./plainTextEditing";
+import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
+import { deserializeEditorDocumentHTML, readEditorDocumentText, serializeEditorDocumentHTML } from "./richTextEditing";
 import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHandlers";
+import { getEditorDocumentFontFamily } from "./useEditorPreferences";
 
 type RequestJSON = <T,>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -39,6 +41,7 @@ type NodeWorkspaceSurfaceProps = {
   ruleColor: string;
   scrollbarAccent: string;
   scrollbarTrack: string;
+  outlineStyle: EditorOutlineStyleID;
   requestJSON: RequestJSON;
   onProjectionMutation: () => void;
   onError: (message: string) => void;
@@ -68,6 +71,12 @@ const CHAT_PANE_MIN_HEIGHT = 220;
 const CHAT_PANE_MAX_HEIGHT = 760;
 const TEXT_BLOCK_MIN_HEIGHT = CHAT_PANE_MIN_HEIGHT;
 const TEXT_BLOCK_MAX_HEIGHT = 900;
+const TEXT_BLOCK_FONT_SIZE = 14;
+const TEXT_BLOCK_LINE_HEIGHT = 1.45;
+const TEXT_BLOCK_PADDING_TOP = 12;
+const TEXT_BLOCK_PADDING_RIGHT = 13;
+const TEXT_BLOCK_PADDING_BOTTOM = 12;
+const TEXT_BLOCK_PADDING_LEFT = 13;
 const DEFAULT_TEXT_BLOCK_TITLE = "Hello I am a title";
 
 function projectionsKey(items: NodeProjectionItem[]): string {
@@ -427,6 +436,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   ruleColor,
   scrollbarAccent,
   scrollbarTrack,
+  outlineStyle,
   requestJSON,
   onProjectionMutation,
   onError,
@@ -1037,6 +1047,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     documentValue={block.document}
                     surfaceText={surfaceText}
                     accent={accent}
+                    outlineStyle={outlineStyle}
+                    indentGuideColor={ruleColor}
                     scrollbarTrack={scrollbarTrack}
                     onFocus={() => {
                       setFocusedTextBlockID(block.id);
@@ -1354,6 +1366,8 @@ type NodeTextBlockEditorProps = {
   documentValue: string;
   surfaceText: string;
   accent: string;
+  outlineStyle: EditorOutlineStyleID;
+  indentGuideColor: string;
   scrollbarTrack: string;
   onFocus: () => void;
   onBlur: () => void;
@@ -1380,6 +1394,8 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   documentValue,
   surfaceText,
   accent,
+  outlineStyle,
+  indentGuideColor,
   scrollbarTrack,
   onFocus,
   onBlur,
@@ -1394,11 +1410,16 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const scrollMemoryRef = useRef(createEditorScrollMemory());
   const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
   const pendingFontSizeRef = useRef<number | null>(null);
+  const indentGuideFrameRef = useRef<number | null>(null);
   const lastAppliedDocumentRef = useRef("");
   const lastStoredHeightRef = useRef(0);
   const heightStorageKey = `node-editor-text-block-height-v2:${currentUserID}:${companyID}:${nodeID}:${blockID}`;
   const [height, setHeight] = useState(() => readStoredTextBlockHeight(heightStorageKey));
-  const [, setDocumentScrollTop] = useState(0);
+  const [documentScrollTop, setDocumentScrollTop] = useState(0);
+  const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
+  const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
+  const documentLineHeightPx = TEXT_BLOCK_FONT_SIZE * TEXT_BLOCK_LINE_HEIGHT;
+  const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
 
   useEffect(() => {
     targetKeyRef.current = documentTargetKey;
@@ -1436,20 +1457,46 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     return () => observer.disconnect();
   }, [heightStorageKey]);
 
+  const scheduleTextBlockIndentGuideUpdate = useCallback((text: string) => {
+    if (indentGuideFrameRef.current !== null) {
+      window.cancelAnimationFrame(indentGuideFrameRef.current);
+      indentGuideFrameRef.current = null;
+    }
+    if (outlineStyle !== "indent-guides") {
+      setIndentGuideSegments((current) => current.length > 0 ? [] : current);
+      return;
+    }
+    indentGuideFrameRef.current = window.requestAnimationFrame(() => {
+      indentGuideFrameRef.current = null;
+      setIndentGuideSegments(buildEditorIndentGuideSegments(text, EDITOR_TAB_TEXT.length));
+    });
+  }, [outlineStyle]);
+
+  useEffect(() => {
+    scheduleTextBlockIndentGuideUpdate(editorRef.current ? readEditorDocumentText(editorRef.current) : documentValue);
+  }, [documentValue, scheduleTextBlockIndentGuideUpdate]);
+
+  useEffect(() => () => {
+    if (indentGuideFrameRef.current !== null) {
+      window.cancelAnimationFrame(indentGuideFrameRef.current);
+      indentGuideFrameRef.current = null;
+    }
+  }, []);
+
   const handlers = useEditorDocumentSurfaceHandlers({
     restoringScrollRef,
     currentDocumentTargetKeyRef: targetKeyRef,
     scrollMemoryRef,
     documentUndoHistoryRef,
     pendingEditorFontSizeRef: pendingFontSizeRef,
-    outlineStyle: DEFAULT_EDITOR_OUTLINE_STYLE,
+    outlineStyle,
     setDocumentScrollTop,
     scheduleDocumentSave: (nextDocument, immediate = false) => {
       lastAppliedDocumentRef.current = nextDocument;
       onDocumentChange(nextDocument);
       if (immediate) onDocumentFlush(nextDocument);
     },
-    scheduleIndentGuideUpdate: () => undefined,
+    scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
     rememberCurrentDocumentScroll: () => undefined,
     flushPendingDocumentSave: (fallbackDocument) => {
       const nextDocument = fallbackDocument ?? (editorRef.current ? serializeEditorDocumentHTML(editorRef.current) : lastAppliedDocumentRef.current);
@@ -1466,55 +1513,103 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
 
   return (
     <div
-      ref={editorRef}
-      className="editor-document-scroll"
-      data-node-text-block-id={blockID}
-      role="textbox"
-      aria-label="Node text block"
-      aria-multiline="true"
-      contentEditable
-      suppressContentEditableWarning
-      spellCheck
-      onFocus={onFocus}
-      onBeforeInput={handlers.onBeforeInput}
-      onPaste={handlers.onPaste}
-      onDrop={handlers.onDrop}
-      onInput={handlers.onInput}
-      onSelect={handlers.onSelect}
-      onClick={handlers.onClick}
-      onPointerDown={handlers.onPointerDown}
-      onPointerMove={handlers.onPointerMove}
-      onKeyUp={handlers.onKeyUp}
-      onBlur={handleBlur}
-      onScroll={handlers.onScroll}
-      onWheel={handlers.onWheel}
-      onKeyDown={handlers.onKeyDown}
       style={{
-        display: "block",
+        position: "relative",
         width: "100%",
-        height,
-        minHeight: TEXT_BLOCK_MIN_HEIGHT,
-        maxHeight: TEXT_BLOCK_MAX_HEIGHT,
-        resize: "vertical",
-        border: 0,
-        outline: "none",
-        padding: "12px 13px",
-        boxSizing: "border-box",
-        color: surfaceText,
+        minWidth: 0,
         background: "#ffffff",
-        fontSize: 14,
-        lineHeight: 1.45,
-        letterSpacing: 0,
-        overflowWrap: "anywhere",
-        wordBreak: "break-word",
-        whiteSpace: "pre-wrap",
-        overflowY: "auto",
-        overflowX: "hidden",
-        cursor: "text",
-        ["--editor-document-scroll-accent" as string]: accent,
-        ["--editor-document-scroll-track" as string]: scrollbarTrack,
       }}
-    />
+    >
+      {showIndentGuides && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 0,
+            pointerEvents: "none",
+            boxSizing: "border-box",
+            overflow: "hidden",
+            padding: `${TEXT_BLOCK_PADDING_TOP}px ${TEXT_BLOCK_PADDING_RIGHT}px ${TEXT_BLOCK_PADDING_BOTTOM}px ${TEXT_BLOCK_PADDING_LEFT}px`,
+            fontSize: TEXT_BLOCK_FONT_SIZE,
+            lineHeight: TEXT_BLOCK_LINE_HEIGHT,
+            fontFamily: documentFontFamily,
+            letterSpacing: 0,
+            tabSize: EDITOR_TAB_TEXT.length,
+          }}
+        >
+          <div style={{ position: "relative", transform: `translateY(-${documentScrollTop}px)` }}>
+            {indentGuideSegments.map((segment) => (
+              <div
+                key={`${segment.depth}-${segment.lineStart}-${segment.lineEnd}`}
+                style={{
+                  position: "absolute",
+                  top: segment.lineStart * documentLineHeightPx,
+                  left: `${(segment.depth - 1) * EDITOR_TAB_TEXT.length}ch`,
+                  height: Math.max(documentLineHeightPx, (segment.lineEnd - segment.lineStart + 1) * documentLineHeightPx),
+                  borderLeft: `1px solid ${indentGuideColor}`,
+                  opacity: 0.9,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      <div
+        ref={editorRef}
+        className="editor-document-scroll"
+        data-node-text-block-id={blockID}
+        role="textbox"
+        aria-label="Node text block"
+        aria-multiline="true"
+        contentEditable
+        suppressContentEditableWarning
+        spellCheck
+        onFocus={onFocus}
+        onBeforeInput={handlers.onBeforeInput}
+        onPaste={handlers.onPaste}
+        onDrop={handlers.onDrop}
+        onInput={handlers.onInput}
+        onSelect={handlers.onSelect}
+        onClick={handlers.onClick}
+        onPointerDown={handlers.onPointerDown}
+        onPointerMove={handlers.onPointerMove}
+        onKeyUp={handlers.onKeyUp}
+        onBlur={handleBlur}
+        onScroll={handlers.onScroll}
+        onWheel={handlers.onWheel}
+        onKeyDown={handlers.onKeyDown}
+        style={{
+          position: "relative",
+          zIndex: 1,
+          display: "block",
+          width: "100%",
+          height,
+          minHeight: TEXT_BLOCK_MIN_HEIGHT,
+          maxHeight: TEXT_BLOCK_MAX_HEIGHT,
+          resize: "vertical",
+          border: 0,
+          outline: "none",
+          padding: `${TEXT_BLOCK_PADDING_TOP}px ${TEXT_BLOCK_PADDING_RIGHT}px ${TEXT_BLOCK_PADDING_BOTTOM}px ${TEXT_BLOCK_PADDING_LEFT}px`,
+          boxSizing: "border-box",
+          color: surfaceText,
+          background: "transparent",
+          fontSize: TEXT_BLOCK_FONT_SIZE,
+          lineHeight: TEXT_BLOCK_LINE_HEIGHT,
+          fontFamily: documentFontFamily,
+          tabSize: EDITOR_TAB_TEXT.length,
+          letterSpacing: 0,
+          overflowWrap: "anywhere",
+          wordBreak: "break-word",
+          whiteSpace: "pre-wrap",
+          overflowY: "auto",
+          overflowX: "hidden",
+          cursor: "text",
+          ["--editor-document-scroll-accent" as string]: accent,
+          ["--editor-document-scroll-track" as string]: scrollbarTrack,
+        }}
+      />
+    </div>
   );
 };
 

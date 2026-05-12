@@ -171,7 +171,7 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 		r.addEmailProjectionLocked(input.CompanyID, nodeID, triageItem.Message, now)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 
-		result.Nodes = append(result.Nodes, node)
+		result.Nodes = append(result.Nodes, r.withNodeReadModelLocked(node))
 		result.Cards = append(result.Cards, card)
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}

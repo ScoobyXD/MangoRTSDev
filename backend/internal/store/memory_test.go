@@ -548,6 +548,9 @@ func TestMemoryRepoConvertCommunicationsTriageItemsAddsAttachedEmailProjection(t
 	if len(result.Nodes) != 1 {
 		t.Fatalf("expected one converted node, got %d", len(result.Nodes))
 	}
+	if result.Nodes[0].Status == nil || *result.Nodes[0].Status != "Pending" {
+		t.Fatalf("converted node status = %+v, want Pending read model", result.Nodes[0].Status)
+	}
 	projections, err := repo.ListNodeProjections(companyID, result.Nodes[0].NodeID)
 	if err != nil {
 		t.Fatalf("ListNodeProjections failed: %v", err)

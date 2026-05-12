@@ -1348,6 +1348,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             ruleColor={ruleColor}
             scrollbarAccent={scrollbarAccent}
             scrollbarTrack={scrollbarTrack}
+            outlineStyle={outlineStyle}
             requestJSON={requestJSON}
             onProjectionMutation={handleNodeWorkspaceProjectionMutation}
             onError={setError}
