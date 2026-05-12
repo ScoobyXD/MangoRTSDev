@@ -61,8 +61,11 @@ type ChatThreadNode = {
 
 const EMAIL_DRAG_MIME = "application/x-mango-email-message";
 const TIMELINE_OPTIONS: TimelineGranularity[] = ["day", "week", "month", "year"];
-const CHAT_ATTACHMENT_MAX_BYTES = 256 * 1024;
-const CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES = 720 * 1024;
+const CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+const CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES = 12 * 1024 * 1024;
+const CHAT_PANE_DEFAULT_HEIGHT = 320;
+const CHAT_PANE_MIN_HEIGHT = 220;
+const CHAT_PANE_MAX_HEIGHT = 760;
 
 function projectionsKey(items: NodeProjectionItem[]): string {
   return items.map((item) => `${item.information_id}:${item.type}:${item.updated_timestamp}`).join("|");
@@ -164,6 +167,39 @@ function readChatAttachment(file: File): Promise<EditorChatAttachment> {
     };
     reader.readAsDataURL(file);
   });
+}
+
+function imageFilesFromTransfer(dataTransfer: DataTransfer): File[] {
+  const files: File[] = [];
+  for (const file of Array.from(dataTransfer.files)) {
+    if (file.type.startsWith("image/")) files.push(file);
+  }
+  if (files.length > 0 || !dataTransfer.items) return files;
+  for (const item of Array.from(dataTransfer.items)) {
+    if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+    const file = item.getAsFile();
+    if (file) files.push(file);
+  }
+  return files;
+}
+
+function isImageAttachment(attachment: EditorChatAttachment): boolean {
+  return attachment.type.startsWith("image/") && Boolean(attachment.dataURL?.startsWith("data:image/"));
+}
+
+function clampChatPaneHeight(value: number): number {
+  if (!Number.isFinite(value)) return CHAT_PANE_DEFAULT_HEIGHT;
+  return Math.max(CHAT_PANE_MIN_HEIGHT, Math.min(Math.round(value), CHAT_PANE_MAX_HEIGHT));
+}
+
+function readStoredChatPaneHeight(storageKey: string): number {
+  if (typeof localStorage === "undefined") return CHAT_PANE_DEFAULT_HEIGHT;
+  return clampChatPaneHeight(Number.parseInt(localStorage.getItem(storageKey) ?? "", 10));
+}
+
+function storeChatPaneHeight(storageKey: string, height: number) {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(storageKey, String(clampChatPaneHeight(height)));
 }
 
 function chatParentCreatesCycle(nodes: Map<string, ChatThreadNode>, childID: string, parentID: string): boolean {
@@ -924,6 +960,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     ruleColor={ruleColor}
                     replyTargetID={chatReplyTargets[block.id] ?? ""}
                     draftAttachments={chatDraftAttachments[block.id] ?? []}
+                    heightStorageKey={`node-editor-chat-pane-height-v1:${companyID}:${nodeID}:${block.id}`}
                     onFocus={focusChat}
                     onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
                     onReply={replyToMessage}
@@ -948,6 +985,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     ruleColor={ruleColor}
                     replyTargetID={chatReplyTargets[block.id] ?? ""}
                     draftAttachments={chatDraftAttachments[block.id] ?? []}
+                    heightStorageKey={`node-editor-chat-pane-height-v1:${companyID}:${nodeID}:${block.id}`}
                     onFocus={focusChat}
                     onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
                     onReply={replyToMessage}
@@ -1223,6 +1261,7 @@ type ChatPaneProps = {
   draft: string;
   draftAttachments: EditorChatAttachment[];
   replyTargetID: string;
+  heightStorageKey: string;
   active: boolean;
   accent: string;
   surfaceText: string;
@@ -1233,7 +1272,7 @@ type ChatPaneProps = {
   onDraftChange: (draft: string) => void;
   onReply: (messageID: string) => void;
   onClearReply: () => void;
-  onAttachFiles: (files: FileList) => void;
+  onAttachFiles: (files: FileList | File[]) => void;
   onRemoveDraftAttachment: (attachmentID: string) => void;
   onSubmit: () => void;
 };
@@ -1244,6 +1283,7 @@ const ChatPane: React.FC<ChatPaneProps> = ({
   draft,
   draftAttachments,
   replyTargetID,
+  heightStorageKey,
   active,
   accent,
   surfaceText,
@@ -1259,110 +1299,191 @@ const ChatPane: React.FC<ChatPaneProps> = ({
   onSubmit,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const threads = useMemo(() => buildChatThreads(messages), [messages]);
   const replyTarget = replyTargetID ? messages.find((message) => message.id === replyTargetID) : undefined;
   const lineCount = Math.min(5, Math.max(1, draft.split(/\r\n|\r|\n/).length));
   const composerHeight = 34 + ((lineCount - 1) * 17);
   const canSubmit = draft.trim().length > 0 || draftAttachments.length > 0;
+  const [height, setHeight] = useState(() => readStoredChatPaneHeight(heightStorageKey));
+  const [previewAttachment, setPreviewAttachment] = useState<EditorChatAttachment | null>(null);
+
+  useEffect(() => {
+    setHeight(readStoredChatPaneHeight(heightStorageKey));
+  }, [heightStorageKey]);
+
+  useEffect(() => {
+    if (!replyTargetID) return;
+    const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [replyTargetID]);
+
+  const focusComposer = () => {
+    onFocus();
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const handleReply = (messageID: string) => {
+    onReply(messageID);
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const attachTransferredImages = (dataTransfer: DataTransfer): boolean => {
+    const files = imageFilesFromTransfer(dataTransfer);
+    if (files.length === 0) return false;
+    onAttachFiles(files);
+    return true;
+  };
+
+  const beginResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startY = event.clientY;
+    const startHeight = height;
+    let nextHeight = startHeight;
+    const onPointerMove = (pointerEvent: PointerEvent) => {
+      nextHeight = clampChatPaneHeight(startHeight + pointerEvent.clientY - startY);
+      setHeight(nextHeight);
+    };
+    const onPointerUp = () => {
+      storeChatPaneHeight(heightStorageKey, nextHeight);
+      window.removeEventListener("pointermove", onPointerMove);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+  };
 
   return (
-    <div
-      data-node-chat-block-id={blockID}
-      onMouseDown={(event) => {
-        event.stopPropagation();
-        onFocus();
-      }}
-      style={{
-        minWidth: 0,
-        marginTop: 0,
-        border: `1px solid ${active ? accent : strokeColor}`,
-        borderRadius: 8,
-        background: active ? "#ffffff" : panelBackground,
-        overflow: "hidden",
-        opacity: active || messages.length > 0 ? 1 : 0.72,
-      }}
-    >
-      <div style={{ minHeight: 30, display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${ruleColor}`, padding: "6px 8px", color: surfaceText, fontSize: 11, fontWeight: 800 }}>
-        <ChatIcon color={active ? accent : "rgba(100,116,139,0.85)"} />
-        <span>{messages.length}</span>
-      </div>
-      <div className="editor-document-scroll" style={{ display: "grid", gap: 8, maxHeight: 198, overflowY: "auto", overflowX: "hidden", padding: "9px 8px", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
-        {threads.map((thread) => (
-          <ChatThreadItem
-            key={thread.message.id}
-            node={thread}
-            depth={0}
-            accent={accent}
-            surfaceText={surfaceText}
-            ruleColor={ruleColor}
-            onReply={onReply}
-          />
-        ))}
-      </div>
-      <div style={{ display: "grid", gap: 6, padding: 8, borderTop: `1px solid ${ruleColor}` }}>
-        {replyTarget && (
-          <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 22px", alignItems: "center", gap: 6, border: `1px solid rgba(255,136,32,0.32)`, borderRadius: 6, background: "rgba(255,136,32,0.08)", padding: "5px 6px", color: surfaceText, fontSize: 10, fontWeight: 800 }}>
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Replying to {replyTarget.authorName}</span>
-            <button type="button" aria-label="Cancel reply" onClick={onClearReply} style={{ width: 22, height: 22, border: "none", borderRadius: 5, background: "transparent", color: surfaceText, cursor: "pointer", fontSize: 13, fontWeight: 800, lineHeight: 1 }}>
-              x
-            </button>
-          </div>
-        )}
-        {draftAttachments.length > 0 && (
-          <DraftAttachmentList
-            attachments={draftAttachments}
-            surfaceText={surfaceText}
-            strokeColor={strokeColor}
-            onRemove={onRemoveDraftAttachment}
-          />
-        )}
-        <div style={{ display: "grid", gridTemplateColumns: "32px minmax(0, 1fr) 32px", alignItems: "end", gap: 6 }}>
-          <button
-            type="button"
-            aria-label="Add attachment"
-            title="Add attachment"
-            onClick={() => fileInputRef.current?.click()}
-            style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: accent, display: "grid", placeItems: "center", cursor: "pointer" }}
-          >
-            <PlusIcon color={accent} />
-          </button>
-          <textarea
-            value={draft}
-            rows={lineCount}
-            onFocus={onFocus}
-            onChange={(event) => onDraftChange(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                onSubmit();
-              }
-            }}
-            style={{ width: "100%", height: composerHeight, minHeight: 34, maxHeight: 102, resize: "none", overflowY: lineCount >= 5 ? "auto" : "hidden", border: `1px solid ${strokeColor}`, borderRadius: 6, outline: "none", padding: "7px 8px", color: surfaceText, background: "#ffffff", fontSize: 12, lineHeight: 1.35, letterSpacing: 0 }}
-          />
-          <button
-            type="button"
-            aria-label="Send"
-            title="Send"
-            disabled={!canSubmit}
-            onClick={onSubmit}
-            style={{ width: 32, height: 32, border: `1px solid ${accent}`, background: canSubmit && active ? accent : "#ffffff", color: canSubmit && active ? "#ffffff" : accent, borderRadius: 6, display: "grid", placeItems: "center", cursor: canSubmit ? "pointer" : "default", opacity: canSubmit ? 1 : 0.44 }}
-          >
-            <ArrowRightIcon color={canSubmit && active ? "#ffffff" : accent} />
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            tabIndex={-1}
-            style={{ display: "none" }}
-            onChange={(event) => {
-              if (event.currentTarget.files) onAttachFiles(event.currentTarget.files);
-              event.currentTarget.value = "";
-            }}
-          />
+    <>
+      <div
+        data-node-chat-block-id={blockID}
+        onMouseDown={(event) => {
+          event.stopPropagation();
+          onFocus();
+        }}
+        style={{
+          minWidth: 0,
+          height,
+          marginTop: 0,
+          display: "grid",
+          gridTemplateRows: "auto minmax(0, 1fr) auto 7px",
+          border: `1px solid ${active ? accent : strokeColor}`,
+          borderRadius: 8,
+          background: active ? "#ffffff" : panelBackground,
+          overflow: "hidden",
+          opacity: active || messages.length > 0 ? 1 : 0.72,
+        }}
+      >
+        <div style={{ minHeight: 30, display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${ruleColor}`, padding: "6px 8px", color: surfaceText, fontSize: 11, fontWeight: 800 }}>
+          <ChatIcon color={active ? accent : "rgba(100,116,139,0.85)"} />
+          <span>{messages.length}</span>
         </div>
+        <div className="editor-document-scroll" style={{ minHeight: 0, display: "grid", alignContent: "start", gap: 8, overflowY: "auto", overflowX: "hidden", padding: "9px 8px", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
+          {threads.map((thread) => (
+            <ChatThreadItem
+              key={thread.message.id}
+              node={thread}
+              depth={0}
+              accent={accent}
+              surfaceText={surfaceText}
+              ruleColor={ruleColor}
+              onReply={handleReply}
+              onPreviewImage={setPreviewAttachment}
+            />
+          ))}
+        </div>
+        <div style={{ display: "grid", gap: 6, padding: 8, borderTop: `1px solid ${ruleColor}` }}>
+          {draftAttachments.length > 0 && (
+            <DraftAttachmentList
+              attachments={draftAttachments}
+              surfaceText={surfaceText}
+              strokeColor={strokeColor}
+              onRemove={onRemoveDraftAttachment}
+              onPreviewImage={setPreviewAttachment}
+            />
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "32px minmax(0, 1fr) 32px", alignItems: "end", gap: 6 }}>
+            <button
+              type="button"
+              aria-label="Add attachment"
+              title="Add attachment"
+              onClick={() => {
+                focusComposer();
+                fileInputRef.current?.click();
+              }}
+              style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: accent, display: "grid", placeItems: "center", cursor: "pointer" }}
+            >
+              <PlusIcon color={accent} />
+            </button>
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              rows={lineCount}
+              placeholder={replyTarget ? `↖ Replying to ${replyTarget.authorName}` : ""}
+              onFocus={onFocus}
+              onPaste={(event) => {
+                if (attachTransferredImages(event.clipboardData)) event.preventDefault();
+              }}
+              onDragOver={(event) => {
+                if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+              }}
+              onDrop={(event) => {
+                if (attachTransferredImages(event.dataTransfer)) event.preventDefault();
+              }}
+              onChange={(event) => onDraftChange(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && replyTarget) {
+                  event.preventDefault();
+                  onClearReply();
+                  return;
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  onSubmit();
+                }
+              }}
+              style={{ width: "100%", height: composerHeight, minHeight: 34, maxHeight: 102, resize: "none", overflowY: lineCount >= 5 ? "auto" : "hidden", border: `1px solid ${strokeColor}`, borderRadius: 6, outline: "none", padding: "7px 8px", color: surfaceText, background: "#ffffff", fontSize: 12, lineHeight: 1.35, letterSpacing: 0 }}
+            />
+            <button
+              type="button"
+              aria-label="Send"
+              title="Send"
+              disabled={!canSubmit}
+              onClick={onSubmit}
+              style={{ width: 32, height: 32, border: `1px solid ${accent}`, background: canSubmit && active ? accent : "#ffffff", color: canSubmit && active ? "#ffffff" : accent, borderRadius: 6, display: "grid", placeItems: "center", cursor: canSubmit ? "pointer" : "default", opacity: canSubmit ? 1 : 0.44 }}
+            >
+              <ArrowRightIcon color={canSubmit && active ? "#ffffff" : accent} />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              tabIndex={-1}
+              style={{ display: "none" }}
+              onChange={(event) => {
+                if (event.currentTarget.files) onAttachFiles(event.currentTarget.files);
+                event.currentTarget.value = "";
+              }}
+            />
+          </div>
+        </div>
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          title="Resize chat"
+          onPointerDown={beginResize}
+          style={{ cursor: "ns-resize", borderTop: `1px solid ${ruleColor}`, background: active ? "rgba(255,136,32,0.10)" : "rgba(100,116,139,0.08)" }}
+        />
       </div>
-    </div>
+      {previewAttachment && (
+        <ImageAttachmentPreviewModal
+          attachment={previewAttachment}
+          surfaceText={surfaceText}
+          strokeColor={strokeColor}
+          onClose={() => setPreviewAttachment(null)}
+        />
+      )}
+    </>
   );
 };
 
@@ -1373,9 +1494,10 @@ type ChatThreadItemProps = {
   surfaceText: string;
   ruleColor: string;
   onReply: (messageID: string) => void;
+  onPreviewImage: (attachment: EditorChatAttachment) => void;
 };
 
-const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, accent, surfaceText, ruleColor, onReply }) => {
+const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, accent, surfaceText, ruleColor, onReply, onPreviewImage }) => {
   const { message, children } = node;
   const guideColor = "rgba(100,116,139,0.24)";
   return (
@@ -1393,7 +1515,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, accent, su
             <span style={{ opacity: 0.58, flex: "0 0 auto" }}>{formatTimestamp(message.createdTimestamp)}</span>
           </div>
           {message.message && <div style={{ color: surfaceText, fontSize: 12, lineHeight: 1.35, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{message.message}</div>}
-          {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} surfaceText={surfaceText} strokeColor={ruleColor} />}
+          {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} surfaceText={surfaceText} strokeColor={ruleColor} onPreviewImage={onPreviewImage} />}
           <button type="button" onClick={() => onReply(message.id)} style={{ justifySelf: "start", display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: accent, cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}>
             <ChatIcon color={accent} />
             Reply
@@ -1411,6 +1533,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, accent, su
               surfaceText={surfaceText}
               ruleColor={ruleColor}
               onReply={onReply}
+              onPreviewImage={onPreviewImage}
             />
           ))}
         </div>
@@ -1423,22 +1546,25 @@ type ChatAttachmentListProps = {
   attachments: EditorChatAttachment[];
   surfaceText: string;
   strokeColor: string;
+  onPreviewImage: (attachment: EditorChatAttachment) => void;
 };
 
-const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, surfaceText, strokeColor }) => (
+const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, surfaceText, strokeColor, onPreviewImage }) => (
   <div style={{ minWidth: 0, display: "flex", flexWrap: "wrap", gap: 5 }}>
     {attachments.map((attachment) => {
+      const image = isImageAttachment(attachment);
       const content = (
         <>
+          <AttachmentThumb attachment={attachment} />
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
           <span style={{ flex: "0 0 auto", opacity: 0.58 }}>{formatFileSize(attachment.size)}</span>
         </>
       );
       const style: React.CSSProperties = {
         maxWidth: "100%",
-        minHeight: 24,
+        minHeight: 30,
         display: "inline-grid",
-        gridTemplateColumns: "minmax(0, 1fr) auto",
+        gridTemplateColumns: "24px minmax(0, 1fr) auto",
         alignItems: "center",
         gap: 6,
         border: `1px solid ${strokeColor}`,
@@ -1451,6 +1577,13 @@ const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, su
         letterSpacing: 0,
         textDecoration: "none",
       };
+      if (image) {
+        return (
+          <button key={attachment.id} type="button" onClick={() => onPreviewImage(attachment)} style={{ ...style, cursor: "pointer" }}>
+            {content}
+          </button>
+        );
+      }
       return attachment.dataURL ? (
         <a key={attachment.id} href={attachment.dataURL} download={attachment.name} style={style}>
           {content}
@@ -1467,12 +1600,16 @@ type DraftAttachmentListProps = {
   surfaceText: string;
   strokeColor: string;
   onRemove: (attachmentID: string) => void;
+  onPreviewImage: (attachment: EditorChatAttachment) => void;
 };
 
-const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, surfaceText, strokeColor, onRemove }) => (
+const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, surfaceText, strokeColor, onRemove, onPreviewImage }) => (
   <div style={{ minWidth: 0, display: "flex", flexWrap: "wrap", gap: 5 }}>
     {attachments.map((attachment) => (
-      <span key={attachment.id} style={{ maxWidth: "100%", minHeight: 24, display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) auto 18px", alignItems: "center", gap: 5, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: surfaceText, padding: "3px 4px 3px 6px", fontSize: 10, fontWeight: 800, letterSpacing: 0 }}>
+      <span key={attachment.id} style={{ maxWidth: "100%", minHeight: 30, display: "inline-grid", gridTemplateColumns: "24px minmax(0, 1fr) auto 18px", alignItems: "center", gap: 5, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: surfaceText, padding: "3px 4px 3px 5px", fontSize: 10, fontWeight: 800, letterSpacing: 0 }}>
+        <button type="button" aria-label={isImageAttachment(attachment) ? `Preview ${attachment.name}` : attachment.name} onClick={() => { if (isImageAttachment(attachment)) onPreviewImage(attachment); }} style={{ width: 24, height: 24, border: "none", background: "transparent", padding: 0, cursor: isImageAttachment(attachment) ? "pointer" : "default" }}>
+          <AttachmentThumb attachment={attachment} />
+        </button>
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
         <span style={{ flex: "0 0 auto", opacity: 0.58 }}>{formatFileSize(attachment.size)}</span>
         <button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => onRemove(attachment.id)} style={{ width: 18, height: 18, border: "none", borderRadius: 4, background: "transparent", color: surfaceText, cursor: "pointer", fontSize: 12, fontWeight: 800, lineHeight: 1 }}>
@@ -1482,6 +1619,58 @@ const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, 
     ))}
   </div>
 );
+
+const AttachmentThumb: React.FC<{ attachment: EditorChatAttachment }> = ({ attachment }) => {
+  if (isImageAttachment(attachment)) {
+    return <img alt="" src={attachment.dataURL} style={{ width: 24, height: 24, borderRadius: 4, objectFit: "cover", display: "block", border: "1px solid rgba(17,17,17,0.12)" }} />;
+  }
+  return (
+    <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 4, border: "1px solid rgba(17,17,17,0.14)", background: "rgba(255,136,32,0.10)", display: "grid", placeItems: "center", color: "rgba(36,18,10,0.78)", fontSize: 8, fontWeight: 900 }}>
+      FILE
+    </span>
+  );
+};
+
+type ImageAttachmentPreviewModalProps = {
+  attachment: EditorChatAttachment;
+  surfaceText: string;
+  strokeColor: string;
+  onClose: () => void;
+};
+
+const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = ({ attachment, surfaceText, strokeColor, onClose }) => {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={attachment.name}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      style={{ position: "fixed", inset: 0, zIndex: 1200, background: "rgba(17,24,39,0.46)", display: "grid", placeItems: "center", padding: 18 }}
+    >
+      <div style={{ width: "min(920px, 96vw)", maxHeight: "92vh", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", border: `1px solid ${strokeColor}`, borderRadius: 8, background: "#ffffff", color: surfaceText, boxShadow: "0 18px 48px rgba(0,0,0,0.26)", overflow: "hidden" }}>
+        <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: `1px solid ${strokeColor}` }}>
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 800 }}>{attachment.name}</span>
+          <button type="button" aria-label="Close image preview" onClick={onClose} style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>
+            x
+          </button>
+        </div>
+        <div style={{ minHeight: 0, overflow: "auto", display: "grid", placeItems: "center", background: "#111827", padding: 10 }}>
+          <img alt={attachment.name} src={attachment.dataURL} style={{ maxWidth: "100%", maxHeight: "78vh", objectFit: "contain", display: "block" }} />
+        </div>
+      </div>
+    </div>
+  );
+};
 
 type AttachedEmailsPanelProps = {
   emails: EditorAttachedEmail[];
