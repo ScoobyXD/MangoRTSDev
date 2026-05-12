@@ -340,6 +340,14 @@ jobs:
           require_status "invite validate backend route" "404" "$status" "$tmp_body"
           jq -e '.error == "invitation_bad_token"' "$tmp_body" >/dev/null
 
+          status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data '{"company_id":"'"${DEV_COMPANY_ID}"'","type":"Text box","information":"<!-- mango-editor-html-v1 --><script>alert(1)</script>","information_id":"deploy-smoke"}' \
+            "${APP_URL}/v1/nodes/deploy-smoke-node/information")"
+          require_status "rich-text API write edge pass-through" "401" "$status" "$tmp_body"
+          jq -e '.error == "unauthorized"' "$tmp_body" >/dev/null
+
           status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/v1/me")"
           require_status "backend unauthorized route" "401" "$status" "$tmp_body"
           jq -e '.error == "unauthorized"' "$tmp_body" >/dev/null
