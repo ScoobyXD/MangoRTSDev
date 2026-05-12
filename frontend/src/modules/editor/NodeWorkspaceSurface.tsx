@@ -468,7 +468,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           </div>
         </div>
 
-        <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", padding: "2px 0 10px", background: "inherit" }}>
+        <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", alignItems: "center", gap: 8, padding: "2px 0 10px", background: "inherit" }}>
           <button
             type="button"
             title="Add text box"
@@ -487,6 +487,28 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             }}
           >
             <PlusIcon color={accent} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setEmailPickerOpen(true)}
+            style={{
+              minHeight: 30,
+              borderRadius: 6,
+              border: `1px solid ${strokeColor}`,
+              background: panelBackground,
+              color: surfaceText,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 7,
+              padding: "0 10px",
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 800,
+              letterSpacing: 0,
+            }}
+          >
+            <MailIcon color={accent} />
+            Attach email
           </button>
         </div>
 
