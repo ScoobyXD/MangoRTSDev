@@ -4,18 +4,24 @@ import { getEmailMessage, listEmailMessages, type EmailAddress, type EmailMessag
 import type { NodeProjectionItem } from "../node-map/NodeRecordStore";
 import {
   buildEditorAttachedEmailPayload,
+  buildEditorTextBlockContentPayload,
   buildEditorTextBlockChatPayload,
   EDITOR_ATTACHED_EMAIL_TYPE,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
   EDITOR_TEXT_BLOCK_TYPE,
   listEditorTextBlockProjections,
   parseEditorAttachedEmails,
+  parseEditorTextBlockContent,
   parseEditorTextBlockChats,
   type EditorAttachedEmail,
+  type EditorTextBlockContent,
   type EditorTextBlockChatMessage,
 } from "./editorProjection";
 import { EDITOR_AUTOSAVE_DELAY_MS, generateStableInformationID } from "./editorTypes";
-import { deserializeEditorDocumentHTML, EDITOR_RICH_TEXT_PREFIX } from "./richTextEditing";
+import { createEditorScrollMemory } from "./editorScroll";
+import { DEFAULT_EDITOR_OUTLINE_STYLE } from "./plainTextEditing";
+import { deserializeEditorDocumentHTML, serializeEditorDocumentHTML } from "./richTextEditing";
+import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHandlers";
 
 type RequestJSON = <T,>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -38,7 +44,8 @@ type NodeWorkspaceSurfaceProps = {
 
 type TextBlockState = {
   id: string;
-  text: string;
+  title: string;
+  document: string;
   createdTimestamp: string;
   updatedTimestamp: string;
   pending: boolean;
@@ -51,14 +58,6 @@ const TIMELINE_OPTIONS: TimelineGranularity[] = ["day", "week", "month", "year"]
 
 function projectionsKey(items: NodeProjectionItem[]): string {
   return items.map((item) => `${item.information_id}:${item.type}:${item.updated_timestamp}`).join("|");
-}
-
-function plainTextFromStoredInformation(value: string): string {
-  if (!value.startsWith(EDITOR_RICH_TEXT_PREFIX)) return value;
-  if (typeof document === "undefined") return value.replace(EDITOR_RICH_TEXT_PREFIX, "");
-  const container = document.createElement("div");
-  container.innerHTML = deserializeEditorDocumentHTML(value);
-  return container.innerText.trim();
 }
 
 function formatAddressList(addresses?: EmailAddress[]): string {
@@ -153,14 +152,16 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const saveTimersRef = useRef(new Map<string, number>());
-  const textByBlockRef = useRef(new Map<string, string>());
+  const contentByBlockRef = useRef(new Map<string, EditorTextBlockContent>());
   const focusBlockIDRef = useRef("");
+  const previousNodeIDRef = useRef(nodeID);
   const [width, setWidth] = useState(0);
   const [blocks, setBlocks] = useState<TextBlockState[]>([]);
   const [chatMessages, setChatMessages] = useState<EditorTextBlockChatMessage[]>([]);
   const [attachedEmails, setAttachedEmails] = useState<EditorAttachedEmail[]>([]);
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
   const [activeChatBlockID, setActiveChatBlockID] = useState("");
+  const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set());
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
   const [timelineGranularity, setTimelineGranularity] = useState<TimelineGranularity>("day");
   const [emailPickerOpen, setEmailPickerOpen] = useState(false);
@@ -186,19 +187,31 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, []);
 
   useEffect(() => {
-    const textBlocks = listEditorTextBlockProjections(projections).map((item) => ({
-      id: item.information_id,
-      text: plainTextFromStoredInformation(item.information),
-      createdTimestamp: item.created_timestamp,
-      updatedTimestamp: item.updated_timestamp,
-      pending: false,
-    }));
+    const textBlocks = listEditorTextBlockProjections(projections).map((item) => {
+      const content = parseEditorTextBlockContent(item.information);
+      return {
+        id: item.information_id,
+        title: content.title,
+        document: content.document,
+        createdTimestamp: item.created_timestamp,
+        updatedTimestamp: item.updated_timestamp,
+        pending: false,
+      };
+    });
     setBlocks(textBlocks);
-    textByBlockRef.current = new Map(textBlocks.map((block) => [block.id, block.text]));
+    contentByBlockRef.current = new Map(textBlocks.map((block) => [block.id, { title: block.title, document: block.document }]));
     setChatMessages(parseEditorTextBlockChats(projections));
     setAttachedEmails(parseEditorAttachedEmails(projections));
-    setChatDrafts({});
-    setActiveChatBlockID("");
+    const nodeChanged = previousNodeIDRef.current !== nodeID;
+    previousNodeIDRef.current = nodeID;
+    const blockIDs = new Set(textBlocks.map((block) => block.id));
+    setChatDrafts((current) => nodeChanged ? {} : Object.fromEntries(Object.entries(current).filter(([id]) => blockIDs.has(id))));
+    setActiveChatBlockID((current) => (nodeChanged || !blockIDs.has(current) ? "" : current));
+    setClosedChatBlockIDs((current) => {
+      if (nodeChanged) return new Set();
+      return new Set(Array.from(current).filter((id) => blockIDs.has(id)));
+    });
+    setFocusedTextBlockID((current) => (nodeChanged || !blockIDs.has(current) ? "" : current));
   }, [nodeID, projectionIdentity, projections]);
 
   useEffect(() => {
@@ -225,22 +238,23 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const blockID = focusBlockIDRef.current;
     focusBlockIDRef.current = "";
     window.requestAnimationFrame(() => {
-      const textarea = rootRef.current?.querySelector<HTMLTextAreaElement>(`textarea[data-node-text-block-id="${blockID}"]`);
-      textarea?.focus({ preventScroll: true });
+      const editor = rootRef.current?.querySelector<HTMLElement>(`[data-node-text-block-id="${blockID}"]`);
+      editor?.focus({ preventScroll: true });
     });
   }, [blocks.length]);
 
-  const persistTextBlock = useCallback(async (blockID: string, text: string) => {
+  const persistTextBlock = useCallback(async (blockID: string, content: EditorTextBlockContent) => {
     if (!nodeID || !companyID) return;
     setBlocks((current) => current.map((block) => block.id === blockID ? { ...block, pending: true } : block));
     try {
-      if (text.trim()) {
+      const information = buildEditorTextBlockContentPayload(content);
+      if (information.trim()) {
         await requestJSON<unknown>(`/v1/nodes/${nodeID}/information`, {
           method: "POST",
           body: JSON.stringify({
             company_id: companyID,
             type: EDITOR_TEXT_BLOCK_TYPE,
-            information: text,
+            information,
             information_id: blockID,
           }),
         });
@@ -261,16 +275,16 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       window.clearTimeout(timer);
       saveTimersRef.current.delete(blockID);
     }
-    void persistTextBlock(blockID, textByBlockRef.current.get(blockID) ?? "");
+    void persistTextBlock(blockID, contentByBlockRef.current.get(blockID) ?? { title: "", document: "" });
   }, [persistTextBlock]);
 
-  const scheduleTextBlockSave = useCallback((blockID: string, text: string) => {
-    textByBlockRef.current.set(blockID, text);
+  const scheduleTextBlockSave = useCallback((blockID: string, content: EditorTextBlockContent) => {
+    contentByBlockRef.current.set(blockID, content);
     const existingTimer = saveTimersRef.current.get(blockID);
     if (existingTimer !== undefined) window.clearTimeout(existingTimer);
     const timer = window.setTimeout(() => {
       saveTimersRef.current.delete(blockID);
-      void persistTextBlock(blockID, textByBlockRef.current.get(blockID) ?? "");
+      void persistTextBlock(blockID, contentByBlockRef.current.get(blockID) ?? { title: "", document: "" });
     }, EDITOR_AUTOSAVE_DELAY_MS);
     saveTimersRef.current.set(blockID, timer);
   }, [persistTextBlock]);
@@ -279,10 +293,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
     focusBlockIDRef.current = blockID;
+    contentByBlockRef.current.set(blockID, { title: "", document: "" });
     setBlocks((current) => [
       {
         id: blockID,
-        text: "",
+        title: "",
+        document: "",
         createdTimestamp: now,
         updatedTimestamp: now,
         pending: false,
@@ -291,9 +307,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     ]);
   }, []);
 
-  const updateTextBlock = useCallback((blockID: string, text: string) => {
-    setBlocks((current) => current.map((block) => block.id === blockID ? { ...block, text, updatedTimestamp: new Date().toISOString() } : block));
-    scheduleTextBlockSave(blockID, text);
+  const updateTextBlockContent = useCallback((blockID: string, patch: Partial<EditorTextBlockContent>) => {
+    const existing = contentByBlockRef.current.get(blockID) ?? { title: "", document: "" };
+    const nextContent: EditorTextBlockContent = {
+      title: patch.title ?? existing.title,
+      document: patch.document ?? existing.document,
+    };
+    setBlocks((current) => current.map((block) => {
+      if (block.id !== blockID) return block;
+      return { ...block, ...nextContent, updatedTimestamp: new Date().toISOString() };
+    }));
+    scheduleTextBlockSave(blockID, nextContent);
   }, [scheduleTextBlockSave]);
 
   const submitChat = useCallback(async (blockID: string) => {
@@ -311,6 +335,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     };
     setChatDrafts((current) => ({ ...current, [blockID]: "" }));
     setChatMessages((current) => [...current, nextMessage]);
+    setClosedChatBlockIDs((current) => {
+      if (!current.has(blockID)) return current;
+      const next = new Set(current);
+      next.delete(blockID);
+      return next;
+    });
     try {
       await requestJSON<unknown>(`/v1/nodes/${nodeID}/information`, {
         method: "POST",
@@ -438,7 +468,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           </div>
         </div>
 
-        <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", alignItems: "center", gap: 8, padding: "2px 0 10px", background: "inherit" }}>
+        <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", padding: "2px 0 10px", background: "inherit" }}>
           <button
             type="button"
             title="Add text box"
@@ -457,28 +487,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             }}
           >
             <PlusIcon color={accent} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setEmailPickerOpen(true)}
-            style={{
-              minHeight: 30,
-              borderRadius: 6,
-              border: `1px solid ${strokeColor}`,
-              background: panelBackground,
-              color: surfaceText,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 7,
-              padding: "0 10px",
-              cursor: "pointer",
-              fontSize: 12,
-              fontWeight: 800,
-              letterSpacing: 0,
-            }}
-          >
-            <MailIcon color={accent} />
-            Attach email
           </button>
         </div>
 
@@ -499,51 +507,85 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         {blocks.map((block, index) => {
           const messages = chatMessagesByBlock.get(block.id) ?? [];
           const chatIsActive = activeChatBlockID === block.id;
-          const chatIsVisible = chatIsActive || messages.length > 0;
+          const chatIsVisible = chatIsActive || (messages.length > 0 && !closedChatBlockIDs.has(block.id));
           const textBlockIsFocused = focusedTextBlockID === block.id;
+          const toggleChat = () => {
+            setFocusedTextBlockID("");
+            const nextOpen = !chatIsVisible;
+            setClosedChatBlockIDs((closed) => {
+              const next = new Set(closed);
+              if (nextOpen) next.delete(block.id);
+              else next.add(block.id);
+              return next;
+            });
+            setActiveChatBlockID(nextOpen ? block.id : "");
+          };
+          const focusChat = () => {
+            setFocusedTextBlockID("");
+            setClosedChatBlockIDs((current) => {
+              if (!current.has(block.id)) return current;
+              const next = new Set(current);
+              next.delete(block.id);
+              return next;
+            });
+            setActiveChatBlockID(block.id);
+          };
           return (
             <React.Fragment key={block.id}>
               <TimelineCell label={timelineRows[index]?.label ?? ""} count={timelineRows[index]?.count ?? 0} accent={accent} muted={false} />
               <div style={{ minWidth: 0 }}>
                 <div style={{ border: `1px solid ${textBlockIsFocused ? accent : strokeColor}`, borderRadius: 8, background: "rgba(255,255,255,0.72)", overflow: "hidden", boxShadow: textBlockIsFocused ? "0 0 0 2px rgba(255,136,32,0.14), 0 6px 18px rgba(0,0,0,0.05)" : "0 6px 18px rgba(0,0,0,0.05)" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 8px", background: panelBackground }}>
-                    <span style={{ color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {formatTimestamp(block.createdTimestamp) || `Text box ${index + 1}`}
-                    </span>
+                    <input
+                      value={block.title}
+                      onFocus={() => {
+                        setFocusedTextBlockID(block.id);
+                        setActiveChatBlockID("");
+                      }}
+                      onChange={(event) => updateTextBlockContent(block.id, { title: event.currentTarget.value })}
+                      onBlur={() => flushTextBlockSave(block.id)}
+                      placeholder={formatTimestamp(block.createdTimestamp) || `Text box ${index + 1}`}
+                      style={{
+                        minWidth: 0,
+                        width: "100%",
+                        border: 0,
+                        outline: "none",
+                        background: "transparent",
+                        color: surfaceText,
+                        opacity: block.title ? 0.9 : 0.68,
+                        fontSize: 11,
+                        fontWeight: 800,
+                        letterSpacing: 0,
+                      }}
+                    />
                     <button
                       type="button"
-                      title="Open chat"
-                      onClick={() => setActiveChatBlockID(block.id)}
+                      title={chatIsVisible ? "Hide chat" : "Open chat"}
+                      onClick={toggleChat}
                       style={{ width: 26, height: 24, borderRadius: 5, border: `1px solid ${chatIsActive ? accent : strokeColor}`, background: chatIsActive ? accent : "#ffffff", color: chatIsActive ? "#ffffff" : accent, display: "grid", placeItems: "center", cursor: "pointer", flex: "0 0 auto" }}
                     >
                       <ChatIcon color={chatIsActive ? "#ffffff" : accent} />
                     </button>
                   </div>
-                  <textarea
-                    data-node-text-block-id={block.id}
-                    value={block.text}
-                    placeholder=""
-                    spellCheck
-                    onFocus={() => setFocusedTextBlockID(block.id)}
-                    onChange={(event) => updateTextBlock(block.id, event.currentTarget.value)}
+                  <NodeTextBlockEditor
+                    blockID={block.id}
+                    nodeID={nodeID}
+                    companyID={companyID}
+                    documentValue={block.document}
+                    surfaceText={surfaceText}
+                    accent={accent}
+                    scrollbarTrack={scrollbarTrack}
+                    onFocus={() => {
+                      setFocusedTextBlockID(block.id);
+                      setActiveChatBlockID("");
+                    }}
                     onBlur={() => {
-                      flushTextBlockSave(block.id);
                       setFocusedTextBlockID((current) => current === block.id ? "" : current);
                     }}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      minHeight: 120,
-                      resize: "vertical",
-                      border: 0,
-                      outline: "none",
-                      padding: "12px 13px",
-                      color: surfaceText,
-                      background: "#ffffff",
-                      fontSize: 14,
-                      lineHeight: 1.45,
-                      letterSpacing: 0,
-                      overflowWrap: "anywhere",
+                    onDocumentChange={(document) => updateTextBlockContent(block.id, { document })}
+                    onDocumentFlush={(document) => {
+                      updateTextBlockContent(block.id, { document });
+                      flushTextBlockSave(block.id);
                     }}
                   />
                 </div>
@@ -558,7 +600,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     panelBackground={panelBackground}
                     strokeColor={strokeColor}
                     ruleColor={ruleColor}
-                    onFocus={() => setActiveChatBlockID(block.id)}
+                    onFocus={focusChat}
                     onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
                     onSubmit={() => { void submitChat(block.id); }}
                   />
@@ -576,7 +618,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     panelBackground={panelBackground}
                     strokeColor={strokeColor}
                     ruleColor={ruleColor}
-                    onFocus={() => setActiveChatBlockID(block.id)}
+                    onFocus={focusChat}
                     onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
                     onSubmit={() => { void submitChat(block.id); }}
                   />
@@ -670,6 +712,169 @@ const TimelineCell: React.FC<TimelineCellProps> = ({ label, count, accent, muted
     )}
   </div>
 );
+
+type NodeTextBlockEditorProps = {
+  blockID: string;
+  nodeID: string;
+  companyID: string;
+  documentValue: string;
+  surfaceText: string;
+  accent: string;
+  scrollbarTrack: string;
+  onFocus: () => void;
+  onBlur: () => void;
+  onDocumentChange: (document: string) => void;
+  onDocumentFlush: (document: string) => void;
+};
+
+function readStoredTextBlockHeight(storageKey: string): number {
+  if (typeof localStorage === "undefined") return 120;
+  const parsed = Number.parseInt(localStorage.getItem(storageKey) ?? "", 10);
+  return Number.isFinite(parsed) ? Math.max(120, Math.min(parsed, 900)) : 120;
+}
+
+function storeTextBlockHeight(storageKey: string, height: number) {
+  if (typeof localStorage === "undefined" || !Number.isFinite(height)) return;
+  localStorage.setItem(storageKey, String(Math.max(120, Math.min(Math.round(height), 900))));
+}
+
+const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
+  blockID,
+  nodeID,
+  companyID,
+  documentValue,
+  surfaceText,
+  accent,
+  scrollbarTrack,
+  onFocus,
+  onBlur,
+  onDocumentChange,
+  onDocumentFlush,
+}) => {
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const restoringScrollRef = useRef(false);
+  const targetKeyRef = useRef(`node-text-block:${nodeID}:${blockID}`);
+  const scrollMemoryRef = useRef(createEditorScrollMemory());
+  const pendingFontSizeRef = useRef<number | null>(null);
+  const lastAppliedDocumentRef = useRef("");
+  const lastStoredHeightRef = useRef(0);
+  const heightStorageKey = `node-editor-text-block-height-v1:${companyID}:${nodeID}:${blockID}`;
+  const [height, setHeight] = useState(() => readStoredTextBlockHeight(heightStorageKey));
+  const [, setDocumentScrollTop] = useState(0);
+
+  useEffect(() => {
+    targetKeyRef.current = `node-text-block:${nodeID}:${blockID}`;
+  }, [blockID, nodeID]);
+
+  useEffect(() => {
+    const nextHeight = readStoredTextBlockHeight(heightStorageKey);
+    lastStoredHeightRef.current = nextHeight;
+    setHeight(nextHeight);
+  }, [heightStorageKey]);
+
+  useEffect(() => {
+    const element = editorRef.current;
+    if (!element) return;
+    const nextHTML = deserializeEditorDocumentHTML(documentValue);
+    if (documentValue === lastAppliedDocumentRef.current && element.innerHTML === nextHTML) return;
+    element.innerHTML = nextHTML;
+    lastAppliedDocumentRef.current = documentValue;
+  }, [blockID, documentValue]);
+
+  useEffect(() => {
+    const element = editorRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      const nextHeight = Math.round(element.getBoundingClientRect().height);
+      if (!Number.isFinite(nextHeight) || Math.abs(nextHeight - lastStoredHeightRef.current) < 2) return;
+      lastStoredHeightRef.current = nextHeight;
+      setHeight(nextHeight);
+      storeTextBlockHeight(heightStorageKey, nextHeight);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [heightStorageKey]);
+
+  const handlers = useEditorDocumentSurfaceHandlers({
+    restoringScrollRef,
+    currentDocumentTargetKeyRef: targetKeyRef,
+    scrollMemoryRef,
+    pendingEditorFontSizeRef: pendingFontSizeRef,
+    outlineStyle: DEFAULT_EDITOR_OUTLINE_STYLE,
+    setDocumentScrollTop,
+    scheduleDocumentSave: (nextDocument, immediate = false) => {
+      lastAppliedDocumentRef.current = nextDocument;
+      onDocumentChange(nextDocument);
+      if (immediate) onDocumentFlush(nextDocument);
+    },
+    scheduleIndentGuideUpdate: () => undefined,
+    rememberCurrentDocumentScroll: () => undefined,
+    flushPendingDocumentSave: (fallbackDocument) => {
+      const nextDocument = fallbackDocument ?? (editorRef.current ? serializeEditorDocumentHTML(editorRef.current) : lastAppliedDocumentRef.current);
+      lastAppliedDocumentRef.current = nextDocument;
+      onDocumentFlush(nextDocument);
+    },
+    onSelectionFontSizeChange: () => undefined,
+  });
+
+  const handleBlur: React.FocusEventHandler<HTMLDivElement> = (event) => {
+    handlers.onBlur(event);
+    onBlur();
+  };
+
+  return (
+    <div
+      ref={editorRef}
+      className="editor-document-scroll"
+      data-node-text-block-id={blockID}
+      role="textbox"
+      aria-label="Node text block"
+      aria-multiline="true"
+      contentEditable
+      suppressContentEditableWarning
+      spellCheck
+      onFocus={onFocus}
+      onBeforeInput={handlers.onBeforeInput}
+      onPaste={handlers.onPaste}
+      onDrop={handlers.onDrop}
+      onInput={handlers.onInput}
+      onSelect={handlers.onSelect}
+      onClick={handlers.onClick}
+      onPointerDown={handlers.onPointerDown}
+      onPointerMove={handlers.onPointerMove}
+      onKeyUp={handlers.onKeyUp}
+      onBlur={handleBlur}
+      onScroll={handlers.onScroll}
+      onWheel={handlers.onWheel}
+      onKeyDown={handlers.onKeyDown}
+      style={{
+        display: "block",
+        width: "100%",
+        height,
+        minHeight: 120,
+        maxHeight: 900,
+        resize: "vertical",
+        border: 0,
+        outline: "none",
+        padding: "12px 13px",
+        boxSizing: "border-box",
+        color: surfaceText,
+        background: "#ffffff",
+        fontSize: 14,
+        lineHeight: 1.45,
+        letterSpacing: 0,
+        overflowWrap: "anywhere",
+        wordBreak: "break-word",
+        whiteSpace: "pre-wrap",
+        overflowY: "auto",
+        overflowX: "hidden",
+        cursor: "text",
+        ["--editor-document-scroll-accent" as string]: accent,
+        ["--editor-document-scroll-track" as string]: scrollbarTrack,
+      }}
+    />
+  );
+};
 
 type ChatPaneProps = {
   blockID: string;
@@ -925,7 +1130,7 @@ const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ messageID, accent, 
           <div style={{ minWidth: 0 }}>
             <div style={{ color: surfaceText, fontSize: 15, fontWeight: 800, overflowWrap: "anywhere" }}>{message?.subject || "(no subject)"}</div>
             <div style={{ marginTop: 4, color: surfaceText, opacity: 0.64, fontSize: 11, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {message ? `${formatAddressList(message.from) || "Unknown sender"}${message.date ? ` · ${formatTimestamp(message.date)}` : ""}` : "Email"}
+              {message ? `${formatAddressList(message.from) || "Unknown sender"}${message.date ? ` - ${formatTimestamp(message.date)}` : ""}` : "Email"}
             </div>
           </div>
           <button type="button" onClick={onClose} style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>

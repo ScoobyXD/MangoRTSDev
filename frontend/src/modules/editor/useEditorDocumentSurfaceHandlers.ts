@@ -834,6 +834,13 @@ export function useEditorDocumentSurfaceHandlers({
 
       if (PENDING_FONT_SIZE_CANCEL_KEYS.has(event.key)) pendingEditorFontSizeRef.current = null;
 
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "x" && removeSelectedEditorImage(event.currentTarget)) {
+        event.preventDefault();
+        pendingEditorFontSizeRef.current = null;
+        commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        return;
+      }
+
       if ((event.key === "Backspace" || event.key === "Delete") && removeSelectedEditorImage(event.currentTarget)) {
         event.preventDefault();
         commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
