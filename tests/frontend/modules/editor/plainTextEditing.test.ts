@@ -102,6 +102,17 @@ test("Backspace deletes repeated inserted tab-sized space runs one at a time", (
   assert.equal(third?.value, "alpha");
 });
 
+test("Backspace leaves an empty tabbed line at its left edge", () => {
+  const value = `alpha\n${EDITOR_TAB_TEXT}`;
+  const edit = deleteEditorBackspaceText(value, value.length, value.length);
+
+  assert.deepEqual(edit, {
+    value: "alpha\n",
+    selectionStart: "alpha\n".length,
+    selectionEnd: "alpha\n".length,
+  });
+});
+
 test("automatic outline continuation only looks at the new edit point", () => {
   assert.equal(getAutomaticOutlineContinuation("already typed\nplain line", "already typed\nplain line".length), null);
 });

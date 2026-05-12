@@ -371,8 +371,9 @@ function replaceDocumentWithPlainText(root: HTMLElement, text: string, selection
   setEditorSelectionByOffsets(root, selectionStart, selectionEnd);
 }
 
-function deleteTextByOffsets(root: HTMLElement, start: number, end: number): boolean {
+function deleteTextByOffsets(root: HTMLElement, start: number, end: number, options: { preserveTrailingNewline?: boolean } = {}): boolean {
   if (start < 0 || end < start) return false;
+  removeEditorTerminalBreaks(root);
   setEditorSelectionByOffsets(root, start, end);
   const range = getEditorSelectionRange(root);
   if (!range) return false;
@@ -381,6 +382,11 @@ function deleteTextByOffsets(root: HTMLElement, start: number, end: number): boo
   const selection = root.ownerDocument.getSelection();
   selection?.removeAllRanges();
   selection?.addRange(range);
+  if (options.preserveTrailingNewline) {
+    const terminalBreak = root.ownerDocument.createElement("br");
+    terminalBreak.setAttribute(EDITOR_TERMINAL_BREAK_ATTRIBUTE, "true");
+    root.appendChild(terminalBreak);
+  }
   return true;
 }
 
@@ -1163,7 +1169,7 @@ export function useEditorDocumentSurfaceHandlers({
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
         clearEditorImageSelection(root);
-        if (deleteTextByOffsets(root, edit.selectionStart, offsets.start)) {
+        if (deleteTextByOffsets(root, edit.selectionStart, offsets.start, { preserveTrailingNewline: edit.value.endsWith("\n") })) {
           recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "delete");
           commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
         }

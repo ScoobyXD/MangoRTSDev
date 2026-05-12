@@ -55,6 +55,8 @@ import { buildCompanyExplorerTreeRows } from "../../modules/company-explorer/com
 import { getExplorerDropPayloadItems, resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
+import { invalidateNodeRecordStoreCaches } from "../../modules/node-map/NodeRecordStore";
+import { upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache } from "../../modules/kanban/kanbanApi";
 import {
@@ -1060,6 +1062,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       invalidateLogicGateArenaViewCache(apiBase, companyID, boardLogicGateID);
       window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, board: result.board } }));
       window.dispatchEvent(new CustomEvent<KanbanBoardContentsUpdatedDetail>(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, { detail: { companyID, boardID, logicGateID: boardLogicGateID } }));
+      for (const node of result.nodes ?? []) {
+        invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
+        upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+      }
       const removed = result.deleted_message_ids ?? ids;
       setMessages((previous) => previous.filter((message) => !removed.includes(message.id)));
       if (selectedMessageID && removed.includes(selectedMessageID)) {

@@ -331,11 +331,13 @@ export function insertAutomaticOutlineFirstText(
 export function deleteEditorBackspaceText(value: string, selectionStart: number, selectionEnd: number): PlainTextEdit | null {
   const { start, end } = clampSelection(value, selectionStart, selectionEnd);
   if (start !== end || start < EDITOR_TAB_TEXT.length) return null;
-  if (value.slice(start - EDITOR_TAB_TEXT.length, start) !== EDITOR_TAB_TEXT) return null;
+  const deleteStart = start - EDITOR_TAB_TEXT.length;
+  if (deleteStart < getLineStart(value, start)) return null;
+  if (value.slice(deleteStart, start) !== EDITOR_TAB_TEXT) return null;
   return {
-    value: `${value.slice(0, start - EDITOR_TAB_TEXT.length)}${value.slice(start)}`,
-    selectionStart: start - EDITOR_TAB_TEXT.length,
-    selectionEnd: start - EDITOR_TAB_TEXT.length,
+    value: `${value.slice(0, deleteStart)}${value.slice(start)}`,
+    selectionStart: deleteStart,
+    selectionEnd: deleteStart,
   };
 }
 
