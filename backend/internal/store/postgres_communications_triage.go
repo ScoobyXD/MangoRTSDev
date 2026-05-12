@@ -216,18 +216,6 @@ insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
 values ($1, $2, $3, $4, now())`, input.CompanyID, nodeID, 120+float64(index*28), 120+float64(index*28)); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		informationID := newUUIDv7String()
-		if _, err := tx.ExecContext(ctx, `
-insert into node_information (company_id, information_id, node_id, type, information, created_timestamp, updated_timestamp)
-values ($1, $2, $3, 'Attached email'::information_type, $4, now(), now())`, input.CompanyID, informationID, nodeID, string(rawMessage)); err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
-		if _, err := tx.ExecContext(ctx, `
-insert into node_projection_table (company_id, node_id, information_id, type, information, created_timestamp, updated_timestamp)
-values ($1, $2, $3, 'Attached email'::information_type, $4, now(), now())`, input.CompanyID, nodeID, informationID, string(rawMessage)); err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
-
 		cardID := newUUIDv7String()
 		card, err := scanKanbanCard(tx.QueryRowContext(ctx, `
 insert into kanban_cards (
