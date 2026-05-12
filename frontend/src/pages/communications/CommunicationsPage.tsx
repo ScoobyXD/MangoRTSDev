@@ -121,8 +121,8 @@ const MESSAGE_BATCH_SIZE = 25;
 const TRIAGE_MESSAGE_DRAG_MIME = "application/x-mangorts-communications-triage-messages";
 const COMMUNICATIONS_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.communications.columnWidths.v1";
 const COMMUNICATIONS_COLUMN_RESIZER_WIDTH = 10;
-const COMMUNICATIONS_COLUMN_MIN_WIDTHS: CommunicationsColumnWidths = [170, 280, 340, 280];
-const COMMUNICATIONS_COLUMN_MAX_WIDTHS: CommunicationsColumnWidths = [360, 560, 1400, 720];
+const COMMUNICATIONS_COLUMN_MIN_WIDTHS: CommunicationsColumnWidths = [170, 280, 220, 280];
+const COMMUNICATIONS_COLUMN_MAX_WIDTHS: CommunicationsColumnWidths = [360, 760, 1600, 1600];
 
 export function CommunicationsPage({ me, onNavigate, embedded = false }: CommunicationsPageProps) {
   const companyID = getActiveCompanyID();
