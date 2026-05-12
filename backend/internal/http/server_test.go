@@ -2092,6 +2092,31 @@ func TestMapEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *test
 	if payload.FolderItems[0].Position != 4242 {
 		t.Fatalf("folder item position = %d, want 4242", payload.FolderItems[0].Position)
 	}
+
+	arenaReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gate-arena?company_id="+companyID+"&logic_gate_id="+createdID, nil)
+	arenaRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(arenaRec, arenaReq)
+	if arenaRec.Code != http.StatusOK {
+		t.Fatalf("GET logic gate arena status = %d, want %d body=%s", arenaRec.Code, http.StatusOK, arenaRec.Body.String())
+	}
+	var arenaPayload struct {
+		Board struct {
+			BoardID     string  `json:"board_id"`
+			LogicGateID *string `json:"logic_gate_id"`
+		} `json:"board"`
+		Columns []struct {
+			ColumnID string `json:"column_id"`
+		} `json:"columns"`
+	}
+	if err := json.Unmarshal(arenaRec.Body.Bytes(), &arenaPayload); err != nil {
+		t.Fatalf("decode logic gate arena response: %v", err)
+	}
+	if arenaPayload.Board.BoardID != store.LogicGateKanbanBoardID(createdID) || arenaPayload.Board.LogicGateID == nil || *arenaPayload.Board.LogicGateID != createdID {
+		t.Fatalf("arena board = %+v, want attached board for created gate %s", arenaPayload.Board, createdID)
+	}
+	if len(arenaPayload.Columns) != 3 {
+		t.Fatalf("arena columns = %d, want default columns", len(arenaPayload.Columns))
+	}
 }
 
 func TestRequestBodyLimitRejectsOversizedPayload(t *testing.T) {

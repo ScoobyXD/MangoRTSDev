@@ -82,6 +82,9 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 		).Scan(&created.CompanyID, &created.LogicGateID, &created.Header, &created.CreatedTimestamp); err != nil {
 			return MapEntityBatchResult{}, err
 		}
+		if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, created.LogicGateID, created.Header); err != nil {
+			return MapEntityBatchResult{}, err
+		}
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID
 		result.EntityMappings = append(result.EntityMappings, MapEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.LogicGateID})
