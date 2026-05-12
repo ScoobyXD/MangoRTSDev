@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
-import { listEmailMessages, type EmailAddress, type EmailMessage } from "../../pages/communications/communicationsApi";
+import { getEmailMessage, listEmailMessages, type EmailAddress, type EmailMessage } from "../../pages/communications/communicationsApi";
 import type { NodeProjectionItem } from "../node-map/NodeRecordStore";
 import {
   buildEditorAttachedEmailPayload,
@@ -161,8 +161,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [attachedEmails, setAttachedEmails] = useState<EditorAttachedEmail[]>([]);
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
   const [activeChatBlockID, setActiveChatBlockID] = useState("");
+  const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
   const [timelineGranularity, setTimelineGranularity] = useState<TimelineGranularity>("day");
   const [emailPickerOpen, setEmailPickerOpen] = useState(false);
+  const [selectedEmailID, setSelectedEmailID] = useState("");
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
 
@@ -278,7 +280,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const blockID = generateStableInformationID();
     focusBlockIDRef.current = blockID;
     setBlocks((current) => [
-      ...current,
       {
         id: blockID,
         text: "",
@@ -286,8 +287,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         updatedTimestamp: now,
         pending: false,
       },
+      ...current,
     ]);
-    setActiveChatBlockID(blockID);
   }, []);
 
   const updateTextBlock = useCallback((blockID: string, text: string) => {
@@ -498,11 +499,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         {blocks.map((block, index) => {
           const messages = chatMessagesByBlock.get(block.id) ?? [];
           const chatIsActive = activeChatBlockID === block.id;
+          const chatIsVisible = chatIsActive || messages.length > 0;
+          const textBlockIsFocused = focusedTextBlockID === block.id;
           return (
             <React.Fragment key={block.id}>
               <TimelineCell label={timelineRows[index]?.label ?? ""} count={timelineRows[index]?.count ?? 0} accent={accent} muted={false} />
               <div style={{ minWidth: 0 }}>
-                <div style={{ border: `1px solid ${strokeColor}`, borderRadius: 8, background: "rgba(255,255,255,0.72)", overflow: "hidden", boxShadow: "0 6px 18px rgba(0,0,0,0.05)" }}>
+                <div style={{ border: `1px solid ${textBlockIsFocused ? accent : strokeColor}`, borderRadius: 8, background: "rgba(255,255,255,0.72)", overflow: "hidden", boxShadow: textBlockIsFocused ? "0 0 0 2px rgba(255,136,32,0.14), 0 6px 18px rgba(0,0,0,0.05)" : "0 6px 18px rgba(0,0,0,0.05)" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 8px", background: panelBackground }}>
                     <span style={{ color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {formatTimestamp(block.createdTimestamp) || `Text box ${index + 1}`}
@@ -521,8 +524,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     value={block.text}
                     placeholder=""
                     spellCheck
+                    onFocus={() => setFocusedTextBlockID(block.id)}
                     onChange={(event) => updateTextBlock(block.id, event.currentTarget.value)}
-                    onBlur={() => flushTextBlockSave(block.id)}
+                    onBlur={() => {
+                      flushTextBlockSave(block.id);
+                      setFocusedTextBlockID((current) => current === block.id ? "" : current);
+                    }}
                     style={{
                       display: "block",
                       width: "100%",
@@ -540,7 +547,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     }}
                   />
                 </div>
-                {compact && (
+                {compact && chatIsVisible && (
                   <ChatPane
                     blockID={block.id}
                     messages={messages}
@@ -558,67 +565,66 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 )}
               </div>
               {!compact && (
-                <ChatPane
-                  blockID={block.id}
-                  messages={messages}
-                  draft={chatDrafts[block.id] ?? ""}
-                  active={chatIsActive}
-                  accent={accent}
-                  surfaceText={surfaceText}
-                  panelBackground={panelBackground}
-                  strokeColor={strokeColor}
-                  ruleColor={ruleColor}
-                  onFocus={() => setActiveChatBlockID(block.id)}
-                  onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
-                  onSubmit={() => { void submitChat(block.id); }}
-                />
+                chatIsVisible ? (
+                  <ChatPane
+                    blockID={block.id}
+                    messages={messages}
+                    draft={chatDrafts[block.id] ?? ""}
+                    active={chatIsActive}
+                    accent={accent}
+                    surfaceText={surfaceText}
+                    panelBackground={panelBackground}
+                    strokeColor={strokeColor}
+                    ruleColor={ruleColor}
+                    onFocus={() => setActiveChatBlockID(block.id)}
+                    onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
+                    onSubmit={() => { void submitChat(block.id); }}
+                  />
+                ) : <div />
               )}
             </React.Fragment>
           );
         })}
 
         <div />
-        <div
-          onDragEnter={() => setDropActive(true)}
-          onDragOver={(event) => {
-            if (event.dataTransfer.types.includes(EMAIL_DRAG_MIME)) event.preventDefault();
-          }}
-          onDragLeave={() => setDropActive(false)}
-          onDrop={onDropEmail}
-          style={{
-            minHeight: 58,
-            border: `1px ${dropActive ? "solid" : "dashed"} ${dropActive ? accent : strokeColor}`,
-            borderRadius: 8,
-            background: dropActive ? "rgba(255,136,32,0.08)" : panelBackground,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 10,
-            padding: "10px 12px",
-            color: surfaceText,
-            fontSize: 12,
-            fontWeight: 800,
-          }}
-        >
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-            <MailIcon color={accent} />
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Attach email</span>
-          </span>
-          <button
-            type="button"
-            onClick={() => setEmailPickerOpen(true)}
-            style={{ border: `1px solid ${accent}`, background: "#ffffff", color: accent, borderRadius: 6, padding: "5px 9px", fontSize: 11, fontWeight: 800, cursor: "pointer", flex: "0 0 auto" }}
+        <div style={{ minWidth: 0, display: "grid", gap: 8 }}>
+          <div
+            onDragEnter={() => setDropActive(true)}
+            onDragOver={(event) => {
+              if (event.dataTransfer.types.includes(EMAIL_DRAG_MIME)) event.preventDefault();
+            }}
+            onDragLeave={() => setDropActive(false)}
+            onDrop={onDropEmail}
+            style={{
+              minHeight: 58,
+              border: `1px ${dropActive ? "solid" : "dashed"} ${dropActive ? accent : strokeColor}`,
+              borderRadius: 8,
+              background: dropActive ? "rgba(255,136,32,0.08)" : panelBackground,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              padding: "10px 12px",
+              color: surfaceText,
+              fontSize: 12,
+              fontWeight: 800,
+            }}
           >
-            Add email
-          </button>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+              <MailIcon color={accent} />
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Attach email</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setEmailPickerOpen(true)}
+              style={{ border: `1px solid ${accent}`, background: "#ffffff", color: accent, borderRadius: 6, padding: "5px 9px", fontSize: 11, fontWeight: 800, cursor: "pointer", flex: "0 0 auto" }}
+            >
+              Add email
+            </button>
+          </div>
+          <AttachedEmailsPanel emails={attachedEmails} accent={accent} surfaceText={surfaceText} panelBackground={panelBackground} strokeColor={strokeColor} onOpenEmail={setSelectedEmailID} />
         </div>
-        {!compact && <AttachedEmailsPanel emails={attachedEmails} accent={accent} surfaceText={surfaceText} panelBackground={panelBackground} strokeColor={strokeColor} />}
-        {compact && (
-          <>
-            <div />
-            <AttachedEmailsPanel emails={attachedEmails} accent={accent} surfaceText={surfaceText} panelBackground={panelBackground} strokeColor={strokeColor} />
-          </>
-        )}
+        {!compact && <div />}
       </div>
 
       {emailPickerOpen && (
@@ -629,6 +635,16 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           strokeColor={strokeColor}
           onClose={() => setEmailPickerOpen(false)}
           onAttach={(message) => { void attachEmail(messageAttachmentPayload(message)); }}
+        />
+      )}
+      {selectedEmailID && (
+        <EmailDetailModal
+          messageID={selectedEmailID}
+          accent={accent}
+          surfaceText={surfaceText}
+          panelBackground={panelBackground}
+          strokeColor={strokeColor}
+          onClose={() => setSelectedEmailID("")}
         />
       )}
     </div>
@@ -741,19 +757,20 @@ type AttachedEmailsPanelProps = {
   surfaceText: string;
   panelBackground: string;
   strokeColor: string;
+  onOpenEmail: (messageID: string) => void;
 };
 
-const AttachedEmailsPanel: React.FC<AttachedEmailsPanelProps> = ({ emails, accent, surfaceText, panelBackground, strokeColor }) => (
-  <div style={{ minWidth: 0, display: "grid", gap: 7, border: `1px solid ${strokeColor}`, borderRadius: 8, background: panelBackground, padding: 8 }}>
+const AttachedEmailsPanel: React.FC<AttachedEmailsPanelProps> = ({ emails, accent, surfaceText, panelBackground, strokeColor, onOpenEmail }) => (
+  <div style={{ minWidth: 0, display: "grid", gap: 7, border: `1px solid ${strokeColor}`, borderRadius: 8, background: panelBackground, padding: 8, maxHeight: 260, overflowY: "auto" }}>
     <div style={{ display: "flex", alignItems: "center", gap: 7, color: surfaceText, fontSize: 11, fontWeight: 800 }}>
       <MailIcon color={accent} />
       <span>{emails.length}</span>
     </div>
-    {emails.slice(0, 5).map((email) => (
-      <div key={email.id} title={email.subject} style={{ display: "grid", gap: 2, minWidth: 0, borderTop: `1px solid ${strokeColor}`, paddingTop: 7 }}>
+    {emails.map((email) => (
+      <button key={email.id} type="button" title={email.subject} onClick={() => onOpenEmail(email.messageID)} style={{ display: "grid", gap: 2, minWidth: 0, border: 0, borderTop: `1px solid ${strokeColor}`, padding: "7px 0 0", background: "transparent", textAlign: "left", cursor: "pointer" }}>
         <div style={{ color: surfaceText, fontSize: 11, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email.subject}</div>
         <div style={{ color: surfaceText, opacity: 0.62, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email.from || formatTimestamp(email.date)}</div>
-      </div>
+      </button>
     ))}
   </div>
 );
@@ -786,7 +803,7 @@ const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surfaceText
     const timer = window.setTimeout(() => {
       setLoading(true);
       setError("");
-      void listEmailMessages({ mailbox: "all", limit: 30, q: query.trim() || undefined })
+      void listEmailMessages({ mailbox: "primary", limit: 30, q: query.trim() || undefined })
         .then((page) => {
           if (!cancelled) setMessages(page.messages ?? []);
         })
@@ -854,3 +871,84 @@ const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surfaceText
     </div>
   );
 };
+
+type EmailDetailModalProps = {
+  messageID: string;
+  accent: string;
+  surfaceText: string;
+  panelBackground: string;
+  strokeColor: string;
+  onClose: () => void;
+};
+
+const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ messageID, accent, surfaceText, panelBackground, strokeColor, onClose }) => {
+  const [message, setMessage] = useState<EmailMessage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    void getEmailMessage(messageID)
+      .then((payload) => {
+        if (!cancelled) setMessage(payload);
+      })
+      .catch((cause) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : "failed_to_load_email");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [messageID]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{ position: "absolute", inset: 0, zIndex: 32, background: "rgba(17, 24, 39, 0.32)", display: "grid", placeItems: "center", padding: 18 }}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div style={{ width: "min(720px, 100%)", maxHeight: "min(760px, 92%)", display: "grid", gridTemplateRows: "auto auto minmax(260px, 1fr)", border: `1px solid ${strokeColor}`, borderRadius: 8, background: "#ffffff", color: surfaceText, boxShadow: "0 18px 48px rgba(0,0,0,0.24)", overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "start", padding: 12, borderBottom: `1px solid ${strokeColor}`, background: panelBackground }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: surfaceText, fontSize: 15, fontWeight: 800, overflowWrap: "anywhere" }}>{message?.subject || "(no subject)"}</div>
+            <div style={{ marginTop: 4, color: surfaceText, opacity: 0.64, fontSize: 11, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {message ? `${formatAddressList(message.from) || "Unknown sender"}${message.date ? ` · ${formatTimestamp(message.date)}` : ""}` : "Email"}
+            </div>
+          </div>
+          <button type="button" onClick={onClose} style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>
+            x
+          </button>
+        </div>
+        {(loading || error) && (
+          <div style={{ padding: "9px 12px", borderBottom: `1px solid ${strokeColor}`, color: error ? "#b00020" : accent, fontSize: 12, fontWeight: 800 }}>
+            {error || "Loading"}
+          </div>
+        )}
+        <iframe title="Attached email body" sandbox="" srcDoc={messageDocument(message?.body || message?.snippet || "")} style={{ width: "100%", height: "100%", minHeight: 320, border: 0, background: "#ffffff" }} />
+      </div>
+    </div>
+  );
+};
+
+function messageDocument(body: string): string {
+  const value = body.trim();
+  const content = /<\/?[a-z][\s\S]*>/i.test(value) ? value : `<pre>${escapeHTML(value)}</pre>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><style>body{font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#111;margin:0;padding:14px;overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}</style></head><body>${content}</body></html>`;
+}
+
+function escapeHTML(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}

@@ -29,14 +29,14 @@ test("does not load non-text projections into the editor document", () => {
   assert.equal(selected, null);
 });
 
-test("lists every text-box projection in created order", () => {
+test("lists every text-box projection newest first", () => {
   const blocks = listEditorTextBlockProjections([
     { information_id: "b", type: "Text box", information: "second", created_timestamp: "2026-05-04T02:00:00.000Z" },
     { information_id: "status", type: "Status", information: "open", created_timestamp: "2026-05-04T01:30:00.000Z" },
     { information_id: "a", type: "Text box", information: "first", created_timestamp: "2026-05-04T01:00:00.000Z" },
   ]);
 
-  assert.deepEqual(blocks.map((block) => block.information_id), ["a", "b"]);
+  assert.deepEqual(blocks.map((block) => block.information_id), ["b", "a"]);
 });
 
 test("parses node text block chat projection payloads", () => {

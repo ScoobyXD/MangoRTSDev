@@ -14,7 +14,12 @@ import { getEditorDocumentIsolationState, type EditorTabID } from "./editorTabs"
 import { EDITOR_TAB_TEXT } from "./plainTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
 import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
-import { selectCurrentEditorTextProjection } from "./editorProjection";
+import {
+  EDITOR_ATTACHED_EMAIL_TYPE,
+  EDITOR_TEXT_BLOCK_CHAT_TYPE,
+  EDITOR_TEXT_BLOCK_TYPE,
+  selectCurrentEditorTextProjection,
+} from "./editorProjection";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
@@ -157,6 +162,10 @@ function findCompanyUserByAssigneeDraft(users: CompanyUser[], draft: string): Co
     ];
     return labels.some((label) => label.trim().toLowerCase() === value);
   }) ?? null;
+}
+
+function isNodeWorkspaceHeaderInformationType(type: string): boolean {
+  return type === EDITOR_TEXT_BLOCK_TYPE || type === EDITOR_TEXT_BLOCK_CHAT_TYPE || type === EDITOR_ATTACHED_EMAIL_TYPE;
 }
 
 // Editor module: linked document canvas for node or logic-gate context.
@@ -1122,8 +1131,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodeDueDateDraft("");
           syncNodeAssignee("");
           setNodeWorkspaceProjections([]);
-          const nonText = details.information.filter((item) => item.type !== "Text box");
-          const textBoxes = projections.filter((item) => item.type === "Text box");
+          const nonText = details.information.filter((item) => item.type !== EDITOR_TEXT_BLOCK_TYPE);
+          const textBoxes = projections.filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE);
           setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
           setLinkedNodeMetadataRows([
             { label: "Logic Gate ID", value: details.logic_gate.logic_gate_id },
@@ -1154,9 +1163,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
         syncNodeAssignee(details.node.assignee_user_id);
         setNodeWorkspaceProjections(projections);
-        const nonText = details.information.filter((item) => item.type !== "Text box");
-        const textBoxes = projections.filter((item) => item.type === "Text box");
-        setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
+        const visibleNodeInformation = details.information.filter((item) => !isNodeWorkspaceHeaderInformationType(item.type));
+        const textBoxes = projections.filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE);
+        setLinkedNodeInfoPreview(visibleNodeInformation.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
         setLinkedNodeMetadataRows([
           { label: "Node ID", value: details.node.node_id },
           { label: "Created", value: details.node.created_timestamp },
@@ -1166,7 +1175,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         ]);
         const historyRows = [
           details.node.created_timestamp ? `Node created at ${details.node.created_timestamp}` : "Node created",
-          ...details.information.slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`),
+          ...visibleNodeInformation.slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`),
         ];
         setLinkedNodeHistoryRows(historyRows);
       } catch (cause) {

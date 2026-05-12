@@ -61,7 +61,7 @@ export function listEditorTextBlockProjections<T extends EditorProjectionItem>(i
   return items
     .filter((item): item is EditorTextBlockProjection<T> => item.type === EDITOR_TEXT_BLOCK_TYPE)
     .slice()
-    .sort(compareProjectionCreated);
+    .sort((a, b) => -compareProjectionCreated(a, b));
 }
 
 export function parseEditorTextBlockChats(items: EditorProjectionItem[]): EditorTextBlockChatMessage[] {
