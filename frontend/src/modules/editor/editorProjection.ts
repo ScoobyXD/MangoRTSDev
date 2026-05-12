@@ -15,13 +15,23 @@ export type EditorTextBlockProjection<T extends EditorProjectionItem = EditorPro
   type: typeof EDITOR_TEXT_BLOCK_TYPE;
 };
 
+export type EditorChatAttachment = {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  dataURL?: string;
+};
+
 export type EditorTextBlockChatMessage = {
   id: string;
   blockID: string;
+  parentID?: string;
   authorID: string;
   authorName: string;
   message: string;
   createdTimestamp: string;
+  attachments: EditorChatAttachment[];
 };
 
 export type EditorAttachedEmail = {
@@ -92,17 +102,27 @@ export function parseEditorAttachedEmails(items: EditorProjectionItem[]): Editor
 
 export function buildEditorTextBlockChatPayload(input: {
   blockID: string;
+  parentID?: string;
   authorID?: string;
   authorName: string;
   message: string;
   createdTimestamp: string;
+  attachments?: EditorChatAttachment[];
 }): string {
   return JSON.stringify({
     block_id: input.blockID,
+    parent_id: input.parentID ?? "",
     author_id: input.authorID ?? "",
     author_name: input.authorName,
     message: input.message,
     created_timestamp: input.createdTimestamp,
+    attachments: normalizeChatAttachments(input.attachments ?? []).map((attachment) => ({
+      id: attachment.id,
+      name: attachment.name,
+      type: attachment.type,
+      size: attachment.size,
+      data_url: attachment.dataURL ?? "",
+    })),
   });
 }
 
@@ -167,20 +187,58 @@ function numberValue(payload: Record<string, unknown>, key: string): number | un
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function normalizeChatAttachments(items: EditorChatAttachment[]): EditorChatAttachment[] {
+  return items
+    .map((item) => ({
+      id: item.id.trim(),
+      name: item.name.trim(),
+      type: item.type.trim(),
+      size: Number.isFinite(item.size) && item.size > 0 ? Math.round(item.size) : 0,
+      dataURL: item.dataURL?.trim() || undefined,
+    }))
+    .filter((item) => item.id && item.name);
+}
+
+function parseEditorChatAttachments(value: unknown): EditorChatAttachment[] {
+  if (!Array.isArray(value)) return [];
+  const attachments: EditorChatAttachment[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const record = raw as Record<string, unknown>;
+    const id = typeof record.id === "string" ? record.id.trim() : "";
+    const name = typeof record.name === "string" ? record.name.trim() : "";
+    if (!id || !name) continue;
+    const type = typeof record.type === "string" ? record.type.trim() : "";
+    const rawSize = record.size;
+    const size = typeof rawSize === "number" && Number.isFinite(rawSize) && rawSize > 0 ? Math.round(rawSize) : 0;
+    const dataURL = typeof record.data_url === "string"
+      ? record.data_url.trim()
+      : typeof record.dataURL === "string"
+        ? record.dataURL.trim()
+        : "";
+    attachments.push({ id, name, type, size, dataURL: dataURL || undefined });
+  }
+  return attachments;
+}
+
 function parseEditorTextBlockChat(item: EditorProjectionItem): EditorTextBlockChatMessage | null {
   const payload = parsePayload(item.information);
   if (!payload || typeof payload !== "object") return null;
   const record = payload as Record<string, unknown>;
   const blockID = stringValue(record, "block_id");
   const message = stringValue(record, "message");
-  if (!blockID || !message) return null;
+  const attachments = parseEditorChatAttachments(record.attachments);
+  if (!blockID || (!message && attachments.length === 0)) return null;
+  const parentID = stringValue(record, "parent_id");
   return {
     id: item.information_id,
     blockID,
+    parentID: parentID || undefined,
     authorID: stringValue(record, "author_id"),
     authorName: stringValue(record, "author_name") || "Unknown user",
     message,
     createdTimestamp: stringValue(record, "created_timestamp") || item.created_timestamp || "",
+    attachments,
   };
 }
 

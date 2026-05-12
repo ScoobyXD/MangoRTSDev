@@ -44,10 +44,12 @@ test("lists every text-box projection newest first", () => {
 test("parses node text block chat projection payloads", () => {
   const payload = buildEditorTextBlockChatPayload({
     blockID: "block-1",
+    parentID: "chat-parent",
     authorID: "user-1",
     authorName: "Ada",
     message: "Check this section",
     createdTimestamp: "2026-05-04T01:00:00.000Z",
+    attachments: [{ id: "attachment-1", name: "notes.csv", type: "text/csv", size: 42, dataURL: "data:text/csv;base64,YSxi" }],
   });
   const messages = parseEditorTextBlockChats([
     { information_id: "chat-1", type: "Text block chat", information: payload, created_timestamp: "2026-05-04T01:00:00.000Z" },
@@ -55,8 +57,47 @@ test("parses node text block chat projection payloads", () => {
 
   assert.equal(messages.length, 1);
   assert.equal(messages[0].blockID, "block-1");
+  assert.equal(messages[0].parentID, "chat-parent");
   assert.equal(messages[0].authorName, "Ada");
   assert.equal(messages[0].message, "Check this section");
+  assert.deepEqual(messages[0].attachments, [{ id: "attachment-1", name: "notes.csv", type: "text/csv", size: 42, dataURL: "data:text/csv;base64,YSxi" }]);
+});
+
+test("keeps legacy chat payloads valid without parent or attachments", () => {
+  const messages = parseEditorTextBlockChats([
+    {
+      information_id: "chat-legacy",
+      type: "Text block chat",
+      information: JSON.stringify({
+        block_id: "block-1",
+        author_name: "Ada",
+        message: "Legacy message",
+        created_timestamp: "2026-05-04T01:00:00.000Z",
+      }),
+      created_timestamp: "2026-05-04T01:00:00.000Z",
+    },
+  ]);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].parentID, undefined);
+  assert.deepEqual(messages[0].attachments, []);
+});
+
+test("parses attachment-only chat payloads", () => {
+  const payload = buildEditorTextBlockChatPayload({
+    blockID: "block-1",
+    authorName: "Ada",
+    message: "",
+    createdTimestamp: "2026-05-04T01:00:00.000Z",
+    attachments: [{ id: "attachment-1", name: "image.png", type: "image/png", size: 128 }],
+  });
+  const messages = parseEditorTextBlockChats([
+    { information_id: "chat-attachment", type: "Text block chat", information: payload, created_timestamp: "2026-05-04T01:00:00.000Z" },
+  ]);
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].message, "");
+  assert.equal(messages[0].attachments[0].name, "image.png");
 });
 
 test("parses titled node text block content payloads with legacy fallback", () => {
