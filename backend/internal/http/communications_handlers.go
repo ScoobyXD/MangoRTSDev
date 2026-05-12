@@ -371,6 +371,7 @@ func (s *Server) requireConnectedEmail(w http.ResponseWriter, r *http.Request) (
 func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, err error) {
 	var apiErr NylasAPIError
 	if errors.As(err, &apiErr) {
+		log.Printf("nylas API error user_id=%s provider=%s path=%s status=%d code=%s message=%s", connection.UserID, connection.Provider, r.URL.Path, apiErr.StatusCode, apiErr.Code, apiErr.Message)
 		if apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden {
 			_, _ = s.repo.UpdateUserEmailConnectionStatus(connection.UserID, "reauth_required")
 			writeError(w, http.StatusUnauthorized, "nylas_reauth_required")

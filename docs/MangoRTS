@@ -45,6 +45,10 @@ New Features:
 13. For the Company Explorer search functionality optimization Let's have it where when I select into a folder and I type something where we only search inside that folder. Let's turn it into We first search into that folder and try to get results but if we don't find anything then we will search the rest of the company folders and files.
 14. I should change my Google password one day. 
 15. Should be able to do @ to summon ai agent like shopify and grok
+16. Really really need to check the security measures and dangers of idle machine or if someone can do damage or sql injections if the computer is left unattended
+17. I HATE BAD SOFTWARE I HATE IT. Make sure every thing, every feature, every possible thing is searchable. Especially in settings and setup.
+18. I like the micro graphics from foxrockettstudio from instagram
+
 ========
 
 PROBLEM:
@@ -118,7 +122,12 @@ General Bugs:
 3.  On another note when I have multi-select on for node or logic gates and I right-click, I should not automatically select one node or logic gate. I should keep all of the selected stuff selected. I should only be able to deselect when I single-click on another part of the map without dragging. 
 1. when there are two people on the same account, weird stuff happens, its like 1 gets command and the other watches as 1 controls, gets to click on stuff on the company explorer and the other cant. but sometimes they switch places.
 
+Logic Gate Arena:
+1.editor does not save when a photo is in it. actually probably goes for editor displaying nodes
+2. also when i backspace the last tab on indent guides it auto takes me back to the end of the line above instead of the beginning of that row i was deleting from.
+
 Company Explorer:
+1. The renaming doesnt work it keep highlighting the entire text and so when i type characters it just replaces the character i just typed
 2. The search bar needs to be better at searching the first and second words.
 
 Map:
@@ -284,7 +293,6 @@ aws configure --profile mangorts-dev
 aws sso login --profile mangorts-dev
 
 .\scripts\start_local_cognito_backend.ps1 -AwsProfile mangorts-dev -StopExisting
-
 
 -----
 
@@ -471,8 +479,17 @@ Nylas
 DEV:
 Application name: MangoRTSDev
 Client ID: 1803921b-02e9-4ef4-972a-3dfef3d6557b
+MangoRTSDev API Key: nyk_v0_HrDTzN4KktiFjAaMhhpzMRcSdFhGJVMieQRhDgBt2GLLh069I3uwUEGj3IjKcKGr
+API Arn key: arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/nylas-api-key-Ig3ZDA
+state secret arn: arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/nylas-state-secret-ytLKXO
 
+local env:
+webhook secret: 2rCQGsD4oB-HARSEWbFE
+webhook secret arn: arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/local/nylas-webhook-secret-GqLFxK
 
+dev.MangoRTS.com
+webhook secret: s0Tho0mhsexjaWXqEMTQ
+webhook secret arn: arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/nylas-webhook-secret-Bd23HV
 
 SANDBOX:
 mangorts sandbox US clientID: b079d358-1f5c-47b5-a23b-910ac94d2872
@@ -484,3 +501,7 @@ API key: nyk_v0_U7NVuxYwMXsHkI8EgQGsjQCOzU90KhOCrDWy0r5zaaumblrOQOHeQeSlqUqzgawA
 
 API key arn version: arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/nylas-api-key-Ig3ZDA
 state secret arn version: arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/nylas-state-secret-ytLKXO
+
+
+Nylas google auth client Id: 109511778785-l0sa46ebcspncnpv43o024alpksa2alt.apps.googleusercontent.com
+nylas google client secret: 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

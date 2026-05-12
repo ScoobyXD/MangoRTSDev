@@ -131,6 +131,16 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     }
   }, []);
 
+  const handleEmailAccessExpired = useCallback(async (accessError: unknown) => {
+    setNotice("");
+    setFolders([]);
+    setMessages([]);
+    setSelectedMessage(null);
+    setSelectedMessageID("");
+    await loadStatus();
+    setError(formatError(accessError, "Email access expired. Disconnect and reconnect your mailbox."));
+  }, [loadStatus]);
+
   const loadFolders = useCallback(async (): Promise<boolean> => {
     if (foldersRequestInFlightRef.current) return false;
     foldersRequestInFlightRef.current = true;
@@ -139,12 +149,16 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       setFolders(next);
       return true;
     } catch (folderError) {
+      if (isEmailAccessExpiredError(folderError)) {
+        await handleEmailAccessExpired(folderError);
+        return false;
+      }
       setError(formatError(folderError, "Failed to load folders"));
       return false;
     } finally {
       foldersRequestInFlightRef.current = false;
     }
-  }, []);
+  }, [handleEmailAccessExpired]);
 
   const loadMessages = useCallback(async () => {
     if (!status?.connected) return;
@@ -176,6 +190,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       }
     } catch (messageError) {
       if (messageRequestSeqRef.current === requestSeq) {
+        if (isEmailAccessExpiredError(messageError)) {
+          await handleEmailAccessExpired(messageError);
+          return;
+        }
         setError(formatError(messageError, "Failed to load messages"));
       }
     } finally {
@@ -188,7 +206,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         }
       }
     }
-  }, [mailbox, pageToken, searchQuery, status?.connected, unreadOnly]);
+  }, [handleEmailAccessExpired, mailbox, pageToken, searchQuery, status?.connected, unreadOnly]);
 
   useEffect(() => { void loadStatus(); }, [loadStatus]);
   useEffect(() => { if (status?.connected) void loadFolders(); }, [loadFolders, status?.connected]);
@@ -235,13 +253,19 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         if (!cancelled) setSelectedMessage(message);
       })
       .catch((detailError) => {
-        if (!cancelled) setError(formatError(detailError, "Failed to load message"));
+        if (!cancelled) {
+          if (isEmailAccessExpiredError(detailError)) {
+            void handleEmailAccessExpired(detailError);
+            return;
+          }
+          setError(formatError(detailError, "Failed to load message"));
+        }
       })
       .finally(() => {
         if (!cancelled) setLoadingDetail(false);
       });
     return () => { cancelled = true; };
-  }, [selectedMessageID]);
+  }, [handleEmailAccessExpired, selectedMessageID]);
 
   const archiveFolder = useMemo(() => findSystemFolder(folders, "archive"), [folders]);
   const connection = status?.connection;
@@ -722,6 +746,10 @@ function escapeHTML(value: string): string {
 
 function formatError(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim() ? error.message : fallback;
+}
+
+function isEmailAccessExpiredError(error: unknown): boolean {
+  return error instanceof Error && error.message.trim() === "Email access expired. Disconnect and reconnect your mailbox.";
 }
 
 function formatErrorCode(code: string): string {

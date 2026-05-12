@@ -21,10 +21,17 @@ if (-not (Test-Path -LiteralPath $tfvarsPath)) {
 }
 
 $MangoLocalTunnelURL = ""
+$MangoLocalNylasClientID = ""
+$MangoLocalNylasAPIBaseURL = ""
+$MangoLocalNylasAPIKeySecretArn = ""
+$MangoLocalNylasStateSecretArn = ""
 $MangoLocalNylasWebhookSecret = ""
 $MangoLocalNylasWebhookSecretArn = ""
 if (Test-Path -LiteralPath $localConfigPath) {
   . $localConfigPath
+}
+if ($MangoLocalNylasWebhookSecret -eq "<local-webhook-secret>") {
+  $MangoLocalNylasWebhookSecret = ""
 }
 
 function Get-TfvarString {
@@ -272,11 +279,13 @@ if (-not $SkipNylas) {
 }
 
 $nylasClientID = First-NonBlank @(
+  $MangoLocalNylasClientID,
   $env:NYLAS_CLIENT_ID,
   (Get-OptionalTfvarString -Name "nylas_client_id" -Path $tfvarsPath),
   (Get-ContainerEnvironmentValue -Container $backendContainer -Name "NYLAS_CLIENT_ID")
 )
 $nylasAPIBaseURL = First-NonBlank @(
+  $MangoLocalNylasAPIBaseURL,
   $env:NYLAS_API_BASE_URL,
   (Get-OptionalTfvarString -Name "nylas_api_base_url" -Path $tfvarsPath -Default "https://api.us.nylas.com"),
   (Get-ContainerEnvironmentValue -Container $backendContainer -Name "NYLAS_API_BASE_URL"),
@@ -293,11 +302,13 @@ $nylasMicrosoftScopes = First-NonBlank @(
   (Get-ContainerEnvironmentValue -Container $backendContainer -Name "NYLAS_MICROSOFT_SCOPES")
 )
 $nylasAPIKeySecretArn = First-NonBlank @(
+  $MangoLocalNylasAPIKeySecretArn,
   $env:NYLAS_API_KEY_SECRET_ARN,
   (Get-OptionalTfvarString -Name "nylas_api_key_secret_arn" -Path $tfvarsPath),
   (Get-ContainerSecretReference -Container $backendContainer -Name "NYLAS_API_KEY")
 )
 $nylasStateSecretArn = First-NonBlank @(
+  $MangoLocalNylasStateSecretArn,
   $env:NYLAS_STATE_SECRET_ARN,
   (Get-OptionalTfvarString -Name "nylas_state_secret_arn" -Path $tfvarsPath),
   (Get-ContainerSecretReference -Container $backendContainer -Name "NYLAS_STATE_SECRET")
