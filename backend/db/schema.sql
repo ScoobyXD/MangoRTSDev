@@ -36,13 +36,6 @@ end $$;
 alter type information_type add value if not exists 'Text block chat';
 alter type information_type add value if not exists 'Attached email';
 
-do $$
-begin
-  if not exists (select 1 from pg_type where typname = 'operation_status') then
-    create type operation_status as enum ('In Progress', 'Success', 'Failed');
-  end if;
-end $$;
-
 create table if not exists users (
   user_id uuid not null,
   cognito_subject text not null,
@@ -292,19 +285,6 @@ do update set
   updated_timestamp = excluded.updated_timestamp
 where logic_gate_projection_table.updated_timestamp <= excluded.updated_timestamp;
 
-create table if not exists operations (
-  company_id uuid not null,
-  operation_id uuid not null,
-  node_id uuid,
-  logic_gate_id uuid,
-  status operation_status not null,
-  start_timestamp timestamptz not null,
-  end_timestamp timestamptz,
-  primary key (company_id, operation_id),
-  foreign key (company_id, node_id) references nodes (company_id, node_id),
-  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
-);
-
 create table if not exists kanban_boards (
   company_id uuid not null,
   board_id text not null,
@@ -472,8 +452,6 @@ create unique index if not exists idx_logic_gate_projection_table_one_text_box o
 create index if not exists idx_logic_gate_map_positions_company_updated on logic_gate_map_positions(company_id, updated_timestamp desc);
 create index if not exists idx_logic_gate_relationships_a on logic_gate_relationships(company_id, logic_gate_id_a);
 create index if not exists idx_logic_gate_relationships_b on logic_gate_relationships(company_id, logic_gate_id_b);
-create index if not exists idx_operations_node on operations(company_id, node_id);
-create index if not exists idx_operations_logic_gate on operations(company_id, logic_gate_id);
 create index if not exists idx_kanban_boards_company_position on kanban_boards(company_id, position, board_id);
 create unique index if not exists idx_kanban_boards_logic_gate
   on kanban_boards(company_id, logic_gate_id)
@@ -495,7 +473,7 @@ create table if not exists company_explorer_folders (
   position integer not null default 1000,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
-  constraint company_explorer_folders_kind_chk check (folder_kind in ('node', 'logic_gate')),
+  constraint company_explorer_folders_kind_chk check (folder_kind in ('node', 'logic_gate', 'communications')),
   constraint company_explorer_folders_system_key_nonblank_chk check (system_key is null or btrim(system_key) <> ''),
   constraint company_explorer_folders_name_nonblank_chk check (btrim(name) <> ''),
   constraint company_explorer_folders_parent_not_self_chk check (parent_folder_id is null or parent_folder_id <> folder_id),

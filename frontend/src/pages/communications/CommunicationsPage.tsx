@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CurrentUserResponse } from "../../auth/cognitoAuth";
+import { getActiveCompanyID } from "../../auth/currentCompany";
 import { MangoWordmark } from "../../app/MangoLogo";
 import { preloadLogicGateArenaSurface } from "../../app/preloadDashboardModules";
 import {
   applyEmailMessageToCachedPages,
+  createCommunicationsSharedInbox,
   deleteEmailMessage,
   disconnectCommunications,
   emailMessageMatchesListFilters,
@@ -15,12 +17,14 @@ import {
   invalidateEmailMessageCache,
   listEmailFolders,
   listEmailMessages,
+  listCommunicationsSharedInboxes,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
   primeEmailMessageCache,
   removeEmailMessageFromCache,
   sendEmail,
   updateEmailMessage,
+  type CommunicationsSharedInbox,
   type EmailAddress,
   type EmailFolder,
   type EmailMailbox,
@@ -66,34 +70,50 @@ type CommunicationsStreamEnvelope = {
   message_id?: string;
 };
 
+type CommunicationsViewID =
+  | "primary"
+  | "shared-root"
+  | "logic-gate"
+  | "my-nodes"
+  | "my-logic-gates"
+  | `shared:${string}`;
+
 const MAILBOX_OPTIONS: MailboxOption[] = [
   { value: "primary", label: "Primary Inbox" },
   { value: "sent", label: "Sent mail" },
   { value: "all", label: "All mail" },
 ];
 
+const MESSAGE_BATCH_SIZE = 25;
+
 export function CommunicationsPage({ me, onNavigate, embedded = false }: CommunicationsPageProps) {
+  const companyID = getActiveCompanyID();
   const [status, setStatus] = useState<CommunicationsStatus | null>(null);
   const [folders, setFolders] = useState<EmailFolder[]>([]);
+  const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [mailbox, setMailbox] = useState<EmailMailbox>("primary");
+  const [activeViewID, setActiveViewID] = useState<CommunicationsViewID>("primary");
   const [selectedMessageID, setSelectedMessageID] = useState("");
   const [selectedMessage, setSelectedMessage] = useState<EmailMessage | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const [pageToken, setPageToken] = useState("");
-  const [pageStack, setPageStack] = useState<string[]>([]);
   const [nextPageToken, setNextPageToken] = useState("");
+  const [newSharedInboxName, setNewSharedInboxName] = useState("");
   const [compose, setCompose] = useState<ComposeState>(emptyCompose);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const messageListRef = useRef<HTMLDivElement | null>(null);
   const foldersRequestInFlightRef = useRef(false);
+  const sharedInboxesRequestInFlightRef = useRef(false);
   const messageRequestKeyRef = useRef("");
   const pendingMessageReloadRef = useRef(false);
   const messageRequestSeqRef = useRef(0);
@@ -101,9 +121,12 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const folderReloadTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<EmailMessage[]>([]);
   const mailboxRef = useRef<EmailMailbox>("primary");
-  const pageTokenRef = useRef("");
+  const nextPageTokenRef = useRef("");
   const searchQueryRef = useRef("");
   const unreadOnlyRef = useRef(false);
+  const loadingMessagesRef = useRef(false);
+  const loadingMoreMessagesRef = useRef(false);
+  const messageListFilterKeyRef = useRef("");
 
   const isNarrow = viewportWidth < 980;
 
@@ -120,8 +143,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   }, [mailbox]);
 
   useEffect(() => {
-    pageTokenRef.current = pageToken;
-  }, [pageToken]);
+    nextPageTokenRef.current = nextPageToken;
+  }, [nextPageToken]);
 
   useEffect(() => {
     searchQueryRef.current = searchQuery;
@@ -130,6 +153,14 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   useEffect(() => {
     unreadOnlyRef.current = unreadOnly;
   }, [unreadOnly]);
+
+  useEffect(() => {
+    loadingMessagesRef.current = loadingMessages;
+  }, [loadingMessages]);
+
+  useEffect(() => {
+    loadingMoreMessagesRef.current = loadingMoreMessages;
+  }, [loadingMoreMessages]);
 
   useEffect(() => {
     const onResize = () => setViewportWidth(window.innerWidth);
@@ -159,9 +190,11 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       setStatus(next);
       if (!next.connected) {
         setFolders([]);
+        setSharedInboxes([]);
         setMessages([]);
         setSelectedMessage(null);
         setSelectedMessageID("");
+        setNextPageToken("");
       }
       return next;
     } catch (statusError) {
@@ -202,9 +235,27 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     }
   }, [handleEmailAccessExpired]);
 
+  const loadSharedInboxes = useCallback(async (): Promise<boolean> => {
+    if (sharedInboxesRequestInFlightRef.current) return false;
+    sharedInboxesRequestInFlightRef.current = true;
+    setLoadingSharedInboxes(true);
+    try {
+      const next = await listCommunicationsSharedInboxes(companyID);
+      setSharedInboxes(next);
+      return true;
+    } catch (sharedInboxError) {
+      setError(formatError(sharedInboxError, "Failed to load shared inboxes"));
+      return false;
+    } finally {
+      sharedInboxesRequestInFlightRef.current = false;
+      setLoadingSharedInboxes(false);
+    }
+  }, [companyID]);
+
   const loadMessages = useCallback(async () => {
     if (!status?.connected) return;
-    const requestKey = JSON.stringify([mailbox, pageToken, searchQuery, unreadOnly]);
+    const requestKey = JSON.stringify([mailbox, searchQuery, unreadOnly]);
+    messageListFilterKeyRef.current = requestKey;
     if (messageRequestKeyRef.current === requestKey) {
       pendingMessageReloadRef.current = true;
       return;
@@ -216,8 +267,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     setError("");
     try {
       const page = await listEmailMessages({
-        limit: 25,
-        pageToken,
+        limit: MESSAGE_BATCH_SIZE,
         mailbox,
         q: searchQuery,
         unread: unreadOnly ? true : undefined,
@@ -248,17 +298,61 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         }
       }
     }
-  }, [handleEmailAccessExpired, mailbox, pageToken, searchQuery, status?.connected, unreadOnly]);
+  }, [handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
+
+  const loadMoreMessages = useCallback(async () => {
+    if (!status?.connected || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
+    const pageToken = nextPageTokenRef.current.trim();
+    if (!pageToken) return;
+    const filterKey = JSON.stringify([mailboxRef.current, searchQueryRef.current, unreadOnlyRef.current]);
+    setLoadingMoreMessages(true);
+    setError("");
+    try {
+      const page = await listEmailMessages({
+        limit: MESSAGE_BATCH_SIZE,
+        pageToken,
+        mailbox: mailboxRef.current,
+        q: searchQueryRef.current,
+        unread: unreadOnlyRef.current ? true : undefined,
+      });
+      if (messageListFilterKeyRef.current !== filterKey || nextPageTokenRef.current !== pageToken) return;
+      setMessages((previous) => {
+        const seen = new Set(previous.map((message) => message.id));
+        const next = [...previous];
+        for (const message of page.messages ?? []) {
+          if (!message.id || seen.has(message.id)) continue;
+          seen.add(message.id);
+          next.push(message);
+        }
+        return next;
+      });
+      setNextPageToken(page.next_page_token ?? "");
+    } catch (messageError) {
+      if (isEmailAccessExpiredError(messageError)) {
+        await handleEmailAccessExpired(messageError);
+        return;
+      }
+      setError(formatError(messageError, "Failed to load messages"));
+    } finally {
+      setLoadingMoreMessages(false);
+    }
+  }, [handleEmailAccessExpired, status?.connected]);
 
   useEffect(() => { void loadStatus(); }, [loadStatus]);
   useEffect(() => { if (status?.connected) void loadFolders(); }, [loadFolders, status?.connected]);
+  useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
   useEffect(() => { void loadMessages(); }, [loadMessages]);
+
+  useEffect(() => {
+    const list = messageListRef.current;
+    if (!list || !nextPageToken || loadingMessages || loadingMoreMessages) return;
+    if (list.scrollHeight <= list.clientHeight + 120) void loadMoreMessages();
+  }, [loadMoreMessages, loadingMessages, loadingMoreMessages, messages.length, nextPageToken]);
 
   useEffect(() => {
     if (!status?.connected) return undefined;
     const currentMessageListParams = () => ({
-      limit: 25,
-      pageToken: pageTokenRef.current,
+      limit: MESSAGE_BATCH_SIZE,
       mailbox: mailboxRef.current,
       q: searchQueryRef.current,
       unread: unreadOnlyRef.current ? true : undefined,
@@ -273,10 +367,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     };
     const applyMessageToCurrentView = (message: EmailMessage, prependIfMissing: boolean) => {
       const params = currentMessageListParams();
-      applyEmailMessageToCachedPages(message, { prependIfMissing, maxMessages: 25 });
+      applyEmailMessageToCachedPages(message, { prependIfMissing, maxMessages: MESSAGE_BATCH_SIZE });
       setMessages((previous) => mergeEmailMessageIntoMessageList(previous, message, params, {
-        prependIfMissing: prependIfMissing && !params.pageToken,
-        maxMessages: 25,
+        prependIfMissing,
+        maxMessages: Math.max(MESSAGE_BATCH_SIZE, previous.length + (prependIfMissing ? 1 : 0)),
       }));
       if (selectedMessageIDRef.current === message.id) setSelectedMessage(message);
     };
@@ -309,7 +403,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         const params = currentMessageListParams();
         const visible = messagesRef.current.some((message) => message.id === messageID);
         const selected = selectedMessageIDRef.current === messageID;
-        const shouldFetchCreated = trigger.startsWith("message.created") && !params.pageToken && emailMessageMatchesListFilters({
+        const shouldFetchCreated = trigger.startsWith("message.created") && emailMessageMatchesListFilters({
           id: messageID,
           subject: "",
           unread: true,
@@ -398,16 +492,19 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const submitSearch = (event: React.FormEvent) => {
     event.preventDefault();
     setSearchQuery(searchDraft.trim());
-    setPageToken("");
-    setPageStack([]);
+    setNextPageToken("");
   };
 
   const selectMailbox = (nextMailbox: EmailMailbox) => {
     setMailbox(nextMailbox);
-    setPageToken("");
-    setPageStack([]);
+    setNextPageToken("");
     setSelectedMessageID("");
     setSelectedMessage(null);
+  };
+
+  const selectCommunicationsView = (viewID: CommunicationsViewID, nextMailbox: EmailMailbox = "primary") => {
+    setActiveViewID(viewID);
+    selectMailbox(nextMailbox);
   };
 
   const patchSelectedMessage = async (update: { unread?: boolean; starred?: boolean; folders?: string[] }) => {
@@ -499,6 +596,27 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     }
   };
 
+  const submitSharedInbox = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const name = newSharedInboxName.trim();
+    if (!name) return;
+    const parentFolderID = activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length) : "";
+    setBusy("shared-inbox");
+    setError("");
+    try {
+      const folder = await createCommunicationsSharedInbox({ companyID, name, parentFolderID });
+      setSharedInboxes((previous) => sortSharedInboxes([...previous, folder]));
+      setNewSharedInboxName("");
+      setActiveViewID(`shared:${folder.folder_id}`);
+    } catch (sharedInboxError) {
+      setError(formatError(sharedInboxError, "Failed to create shared inbox"));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const activeViewLabel = getCommunicationsViewLabel(activeViewID, sharedInboxes);
+
   return (
     <div style={embedded ? { ...pageStyle, height: "100%" } : pageStyle}>
       {!embedded && (
@@ -547,10 +665,49 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
           </section>
         </main>
       ) : (
-        <main style={{ ...workspaceStyle, gridTemplateColumns: isNarrow ? "1fr" : "minmax(320px, 430px) minmax(0, 1fr)" }}>
+        <main style={{ ...workspaceStyle, gridTemplateColumns: isNarrow ? "1fr" : "220px minmax(320px, 430px) minmax(0, 1fr)" }}>
+          <aside style={sidebarStyle}>
+            <nav style={sidebarNavStyle} aria-label="Communication inboxes">
+              <CommunicationsNavButton label="Primary Inbox" active={activeViewID === "primary"} onClick={() => selectCommunicationsView("primary", "primary")} />
+              <section style={sidebarSectionStyle}>
+                <button
+                  type="button"
+                  style={navButtonStyle(activeViewID === "shared-root")}
+                  onClick={() => selectCommunicationsView("shared-root", "all")}
+                >
+                  <span style={navLabelStyle}>Shared Inbox</span>
+                  {loadingSharedInboxes && <span style={navMetaStyle}>Loading</span>}
+                </button>
+                <div style={sharedInboxRowsStyle}>
+                  {buildSharedInboxRows(sharedInboxes).map((row) => (
+                    <CommunicationsNavButton
+                      key={row.folder.folder_id}
+                      label={row.folder.name}
+                      depth={row.depth}
+                      active={activeViewID === `shared:${row.folder.folder_id}`}
+                      onClick={() => selectCommunicationsView(`shared:${row.folder.folder_id}`, "all")}
+                    />
+                  ))}
+                </div>
+                <form style={sharedInboxCreateStyle} onSubmit={submitSharedInbox}>
+                  <input
+                    style={sharedInboxInputStyle}
+                    value={newSharedInboxName}
+                    onChange={(event) => setNewSharedInboxName(event.target.value)}
+                    placeholder="New shared inbox"
+                  />
+                  <button style={sharedInboxCreateButtonStyle} disabled={busy === "shared-inbox" || !newSharedInboxName.trim()} aria-label="Create shared inbox">+</button>
+                </form>
+              </section>
+              <CommunicationsNavButton label="Logic Gate Inbox" active={activeViewID === "logic-gate"} onClick={() => selectCommunicationsView("logic-gate", "all")} />
+              <CommunicationsNavButton label="My Nodes" active={activeViewID === "my-nodes"} onClick={() => selectCommunicationsView("my-nodes", "all")} />
+              <CommunicationsNavButton label="My Logic Gates" active={activeViewID === "my-logic-gates"} onClick={() => selectCommunicationsView("my-logic-gates", "all")} />
+            </nav>
+          </aside>
+
           <section style={panelStyle}>
             <div style={mailListToolbarStyle}>
-              <MailboxSelect value={mailbox} options={MAILBOX_OPTIONS} onChange={selectMailbox} />
+              <h2 style={panelTitleStyle}>{activeViewLabel}</h2>
               <button style={primaryButtonStyle} onClick={openNewCompose}>Compose</button>
             </div>
             <div style={accountRowStyle}>
@@ -572,17 +729,23 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                 checked={unreadOnly}
                 onChange={(event) => {
                   setUnreadOnly(event.target.checked);
-                  setPageToken("");
-                  setPageStack([]);
+                  setNextPageToken("");
                 }}
               />
               <span>Unread only</span>
             </label>
             <div style={listHeaderStyle}>
               <span>{mailboxLabel(mailbox)}</span>
-              {loadingMessages && <span>Loading</span>}
+              {(loadingMessages || loadingMoreMessages) && <span>Loading</span>}
             </div>
-            <div style={messageListStyle}>
+            <div
+              ref={messageListRef}
+              style={messageListStyle}
+              onScroll={(event) => {
+                const target = event.currentTarget;
+                if (target.scrollHeight - target.scrollTop - target.clientHeight < 160) void loadMoreMessages();
+              }}
+            >
               {messages.length === 0 && !loadingMessages ? (
                 <div style={emptyStateStyle}>No messages</div>
               ) : messages.map((message) => (
@@ -599,30 +762,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                   <span style={snippetStyle}>{message.snippet || ""}</span>
                 </button>
               ))}
-            </div>
-            <div style={paginationStyle}>
-              <button
-                style={smallButtonStyle}
-                disabled={pageStack.length === 0 || loadingMessages}
-                onClick={() => {
-                  const previous = [...pageStack];
-                  const next = previous.pop() ?? "";
-                  setPageStack(previous);
-                  setPageToken(next);
-                }}
-              >
-                Previous
-              </button>
-              <button
-                style={smallButtonStyle}
-                disabled={!nextPageToken || loadingMessages}
-                onClick={() => {
-                  setPageStack((previous) => [...previous, pageToken]);
-                  setPageToken(nextPageToken);
-                }}
-              >
-                Next
-              </button>
+              {loadingMoreMessages && <div style={loadingMoreStyle}>Loading</div>}
             </div>
           </section>
 
@@ -661,94 +801,51 @@ export const CommunicationsFrameContent: React.FC<{ accent: string; widgetId?: s
   <CommunicationsPage embedded />
 );
 
-function MailboxSelect({ value, options, onChange }: {
-  value: EmailMailbox;
-  options: MailboxOption[];
-  onChange: (value: EmailMailbox) => void;
+function CommunicationsNavButton({ label, active, depth = 0, onClick }: {
+  label: string;
+  active: boolean;
+  depth?: number;
+  onClick: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLSpanElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  useClosePopover(open, rootRef, close);
-  const selected = options.find((option) => option.value === value) ?? options[0];
   return (
-    <span ref={rootRef} style={{ position: "relative", display: "block", minWidth: 0 }}>
-      <button
-        type="button"
-        aria-label="Mailbox"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((nextOpen) => !nextOpen)}
-        style={{ ...selectButtonStyle, borderColor: open ? "rgba(255, 136, 32, 0.92)" : selectButtonStyle.borderColor }}
-      >
-        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected?.label ?? "Mailbox"}</span>
-        <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: "rgb(255, 136, 32)" }}>
-          <DisclosureIcon open={open} />
-        </span>
-      </button>
-      {open && (
-        <div role="listbox" aria-label="Mailbox" className="company-explorer-scroll" style={selectMenuStyle}>
-          {options.map((option) => {
-            const selectedOption = option.value === value;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                role="option"
-                aria-selected={selectedOption}
-                onClick={() => {
-                  onChange(option.value);
-                  setOpen(false);
-                }}
-                style={{ ...selectOptionButtonStyle, background: selectedOption ? "rgba(255, 136, 32, 0.18)" : "#ffffff" }}
-              >
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
-                <span aria-hidden="true" style={{ display: "grid", placeItems: "center" }}>
-                  {selectedOption ? <CheckIcon /> : null}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </span>
+    <button type="button" style={{ ...navButtonStyle(active), paddingLeft: 10 + depth * 14 }} onClick={onClick}>
+      <span style={navLabelStyle}>{label}</span>
+    </button>
   );
 }
 
-function useClosePopover(open: boolean, ref: React.RefObject<HTMLElement>, onClose: () => void): void {
-  useEffect(() => {
-    if (!open) return;
-    const onMouseDown = (event: MouseEvent) => {
-      if (ref.current?.contains(event.target as Node)) return;
-      onClose();
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    const timer = window.setTimeout(() => window.addEventListener("mousedown", onMouseDown, true), 0);
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("mousedown", onMouseDown, true);
-      window.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [open, onClose, ref]);
+function buildSharedInboxRows(folders: CommunicationsSharedInbox[]): Array<{ folder: CommunicationsSharedInbox; depth: number }> {
+  const byParent = new Map<string, CommunicationsSharedInbox[]>();
+  for (const folder of sortSharedInboxes(folders)) {
+    const key = folder.parent_folder_id ?? "";
+    const bucket = byParent.get(key) ?? [];
+    bucket.push(folder);
+    byParent.set(key, bucket);
+  }
+  const rows: Array<{ folder: CommunicationsSharedInbox; depth: number }> = [];
+  const visit = (parentID: string, depth: number, seen: Set<string>) => {
+    for (const folder of byParent.get(parentID) ?? []) {
+      if (seen.has(folder.folder_id)) continue;
+      rows.push({ folder, depth });
+      visit(folder.folder_id, depth + 1, new Set([...seen, folder.folder_id]));
+    }
+  };
+  visit("", 0, new Set());
+  return rows;
 }
 
-function DisclosureIcon({ open, color = "currentColor" }: { open: boolean; color?: string }) {
-  return (
-    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", transform: open ? "rotate(180deg)" : "none", transition: "transform 120ms ease" }}>
-      <path d="M4 6.2 8 10.2 12 6.2" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+function sortSharedInboxes(folders: CommunicationsSharedInbox[]): CommunicationsSharedInbox[] {
+  return [...folders].sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp) || a.folder_id.localeCompare(b.folder_id));
 }
 
-function CheckIcon({ color = "rgb(255, 136, 32)" }: { color?: string }) {
-  return (
-    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
-      <path d="M3.2 8.2 6.4 11.4 12.9 4.6" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+function getCommunicationsViewLabel(viewID: CommunicationsViewID, sharedInboxes: CommunicationsSharedInbox[]): string {
+  if (viewID === "primary") return "Primary Inbox";
+  if (viewID === "shared-root") return "Shared Inbox";
+  if (viewID === "logic-gate") return "Logic Gate Inbox";
+  if (viewID === "my-nodes") return "My Nodes";
+  if (viewID === "my-logic-gates") return "My Logic Gates";
+  const folderID = viewID.startsWith("shared:") ? viewID.slice("shared:".length) : "";
+  return sharedInboxes.find((folder) => folder.folder_id === folderID)?.name || "Shared Inbox";
 }
 
 function ComposePanel({ compose, busy, onChange, onCancel, onSubmit }: {
@@ -920,6 +1017,104 @@ const workspaceStyle: React.CSSProperties = {
   overflow: "auto",
 };
 
+const sidebarStyle: React.CSSProperties = {
+  minHeight: 0,
+  minWidth: 0,
+  display: "grid",
+  alignContent: "start",
+  gap: 8,
+  padding: 8,
+  border: "1px solid rgba(255, 136, 32, 0.18)",
+  background: "#ffffff",
+  borderRadius: 8,
+  overflow: "hidden",
+};
+
+const sidebarNavStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  alignContent: "start",
+  gap: 5,
+  overflow: "auto",
+};
+
+const sidebarSectionStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 5,
+  minWidth: 0,
+};
+
+const sharedInboxRowsStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 4,
+  minWidth: 0,
+};
+
+function navButtonStyle(active: boolean): React.CSSProperties {
+  return {
+    width: "100%",
+    minHeight: 30,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: 8,
+    border: `1px solid ${active ? "rgba(255, 136, 32, 0.72)" : "rgba(255, 136, 32, 0.16)"}`,
+    borderRadius: 6,
+    background: active ? "#fff2e0" : "#ffffff",
+    color: "#24120a",
+    cursor: "pointer",
+    font: "inherit",
+    fontSize: 12,
+    fontWeight: active ? 700 : 500,
+    padding: "0 10px",
+    textAlign: "left",
+    minWidth: 0,
+  };
+}
+
+const navLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const navMetaStyle: React.CSSProperties = {
+  fontSize: 10,
+  color: "rgba(36, 18, 10, 0.54)",
+};
+
+const sharedInboxCreateStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 30px",
+  gap: 5,
+};
+
+const sharedInboxInputStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  height: 30,
+  border: "1px solid rgba(255, 136, 32, 0.22)",
+  borderRadius: 6,
+  padding: "0 8px",
+  font: "inherit",
+  fontSize: 11,
+};
+
+const sharedInboxCreateButtonStyle: React.CSSProperties = {
+  width: 30,
+  height: 30,
+  border: "1px solid rgba(255, 136, 32, 0.42)",
+  borderRadius: 6,
+  background: "#ffffff",
+  color: "#24120a",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 16,
+  fontWeight: 700,
+  lineHeight: 1,
+};
+
 const panelStyle: React.CSSProperties = {
   minHeight: 0,
   display: "grid",
@@ -1048,60 +1243,6 @@ const accountRowStyle: React.CSSProperties = {
   alignItems: "center",
 };
 
-const selectButtonStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 34,
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 18px",
-  alignItems: "center",
-  gap: 8,
-  border: "1px solid rgba(255, 136, 32, 0.44)",
-  borderRadius: 6,
-  background: "#ffffff",
-  color: "#24120a",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 12,
-  fontWeight: 500,
-  padding: "0 10px",
-  textAlign: "left",
-};
-
-const selectMenuStyle: React.CSSProperties = {
-  position: "absolute",
-  zIndex: 40,
-  top: "calc(100% + 6px)",
-  left: 0,
-  width: "min(260px, 78vw)",
-  maxHeight: 220,
-  overflowY: "auto",
-  overflowX: "hidden",
-  padding: 5,
-  border: "1px solid rgba(255, 136, 32, 0.58)",
-  borderRadius: 8,
-  background: "#ffffff",
-  color: "#24120a",
-  boxShadow: "0 12px 28px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(255, 136, 32, 0.12) inset",
-};
-
-const selectOptionButtonStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 32,
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 18px",
-  alignItems: "center",
-  gap: 8,
-  border: "none",
-  borderRadius: 6,
-  color: "#24120a",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 12,
-  fontWeight: 500,
-  padding: "7px 8px",
-  textAlign: "left",
-};
-
 const searchRowStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) auto",
@@ -1129,6 +1270,14 @@ const messageListStyle: React.CSSProperties = {
   display: "grid",
   alignContent: "start",
   gap: 6,
+};
+
+const loadingMoreStyle: React.CSSProperties = {
+  minHeight: 28,
+  display: "grid",
+  placeItems: "center",
+  color: "rgba(36, 18, 10, 0.56)",
+  fontSize: 11,
 };
 
 function messageRowStyle(active: boolean, unread: boolean): React.CSSProperties {
@@ -1165,12 +1314,6 @@ const snippetStyle: React.CSSProperties = {
   color: "rgba(36, 18, 10, 0.62)",
   fontSize: 11,
   lineHeight: 1.35,
-};
-
-const paginationStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 6,
 };
 
 const detailStyle: React.CSSProperties = {

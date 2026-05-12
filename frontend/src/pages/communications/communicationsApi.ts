@@ -62,6 +62,17 @@ export type ListMessagesParams = {
 
 export type EmailMailbox = "primary" | "sent" | "all";
 
+export type CommunicationsSharedInbox = {
+  company_id: string;
+  folder_id: string;
+  parent_folder_id?: string;
+  folder_kind: "communications";
+  name: string;
+  position: number;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
 export type MessagePage = {
   messages: EmailMessage[];
   next_page_token?: string;
@@ -171,6 +182,32 @@ export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
   messagePageCache.clear();
   foldersCache = null;
   return payload.message;
+}
+
+export async function listCommunicationsSharedInboxes(companyID: string): Promise<CommunicationsSharedInbox[]> {
+  const params = new URLSearchParams({
+    company_id: companyID,
+    folder_kind: "communications",
+  });
+  const payload = await apiFetchJSON<{ folders?: CommunicationsSharedInbox[] }>(`/v1/company-explorer/folders?${params.toString()}`);
+  return cloneSharedInboxes(payload.folders ?? []);
+}
+
+export async function createCommunicationsSharedInbox(input: {
+  companyID: string;
+  name: string;
+  parentFolderID?: string;
+}): Promise<CommunicationsSharedInbox> {
+  const folder = await apiFetchJSON<CommunicationsSharedInbox>("/v1/company-explorer/folders", {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      folder_kind: "communications",
+      parent_folder_id: input.parentFolderID?.trim() || undefined,
+      name: input.name.trim(),
+    }),
+  });
+  return cloneSharedInbox(folder);
 }
 
 export function invalidateCommunicationsCache(scope?: { status?: boolean; folders?: boolean; messagePages?: boolean; messages?: boolean }): void {
@@ -329,6 +366,14 @@ function cloneMessage(message: EmailMessage): EmailMessage {
 
 function cloneEmailAddresses(addresses: EmailAddress[] | undefined): EmailAddress[] | undefined {
   return addresses ? addresses.map((address) => ({ ...address })) : undefined;
+}
+
+function cloneSharedInboxes(inboxes: CommunicationsSharedInbox[]): CommunicationsSharedInbox[] {
+  return inboxes.map(cloneSharedInbox);
+}
+
+function cloneSharedInbox(inbox: CommunicationsSharedInbox): CommunicationsSharedInbox {
+  return { ...inbox };
 }
 
 function listMessageParamsFromCacheKey(path: string): ListMessagesParams {

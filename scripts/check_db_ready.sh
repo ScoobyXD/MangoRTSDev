@@ -15,8 +15,7 @@ select to_regclass('public.nodes') as nodes,
        to_regclass('public.node_information') as node_information,
        to_regclass('public.node_projection_table') as node_projection_table,
        to_regclass('public.logic_gates') as logic_gates,
-       to_regclass('public.logic_gate_projection_table') as logic_gate_projection_table,
-       to_regclass('public.operations') as operations;
+       to_regclass('public.logic_gate_projection_table') as logic_gate_projection_table;
 
 select conname
 from pg_constraint
@@ -29,8 +28,7 @@ begin
      or to_regclass('public.node_information') is null
      or to_regclass('public.node_projection_table') is null
      or to_regclass('public.logic_gates') is null
-     or to_regclass('public.logic_gate_projection_table') is null
-     or to_regclass('public.operations') is null then
+     or to_regclass('public.logic_gate_projection_table') is null then
     raise exception 'canonical schema tables are missing; run apply_canonical_schema first';
   end if;
   if not exists (select 1 from pg_constraint where conname = 'node_relationships_position_pair_chk') then

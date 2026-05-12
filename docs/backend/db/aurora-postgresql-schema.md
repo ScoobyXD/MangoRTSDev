@@ -47,13 +47,6 @@ begin
   end if;
 end $$;
 
-do $$
-begin
-  if not exists (select 1 from pg_type where typname = 'operation_status') then
-    create type operation_status as enum ('In Progress', 'Success', 'Failed');
-  end if;
-end $$;
-
 -- ==========================================================
 -- NODE SCHEMA
 -- ==========================================================
@@ -202,23 +195,6 @@ create index if not exists idx_logic_gate_map_positions_company_updated
   on logic_gate_map_positions(company_id, updated_timestamp desc);
 
 -- ==========================================================
--- OPERATION
--- ==========================================================
-
-create table if not exists operations (
-  company_id uuid not null,
-  operation_id uuid not null,
-  node_id uuid,
-  logic_gate_id uuid,
-  status operation_status not null,
-  start_timestamp timestamptz not null,
-  end_timestamp timestamptz,
-  primary key (company_id, operation_id),
-  foreign key (company_id, node_id) references nodes (company_id, node_id),
-  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
-);
-
--- ==========================================================
 -- COMPANY EXPLORER FOLDERS
 -- ==========================================================
 
@@ -230,7 +206,7 @@ create table if not exists company_explorer_folders (
   name text not null,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
-  constraint company_explorer_folders_kind_chk check (folder_kind in ('node', 'logic_gate')),
+  constraint company_explorer_folders_kind_chk check (folder_kind in ('node', 'logic_gate', 'communications')),
   constraint company_explorer_folders_name_nonblank_chk check (btrim(name) <> ''),
   constraint company_explorer_folders_parent_not_self_chk check (parent_folder_id is null or parent_folder_id <> folder_id),
   primary key (company_id, folder_id),
@@ -384,16 +360,6 @@ The previous grouped/filter query indexes were removed with the query surface.
 - Unique index: `idx_logic_gate_projection_table_one_text_box` keeps one current `Text box` projection per logic gate because the current Editor has one document surface per logic gate.
 
 `logic_gate_information` is the durable history table. `logic_gate_projection_table` is the hot read model for current values used by UI clients and headless agents.
-
-### Operation
-
-- Company ID (UUIDv7) (FK) -> `operations.company_id`
-- Operation ID (UUIDv7) -> `operations.operation_id`
-- Node ID (UUIDv7) (FK) -> `operations.node_id`
-- Logic Gate ID (UUIDv7) (FK) -> `operations.logic_gate_id`
-- Status (Enum: In Progress, Success, Failed) -> `operations.status`
-- Start Timestamp (TIMESTAMPTZ) -> `operations.start_timestamp`
-- End Timestamp (TIMESTAMPTZ) -> `operations.end_timestamp`
 
 ### Kanban Columns
 

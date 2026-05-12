@@ -40,11 +40,17 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships")
 		return
 	}
-	folders, err := s.repo.ListCompanyExplorerFolders(companyID, "")
+	nodeFolders, err := s.repo.ListCompanyExplorerFolders(companyID, "node")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 		return
 	}
+	logicGateFolders, err := s.repo.ListCompanyExplorerFolders(companyID, "logic_gate")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
+		return
+	}
+	folders := append(nodeFolders, logicGateFolders...)
 	folderItems, err := s.repo.ListCompanyExplorerFolderItems(companyID, "", "")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")

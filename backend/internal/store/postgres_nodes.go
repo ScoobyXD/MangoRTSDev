@@ -345,17 +345,6 @@ func (r *PostgresRepo) DeleteNode(companyID, nodeID string) error {
 		return err
 	}
 
-	// Operations are audit records. Keep the row, but clear the direct node pointer
-	// before deleting the node so a historical operation never blocks item cleanup.
-	if _, err := tx.ExecContext(ctx,
-		`update operations
-		 set node_id=null
-		 where company_id=$1 and node_id=$2`,
-		companyID, nodeID,
-	); err != nil {
-		return err
-	}
-
 	if _, err := tx.ExecContext(ctx,
 		`delete from node_information
 		 where company_id=$1 and node_id=$2`,

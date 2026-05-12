@@ -662,9 +662,9 @@ func (s *Server) handleCompanyExplorerFolderItemsBatch(w http.ResponseWriter, r 
 }
 
 func isValidCompanyExplorerFolderKind(value string) bool {
-	return value == "node" || value == "logic_gate"
+	return value == "node" || value == "logic_gate" || value == "communications"
 }
 
 func isValidCompanyExplorerItemType(value string) bool {
-	return isValidCompanyExplorerFolderKind(value) || value == "kanban"
+	return value == "node" || value == "logic_gate" || value == "kanban"
 }

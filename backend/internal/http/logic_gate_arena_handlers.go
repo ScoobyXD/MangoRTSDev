@@ -38,14 +38,29 @@ func (s *Server) handleLogicGateArena(w http.ResponseWriter, r *http.Request) {
 	expectedBoardID := store.LogicGateKanbanBoardID(logicGateID)
 	board, ok := selectLogicGateArenaBoard(boards, expectedBoardID)
 	if !ok {
-		writeError(w, http.StatusConflict, "logic_gate_arena_board_missing")
-		return
+		board, err = s.repo.EnsureLogicGateKanbanBoard(companyID, logicGateID, logicGate.Header)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
+			return
+		}
 	}
 
 	columns, err := s.repo.ListKanbanColumns(companyID, board.BoardID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
 		return
+	}
+	if logicGateArenaDefaultColumnsMissing(columns) {
+		board, err = s.repo.EnsureLogicGateKanbanBoard(companyID, logicGateID, logicGate.Header)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
+			return
+		}
+		columns, err = s.repo.ListKanbanColumns(companyID, board.BoardID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
+			return
+		}
 	}
 	cards, err := s.repo.ListKanbanCards(companyID, board.BoardID, store.KanbanCardQuery{Limit: store.KanbanMaxCardsLimit})
 	if err != nil {
@@ -69,4 +84,24 @@ func selectLogicGateArenaBoard(boards []domain.KanbanBoard, expectedBoardID stri
 		}
 	}
 	return domain.KanbanBoard{}, false
+}
+
+func logicGateArenaDefaultColumnsMissing(columns []domain.KanbanColumn) bool {
+	required := map[string]bool{
+		"pending":     false,
+		"in progress": false,
+		"done":        false,
+	}
+	for _, column := range columns {
+		title := strings.ToLower(strings.TrimSpace(column.Title))
+		if _, ok := required[title]; ok {
+			required[title] = true
+		}
+	}
+	for _, found := range required {
+		if !found {
+			return true
+		}
+	}
+	return false
 }

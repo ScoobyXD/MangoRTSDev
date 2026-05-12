@@ -106,6 +106,42 @@ limit $4`, companyID, query.AfterPosition, query.LogicGateID, query.Limit)
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) EnsureLogicGateKanbanBoard(companyID, logicGateID, title string) (domain.KanbanBoard, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.KanbanBoard{}, err
+	}
+	defer tx.Rollback()
+
+	var exists bool
+	if err := tx.QueryRowContext(ctx,
+		`select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`,
+		companyID, logicGateID,
+	).Scan(&exists); err != nil {
+		return domain.KanbanBoard{}, err
+	}
+	if !exists {
+		return domain.KanbanBoard{}, ErrNotFound
+	}
+	if err := ensureLogicGateKanbanBoardSQL(ctx, tx, companyID, logicGateID, title); err != nil {
+		return domain.KanbanBoard{}, err
+	}
+	board, err := scanKanbanBoard(tx.QueryRowContext(ctx, `
+select company_id, board_id, logic_gate_id::text, title, position, created_timestamp, updated_timestamp
+from kanban_boards
+where company_id=$1 and board_id=$2`,
+		companyID, LogicGateKanbanBoardID(logicGateID),
+	))
+	if err != nil {
+		return domain.KanbanBoard{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.KanbanBoard{}, err
+	}
+	return board, nil
+}
+
 func (r *PostgresRepo) CreateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error) {
 	ctx := context.Background()
 	if boardID == "" {

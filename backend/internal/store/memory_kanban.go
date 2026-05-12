@@ -192,6 +192,15 @@ func (r *MemoryRepo) ensureLogicGateKanbanBoardLocked(companyID, logicGateID, ti
 	return board
 }
 
+func (r *MemoryRepo) EnsureLogicGateKanbanBoard(companyID, logicGateID, title string) (domain.KanbanBoard, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
+		return domain.KanbanBoard{}, ErrNotFound
+	}
+	return r.ensureLogicGateKanbanBoardLocked(companyID, logicGateID, title), nil
+}
+
 func (r *MemoryRepo) ListKanbanBoards(companyID string, query KanbanBoardQuery) ([]domain.KanbanBoard, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
