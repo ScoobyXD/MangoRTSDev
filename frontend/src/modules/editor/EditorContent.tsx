@@ -44,6 +44,7 @@ import {
 } from "./useEditorPreferences";
 import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHandlers";
 import { useEditorDocumentPersistence } from "./useEditorDocumentPersistence";
+import { createEditorDocumentUndoHistory, recordEditorDocumentUndoChange, resetEditorDocumentUndoHistory, snapshotEditorDocumentHTML } from "./editorUndoHistory";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import {
@@ -74,6 +75,27 @@ function getSelectionRangeInsideElement(element: HTMLElement): Range | null {
   const range = selection.getRangeAt(0);
   const container = range.commonAncestorContainer;
   return container === element || element.contains(container) ? range : null;
+}
+
+function getSelectionOffsetsInsideElement(element: HTMLElement): { start: number; end: number } | null {
+  const range = getSelectionRangeInsideElement(element);
+  if (!range) return null;
+  const startRange = range.cloneRange();
+  startRange.selectNodeContents(element);
+  startRange.setEnd(range.startContainer, range.startOffset);
+  const endRange = range.cloneRange();
+  endRange.selectNodeContents(element);
+  endRange.setEnd(range.endContainer, range.endOffset);
+  return {
+    start: startRange.toString().length,
+    end: endRange.toString().length,
+  };
+}
+
+function snapshotEditorElementForUndo(element: HTMLElement) {
+  const offsets = getSelectionOffsetsInsideElement(element);
+  const fallbackOffset = readEditorDocumentText(element).length;
+  return snapshotEditorDocumentHTML(serializeEditorDocumentHTML(element), offsets?.start ?? fallbackOffset, offsets?.end ?? fallbackOffset);
 }
 
 function readRangeFontSize(range: Range, fallbackFontSize: number): number {
@@ -196,6 +218,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const activeTabRef = useRef<EditorTabID>("editor");
   const restoringScrollRef = useRef(false);
   const scrollMemoryRef = useRef(createEditorScrollMemory());
+  const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
   const indentGuideFrameRef = useRef<number | null>(null);
   const documentDraftRef = useRef("");
   const persistedDocumentRef = useRef("");
@@ -440,6 +463,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     try {
       const nextHTML = deserializeEditorDocumentHTML(payload.documentHTML);
       element.innerHTML = nextHTML;
+      resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
       documentDraftRef.current = payload.documentHTML;
       if (payload.informationID && !documentInformationIDRef.current) {
         documentInformationIDRef.current = payload.informationID;
@@ -492,6 +516,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       return;
     }
 
+    const undoBefore = snapshotEditorElementForUndo(element);
     const fragment = range.extractContents();
     const stripFontSizes = (node: Node) => {
       if (node instanceof HTMLElement && node.tagName.toLowerCase() === "span") node.style.fontSize = "";
@@ -504,6 +529,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     range.insertNode(span);
     selectElementContents(span);
     pendingEditorFontSizeRef.current = null;
+    recordEditorDocumentUndoChange(documentUndoHistoryRef.current, undoBefore, snapshotEditorElementForUndo(element), "format");
     scheduleCollaborativeDocumentSave(serializeEditorDocumentHTML(element));
     scheduleIndentGuideUpdate(readEditorDocumentText(element));
   }, [scheduleCollaborativeDocumentSave, scheduleIndentGuideUpdate]);
@@ -541,6 +567,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [flushPendingDocumentSave, linkedEntityKind, linkedNodeID, rememberCurrentDocumentScroll]);
 
   const applyLoadedDocument = useCallback((entityKind: LinkedEntityKind, entityID: string, informationID: string, text: string) => {
+    resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
     documentDraftRef.current = text;
     persistedDocumentRef.current = text;
     documentInformationIDRef.current = informationID;
@@ -663,6 +690,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     currentDocumentTargetKeyRef.current = "";
     persistedDocumentTargetKeyRef.current = "";
     pendingSaveRef.current = null;
+    resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
     setDocumentInformationID("");
     pendingEditorFontSizeRef.current = null;
     setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
@@ -1091,6 +1119,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       currentDocumentTargetKeyRef.current = "";
       persistedDocumentTargetKeyRef.current = "";
       pendingSaveRef.current = null;
+      resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
       setDocumentInformationID("");
       pendingEditorFontSizeRef.current = null;
       setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
@@ -1197,6 +1226,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     restoringScrollRef,
     currentDocumentTargetKeyRef,
     scrollMemoryRef,
+    documentUndoHistoryRef,
     pendingEditorFontSizeRef,
     outlineStyle,
     setDocumentScrollTop,

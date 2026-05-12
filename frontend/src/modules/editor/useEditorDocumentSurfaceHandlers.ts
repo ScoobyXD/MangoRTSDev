@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import type React from "react";
 import type { EditorDocumentSurfaceProps } from "./EditorDocumentSurface";
 import type { EditorScrollMemory } from "./editorScroll";
@@ -12,11 +12,21 @@ import {
 } from "./plainTextEditing";
 import {
   EDITOR_TERMINAL_BREAK_ATTRIBUTE,
+  deserializeEditorDocumentHTML,
   getEditorLinkHrefForText,
   linkifyEditorPlainTextToHTML,
   readEditorDocumentText,
   serializeEditorDocumentHTML,
 } from "./richTextEditing";
+import {
+  recordEditorDocumentUndoChange,
+  redoEditorDocument,
+  snapshotEditorDocumentHTML,
+  undoEditorDocument,
+  type EditorDocumentChangeKind,
+  type EditorDocumentUndoHistory,
+  type EditorDocumentUndoSnapshot,
+} from "./editorUndoHistory";
 import {
   EDITOR_DOCUMENT_MAX_FONT_SIZE_PX,
   EDITOR_DOCUMENT_MIN_FONT_SIZE_PX,
@@ -74,6 +84,7 @@ type UseEditorDocumentSurfaceHandlersOptions = {
   restoringScrollRef: React.MutableRefObject<boolean>;
   currentDocumentTargetKeyRef: React.MutableRefObject<string>;
   scrollMemoryRef: React.MutableRefObject<EditorScrollMemory>;
+  documentUndoHistoryRef: React.MutableRefObject<EditorDocumentUndoHistory>;
   pendingEditorFontSizeRef: React.MutableRefObject<number | null>;
   outlineStyle: EditorOutlineStyleID;
   setDocumentScrollTop: React.Dispatch<React.SetStateAction<number>>;
@@ -268,18 +279,22 @@ async function insertEditorImageFile(
   root: HTMLElement,
   file: File,
   savedRange: Range | null,
+  undoBefore: EditorDocumentUndoSnapshot | null,
+  documentUndoHistory: EditorDocumentUndoHistory,
   scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
   scheduleIndentGuideUpdate: (text: string) => void,
 ) {
   const maxDisplayWidth = Math.max(120, Math.min(720, root.clientWidth - 56));
   const imageData = await createEditorImageDataFromFile(file, maxDisplayWidth, getEditorImageStorageBudget(root));
-  insertPreparedEditorImage(root, imageData, savedRange, scheduleDocumentSave, scheduleIndentGuideUpdate);
+  insertPreparedEditorImage(root, imageData, savedRange, undoBefore, documentUndoHistory, scheduleDocumentSave, scheduleIndentGuideUpdate);
 }
 
 async function insertEditorClipboardImageData(
   root: HTMLElement,
   clipboardData: EditorImageClipboardData,
   savedRange: Range | null,
+  undoBefore: EditorDocumentUndoSnapshot | null,
+  documentUndoHistory: EditorDocumentUndoHistory,
   scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
   scheduleIndentGuideUpdate: (text: string) => void,
 ) {
@@ -292,13 +307,15 @@ async function insertEditorClipboardImageData(
     marginTop: clipboardData.marginTop,
     floatSide: clipboardData.floatSide,
   });
-  insertPreparedEditorImage(root, imageData, savedRange, scheduleDocumentSave, scheduleIndentGuideUpdate);
+  insertPreparedEditorImage(root, imageData, savedRange, undoBefore, documentUndoHistory, scheduleDocumentSave, scheduleIndentGuideUpdate);
 }
 
 function insertPreparedEditorImage(
   root: HTMLElement,
   imageData: EditorImageData,
   savedRange: Range | null,
+  undoBefore: EditorDocumentUndoSnapshot | null,
+  documentUndoHistory: EditorDocumentUndoHistory,
   scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
   scheduleIndentGuideUpdate: (text: string) => void,
 ) {
@@ -319,6 +336,7 @@ function insertPreparedEditorImage(
     selection?.addRange(range);
   }
   selectEditorImageFrame(root, frame);
+  recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, "image");
   commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
 }
 
@@ -472,6 +490,67 @@ function commitEditorDocument(root: HTMLElement, scheduleDocumentSave: (nextText
   const plainText = readEditorDocumentText(root);
   scheduleDocumentSave(serializeEditorDocumentHTML(root), immediate);
   scheduleIndentGuideUpdate(plainText);
+}
+
+function snapshotEditorDocumentRoot(root: HTMLElement): EditorDocumentUndoSnapshot {
+  const offsets = getEditorSelectionOffsets(root);
+  const fallbackOffset = readEditorDocumentText(root).length;
+  return snapshotEditorDocumentHTML(
+    serializeEditorDocumentHTML(root),
+    offsets?.start ?? fallbackOffset,
+    offsets?.end ?? fallbackOffset,
+  );
+}
+
+function recordEditorDocumentMutation(
+  history: EditorDocumentUndoHistory,
+  root: HTMLElement,
+  before: EditorDocumentUndoSnapshot | null,
+  kind: EditorDocumentChangeKind,
+) {
+  if (!before) return;
+  recordEditorDocumentUndoChange(history, before, snapshotEditorDocumentRoot(root), kind);
+}
+
+function restoreEditorDocumentUndoSnapshot(
+  root: HTMLElement,
+  snapshot: EditorDocumentUndoSnapshot,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+  onSelectionFontSizeChange: (fontSize: number) => void,
+) {
+  root.innerHTML = deserializeEditorDocumentHTML(snapshot.html);
+  setEditorSelectionByOffsets(root, snapshot.selectionStart, snapshot.selectionEnd);
+  clearEditorImageSelection(root);
+  commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
+  syncSelectionFontSize(root, onSelectionFontSizeChange);
+}
+
+function applyEditorUndoCommand(
+  root: HTMLElement,
+  history: EditorDocumentUndoHistory,
+  direction: "undo" | "redo",
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+  onSelectionFontSizeChange: (fontSize: number) => void,
+): boolean {
+  const currentHTML = serializeEditorDocumentHTML(root);
+  const snapshot = direction === "undo"
+    ? undoEditorDocument(history, currentHTML)
+    : redoEditorDocument(history, currentHTML);
+  if (!snapshot) return false;
+  restoreEditorDocumentUndoSnapshot(root, snapshot, scheduleDocumentSave, scheduleIndentGuideUpdate, onSelectionFontSizeChange);
+  return true;
+}
+
+function isEditorUndoShortcut(event: React.KeyboardEvent<HTMLDivElement>): boolean {
+  return (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "z" && !event.shiftKey;
+}
+
+function isEditorRedoShortcut(event: React.KeyboardEvent<HTMLDivElement>): boolean {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return false;
+  const key = event.key.toLowerCase();
+  return (key === "z" && event.shiftKey) || key === "y";
 }
 
 function copyEditorImageToSystemClipboard(data: EditorImageData, html: string) {
@@ -630,6 +709,7 @@ function startEditorImagePointerInteraction(
   root: HTMLElement,
   frame: HTMLSpanElement,
   pointerEvent: React.PointerEvent<HTMLDivElement>,
+  documentUndoHistory: EditorDocumentUndoHistory,
   scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
   scheduleIndentGuideUpdate: (text: string) => void,
 ) {
@@ -644,7 +724,7 @@ function startEditorImagePointerInteraction(
   );
   const visualLeft = clampEditorImageOffset(
     frameRect.left - rootMetrics.left,
-    getEditorImageHorizontalLimit(rootMetrics.width, frameRect.width),
+    getEditorImageHorizontalLimit(getEditorImageMaxFrameWidth(rootMetrics.width), frameRect.width),
   );
   const start = {
     x: pointerEvent.clientX,
@@ -659,6 +739,7 @@ function startEditorImagePointerInteraction(
   const aspectRatio = readEditorImageAspectRatio(frame, start.width / Math.max(1, start.height));
   const previousCursor = ownerDocument.body.style.cursor;
   ownerDocument.body.style.cursor = getEditorImageCursorForInteraction(interaction);
+  const undoBefore = snapshotEditorDocumentRoot(root);
   let latestDragVisualTop = start.visualTop;
   let shouldReanchorAfterDrag = false;
 
@@ -674,16 +755,43 @@ function startEditorImagePointerInteraction(
       const maxFrameWidth = getEditorImageMaxFrameWidth(nextMetrics.width);
       const fixedRight = Math.min(maxFrameWidth, start.visualLeft + start.width);
       const fixedBottom = start.marginTop + start.height;
-      const horizontalWeight = interaction.horizontal ? Math.abs(dx) / Math.max(1, start.width) : 0;
-      const verticalWeight = interaction.vertical ? Math.abs(dy) / Math.max(1, start.height) : 0;
-      const resizeFromWidth = interaction.horizontal !== 0 && (interaction.vertical === 0 || horizontalWeight >= verticalWeight);
 
       let nextVisualLeft = start.visualLeft;
       let nextWidth = start.width;
       let nextMarginTop = start.marginTop;
       let nextHeight = start.height;
 
-      if (resizeFromWidth) {
+      if (interaction.horizontal && interaction.vertical) {
+        const horizontalWeight = Math.abs(dx) / Math.max(1, start.width);
+        const verticalWeight = Math.abs(dy) / Math.max(1, start.height);
+        if (horizontalWeight >= verticalWeight) {
+          if (interaction.horizontal < 0) {
+            const maxLeft = Math.max(0, fixedRight - minWidth);
+            nextVisualLeft = Math.max(0, Math.min(maxLeft, start.visualLeft + dx));
+            nextWidth = fixedRight - nextVisualLeft;
+          } else {
+            const maxWidth = Math.max(minWidth, maxFrameWidth - start.visualLeft);
+            nextWidth = clampEditorImageSize(start.width + dx, minWidth, maxWidth);
+          }
+          nextHeight = clampEditorImageSize(nextWidth / aspectRatio, minHeight, maxHeight);
+        } else {
+          if (interaction.vertical < 0) {
+            const maxTop = fixedBottom - minHeight;
+            nextMarginTop = clampEditorImageVerticalOffset(start.marginTop + dy, -5_000, maxTop);
+            nextHeight = fixedBottom - nextMarginTop;
+          } else {
+            nextHeight = clampEditorImageSize(start.height + dy, minHeight, maxHeight);
+          }
+          nextWidth = clampEditorImageSize(nextHeight * aspectRatio, minWidth, maxFrameWidth);
+        }
+
+        const maxWidthForAnchor = interaction.horizontal < 0 ? Math.max(minWidth, fixedRight) : Math.max(minWidth, maxFrameWidth - start.visualLeft);
+        const sizeScale = Math.min(1, maxWidthForAnchor / Math.max(1, nextWidth), maxHeight / Math.max(1, nextHeight));
+        nextWidth = clampEditorImageSize(nextWidth * sizeScale, minWidth, maxWidthForAnchor);
+        nextHeight = clampEditorImageSize(nextWidth / aspectRatio, minHeight, maxHeight);
+        if (interaction.horizontal < 0) nextVisualLeft = fixedRight - nextWidth;
+        if (interaction.vertical < 0) nextMarginTop = fixedBottom - nextHeight;
+      } else if (interaction.horizontal) {
         if (interaction.horizontal < 0) {
           const maxLeft = Math.max(0, fixedRight - minWidth);
           nextVisualLeft = Math.max(0, Math.min(maxLeft, start.visualLeft + dx));
@@ -692,8 +800,7 @@ function startEditorImagePointerInteraction(
           const maxWidth = Math.max(minWidth, maxFrameWidth - start.visualLeft);
           nextWidth = clampEditorImageSize(start.width + dx, minWidth, maxWidth);
         }
-        nextHeight = clampEditorImageSize(nextWidth / aspectRatio, minHeight, maxHeight);
-      } else {
+      } else if (interaction.vertical) {
         if (interaction.vertical < 0) {
           const maxTop = fixedBottom - minHeight;
           nextMarginTop = clampEditorImageVerticalOffset(start.marginTop + dy, -5_000, maxTop);
@@ -701,21 +808,13 @@ function startEditorImagePointerInteraction(
         } else {
           nextHeight = clampEditorImageSize(start.height + dy, minHeight, maxHeight);
         }
-        nextWidth = clampEditorImageSize(nextHeight * aspectRatio, minWidth, maxFrameWidth);
       }
-
-      const maxWidthForAnchor = interaction.horizontal < 0 ? Math.max(minWidth, fixedRight) : Math.max(minWidth, maxFrameWidth - start.visualLeft);
-      const sizeScale = Math.min(1, maxWidthForAnchor / Math.max(1, nextWidth), maxHeight / Math.max(1, nextHeight));
-      nextWidth = clampEditorImageSize(nextWidth * sizeScale, minWidth, maxWidthForAnchor);
-      nextHeight = clampEditorImageSize(nextWidth / aspectRatio, minHeight, maxHeight);
-      if (interaction.horizontal < 0) nextVisualLeft = fixedRight - nextWidth;
-      if (interaction.vertical < 0) nextMarginTop = fixedBottom - nextHeight;
 
       nextVisualLeft = clampEditorImageOffset(
         nextVisualLeft,
-        getEditorImageHorizontalLimit(nextMetrics.width, nextWidth),
+        getEditorImageHorizontalLimit(maxFrameWidth, nextWidth),
       );
-      const inlineOffset = getEditorImageInlineOffsetForVisualLeft(nextMetrics.width, nextWidth, start.floatSide, nextVisualLeft);
+      const inlineOffset = getEditorImageInlineOffsetForVisualLeft(maxFrameWidth, nextWidth, start.floatSide, nextVisualLeft);
       applyEditorImageFloatLayout(frame, start.floatSide, inlineOffset);
       frame.style.width = `${nextWidth}px`;
       frame.style.height = `${nextHeight}px`;
@@ -724,14 +823,18 @@ function startEditorImagePointerInteraction(
       return;
     }
 
-    const maxLeft = getEditorImageHorizontalLimit(nextMetrics.width, start.width);
+    const maxFrameWidth = getEditorImageMaxFrameWidth(nextMetrics.width);
+    const maxLeft = getEditorImageHorizontalLimit(maxFrameWidth, start.width);
     const nextVisualLeft = clampEditorImageOffset(start.visualLeft + dx, maxLeft);
-    const nextFloatSide = getEditorImageFloatSideForVisualLeft(nextMetrics.width, start.width, nextVisualLeft);
-    const inlineOffset = getEditorImageInlineOffsetForVisualLeft(nextMetrics.width, start.width, nextFloatSide, nextVisualLeft);
+    const nextFloatSide = getEditorImageFloatSideForVisualLeft(maxFrameWidth, start.width, nextVisualLeft);
+    const inlineOffset = getEditorImageInlineOffsetForVisualLeft(maxFrameWidth, start.width, nextFloatSide, nextVisualLeft);
     applyEditorImageFloatLayout(frame, nextFloatSide, inlineOffset);
-    latestDragVisualTop = start.visualTop + dy;
-    shouldReanchorAfterDrag = Math.abs(dy) >= 6;
-    frame.style.marginTop = `${clampEditorImageVerticalOffset(start.marginTop + dy, -5_000, 5_000)}px`;
+    const rootRect = root.getBoundingClientRect();
+    const minVisualTop = rootRect.top - Math.max(0, start.height - 48);
+    const maxVisualTop = rootRect.bottom - 48;
+    latestDragVisualTop = clampEditorImageVerticalOffset(start.visualTop + dy, minVisualTop, maxVisualTop);
+    shouldReanchorAfterDrag = Math.abs(latestDragVisualTop - start.visualTop) >= 6;
+    frame.style.marginTop = `${clampEditorImageVerticalOffset(start.marginTop + latestDragVisualTop - start.visualTop, -5_000, 5_000)}px`;
   };
 
   const finish = () => {
@@ -742,6 +845,7 @@ function startEditorImagePointerInteraction(
     if (interaction.kind === "drag" && shouldReanchorAfterDrag && reanchorEditorImageForVisualTop(root, frame, latestDragVisualTop)) {
       frame.style.marginTop = `${DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX}px`;
     }
+    recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, interaction.kind === "resize" ? "resize" : "image");
     commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
   };
 
@@ -754,6 +858,7 @@ export function useEditorDocumentSurfaceHandlers({
   restoringScrollRef,
   currentDocumentTargetKeyRef,
   scrollMemoryRef,
+  documentUndoHistoryRef,
   pendingEditorFontSizeRef,
   outlineStyle,
   setDocumentScrollTop,
@@ -763,10 +868,27 @@ export function useEditorDocumentSurfaceHandlers({
   flushPendingDocumentSave,
   onSelectionFontSizeChange,
 }: UseEditorDocumentSurfaceHandlersOptions): EditorDocumentSurfaceHandlers {
+  const pendingNativeUndoSnapshotRef = useRef<EditorDocumentUndoSnapshot | null>(null);
   return useMemo(() => ({
     onBeforeInput(event) {
+      const root = event.currentTarget;
       const inputEvent = event.nativeEvent as InputEvent;
       const pendingFontSize = pendingEditorFontSizeRef.current;
+
+      if (inputEvent.inputType === "historyUndo" || inputEvent.inputType === "historyRedo") {
+        event.preventDefault();
+        pendingNativeUndoSnapshotRef.current = null;
+        applyEditorUndoCommand(
+          root,
+          documentUndoHistoryRef.current,
+          inputEvent.inputType === "historyUndo" ? "undo" : "redo",
+          scheduleDocumentSave,
+          scheduleIndentGuideUpdate,
+          onSelectionFontSizeChange,
+        );
+        return;
+      }
+
       if (
         inputEvent.inputType === "insertText" &&
         typeof inputEvent.data === "string" &&
@@ -774,59 +896,71 @@ export function useEditorDocumentSurfaceHandlers({
       ) {
         if (pendingFontSize !== null) {
           event.preventDefault();
-          if (replaceSelectionWithStyledText(event.currentTarget, inputEvent.data, pendingFontSize)) {
+          const undoBefore = snapshotEditorDocumentRoot(root);
+          if (replaceSelectionWithStyledText(root, inputEvent.data, pendingFontSize)) {
             onSelectionFontSizeChange(pendingFontSize);
-            commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+            recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
+            commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
           }
           return;
         }
 
         if (outlineStyle === "automatic-outline-numbering") {
-          const offsets = getEditorSelectionOffsets(event.currentTarget);
-          const currentText = offsets ? readEditorDocumentText(event.currentTarget) : "";
+          const offsets = getEditorSelectionOffsets(root);
+          const currentText = offsets ? readEditorDocumentText(root) : "";
           const edit = offsets
             ? insertAutomaticOutlineFirstText(currentText, offsets.start, offsets.end, inputEvent.data)
             : null;
           if (edit) {
             event.preventDefault();
             pendingEditorFontSizeRef.current = null;
-            replaceDocumentWithPlainText(event.currentTarget, edit.value, edit.selectionStart, edit.selectionEnd);
-            commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+            const undoBefore = snapshotEditorDocumentRoot(root);
+            replaceDocumentWithPlainText(root, edit.value, edit.selectionStart, edit.selectionEnd);
+            recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
+            commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
             return;
           }
         }
 
-        const anchor = getCollapsedAnchorAtSelectionEnd(event.currentTarget);
+        const anchor = getCollapsedAnchorAtSelectionEnd(root);
         if (anchor) {
           event.preventDefault();
           pendingEditorFontSizeRef.current = null;
+          const undoBefore = snapshotEditorDocumentRoot(root);
           const inserted = isHyperlinkDividerText(inputEvent.data)
-            ? insertPlainTextAfterAnchor(event.currentTarget, anchor, inputEvent.data)
-            : appendTextToAnchorEnd(event.currentTarget, anchor, inputEvent.data);
+            ? insertPlainTextAfterAnchor(root, anchor, inputEvent.data)
+            : appendTextToAnchorEnd(root, anchor, inputEvent.data);
           if (inserted) {
-            commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+            recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
+            commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
           }
           return;
         }
       }
+
+      if (inputEvent.inputType && inputEvent.inputType !== "insertCompositionText") {
+        pendingNativeUndoSnapshotRef.current = snapshotEditorDocumentRoot(root);
+      }
     },
     onPaste(event) {
+      const root = event.currentTarget;
+      const undoBefore = snapshotEditorDocumentRoot(root);
       const imageFile = getImageFileFromDataTransfer(event.clipboardData);
       if (imageFile) {
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
-        const savedRange = getEditorSelectionRange(event.currentTarget)?.cloneRange() ?? null;
-        void insertEditorImageFile(event.currentTarget, imageFile, savedRange, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        const savedRange = getEditorSelectionRange(root)?.cloneRange() ?? null;
+        void insertEditorImageFile(root, imageFile, savedRange, undoBefore, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
         return;
       }
 
       const html = event.clipboardData.getData("text/html");
-      const clipboardImageData = readEditorImageClipboardDataFromHTML(event.currentTarget.ownerDocument, html);
+      const clipboardImageData = readEditorImageClipboardDataFromHTML(root.ownerDocument, html);
       if (clipboardImageData) {
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
-        const savedRange = getEditorSelectionRange(event.currentTarget)?.cloneRange() ?? null;
-        void insertEditorClipboardImageData(event.currentTarget, clipboardImageData, savedRange, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        const savedRange = getEditorSelectionRange(root)?.cloneRange() ?? null;
+        void insertEditorClipboardImageData(root, clipboardImageData, savedRange, undoBefore, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
         return;
       }
 
@@ -834,9 +968,10 @@ export function useEditorDocumentSurfaceHandlers({
       if (!text) return;
       event.preventDefault();
       pendingEditorFontSizeRef.current = null;
-      clearEditorImageSelection(event.currentTarget);
-      if (replaceSelectionWithHTML(event.currentTarget, linkifyEditorPlainTextToHTML(text))) {
-        commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+      clearEditorImageSelection(root);
+      if (replaceSelectionWithHTML(root, linkifyEditorPlainTextToHTML(text))) {
+        recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "paste");
+        commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
       }
     },
     onCopy(event) {
@@ -844,24 +979,26 @@ export function useEditorDocumentSurfaceHandlers({
       event.preventDefault();
     },
     onDrop(event) {
+      const root = event.currentTarget;
+      const undoBefore = snapshotEditorDocumentRoot(root);
       const imageFile = getImageFileFromDataTransfer(event.dataTransfer);
       if (imageFile) {
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
-        event.currentTarget.focus({ preventScroll: true });
-        const savedRange = getEditorSelectionRange(event.currentTarget)?.cloneRange() ?? null;
-        void insertEditorImageFile(event.currentTarget, imageFile, savedRange, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        root.focus({ preventScroll: true });
+        const savedRange = getEditorSelectionRange(root)?.cloneRange() ?? null;
+        void insertEditorImageFile(root, imageFile, savedRange, undoBefore, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
         return;
       }
 
       const html = event.dataTransfer.getData("text/html");
-      const clipboardImageData = readEditorImageClipboardDataFromHTML(event.currentTarget.ownerDocument, html);
+      const clipboardImageData = readEditorImageClipboardDataFromHTML(root.ownerDocument, html);
       if (clipboardImageData) {
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
-        event.currentTarget.focus({ preventScroll: true });
-        const savedRange = getEditorSelectionRange(event.currentTarget)?.cloneRange() ?? null;
-        void insertEditorClipboardImageData(event.currentTarget, clipboardImageData, savedRange, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        root.focus({ preventScroll: true });
+        const savedRange = getEditorSelectionRange(root)?.cloneRange() ?? null;
+        void insertEditorClipboardImageData(root, clipboardImageData, savedRange, undoBefore, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
         return;
       }
 
@@ -869,13 +1006,17 @@ export function useEditorDocumentSurfaceHandlers({
       if (!text) return;
       event.preventDefault();
       pendingEditorFontSizeRef.current = null;
-      clearEditorImageSelection(event.currentTarget);
-      event.currentTarget.focus({ preventScroll: true });
-      if (replaceSelectionWithHTML(event.currentTarget, linkifyEditorPlainTextToHTML(text))) {
-        commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+      clearEditorImageSelection(root);
+      root.focus({ preventScroll: true });
+      if (replaceSelectionWithHTML(root, linkifyEditorPlainTextToHTML(text))) {
+        recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "paste");
+        commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
       }
     },
     onInput(event) {
+      const undoBefore = pendingNativeUndoSnapshotRef.current;
+      pendingNativeUndoSnapshotRef.current = null;
+      recordEditorDocumentMutation(documentUndoHistoryRef.current, event.currentTarget, undoBefore, "typing");
       commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
       syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
     },
@@ -913,7 +1054,7 @@ export function useEditorDocumentSurfaceHandlers({
       event.currentTarget.focus({ preventScroll: true });
       selectEditorImageFrame(event.currentTarget, frame);
       if (event.button === 0) {
-        startEditorImagePointerInteraction(event.currentTarget, frame, event, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        startEditorImagePointerInteraction(event.currentTarget, frame, event, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
       }
     },
     onPointerMove(event) {
@@ -941,53 +1082,79 @@ export function useEditorDocumentSurfaceHandlers({
       event.stopPropagation();
     },
     onKeyDown(event) {
+      const root = event.currentTarget;
+      if (isEditorUndoShortcut(event) || isEditorRedoShortcut(event)) {
+        event.preventDefault();
+        pendingEditorFontSizeRef.current = null;
+        pendingNativeUndoSnapshotRef.current = null;
+        applyEditorUndoCommand(
+          root,
+          documentUndoHistoryRef.current,
+          isEditorUndoShortcut(event) ? "undo" : "redo",
+          scheduleDocumentSave,
+          scheduleIndentGuideUpdate,
+          onSelectionFontSizeChange,
+        );
+        return;
+      }
+
       if (event.key === "Escape") {
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
-        clearEditorImageSelection(event.currentTarget);
-        event.currentTarget.blur();
+        clearEditorImageSelection(root);
+        root.blur();
         return;
       }
 
       if (PENDING_FONT_SIZE_CANCEL_KEYS.has(event.key)) pendingEditorFontSizeRef.current = null;
 
-      if ((event.key === "Backspace" || event.key === "Delete") && removeSelectedEditorImage(event.currentTarget)) {
-        event.preventDefault();
-        commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
-        return;
+      if (event.key === "Backspace" || event.key === "Delete") {
+        const undoBefore = snapshotEditorDocumentRoot(root);
+        if (!removeSelectedEditorImage(root)) {
+          // Text deletion handling below still gets its own narrower undo group.
+        } else {
+          event.preventDefault();
+          recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "image");
+          commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
+          return;
+        }
       }
 
       if (event.key === "Enter") {
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
-        clearEditorImageSelection(event.currentTarget);
-        const offsets = getEditorSelectionOffsets(event.currentTarget);
+        clearEditorImageSelection(root);
+        const offsets = getEditorSelectionOffsets(root);
         if (!offsets) return;
-        const currentText = readEditorDocumentText(event.currentTarget);
+        const undoBefore = snapshotEditorDocumentRoot(root);
+        const currentText = readEditorDocumentText(root);
         const edit = insertEditorEnterText(currentText, offsets.start, offsets.end, outlineStyle);
         const insertedText = edit.value.slice(offsets.start, edit.selectionStart);
-        const anchor = getCollapsedAnchorAtSelectionEnd(event.currentTarget);
+        const anchor = getCollapsedAnchorAtSelectionEnd(root);
         const inserted = anchor
-          ? insertPlainTextAfterAnchor(event.currentTarget, anchor, insertedText, { preserveTrailingNewline: edit.value.endsWith("\n") })
-          : replaceSelectionWithText(event.currentTarget, insertedText, { preserveTrailingNewline: edit.value.endsWith("\n") });
+          ? insertPlainTextAfterAnchor(root, anchor, insertedText, { preserveTrailingNewline: edit.value.endsWith("\n") })
+          : replaceSelectionWithText(root, insertedText, { preserveTrailingNewline: edit.value.endsWith("\n") });
         if (inserted) {
-          scrollEditorToLineStart(event.currentTarget);
-          commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          scrollEditorToLineStart(root);
+          recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "lineBreak");
+          commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
         }
         return;
       }
 
       if (event.key === "Backspace") {
-        const offsets = getEditorSelectionOffsets(event.currentTarget);
+        const offsets = getEditorSelectionOffsets(root);
         if (!offsets) return;
-        const currentText = readEditorDocumentText(event.currentTarget);
+        const undoBefore = snapshotEditorDocumentRoot(root);
+        const currentText = readEditorDocumentText(root);
         const edit = deleteEditorBackspaceText(currentText, offsets.start, offsets.end);
         if (!edit) return;
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
-        clearEditorImageSelection(event.currentTarget);
-        if (deleteTextByOffsets(event.currentTarget, edit.selectionStart, offsets.start)) {
-          commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        clearEditorImageSelection(root);
+        if (deleteTextByOffsets(root, edit.selectionStart, offsets.start)) {
+          recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "delete");
+          commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
         }
         return;
       }
@@ -995,30 +1162,34 @@ export function useEditorDocumentSurfaceHandlers({
       if (event.key !== "Tab") return;
       event.preventDefault();
       pendingEditorFontSizeRef.current = null;
-      clearEditorImageSelection(event.currentTarget);
-      const offsets = getEditorSelectionOffsets(event.currentTarget);
+      clearEditorImageSelection(root);
+      const offsets = getEditorSelectionOffsets(root);
       if (!offsets) return;
-      const anchor = !event.shiftKey ? getCollapsedAnchorAtSelectionEnd(event.currentTarget) : null;
+      const undoBefore = snapshotEditorDocumentRoot(root);
+      const anchor = !event.shiftKey ? getCollapsedAnchorAtSelectionEnd(root) : null;
       if (anchor) {
-        insertPlainTextAfterAnchor(event.currentTarget, anchor, EDITOR_TAB_TEXT);
-        commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        insertPlainTextAfterAnchor(root, anchor, EDITOR_TAB_TEXT);
+        recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "tab");
+        commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
         return;
       }
-      const currentText = readEditorDocumentText(event.currentTarget);
+      const currentText = readEditorDocumentText(root);
       const edit = event.shiftKey
         ? insertEditorTabText(currentText, offsets.start, offsets.end, outlineStyle, "outdent")
         : insertEditorTabText(currentText, offsets.start, offsets.end, outlineStyle, "indent");
       const simpleInsertedText = edit.value.slice(offsets.start, edit.selectionStart);
       const simpleReplacement = `${currentText.slice(0, offsets.start)}${simpleInsertedText}${currentText.slice(offsets.end)}`;
       if (!event.shiftKey && simpleReplacement === edit.value) {
-        replaceSelectionWithText(event.currentTarget, simpleInsertedText || EDITOR_TAB_TEXT);
+        replaceSelectionWithText(root, simpleInsertedText || EDITOR_TAB_TEXT);
       } else {
-        replaceDocumentWithPlainText(event.currentTarget, edit.value, edit.selectionStart, edit.selectionEnd);
+        replaceDocumentWithPlainText(root, edit.value, edit.selectionStart, edit.selectionEnd);
       }
-      commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+      recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "tab");
+      commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
     },
   }), [
     currentDocumentTargetKeyRef,
+    documentUndoHistoryRef,
     flushPendingDocumentSave,
     onSelectionFontSizeChange,
     outlineStyle,

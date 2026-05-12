@@ -1,4 +1,5 @@
 export type EditorTextChangeKind = "typing" | "delete" | "paste" | "lineBreak" | "tab" | "unknown";
+export type EditorDocumentChangeKind = EditorTextChangeKind | "image" | "resize" | "format";
 
 export type EditorTextSnapshot = {
   value: string;
@@ -9,6 +10,27 @@ export type EditorTextSnapshot = {
 export type EditorUndoHistory = {
   undoStack: EditorUndoGroup[];
   redoStack: EditorUndoGroup[];
+  maxGroups: number;
+  maxStoredChars: number;
+  groupDelayMs: number;
+};
+
+export type EditorDocumentUndoSnapshot = {
+  html: string;
+  selectionStart: number;
+  selectionEnd: number;
+};
+
+export type EditorDocumentUndoGroup = {
+  before: EditorDocumentUndoSnapshot;
+  after: EditorDocumentUndoSnapshot;
+  kind: EditorDocumentChangeKind;
+  timestamp: number;
+};
+
+export type EditorDocumentUndoHistory = {
+  undoStack: EditorDocumentUndoGroup[];
+  redoStack: EditorDocumentUndoGroup[];
   maxGroups: number;
   maxStoredChars: number;
   groupDelayMs: number;
@@ -30,6 +52,8 @@ export type EditorUndoGroup = EditorTextChange & {
 const DEFAULT_MAX_GROUPS = 100;
 const DEFAULT_MAX_STORED_CHARS = 200_000;
 const DEFAULT_GROUP_DELAY_MS = 500;
+const DEFAULT_DOCUMENT_MAX_GROUPS = 40;
+const DEFAULT_DOCUMENT_MAX_STORED_CHARS = 6_000_000;
 
 export function createEditorUndoHistory(config?: Partial<Pick<EditorUndoHistory, "maxGroups" | "maxStoredChars" | "groupDelayMs">>): EditorUndoHistory {
   return {
@@ -46,10 +70,31 @@ export function resetEditorUndoHistory(history: EditorUndoHistory) {
   history.redoStack = [];
 }
 
+export function createEditorDocumentUndoHistory(config?: Partial<Pick<EditorDocumentUndoHistory, "maxGroups" | "maxStoredChars" | "groupDelayMs">>): EditorDocumentUndoHistory {
+  return {
+    undoStack: [],
+    redoStack: [],
+    maxGroups: config?.maxGroups ?? DEFAULT_DOCUMENT_MAX_GROUPS,
+    maxStoredChars: config?.maxStoredChars ?? DEFAULT_DOCUMENT_MAX_STORED_CHARS,
+    groupDelayMs: config?.groupDelayMs ?? DEFAULT_GROUP_DELAY_MS,
+  };
+}
+
+export function resetEditorDocumentUndoHistory(history: EditorDocumentUndoHistory) {
+  history.undoStack = [];
+  history.redoStack = [];
+}
+
 export function snapshotEditorText(value: string, selectionStart: number, selectionEnd: number): EditorTextSnapshot {
   const start = Math.max(0, Math.min(selectionStart, value.length));
   const end = Math.max(start, Math.min(selectionEnd, value.length));
   return { value, selectionStart: start, selectionEnd: end };
+}
+
+export function snapshotEditorDocumentHTML(html: string, selectionStart: number, selectionEnd: number): EditorDocumentUndoSnapshot {
+  const start = Math.max(0, selectionStart);
+  const end = Math.max(start, selectionEnd);
+  return { html, selectionStart: start, selectionEnd: end };
 }
 
 export function snapshotEditorTextArea(target: Pick<HTMLTextAreaElement, "value" | "selectionStart" | "selectionEnd">): EditorTextSnapshot {
@@ -99,6 +144,37 @@ export function recordEditorUndoChange(
   trimUndoHistory(history);
 }
 
+export function recordEditorDocumentUndoChange(
+  history: EditorDocumentUndoHistory,
+  before: EditorDocumentUndoSnapshot,
+  after: EditorDocumentUndoSnapshot,
+  kind: EditorDocumentChangeKind,
+  timestamp = Date.now(),
+) {
+  if (before.html === after.html) return;
+  history.redoStack = [];
+
+  const next: EditorDocumentUndoGroup = { before, after, kind, timestamp };
+  if (storedDocumentChars(next) > history.maxStoredChars) {
+    resetEditorDocumentUndoHistory(history);
+    return;
+  }
+
+  const last = history.undoStack[history.undoStack.length - 1];
+  if (last && shouldMergeDocumentUndoGroup(last, next, history.groupDelayMs)) {
+    history.undoStack[history.undoStack.length - 1] = {
+      ...last,
+      after,
+      timestamp,
+    };
+    trimDocumentUndoHistory(history);
+    return;
+  }
+
+  history.undoStack.push(next);
+  trimDocumentUndoHistory(history);
+}
+
 export function undoEditorText(history: EditorUndoHistory, currentValue: string): EditorTextSnapshot | null {
   const group = history.undoStack.pop();
   if (!group) return null;
@@ -134,6 +210,29 @@ export function redoEditorText(history: EditorUndoHistory, currentValue: string)
     selectionStart: group.afterSelection.selectionStart,
     selectionEnd: group.afterSelection.selectionEnd,
   };
+}
+
+export function undoEditorDocument(history: EditorDocumentUndoHistory, currentHTML: string): EditorDocumentUndoSnapshot | null {
+  const group = history.undoStack.pop();
+  if (!group) return null;
+  if (currentHTML !== group.after.html) {
+    resetEditorDocumentUndoHistory(history);
+    return null;
+  }
+  history.redoStack.push(group);
+  return group.before;
+}
+
+export function redoEditorDocument(history: EditorDocumentUndoHistory, currentHTML: string): EditorDocumentUndoSnapshot | null {
+  const group = history.redoStack.pop();
+  if (!group) return null;
+  if (currentHTML !== group.before.html) {
+    resetEditorDocumentUndoHistory(history);
+    return null;
+  }
+  history.undoStack.push(group);
+  trimDocumentUndoHistory(history);
+  return group.after;
 }
 
 function deriveEditorTextChange(before: EditorTextSnapshot, after: EditorTextSnapshot): EditorTextChange {
@@ -207,6 +306,24 @@ function trimUndoHistory(history: EditorUndoHistory) {
   while (history.undoStack.length > 0 && (history.undoStack.length > history.maxGroups || totalStoredChars(history.undoStack) > history.maxStoredChars)) {
     history.undoStack.shift();
   }
+}
+
+function shouldMergeDocumentUndoGroup(last: EditorDocumentUndoGroup, next: EditorDocumentUndoGroup, groupDelayMs: number): boolean {
+  return last.kind === "typing" && next.kind === "typing" && next.timestamp - last.timestamp <= groupDelayMs;
+}
+
+function trimDocumentUndoHistory(history: EditorDocumentUndoHistory) {
+  while (history.undoStack.length > 0 && (history.undoStack.length > history.maxGroups || totalStoredDocumentChars(history.undoStack) > history.maxStoredChars)) {
+    history.undoStack.shift();
+  }
+}
+
+function totalStoredDocumentChars(groups: EditorDocumentUndoGroup[]) {
+  return groups.reduce((total, group) => total + storedDocumentChars(group), 0);
+}
+
+function storedDocumentChars(group: EditorDocumentUndoGroup) {
+  return group.before.html.length + group.after.html.length;
 }
 
 function totalStoredChars(groups: EditorUndoGroup[]) {

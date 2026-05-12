@@ -62,12 +62,9 @@ export function createEditorImageFrame(ownerDocument: Document, data: EditorImag
   image.style.display = "block";
   image.style.width = "100%";
   image.style.height = "100%";
-  image.style.objectFit = "contain";
+  image.style.objectFit = "fill";
   image.style.pointerEvents = "none";
-  image.addEventListener("load", () => syncEditorImageFrameToImageAspect(frame, image), { once: true });
   image.src = data.src;
-  if (image.complete) syncEditorImageFrameToImageAspect(frame, image);
-  ownerDocument.defaultView?.requestAnimationFrame(() => syncEditorImageFrameToImageAspect(frame, image));
   frame.appendChild(image);
   return frame;
 }
@@ -216,7 +213,7 @@ export function getEditorImageVisualLeftForInlineOffset(containerWidth: number, 
   return floatSide === "right" ? maxLeft - offset : offset;
 }
 
-export function getEditorImagePointerInteraction(width: number, height: number, pointerX: number, pointerY: number, edgeSize = 14): EditorImagePointerInteraction {
+export function getEditorImagePointerInteraction(width: number, height: number, pointerX: number, pointerY: number, edgeSize = 8): EditorImagePointerInteraction {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return { kind: "drag" };
   const safeEdgeSize = Math.max(6, Math.min(edgeSize, width / 2, height / 2));
   const horizontal = pointerX <= safeEdgeSize ? -1 : pointerX >= width - safeEdgeSize ? 1 : 0;
@@ -233,13 +230,13 @@ export function getEditorImageCursorForInteraction(interaction: EditorImagePoint
 }
 
 export function readEditorImageAspectRatio(frame: HTMLElement, fallbackRatio = 1): number {
+  const width = readSafeStylePixels(frame.style.width, 0, MIN_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_WIDTH_PX);
+  const height = readSafeStylePixels(frame.style.height, 0, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_HEIGHT_PX);
+  if (width > 0 && height > 0) return width / height;
   const image = frame.querySelector("img[src]") as HTMLImageElement | null;
   const naturalWidth = image?.naturalWidth ?? 0;
   const naturalHeight = image?.naturalHeight ?? 0;
   if (naturalWidth > 0 && naturalHeight > 0) return naturalWidth / naturalHeight;
-  const width = readSafeStylePixels(frame.style.width, 0, MIN_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_WIDTH_PX);
-  const height = readSafeStylePixels(frame.style.height, 0, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_HEIGHT_PX);
-  if (width > 0 && height > 0) return width / height;
   return Number.isFinite(fallbackRatio) && fallbackRatio > 0 ? fallbackRatio : 1;
 }
 
@@ -330,22 +327,6 @@ function applyEditorImageFrameSize(frame: HTMLElement, width: number, height: nu
   frame.style.width = `${nextWidth}px`;
   frame.style.height = `${nextHeight}px`;
   frame.style.aspectRatio = `${nextWidth} / ${nextHeight}`;
-}
-
-function syncEditorImageFrameToImageAspect(frame: HTMLElement, image: HTMLImageElement) {
-  const naturalWidth = image.naturalWidth;
-  const naturalHeight = image.naturalHeight;
-  if (!naturalWidth || !naturalHeight) return;
-  const aspectRatio = naturalWidth / naturalHeight;
-  const renderedWidth = Math.round(frame.getBoundingClientRect().width);
-  const styleWidth = readSafeStylePixels(frame.style.width, naturalWidth, MIN_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_WIDTH_PX);
-  let width = renderedWidth >= MIN_EDITOR_IMAGE_WIDTH_PX ? renderedWidth : styleWidth;
-  let height = Math.round(width / aspectRatio);
-  if (height > MAX_EDITOR_IMAGE_HEIGHT_PX) {
-    height = MAX_EDITOR_IMAGE_HEIGHT_PX;
-    width = Math.round(height * aspectRatio);
-  }
-  applyEditorImageFrameSize(frame, width, height);
 }
 
 function resolveEditorImageDisplaySize(image: HTMLImageElement, maxDisplayWidth: number, preferredWidth?: number, preferredHeight?: number): { width: number; height: number } {

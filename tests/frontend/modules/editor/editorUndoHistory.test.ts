@@ -2,11 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   classifyEditorInputType,
+  createEditorDocumentUndoHistory,
   createEditorUndoHistory,
+  recordEditorDocumentUndoChange,
   recordEditorUndoChange,
+  redoEditorDocument,
   redoEditorText,
+  resetEditorDocumentUndoHistory,
   resetEditorUndoHistory,
+  snapshotEditorDocumentHTML,
   snapshotEditorText,
+  undoEditorDocument,
   undoEditorText,
 } from "../../../../frontend/src/modules/editor/editorUndoHistory.js";
 
@@ -85,6 +91,21 @@ test("reset drops local editor undo and redo state", () => {
 
   resetEditorUndoHistory(history);
 
+  assert.equal(history.undoStack.length, 0);
+  assert.equal(history.redoStack.length, 0);
+});
+
+test("document undo restores image-bearing HTML snapshots", () => {
+  const history = createEditorDocumentUndoHistory();
+  const before = snapshotEditorDocumentHTML("<!-- mango-editor-html-v1 -->", 0, 0);
+  const after = snapshotEditorDocumentHTML('<!-- mango-editor-html-v1 --><span data-mango-editor-image="true"><img src="data:image/png;base64,iVBORw0KGgo="/></span>', 0, 0);
+
+  recordEditorDocumentUndoChange(history, before, after, "image", 0);
+
+  assert.deepEqual(undoEditorDocument(history, after.html), before);
+  assert.deepEqual(redoEditorDocument(history, before.html), after);
+
+  resetEditorDocumentUndoHistory(history);
   assert.equal(history.undoStack.length, 0);
   assert.equal(history.redoStack.length, 0);
 });
