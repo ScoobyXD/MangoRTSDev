@@ -102,6 +102,14 @@ type CommunicationsViewID =
   | "my-logic-gates"
   | `shared:${string}`;
 
+type CommunicationsColumnWidths = [number, number, number, number];
+
+type CommunicationsColumnResizeDrag = {
+  dividerIndex: 0 | 1 | 2;
+  startX: number;
+  startWidths: CommunicationsColumnWidths;
+};
+
 const MAILBOX_OPTIONS: MailboxOption[] = [
   { value: "primary", label: "Primary Inbox" },
   { value: "sent", label: "Sent mail" },
@@ -110,6 +118,10 @@ const MAILBOX_OPTIONS: MailboxOption[] = [
 
 const MESSAGE_BATCH_SIZE = 25;
 const TRIAGE_MESSAGE_DRAG_MIME = "application/x-mangorts-communications-triage-messages";
+const COMMUNICATIONS_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.communications.columnWidths.v1";
+const COMMUNICATIONS_COLUMN_RESIZER_WIDTH = 10;
+const COMMUNICATIONS_COLUMN_MIN_WIDTHS: CommunicationsColumnWidths = [170, 280, 340, 280];
+const COMMUNICATIONS_COLUMN_MAX_WIDTHS: CommunicationsColumnWidths = [360, 560, 1400, 720];
 
 export function CommunicationsPage({ me, onNavigate, embedded = false }: CommunicationsPageProps) {
   const companyID = getActiveCompanyID();
@@ -148,6 +160,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const [columnWidths, setColumnWidths] = useState<CommunicationsColumnWidths>(() => readCommunicationsColumnWidths());
+  const [columnResizeDrag, setColumnResizeDrag] = useState<CommunicationsColumnResizeDrag | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const foldersRequestInFlightRef = useRef(false);
   const sharedInboxesRequestInFlightRef = useRef(false);
@@ -214,6 +228,38 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  useEffect(() => {
+    if (!columnResizeDrag) return undefined;
+
+    const onPointerMove = (event: PointerEvent) => {
+      event.preventDefault();
+      const delta = event.clientX - columnResizeDrag.startX;
+      setColumnWidths(resizeCommunicationsColumns(columnResizeDrag.startWidths, columnResizeDrag.dividerIndex, delta));
+    };
+    const onPointerUp = () => setColumnResizeDrag(null);
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+
+    return () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+  }, [columnResizeDrag]);
+
+  useEffect(() => {
+    if (isNarrow) return;
+    localStorage.setItem(COMMUNICATIONS_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(columnWidths));
+  }, [columnWidths, isNarrow]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -889,7 +935,14 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     setLogicGateSelectionAnchorID(next.anchorID);
   }, [logicGateSelectionAnchorID, selectedLogicGateRowIDs, visibleLogicGateRows]);
 
+  const startColumnResize = useCallback((dividerIndex: 0 | 1 | 2, event: React.PointerEvent<HTMLButtonElement>) => {
+    if (isNarrow) return;
+    event.preventDefault();
+    setColumnResizeDrag({ dividerIndex, startX: event.clientX, startWidths: columnWidths });
+  }, [columnWidths, isNarrow]);
+
   const activeViewLabel = getCommunicationsViewLabel(activeViewID, sharedInboxes);
+  const workspaceGridTemplateColumns = isNarrow ? "1fr" : getCommunicationsGridTemplateColumns(columnWidths);
 
   return (
     <div style={embedded ? { ...pageStyle, height: "100%" } : pageStyle}>
@@ -939,7 +992,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
           </section>
         </main>
       ) : (
-        <main style={{ ...workspaceStyle, gridTemplateColumns: isNarrow ? "1fr" : "220px minmax(300px, 390px) minmax(0, 1fr) minmax(300px, 360px)" }}>
+        <main style={{ ...workspaceStyle, gridTemplateColumns: workspaceGridTemplateColumns, gap: isNarrow ? 10 : 0 }}>
           <aside style={sidebarStyle}>
             <nav style={sidebarNavStyle} aria-label="Communication inboxes">
               <CommunicationsNavButton label="Primary Inbox" active={activeViewID === "primary"} onClick={() => selectCommunicationsView("primary", "primary")} />
@@ -979,6 +1032,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
               <CommunicationsNavButton label="My Logic Gates" active={activeViewID === "my-logic-gates"} onClick={() => selectCommunicationsView("my-logic-gates", "all")} />
             </nav>
           </aside>
+
+          {!isNarrow && <CommunicationsColumnResizeHandle dividerIndex={0} onPointerDown={startColumnResize} />}
 
           <section style={panelStyle}>
             <div style={mailListToolbarStyle}>
@@ -1044,6 +1099,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
             </div>
           </section>
 
+          {!isNarrow && <CommunicationsColumnResizeHandle dividerIndex={1} onPointerDown={startColumnResize} />}
+
           <section style={panelStyle}>
             {compose.open ? (
               <ComposePanel
@@ -1069,6 +1126,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
               <div style={emptyStateStyle}>Select a message or compose a new one</div>
             )}
           </section>
+
+          {!isNarrow && <CommunicationsColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
 
           <LogicGateRail
             loading={loadingLogicGates}
@@ -1171,6 +1230,25 @@ type MyLogicGateGroup = {
   logicGates: LogicGateRecord[];
 };
 
+function CommunicationsColumnResizeHandle({
+  dividerIndex,
+  onPointerDown,
+}: {
+  dividerIndex: 0 | 1 | 2;
+  onPointerDown: (dividerIndex: 0 | 1 | 2, event: React.PointerEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={`Resize communications column ${dividerIndex + 1}`}
+      style={columnResizeHandleStyle}
+      onPointerDown={(event) => onPointerDown(dividerIndex, event)}
+    >
+      <span style={columnResizeGripStyle} />
+    </button>
+  );
+}
+
 function LogicGateRail({
   loading,
   logicGateByID,
@@ -1211,13 +1289,13 @@ function LogicGateRail({
       <section
         style={logicGateRailSectionStyle}
         onDragOver={(event) => {
-          const payload = readExplorerDragPayload(event.dataTransfer);
-          if (logicGateIDsFromExplorerPayload(payload, folders, folderItems).length === 0) return;
+          if (!hasExplorerDrag(event.dataTransfer)) return;
           event.preventDefault();
           event.dataTransfer.dropEffect = "copy";
         }}
         onDrop={(event) => {
           const payload = readExplorerDragPayload(event.dataTransfer);
+          if (logicGateIDsFromExplorerPayload(payload, folders, folderItems).length === 0) return;
           event.preventDefault();
           onAddShortcuts(payload);
         }}
@@ -1419,6 +1497,66 @@ function MessageDetail({ message, loading, archiveAvailable, busy, onReply, onAr
   );
 }
 
+function readCommunicationsColumnWidths(): CommunicationsColumnWidths {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(COMMUNICATIONS_COLUMN_WIDTHS_STORAGE_KEY) ?? "null") as unknown;
+    if (Array.isArray(parsed) && parsed.length === 4 && parsed.every((value) => typeof value === "number" && Number.isFinite(value))) {
+      return normalizeCommunicationsColumnWidths(parsed as CommunicationsColumnWidths);
+    }
+  } catch {
+    // Stored UI preferences are optional; fall back to viewport-aware defaults.
+  }
+  return defaultCommunicationsColumnWidths();
+}
+
+function defaultCommunicationsColumnWidths(): CommunicationsColumnWidths {
+  const availableWidth = Math.max(1120, window.innerWidth - 52 - COMMUNICATIONS_COLUMN_RESIZER_WIDTH * 3);
+  const sidebarWidth = 220;
+  const listWidth = 350;
+  const logicGateWidth = 340;
+  const detailWidth = clampNumber(availableWidth - sidebarWidth - listWidth - logicGateWidth, 360, 820);
+  return normalizeCommunicationsColumnWidths([sidebarWidth, listWidth, detailWidth, logicGateWidth]);
+}
+
+function normalizeCommunicationsColumnWidths(widths: CommunicationsColumnWidths): CommunicationsColumnWidths {
+  return [
+    clampNumber(widths[0], COMMUNICATIONS_COLUMN_MIN_WIDTHS[0], COMMUNICATIONS_COLUMN_MAX_WIDTHS[0]),
+    clampNumber(widths[1], COMMUNICATIONS_COLUMN_MIN_WIDTHS[1], COMMUNICATIONS_COLUMN_MAX_WIDTHS[1]),
+    clampNumber(widths[2], COMMUNICATIONS_COLUMN_MIN_WIDTHS[2], COMMUNICATIONS_COLUMN_MAX_WIDTHS[2]),
+    clampNumber(widths[3], COMMUNICATIONS_COLUMN_MIN_WIDTHS[3], COMMUNICATIONS_COLUMN_MAX_WIDTHS[3]),
+  ];
+}
+
+function resizeCommunicationsColumns(startWidths: CommunicationsColumnWidths, dividerIndex: 0 | 1 | 2, delta: number): CommunicationsColumnWidths {
+  const next: CommunicationsColumnWidths = [startWidths[0], startWidths[1], startWidths[2], startWidths[3]];
+  const leftIndex = dividerIndex;
+  const rightIndex = dividerIndex + 1;
+  const pairTotal = startWidths[leftIndex] + startWidths[rightIndex];
+  const minLeft = COMMUNICATIONS_COLUMN_MIN_WIDTHS[leftIndex];
+  const maxLeft = Math.min(COMMUNICATIONS_COLUMN_MAX_WIDTHS[leftIndex], pairTotal - COMMUNICATIONS_COLUMN_MIN_WIDTHS[rightIndex]);
+  const nextLeft = clampNumber(startWidths[leftIndex] + delta, minLeft, maxLeft);
+
+  next[leftIndex] = nextLeft;
+  next[rightIndex] = pairTotal - nextLeft;
+  return normalizeCommunicationsColumnWidths(next);
+}
+
+function getCommunicationsGridTemplateColumns(widths: CommunicationsColumnWidths): string {
+  return [
+    `${widths[0]}px`,
+    `${COMMUNICATIONS_COLUMN_RESIZER_WIDTH}px`,
+    `${widths[1]}px`,
+    `${COMMUNICATIONS_COLUMN_RESIZER_WIDTH}px`,
+    `${widths[2]}px`,
+    `${COMMUNICATIONS_COLUMN_RESIZER_WIDTH}px`,
+    `${widths[3]}px`,
+  ].join(" ");
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
 function readTriageMessageIDs(dataTransfer: DataTransfer): string[] {
   try {
     const raw = dataTransfer.getData(TRIAGE_MESSAGE_DRAG_MIME);
@@ -1433,6 +1571,10 @@ function readTriageMessageIDs(dataTransfer: DataTransfer): string[] {
 
 function hasTriageMessageDrag(dataTransfer: DataTransfer): boolean {
   return Array.from(dataTransfer.types).includes(TRIAGE_MESSAGE_DRAG_MIME);
+}
+
+function hasExplorerDrag(dataTransfer: DataTransfer): boolean {
+  return Array.from(dataTransfer.types).includes(EXPLORER_DRAG_MIME);
 }
 
 function cleanIDList(values: string[]): string[] {
@@ -1655,6 +1797,27 @@ const workspaceStyle: React.CSSProperties = {
   gap: 10,
   padding: 10,
   overflow: "auto",
+};
+
+const columnResizeHandleStyle: React.CSSProperties = {
+  minHeight: 0,
+  width: "100%",
+  height: "100%",
+  display: "flex",
+  alignItems: "stretch",
+  justifyContent: "center",
+  padding: 0,
+  border: 0,
+  background: "transparent",
+  cursor: "col-resize",
+  touchAction: "none",
+};
+
+const columnResizeGripStyle: React.CSSProperties = {
+  width: 2,
+  minHeight: 0,
+  borderRadius: 2,
+  background: "rgba(255, 136, 32, 0.2)",
 };
 
 const sidebarStyle: React.CSSProperties = {
