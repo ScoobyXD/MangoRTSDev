@@ -138,7 +138,6 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			Y:                120 + float64(index*28),
 			UpdatedTimestamp: now,
 		}
-		r.addEmailProjectionLocked(input.CompanyID, nodeID, triageItem.Message, now)
 
 		logicGateID := input.LogicGateID
 		card := domain.KanbanCard{

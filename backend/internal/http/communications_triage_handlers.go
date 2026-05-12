@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -146,6 +147,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		return
 	}
 	if err != nil {
+		log.Printf("failed to convert communications triage items user_id=%s company_id=%s logic_gate_id=%s message_count=%d: %v", connection.UserID, req.CompanyID, req.LogicGateID, len(req.MessageIDs), err)
 		writeError(w, http.StatusInternalServerError, "failed_to_convert_triage_items")
 		return
 	}
