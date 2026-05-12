@@ -165,6 +165,12 @@ func (h *workspaceEventHub) unsubscribe(companyID string, ch chan []byte) {
 	close(ch)
 }
 
+func (h *workspaceEventHub) hasSubscribers(companyID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.subscribers[companyID]) > 0
+}
+
 func (h *workspaceEventHub) publish(companyID string, payload []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

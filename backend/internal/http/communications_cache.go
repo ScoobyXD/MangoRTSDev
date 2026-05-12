@@ -158,15 +158,63 @@ func (c *communicationsCache) invalidateUser(userID string) {
 	if userID == "" {
 		return
 	}
-	prefix := userID + communicationsCacheKeySeparator
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.folders, userID)
+	c.deleteMessagePagesForUserLocked(userID)
+	c.deleteMessagesForUserLocked(userID)
+}
+
+func (c *communicationsCache) invalidateFolders(userID string) {
+	if c == nil {
+		return
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.folders, userID)
+}
+
+func (c *communicationsCache) invalidateMessagePages(userID string) {
+	if c == nil {
+		return
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.deleteMessagePagesForUserLocked(userID)
+}
+
+func (c *communicationsCache) invalidateMessage(userID, messageID string) {
+	if c == nil {
+		return
+	}
+	key := communicationsMessageCacheKey(userID, messageID)
+	if key == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.messages, key)
+}
+
+func (c *communicationsCache) deleteMessagePagesForUserLocked(userID string) {
+	prefix := userID + communicationsCacheKeySeparator
 	for key := range c.messagePages {
 		if strings.HasPrefix(key, prefix) {
 			delete(c.messagePages, key)
 		}
 	}
+}
+
+func (c *communicationsCache) deleteMessagesForUserLocked(userID string) {
+	prefix := userID + communicationsCacheKeySeparator
 	for key := range c.messages {
 		if strings.HasPrefix(key, prefix) {
 			delete(c.messages, key)

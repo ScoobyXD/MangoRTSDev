@@ -120,20 +120,34 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, "invalid_webhook_json")
 		return
 	}
+	grantUserIDs := map[string]string{}
+	missingGrants := map[string]struct{}{}
 	for _, change := range changes {
-		if !isCommunicationsMailboxTrigger(change.Trigger) || strings.TrimSpace(change.GrantID) == "" {
+		grantID := strings.TrimSpace(change.GrantID)
+		if !isCommunicationsMailboxTrigger(change.Trigger) || grantID == "" {
 			continue
 		}
-		connection, err := s.repo.GetUserEmailConnectionByGrantID(change.GrantID)
-		if errors.Is(err, store.ErrNotFound) {
+		if _, missing := missingGrants[grantID]; missing {
 			continue
 		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_load_email_connection")
-			return
+		userID, ok := grantUserIDs[grantID]
+		if !ok {
+			connection, err := s.repo.GetUserEmailConnectionByGrantID(grantID)
+			if errors.Is(err, store.ErrNotFound) {
+				missingGrants[grantID] = struct{}{}
+				continue
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_load_email_connection")
+				return
+			}
+			userID = connection.UserID
+			grantUserIDs[grantID] = userID
 		}
-		s.commCache.invalidateUser(connection.UserID)
-		s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", change.Trigger, change.MessageID)
+		s.applyNylasWebhookCacheInvalidation(userID, change)
+		if s.emailHub.hasSubscribers(userID) {
+			s.publishCommunicationsEvent(userID, "mailbox_changed", change.Trigger, change.MessageID)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -201,6 +215,22 @@ func isCommunicationsMailboxTrigger(trigger string) bool {
 		strings.HasPrefix(trigger, "folder.created") ||
 		strings.HasPrefix(trigger, "folder.updated") ||
 		strings.HasPrefix(trigger, "folder.deleted")
+}
+
+func (s *Server) applyNylasWebhookCacheInvalidation(userID string, change nylasWebhookChange) {
+	trigger := strings.TrimSpace(strings.ToLower(change.Trigger))
+	switch {
+	case strings.HasPrefix(trigger, "folder."):
+		s.commCache.invalidateFolders(userID)
+		s.commCache.invalidateMessagePages(userID)
+	case strings.HasPrefix(trigger, "message.created"):
+		s.commCache.invalidateMessagePages(userID)
+	case strings.HasPrefix(trigger, "message.updated"), strings.HasPrefix(trigger, "message.deleted"):
+		s.commCache.invalidateMessagePages(userID)
+		s.commCache.invalidateMessage(userID, change.MessageID)
+	default:
+		s.commCache.invalidateUser(userID)
+	}
 }
 
 func (s *Server) publishCommunicationsEvent(userID, eventType, trigger, messageID string) {

@@ -426,6 +426,49 @@ func TestCommunicationsCacheEvictsBoundedEntries(t *testing.T) {
 	}
 }
 
+func TestNylasWebhookCacheInvalidationIsGranular(t *testing.T) {
+	t.Parallel()
+
+	now := time.Unix(1000, 0).UTC()
+	query := NylasMessageQuery{Limit: 5, Mailbox: "primary"}
+
+	cache := newCommunicationsCache()
+	server := &Server{commCache: cache}
+	cache.setFolders("user-1", []NylasFolder{{ID: "inbox", Name: "Inbox"}}, now)
+	cache.setMessagePage("user-1", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
+	cache.setMessage("user-1", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
+
+	server.applyNylasWebhookCacheInvalidation("user-1", nylasWebhookChange{Trigger: "message.updated", MessageID: "message-1"})
+
+	if _, ok := cache.getFolders("user-1", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
+		t.Fatal("message webhook invalidated folders; want folder cache preserved")
+	}
+	if _, ok := cache.getMessagePage("user-1", query, communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("message webhook preserved message page; want list cache invalidated")
+	}
+	if _, ok := cache.getMessage("user-1", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("message webhook preserved detail; want changed message detail invalidated")
+	}
+
+	cache = newCommunicationsCache()
+	server.commCache = cache
+	cache.setFolders("user-1", []NylasFolder{{ID: "inbox", Name: "Inbox"}}, now)
+	cache.setMessagePage("user-1", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
+	cache.setMessage("user-1", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
+
+	server.applyNylasWebhookCacheInvalidation("user-1", nylasWebhookChange{Trigger: "folder.updated"})
+
+	if _, ok := cache.getFolders("user-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("folder webhook preserved folders; want folder cache invalidated")
+	}
+	if _, ok := cache.getMessagePage("user-1", query, communicationsMaxStaleTTL, now.Add(time.Second)); ok {
+		t.Fatal("folder webhook preserved message page; want list cache invalidated")
+	}
+	if _, ok := cache.getMessage("user-1", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
+		t.Fatal("folder webhook invalidated message detail; want detail cache preserved")
+	}
+}
+
 func TestCommunicationsPrimaryMailboxUsesGmailNativeSearch(t *testing.T) {
 	t.Parallel()
 
