@@ -437,6 +437,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [selectedEmailID, setSelectedEmailID] = useState("");
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
+  const [deleteTextBlockConfirmation, setDeleteTextBlockConfirmation] = useState<{ blockID: string; title: string; chatCount: number } | null>(null);
 
   const projectionIdentity = useMemo(() => projectionsKey(projections), [projections]);
   const compact = width > 0 && width < 720;
@@ -615,7 +616,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   const deleteTextBlock = useCallback(async (blockID: string) => {
     if (!nodeID || !companyID) return;
-    if (!window.confirm("Are you sure you want to delete this?")) return;
     const timer = saveTimersRef.current.get(blockID);
     if (timer !== undefined) {
       window.clearTimeout(timer);
@@ -668,6 +668,16 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       onProjectionMutation();
     }
   }, [chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
+
+  const requestDeleteTextBlock = useCallback((blockID: string) => {
+    const block = blocks.find((item) => item.id === blockID);
+    const chatCount = chatMessages.filter((message) => message.blockID === blockID).length;
+    setDeleteTextBlockConfirmation({
+      blockID,
+      title: block?.title.trim() || DEFAULT_TEXT_BLOCK_TITLE,
+      chatCount,
+    });
+  }, [blocks, chatMessages]);
 
   const submitChat = useCallback(async (blockID: string) => {
     const message = (chatDrafts[blockID] ?? "").trim();
@@ -962,7 +972,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               <TimelineCell label={timelineRows[index]?.label ?? ""} count={timelineRows[index]?.count ?? 0} accent={accent} muted={false} />
               <div style={{ minWidth: 0 }}>
                 <div style={{ border: `1px solid ${textBlockIsFocused ? accent : strokeColor}`, borderRadius: 8, background: "rgba(255,255,255,0.72)", overflow: "hidden", boxShadow: textBlockIsFocused ? "0 0 0 2px rgba(255,136,32,0.14), 0 6px 18px rgba(0,0,0,0.05)" : "0 6px 18px rgba(0,0,0,0.05)" }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, auto) minmax(0, auto) 26px 26px", alignItems: "center", gap: 7, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 8px", background: panelBackground }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, auto) minmax(0, auto) 26px 26px", alignItems: "center", gap: 5, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, padding: "6px 6px 6px 8px", background: panelBackground }}>
                     <input
                       value={block.title}
                       onFocus={() => {
@@ -985,10 +995,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                         letterSpacing: 0,
                       }}
                     />
-                    <span title={`Last updated ${formatTimestamp(block.updatedTimestamp)}`} style={{ minWidth: 0, maxWidth: compact ? 86 : 136, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, opacity: 0.58, fontSize: 10, fontWeight: 800, letterSpacing: 0 }}>
+                    <span title={`Last updated ${formatTimestamp(block.updatedTimestamp)}`} style={{ minWidth: 0, maxWidth: compact ? 104 : 174, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, opacity: 0.58, fontSize: 10, fontWeight: 800, letterSpacing: 0 }}>
                       Updated {formatTimestamp(block.updatedTimestamp)}
                     </span>
-                    <span title={`Created ${formatTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, maxWidth: compact ? 86 : 136, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, opacity: 0.58, fontSize: 10, fontWeight: 800, letterSpacing: 0 }}>
+                    <span title={`Created ${formatTimestamp(block.createdTimestamp)}`} style={{ minWidth: 0, maxWidth: compact ? 104 : 174, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, opacity: 0.58, fontSize: 10, fontWeight: 800, letterSpacing: 0 }}>
                       Created {formatTimestamp(block.createdTimestamp)}
                     </span>
                     <button
@@ -1005,7 +1015,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       panelBackground={panelBackground}
                       strokeColor={strokeColor}
                       onRename={() => renameTextBlock(block.id)}
-                      onDelete={() => { void deleteTextBlock(block.id); }}
+                      onDelete={() => requestDeleteTextBlock(block.id)}
                     />
                   </div>
                   <NodeTextBlockEditor
@@ -1144,6 +1154,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           onClose={() => setSelectedEmailID("")}
         />
       )}
+      {deleteTextBlockConfirmation && (
+        <DeleteTextBlockConfirmationModal
+          title={deleteTextBlockConfirmation.title}
+          chatCount={deleteTextBlockConfirmation.chatCount}
+          accent={accent}
+          surfaceText={surfaceText}
+          panelBackground={panelBackground}
+          ruleColor={ruleColor}
+          onConfirm={() => {
+            const blockID = deleteTextBlockConfirmation.blockID;
+            setDeleteTextBlockConfirmation(null);
+            void deleteTextBlock(blockID);
+          }}
+          onCancel={() => setDeleteTextBlockConfirmation(null)}
+        />
+      )}
     </div>
   );
 };
@@ -1262,6 +1288,47 @@ const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
     </div>
   );
 };
+
+type DeleteTextBlockConfirmationModalProps = {
+  title: string;
+  chatCount: number;
+  accent: string;
+  surfaceText: string;
+  panelBackground: string;
+  ruleColor: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+};
+
+const DeleteTextBlockConfirmationModal: React.FC<DeleteTextBlockConfirmationModalProps> = ({
+  title,
+  chatCount,
+  accent,
+  surfaceText,
+  panelBackground,
+  ruleColor,
+  onConfirm,
+  onCancel,
+}) => (
+  <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
+    <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: `1px solid ${ruleColor}`, background: panelBackground, color: surfaceText, padding: 12, display: "grid", gap: 10, boxShadow: "0 18px 44px rgba(0,0,0,0.20)" }}>
+      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0 }}>
+        Are you sure you want to delete this?
+      </div>
+      <div style={{ fontSize: 11, lineHeight: 1.35, color: surfaceText, opacity: 0.72 }}>
+        This removes "{title}" from the middle column{chatCount > 0 ? ` and deletes ${chatCount} chat repl${chatCount === 1 ? "y" : "ies"} attached to it` : ""}.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <button type="button" onClick={onConfirm} style={{ minHeight: 28, border: `1px solid ${accent}`, background: "#ffffff", color: "#111111", cursor: "pointer", fontWeight: 700 }}>
+          Yes
+        </button>
+        <button type="button" onClick={onCancel} style={{ minHeight: 28, border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#ffffff", cursor: "pointer", fontWeight: 700 }}>
+          No
+        </button>
+      </div>
+    </div>
+  </div>
+);
 
 type NodeTextBlockEditorProps = {
   blockID: string;
@@ -1562,6 +1629,7 @@ const ChatPane: React.FC<ChatPaneProps> = ({
               key={thread.message.id}
               node={thread}
               depth={0}
+              isLastSibling={false}
               accent={accent}
               surfaceText={surfaceText}
               ruleColor={ruleColor}
@@ -1668,6 +1736,7 @@ const ChatPane: React.FC<ChatPaneProps> = ({
 type ChatThreadItemProps = {
   node: ChatThreadNode;
   depth: number;
+  isLastSibling: boolean;
   accent: string;
   surfaceText: string;
   ruleColor: string;
@@ -1675,13 +1744,16 @@ type ChatThreadItemProps = {
   onPreviewImage: (attachment: EditorChatAttachment) => void;
 };
 
-const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, accent, surfaceText, ruleColor, onReply, onPreviewImage }) => {
+const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, accent, surfaceText, ruleColor, onReply, onPreviewImage }) => {
   const { message, children } = node;
   const guideColor = "rgba(100,116,139,0.24)";
+  const guideStyle: React.CSSProperties = isLastSibling
+    ? { position: "absolute", top: -10, left: 13, width: 1, height: 23, background: guideColor }
+    : { position: "absolute", top: -10, bottom: -8, left: 13, width: 1, background: guideColor };
   return (
     <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "28px minmax(0, 1fr)", columnGap: 7, alignItems: "start" }}>
       <div style={{ position: "relative", gridRow: children.length > 0 ? "1 / span 2" : undefined, alignSelf: "stretch", display: "grid", justifyItems: "center", minHeight: 28 }}>
-        {depth > 0 && <div aria-hidden="true" style={{ position: "absolute", top: -10, bottom: -8, left: 13, width: 1, background: guideColor }} />}
+        {depth > 0 && <div aria-hidden="true" style={guideStyle} />}
         <div style={{ position: "relative", zIndex: 1, width: 26, height: 26, borderRadius: 999, border: `1px solid ${ruleColor}`, background: avatarBackgroundForName(message.authorName || message.authorID), color: surfaceText, display: "grid", placeItems: "center", fontSize: 9, fontWeight: 800, letterSpacing: 0 }}>
           {initialsForName(message.authorName || message.authorID)}
         </div>
@@ -1700,11 +1772,12 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, accent, su
       </div>
       {children.length > 0 && (
         <div style={{ gridColumn: "2", minWidth: 0, marginTop: 4, display: "grid", gap: 8 }}>
-          {children.map((child) => (
+          {children.map((child, childIndex) => (
             <ChatThreadItem
               key={child.message.id}
               node={child}
               depth={depth + 1}
+              isLastSibling={childIndex === children.length - 1}
               accent={accent}
               surfaceText={surfaceText}
               ruleColor={ruleColor}
