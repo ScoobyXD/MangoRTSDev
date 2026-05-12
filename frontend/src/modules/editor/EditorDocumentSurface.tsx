@@ -22,6 +22,7 @@ export type EditorDocumentSurfaceProps = {
   scrollbarTrack: string;
   onBeforeInput: React.FormEventHandler<HTMLDivElement>;
   onPaste: React.ClipboardEventHandler<HTMLDivElement>;
+  onCopy: React.ClipboardEventHandler<HTMLDivElement>;
   onDrop: React.DragEventHandler<HTMLDivElement>;
   onInput: React.FormEventHandler<HTMLDivElement>;
   onSelect: React.ReactEventHandler<HTMLDivElement>;
@@ -53,6 +54,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
   scrollbarTrack,
   onBeforeInput,
   onPaste,
+  onCopy,
   onDrop,
   onInput,
   onSelect,
@@ -118,6 +120,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
       spellCheck
       onBeforeInput={onBeforeInput}
       onPaste={onPaste}
+      onCopy={onCopy}
       onDrop={onDrop}
       onInput={onInput}
       onSelect={onSelect}

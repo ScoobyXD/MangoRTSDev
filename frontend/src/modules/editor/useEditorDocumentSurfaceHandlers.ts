@@ -23,28 +23,40 @@ import {
 } from "./useEditorPreferences";
 import {
   DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX,
+  EDITOR_IMAGE_MAX_WIDTH_INSET_PX,
   applyEditorImageFloatLayout,
   clampEditorImageOffset,
   clampEditorImageSize,
   clampEditorImageVerticalOffset,
   clearEditorImageSelection,
+  createEditorImageBlob,
+  createEditorImageClipboardHTML,
   createEditorImageDataFromFile,
+  createEditorImageDataFromSource,
   createEditorImageFrame,
+  estimateEditorDocumentBytes,
   findEditorImageFrame,
   getEditorImageCursorForInteraction,
   getEditorImageFloatSideForVisualLeft,
   getEditorImageHorizontalLimit,
   getEditorImageInlineOffsetForVisualLeft,
   getEditorImagePointerInteraction,
+  getEditorImageStorageBudgetForDocumentBytes,
+  readEditorImageAspectRatio,
+  readEditorImageClipboardDataFromHTML,
+  readEditorImageData,
   readEditorImageFloatSide,
   getSelectedEditorImageFrame,
   selectEditorImageFrame,
+  type EditorImageClipboardData,
+  type EditorImageData,
 } from "./editorImages";
 
 export type EditorDocumentSurfaceHandlers = Pick<
   EditorDocumentSurfaceProps,
   | "onBeforeInput"
   | "onPaste"
+  | "onCopy"
   | "onDrop"
   | "onInput"
   | "onSelect"
@@ -235,6 +247,14 @@ function getImageFileFromDataTransfer(dataTransfer: DataTransfer): File | null {
   return null;
 }
 
+function getEditorImageStorageBudget(root: HTMLElement): number {
+  return getEditorImageStorageBudgetForDocumentBytes(estimateEditorDocumentBytes(serializeEditorDocumentHTML(root)));
+}
+
+function getEditorImageMaxFrameWidth(contentWidth: number): number {
+  return Math.max(48, Math.round(contentWidth - EDITOR_IMAGE_MAX_WIDTH_INSET_PX));
+}
+
 function rangeIsStillInsideRoot(root: HTMLElement, range: Range | null): range is Range {
   if (!range) return false;
   try {
@@ -252,7 +272,36 @@ async function insertEditorImageFile(
   scheduleIndentGuideUpdate: (text: string) => void,
 ) {
   const maxDisplayWidth = Math.max(120, Math.min(720, root.clientWidth - 56));
-  const imageData = await createEditorImageDataFromFile(file, maxDisplayWidth);
+  const imageData = await createEditorImageDataFromFile(file, maxDisplayWidth, getEditorImageStorageBudget(root));
+  insertPreparedEditorImage(root, imageData, savedRange, scheduleDocumentSave, scheduleIndentGuideUpdate);
+}
+
+async function insertEditorClipboardImageData(
+  root: HTMLElement,
+  clipboardData: EditorImageClipboardData,
+  savedRange: Range | null,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+) {
+  const maxDisplayWidth = Math.max(120, Math.min(720, root.clientWidth - 56));
+  const imageData = await createEditorImageDataFromSource(clipboardData.src, maxDisplayWidth, {
+    maxStoredBytes: getEditorImageStorageBudget(root),
+    preferredWidth: clipboardData.width,
+    preferredHeight: clipboardData.height,
+    marginLeft: clipboardData.marginLeft,
+    marginTop: clipboardData.marginTop,
+    floatSide: clipboardData.floatSide,
+  });
+  insertPreparedEditorImage(root, imageData, savedRange, scheduleDocumentSave, scheduleIndentGuideUpdate);
+}
+
+function insertPreparedEditorImage(
+  root: HTMLElement,
+  imageData: EditorImageData,
+  savedRange: Range | null,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+) {
   const frame = createEditorImageFrame(root.ownerDocument, imageData);
   removeEditorTerminalBreaks(root);
   const range = rangeIsStillInsideRoot(root, savedRange) ? savedRange : getEditorSelectionRange(root);
@@ -270,7 +319,7 @@ async function insertEditorImageFile(
     selection?.addRange(range);
   }
   selectEditorImageFrame(root, frame);
-  commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+  commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
 }
 
 function replaceSelectionWithStyledText(root: HTMLElement, text: string, fontSize: number): boolean {
@@ -423,6 +472,32 @@ function commitEditorDocument(root: HTMLElement, scheduleDocumentSave: (nextText
   const plainText = readEditorDocumentText(root);
   scheduleDocumentSave(serializeEditorDocumentHTML(root), immediate);
   scheduleIndentGuideUpdate(plainText);
+}
+
+function copyEditorImageToSystemClipboard(data: EditorImageData, html: string) {
+  const clipboard = typeof navigator !== "undefined" ? navigator.clipboard : undefined;
+  if (!clipboard?.write || typeof ClipboardItem === "undefined") return;
+  const imageBlob = createEditorImageBlob(data.src);
+  if (!imageBlob) return;
+  void clipboard.write([
+    new ClipboardItem({
+      [imageBlob.type]: imageBlob,
+      "text/html": new Blob([html], { type: "text/html" }),
+      "text/plain": new Blob(["Image"], { type: "text/plain" }),
+    }),
+  ]).catch(() => undefined);
+}
+
+function copySelectedEditorImage(root: HTMLElement, clipboardData: DataTransfer): boolean {
+  const frame = getSelectedEditorImageFrame(root);
+  if (!frame) return false;
+  const data = readEditorImageData(frame);
+  if (!data) return false;
+  const html = createEditorImageClipboardHTML(root.ownerDocument, data);
+  clipboardData.setData("text/html", html);
+  clipboardData.setData("text/plain", "Image");
+  copyEditorImageToSystemClipboard(data, html);
+  return true;
 }
 
 function getFontSizeElementForNode(root: HTMLElement, node: Node | null): Element {
@@ -581,6 +656,7 @@ function startEditorImagePointerInteraction(
     marginTop: readStylePixels(frame.style.marginTop, DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX),
     floatSide: readEditorImageFloatSide(frame),
   };
+  const aspectRatio = readEditorImageAspectRatio(frame, start.width / Math.max(1, start.height));
   const previousCursor = ownerDocument.body.style.cursor;
   ownerDocument.body.style.cursor = getEditorImageCursorForInteraction(interaction);
   let latestDragVisualTop = start.visualTop;
@@ -594,32 +670,47 @@ function startEditorImagePointerInteraction(
     if (interaction.kind === "resize") {
       const minWidth = 48;
       const minHeight = 36;
+      const maxHeight = 1_600;
+      const maxFrameWidth = getEditorImageMaxFrameWidth(nextMetrics.width);
+      const fixedRight = Math.min(maxFrameWidth, start.visualLeft + start.width);
+      const fixedBottom = start.marginTop + start.height;
+      const horizontalWeight = interaction.horizontal ? Math.abs(dx) / Math.max(1, start.width) : 0;
+      const verticalWeight = interaction.vertical ? Math.abs(dy) / Math.max(1, start.height) : 0;
+      const resizeFromWidth = interaction.horizontal !== 0 && (interaction.vertical === 0 || horizontalWeight >= verticalWeight);
+
       let nextVisualLeft = start.visualLeft;
       let nextWidth = start.width;
-      if (interaction.horizontal < 0) {
-        const fixedRight = Math.min(nextMetrics.width, start.visualLeft + start.width);
-        const maxLeft = Math.max(0, fixedRight - minWidth);
-        nextVisualLeft = Math.max(0, Math.min(maxLeft, start.visualLeft + dx));
-        nextWidth = fixedRight - nextVisualLeft;
-      } else if (interaction.horizontal > 0) {
-        const maxWidth = Math.max(minWidth, nextMetrics.width - start.visualLeft);
-        nextWidth = clampEditorImageSize(start.width + dx, minWidth, maxWidth);
-      }
-
       let nextMarginTop = start.marginTop;
       let nextHeight = start.height;
-      if (interaction.vertical < 0) {
-        const fixedBottom = start.marginTop + start.height;
-        const maxTop = fixedBottom - minHeight;
-        nextMarginTop = clampEditorImageVerticalOffset(start.marginTop + dy, -5_000, maxTop);
-        nextHeight = clampEditorImageSize(fixedBottom - nextMarginTop, minHeight, 1_600);
-        nextMarginTop = fixedBottom - nextHeight;
-      } else if (interaction.vertical > 0) {
-        nextHeight = clampEditorImageSize(start.height + dy, minHeight, 1_600);
+
+      if (resizeFromWidth) {
+        if (interaction.horizontal < 0) {
+          const maxLeft = Math.max(0, fixedRight - minWidth);
+          nextVisualLeft = Math.max(0, Math.min(maxLeft, start.visualLeft + dx));
+          nextWidth = fixedRight - nextVisualLeft;
+        } else {
+          const maxWidth = Math.max(minWidth, maxFrameWidth - start.visualLeft);
+          nextWidth = clampEditorImageSize(start.width + dx, minWidth, maxWidth);
+        }
+        nextHeight = clampEditorImageSize(nextWidth / aspectRatio, minHeight, maxHeight);
+      } else {
+        if (interaction.vertical < 0) {
+          const maxTop = fixedBottom - minHeight;
+          nextMarginTop = clampEditorImageVerticalOffset(start.marginTop + dy, -5_000, maxTop);
+          nextHeight = fixedBottom - nextMarginTop;
+        } else {
+          nextHeight = clampEditorImageSize(start.height + dy, minHeight, maxHeight);
+        }
+        nextWidth = clampEditorImageSize(nextHeight * aspectRatio, minWidth, maxFrameWidth);
       }
 
-      nextWidth = clampEditorImageSize(nextWidth, minWidth, Math.max(minWidth, nextMetrics.width));
-      nextHeight = clampEditorImageSize(nextHeight, minHeight, 1_600);
+      const maxWidthForAnchor = interaction.horizontal < 0 ? Math.max(minWidth, fixedRight) : Math.max(minWidth, maxFrameWidth - start.visualLeft);
+      const sizeScale = Math.min(1, maxWidthForAnchor / Math.max(1, nextWidth), maxHeight / Math.max(1, nextHeight));
+      nextWidth = clampEditorImageSize(nextWidth * sizeScale, minWidth, maxWidthForAnchor);
+      nextHeight = clampEditorImageSize(nextWidth / aspectRatio, minHeight, maxHeight);
+      if (interaction.horizontal < 0) nextVisualLeft = fixedRight - nextWidth;
+      if (interaction.vertical < 0) nextMarginTop = fixedBottom - nextHeight;
+
       nextVisualLeft = clampEditorImageOffset(
         nextVisualLeft,
         getEditorImageHorizontalLimit(nextMetrics.width, nextWidth),
@@ -628,6 +719,7 @@ function startEditorImagePointerInteraction(
       applyEditorImageFloatLayout(frame, start.floatSide, inlineOffset);
       frame.style.width = `${nextWidth}px`;
       frame.style.height = `${nextHeight}px`;
+      frame.style.aspectRatio = `${nextWidth} / ${nextHeight}`;
       frame.style.marginTop = `${clampEditorImageVerticalOffset(nextMarginTop, -5_000, 5_000)}px`;
       return;
     }
@@ -650,7 +742,7 @@ function startEditorImagePointerInteraction(
     if (interaction.kind === "drag" && shouldReanchorAfterDrag && reanchorEditorImageForVisualTop(root, frame, latestDragVisualTop)) {
       frame.style.marginTop = `${DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX}px`;
     }
-    commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+    commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
   };
 
   ownerDocument.addEventListener("pointermove", onPointerMove);
@@ -728,6 +820,16 @@ export function useEditorDocumentSurfaceHandlers({
         return;
       }
 
+      const html = event.clipboardData.getData("text/html");
+      const clipboardImageData = readEditorImageClipboardDataFromHTML(event.currentTarget.ownerDocument, html);
+      if (clipboardImageData) {
+        event.preventDefault();
+        pendingEditorFontSizeRef.current = null;
+        const savedRange = getEditorSelectionRange(event.currentTarget)?.cloneRange() ?? null;
+        void insertEditorClipboardImageData(event.currentTarget, clipboardImageData, savedRange, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        return;
+      }
+
       const text = event.clipboardData.getData("text/plain");
       if (!text) return;
       event.preventDefault();
@@ -737,6 +839,10 @@ export function useEditorDocumentSurfaceHandlers({
         commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
       }
     },
+    onCopy(event) {
+      if (!copySelectedEditorImage(event.currentTarget, event.clipboardData)) return;
+      event.preventDefault();
+    },
     onDrop(event) {
       const imageFile = getImageFileFromDataTransfer(event.dataTransfer);
       if (imageFile) {
@@ -745,6 +851,17 @@ export function useEditorDocumentSurfaceHandlers({
         event.currentTarget.focus({ preventScroll: true });
         const savedRange = getEditorSelectionRange(event.currentTarget)?.cloneRange() ?? null;
         void insertEditorImageFile(event.currentTarget, imageFile, savedRange, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        return;
+      }
+
+      const html = event.dataTransfer.getData("text/html");
+      const clipboardImageData = readEditorImageClipboardDataFromHTML(event.currentTarget.ownerDocument, html);
+      if (clipboardImageData) {
+        event.preventDefault();
+        pendingEditorFontSizeRef.current = null;
+        event.currentTarget.focus({ preventScroll: true });
+        const savedRange = getEditorSelectionRange(event.currentTarget)?.cloneRange() ?? null;
+        void insertEditorClipboardImageData(event.currentTarget, clipboardImageData, savedRange, scheduleDocumentSave, scheduleIndentGuideUpdate);
         return;
       }
 
@@ -836,7 +953,7 @@ export function useEditorDocumentSurfaceHandlers({
 
       if ((event.key === "Backspace" || event.key === "Delete") && removeSelectedEditorImage(event.currentTarget)) {
         event.preventDefault();
-        commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
         return;
       }
 

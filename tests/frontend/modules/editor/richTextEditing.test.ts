@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { sanitizeAPIErrorMessage } from "../../../../frontend/src/modules/api/requestJSON.js";
 import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, deserializeEditorDocumentHTML, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
-import { clampEditorImageVerticalOffset, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, isSafeEditorImageSource } from "../../../../frontend/src/modules/editor/editorImages.js";
+import { clampEditorImageVerticalOffset, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isSafeEditorImageSource } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
   assert.equal(EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, 20);
@@ -76,4 +76,10 @@ test("editor image wrapping flips to the side nearest the image", () => {
 test("editor image vertical offset allows moving above the insertion point", () => {
   assert.equal(clampEditorImageVerticalOffset(-240, -5_000, 5_000), -240);
   assert.equal(clampEditorImageVerticalOffset(-6_000, -5_000, 5_000), -5_000);
+});
+
+test("editor image storage budget shrinks near the document save limit", () => {
+  assert.equal(getEditorImageStorageBudgetForDocumentBytes(1_000), 220_000);
+  assert.equal(getEditorImageStorageBudgetForDocumentBytes(650_000), 74_800);
+  assert.equal(getEditorImageStorageBudgetForDocumentBytes(740_000), 48_000);
 });
