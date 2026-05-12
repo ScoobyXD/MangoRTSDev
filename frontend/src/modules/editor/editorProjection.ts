@@ -9,6 +9,7 @@ export type EditorProjectionItem = {
 export const EDITOR_TEXT_BLOCK_TYPE = "Text box";
 export const EDITOR_TEXT_BLOCK_CHAT_TYPE = "Text block chat";
 export const EDITOR_ATTACHED_EMAIL_TYPE = "Attached email";
+export const EDITOR_TEXT_BLOCK_CONTENT_PREFIX = "<!-- mango-node-text-block-v1 -->";
 
 export type EditorTextBlockProjection<T extends EditorProjectionItem = EditorProjectionItem> = T & {
   type: typeof EDITOR_TEXT_BLOCK_TYPE;
@@ -32,6 +33,11 @@ export type EditorAttachedEmail = {
   from?: string;
   date?: number;
   attachedTimestamp: string;
+};
+
+export type EditorTextBlockContent = {
+  title: string;
+  document: string;
 };
 
 function compareProjectionFreshness(a: EditorProjectionItem, b: EditorProjectionItem): number {
@@ -120,6 +126,24 @@ export function buildEditorAttachedEmailPayload(input: {
   });
 }
 
+export function parseEditorTextBlockContent(value: string): EditorTextBlockContent {
+  if (!value.startsWith(EDITOR_TEXT_BLOCK_CONTENT_PREFIX)) return { title: "", document: value };
+  const payload = parsePayload(value.slice(EDITOR_TEXT_BLOCK_CONTENT_PREFIX.length));
+  if (!payload || typeof payload !== "object") return { title: "", document: "" };
+  const record = payload as Record<string, unknown>;
+  return {
+    title: stringValue(record, "title"),
+    document: rawStringValue(record, "document"),
+  };
+}
+
+export function buildEditorTextBlockContentPayload(input: EditorTextBlockContent): string {
+  const title = input.title.trim();
+  const document = input.document.trim() ? input.document : "";
+  if (!title && !document) return "";
+  return `${EDITOR_TEXT_BLOCK_CONTENT_PREFIX}${JSON.stringify({ title, document })}`;
+}
+
 function parsePayload(value: string): unknown {
   try {
     return JSON.parse(value) as unknown;
@@ -131,6 +155,11 @@ function parsePayload(value: string): unknown {
 function stringValue(payload: Record<string, unknown>, key: string): string {
   const value = payload[key];
   return typeof value === "string" ? value.trim() : "";
+}
+
+function rawStringValue(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  return typeof value === "string" ? value : "";
 }
 
 function numberValue(payload: Record<string, unknown>, key: string): number | undefined {

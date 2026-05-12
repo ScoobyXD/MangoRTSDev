@@ -127,6 +127,11 @@ type OverlayResizeState = {
   boardHeight: number;
 };
 
+type NodeEditorOverlayRatio = {
+  width: number;
+  height: number;
+};
+
 const nodeEditorOverlayResizeHandles: Array<{
   key: string;
   edges: OverlayResizeState["edges"];
@@ -142,6 +147,36 @@ const nodeEditorOverlayResizeHandles: Array<{
   { key: "left", edges: { left: true }, cursor: "ew-resize", style: { left: -4, top: 18, bottom: 18, width: 8 } },
   { key: "right", edges: { right: true }, cursor: "ew-resize", style: { right: -4, top: 18, bottom: 18, width: 8 } },
 ];
+
+const DEFAULT_NODE_EDITOR_OVERLAY_RATIO: NodeEditorOverlayRatio = { width: 0.78, height: 0.82 };
+
+function nodeEditorOverlayRatioStorageKey(companyID: string, frameID: string): string {
+  return `kanban-node-editor-overlay-ratio-v1:${companyID}:${frameID}`;
+}
+
+function clampNodeEditorOverlayRatio(value: NodeEditorOverlayRatio): NodeEditorOverlayRatio {
+  return {
+    width: Math.max(0.42, Math.min(value.width, 0.96)),
+    height: Math.max(0.42, Math.min(value.height, 0.94)),
+  };
+}
+
+function readNodeEditorOverlayRatio(companyID: string, frameID: string): NodeEditorOverlayRatio {
+  if (typeof localStorage === "undefined") return DEFAULT_NODE_EDITOR_OVERLAY_RATIO;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(nodeEditorOverlayRatioStorageKey(companyID, frameID)) ?? "") as Partial<NodeEditorOverlayRatio>;
+    const width = typeof parsed.width === "number" && Number.isFinite(parsed.width) ? parsed.width : DEFAULT_NODE_EDITOR_OVERLAY_RATIO.width;
+    const height = typeof parsed.height === "number" && Number.isFinite(parsed.height) ? parsed.height : DEFAULT_NODE_EDITOR_OVERLAY_RATIO.height;
+    return clampNodeEditorOverlayRatio({ width, height });
+  } catch {
+    return DEFAULT_NODE_EDITOR_OVERLAY_RATIO;
+  }
+}
+
+function storeNodeEditorOverlayRatio(companyID: string, frameID: string, ratio: NodeEditorOverlayRatio) {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(nodeEditorOverlayRatioStorageKey(companyID, frameID), JSON.stringify(clampNodeEditorOverlayRatio(ratio)));
+}
 
 const contextMenuButtonStyle: React.CSSProperties = {
   display: "flex",
@@ -309,7 +344,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [columnContextMenu, setColumnContextMenu] = useState<{ x: number; y: number; columnID: string } | null>(null);
   const [cardContextMenu, setCardContextMenu] = useState<{ x: number; y: number; cardID: string } | null>(null);
   const [nodeEditorOverlay, setNodeEditorOverlay] = useState<NodeEditorOverlayState | null>(null);
-  const [nodeEditorOverlayRatio, setNodeEditorOverlayRatio] = useState({ width: 0.78, height: 0.82 });
+  const [nodeEditorOverlayRatio, setNodeEditorOverlayRatio] = useState<NodeEditorOverlayRatio>(() => readNodeEditorOverlayRatio(companyID, frameID));
   const [deleteColumnConfirmation, setDeleteColumnConfirmation] = useState<{ columnID: string; title: string } | null>(null);
   const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
   const [deleteNodeConfirmation, setDeleteNodeConfirmation] = useState<{ nodeIDs: string[] } | null>(null);
@@ -317,6 +352,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const arenaGroupControlsRef = useRef<HTMLDivElement | null>(null);
   const resizeRef = useRef<ColumnResizeState | null>(null);
   const nodeEditorOverlayResizeRef = useRef<OverlayResizeState | null>(null);
+  const nodeEditorOverlayRatioRef = useRef(nodeEditorOverlayRatio);
   const activeBoardIDRef = useRef(activeBoardID);
   const frameBoardIDRef = useRef(frameBoardID);
   const boardsRef = useRef<KanbanBoard[]>([]);
@@ -368,7 +404,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setActiveLogicGateID("");
     setActiveLogicGateLabel("");
     setNodeEditorOverlay(null);
-  }, [frameBoardID]);
+    setNodeEditorOverlayRatio(readNodeEditorOverlayRatio(companyID, frameBoardID));
+  }, [companyID, frameBoardID]);
+
+  useEffect(() => {
+    nodeEditorOverlayRatioRef.current = nodeEditorOverlayRatio;
+  }, [nodeEditorOverlayRatio]);
 
   useEffect(() => {
     activeBoardIDRef.current = activeBoardID;
@@ -418,12 +459,17 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       if (state.edges.left) width -= dx;
       if (state.edges.bottom) height += dy;
       if (state.edges.top) height -= dy;
-      setNodeEditorOverlayRatio({
-        width: Math.max(0.42, Math.min(width / Math.max(1, state.boardWidth), 0.96)),
-        height: Math.max(0.42, Math.min(height / Math.max(1, state.boardHeight), 0.94)),
+      const nextRatio = clampNodeEditorOverlayRatio({
+        width: width / Math.max(1, state.boardWidth),
+        height: height / Math.max(1, state.boardHeight),
       });
+      nodeEditorOverlayRatioRef.current = nextRatio;
+      setNodeEditorOverlayRatio(nextRatio);
     };
     const onEnd = () => {
+      if (nodeEditorOverlayResizeRef.current) {
+        storeNodeEditorOverlayRatio(companyID, frameID, nodeEditorOverlayRatioRef.current);
+      }
       nodeEditorOverlayResizeRef.current = null;
     };
     window.addEventListener("mousemove", onMove);
@@ -432,7 +478,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onEnd);
     };
-  }, []);
+  }, [companyID, frameID]);
 
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
   const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, normalizeKanbanColumnItemColor(column.item_color)])), [orderedColumns]);

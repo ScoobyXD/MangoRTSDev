@@ -1108,6 +1108,17 @@ export function useEditorDocumentSurfaceHandlers({
 
       if (PENDING_FONT_SIZE_CANCEL_KEYS.has(event.key)) pendingEditorFontSizeRef.current = null;
 
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "x") {
+        const undoBefore = snapshotEditorDocumentRoot(root);
+        if (removeSelectedEditorImage(root)) {
+          event.preventDefault();
+          pendingEditorFontSizeRef.current = null;
+          recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "image");
+          commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
+          return;
+        }
+      }
+
       if (event.key === "Backspace" || event.key === "Delete") {
         const undoBefore = snapshotEditorDocumentRoot(root);
         if (!removeSelectedEditorImage(root)) {

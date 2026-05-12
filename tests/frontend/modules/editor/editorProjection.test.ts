@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildEditorAttachedEmailPayload,
+  buildEditorTextBlockContentPayload,
   buildEditorTextBlockChatPayload,
   listEditorTextBlockProjections,
   parseEditorAttachedEmails,
+  parseEditorTextBlockContent,
   parseEditorTextBlockChats,
   selectCurrentEditorTextProjection,
 } from "../../../../frontend/src/modules/editor/editorProjection.js";
@@ -55,6 +57,22 @@ test("parses node text block chat projection payloads", () => {
   assert.equal(messages[0].blockID, "block-1");
   assert.equal(messages[0].authorName, "Ada");
   assert.equal(messages[0].message, "Check this section");
+});
+
+test("parses titled node text block content payloads with legacy fallback", () => {
+  const payload = buildEditorTextBlockContentPayload({
+    title: "Decision notes",
+    document: "<!-- mango-editor-html-v1 --><b>Ship it</b>",
+  });
+
+  assert.deepEqual(parseEditorTextBlockContent(payload), {
+    title: "Decision notes",
+    document: "<!-- mango-editor-html-v1 --><b>Ship it</b>",
+  });
+  assert.deepEqual(parseEditorTextBlockContent("legacy text"), {
+    title: "",
+    document: "legacy text",
+  });
 });
 
 test("parses attached email projection payloads", () => {
