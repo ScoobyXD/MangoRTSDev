@@ -93,6 +93,7 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 			CreatedTimestamp: now,
 		}
 		r.logicGates[key(input.CompanyID, created.LogicGateID)] = created
+		r.ensureLogicGateKanbanBoardLocked(input.CompanyID, created.LogicGateID, created.Header)
 		result.LogicGates = append(result.LogicGates, created)
 		clientToEntityID[item.ClientID] = created.LogicGateID
 		result.EntityMappings = append(result.EntityMappings, MapEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.LogicGateID})
