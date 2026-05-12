@@ -49,8 +49,16 @@ func TestEnsureLogicGateKanbanBoardSQL_DefaultColumnsAreConflictSafe(t *testing.
 	}
 
 	columnInsertCount := 0
+	sawAdvisoryLock := false
+	sawAttachedBoardLookup := false
 	for _, query := range exec.queries {
 		normalized := strings.ToLower(strings.Join(strings.Fields(query), " "))
+		if strings.Contains(normalized, "pg_advisory_xact_lock") {
+			sawAdvisoryLock = true
+		}
+		if strings.Contains(normalized, "kb.logic_gate_id = p.logic_gate_id") {
+			sawAttachedBoardLookup = true
+		}
 		if strings.Contains(normalized, "insert into kanban_columns") {
 			columnInsertCount++
 			if !strings.Contains(normalized, "do update set") {
@@ -58,7 +66,13 @@ func TestEnsureLogicGateKanbanBoardSQL_DefaultColumnsAreConflictSafe(t *testing.
 			}
 		}
 	}
-	if columnInsertCount != 3 {
-		t.Fatalf("default column insert count = %d, want 3", columnInsertCount)
+	if !sawAdvisoryLock {
+		t.Fatal("ensure should take a per-gate advisory lock before repairing arena state")
+	}
+	if !sawAttachedBoardLookup {
+		t.Fatal("ensure should reuse an existing board attached by logic_gate_id before creating a preferred board_id")
+	}
+	if columnInsertCount != 1 {
+		t.Fatalf("default column insert count = %d, want 1 set-based insert", columnInsertCount)
 	}
 }

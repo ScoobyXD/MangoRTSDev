@@ -135,30 +135,56 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	}
 	boardID := LogicGateKanbanBoardID(logicGateID)
 	if _, err := tx.ExecContext(ctx,
-		`delete from company_explorer_folder_items
-		 where company_id=$1 and item_type='kanban' and item_id=$2`,
-		companyID, boardID,
+		`with target_boards as (
+		   select $3::text as board_id
+		   union
+		   select board_id
+		   from kanban_boards
+		   where company_id=$1 and logic_gate_id=$2::uuid
+		 )
+		 delete from company_explorer_folder_items
+		 where company_id=$1
+		   and item_type='kanban'
+		   and item_id in (select board_id from target_boards)`,
+		companyID, logicGateID, boardID,
 	); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`delete from kanban_cards
-		 where company_id=$1 and board_id=$2`,
-		companyID, boardID,
+		`with target_boards as (
+		   select $3::text as board_id
+		   union
+		   select board_id
+		   from kanban_boards
+		   where company_id=$1 and logic_gate_id=$2::uuid
+		 )
+		 delete from kanban_cards
+		 where company_id=$1
+		   and board_id in (select board_id from target_boards)`,
+		companyID, logicGateID, boardID,
 	); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`delete from kanban_columns
-		 where company_id=$1 and board_id=$2`,
-		companyID, boardID,
+		`with target_boards as (
+		   select $3::text as board_id
+		   union
+		   select board_id
+		   from kanban_boards
+		   where company_id=$1 and logic_gate_id=$2::uuid
+		 )
+		 delete from kanban_columns
+		 where company_id=$1
+		   and board_id in (select board_id from target_boards)`,
+		companyID, logicGateID, boardID,
 	); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
 		`delete from kanban_boards
-		 where company_id=$1 and board_id=$2`,
-		companyID, boardID,
+		 where company_id=$1
+		   and (board_id=$3 or logic_gate_id=$2::uuid)`,
+		companyID, logicGateID, boardID,
 	); err != nil {
 		return err
 	}

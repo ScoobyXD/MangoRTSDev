@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"log"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -26,12 +27,14 @@ func (s *Server) handleLogicGateArena(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		log.Printf("failed to load logic gate for arena company_id=%s logic_gate_id=%s: %v", companyID, logicGateID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
 		return
 	}
 
 	boards, err := s.repo.ListKanbanBoards(companyID, store.KanbanBoardQuery{LogicGateID: logicGateID, Limit: 2})
 	if err != nil {
+		log.Printf("failed to list logic gate arena boards company_id=%s logic_gate_id=%s: %v", companyID, logicGateID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
 		return
 	}
@@ -40,6 +43,7 @@ func (s *Server) handleLogicGateArena(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		board, err = s.repo.EnsureLogicGateKanbanBoard(companyID, logicGateID, logicGate.Header)
 		if err != nil {
+			log.Printf("failed to ensure logic gate arena board company_id=%s logic_gate_id=%s: %v", companyID, logicGateID, err)
 			writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
 			return
 		}
@@ -47,23 +51,27 @@ func (s *Server) handleLogicGateArena(w http.ResponseWriter, r *http.Request) {
 
 	columns, err := s.repo.ListKanbanColumns(companyID, board.BoardID)
 	if err != nil {
+		log.Printf("failed to list logic gate arena columns company_id=%s logic_gate_id=%s board_id=%s: %v", companyID, logicGateID, board.BoardID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
 		return
 	}
 	if logicGateArenaDefaultColumnsMissing(columns) {
 		board, err = s.repo.EnsureLogicGateKanbanBoard(companyID, logicGateID, logicGate.Header)
 		if err != nil {
+			log.Printf("failed to repair logic gate arena default columns company_id=%s logic_gate_id=%s board_id=%s: %v", companyID, logicGateID, board.BoardID, err)
 			writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
 			return
 		}
 		columns, err = s.repo.ListKanbanColumns(companyID, board.BoardID)
 		if err != nil {
+			log.Printf("failed to list repaired logic gate arena columns company_id=%s logic_gate_id=%s board_id=%s: %v", companyID, logicGateID, board.BoardID, err)
 			writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
 			return
 		}
 	}
 	cards, err := s.repo.ListKanbanCards(companyID, board.BoardID, store.KanbanCardQuery{Limit: store.KanbanMaxCardsLimit})
 	if err != nil {
+		log.Printf("failed to list logic gate arena cards company_id=%s logic_gate_id=%s board_id=%s: %v", companyID, logicGateID, board.BoardID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
 		return
 	}
@@ -82,6 +90,9 @@ func selectLogicGateArenaBoard(boards []domain.KanbanBoard, expectedBoardID stri
 		if board.BoardID == expectedBoardID {
 			return board, true
 		}
+	}
+	if len(boards) > 0 {
+		return boards[0], true
 	}
 	return domain.KanbanBoard{}, false
 }
