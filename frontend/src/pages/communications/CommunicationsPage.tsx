@@ -6,6 +6,9 @@ import { preloadLogicGateArenaSurface } from "../../app/preloadDashboardModules"
 import {
   applyEmailMessageToCachedPages,
   createCommunicationsSharedInbox,
+  addMessagesToMyTriage,
+  addMyLogicGateShortcuts,
+  convertTriageMessagesToLogicGate,
   deleteEmailMessage,
   disconnectCommunications,
   emailMessageMatchesListFilters,
@@ -18,9 +21,16 @@ import {
   listEmailFolders,
   listEmailMessages,
   listCommunicationsSharedInboxes,
+  listCommunicationsTriageItems,
+  listLogicGateFolderItems,
+  listLogicGateFolders,
+  listLogicGates,
+  listMyLogicGateShortcuts,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
   primeEmailMessageCache,
+  removeMessageFromMyTriage,
+  removeMyLogicGateShortcut,
   removeEmailMessageFromCache,
   sendEmail,
   updateEmailMessage,
@@ -30,8 +40,21 @@ import {
   type EmailMailbox,
   type EmailMessage,
   type CommunicationsStatus,
+  type UserLogicGateShortcut,
 } from "./communicationsApi";
 import { subscribeCommunicationsStream } from "./communicationsStream";
+import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
+import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import {
+  collectFolderSubtreeIDs,
+  EXPLORER_DRAG_MIME,
+  getExplorerDragPayloadForSelection,
+  readExplorerDragPayload,
+} from "../../modules/company-explorer/companyExplorerDragDrop";
+import { buildCompanyExplorerTreeRows } from "../../modules/company-explorer/companyExplorerTreeRows";
+import { getExplorerDropPayloadItems, resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
+import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
+import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
 
 type CommunicationsPageProps = {
   me?: CurrentUserResponse;
@@ -72,6 +95,7 @@ type CommunicationsStreamEnvelope = {
 
 type CommunicationsViewID =
   | "primary"
+  | "my-triage"
   | "shared-root"
   | "logic-gate"
   | "my-nodes"
@@ -85,6 +109,7 @@ const MAILBOX_OPTIONS: MailboxOption[] = [
 ];
 
 const MESSAGE_BATCH_SIZE = 25;
+const TRIAGE_MESSAGE_DRAG_MIME = "application/x-mangorts-communications-triage-messages";
 
 export function CommunicationsPage({ me, onNavigate, embedded = false }: CommunicationsPageProps) {
   const companyID = getActiveCompanyID();
@@ -95,7 +120,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const [mailbox, setMailbox] = useState<EmailMailbox>("primary");
   const [activeViewID, setActiveViewID] = useState<CommunicationsViewID>("primary");
   const [selectedMessageID, setSelectedMessageID] = useState("");
+  const [selectedMessageIDs, setSelectedMessageIDs] = useState<Set<string>>(new Set());
+  const [selectionAnchorMessageID, setSelectionAnchorMessageID] = useState("");
   const [selectedMessage, setSelectedMessage] = useState<EmailMessage | null>(null);
+  const [messageContextMenu, setMessageContextMenu] = useState<{ x: number; y: number; messageIDs: string[] } | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -107,6 +135,15 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
+  const [loadingLogicGates, setLoadingLogicGates] = useState(false);
+  const [logicGateFolders, setLogicGateFolders] = useState<CompanyExplorerFolder[]>([]);
+  const [logicGateFolderItems, setLogicGateFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
+  const [logicGates, setLogicGates] = useState<LogicGateRecord[]>([]);
+  const [myLogicGateShortcuts, setMyLogicGateShortcuts] = useState<UserLogicGateShortcut[]>([]);
+  const [logicGateSearch, setLogicGateSearch] = useState("");
+  const [logicGateExpandedIDs, setLogicGateExpandedIDs] = useState<Set<string>>(new Set());
+  const [selectedLogicGateRowIDs, setSelectedLogicGateRowIDs] = useState<Set<string>>(new Set());
+  const [logicGateSelectionAnchorID, setLogicGateSelectionAnchorID] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -118,6 +155,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const pendingMessageReloadRef = useRef(false);
   const messageRequestSeqRef = useRef(0);
   const selectedMessageIDRef = useRef("");
+  const activeViewIDRef = useRef<CommunicationsViewID>("primary");
   const folderReloadTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<EmailMessage[]>([]);
   const mailboxRef = useRef<EmailMailbox>("primary");
@@ -135,7 +173,16 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   }, [selectedMessageID]);
 
   useEffect(() => {
+    activeViewIDRef.current = activeViewID;
+  }, [activeViewID]);
+
+  useEffect(() => {
     messagesRef.current = messages;
+    setSelectedMessageIDs((previous) => {
+      const visible = new Set(messages.map((message) => message.id));
+      const next = new Set(Array.from(previous).filter((id) => visible.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
   }, [messages]);
 
   useEffect(() => {
@@ -194,6 +241,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         setMessages([]);
         setSelectedMessage(null);
         setSelectedMessageID("");
+        setSelectedMessageIDs(new Set());
+        setSelectionAnchorMessageID("");
         setNextPageToken("");
       }
       return next;
@@ -212,6 +261,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     setMessages([]);
     setSelectedMessage(null);
     setSelectedMessageID("");
+    setSelectedMessageIDs(new Set());
+    setSelectionAnchorMessageID("");
     await loadStatus();
     setError(formatError(accessError, "Email access expired. Disconnect and reconnect your mailbox."));
   }, [loadStatus]);
@@ -252,9 +303,37 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     }
   }, [companyID]);
 
+  const loadLogicGatePanel = useCallback(async (): Promise<boolean> => {
+    if (!companyID) return false;
+    setLoadingLogicGates(true);
+    try {
+      const [nextFolders, nextFolderItems, nextLogicGates, nextShortcuts] = await Promise.all([
+        listLogicGateFolders(companyID),
+        listLogicGateFolderItems(companyID),
+        listLogicGates(companyID),
+        listMyLogicGateShortcuts(companyID),
+      ]);
+      setLogicGateFolders(nextFolders);
+      setLogicGateFolderItems(nextFolderItems);
+      setLogicGates(nextLogicGates);
+      setMyLogicGateShortcuts(sortLogicGateShortcuts(nextShortcuts));
+      setLogicGateExpandedIDs((previous) => {
+        const next = new Set(previous);
+        for (const folder of nextFolders) next.add(`workspace-folder-${folder.folder_id}`);
+        return next;
+      });
+      return true;
+    } catch (logicGateError) {
+      setError(formatError(logicGateError, "Failed to load Logic Gates"));
+      return false;
+    } finally {
+      setLoadingLogicGates(false);
+    }
+  }, [companyID]);
+
   const loadMessages = useCallback(async () => {
     if (!status?.connected) return;
-    const requestKey = JSON.stringify([mailbox, searchQuery, unreadOnly]);
+    const requestKey = JSON.stringify([activeViewID, mailbox, searchQuery, unreadOnly]);
     messageListFilterKeyRef.current = requestKey;
     if (messageRequestKeyRef.current === requestKey) {
       pendingMessageReloadRef.current = true;
@@ -266,6 +345,25 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     setLoadingMessages(true);
     setError("");
     try {
+      if (activeViewID === "my-triage") {
+        const triageItems = await listCommunicationsTriageItems();
+        const nextMessages = triageItems
+          .map((item) => item.message)
+          .filter((message) => emailMessageMatchesListFilters(message, {
+            mailbox: "all",
+            q: searchQuery,
+            unread: unreadOnly ? true : undefined,
+          }));
+        if (messageRequestSeqRef.current !== requestSeq) return;
+        setMessages(nextMessages);
+        setNextPageToken("");
+        const currentSelectedMessageID = selectedMessageIDRef.current;
+        if (currentSelectedMessageID && !nextMessages.some((message) => message.id === currentSelectedMessageID)) {
+          setSelectedMessageID("");
+          setSelectedMessage(null);
+        }
+        return;
+      }
       const page = await listEmailMessages({
         limit: MESSAGE_BATCH_SIZE,
         mailbox,
@@ -298,10 +396,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         }
       }
     }
-  }, [handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
+  }, [activeViewID, handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
 
   const loadMoreMessages = useCallback(async () => {
-    if (!status?.connected || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
+    if (!status?.connected || activeViewIDRef.current === "my-triage" || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
     const pageToken = nextPageTokenRef.current.trim();
     if (!pageToken) return;
     const filterKey = JSON.stringify([mailboxRef.current, searchQueryRef.current, unreadOnlyRef.current]);
@@ -341,6 +439,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   useEffect(() => { void loadStatus(); }, [loadStatus]);
   useEffect(() => { if (status?.connected) void loadFolders(); }, [loadFolders, status?.connected]);
   useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
+  useEffect(() => { if (status?.connected) void loadLogicGatePanel(); }, [loadLogicGatePanel, status?.connected]);
   useEffect(() => { void loadMessages(); }, [loadMessages]);
 
   useEffect(() => {
@@ -385,6 +484,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         }
         const trigger = envelope.trigger?.trim().toLowerCase() ?? "";
         const messageID = envelope.message_id?.trim() ?? "";
+        if (trigger.startsWith("triage.")) {
+          if (activeViewIDRef.current === "my-triage") void loadMessages();
+          return;
+        }
         if (trigger.startsWith("folder.")) {
           scheduleFolderRefresh();
           return;
@@ -434,10 +537,16 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         folderReloadTimerRef.current = null;
       }
     };
-  }, [handleEmailAccessExpired, loadFolders, status?.connected]);
+  }, [handleEmailAccessExpired, loadFolders, loadMessages, status?.connected]);
 
   useEffect(() => {
-    if (!selectedMessageID) return;
+    if (activeViewID !== "my-triage" || !selectedMessageID) return;
+    setLoadingDetail(false);
+    setSelectedMessage(messages.find((message) => message.id === selectedMessageID) ?? null);
+  }, [activeViewID, messages, selectedMessageID]);
+
+  useEffect(() => {
+    if (!selectedMessageID || activeViewID === "my-triage") return;
     let cancelled = false;
     setLoadingDetail(true);
     setError("");
@@ -458,7 +567,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         if (!cancelled) setLoadingDetail(false);
       });
     return () => { cancelled = true; };
-  }, [handleEmailAccessExpired, selectedMessageID]);
+  }, [activeViewID, handleEmailAccessExpired, selectedMessageID]);
 
   const archiveFolder = useMemo(() => findSystemFolder(folders, "archive"), [folders]);
   const connection = status?.connection;
@@ -499,7 +608,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     setMailbox(nextMailbox);
     setNextPageToken("");
     setSelectedMessageID("");
+    setSelectedMessageIDs(new Set());
+    setSelectionAnchorMessageID("");
     setSelectedMessage(null);
+    setMessageContextMenu(null);
   };
 
   const selectCommunicationsView = (viewID: CommunicationsViewID, nextMailbox: EmailMailbox = "primary") => {
@@ -615,6 +727,168 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     }
   };
 
+  const logicGateByID = useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
+  const logicGateCanvasRecords = useMemo(() => logicGates.map((logicGate) => ({
+    ...logicGate,
+    node_id: logicGate.logic_gate_id,
+    title: logicGate.header,
+  })), [logicGates]);
+  const allLogicGateRows = useMemo(() => buildCompanyExplorerTreeRows({
+    expanded: logicGateExpandedIDs,
+    nodes: [],
+    logicGates: logicGateCanvasRecords,
+    kanbanBoards: [],
+    folders: logicGateFolders,
+    folderItems: logicGateFolderItems,
+    rootRowOrder: {},
+  }).filter((row) => row.kind === "folder" || row.kind === "logic_gate"), [logicGateCanvasRecords, logicGateExpandedIDs, logicGateFolderItems, logicGateFolders]);
+  const visibleLogicGateRows = useMemo(() => filterLogicGateRowsForSearch(allLogicGateRows, logicGateSearch), [allLogicGateRows, logicGateSearch]);
+  const myLogicGateGroups = useMemo(() => buildMyLogicGateGroups({
+    shortcuts: myLogicGateShortcuts,
+    logicGateByID,
+    folders: logicGateFolders,
+    folderItems: logicGateFolderItems,
+  }), [logicGateByID, logicGateFolderItems, logicGateFolders, myLogicGateShortcuts]);
+
+  const selectMessageRow = useCallback((message: EmailMessage, event: React.MouseEvent) => {
+    const orderedIDs = messages.map((item) => item.id);
+    const next = resolveExplorerClickSelection({
+      orderedIDs,
+      previousSelectedIDs: selectedMessageIDs,
+      anchorID: selectionAnchorMessageID,
+      clickedID: message.id,
+      shiftKey: event.shiftKey,
+      ctrlKey: event.ctrlKey || event.metaKey,
+    });
+    setSelectedMessageIDs(next.selectedIDs);
+    setSelectionAnchorMessageID(next.anchorID);
+    setSelectedMessageID(message.id);
+    setMessageContextMenu(null);
+  }, [messages, selectedMessageIDs, selectionAnchorMessageID]);
+
+  const openMessageContextMenu = useCallback((message: EmailMessage, event: React.MouseEvent) => {
+    event.preventDefault();
+    const nextIDs = selectedMessageIDs.has(message.id) ? Array.from(selectedMessageIDs) : [message.id];
+    setSelectedMessageIDs(new Set(nextIDs));
+    setSelectionAnchorMessageID(message.id);
+    setSelectedMessageID(message.id);
+    setMessageContextMenu({ x: event.clientX, y: event.clientY, messageIDs: nextIDs });
+  }, [selectedMessageIDs]);
+
+  const startMessageDrag = useCallback((message: EmailMessage, event: React.DragEvent<HTMLButtonElement>) => {
+    if (activeViewID !== "my-triage") return;
+    const messageIDs = selectedMessageIDs.has(message.id) ? Array.from(selectedMessageIDs) : [message.id];
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(TRIAGE_MESSAGE_DRAG_MIME, JSON.stringify({ kind: "triage_messages", message_ids: messageIDs }));
+    event.dataTransfer.setData("text/plain", messageIDs.join(","));
+  }, [activeViewID, selectedMessageIDs]);
+
+  const addSelectedMessagesToTriage = useCallback(async (messageIDs: string[]) => {
+    const ids = cleanIDList(messageIDs);
+    if (ids.length === 0) return;
+    setBusy("triage");
+    setError("");
+    try {
+      await addMessagesToMyTriage(ids);
+      setNotice(ids.length === 1 ? "Added to My Triage." : `${ids.length} messages added to My Triage.`);
+      setMessageContextMenu(null);
+    } catch (triageError) {
+      setError(formatError(triageError, "Failed to add to My Triage"));
+    } finally {
+      setBusy("");
+    }
+  }, []);
+
+  const removeSelectedMessagesFromTriage = useCallback(async (messageIDs: string[]) => {
+    const ids = cleanIDList(messageIDs);
+    if (ids.length === 0) return;
+    setBusy("triage");
+    setError("");
+    try {
+      await Promise.all(ids.map(removeMessageFromMyTriage));
+      setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
+      if (selectedMessageID && ids.includes(selectedMessageID)) {
+        setSelectedMessageID("");
+        setSelectedMessage(null);
+      }
+      setSelectedMessageIDs(new Set());
+      setSelectionAnchorMessageID("");
+      setMessageContextMenu(null);
+      setNotice(ids.length === 1 ? "Removed from My Triage." : `${ids.length} messages removed from My Triage.`);
+    } catch (triageError) {
+      setError(formatError(triageError, "Failed to remove from My Triage"));
+    } finally {
+      setBusy("");
+    }
+  }, [selectedMessageID]);
+
+  const addShortcutsFromExplorerPayload = useCallback(async (payload: ExplorerDragPayload | null) => {
+    const logicGateIDs = logicGateIDsFromExplorerPayload(payload, logicGateFolders, logicGateFolderItems);
+    if (logicGateIDs.length === 0) return;
+    setBusy("my-logic-gates");
+    setError("");
+    try {
+      const shortcuts = await addMyLogicGateShortcuts(companyID, logicGateIDs);
+      setMyLogicGateShortcuts((previous) => mergeLogicGateShortcuts(previous, shortcuts));
+      setNotice(logicGateIDs.length === 1 ? "Added to My Logic Gates." : `${logicGateIDs.length} Logic Gates added.`);
+    } catch (shortcutError) {
+      setError(formatError(shortcutError, "Failed to add My Logic Gates"));
+    } finally {
+      setBusy("");
+    }
+  }, [companyID, logicGateFolderItems, logicGateFolders]);
+
+  const removeShortcut = useCallback(async (logicGateID: string) => {
+    if (!logicGateID) return;
+    setBusy("my-logic-gates");
+    setError("");
+    try {
+      await removeMyLogicGateShortcut(companyID, logicGateID);
+      setMyLogicGateShortcuts((previous) => previous.filter((shortcut) => shortcut.logic_gate_id !== logicGateID));
+    } catch (shortcutError) {
+      setError(formatError(shortcutError, "Failed to remove My Logic Gate"));
+    } finally {
+      setBusy("");
+    }
+  }, [companyID]);
+
+  const convertMessagesToLogicGate = useCallback(async (logicGateID: string, messageIDs: string[]) => {
+    const ids = cleanIDList(messageIDs);
+    if (!logicGateID || ids.length === 0) return;
+    setBusy("triage-convert");
+    setError("");
+    try {
+      const result = await convertTriageMessagesToLogicGate({ companyID, logicGateID, messageIDs: ids });
+      const removed = result.deleted_message_ids ?? ids;
+      setMessages((previous) => previous.filter((message) => !removed.includes(message.id)));
+      if (selectedMessageID && removed.includes(selectedMessageID)) {
+        setSelectedMessageID("");
+        setSelectedMessage(null);
+      }
+      setSelectedMessageIDs((previous) => new Set(Array.from(previous).filter((id) => !removed.includes(id))));
+      const title = logicGateByID.get(logicGateID)?.header || "Logic Gate";
+      setNotice(removed.length === 1 ? `Moved to ${title}.` : `${removed.length} messages moved to ${title}.`);
+    } catch (convertError) {
+      setError(formatError(convertError, "Failed to move messages to Logic Gate"));
+    } finally {
+      setBusy("");
+    }
+  }, [companyID, logicGateByID, selectedMessageID]);
+
+  const selectLogicGateRow = useCallback((row: ExplorerTreeNode, event: React.MouseEvent) => {
+    const orderedIDs = visibleLogicGateRows.map((item) => item.id);
+    const next = resolveExplorerClickSelection({
+      orderedIDs,
+      previousSelectedIDs: selectedLogicGateRowIDs,
+      anchorID: logicGateSelectionAnchorID,
+      clickedID: row.id,
+      shiftKey: event.shiftKey,
+      ctrlKey: event.ctrlKey || event.metaKey,
+    });
+    setSelectedLogicGateRowIDs(next.selectedIDs);
+    setLogicGateSelectionAnchorID(next.anchorID);
+  }, [logicGateSelectionAnchorID, selectedLogicGateRowIDs, visibleLogicGateRows]);
+
   const activeViewLabel = getCommunicationsViewLabel(activeViewID, sharedInboxes);
 
   return (
@@ -665,10 +939,11 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
           </section>
         </main>
       ) : (
-        <main style={{ ...workspaceStyle, gridTemplateColumns: isNarrow ? "1fr" : "220px minmax(320px, 430px) minmax(0, 1fr)" }}>
+        <main style={{ ...workspaceStyle, gridTemplateColumns: isNarrow ? "1fr" : "220px minmax(300px, 390px) minmax(0, 1fr) minmax(300px, 360px)" }}>
           <aside style={sidebarStyle}>
             <nav style={sidebarNavStyle} aria-label="Communication inboxes">
               <CommunicationsNavButton label="Primary Inbox" active={activeViewID === "primary"} onClick={() => selectCommunicationsView("primary", "primary")} />
+              <CommunicationsNavButton label="My Triage" active={activeViewID === "my-triage"} onClick={() => selectCommunicationsView("my-triage", "all")} />
               <section style={sidebarSectionStyle}>
                 <button
                   type="button"
@@ -735,7 +1010,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
               <span>Unread only</span>
             </label>
             <div style={listHeaderStyle}>
-              <span>{mailboxLabel(mailbox)}</span>
+              <span>{activeViewID === "my-triage" ? "My Triage" : mailboxLabel(mailbox)}</span>
               {(loadingMessages || loadingMoreMessages) && <span>Loading</span>}
             </div>
             <div
@@ -751,8 +1026,11 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
               ) : messages.map((message) => (
                 <button
                   key={message.id}
-                  style={messageRowStyle(selectedMessageID === message.id, message.unread)}
-                  onClick={() => setSelectedMessageID(message.id)}
+                  style={messageRowStyle(selectedMessageIDs.has(message.id) || selectedMessageID === message.id, message.unread)}
+                  draggable={activeViewID === "my-triage"}
+                  onClick={(event) => selectMessageRow(message, event)}
+                  onContextMenu={(event) => openMessageContextMenu(message, event)}
+                  onDragStart={(event) => startMessageDrag(message, event)}
                 >
                   <span style={messageRowTopStyle}>
                     <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{formatAddressList(message.from) || "Unknown sender"}</strong>
@@ -791,6 +1069,44 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
               <div style={emptyStateStyle}>Select a message or compose a new one</div>
             )}
           </section>
+
+          <LogicGateRail
+            loading={loadingLogicGates}
+            logicGateByID={logicGateByID}
+            folders={logicGateFolders}
+            folderItems={logicGateFolderItems}
+            allRows={visibleLogicGateRows}
+            selectedRowIDs={selectedLogicGateRowIDs}
+            expandedRowIDs={logicGateExpandedIDs}
+            search={logicGateSearch}
+            myGroups={myLogicGateGroups}
+            busy={!!busy}
+            onSearchChange={setLogicGateSearch}
+            onToggleFolder={(rowID) => {
+              setLogicGateExpandedIDs((previous) => {
+                const next = new Set(previous);
+                if (next.has(rowID)) next.delete(rowID);
+                else next.add(rowID);
+                return next;
+              });
+            }}
+            onSelectRow={selectLogicGateRow}
+            onAddShortcuts={addShortcutsFromExplorerPayload}
+            onRemoveShortcut={removeShortcut}
+            onConvertMessages={convertMessagesToLogicGate}
+          />
+          {messageContextMenu && (
+            <div
+              style={{ ...messageContextMenuStyle, left: messageContextMenu.x, top: messageContextMenu.y }}
+              onMouseLeave={() => setMessageContextMenu(null)}
+            >
+              {activeViewID === "my-triage" ? (
+                <button style={contextMenuActionStyle} disabled={busy === "triage"} onClick={() => removeSelectedMessagesFromTriage(messageContextMenu.messageIDs)}>Remove from triage</button>
+              ) : (
+                <button style={contextMenuActionStyle} disabled={busy === "triage"} onClick={() => addSelectedMessagesToTriage(messageContextMenu.messageIDs)}>Add to My Triage</button>
+              )}
+            </div>
+          )}
         </main>
       )}
     </div>
@@ -840,12 +1156,211 @@ function sortSharedInboxes(folders: CommunicationsSharedInbox[]): Communications
 
 function getCommunicationsViewLabel(viewID: CommunicationsViewID, sharedInboxes: CommunicationsSharedInbox[]): string {
   if (viewID === "primary") return "Primary Inbox";
+  if (viewID === "my-triage") return "My Triage";
   if (viewID === "shared-root") return "Shared Inbox";
   if (viewID === "logic-gate") return "Logic Gate Inbox";
   if (viewID === "my-nodes") return "My Nodes";
   if (viewID === "my-logic-gates") return "My Logic Gates";
   const folderID = viewID.startsWith("shared:") ? viewID.slice("shared:".length) : "";
   return sharedInboxes.find((folder) => folder.folder_id === folderID)?.name || "Shared Inbox";
+}
+
+type MyLogicGateGroup = {
+  key: string;
+  label: string;
+  logicGates: LogicGateRecord[];
+};
+
+function LogicGateRail({
+  loading,
+  logicGateByID,
+  folders,
+  folderItems,
+  allRows,
+  selectedRowIDs,
+  expandedRowIDs,
+  search,
+  myGroups,
+  busy,
+  onSearchChange,
+  onToggleFolder,
+  onSelectRow,
+  onAddShortcuts,
+  onRemoveShortcut,
+  onConvertMessages,
+}: {
+  loading: boolean;
+  logicGateByID: Map<string, LogicGateRecord>;
+  folders: CompanyExplorerFolder[];
+  folderItems: CompanyExplorerFolderItem[];
+  allRows: ExplorerTreeNode[];
+  selectedRowIDs: Set<string>;
+  expandedRowIDs: Set<string>;
+  search: string;
+  myGroups: MyLogicGateGroup[];
+  busy: boolean;
+  onSearchChange: (value: string) => void;
+  onToggleFolder: (rowID: string) => void;
+  onSelectRow: (row: ExplorerTreeNode, event: React.MouseEvent) => void;
+  onAddShortcuts: (payload: ExplorerDragPayload | null) => void;
+  onRemoveShortcut: (logicGateID: string) => void;
+  onConvertMessages: (logicGateID: string, messageIDs: string[]) => void;
+}) {
+  return (
+    <aside style={logicGateRailStyle}>
+      <section
+        style={logicGateRailSectionStyle}
+        onDragOver={(event) => {
+          const payload = readExplorerDragPayload(event.dataTransfer);
+          if (logicGateIDsFromExplorerPayload(payload, folders, folderItems).length === 0) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(event) => {
+          const payload = readExplorerDragPayload(event.dataTransfer);
+          event.preventDefault();
+          onAddShortcuts(payload);
+        }}
+      >
+        <div style={logicGateRailHeaderStyle}>
+          <h2 style={panelTitleStyle}>My Logic Gates</h2>
+          {loading && <span style={mutedSmallStyle}>Loading</span>}
+        </div>
+        <div style={myLogicGatesListStyle}>
+          {myGroups.length === 0 ? (
+            <div style={emptySmallStyle}>No shortcuts</div>
+          ) : myGroups.map((group) => (
+            <div key={group.key} style={myLogicGateGroupStyle}>
+              <div style={myLogicGateFolderLabelStyle}>
+                <ExplorerRowIcon kind="folder" />
+                <span>{group.label}</span>
+              </div>
+              <div style={myLogicGateGridStyle}>
+                {group.logicGates.map((logicGate) => (
+                  <button
+                    key={logicGate.logic_gate_id}
+                    type="button"
+                    draggable
+                    style={myLogicGateTileStyle}
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = "copyMove";
+                      event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify({
+                        kind: "logic_gate",
+                        itemID: logicGate.logic_gate_id,
+                        itemType: "logic_gate",
+                        sourceTreeID: `logic-gate-${logicGate.logic_gate_id}`,
+                      }));
+                    }}
+                    onDragOver={(event) => {
+                      if (!hasTriageMessageDrag(event.dataTransfer)) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                    }}
+                    onDrop={(event) => {
+                      const messageIDs = readTriageMessageIDs(event.dataTransfer);
+                      if (messageIDs.length === 0) return;
+                      event.preventDefault();
+                      onConvertMessages(logicGate.logic_gate_id, messageIDs);
+                    }}
+                  >
+                    <span style={myLogicGateTileIconStyle}><ExplorerRowIcon kind="logic_gate" /></span>
+                    <span style={myLogicGateTileTextStyle}>{logicGate.header || "Logic Gate"}</span>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Remove shortcut"
+                      style={shortcutRemoveStyle}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (!busy) onRemoveShortcut(logicGate.logic_gate_id);
+                      }}
+                      onKeyDown={(event) => {
+                        if ((event.key === "Enter" || event.key === " ") && !busy) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onRemoveShortcut(logicGate.logic_gate_id);
+                        }
+                      }}
+                    >
+                      x
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section style={{ ...logicGateRailSectionStyle, gridTemplateRows: "auto auto minmax(0, 1fr)" }}>
+        <div style={logicGateRailHeaderStyle}>
+          <h2 style={panelTitleStyle}>All Logic Gates</h2>
+          {loading && <span style={mutedSmallStyle}>Loading</span>}
+        </div>
+        <input
+          style={inputStyle}
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Search Logic Gates"
+        />
+        <div style={allLogicGateRowsStyle}>
+          {allRows.length === 0 && !loading ? (
+            <div style={emptySmallStyle}>No Logic Gates</div>
+          ) : allRows.map((row) => {
+            const selected = selectedRowIDs.has(row.id);
+            const isFolder = row.kind === "folder";
+            const logicGateID = row.logicGateID ?? "";
+            const logicGate = logicGateID ? logicGateByID.get(logicGateID) : undefined;
+            return (
+              <div
+                key={row.id}
+                draggable
+                style={logicGateTreeRowStyle(row.depth, selected, row.kind === "logic_gate")}
+                onClick={(event) => onSelectRow(row, event)}
+                onDragStart={(event) => {
+                  const payload = getExplorerDragPayloadForSelection(row, selectedRowIDs, allRows);
+                  if (!payload) return;
+                  event.dataTransfer.effectAllowed = row.kind === "folder" ? "copyMove" : "copy";
+                  event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(payload));
+                  event.dataTransfer.setData("text/plain", row.label);
+                }}
+                onDragOver={(event) => {
+                  if (row.kind !== "logic_gate" || !hasTriageMessageDrag(event.dataTransfer)) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                }}
+                onDrop={(event) => {
+                  if (row.kind !== "logic_gate" || !logicGateID) return;
+                  const messageIDs = readTriageMessageIDs(event.dataTransfer);
+                  if (messageIDs.length === 0) return;
+                  event.preventDefault();
+                  onConvertMessages(logicGateID, messageIDs);
+                }}
+              >
+                {isFolder ? (
+                  <button
+                    type="button"
+                    draggable={false}
+                    style={logicGateDisclosureStyle}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onToggleFolder(row.id);
+                    }}
+                  >
+                    <ExplorerDisclosureIcon open={expandedRowIDs.has(row.id)} color="rgba(36, 18, 10, 0.62)" />
+                  </button>
+                ) : (
+                  <span style={{ width: 18, flexShrink: 0 }} />
+                )}
+                <ExplorerRowIcon kind={row.kind} systemKey={row.systemKey} />
+                <span style={logicGateTreeRowTextStyle}>{logicGate?.header || row.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </aside>
+  );
 }
 
 function ComposePanel({ compose, busy, onChange, onCancel, onSubmit }: {
@@ -902,6 +1417,131 @@ function MessageDetail({ message, loading, archiveAvailable, busy, onReply, onAr
       <iframe title="Email body" sandbox="" srcDoc={messageDocument(message.body || message.snippet || "")} style={iframeStyle} />
     </div>
   );
+}
+
+function readTriageMessageIDs(dataTransfer: DataTransfer): string[] {
+  try {
+    const raw = dataTransfer.getData(TRIAGE_MESSAGE_DRAG_MIME);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { kind?: string; message_ids?: unknown };
+    if (parsed.kind !== "triage_messages" || !Array.isArray(parsed.message_ids)) return [];
+    return cleanIDList(parsed.message_ids.filter((value): value is string => typeof value === "string"));
+  } catch {
+    return [];
+  }
+}
+
+function hasTriageMessageDrag(dataTransfer: DataTransfer): boolean {
+  return Array.from(dataTransfer.types).includes(TRIAGE_MESSAGE_DRAG_MIME);
+}
+
+function cleanIDList(values: string[]): string[] {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const value of values) {
+    const clean = value.trim();
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    ids.push(clean);
+  }
+  return ids;
+}
+
+function logicGateIDsFromExplorerPayload(payload: ExplorerDragPayload | null, folders: CompanyExplorerFolder[], folderItems: CompanyExplorerFolderItem[]): string[] {
+  if (!payload) return [];
+  if (payload.kind === "logic_gate" && payload.itemID) return [payload.itemID];
+  if (payload.kind === "batch") {
+    return cleanIDList(getExplorerDropPayloadItems(payload)
+      .filter((item) => item.itemType === "logic_gate")
+      .map((item) => item.itemID));
+  }
+  if (payload.kind === "folder" && payload.folderKind === "logic_gate" && payload.folderID) {
+    const subtree = collectFolderSubtreeIDs(folders, payload.folderID);
+    return cleanIDList(folderItems
+      .filter((item) => item.item_type === "logic_gate" && subtree.has(item.folder_id))
+      .map((item) => item.item_id));
+  }
+  return [];
+}
+
+function sortLogicGateShortcuts(shortcuts: UserLogicGateShortcut[]): UserLogicGateShortcut[] {
+  return [...shortcuts].sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp) || a.logic_gate_id.localeCompare(b.logic_gate_id));
+}
+
+function mergeLogicGateShortcuts(current: UserLogicGateShortcut[], incoming: UserLogicGateShortcut[]): UserLogicGateShortcut[] {
+  const byID = new Map(current.map((shortcut) => [shortcut.logic_gate_id, shortcut]));
+  for (const shortcut of incoming) byID.set(shortcut.logic_gate_id, shortcut);
+  return sortLogicGateShortcuts(Array.from(byID.values()));
+}
+
+function buildMyLogicGateGroups(input: {
+  shortcuts: UserLogicGateShortcut[];
+  logicGateByID: Map<string, LogicGateRecord>;
+  folders: CompanyExplorerFolder[];
+  folderItems: CompanyExplorerFolderItem[];
+}): MyLogicGateGroup[] {
+  const folderByID = new Map(input.folders.map((folder) => [folder.folder_id, folder]));
+  const folderIDByLogicGateID = new Map(input.folderItems.filter((item) => item.item_type === "logic_gate").map((item) => [item.item_id, item.folder_id]));
+  const groupByKey = new Map<string, MyLogicGateGroup>();
+  for (const shortcut of sortLogicGateShortcuts(input.shortcuts)) {
+    const logicGate = input.logicGateByID.get(shortcut.logic_gate_id);
+    if (!logicGate) continue;
+    const folderID = folderIDByLogicGateID.get(shortcut.logic_gate_id) ?? "";
+    const key = folderID || "unfiled";
+    const group = groupByKey.get(key) ?? {
+      key,
+      label: folderID ? folderPathLabel(folderByID, folderID) : "Unfiled Logic Gates",
+      logicGates: [],
+    };
+    group.logicGates.push(logicGate);
+    groupByKey.set(key, group);
+  }
+  return Array.from(groupByKey.values()).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function folderPathLabel(folderByID: Map<string, CompanyExplorerFolder>, folderID: string): string {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let currentID = folderID;
+  while (currentID && !seen.has(currentID)) {
+    seen.add(currentID);
+    const folder = folderByID.get(currentID);
+    if (!folder) break;
+    names.push(folder.name);
+    currentID = folder.parent_folder_id ?? "";
+  }
+  return names.reverse().join(" / ") || "Logic Gates";
+}
+
+function filterLogicGateRowsForSearch(rows: ExplorerTreeNode[], rawQuery: string): ExplorerTreeNode[] {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query) return rows;
+  const included = new Set<string>();
+  const includeDescendants = (startIndex: number) => {
+    const parent = rows[startIndex];
+    included.add(parent.id);
+    for (let index = startIndex + 1; index < rows.length; index += 1) {
+      if (rows[index].depth <= parent.depth) break;
+      included.add(rows[index].id);
+    }
+  };
+  const includeAncestors = (startIndex: number) => {
+    let depth = rows[startIndex].depth;
+    for (let index = startIndex - 1; index >= 0 && depth > 0; index -= 1) {
+      const row = rows[index];
+      if (row.depth >= depth) continue;
+      included.add(row.id);
+      depth = row.depth;
+    }
+  };
+  rows.forEach((row, index) => {
+    const text = [row.label, row.folderLabel, row.logicGateID, row.folderID].join(" ").toLowerCase();
+    if (!text.includes(query)) return;
+    included.add(row.id);
+    includeAncestors(index);
+    if (row.kind === "folder") includeDescendants(index);
+  });
+  return rows.filter((row) => included.has(row.id));
 }
 
 function findSystemFolder(folders: EmailFolder[], system: string): EmailFolder | null {
@@ -1125,6 +1765,200 @@ const panelStyle: React.CSSProperties = {
   background: "#ffffff",
   borderRadius: 8,
   overflow: "hidden",
+};
+
+const logicGateRailStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  gridTemplateRows: "minmax(0, 1fr) minmax(0, 1fr)",
+  gap: 10,
+  overflow: "hidden",
+};
+
+const logicGateRailSectionStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  gridTemplateRows: "auto minmax(0, 1fr)",
+  gap: 8,
+  padding: 10,
+  border: "1px solid rgba(255, 136, 32, 0.22)",
+  background: "#ffffff",
+  borderRadius: 8,
+  overflow: "hidden",
+};
+
+const logicGateRailHeaderStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 8,
+};
+
+const myLogicGatesListStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  alignContent: "start",
+  gap: 10,
+  overflowY: "auto",
+  paddingRight: 2,
+};
+
+const myLogicGateGroupStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 7,
+};
+
+const myLogicGateFolderLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  fontSize: 11,
+  fontWeight: 700,
+  color: "rgba(36, 18, 10, 0.76)",
+};
+
+const myLogicGateGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))",
+  gap: 8,
+};
+
+const myLogicGateTileStyle: React.CSSProperties = {
+  position: "relative",
+  minHeight: 88,
+  display: "grid",
+  alignContent: "center",
+  justifyItems: "center",
+  gap: 7,
+  border: "1px solid rgba(255, 136, 32, 0.28)",
+  borderRadius: 7,
+  background: "#fffaf3",
+  color: "#24120a",
+  cursor: "grab",
+  font: "inherit",
+  padding: "10px 8px",
+  minWidth: 0,
+};
+
+const myLogicGateTileIconStyle: React.CSSProperties = {
+  width: 28,
+  height: 28,
+  display: "grid",
+  placeItems: "center",
+  transform: "scale(1.35)",
+};
+
+const myLogicGateTileTextStyle: React.CSSProperties = {
+  maxWidth: "100%",
+  minWidth: 0,
+  overflow: "hidden",
+  display: "-webkit-box",
+  WebkitBoxOrient: "vertical",
+  WebkitLineClamp: 2,
+  overflowWrap: "anywhere",
+  textAlign: "center",
+  fontSize: 11,
+  fontWeight: 700,
+  lineHeight: 1.2,
+};
+
+const shortcutRemoveStyle: React.CSSProperties = {
+  position: "absolute",
+  top: 5,
+  right: 6,
+  width: 18,
+  height: 18,
+  display: "grid",
+  placeItems: "center",
+  borderRadius: 4,
+  color: "rgba(36, 18, 10, 0.58)",
+  fontSize: 12,
+  lineHeight: 1,
+  cursor: "pointer",
+};
+
+const allLogicGateRowsStyle: React.CSSProperties = {
+  minHeight: 0,
+  overflowY: "auto",
+  display: "grid",
+  alignContent: "start",
+  gap: 2,
+  paddingRight: 2,
+};
+
+function logicGateTreeRowStyle(depth: number, selected: boolean, isDropTarget: boolean): React.CSSProperties {
+  return {
+    minHeight: 29,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    border: `1px solid ${selected ? "rgba(255, 136, 32, 0.6)" : "transparent"}`,
+    borderRadius: 6,
+    background: selected ? "#fff2e0" : isDropTarget ? "#ffffff" : "transparent",
+    color: "#24120a",
+    cursor: "pointer",
+    padding: `3px 7px 3px ${6 + depth * 14}px`,
+    minWidth: 0,
+  };
+}
+
+const logicGateDisclosureStyle: React.CSSProperties = {
+  width: 18,
+  height: 20,
+  border: "none",
+  background: "transparent",
+  color: "#24120a",
+  cursor: "pointer",
+  display: "grid",
+  placeItems: "center",
+  padding: 0,
+  flexShrink: 0,
+};
+
+const logicGateTreeRowTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 11,
+  fontWeight: 600,
+};
+
+const emptySmallStyle: React.CSSProperties = {
+  minHeight: 64,
+  display: "grid",
+  placeItems: "center",
+  color: "rgba(36, 18, 10, 0.52)",
+  fontSize: 11,
+};
+
+const messageContextMenuStyle: React.CSSProperties = {
+  position: "fixed",
+  zIndex: 80,
+  minWidth: 178,
+  padding: 4,
+  border: "1px solid rgba(36, 18, 10, 0.16)",
+  borderRadius: 7,
+  background: "#ffffff",
+  boxShadow: "0 12px 28px rgba(0, 0, 0, 0.16)",
+};
+
+const contextMenuActionStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 31,
+  border: "none",
+  borderRadius: 5,
+  background: "transparent",
+  color: "#24120a",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 600,
+  textAlign: "left",
+  padding: "0 10px",
 };
 
 const connectPanelStyle: React.CSSProperties = {
