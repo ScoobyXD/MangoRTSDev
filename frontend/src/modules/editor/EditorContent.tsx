@@ -3,7 +3,7 @@ import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, type NodeRecord } f
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, toLogicGateCanvasRecord, type LogicGateRecord } from "../logic-gate-map/shared";
 import { EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
-import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
+import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches, type NodeProjectionItem } from "../node-map/NodeRecordStore";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches } from "../logic-gate-map/LogicGateRecordStore";
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
@@ -19,6 +19,7 @@ import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
 import { EditorTabBar } from "./EditorTabBar";
+import { NodeWorkspaceSurface } from "./NodeWorkspaceSurface";
 import {
   deserializeEditorDocumentHTML,
   EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES,
@@ -172,6 +173,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
   const [linkedNodeMetadataRows, setLinkedNodeMetadataRows] = useState<Array<{ label: string; value: string }>>([]);
   const [linkedNodeHistoryRows, setLinkedNodeHistoryRows] = useState<string[]>([]);
+  const [nodeWorkspaceProjections, setNodeWorkspaceProjections] = useState<NodeProjectionItem[]>([]);
   const [nodeStatus, setNodeStatus] = useState("");
   const [nodeStatusColor, setNodeStatusColor] = useState("");
   const [nodePriorityDraft, setNodePriorityDraft] = useState("");
@@ -652,6 +654,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setLinkedNodeInfoPreview([]);
     setLinkedNodeMetadataRows([]);
     setLinkedNodeHistoryRows([]);
+    setNodeWorkspaceProjections([]);
     setNodeStatus("");
     setNodeStatusColor("");
     setNodePriorityDraft("");
@@ -1080,6 +1083,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setLinkedNodeInfoPreview([]);
       setLinkedNodeMetadataRows([]);
       setLinkedNodeHistoryRows([]);
+      setNodeWorkspaceProjections([]);
       setNodeStatus("");
       setNodeStatusColor("");
       setNodePriorityDraft("");
@@ -1117,6 +1121,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodePriorityDraft("");
           setNodeDueDateDraft("");
           syncNodeAssignee("");
+          setNodeWorkspaceProjections([]);
           const nonText = details.information.filter((item) => item.type !== "Text box");
           const textBoxes = projections.filter((item) => item.type === "Text box");
           setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
@@ -1148,6 +1153,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodePriorityDraft(details.node.priority == null ? "" : String(details.node.priority));
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
         syncNodeAssignee(details.node.assignee_user_id);
+        setNodeWorkspaceProjections(projections);
         const nonText = details.information.filter((item) => item.type !== "Text box");
         const textBoxes = projections.filter((item) => item.type === "Text box");
         setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
@@ -1163,9 +1169,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           ...details.information.slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`),
         ];
         setLinkedNodeHistoryRows(historyRows);
-        const currentTextBox = selectCurrentEditorTextProjection(projections);
-        const initialDocument = currentTextBox?.information ?? "";
-        applyLoadedDocument("node", linkedNodeID, currentTextBox?.information_id ?? "", initialDocument);
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load linked information");
       }
@@ -1206,6 +1209,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     flushPendingDocumentSave,
     onSelectionFontSizeChange: updateSelectionFontSize,
   });
+  const handleNodeWorkspaceProjectionMutation = useCallback(() => {
+    if (linkedEntityKind !== "node" || !linkedNodeID) return;
+    invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID]);
   const visibleCollaborators = useMemo(() => {
     const now = Date.now();
     return collaborators.filter((item) => now - item.lastSeen < EDITOR_COLLABORATOR_TTL_MS);
@@ -1299,7 +1306,25 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           </div>
         )}
 
-        {hasLinkedDocument && (
+        {hasLinkedDocument && linkedEntityKind === "node" && (
+          <NodeWorkspaceSurface
+            companyID={companyID}
+            nodeID={linkedNodeID}
+            projections={nodeWorkspaceProjections}
+            topPx={documentTopPx}
+            accent={accent}
+            surfaceText={surfaceText}
+            panelBackground={panelBackground}
+            strokeColor={strokeColor}
+            ruleColor={ruleColor}
+            scrollbarAccent={scrollbarAccent}
+            scrollbarTrack={scrollbarTrack}
+            requestJSON={requestJSON}
+            onProjectionMutation={handleNodeWorkspaceProjectionMutation}
+            onError={setError}
+          />
+        )}
+        {hasLinkedDocument && linkedEntityKind !== "node" && (
           <EditorDocumentSurface
             documentRef={editorDocumentRef}
             documentIsolation={documentIsolation}

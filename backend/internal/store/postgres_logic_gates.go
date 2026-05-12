@@ -422,13 +422,13 @@ func (r *PostgresRepo) AddLogicGateInformation(companyID, logicGateID, infoType,
 		return domain.LogicGateInformation{}, err
 	}
 
-	// History is append-only above. For the one-document editor surface, the
-	// Text box projection is the single current row for hot UI/API reads.
 	projectionID := informationID
 	if projectionID == "" {
 		projectionID = item.InformationID
 	}
 	if isEditorTextBoxType(item.Type) {
+		// Logic gates keep the legacy one-document editor contract. The new
+		// multi-block timeline/chat/email workspace is node-only.
 		if _, err := tx.ExecContext(ctx,
 			`insert into logic_gate_projection_table
 			 (company_id, logic_gate_id, information_id, type, information, created_timestamp, updated_timestamp)

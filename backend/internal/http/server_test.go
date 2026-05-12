@@ -247,7 +247,35 @@ func TestLogicGateInformationProjectionAPIKeepsLatestValueAndHistory(t *testing.
 	}
 }
 
-func TestNodeInformationProjectionAPICollapsesEditorTextBoxes(t *testing.T) {
+func TestLogicGateInformationAPIRejectsNodeEditorOnlyTypes(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-logic-gate-node-only-type-test"
+
+	logicGate, err := repo.CreateLogicGate(companyID, "logic gate without node workspace")
+	if err != nil {
+		t.Fatalf("CreateLogicGate() error = %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"company_id":     companyID,
+		"type":           "Text block chat",
+		"information":    `{"block_id":"block-1","message":"node only"}`,
+		"information_id": "88888888-8888-4888-8888-888888888888",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/logic-gates/"+logicGate.LogicGateID+"/information", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST node-only logic-gate information status = %d, want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestNodeInformationProjectionAPIKeepsEditorTextBoxesIndependent(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -255,7 +283,7 @@ func TestNodeInformationProjectionAPICollapsesEditorTextBoxes(t *testing.T) {
 	handler := server.Routes()
 	companyID := "company-node-projection-collapse-test"
 
-	node, err := repo.CreateNode(companyID, "node with one editor document")
+	node, err := repo.CreateNode(companyID, "node with editor text blocks")
 	if err != nil {
 		t.Fatalf("CreateNode() error = %v", err)
 	}
@@ -295,11 +323,14 @@ func TestNodeInformationProjectionAPICollapsesEditorTextBoxes(t *testing.T) {
 	if err := json.NewDecoder(projectionRec.Body).Decode(&projectionPayload); err != nil {
 		t.Fatalf("decode projection: %v", err)
 	}
-	if len(projectionPayload.Items) != 1 {
-		t.Fatalf("projection item count = %d, want 1", len(projectionPayload.Items))
+	if len(projectionPayload.Items) != 2 {
+		t.Fatalf("projection item count = %d, want 2", len(projectionPayload.Items))
 	}
-	if projectionPayload.Items[0].Type != "Text box" || projectionPayload.Items[0].Information != "current editor document" {
-		t.Fatalf("projection item = %+v, want current Text box document", projectionPayload.Items[0])
+	if projectionPayload.Items[0].Type != "Text box" || projectionPayload.Items[0].Information != "old editor document" {
+		t.Fatalf("first projection item = %+v, want old Text box document", projectionPayload.Items[0])
+	}
+	if projectionPayload.Items[1].Type != "Text box" || projectionPayload.Items[1].Information != "current editor document" {
+		t.Fatalf("second projection item = %+v, want current Text box document", projectionPayload.Items[1])
 	}
 
 	details, err := repo.GetNodeDetails(companyID, node.NodeID)

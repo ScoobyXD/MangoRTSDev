@@ -26,10 +26,15 @@ begin
       'PDF',
       'PNG',
       'MOV',
-      'Hyperlink'
+      'Hyperlink',
+      'Text block chat',
+      'Attached email'
     );
   end if;
 end $$;
+
+alter type information_type add value if not exists 'Text block chat';
+alter type information_type add value if not exists 'Attached email';
 
 do $$
 begin
@@ -442,20 +447,9 @@ where target.ctid = ranked.ctid
 
 create index if not exists idx_node_information_node on node_information(company_id, node_id);
 create index if not exists idx_node_projection_table_node_updated on node_projection_table(company_id, node_id, updated_timestamp desc);
-with ranked_node_text as (
-  select ctid,
-         row_number() over (
-           partition by company_id, node_id, type
-           order by updated_timestamp desc, created_timestamp desc, information_id desc
-         ) as rn
-  from node_projection_table
-  where type = 'Text box'::information_type
-)
-delete from node_projection_table target
-using ranked_node_text ranked
-where target.ctid = ranked.ctid
-  and ranked.rn > 1;
-create unique index if not exists idx_node_projection_table_one_text_box on node_projection_table(company_id, node_id, type) where type = 'Text box'::information_type;
+drop index if exists idx_node_projection_table_one_text_box;
+create index if not exists idx_node_projection_table_node_type_created
+  on node_projection_table(company_id, node_id, type, created_timestamp, information_id);
 create index if not exists idx_node_map_positions_company_updated on node_map_positions(company_id, updated_timestamp desc);
 create index if not exists idx_node_relationships_a on node_relationships(company_id, node_id_a);
 create index if not exists idx_node_relationships_b on node_relationships(company_id, node_id_b);

@@ -244,9 +244,8 @@ func (r *MemoryRepo) AddLogicGateInformation(companyID, logicGateID, infoType, i
 		r.logicGateText[k] = map[string]domain.LogicGateProjection{}
 	}
 	if isEditorTextBoxType(infoType) {
-		// Logic gates share the same one-document editor contract as nodes:
-		// many history rows are fine, but one hot Text box projection is the
-		// read model clients and agents should render.
+		// Logic gates keep the legacy one-document editor contract. The new
+		// multi-block timeline/chat/email workspace is node-only.
 		if existingTextKey := newestLogicGateTextProjectionKey(r.logicGateText[k]); existingTextKey != "" {
 			projectionID = existingTextKey
 			for keyValue, projection := range r.logicGateText[k] {

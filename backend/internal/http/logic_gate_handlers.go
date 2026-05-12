@@ -8,6 +8,15 @@ import (
 	"strings"
 )
 
+func isNodeEditorOnlyInformationType(infoType string) bool {
+	switch strings.TrimSpace(infoType) {
+	case "Text block chat", "Attached email":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
@@ -197,6 +206,10 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		}
 		if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Type) == "" {
 			writeError(w, http.StatusBadRequest, "company_id_and_type_required")
+			return
+		}
+		if isNodeEditorOnlyInformationType(req.Type) {
+			writeError(w, http.StatusBadRequest, "logic_gate_information_type_not_supported")
 			return
 		}
 		if strings.TrimSpace(req.Information) == "" {
