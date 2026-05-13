@@ -78,6 +78,7 @@ type Repository interface {
 	MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error)
 	RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error)
 	DeleteCompanyExplorerFolder(companyID, folderID string) error
+	DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput) (CompanyExplorerDeleteResult, error)
 	ListCompanyExplorerFolderShares(companyID, folderID string) ([]domain.CompanyExplorerFolderShare, error)
 	UpsertCompanyExplorerFolderShare(input CompanyExplorerFolderShareInput) (domain.CompanyExplorerFolderShare, error)
 	DeleteCompanyExplorerFolderShare(companyID, folderID, email string) error
@@ -176,6 +177,22 @@ type CompanyExplorerFolderShareInput struct {
 	InvitedByUserID string
 }
 
+type CompanyExplorerDeleteTargetInput struct {
+	Kind       string `json:"kind"`
+	ID         string `json:"id"`
+	FolderKind string `json:"folder_kind,omitempty"`
+}
+
+type CompanyExplorerDeletedTarget struct {
+	Kind       string `json:"kind"`
+	ID         string `json:"id"`
+	FolderKind string `json:"folder_kind,omitempty"`
+}
+
+type CompanyExplorerDeleteResult struct {
+	Targets []CompanyExplorerDeletedTarget `json:"targets"`
+}
+
 type CompanyExplorerRelationshipDeleteResult struct {
 	ItemType        string   `json:"item_type"`
 	ItemID          string   `json:"item_id"`
@@ -190,10 +207,11 @@ type CommunicationsTriageConversionInput struct {
 }
 
 type CommunicationsTriageConversionResult struct {
-	Board             domain.KanbanBoard  `json:"board"`
-	Cards             []domain.KanbanCard `json:"cards"`
-	Nodes             []domain.Node       `json:"nodes"`
-	DeletedMessageIDs []string            `json:"deleted_message_ids"`
+	Board             domain.KanbanBoard                 `json:"board"`
+	Cards             []domain.KanbanCard                `json:"cards"`
+	Nodes             []domain.Node                      `json:"nodes"`
+	FolderItems       []domain.CompanyExplorerFolderItem `json:"folder_items,omitempty"`
+	DeletedMessageIDs []string                           `json:"deleted_message_ids"`
 }
 
 type CommunicationsTriageRevertInput struct {

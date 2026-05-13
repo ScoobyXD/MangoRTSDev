@@ -290,6 +290,11 @@ func (r *MemoryRepo) UpdateKanbanBoard(companyID, boardID, title string, positio
 func (r *MemoryRepo) DeleteKanbanBoard(companyID, boardID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	return r.deleteKanbanBoardLocked(companyID, boardID)
+}
+
+func (r *MemoryRepo) deleteKanbanBoardLocked(companyID, boardID string) error {
 	k := boardKey(companyID, boardID)
 	board, ok := r.kanbanBoards[k]
 	if !ok {

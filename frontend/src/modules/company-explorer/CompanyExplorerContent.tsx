@@ -894,6 +894,22 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
         deletedKanbanBoardIDs.add(target.id);
       }
     }
+    for (const item of folderItems) {
+      if (!deletedFolderIDs.has(item.folder_id)) continue;
+      if (item.item_type === "node") {
+        deletedNodeIDs.add(item.item_id);
+      } else if (item.item_type === "logic_gate") {
+        deletedLogicGateIDs.add(item.item_id);
+        deletedKanbanBoardIDs.add(logicGateKanbanBoardID(item.item_id));
+      } else if (item.item_type === "kanban") {
+        deletedKanbanBoardIDs.add(item.item_id);
+      }
+    }
+    for (const board of kanbanBoards) {
+      if (board.logic_gate_id && deletedLogicGateIDs.has(board.logic_gate_id)) {
+        deletedKanbanBoardIDs.add(board.board_id);
+      }
+    }
 
     const previousFolders = folders;
     const previousNodes = nodes;

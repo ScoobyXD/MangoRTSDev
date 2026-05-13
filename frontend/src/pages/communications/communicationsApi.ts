@@ -300,12 +300,14 @@ export async function convertTriageMessagesToLogicGate(input: {
   board: KanbanBoard;
   cards: KanbanCard[];
   nodes: NodeRecord[];
+  folder_items?: CompanyExplorerFolderItem[];
   deleted_message_ids: string[];
 }> {
   return apiFetchJSON<{
     board: KanbanBoard;
     cards: KanbanCard[];
     nodes: NodeRecord[];
+    folder_items?: CompanyExplorerFolderItem[];
     deleted_message_ids: string[];
   }>("/v1/communications/triage/convert", {
     method: "POST",

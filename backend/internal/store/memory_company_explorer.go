@@ -21,14 +21,25 @@ var companyExplorerDefaultLogicGateChildFolderNames = []string{
 	"QA",
 }
 
-var companyExplorerSystemFolderSeeds = []struct {
+type companyExplorerSystemFolderDefinition struct {
 	Key      string
 	Name     string
 	Position int
-}{
+}
+
+var companyExplorerSystemFolderSeeds = []companyExplorerSystemFolderDefinition{
 	{Key: CompanyExplorerSystemKanbanBoardsKey, Name: "Kanban Boards", Position: 100},
 	{Key: CompanyExplorerSystemActiveNodesKey, Name: "Active Nodes", Position: 200},
 	{Key: CompanyExplorerSystemHistoryKey, Name: "History", Position: 300},
+}
+
+func companyExplorerSystemFolderDefinitionForKey(systemKey string) (companyExplorerSystemFolderDefinition, bool) {
+	for _, seed := range companyExplorerSystemFolderSeeds {
+		if seed.Key == systemKey {
+			return seed, true
+		}
+	}
+	return companyExplorerSystemFolderDefinition{}, false
 }
 
 func companyExplorerParentID(folder domain.CompanyExplorerFolder) string {
@@ -100,6 +111,33 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 		r.folders[key(companyID, child.FolderID)] = child
 	}
 	r.defaultFolderSeed[seedKey] = true
+}
+
+func (r *MemoryRepo) ensureCompanyExplorerSystemFolderLocked(companyID, systemKey string) (domain.CompanyExplorerFolder, bool) {
+	r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
+	for _, folder := range r.folders {
+		if folder.CompanyID == companyID && folder.SystemKey != nil && *folder.SystemKey == systemKey {
+			return folder, true
+		}
+	}
+	seed, ok := companyExplorerSystemFolderDefinitionForKey(systemKey)
+	if !ok {
+		return domain.CompanyExplorerFolder{}, false
+	}
+	now := time.Now().UTC()
+	systemKeyValue := seed.Key
+	folder := domain.CompanyExplorerFolder{
+		CompanyID:        companyID,
+		FolderID:         newUUIDv7String(),
+		FolderKind:       "node",
+		SystemKey:        &systemKeyValue,
+		Name:             seed.Name,
+		Position:         seed.Position,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	r.folders[key(companyID, folder.FolderID)] = folder
+	return folder, true
 }
 
 func nextCompanyExplorerFolderPosition(folders map[string]domain.CompanyExplorerFolder, companyID, folderKind, parentFolderID string) int {
@@ -296,44 +334,175 @@ func (r *MemoryRepo) RenameCompanyExplorerFolder(companyID, folderID, name strin
 }
 
 func (r *MemoryRepo) DeleteCompanyExplorerFolder(companyID, folderID string) error {
+	_, err := r.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: folderID}})
+	return err
+}
+
+func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput) (CompanyExplorerDeleteResult, error) {
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" || len(targets) == 0 || len(targets) > CompanyExplorerDeleteBatchMaxItems {
+		return CompanyExplorerDeleteResult{}, ErrInvalid
+	}
+	targets = normalizeCompanyExplorerDeleteTargets(targets)
+	if len(targets) == 0 {
+		return CompanyExplorerDeleteResult{}, ErrInvalid
+	}
+	for _, target := range targets {
+		if !validCompanyExplorerDeleteKind(target.Kind) {
+			return CompanyExplorerDeleteResult{}, ErrInvalid
+		}
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.folders[key(companyID, folderID)]; !ok {
-		return ErrNotFound
+	folderIDs := map[string]bool{}
+	folderKinds := map[string]string{}
+	nodeIDs := map[string]bool{}
+	logicGateIDs := map[string]bool{}
+	kanbanBoardIDs := map[string]bool{}
+
+	for _, target := range targets {
+		switch target.Kind {
+		case "folder":
+			folder, ok := r.folders[key(companyID, target.ID)]
+			if !ok {
+				return CompanyExplorerDeleteResult{}, ErrNotFound
+			}
+			toDelete := map[string]bool{target.ID: true}
+			changed := true
+			for changed {
+				changed = false
+				for _, child := range r.folders {
+					if child.CompanyID != companyID || child.ParentFolderID == nil {
+						continue
+					}
+					if toDelete[*child.ParentFolderID] && !toDelete[child.FolderID] {
+						toDelete[child.FolderID] = true
+						changed = true
+					}
+				}
+			}
+			folderKinds[target.ID] = folder.FolderKind
+			for id := range toDelete {
+				item := r.folders[key(companyID, id)]
+				if item.SystemKey != nil {
+					return CompanyExplorerDeleteResult{}, ErrInvalid
+				}
+				folderIDs[id] = true
+				folderKinds[id] = item.FolderKind
+			}
+		case "node":
+			if _, ok := r.nodes[key(companyID, target.ID)]; !ok {
+				return CompanyExplorerDeleteResult{}, ErrNotFound
+			}
+			nodeIDs[target.ID] = true
+		case "logic_gate":
+			if _, ok := r.logicGates[key(companyID, target.ID)]; !ok {
+				return CompanyExplorerDeleteResult{}, ErrNotFound
+			}
+			logicGateIDs[target.ID] = true
+		case "kanban":
+			if _, ok := r.kanbanBoards[boardKey(companyID, target.ID)]; !ok {
+				return CompanyExplorerDeleteResult{}, ErrNotFound
+			}
+			kanbanBoardIDs[target.ID] = true
+		}
 	}
 
-	// Delete the selected folder and every descendant. This matches file-explorer
-	// folder semantics while keeping item delete independent from node/gate delete.
-	toDelete := map[string]bool{folderID: true}
-	changed := true
-	for changed {
-		changed = false
-		for _, folder := range r.folders {
-			if folder.CompanyID != companyID || folder.ParentFolderID == nil {
-				continue
-			}
-			if toDelete[*folder.ParentFolderID] && !toDelete[folder.FolderID] {
-				toDelete[folder.FolderID] = true
-				changed = true
-			}
+	for _, item := range r.folderItems {
+		if item.CompanyID != companyID || !folderIDs[item.FolderID] {
+			continue
 		}
-	}
-	for _, folder := range r.folders {
-		if folder.CompanyID == companyID && toDelete[folder.FolderID] && folder.SystemKey != nil {
-			return ErrInvalid
+		switch item.ItemType {
+		case "node":
+			if _, ok := r.nodes[key(companyID, item.ItemID)]; ok {
+				nodeIDs[item.ItemID] = true
+			}
+		case "logic_gate":
+			if _, ok := r.logicGates[key(companyID, item.ItemID)]; ok {
+				logicGateIDs[item.ItemID] = true
+			}
+		case "kanban":
+			if _, ok := r.kanbanBoards[boardKey(companyID, item.ItemID)]; ok {
+				kanbanBoardIDs[item.ItemID] = true
+			}
 		}
 	}
 
-	for id := range toDelete {
-		delete(r.folders, key(companyID, id))
+	for _, board := range r.kanbanBoards {
+		if board.CompanyID != companyID || board.LogicGateID == nil || !logicGateIDs[*board.LogicGateID] {
+			continue
+		}
+		kanbanBoardIDs[board.BoardID] = true
 	}
-	for k, item := range r.folderItems {
-		if item.CompanyID == companyID && toDelete[item.FolderID] {
-			delete(r.folderItems, k)
+	for logicGateID := range logicGateIDs {
+		kanbanBoardIDs[LogicGateKanbanBoardID(logicGateID)] = true
+	}
+	for boardID := range kanbanBoardIDs {
+		board, ok := r.kanbanBoards[boardKey(companyID, boardID)]
+		if !ok {
+			delete(kanbanBoardIDs, boardID)
+			continue
+		}
+		if board.LogicGateID != nil && !logicGateIDs[*board.LogicGateID] {
+			return CompanyExplorerDeleteResult{}, ErrInvalid
 		}
 	}
-	return nil
+
+	result := CompanyExplorerDeleteResult{Targets: make([]CompanyExplorerDeletedTarget, 0)}
+	seenDeleted := map[string]bool{}
+	appendSorted := func(kind string, ids map[string]bool) {
+		values := make([]string, 0, len(ids))
+		for id := range ids {
+			values = append(values, id)
+		}
+		sort.Strings(values)
+		for _, id := range values {
+			folderKind := ""
+			if kind == "folder" {
+				folderKind = folderKinds[id]
+			}
+			result.Targets = appendCompanyExplorerDeletedTarget(result.Targets, seenDeleted, kind, id, folderKind)
+		}
+	}
+	appendSorted("folder", folderIDs)
+	appendSorted("node", nodeIDs)
+	appendSorted("logic_gate", logicGateIDs)
+	appendSorted("kanban", kanbanBoardIDs)
+
+	for logicGateID := range logicGateIDs {
+		if err := r.deleteLogicGateLocked(companyID, logicGateID); err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+	}
+	for boardID := range kanbanBoardIDs {
+		if _, exists := r.kanbanBoards[boardKey(companyID, boardID)]; !exists {
+			continue
+		}
+		if err := r.deleteKanbanBoardLocked(companyID, boardID); err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+	}
+	for nodeID := range nodeIDs {
+		if err := r.deleteNodeLocked(companyID, nodeID); err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+	}
+	for folderID := range folderIDs {
+		delete(r.folders, key(companyID, folderID))
+	}
+	for itemKey, item := range r.folderItems {
+		if item.CompanyID == companyID && folderIDs[item.FolderID] {
+			delete(r.folderItems, itemKey)
+		}
+	}
+	for shareKey, share := range r.folderShares {
+		if share.CompanyID == companyID && folderIDs[share.FolderID] {
+			delete(r.folderShares, shareKey)
+		}
+	}
+	return result, nil
 }
 
 func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error) {

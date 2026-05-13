@@ -155,7 +155,8 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		if err := s.repo.DeleteCompanyExplorerFolder(companyID, folderID); errors.Is(err, store.ErrNotFound) {
+		result, err := s.repo.DeleteCompanyExplorerTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: folderID}})
+		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
 			return
 		} else if errors.Is(err, store.ErrInvalid) {
@@ -165,7 +166,7 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_folder")
 			return
 		}
-		s.publishWorkspaceEvent(companyID, "company_explorer_folder_deleted", map[string]any{"folder_id": folderID})
+		s.publishCompanyExplorerDeletedTargets(companyID, result.Targets)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}
@@ -404,15 +405,10 @@ func (s *Server) handleCompanyExplorerDeleteBatch(w http.ResponseWriter, r *http
 		return
 	}
 
-	type deleteTarget struct {
-		Kind       string `json:"kind"`
-		ID         string `json:"id"`
-		FolderKind string `json:"folder_kind,omitempty"`
-	}
-	targets := make([]deleteTarget, 0, len(req.Targets))
+	targets := make([]store.CompanyExplorerDeleteTargetInput, 0, len(req.Targets))
 	seen := map[string]bool{}
 	for _, target := range req.Targets {
-		item := deleteTarget{
+		item := store.CompanyExplorerDeleteTargetInput{
 			Kind:       strings.TrimSpace(target.Kind),
 			ID:         strings.TrimSpace(target.ID),
 			FolderKind: strings.TrimSpace(target.FolderKind),
@@ -458,64 +454,37 @@ func (s *Server) handleCompanyExplorerDeleteBatch(w http.ResponseWriter, r *http
 		targets = filtered
 	}
 
+	result, err := s.repo.DeleteCompanyExplorerTargets(req.CompanyID, targets)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "company_explorer_delete_target_not_found")
+		return
+	}
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusConflict, "company_explorer_delete_target_invalid")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_targets")
+		return
+	}
+
+	s.publishCompanyExplorerDeletedTargets(req.CompanyID, result.Targets)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
+}
+
+func (s *Server) publishCompanyExplorerDeletedTargets(companyID string, targets []store.CompanyExplorerDeletedTarget) {
 	for _, target := range targets {
 		switch target.Kind {
 		case "folder":
-			err := s.repo.DeleteCompanyExplorerFolder(req.CompanyID, target.ID)
-			if errors.Is(err, store.ErrNotFound) {
-				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
-				return
-			}
-			if errors.Is(err, store.ErrInvalid) {
-				writeError(w, http.StatusConflict, "protected_company_explorer_folder_cannot_be_deleted")
-				return
-			}
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_folder")
-				return
-			}
-			s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_deleted", map[string]any{"folder_id": target.ID})
+			s.publishWorkspaceEvent(companyID, "company_explorer_folder_deleted", map[string]any{"folder_id": target.ID})
 		case "node":
-			err := s.repo.DeleteNode(req.CompanyID, target.ID)
-			if errors.Is(err, store.ErrNotFound) {
-				writeError(w, http.StatusNotFound, "node_not_found")
-				return
-			}
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_delete_node")
-				return
-			}
-			s.publishWorkspaceEvent(req.CompanyID, "node_deleted", map[string]any{"node_id": target.ID})
+			s.publishWorkspaceEvent(companyID, "node_deleted", map[string]any{"node_id": target.ID})
 		case "logic_gate":
-			err := s.repo.DeleteLogicGate(req.CompanyID, target.ID)
-			if errors.Is(err, store.ErrNotFound) {
-				writeError(w, http.StatusNotFound, "logic_gate_not_found")
-				return
-			}
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_delete_logic_gate")
-				return
-			}
-			s.publishWorkspaceEvent(req.CompanyID, "logic_gate_deleted", map[string]any{"logic_gate_id": target.ID})
+			s.publishWorkspaceEvent(companyID, "logic_gate_deleted", map[string]any{"logic_gate_id": target.ID})
 		case "kanban":
-			err := s.repo.DeleteKanbanBoard(req.CompanyID, target.ID)
-			if errors.Is(err, store.ErrNotFound) {
-				writeError(w, http.StatusNotFound, "kanban_board_not_found")
-				return
-			}
-			if errors.Is(err, store.ErrInvalid) {
-				writeError(w, http.StatusConflict, "attached_kanban_board_cannot_be_deleted")
-				return
-			}
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_delete_kanban_board")
-				return
-			}
-			s.publishWorkspaceEvent(req.CompanyID, "kanban_board_deleted", map[string]any{"board_id": target.ID})
+			s.publishWorkspaceEvent(companyID, "kanban_board_deleted", map[string]any{"board_id": target.ID})
 		}
 	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": targets})
 }
 
 func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http.Request) {

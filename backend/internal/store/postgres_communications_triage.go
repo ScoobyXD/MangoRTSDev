@@ -172,6 +172,10 @@ where company_id=$1 and logic_gate_id=$2`, input.CompanyID, input.LogicGateID).S
 	if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, input.LogicGateID, logicGateTitle); err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
+	activeNodeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
 
 	board, err := scanKanbanBoard(tx.QueryRowContext(ctx, `
 select company_id::text, board_id, logic_gate_id::text, title, position, created_timestamp, updated_timestamp
@@ -231,6 +235,10 @@ insert into nodes (company_id, node_id, title, created_timestamp)
 values ($1, $2, $3, now())`, input.CompanyID, nodeID, nodeTitle); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
+		folderItem, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, input.CompanyID, activeNodeFolder.FolderID, "node", nodeID, 0)
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
 		if _, err := tx.ExecContext(ctx, `
 insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
 values ($1, $2, $3, $4, now())`, input.CompanyID, nodeID, 120+float64(index*28), 120+float64(index*28)); err != nil {
@@ -278,6 +286,7 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 		}
 		result.Nodes = append(result.Nodes, node)
 		result.Cards = append(result.Cards, card)
+		result.FolderItems = append(result.FolderItems, folderItem)
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
 

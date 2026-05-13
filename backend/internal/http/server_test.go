@@ -857,6 +857,24 @@ func TestCompanyExplorerDeleteBatchDeletesSelectedTargetsInOneRequest(t *testing
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder() error = %v", err)
 	}
+	childFolder, err := repo.CreateCompanyExplorerFolder(companyID, folder.FolderID, "node", "Batch delete child folder")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder(child) error = %v", err)
+	}
+	folderNode, err := repo.CreateNode(companyID, "Node inside folder")
+	if err != nil {
+		t.Fatalf("CreateNode(folderNode) error = %v", err)
+	}
+	folderBoard, err := repo.CreateKanbanBoard(companyID, "", "Board inside folder", 0)
+	if err != nil {
+		t.Fatalf("CreateKanbanBoard(folderBoard) error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, childFolder.FolderID, "node", folderNode.NodeID, 1000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem(node) error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, childFolder.FolderID, "kanban", folderBoard.BoardID, 2000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem(kanban) error = %v", err)
+	}
 
 	body, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
@@ -875,13 +893,25 @@ func TestCompanyExplorerDeleteBatchDeletesSelectedTargetsInOneRequest(t *testing
 	if _, err := repo.GetNode(companyID, node.NodeID); err != store.ErrNotFound {
 		t.Fatalf("GetNode after batch delete error = %v, want ErrNotFound", err)
 	}
+	if _, err := repo.GetNode(companyID, folderNode.NodeID); err != store.ErrNotFound {
+		t.Fatalf("GetNode for folder child after batch delete error = %v, want ErrNotFound", err)
+	}
+	boards, err := repo.ListKanbanBoards(companyID, store.KanbanBoardQuery{})
+	if err != nil {
+		t.Fatalf("ListKanbanBoards() error = %v", err)
+	}
+	for _, board := range boards {
+		if board.BoardID == folderBoard.BoardID {
+			t.Fatalf("kanban board %s still exists after folder batch delete", folderBoard.BoardID)
+		}
+	}
 	folders, err := repo.ListCompanyExplorerFolders(companyID, "node")
 	if err != nil {
 		t.Fatalf("ListCompanyExplorerFolders() error = %v", err)
 	}
 	for _, item := range folders {
-		if item.FolderID == folder.FolderID {
-			t.Fatalf("folder %s still exists after batch delete", folder.FolderID)
+		if item.FolderID == folder.FolderID || item.FolderID == childFolder.FolderID {
+			t.Fatalf("folder %s still exists after batch delete", item.FolderID)
 		}
 	}
 }

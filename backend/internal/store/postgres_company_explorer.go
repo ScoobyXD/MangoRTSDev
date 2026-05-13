@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"miraeopus/backend/internal/domain"
+	"sort"
 	"strings"
 )
 
@@ -96,6 +97,57 @@ func ensureCompanyExplorerDefaultFoldersSQL(ctx context.Context, tx *sql.Tx, com
 		}
 	}
 	return nil
+}
+
+func ensureCompanyExplorerSystemFolderSQL(ctx context.Context, tx *sql.Tx, companyID, systemKey string) (domain.CompanyExplorerFolder, error) {
+	if err := ensureCompanyExplorerDefaultFoldersSQL(ctx, tx, companyID); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+	seed, ok := companyExplorerSystemFolderDefinitionForKey(systemKey)
+	if !ok {
+		return domain.CompanyExplorerFolder{}, ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx,
+		`insert into company_explorer_folders
+		 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
+		 values ($1, $2, null, 'node', $3, $4, $5, now(), now())
+		 on conflict (company_id, system_key) where system_key is not null do nothing`,
+		companyID, newUUIDv7String(), seed.Key, seed.Name, seed.Position,
+	); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+
+	var item domain.CompanyExplorerFolder
+	var parent sql.NullString
+	var systemOut sql.NullString
+	if err := tx.QueryRowContext(ctx,
+		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp
+		 from company_explorer_folders
+		 where company_id=$1 and system_key=$2`,
+		companyID, systemKey,
+	).Scan(
+		&item.CompanyID,
+		&item.FolderID,
+		&parent,
+		&item.FolderKind,
+		&systemOut,
+		&item.Name,
+		&item.Position,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.CompanyExplorerFolder{}, ErrNotFound
+		}
+		return domain.CompanyExplorerFolder{}, err
+	}
+	if parent.Valid {
+		item.ParentFolderID = &parent.String
+	}
+	if systemOut.Valid {
+		item.SystemKey = &systemOut.String
+	}
+	return item, nil
 }
 
 func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error) {
@@ -416,36 +468,338 @@ func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name str
 }
 
 func (r *PostgresRepo) DeleteCompanyExplorerFolder(companyID, folderID string) error {
-	ctx := context.Background()
-	var protectedFolderName string
-	err := r.db.QueryRowContext(ctx,
-		`with recursive subtree as (
-		   select folder_id, name, system_key
-		   from company_explorer_folders
-		   where company_id=$1 and folder_id=$2
-		   union all
-		   select child.folder_id, child.name, child.system_key
-		   from company_explorer_folders child
-		   join subtree parent on child.company_id=$1 and child.parent_folder_id=parent.folder_id
-		 )
-		 select name
-		 from subtree
-		 where system_key is not null
-		 order by name asc
-		 limit 1`,
-		companyID, folderID,
-	).Scan(&protectedFolderName)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
+	_, err := r.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: folderID}})
+	return err
+}
+
+func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput) (CompanyExplorerDeleteResult, error) {
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" || len(targets) == 0 || len(targets) > CompanyExplorerDeleteBatchMaxItems {
+		return CompanyExplorerDeleteResult{}, ErrInvalid
 	}
-	if err == nil {
-		return ErrInvalid
+	targets = normalizeCompanyExplorerDeleteTargets(targets)
+	if len(targets) == 0 {
+		return CompanyExplorerDeleteResult{}, ErrInvalid
+	}
+	for _, target := range targets {
+		if !validCompanyExplorerDeleteKind(target.Kind) {
+			return CompanyExplorerDeleteResult{}, ErrInvalid
+		}
 	}
 
-	deleted, err := r.db.ExecContext(ctx,
-		`delete from company_explorer_folders
-		 where company_id=$1 and folder_id=$2`,
-		companyID, folderID,
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return CompanyExplorerDeleteResult{}, err
+	}
+	defer tx.Rollback()
+
+	folderRootIDs := map[string]bool{}
+	folderIDs := map[string]bool{}
+	folderKinds := map[string]string{}
+	nodeIDs := map[string]bool{}
+	directNodeIDs := map[string]bool{}
+	logicGateIDs := map[string]bool{}
+	directLogicGateIDs := map[string]bool{}
+	kanbanBoardIDs := map[string]bool{}
+	directKanbanBoardIDs := map[string]bool{}
+
+	for _, target := range targets {
+		switch target.Kind {
+		case "folder":
+			rows, err := tx.QueryContext(ctx,
+				`with recursive subtree as (
+				   select folder_id, folder_kind, system_key
+				   from company_explorer_folders
+				   where company_id=$1 and folder_id=$2
+				   union all
+				   select child.folder_id, child.folder_kind, child.system_key
+				   from company_explorer_folders child
+				   join subtree parent on child.company_id=$1 and child.parent_folder_id=parent.folder_id
+				 )
+				 select folder_id::text, folder_kind, system_key is not null
+				 from subtree`,
+				companyID, target.ID,
+			)
+			if err != nil {
+				return CompanyExplorerDeleteResult{}, err
+			}
+			count := 0
+			for rows.Next() {
+				var folderID string
+				var folderKind string
+				var protected bool
+				if err := rows.Scan(&folderID, &folderKind, &protected); err != nil {
+					rows.Close()
+					return CompanyExplorerDeleteResult{}, err
+				}
+				count++
+				if protected {
+					rows.Close()
+					return CompanyExplorerDeleteResult{}, ErrInvalid
+				}
+				folderIDs[folderID] = true
+				folderKinds[folderID] = folderKind
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return CompanyExplorerDeleteResult{}, err
+			}
+			rows.Close()
+			if count == 0 {
+				return CompanyExplorerDeleteResult{}, ErrNotFound
+			}
+			folderRootIDs[target.ID] = true
+		case "node":
+			exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from nodes where company_id=$1 and node_id=$2)`, companyID, target.ID)
+			if err != nil {
+				return CompanyExplorerDeleteResult{}, err
+			}
+			if !exists {
+				return CompanyExplorerDeleteResult{}, ErrNotFound
+			}
+			nodeIDs[target.ID] = true
+			directNodeIDs[target.ID] = true
+		case "logic_gate":
+			exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`, companyID, target.ID)
+			if err != nil {
+				return CompanyExplorerDeleteResult{}, err
+			}
+			if !exists {
+				return CompanyExplorerDeleteResult{}, ErrNotFound
+			}
+			logicGateIDs[target.ID] = true
+			directLogicGateIDs[target.ID] = true
+		case "kanban":
+			exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from kanban_boards where company_id=$1 and board_id=$2)`, companyID, target.ID)
+			if err != nil {
+				return CompanyExplorerDeleteResult{}, err
+			}
+			if !exists {
+				return CompanyExplorerDeleteResult{}, ErrNotFound
+			}
+			kanbanBoardIDs[target.ID] = true
+			directKanbanBoardIDs[target.ID] = true
+		}
+	}
+
+	for folderID := range folderIDs {
+		rows, err := tx.QueryContext(ctx,
+			`select item_type, item_id
+			 from company_explorer_folder_items
+			 where company_id=$1 and folder_id=$2`,
+			companyID, folderID,
+		)
+		if err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+		for rows.Next() {
+			var itemType string
+			var itemID string
+			if err := rows.Scan(&itemType, &itemID); err != nil {
+				rows.Close()
+				return CompanyExplorerDeleteResult{}, err
+			}
+			switch itemType {
+			case "node":
+				nodeIDs[itemID] = true
+			case "logic_gate":
+				logicGateIDs[itemID] = true
+			case "kanban":
+				kanbanBoardIDs[itemID] = true
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return CompanyExplorerDeleteResult{}, err
+		}
+		rows.Close()
+	}
+
+	for nodeID := range nodeIDs {
+		exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from nodes where company_id=$1 and node_id=$2)`, companyID, nodeID)
+		if err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+		if !exists {
+			if directNodeIDs[nodeID] {
+				return CompanyExplorerDeleteResult{}, ErrNotFound
+			}
+			delete(nodeIDs, nodeID)
+		}
+	}
+	for logicGateID := range logicGateIDs {
+		exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`, companyID, logicGateID)
+		if err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+		if !exists {
+			if directLogicGateIDs[logicGateID] {
+				return CompanyExplorerDeleteResult{}, ErrNotFound
+			}
+			delete(logicGateIDs, logicGateID)
+			continue
+		}
+		boardRows, err := tx.QueryContext(ctx,
+			`select board_id
+			 from kanban_boards
+			 where company_id=$1 and (board_id=$2 or logic_gate_id=$3)`,
+			companyID, LogicGateKanbanBoardID(logicGateID), logicGateID,
+		)
+		if err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+		for boardRows.Next() {
+			var boardID string
+			if err := boardRows.Scan(&boardID); err != nil {
+				boardRows.Close()
+				return CompanyExplorerDeleteResult{}, err
+			}
+			kanbanBoardIDs[boardID] = true
+		}
+		if err := boardRows.Err(); err != nil {
+			boardRows.Close()
+			return CompanyExplorerDeleteResult{}, err
+		}
+		boardRows.Close()
+	}
+	for boardID := range kanbanBoardIDs {
+		var attachedLogicGateID sql.NullString
+		err := tx.QueryRowContext(ctx,
+			`select logic_gate_id::text
+			 from kanban_boards
+			 where company_id=$1 and board_id=$2`,
+			companyID, boardID,
+		).Scan(&attachedLogicGateID)
+		if errors.Is(err, sql.ErrNoRows) {
+			if directKanbanBoardIDs[boardID] {
+				return CompanyExplorerDeleteResult{}, ErrNotFound
+			}
+			delete(kanbanBoardIDs, boardID)
+			continue
+		}
+		if err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+		if attachedLogicGateID.Valid && !logicGateIDs[attachedLogicGateID.String] {
+			return CompanyExplorerDeleteResult{}, ErrInvalid
+		}
+	}
+
+	result := CompanyExplorerDeleteResult{Targets: make([]CompanyExplorerDeletedTarget, 0)}
+	seenDeleted := map[string]bool{}
+	appendSorted := func(kind string, ids map[string]bool) {
+		values := make([]string, 0, len(ids))
+		for id := range ids {
+			values = append(values, id)
+		}
+		sort.Strings(values)
+		for _, id := range values {
+			folderKind := ""
+			if kind == "folder" {
+				folderKind = folderKinds[id]
+			}
+			result.Targets = appendCompanyExplorerDeletedTarget(result.Targets, seenDeleted, kind, id, folderKind)
+		}
+	}
+	appendSorted("folder", folderIDs)
+	appendSorted("node", nodeIDs)
+	appendSorted("logic_gate", logicGateIDs)
+	appendSorted("kanban", kanbanBoardIDs)
+
+	for logicGateID := range logicGateIDs {
+		if err := postgresDeleteLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+	}
+	for boardID := range kanbanBoardIDs {
+		exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from kanban_boards where company_id=$1 and board_id=$2)`, companyID, boardID)
+		if err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+		if !exists {
+			continue
+		}
+		if err := postgresDeleteKanbanBoardTx(ctx, tx, companyID, boardID); err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+	}
+	for nodeID := range nodeIDs {
+		if err := postgresDeleteNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+	}
+	for folderID := range folderRootIDs {
+		if _, err := tx.ExecContext(ctx,
+			`delete from company_explorer_folders
+			 where company_id=$1 and folder_id=$2`,
+			companyID, folderID,
+		); err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return CompanyExplorerDeleteResult{}, err
+	}
+	return result, nil
+}
+
+func postgresTxExists(ctx context.Context, tx *sql.Tx, query string, args ...any) (bool, error) {
+	var exists bool
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	if _, err := tx.ExecContext(ctx,
+		`delete from node_relationships
+		 where company_id=$1 and (node_id_a=$2 or node_id_b=$2)`,
+		companyID, nodeID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from company_explorer_folder_items
+		 where company_id=$1 and item_type='node' and item_id=$2`,
+		companyID, nodeID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from kanban_cards
+		 where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from node_information
+		 where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from node_projection_table
+		 where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from node_map_positions
+		 where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
+	); err != nil {
+		return err
+	}
+	deleted, err := tx.ExecContext(ctx,
+		`delete from nodes
+		 where company_id=$1 and node_id=$2`,
+		companyID, nodeID,
 	)
 	if err != nil {
 		return err
@@ -457,8 +811,160 @@ func (r *PostgresRepo) DeleteCompanyExplorerFolder(companyID, folderID string) e
 	if affected == 0 {
 		return ErrNotFound
 	}
-	// The self-referential folder FK and company_explorer_folder_items FK both cascade. Deleting
-	// the root folder removes descendants and placements without touching nodes/gates.
+	return nil
+}
+
+func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
+	if _, err := tx.ExecContext(ctx,
+		`delete from logic_gate_relationships
+		 where company_id=$1 and (logic_gate_id_a=$2 or logic_gate_id_b=$2)`,
+		companyID, logicGateID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from company_explorer_folder_items
+		 where company_id=$1 and item_type='logic_gate' and item_id=$2`,
+		companyID, logicGateID,
+	); err != nil {
+		return err
+	}
+	boardID := LogicGateKanbanBoardID(logicGateID)
+	if _, err := tx.ExecContext(ctx,
+		`with target_boards as (
+		   select $3::text as board_id
+		   union
+		   select board_id
+		   from kanban_boards
+		   where company_id=$1 and logic_gate_id=$2
+		 )
+		 delete from company_explorer_folder_items
+		 where company_id=$1
+		   and item_type='kanban'
+		   and item_id in (select board_id from target_boards)`,
+		companyID, logicGateID, boardID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`with target_boards as (
+		   select $3::text as board_id
+		   union
+		   select board_id
+		   from kanban_boards
+		   where company_id=$1 and logic_gate_id=$2
+		 )
+		 delete from kanban_cards
+		 where company_id=$1
+		   and board_id in (select board_id from target_boards)`,
+		companyID, logicGateID, boardID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`with target_boards as (
+		   select $3::text as board_id
+		   union
+		   select board_id
+		   from kanban_boards
+		   where company_id=$1 and logic_gate_id=$2
+		 )
+		 delete from kanban_columns
+		 where company_id=$1
+		   and board_id in (select board_id from target_boards)`,
+		companyID, logicGateID, boardID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from kanban_boards
+		 where company_id=$1
+		   and (board_id=$3 or logic_gate_id=$2)`,
+		companyID, logicGateID, boardID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from logic_gate_information
+		 where company_id=$1 and logic_gate_id=$2`,
+		companyID, logicGateID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from logic_gate_projection_table
+		 where company_id=$1 and logic_gate_id=$2`,
+		companyID, logicGateID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from logic_gate_map_positions
+		 where company_id=$1 and logic_gate_id=$2`,
+		companyID, logicGateID,
+	); err != nil {
+		return err
+	}
+	deleted, err := tx.ExecContext(ctx,
+		`delete from logic_gates
+		 where company_id=$1 and logic_gate_id=$2`,
+		companyID, logicGateID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := deleted.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func postgresDeleteKanbanBoardTx(ctx context.Context, tx *sql.Tx, companyID, boardID string) error {
+	var attachedLogicGateID sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+select logic_gate_id::text
+from kanban_boards
+where company_id=$1 and board_id=$2`, companyID, boardID).Scan(&attachedLogicGateID); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if attachedLogicGateID.Valid {
+		return ErrInvalid
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+delete from company_explorer_folder_items
+where company_id=$1 and item_type='kanban' and item_id=$2`, companyID, boardID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from kanban_cards
+where company_id=$1 and board_id=$2`, companyID, boardID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from kanban_columns
+where company_id=$1 and board_id=$2`, companyID, boardID); err != nil {
+		return err
+	}
+	deleted, err := tx.ExecContext(ctx, `
+delete from kanban_boards
+where company_id=$1 and board_id=$2`, companyID, boardID)
+	if err != nil {
+		return err
+	}
+	affected, err := deleted.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
 	return nil
 }
 

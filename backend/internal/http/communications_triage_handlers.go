@@ -169,6 +169,9 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusInternalServerError, "failed_to_convert_triage_items")
 		return
 	}
+	for _, item := range result.FolderItems {
+		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_item": item})
+	}
 	for _, node := range result.Nodes {
 		s.publishWorkspaceEvent(req.CompanyID, "node_created", map[string]any{"node_id": node.NodeID, "node": node})
 		s.publishKanbanDerivedNodeUpdate(req.CompanyID, node.NodeID)

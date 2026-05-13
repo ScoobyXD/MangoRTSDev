@@ -85,6 +85,10 @@ func (r *MemoryRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	return r.deleteLogicGateLocked(companyID, logicGateID)
+}
+
+func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error {
 	k := key(companyID, logicGateID)
 	if _, ok := r.logicGates[k]; !ok {
 		return ErrNotFound
@@ -94,11 +98,30 @@ func (r *MemoryRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	delete(r.logicGateText, k)
 	delete(r.folderItems, folderItemKey(companyID, "logic_gate", logicGateID))
 	delete(r.logicMapPositions, k)
-	boardID := LogicGateKanbanBoardID(logicGateID)
-	delete(r.kanbanCards, boardKey(companyID, boardID))
-	delete(r.kanbanColumns, boardKey(companyID, boardID))
-	delete(r.kanbanBoards, boardKey(companyID, boardID))
-	delete(r.folderItems, folderItemKey(companyID, "kanban", boardID))
+	for boardKeyValue, board := range r.kanbanBoards {
+		if board.CompanyID != companyID || board.LogicGateID == nil || *board.LogicGateID != logicGateID {
+			continue
+		}
+		delete(r.kanbanCards, boardKeyValue)
+		delete(r.kanbanColumns, boardKeyValue)
+		delete(r.kanbanBoards, boardKeyValue)
+		delete(r.folderItems, folderItemKey(companyID, "kanban", board.BoardID))
+	}
+	defaultBoardID := LogicGateKanbanBoardID(logicGateID)
+	delete(r.kanbanCards, boardKey(companyID, defaultBoardID))
+	delete(r.kanbanColumns, boardKey(companyID, defaultBoardID))
+	delete(r.kanbanBoards, boardKey(companyID, defaultBoardID))
+	delete(r.folderItems, folderItemKey(companyID, "kanban", defaultBoardID))
+	for shortcutKey, shortcut := range r.logicGateShortcuts {
+		if shortcut.CompanyID == companyID && shortcut.LogicGateID == logicGateID {
+			delete(r.logicGateShortcuts, shortcutKey)
+		}
+	}
+	for linkKey, link := range r.emailNodeLinks {
+		if link.CompanyID == companyID && link.LogicGateID == logicGateID {
+			delete(r.emailNodeLinks, linkKey)
+		}
+	}
 
 	filtered := make([]domain.LogicGateRelationship, 0, len(r.logicGateRels[companyID]))
 	for _, rel := range r.logicGateRels[companyID] {

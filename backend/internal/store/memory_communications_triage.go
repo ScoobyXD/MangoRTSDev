@@ -109,6 +109,10 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 	if !ok {
 		return CommunicationsTriageConversionResult{}, ErrNotFound
 	}
+	activeNodeFolder, ok := r.ensureCompanyExplorerSystemFolderLocked(input.CompanyID, CompanyExplorerSystemActiveNodesKey)
+	if !ok {
+		return CommunicationsTriageConversionResult{}, ErrNotFound
+	}
 	board := r.ensureLogicGateKanbanBoardLocked(input.CompanyID, input.LogicGateID, logicGate.Header)
 	pendingColumnID := r.pendingKanbanColumnIDLocked(input.CompanyID, board.BoardID)
 	if pendingColumnID == "" {
@@ -131,6 +135,10 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			CreatedTimestamp: now,
 		}
 		r.nodes[key(input.CompanyID, nodeID)] = node
+		folderItem, _, err := r.assignCompanyExplorerFolderItemLocked(input.CompanyID, activeNodeFolder.FolderID, "node", nodeID, 0)
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
 		r.nodeMapPositions[key(input.CompanyID, nodeID)] = domain.NodeMapPosition{
 			CompanyID:        input.CompanyID,
 			NodeID:           nodeID,
@@ -173,6 +181,7 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 
 		result.Nodes = append(result.Nodes, r.withNodeReadModelLocked(node))
 		result.Cards = append(result.Cards, card)
+		result.FolderItems = append(result.FolderItems, folderItem)
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
 	return result, nil

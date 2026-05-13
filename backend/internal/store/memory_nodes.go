@@ -178,6 +178,10 @@ func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	return r.deleteNodeLocked(companyID, nodeID)
+}
+
+func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	k := key(companyID, nodeID)
 	if _, ok := r.nodes[k]; !ok {
 		return ErrNotFound
@@ -188,6 +192,11 @@ func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
 	delete(r.nodeText, k)
 	delete(r.folderItems, folderItemKey(companyID, "node", nodeID))
 	delete(r.nodeMapPositions, k)
+	for linkKey, link := range r.emailNodeLinks {
+		if link.CompanyID == companyID && link.NodeID == nodeID {
+			delete(r.emailNodeLinks, linkKey)
+		}
+	}
 	for board, cards := range r.kanbanCards {
 		next := make([]domain.KanbanCard, 0, len(cards))
 		for _, card := range cards {

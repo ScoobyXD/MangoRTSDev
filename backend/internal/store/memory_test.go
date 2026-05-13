@@ -548,8 +548,42 @@ func TestMemoryRepoConvertCommunicationsTriageItemsAddsAttachedEmailProjection(t
 	if len(result.Nodes) != 1 {
 		t.Fatalf("expected one converted node, got %d", len(result.Nodes))
 	}
+	if len(result.Cards) != 1 {
+		t.Fatalf("expected one converted card, got %d", len(result.Cards))
+	}
 	if result.Nodes[0].Status == nil || *result.Nodes[0].Status != "Pending" {
 		t.Fatalf("converted node status = %+v, want Pending read model", result.Nodes[0].Status)
+	}
+	columns, err := repo.ListKanbanColumns(companyID, result.Board.BoardID)
+	if err != nil {
+		t.Fatalf("ListKanbanColumns failed: %v", err)
+	}
+	columnTitleByID := map[string]string{}
+	for _, column := range columns {
+		columnTitleByID[column.ColumnID] = column.Title
+	}
+	if columnTitleByID[result.Cards[0].ColumnID] != "Pending" {
+		t.Fatalf("converted card column = %q, want Pending", columnTitleByID[result.Cards[0].ColumnID])
+	}
+	if len(result.FolderItems) != 1 {
+		t.Fatalf("expected one active-node folder item, got %d", len(result.FolderItems))
+	}
+	folders, err := repo.ListCompanyExplorerFolders(companyID, "node")
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerFolders failed: %v", err)
+	}
+	activeFolderID := ""
+	for _, folder := range folders {
+		if folder.SystemKey != nil && *folder.SystemKey == CompanyExplorerSystemActiveNodesKey {
+			activeFolderID = folder.FolderID
+			break
+		}
+	}
+	if activeFolderID == "" {
+		t.Fatal("Active Nodes system folder was not created")
+	}
+	if result.FolderItems[0].FolderID != activeFolderID || result.FolderItems[0].ItemType != "node" || result.FolderItems[0].ItemID != result.Nodes[0].NodeID {
+		t.Fatalf("folder item = %+v, want converted node in Active Nodes folder %s", result.FolderItems[0], activeFolderID)
 	}
 	projections, err := repo.ListNodeProjections(companyID, result.Nodes[0].NodeID)
 	if err != nil {

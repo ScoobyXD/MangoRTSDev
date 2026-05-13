@@ -53,7 +53,8 @@ import { getExplorerDropPayloadItems, resolveExplorerClickSelection } from "../.
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import { invalidateNodeRecordStoreCaches } from "../../modules/node-map/NodeRecordStore";
-import { upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
+import { upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
+import { upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache } from "../../modules/kanban/kanbanApi";
 import {
@@ -994,7 +995,12 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
         upsertNodeRelationshipGraphNode(apiBase, companyID, node);
       }
+      for (const item of result.folder_items ?? []) {
+        upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
+        upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
+      }
       const converted = result.deleted_message_ids?.length ? result.deleted_message_ids : ids;
+      invalidateCommunicationsCache({ messagePages: true, messages: true });
       setMessages((previous) => previous.map((message) => converted.includes(message.id) ? markMessageSentToLogicGate(message, logicGateID) : message));
       setSelectedMessage((current) => current && converted.includes(current.id) ? markMessageSentToLogicGate(current, logicGateID) : current);
       const title = logicGateByID.get(logicGateID)?.header || "Logic Gate";
