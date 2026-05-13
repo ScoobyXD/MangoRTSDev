@@ -35,12 +35,12 @@ type EditorLinkedDocumentPanelsProps = {
 };
 
 const NODE_PRIORITY_OPTIONS = [
-  { value: "0", label: "0 Unassigned", color: "#64748b" },
-  { value: "1", label: "1 Low Priority", color: "#fbb152" },
-  { value: "2", label: "2 Medium-Low Priority", color: "#fea94e" },
-  { value: "3", label: "3 Medium Priority", color: "#fe9b46" },
-  { value: "4", label: "4 High Priority", color: "#ff8820" },
-  { value: "5", label: "5 URGENT", color: "#b91c1c" },
+  { value: "1", label: "1\u00A0\u00A0URGENT (<1 hr)", color: "#b91c1c" },
+  { value: "2", label: "2\u00A0\u00A0By end of day", color: "#dc2626" },
+  { value: "3", label: "3\u00A0\u00A0Within a few days", color: "#ff8820" },
+  { value: "4", label: "4\u00A0\u00A0Within the week", color: "#f59e0b" },
+  { value: "5", label: "5\u00A0\u00A0Later (low priority)", color: "#64748b" },
+  { value: "0", label: "0\u00A0\u00A0Unassigned", color: "#64748b" },
 ] as const;
 
 function companyUserOptionLabel(user: { user_id: string; email?: string; display_name?: string }): string {

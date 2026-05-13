@@ -184,7 +184,7 @@ test("grouped board layout uses one global Y-axis row order across X-axis column
   assert.deepEqual(layout.columns[2].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[], [], []]);
 });
 
-test("grouped board layout sorts group axes and uses full priority labels", () => {
+test("grouped board layout sorts group axes and uses deadline priority labels", () => {
   const columns = [
     column({ column_id: "todo", title: "Todo", position: 1000 }),
     column({ column_id: "done", title: "Done", position: 2000 }),
@@ -192,6 +192,7 @@ test("grouped board layout sorts group axes and uses full priority labels", () =
   const cards = [
     card({ card_id: "low", column_id: "todo", node_id: "node-low", position: 1000 }),
     card({ card_id: "urgent", column_id: "done", node_id: "node-urgent", position: 1000 }),
+    card({ card_id: "unassigned", column_id: "todo", node_id: "node-unassigned", position: 2000 }),
   ];
   const layout = buildKanbanGroupedBoardLayout({
     columns,
@@ -199,22 +200,23 @@ test("grouped board layout sorts group axes and uses full priority labels", () =
     xGroupBy: "status",
     yGroupBy: "priority",
     xSortDirection: "desc",
-    ySortDirection: "desc",
+    ySortDirection: "asc",
     nodeByID: new Map([
-      ["node-low", { node_id: "node-low", priority: 1 }],
-      ["node-urgent", { node_id: "node-urgent", priority: 5 }],
+      ["node-low", { node_id: "node-low", priority: 5 }],
+      ["node-urgent", { node_id: "node-urgent", priority: 1 }],
+      ["node-unassigned", { node_id: "node-unassigned" }],
     ]),
     userByID: new Map(),
   });
 
   assert.deepEqual(layout.columns.map((groupColumn) => groupColumn.label), ["Done", "Todo"]);
-  assert.deepEqual(layout.rows.map((row) => row.label), ["5 URGENT", "1 Low Priority"]);
-  assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["urgent"], []]);
-  assert.deepEqual(layout.columns[1].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[], ["low"]]);
+  assert.deepEqual(layout.rows.map((row) => row.label), ["1\u00A0\u00A0URGENT (<1 hr)", "5\u00A0\u00A0Later (low priority)", "0\u00A0\u00A0Unassigned"]);
+  assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["urgent"], [], []]);
+  assert.deepEqual(layout.columns[1].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[], ["low"], ["unassigned"]]);
 });
 
 test("default Y-axis grouping sort puts urgent priority first and due dates earliest first", () => {
-  assert.equal(getDefaultKanbanYAxisSortDirection("priority"), "desc");
+  assert.equal(getDefaultKanbanYAxisSortDirection("priority"), "asc");
   assert.equal(getDefaultKanbanYAxisSortDirection("due_date"), "asc");
   assert.equal(getDefaultKanbanYAxisSortDirection("status"), "asc");
   assert.equal(getDefaultKanbanYAxisSortDirection("person"), "asc");

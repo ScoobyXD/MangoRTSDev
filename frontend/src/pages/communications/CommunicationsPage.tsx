@@ -20,6 +20,9 @@ import {
   listEmailFolders,
   listEmailMessages,
   listCommunicationsSharedInboxes,
+  listNodeFolderItems,
+  listNodeFolders,
+  listNodes,
   listLogicGateFolderItems,
   listLogicGateFolders,
   listLogicGates,
@@ -42,6 +45,7 @@ import {
 import { subscribeCommunicationsStream } from "./communicationsStream";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import { getNodeTitle, type NodeRecord } from "../../modules/node-map/shared";
 import {
   collectFolderSubtreeIDs,
   EXPLORER_DRAG_MIME,
@@ -107,7 +111,8 @@ type CommunicationsViewID =
   | "primary"
   | "my-triage"
   | "shared-root"
-  | "logic-gate"
+  | "aci-inbox"
+  | "r-inbox"
   | "my-nodes"
   | "my-logic-gates"
   | `shared:${string}`;
@@ -121,17 +126,18 @@ type CommunicationsColumnResizeDrag = {
   availableWidth: number;
 };
 
-type RaciRole = "responsible" | "accountable" | "consulted" | "informed";
-type RaciPriority = 0 | 1 | 2 | 3 | 4 | 5;
+type AciInboxRole = "assigned" | "consulted" | "informed";
+type ResponsibleInboxStatus = "pending" | "in_progress" | "done";
+type InboxPriority = 1 | 2 | 3 | 4 | 5;
 
-type LogicGateRaciPlacement = {
-  logicGateID: string;
-  role: RaciRole;
-  priority: RaciPriority;
+type NodeAciPlacement = {
+  nodeID: string;
+  role: AciInboxRole;
+  priority: InboxPriority;
   updatedAt: number;
 };
 
-type LogicGateRaciPlacementMap = Record<string, LogicGateRaciPlacement>;
+type NodeAciPlacementMap = Record<string, NodeAciPlacement>;
 
 const MAILBOX_OPTIONS: MailboxOption[] = [
   { value: "primary", label: "My Triage" },
@@ -145,22 +151,26 @@ const COMMUNICATIONS_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.communications.column
 const COMMUNICATIONS_COLUMN_RESIZER_WIDTH = 10;
 const COMMUNICATIONS_COLUMN_MIN_WIDTHS: CommunicationsColumnWidths = [170, 280, 220, 280];
 const COMMUNICATIONS_COLUMN_MAX_WIDTHS: CommunicationsColumnWidths = [360, 760, 1600, 1600];
-const LOGIC_GATE_RACI_STORAGE_KEY_PREFIX = "mangorts.communications.logicGateRaciPlacements.v1";
+const NODE_ACI_STORAGE_KEY_PREFIX = "mangorts.communications.nodeAciPlacements.v1";
 
-const RACI_COLUMNS: ReadonlyArray<{ role: RaciRole; letter: string; label: string }> = [
-  { role: "responsible", letter: "R", label: "Responsible" },
-  { role: "accountable", letter: "A", label: "Accountable" },
+const ACI_COLUMNS: ReadonlyArray<{ role: AciInboxRole; letter: string; label: string }> = [
+  { role: "assigned", letter: "A", label: "Assigned" },
   { role: "consulted", letter: "C", label: "Consulted" },
   { role: "informed", letter: "I", label: "Informed" },
 ];
 
-const RACI_PRIORITIES: ReadonlyArray<{ value: RaciPriority; label: string }> = [
-  { value: 5, label: "5 Urgent" },
-  { value: 4, label: "4 High" },
-  { value: 3, label: "3 Medium" },
-  { value: 2, label: "2 Medium-Low" },
-  { value: 1, label: "1 Low" },
-  { value: 0, label: "0 Unassigned" },
+const RESPONSIBLE_STATUS_COLUMNS: ReadonlyArray<{ status: ResponsibleInboxStatus; letter: string; label: string }> = [
+  { status: "pending", letter: "P", label: "Pending" },
+  { status: "in_progress", letter: "IP", label: "In Progress" },
+  { status: "done", letter: "D", label: "Done" },
+];
+
+const INBOX_PRIORITIES: ReadonlyArray<{ value: InboxPriority; label: string }> = [
+  { value: 1, label: "1\u00A0\u00A0URGENT (<1 hr)" },
+  { value: 2, label: "2\u00A0\u00A0By end of day" },
+  { value: 3, label: "3\u00A0\u00A0Within a few days" },
+  { value: 4, label: "4\u00A0\u00A0Within the week" },
+  { value: 5, label: "5\u00A0\u00A0Later (low priority)" },
 ];
 
 export function CommunicationsPage({ me, onNavigate, embedded = false }: CommunicationsPageProps) {
@@ -190,15 +200,23 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
   const [loadingLogicGates, setLoadingLogicGates] = useState(false);
+  const [loadingNodes, setLoadingNodes] = useState(false);
+  const [nodeFolders, setNodeFolders] = useState<CompanyExplorerFolder[]>([]);
+  const [nodeFolderItems, setNodeFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
+  const [nodes, setNodes] = useState<NodeRecord[]>([]);
   const [logicGateFolders, setLogicGateFolders] = useState<CompanyExplorerFolder[]>([]);
   const [logicGateFolderItems, setLogicGateFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [logicGates, setLogicGates] = useState<LogicGateRecord[]>([]);
   const [myLogicGateShortcuts, setMyLogicGateShortcuts] = useState<UserLogicGateShortcut[]>([]);
+  const [nodeSearch, setNodeSearch] = useState("");
+  const [nodeExpandedIDs, setNodeExpandedIDs] = useState<Set<string>>(new Set());
+  const [selectedNodeRowIDs, setSelectedNodeRowIDs] = useState<Set<string>>(new Set());
+  const [nodeSelectionAnchorID, setNodeSelectionAnchorID] = useState("");
   const [logicGateSearch, setLogicGateSearch] = useState("");
   const [logicGateExpandedIDs, setLogicGateExpandedIDs] = useState<Set<string>>(new Set());
   const [selectedLogicGateRowIDs, setSelectedLogicGateRowIDs] = useState<Set<string>>(new Set());
   const [logicGateSelectionAnchorID, setLogicGateSelectionAnchorID] = useState("");
-  const [logicGateRaciPlacements, setLogicGateRaciPlacements] = useState<LogicGateRaciPlacementMap>(() => readLogicGateRaciPlacements(companyID));
+  const [nodeAciPlacements, setNodeAciPlacements] = useState<NodeAciPlacementMap>(() => readNodeAciPlacements(companyID));
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -422,34 +440,55 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const loadLogicGatePanel = useCallback(async (): Promise<boolean> => {
     if (!companyID) return false;
     setLoadingLogicGates(true);
+    setLoadingNodes(true);
     try {
-      const [nextFolders, nextFolderItems, nextLogicGates, nextShortcuts] = await Promise.all([
+      const [
+        nextFolders,
+        nextFolderItems,
+        nextLogicGates,
+        nextShortcuts,
+        nextNodeFolders,
+        nextNodeFolderItems,
+        nextNodes,
+      ] = await Promise.all([
         listLogicGateFolders(companyID),
         listLogicGateFolderItems(companyID),
         listLogicGates(companyID),
         listMyLogicGateShortcuts(companyID),
+        listNodeFolders(companyID),
+        listNodeFolderItems(companyID),
+        listNodes(companyID),
       ]);
       setLogicGateFolders(nextFolders);
       setLogicGateFolderItems(nextFolderItems);
       setLogicGates(nextLogicGates);
       setMyLogicGateShortcuts(sortLogicGateShortcuts(nextShortcuts));
+      setNodeFolders(nextNodeFolders);
+      setNodeFolderItems(nextNodeFolderItems);
+      setNodes(nextNodes);
       setLogicGateExpandedIDs((previous) => {
         const next = new Set(previous);
         for (const folder of nextFolders) next.add(`workspace-folder-${folder.folder_id}`);
         return next;
       });
+      setNodeExpandedIDs((previous) => {
+        const next = new Set(previous);
+        for (const folder of nextNodeFolders) next.add(`workspace-folder-${folder.folder_id}`);
+        return next;
+      });
       return true;
     } catch (logicGateError) {
-      setError(formatError(logicGateError, "Failed to load Logic Gates"));
+      setError(formatError(logicGateError, "Failed to load Home nodes"));
       return false;
     } finally {
       setLoadingLogicGates(false);
+      setLoadingNodes(false);
     }
   }, [companyID]);
 
   const loadMessages = useCallback(async () => {
     if (!status?.connected) return;
-    if (activeViewID === "logic-gate") {
+    if (isInboxMatrixViewID(activeViewID)) {
       setMessages([]);
       setSelectedMessage(null);
       setSelectedMessageID("");
@@ -506,7 +545,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   }, [activeViewID, companyID, handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
 
   const loadMoreMessages = useCallback(async () => {
-    if (!status?.connected || activeViewIDRef.current === "logic-gate" || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
+    if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current) || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
     const pageToken = nextPageTokenRef.current.trim();
     if (!pageToken) return;
     const filterKey = messageListFilterKey(companyID, activeViewIDRef.current, mailboxRef.current, searchQueryRef.current, unreadOnlyRef.current);
@@ -549,7 +588,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
   useEffect(() => { if (status?.connected) void loadLogicGatePanel(); }, [loadLogicGatePanel, status?.connected]);
   useEffect(() => { void loadMessages(); }, [loadMessages]);
-  useEffect(() => { setLogicGateRaciPlacements(readLogicGateRaciPlacements(companyID)); }, [companyID]);
+  useEffect(() => { setNodeAciPlacements(readNodeAciPlacements(companyID)); }, [companyID]);
 
   useEffect(() => {
     const list = messageListRef.current;
@@ -823,6 +862,17 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     }
   };
 
+  const nodeByID = useMemo(() => new Map(nodes.map((node) => [node.node_id, node])), [nodes]);
+  const allNodeRows = useMemo(() => buildCompanyExplorerTreeRows({
+    expanded: nodeExpandedIDs,
+    nodes,
+    logicGates: [],
+    kanbanBoards: [],
+    folders: nodeFolders,
+    folderItems: nodeFolderItems,
+    rootRowOrder: {},
+  }).filter((row) => row.kind === "folder" || row.kind === "node"), [nodeExpandedIDs, nodeFolderItems, nodeFolders, nodes]);
+  const visibleNodeRows = useMemo(() => filterExplorerRowsForSearch(allNodeRows, nodeSearch), [allNodeRows, nodeSearch]);
   const logicGateByID = useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
   const logicGateCanvasRecords = useMemo(() => logicGates.map((logicGate) => ({
     ...logicGate,
@@ -838,7 +888,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     folderItems: logicGateFolderItems,
     rootRowOrder: {},
   }).filter((row) => row.kind === "folder" || row.kind === "logic_gate"), [logicGateCanvasRecords, logicGateExpandedIDs, logicGateFolderItems, logicGateFolders]);
-  const visibleLogicGateRows = useMemo(() => filterLogicGateRowsForSearch(allLogicGateRows, logicGateSearch), [allLogicGateRows, logicGateSearch]);
+  const visibleLogicGateRows = useMemo(() => filterExplorerRowsForSearch(allLogicGateRows, logicGateSearch), [allLogicGateRows, logicGateSearch]);
   const myLogicGateGroups = useMemo(() => buildMyLogicGateGroups({
     shortcuts: myLogicGateShortcuts,
     logicGateByID,
@@ -1033,9 +1083,35 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     selectLogicGateTreeID(logicGateTreeID(logicGateID), myLogicGateOrderedRowIDs, event);
   }, [myLogicGateOrderedRowIDs, selectLogicGateTreeID]);
 
-  const selectLogicGateMatrixCard = useCallback((logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => {
-    selectLogicGateTreeID(logicGateTreeID(logicGateID), orderedIDs, event);
-  }, [selectLogicGateTreeID]);
+  const selectNodeTreeID = useCallback((treeID: string, orderedIDs: string[], event: React.MouseEvent) => {
+    const next = resolveExplorerClickSelection({
+      orderedIDs,
+      previousSelectedIDs: selectedNodeRowIDs,
+      anchorID: nodeSelectionAnchorID,
+      clickedID: treeID,
+      shiftKey: event.shiftKey,
+      ctrlKey: event.ctrlKey || event.metaKey,
+    });
+    setSelectedNodeRowIDs(next.selectedIDs);
+    setNodeSelectionAnchorID(next.anchorID);
+  }, [nodeSelectionAnchorID, selectedNodeRowIDs]);
+
+  const selectNodeRow = useCallback((row: ExplorerTreeNode, event: React.MouseEvent) => {
+    selectNodeTreeID(row.id, visibleNodeRows.map((item) => item.id), event);
+  }, [selectNodeTreeID, visibleNodeRows]);
+
+  const selectNodeMatrixCard = useCallback((nodeID: string, orderedIDs: string[], event: React.MouseEvent) => {
+    selectNodeTreeID(nodeTreeID(nodeID), orderedIDs, event);
+  }, [selectNodeTreeID]);
+
+  const getNodeDragIDs = useCallback((nodeID: string): string[] => {
+    const cleanNodeID = nodeID.trim();
+    if (!cleanNodeID) return [];
+    if (!selectedNodeRowIDs.has(nodeTreeID(cleanNodeID))) return [cleanNodeID];
+    const selectedNodeIDs = cleanIDList(Array.from(selectedNodeRowIDs).map(nodeIDFromTreeID))
+      .filter((id) => nodeByID.has(id));
+    return selectedNodeIDs.length > 0 ? selectedNodeIDs : [cleanNodeID];
+  }, [nodeByID, selectedNodeRowIDs]);
 
   const getLogicGateDragIDs = useCallback((logicGateID: string): string[] => {
     const cleanLogicGateID = logicGateID.trim();
@@ -1046,27 +1122,27 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     return selectedLogicGateIDs.length > 0 ? selectedLogicGateIDs : [cleanLogicGateID];
   }, [logicGateByID, selectedLogicGateRowIDs]);
 
-  const placeLogicGatesInRaci = useCallback((logicGateIDs: string[], role: RaciRole, priority: RaciPriority) => {
-    const ids = cleanIDList(logicGateIDs).filter((id) => logicGateByID.has(id));
+  const placeNodesInAci = useCallback((nodeIDs: string[], role: AciInboxRole, priority: InboxPriority) => {
+    const ids = cleanIDList(nodeIDs).filter((id) => nodeByID.has(id));
     if (ids.length === 0) return;
     const now = Date.now();
-    setLogicGateRaciPlacements((previous) => {
-      const next: LogicGateRaciPlacementMap = { ...previous };
-      for (const logicGateID of ids) next[logicGateID] = { logicGateID, role, priority, updatedAt: now };
-      storeLogicGateRaciPlacements(companyID, next);
+    setNodeAciPlacements((previous) => {
+      const next: NodeAciPlacementMap = { ...previous };
+      for (const nodeID of ids) next[nodeID] = { nodeID, role, priority, updatedAt: now };
+      storeNodeAciPlacements(companyID, next);
       return next;
     });
-    setNotice(ids.length === 1 ? "Logic Gate placed." : `${ids.length} Logic Gates placed.`);
-  }, [companyID, logicGateByID]);
+    setNotice(ids.length === 1 ? "Node placed." : `${ids.length} nodes placed.`);
+  }, [companyID, nodeByID]);
 
-  const removeLogicGateFromRaci = useCallback((logicGateID: string) => {
-    const cleanLogicGateID = logicGateID.trim();
-    if (!cleanLogicGateID) return;
-    setLogicGateRaciPlacements((previous) => {
-      if (!previous[cleanLogicGateID]) return previous;
-      const next: LogicGateRaciPlacementMap = { ...previous };
-      delete next[cleanLogicGateID];
-      storeLogicGateRaciPlacements(companyID, next);
+  const removeNodeFromAci = useCallback((nodeID: string) => {
+    const cleanNodeID = nodeID.trim();
+    if (!cleanNodeID) return;
+    setNodeAciPlacements((previous) => {
+      if (!previous[cleanNodeID]) return previous;
+      const next: NodeAciPlacementMap = { ...previous };
+      delete next[cleanNodeID];
+      storeNodeAciPlacements(companyID, next);
       return next;
     });
   }, [companyID]);
@@ -1084,8 +1160,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
 
   const activeViewLabel = getCommunicationsViewLabel(activeViewID, sharedInboxes);
   const isTriageView = activeViewID === "my-triage";
-  const isLogicGateInboxView = activeViewID === "logic-gate";
-  const workspaceGridTemplateColumns = isNarrow ? "1fr" : isLogicGateInboxView ? getLogicGateInboxGridTemplateColumns(columnWidths) : getCommunicationsGridTemplateColumns(columnWidths);
+  const isAciInboxView = activeViewID === "aci-inbox";
+  const isResponsibleInboxView = activeViewID === "r-inbox";
+  const isInboxMatrixView = isAciInboxView || isResponsibleInboxView;
+  const workspaceGridTemplateColumns = isNarrow ? "1fr" : isInboxMatrixView ? getInboxMatrixGridTemplateColumns(columnWidths) : getCommunicationsGridTemplateColumns(columnWidths);
 
   return (
     <div style={embedded ? { ...pageStyle, height: "100%" } : pageStyle}>
@@ -1135,7 +1213,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
           </section>
         </main>
       ) : (
-        <main ref={workspaceRef} style={{ ...workspaceStyle, gridTemplateColumns: workspaceGridTemplateColumns, gap: isNarrow || isLogicGateInboxView ? 10 : 0 }}>
+        <main ref={workspaceRef} style={{ ...workspaceStyle, gridTemplateColumns: workspaceGridTemplateColumns, gap: isNarrow || isInboxMatrixView ? 10 : 0 }}>
           <aside style={sidebarStyle}>
             <nav style={sidebarNavStyle} aria-label="Home triage">
               <CommunicationsNavButton label="My Triage" active={activeViewID === "my-triage" || activeViewID === "primary"} onClick={() => selectCommunicationsView("my-triage", "primary")} />
@@ -1169,52 +1247,56 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                   <button style={sharedInboxCreateButtonStyle} disabled={busy === "shared-inbox" || !newSharedInboxName.trim()} aria-label="Create Shared Triage">+</button>
                 </form>
               </section>
-              <CommunicationsNavButton label="Logic Gate Inbox" active={activeViewID === "logic-gate"} onClick={() => selectCommunicationsView("logic-gate", "all")} />
+              <CommunicationsNavButton label="ACI Inbox" active={activeViewID === "aci-inbox"} onClick={() => selectCommunicationsView("aci-inbox", "all")} />
+              <CommunicationsNavButton label="R Inbox" active={activeViewID === "r-inbox"} onClick={() => selectCommunicationsView("r-inbox", "all")} />
               <CommunicationsNavButton label="My Nodes" active={activeViewID === "my-nodes"} onClick={() => selectCommunicationsView("my-nodes", "all")} />
               <CommunicationsNavButton label="My Logic Gates" active={activeViewID === "my-logic-gates"} onClick={() => selectCommunicationsView("my-logic-gates", "all")} />
             </nav>
           </aside>
 
-          {isLogicGateInboxView ? (
+          {isInboxMatrixView ? (
             <>
-              <LogicGateRaciMatrix
-                loading={loadingLogicGates}
-                placements={logicGateRaciPlacements}
-                logicGateByID={logicGateByID}
-                folders={logicGateFolders}
-                folderItems={logicGateFolderItems}
-                selectedRowIDs={selectedLogicGateRowIDs}
-                getLogicGateDragIDs={getLogicGateDragIDs}
-                onSelectLogicGate={selectLogicGateMatrixCard}
-                onPlaceLogicGates={placeLogicGatesInRaci}
-                onRemovePlacement={removeLogicGateFromRaci}
-              />
-              <LogicGateRail
-                loading={loadingLogicGates}
-                logicGateByID={logicGateByID}
-                folders={logicGateFolders}
-                folderItems={logicGateFolderItems}
-                allRows={visibleLogicGateRows}
-                selectedRowIDs={selectedLogicGateRowIDs}
-                expandedRowIDs={logicGateExpandedIDs}
-                search={logicGateSearch}
-                myGroups={myLogicGateGroups}
-                busy={!!busy}
-                getLogicGateDragIDs={getLogicGateDragIDs}
-                onSearchChange={setLogicGateSearch}
+              {isAciInboxView ? (
+                <AciInboxMatrix
+                  loading={loadingNodes}
+                  placements={nodeAciPlacements}
+                  nodes={nodes}
+                  nodeByID={nodeByID}
+                  folders={nodeFolders}
+                  folderItems={nodeFolderItems}
+                  selectedRowIDs={selectedNodeRowIDs}
+                  getNodeDragIDs={getNodeDragIDs}
+                  onSelectNode={selectNodeMatrixCard}
+                  onPlaceNodes={placeNodesInAci}
+                  onRemovePlacement={removeNodeFromAci}
+                />
+              ) : (
+                <ResponsibleInboxMatrix
+                  loading={loadingNodes}
+                  nodes={nodes}
+                  nodeByID={nodeByID}
+                  selectedRowIDs={selectedNodeRowIDs}
+                  getNodeDragIDs={getNodeDragIDs}
+                  onSelectNode={selectNodeMatrixCard}
+                />
+              )}
+              <NodeInboxRail
+                loading={loadingNodes}
+                nodeByID={nodeByID}
+                allRows={visibleNodeRows}
+                selectedRowIDs={selectedNodeRowIDs}
+                expandedRowIDs={nodeExpandedIDs}
+                search={nodeSearch}
+                onSearchChange={setNodeSearch}
                 onToggleFolder={(rowID) => {
-                  setLogicGateExpandedIDs((previous) => {
+                  setNodeExpandedIDs((previous) => {
                     const next = new Set(previous);
                     if (next.has(rowID)) next.delete(rowID);
                     else next.add(rowID);
                     return next;
                   });
                 }}
-                onSelectRow={selectLogicGateRow}
-                onSelectShortcut={selectLogicGateShortcut}
-                onAddShortcuts={addShortcutsFromExplorerPayload}
-                onRemoveShortcut={removeShortcut}
-                onConvertMessages={convertMessagesToLogicGate}
+                onSelectRow={selectNodeRow}
               />
             </>
           ) : (
@@ -1455,7 +1537,8 @@ function getCommunicationsViewLabel(viewID: CommunicationsViewID, sharedInboxes:
   if (viewID === "primary") return "My Triage";
   if (viewID === "my-triage") return "My Triage";
   if (viewID === "shared-root") return "Shared Triage";
-  if (viewID === "logic-gate") return "Logic Gate Inbox";
+  if (viewID === "aci-inbox") return "ACI Inbox";
+  if (viewID === "r-inbox") return "R Inbox";
   if (viewID === "my-nodes") return "My Nodes";
   if (viewID === "my-logic-gates") return "My Logic Gates";
   const folderID = viewID.startsWith("shared:") ? viewID.slice("shared:".length) : "";
@@ -1713,88 +1796,172 @@ function MyLogicGateTile({
   );
 }
 
-function LogicGateRaciMatrix({
+function NodeInboxRail({
+  loading,
+  nodeByID,
+  allRows,
+  selectedRowIDs,
+  expandedRowIDs,
+  search,
+  onSearchChange,
+  onToggleFolder,
+  onSelectRow,
+}: {
+  loading: boolean;
+  nodeByID: Map<string, NodeRecord>;
+  allRows: ExplorerTreeNode[];
+  selectedRowIDs: Set<string>;
+  expandedRowIDs: Set<string>;
+  search: string;
+  onSearchChange: (value: string) => void;
+  onToggleFolder: (rowID: string) => void;
+  onSelectRow: (row: ExplorerTreeNode, event: React.MouseEvent) => void;
+}) {
+  return (
+    <aside style={{ ...logicGateRailStyle, gridTemplateRows: "minmax(0, 1fr)" }}>
+      <section style={{ ...logicGateRailSectionStyle, gridTemplateRows: "auto auto minmax(0, 1fr)" }}>
+        <div style={logicGateRailHeaderStyle}>
+          <h2 style={panelTitleStyle}>All Nodes</h2>
+          {loading && <span style={mutedSmallStyle}>Loading</span>}
+        </div>
+        <input
+          style={inputStyle}
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Search Nodes"
+        />
+        <div style={allLogicGateRowsStyle}>
+          {allRows.length === 0 && !loading ? (
+            <div style={emptySmallStyle}>No nodes</div>
+          ) : allRows.map((row) => {
+            const selected = selectedRowIDs.has(row.id);
+            const isFolder = row.kind === "folder";
+            const nodeID = row.nodeID ?? "";
+            const node = nodeID ? nodeByID.get(nodeID) : undefined;
+            return (
+              <div
+                key={row.id}
+                draggable
+                style={logicGateTreeRowStyle(row.depth, selected, row.kind === "node")}
+                onClick={(event) => onSelectRow(row, event)}
+                onDragStart={(event) => {
+                  const payload = getExplorerDragPayloadForSelection(row, selectedRowIDs, allRows);
+                  if (!payload) return;
+                  event.dataTransfer.effectAllowed = row.kind === "folder" ? "copyMove" : "copy";
+                  event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(payload));
+                  event.dataTransfer.setData("text/plain", row.label);
+                }}
+              >
+                {isFolder ? (
+                  <button
+                    type="button"
+                    draggable={false}
+                    style={logicGateDisclosureStyle}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onToggleFolder(row.id);
+                    }}
+                  >
+                    <ExplorerDisclosureIcon open={expandedRowIDs.has(row.id)} color="rgba(36, 18, 10, 0.62)" />
+                  </button>
+                ) : (
+                  <span style={{ width: 18, flexShrink: 0 }} />
+                )}
+                <ExplorerRowIcon kind={row.kind} systemKey={row.systemKey} />
+                <span style={logicGateTreeRowTextStyle}>{node ? nodeTitle(node) : row.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </aside>
+  );
+}
+
+function AciInboxMatrix({
   loading,
   placements,
-  logicGateByID,
+  nodes,
+  nodeByID,
   folders,
   folderItems,
   selectedRowIDs,
-  getLogicGateDragIDs,
-  onSelectLogicGate,
-  onPlaceLogicGates,
+  getNodeDragIDs,
+  onSelectNode,
+  onPlaceNodes,
   onRemovePlacement,
 }: {
   loading: boolean;
-  placements: LogicGateRaciPlacementMap;
-  logicGateByID: Map<string, LogicGateRecord>;
+  placements: NodeAciPlacementMap;
+  nodes: NodeRecord[];
+  nodeByID: Map<string, NodeRecord>;
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
   selectedRowIDs: Set<string>;
-  getLogicGateDragIDs: (logicGateID: string) => string[];
-  onSelectLogicGate: (logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => void;
-  onPlaceLogicGates: (logicGateIDs: string[], role: RaciRole, priority: RaciPriority) => void;
-  onRemovePlacement: (logicGateID: string) => void;
+  getNodeDragIDs: (nodeID: string) => string[];
+  onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onPlaceNodes: (nodeIDs: string[], role: AciInboxRole, priority: InboxPriority) => void;
+  onRemovePlacement: (nodeID: string) => void;
 }) {
   const [dragOverCell, setDragOverCell] = useState<string>("");
-  const cellLogicGateIDs = useMemo(() => {
+  const cellNodeIDs = useMemo(() => {
     const byCell = new Map<string, string[]>();
-    for (const placement of Object.values(placements)) {
-      if (!logicGateByID.has(placement.logicGateID)) continue;
-      const cellKey = raciCellKey(placement.role, placement.priority);
+    for (const placement of buildEffectiveAciPlacements(placements, nodes)) {
+      if (!nodeByID.has(placement.nodeID)) continue;
+      const cellKey = aciCellKey(placement.role, placement.priority);
       const ids = byCell.get(cellKey) ?? [];
-      ids.push(placement.logicGateID);
+      ids.push(placement.nodeID);
       byCell.set(cellKey, ids);
     }
     for (const ids of byCell.values()) {
-      ids.sort((a, b) => logicGateTitle(logicGateByID.get(a)).localeCompare(logicGateTitle(logicGateByID.get(b)), undefined, { numeric: true, sensitivity: "base" }));
+      ids.sort((a, b) => nodeTitle(nodeByID.get(a)).localeCompare(nodeTitle(nodeByID.get(b)), undefined, { numeric: true, sensitivity: "base" }));
     }
     return byCell;
-  }, [logicGateByID, placements]);
+  }, [nodeByID, nodes, placements]);
   const orderedRowIDs = useMemo(() => {
     const ids: string[] = [];
-    for (const priority of RACI_PRIORITIES) {
-      for (const column of RACI_COLUMNS) {
-        ids.push(...(cellLogicGateIDs.get(raciCellKey(column.role, priority.value)) ?? []).map(logicGateTreeID));
+    for (const priority of INBOX_PRIORITIES) {
+      for (const column of ACI_COLUMNS) {
+        ids.push(...(cellNodeIDs.get(aciCellKey(column.role, priority.value)) ?? []).map(nodeTreeID));
       }
     }
     return ids;
-  }, [cellLogicGateIDs]);
+  }, [cellNodeIDs]);
   const placedCount = orderedRowIDs.length;
 
-  const dropIntoCell = (event: React.DragEvent<HTMLElement>, role: RaciRole, priority: RaciPriority) => {
+  const dropIntoCell = (event: React.DragEvent<HTMLElement>, role: AciInboxRole, priority: InboxPriority) => {
     const payload = readExplorerDragPayload(event.dataTransfer);
-    const logicGateIDs = logicGateIDsFromExplorerPayload(payload, folders, folderItems);
+    const nodeIDs = nodeIDsFromExplorerPayload(payload, folders, folderItems);
     setDragOverCell("");
-    if (logicGateIDs.length === 0) return;
+    if (nodeIDs.length === 0) return;
     event.preventDefault();
-    onPlaceLogicGates(logicGateIDs, role, priority);
+    onPlaceNodes(nodeIDs, role, priority);
   };
 
   return (
     <section style={logicGateRaciPanelStyle}>
       <div style={logicGateRaciHeaderStyle}>
-        <h2 style={panelTitleStyle}>RACI Matrix</h2>
+        <h2 style={panelTitleStyle}>ACI Inbox</h2>
         <div style={logicGateRaciMetaStyle}>
           {placedCount > 0 && <span>{placedCount} placed</span>}
           {loading && <span>Loading</span>}
         </div>
       </div>
       <div className="kanban-board-scroll" style={logicGateRaciScrollStyle}>
-        <div style={logicGateRaciGridStyle}>
+        <div style={inboxMatrixGridStyle(ACI_COLUMNS.length)}>
           <div style={logicGateRaciCornerStyle} />
-          {RACI_COLUMNS.map((column) => (
+          {ACI_COLUMNS.map((column) => (
             <div key={column.role} style={logicGateRaciColumnHeaderStyle}>
               <strong style={logicGateRaciColumnLetterStyle}>{column.letter}</strong>
               <span style={logicGateRaciColumnLabelStyle}>{column.label}</span>
             </div>
           ))}
-          {RACI_PRIORITIES.map((priority) => (
+          {INBOX_PRIORITIES.map((priority) => (
             <React.Fragment key={priority.value}>
               <div style={logicGateRaciPriorityHeaderStyle}>{priority.label}</div>
-              {RACI_COLUMNS.map((column) => {
-                const cellKey = raciCellKey(column.role, priority.value);
-                const logicGateIDs = cellLogicGateIDs.get(cellKey) ?? [];
+              {ACI_COLUMNS.map((column) => {
+                const cellKey = aciCellKey(column.role, priority.value);
+                const nodeIDs = cellNodeIDs.get(cellKey) ?? [];
                 const activeDrop = dragOverCell === cellKey;
                 return (
                   <div
@@ -1817,19 +1984,19 @@ function LogicGateRaciMatrix({
                     }}
                     onDrop={(event) => dropIntoCell(event, column.role, priority.value)}
                   >
-                    {logicGateIDs.map((logicGateID) => {
-                      const logicGate = logicGateByID.get(logicGateID);
-                      if (!logicGate) return null;
+                    {nodeIDs.map((nodeID) => {
+                      const node = nodeByID.get(nodeID);
+                      if (!node) return null;
                       return (
-                        <LogicGateRaciCard
-                          key={logicGateID}
-                          logicGate={logicGate}
-                          selected={selectedRowIDs.has(logicGateTreeID(logicGateID))}
+                        <NodeInboxCard
+                          key={nodeID}
+                          node={node}
+                          selected={selectedRowIDs.has(nodeTreeID(nodeID))}
                           orderedRowIDs={orderedRowIDs}
-                          logicGateByID={logicGateByID}
-                          getLogicGateDragIDs={getLogicGateDragIDs}
-                          onSelectLogicGate={onSelectLogicGate}
-                          onRemovePlacement={onRemovePlacement}
+                          nodeByID={nodeByID}
+                          getNodeDragIDs={getNodeDragIDs}
+                          onSelectNode={onSelectNode}
+                          onRemovePlacement={placements[nodeID] ? onRemovePlacement : undefined}
                         />
                       );
                     })}
@@ -1844,49 +2011,147 @@ function LogicGateRaciMatrix({
   );
 }
 
-function LogicGateRaciCard({
-  logicGate,
+function ResponsibleInboxMatrix({
+  loading,
+  nodes,
+  nodeByID,
+  selectedRowIDs,
+  getNodeDragIDs,
+  onSelectNode,
+}: {
+  loading: boolean;
+  nodes: NodeRecord[];
+  nodeByID: Map<string, NodeRecord>;
+  selectedRowIDs: Set<string>;
+  getNodeDragIDs: (nodeID: string) => string[];
+  onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+}) {
+  const cellNodeIDs = useMemo(() => {
+    const byCell = new Map<string, string[]>();
+    for (const node of nodes) {
+      const priority = normalizeInboxPriority(node.priority);
+      const status = normalizeResponsibleInboxStatus(node.status);
+      if (priority === null || !status) continue;
+      const cellKey = responsibleCellKey(status, priority);
+      const ids = byCell.get(cellKey) ?? [];
+      ids.push(node.node_id);
+      byCell.set(cellKey, ids);
+    }
+    for (const ids of byCell.values()) {
+      ids.sort((a, b) => nodeTitle(nodeByID.get(a)).localeCompare(nodeTitle(nodeByID.get(b)), undefined, { numeric: true, sensitivity: "base" }));
+    }
+    return byCell;
+  }, [nodeByID, nodes]);
+  const orderedRowIDs = useMemo(() => {
+    const ids: string[] = [];
+    for (const priority of INBOX_PRIORITIES) {
+      for (const column of RESPONSIBLE_STATUS_COLUMNS) {
+        ids.push(...(cellNodeIDs.get(responsibleCellKey(column.status, priority.value)) ?? []).map(nodeTreeID));
+      }
+    }
+    return ids;
+  }, [cellNodeIDs]);
+  const placedCount = orderedRowIDs.length;
+
+  return (
+    <section style={logicGateRaciPanelStyle}>
+      <div style={logicGateRaciHeaderStyle}>
+        <h2 style={panelTitleStyle}>R Inbox</h2>
+        <div style={logicGateRaciMetaStyle}>
+          {placedCount > 0 && <span>{placedCount} active</span>}
+          {loading && <span>Loading</span>}
+        </div>
+      </div>
+      <div className="kanban-board-scroll" style={logicGateRaciScrollStyle}>
+        <div style={inboxMatrixGridStyle(RESPONSIBLE_STATUS_COLUMNS.length)}>
+          <div style={logicGateRaciCornerStyle} />
+          {RESPONSIBLE_STATUS_COLUMNS.map((column) => (
+            <div key={column.status} style={logicGateRaciColumnHeaderStyle}>
+              <strong style={logicGateRaciColumnLetterStyle}>{column.letter}</strong>
+              <span style={logicGateRaciColumnLabelStyle}>{column.label}</span>
+            </div>
+          ))}
+          {INBOX_PRIORITIES.map((priority) => (
+            <React.Fragment key={priority.value}>
+              <div style={logicGateRaciPriorityHeaderStyle}>{priority.label}</div>
+              {RESPONSIBLE_STATUS_COLUMNS.map((column) => {
+                const cellKey = responsibleCellKey(column.status, priority.value);
+                const nodeIDs = cellNodeIDs.get(cellKey) ?? [];
+                return (
+                  <div key={cellKey} style={logicGateRaciCellStyle(false)}>
+                    {nodeIDs.map((nodeID) => {
+                      const node = nodeByID.get(nodeID);
+                      if (!node) return null;
+                      return (
+                        <NodeInboxCard
+                          key={nodeID}
+                          node={node}
+                          selected={selectedRowIDs.has(nodeTreeID(nodeID))}
+                          orderedRowIDs={orderedRowIDs}
+                          nodeByID={nodeByID}
+                          getNodeDragIDs={getNodeDragIDs}
+                          onSelectNode={onSelectNode}
+                        />
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function NodeInboxCard({
+  node,
   selected,
   orderedRowIDs,
-  logicGateByID,
-  getLogicGateDragIDs,
-  onSelectLogicGate,
+  nodeByID,
+  getNodeDragIDs,
+  onSelectNode,
   onRemovePlacement,
 }: {
-  logicGate: LogicGateRecord;
+  node: NodeRecord;
   selected: boolean;
   orderedRowIDs: string[];
-  logicGateByID: Map<string, LogicGateRecord>;
-  getLogicGateDragIDs: (logicGateID: string) => string[];
-  onSelectLogicGate: (logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => void;
-  onRemovePlacement: (logicGateID: string) => void;
+  nodeByID: Map<string, NodeRecord>;
+  getNodeDragIDs: (nodeID: string) => string[];
+  onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onRemovePlacement?: (nodeID: string) => void;
 }) {
-  const logicGateID = logicGate.logic_gate_id;
+  const nodeID = node.node_id;
   return (
     <div
       role="button"
       tabIndex={0}
       draggable
       style={logicGateRaciCardStyle(selected)}
-      onClick={(event) => onSelectLogicGate(logicGateID, orderedRowIDs, event)}
+      onClick={(event) => onSelectNode(nodeID, orderedRowIDs, event)}
       onDragStart={(event) => {
-        const dragIDs = getLogicGateDragIDs(logicGateID);
-        setLogicGateDragData(event.dataTransfer, dragIDs, logicGateByID);
+        const dragIDs = getNodeDragIDs(nodeID);
+        setNodeDragData(event.dataTransfer, dragIDs, nodeByID);
       }}
     >
-      <span style={logicGateRaciCardIconStyle}><ExplorerRowIcon kind="logic_gate" /></span>
-      <span style={logicGateRaciCardTextStyle}>{logicGateTitle(logicGate)}</span>
-      <button
-        type="button"
-        aria-label="Remove from RACI matrix"
-        style={logicGateRaciCardRemoveStyle}
-        onClick={(event) => {
-          event.stopPropagation();
-          onRemovePlacement(logicGateID);
-        }}
-      >
-        x
-      </button>
+      <span style={logicGateRaciCardIconStyle}><ExplorerRowIcon kind="node" /></span>
+      <span style={logicGateRaciCardTextStyle}>{nodeTitle(node)}</span>
+      {onRemovePlacement ? (
+        <button
+          type="button"
+          aria-label="Remove from ACI inbox"
+          style={logicGateRaciCardRemoveStyle}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemovePlacement(nodeID);
+          }}
+        >
+          x
+        </button>
+      ) : (
+        <span style={logicGateRaciCardStatusStyle}>{responsibleStatusLetter(node.status)}</span>
+      )}
     </div>
   );
 }
@@ -2048,7 +2313,7 @@ function getCommunicationsWorkspaceTrackWidth(element: HTMLElement | null): numb
   return Math.max(1, element.clientWidth - paddingLeft - paddingRight);
 }
 
-function getLogicGateInboxGridTemplateColumns(widths: CommunicationsColumnWidths): string {
+function getInboxMatrixGridTemplateColumns(widths: CommunicationsColumnWidths): string {
   return [
     `${widths[0]}px`,
     "minmax(760px, 1fr)",
@@ -2143,34 +2408,92 @@ function setLogicGateDragData(dataTransfer: DataTransfer, logicGateIDs: string[]
   );
 }
 
-function raciCellKey(role: RaciRole, priority: RaciPriority): string {
+function nodeTreeID(nodeID: string): string {
+  return `node-${nodeID.trim()}`;
+}
+
+function nodeIDFromTreeID(treeID: string): string {
+  const value = treeID.trim();
+  const prefixes = ["node-", "system-active-node-", "system-history-node-"];
+  for (const prefix of prefixes) {
+    if (value.startsWith(prefix)) return value.slice(prefix.length).trim();
+  }
+  return "";
+}
+
+function nodeTitle(node?: Pick<NodeRecord, "title" | "node_id">): string {
+  return node ? getNodeTitle(node) || node.node_id : "Node";
+}
+
+function buildNodeExplorerPayload(nodeIDs: string[]): ExplorerDragPayload | null {
+  const ids = cleanIDList(nodeIDs);
+  if (ids.length === 0) return null;
+  if (ids.length === 1) {
+    return {
+      kind: "node",
+      itemID: ids[0],
+      itemType: "node",
+      sourceTreeID: nodeTreeID(ids[0]),
+    };
+  }
+  return {
+    kind: "batch",
+    itemType: "node",
+    items: ids.map((nodeID) => ({
+      itemID: nodeID,
+      itemType: "node",
+      treeID: nodeTreeID(nodeID),
+    })),
+  };
+}
+
+function setNodeDragData(dataTransfer: DataTransfer, nodeIDs: string[], nodeByID: Map<string, NodeRecord>): void {
+  const payload = buildNodeExplorerPayload(nodeIDs);
+  if (!payload) return;
+  const ids = cleanIDList(nodeIDs);
+  dataTransfer.effectAllowed = "copyMove";
+  dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(payload));
+  dataTransfer.setData("text/plain", ids.length === 1 ? nodeTitle(nodeByID.get(ids[0])) : `${ids.length} nodes`);
+  attachStackedDragPreview(
+    dataTransfer,
+    ids.map((nodeID) => ({ label: nodeTitle(nodeByID.get(nodeID)), color: "#ff8820" })),
+    "#ff8820",
+    "Nodes",
+  );
+}
+
+function aciCellKey(role: AciInboxRole, priority: InboxPriority): string {
   return `${role}:${priority}`;
 }
 
-function logicGateRaciStorageKey(companyID: string): string {
-  return `${LOGIC_GATE_RACI_STORAGE_KEY_PREFIX}:${companyID.trim() || "default"}`;
+function responsibleCellKey(status: ResponsibleInboxStatus, priority: InboxPriority): string {
+  return `${status}:${priority}`;
 }
 
-function readLogicGateRaciPlacements(companyID: string): LogicGateRaciPlacementMap {
+function nodeAciStorageKey(companyID: string): string {
+  return `${NODE_ACI_STORAGE_KEY_PREFIX}:${companyID.trim() || "default"}`;
+}
+
+function readNodeAciPlacements(companyID: string): NodeAciPlacementMap {
   try {
-    const raw = localStorage.getItem(logicGateRaciStorageKey(companyID));
+    const raw = localStorage.getItem(nodeAciStorageKey(companyID));
     if (!raw) return {};
     const parsed = JSON.parse(raw) as unknown;
     const values = Array.isArray(parsed) ? parsed : Object.values(parsed && typeof parsed === "object" ? parsed : {});
-    const placements: LogicGateRaciPlacementMap = {};
+    const placements: NodeAciPlacementMap = {};
     for (const value of values) {
       if (!value || typeof value !== "object") continue;
-      const candidate = value as { logicGateID?: unknown; logic_gate_id?: unknown; role?: unknown; priority?: unknown; updatedAt?: unknown };
-      const logicGateID = typeof candidate.logicGateID === "string"
-        ? candidate.logicGateID.trim()
-        : typeof candidate.logic_gate_id === "string"
-          ? candidate.logic_gate_id.trim()
+      const candidate = value as { nodeID?: unknown; node_id?: unknown; role?: unknown; priority?: unknown; updatedAt?: unknown };
+      const nodeID = typeof candidate.nodeID === "string"
+        ? candidate.nodeID.trim()
+        : typeof candidate.node_id === "string"
+          ? candidate.node_id.trim()
           : "";
-      const role = isRaciRole(candidate.role) ? candidate.role : null;
-      const priority = normalizeRaciPriority(candidate.priority);
-      if (!logicGateID || !role || priority === null) continue;
-      placements[logicGateID] = {
-        logicGateID,
+      const role = isAciInboxRole(candidate.role) ? candidate.role : null;
+      const priority = normalizeInboxPriority(candidate.priority);
+      if (!nodeID || !role || priority === null) continue;
+      placements[nodeID] = {
+        nodeID,
         role,
         priority,
         updatedAt: typeof candidate.updatedAt === "number" && Number.isFinite(candidate.updatedAt) ? candidate.updatedAt : 0,
@@ -2182,23 +2505,76 @@ function readLogicGateRaciPlacements(companyID: string): LogicGateRaciPlacementM
   }
 }
 
-function storeLogicGateRaciPlacements(companyID: string, placements: LogicGateRaciPlacementMap): void {
+function storeNodeAciPlacements(companyID: string, placements: NodeAciPlacementMap): void {
   try {
-    localStorage.setItem(logicGateRaciStorageKey(companyID), JSON.stringify(Object.values(placements)));
+    localStorage.setItem(nodeAciStorageKey(companyID), JSON.stringify(Object.values(placements)));
   } catch {
     // View placements are non-critical UI state; dropping should remain usable if storage is unavailable.
   }
 }
 
-function isRaciRole(value: unknown): value is RaciRole {
-  return value === "responsible" || value === "accountable" || value === "consulted" || value === "informed";
+function isAciInboxRole(value: unknown): value is AciInboxRole {
+  return value === "assigned" || value === "consulted" || value === "informed";
 }
 
-function normalizeRaciPriority(value: unknown): RaciPriority | null {
+function normalizeInboxPriority(value: unknown): InboxPriority | null {
   const priority = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : Number.NaN;
   if (!Number.isFinite(priority)) return null;
   const rounded = Math.round(priority);
-  return rounded >= 0 && rounded <= 5 ? rounded as RaciPriority : null;
+  return rounded >= 1 && rounded <= 5 ? rounded as InboxPriority : null;
+}
+
+function normalizeResponsibleInboxStatus(value: unknown): ResponsibleInboxStatus | null {
+  const status = typeof value === "string" ? value.trim().toLowerCase().replace(/[\s_-]+/g, " ") : "";
+  if (status === "pending" || status === "p") return "pending";
+  if (status === "in progress" || status === "ip") return "in_progress";
+  if (status === "done" || status === "d") return "done";
+  return null;
+}
+
+function responsibleStatusLetter(value: unknown): string {
+  const status = normalizeResponsibleInboxStatus(value);
+  if (status === "pending") return "P";
+  if (status === "in_progress") return "IP";
+  if (status === "done") return "D";
+  return "";
+}
+
+function buildEffectiveAciPlacements(placements: NodeAciPlacementMap, nodes: NodeRecord[]): NodeAciPlacement[] {
+  const effective = new Map<string, NodeAciPlacement>();
+  for (const placement of Object.values(placements)) {
+    effective.set(placement.nodeID, placement);
+  }
+  for (const node of nodes) {
+    if (effective.has(node.node_id)) continue;
+    if (!node.assignee_user_id?.trim()) continue;
+    const priority = normalizeInboxPriority(node.priority);
+    if (priority === null) continue;
+    effective.set(node.node_id, {
+      nodeID: node.node_id,
+      role: "assigned",
+      priority,
+      updatedAt: 0,
+    });
+  }
+  return Array.from(effective.values());
+}
+
+function nodeIDsFromExplorerPayload(payload: ExplorerDragPayload | null, folders: CompanyExplorerFolder[], folderItems: CompanyExplorerFolderItem[]): string[] {
+  if (!payload) return [];
+  if (payload.kind === "node" && payload.itemID) return [payload.itemID];
+  if (payload.kind === "batch") {
+    return cleanIDList(getExplorerDropPayloadItems(payload)
+      .filter((item) => item.itemType === "node")
+      .map((item) => item.itemID));
+  }
+  if (payload.kind === "folder" && payload.folderKind === "node" && payload.folderID) {
+    const subtree = collectFolderSubtreeIDs(folders, payload.folderID);
+    return cleanIDList(folderItems
+      .filter((item) => item.item_type === "node" && subtree.has(item.folder_id))
+      .map((item) => item.item_id));
+  }
+  return [];
 }
 
 function logicGateIDsFromExplorerPayload(payload: ExplorerDragPayload | null, folders: CompanyExplorerFolder[], folderItems: CompanyExplorerFolderItem[]): string[] {
@@ -2267,7 +2643,7 @@ function folderPathLabel(folderByID: Map<string, CompanyExplorerFolder>, folderI
   return names.reverse().join(" / ") || "Logic Gates";
 }
 
-function filterLogicGateRowsForSearch(rows: ExplorerTreeNode[], rawQuery: string): ExplorerTreeNode[] {
+function filterExplorerRowsForSearch(rows: ExplorerTreeNode[], rawQuery: string): ExplorerTreeNode[] {
   const query = rawQuery.trim().toLowerCase();
   if (!query) return rows;
   const included = new Set<string>();
@@ -2289,7 +2665,7 @@ function filterLogicGateRowsForSearch(rows: ExplorerTreeNode[], rawQuery: string
     }
   };
   rows.forEach((row, index) => {
-    const text = [row.label, row.folderLabel, row.logicGateID, row.folderID].join(" ").toLowerCase();
+    const text = [row.label, row.folderLabel, row.nodeID, row.logicGateID, row.folderID].join(" ").toLowerCase();
     if (!text.includes(query)) return;
     included.add(row.id);
     includeAncestors(index);
@@ -2310,6 +2686,10 @@ function findSystemFolder(folders: EmailFolder[], system: string): EmailFolder |
 
 function mailboxLabel(mailbox: EmailMailbox): string {
   return MAILBOX_OPTIONS.find((option) => option.value === mailbox)?.label ?? "Mail";
+}
+
+function isInboxMatrixViewID(viewID: CommunicationsViewID): boolean {
+  return viewID === "aci-inbox" || viewID === "r-inbox";
 }
 
 function messageListFilterKey(companyID: string, viewID: CommunicationsViewID, mailbox: EmailMailbox, query: string, unreadOnly: boolean): string {
@@ -2779,13 +3159,15 @@ const logicGateRaciScrollStyle: React.CSSProperties = {
   ["--kanban-board-scroll-track" as string]: "rgba(255, 136, 32, 0.08)",
 };
 
-const logicGateRaciGridStyle: React.CSSProperties = {
-  minWidth: 900,
-  display: "grid",
-  gridTemplateColumns: "96px repeat(4, minmax(190px, 1fr))",
-  gridTemplateRows: "46px repeat(6, minmax(112px, auto))",
-  alignItems: "stretch",
-};
+function inboxMatrixGridStyle(columnCount: number): React.CSSProperties {
+  return {
+    minWidth: columnCount >= 4 ? 920 : 760,
+    display: "grid",
+    gridTemplateColumns: `120px repeat(${columnCount}, minmax(190px, 1fr))`,
+    gridTemplateRows: `46px repeat(${INBOX_PRIORITIES.length}, minmax(112px, auto))`,
+    alignItems: "stretch",
+  };
+}
 
 const logicGateRaciCornerStyle: React.CSSProperties = {
   gridColumn: 1,
@@ -2907,6 +3289,17 @@ const logicGateRaciCardRemoveStyle: React.CSSProperties = {
   fontSize: 12,
   lineHeight: 1,
   padding: 0,
+};
+
+const logicGateRaciCardStatusStyle: React.CSSProperties = {
+  width: 20,
+  height: 20,
+  display: "grid",
+  placeItems: "center",
+  color: "rgba(36, 18, 10, 0.58)",
+  fontSize: 10,
+  fontWeight: 800,
+  lineHeight: 1,
 };
 
 const emptySmallStyle: React.CSSProperties = {

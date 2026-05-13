@@ -261,6 +261,24 @@ export async function listLogicGates(companyID: string): Promise<LogicGateRecord
   return (payload.logic_gates ?? []).map((logicGate) => ({ ...logicGate }));
 }
 
+export async function listNodes(companyID: string): Promise<NodeRecord[]> {
+  const params = new URLSearchParams({ company_id: companyID });
+  const payload = await apiFetchJSON<{ nodes?: NodeRecord[] }>(`/v1/nodes?${params.toString()}`);
+  return (payload.nodes ?? []).map((node) => ({ ...node }));
+}
+
+export async function listNodeFolders(companyID: string): Promise<CompanyExplorerFolder[]> {
+  const params = new URLSearchParams({ company_id: companyID, folder_kind: "node" });
+  const payload = await apiFetchJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?${params.toString()}`);
+  return (payload.folders ?? []).map((folder) => ({ ...folder }));
+}
+
+export async function listNodeFolderItems(companyID: string): Promise<CompanyExplorerFolderItem[]> {
+  const params = new URLSearchParams({ company_id: companyID, item_type: "node" });
+  const payload = await apiFetchJSON<{ folder_items?: CompanyExplorerFolderItem[] }>(`/v1/company-explorer/folder-items?${params.toString()}`);
+  return (payload.folder_items ?? []).map((item) => ({ ...item }));
+}
+
 export async function listLogicGateFolders(companyID: string): Promise<CompanyExplorerFolder[]> {
   const params = new URLSearchParams({ company_id: companyID, folder_kind: "logic_gate" });
   const payload = await apiFetchJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?${params.toString()}`);

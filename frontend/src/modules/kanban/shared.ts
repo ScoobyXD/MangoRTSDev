@@ -184,8 +184,15 @@ export const KANBAN_GROUP_FIELDS: Array<{ value: KanbanGroupField; label: string
   { value: "due_date", label: "Due Date" },
 ];
 
+const DEFAULT_KANBAN_Y_AXIS_SORT_DIRECTION: Record<KanbanGroupField, KanbanGroupSortDirection> = {
+  status: "asc",
+  person: "asc",
+  priority: "asc",
+  due_date: "asc",
+};
+
 export function getDefaultKanbanYAxisSortDirection(field: KanbanGroupField): KanbanGroupSortDirection {
-  return field === "priority" ? "desc" : "asc";
+  return DEFAULT_KANBAN_Y_AXIS_SORT_DIRECTION[field];
 }
 
 export function isKanbanBoardDropItemType(value: unknown): value is "node" {
@@ -630,12 +637,12 @@ function kanbanStatusGroupFromColumn(column: Pick<KanbanColumn, "title" | "posit
 }
 
 function getKanbanPriorityGroupLabel(priority: number): string {
-  if (priority === 1) return "1 Low Priority";
-  if (priority === 2) return "2 Medium-Low Priority";
-  if (priority === 3) return "3 Medium Priority";
-  if (priority === 4) return "4 High Priority";
-  if (priority === 5) return "5 URGENT";
-  return "0 Unassigned";
+  if (priority === 1) return "1\u00A0\u00A0URGENT (<1 hr)";
+  if (priority === 2) return "2\u00A0\u00A0By end of day";
+  if (priority === 3) return "3\u00A0\u00A0Within a few days";
+  if (priority === 4) return "4\u00A0\u00A0Within the week";
+  if (priority === 5) return "5\u00A0\u00A0Later (low priority)";
+  return "0\u00A0\u00A0Unassigned";
 }
 
 export function getKanbanGroupValue(
@@ -663,7 +670,7 @@ export function getKanbanGroupValue(
   if (field === "priority") {
     const priority = node?.priority ?? 0;
     const normalized = priority > 0 ? Math.max(1, Math.min(5, Math.round(priority))) : 0;
-    return { key: `priority:${normalized}`, label: getKanbanPriorityGroupLabel(normalized), sortValue: normalized };
+    return { key: `priority:${normalized}`, label: getKanbanPriorityGroupLabel(normalized), sortValue: normalized, sortLast: normalized === 0 };
   }
   const dueDate = node?.due_date?.trim();
   return dueDate ? { key: `due:${dueDate}`, label: dueDate, sortValue: dueDate } : { key: "due:none", label: "No due date", sortValue: "", sortLast: true };
