@@ -61,8 +61,30 @@ func (r *MemoryRepo) withDerivedNodeStatusLocked(node domain.Node) domain.Node {
 	return node
 }
 
+func (r *MemoryRepo) nodeLogicGateIDsLocked(companyID, nodeID string) []string {
+	seen := map[string]bool{}
+	for _, cards := range r.kanbanCards {
+		for _, card := range cards {
+			if card.CompanyID != companyID || card.NodeID != nodeID || card.LogicGateID == nil {
+				continue
+			}
+			logicGateID := strings.TrimSpace(*card.LogicGateID)
+			if logicGateID != "" {
+				seen[logicGateID] = true
+			}
+		}
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 func (r *MemoryRepo) withNodeReadModelLocked(node domain.Node) domain.Node {
 	node = r.withDerivedNodeStatusLocked(node)
+	node.LogicGateIDs = r.nodeLogicGateIDsLocked(node.CompanyID, node.NodeID)
 	if node.AssigneeUserID == nil || strings.TrimSpace(*node.AssigneeUserID) == "" {
 		return node
 	}

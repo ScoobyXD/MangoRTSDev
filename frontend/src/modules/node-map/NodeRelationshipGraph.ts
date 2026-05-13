@@ -183,6 +183,7 @@ function asNodeRecord(candidate: unknown): NodeRecord | null {
     due_date: typeof value.due_date === "string" || value.due_date === null ? value.due_date : undefined,
     priority: typeof value.priority === "number" || value.priority === null ? value.priority : undefined,
     assignee_user_id: typeof value.assignee_user_id === "string" || value.assignee_user_id === null ? value.assignee_user_id : undefined,
+    logic_gate_ids: Array.isArray(value.logic_gate_ids) ? value.logic_gate_ids.filter((item): item is string => typeof item === "string") : undefined,
     created_timestamp: typeof value.created_timestamp === "string" ? value.created_timestamp : new Date().toISOString(),
   };
 }

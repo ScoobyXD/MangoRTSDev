@@ -6,6 +6,7 @@ import { KanbanContent } from "../../modules/kanban/KanbanContent";
 import { logicGateIDFromKanbanBoardID } from "../../modules/kanban/shared";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../../modules/selectionCoordinator";
 import { getActiveCompanyID } from "../../auth/currentCompany";
+import { consumePendingLogicGateArenaSelection } from "./logicGateArenaLaunch";
 
 type LogicGateArenaPageProps = {
   frames: FrameDataModel[];
@@ -25,6 +26,7 @@ type ArenaLogicGateSelection = {
   id: string;
   label: string;
   emptyMessage: string;
+  nodeID?: string;
 };
 
 const SPLITTER_WIDTH_PX = 5;
@@ -62,6 +64,13 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
   const explorerSelectionTargetFrameIDs = useMemo(() => (
     editorFrame?.id ? [editorFrame.id] : []
   ), [editorFrame?.id]);
+
+  useEffect(() => {
+    const pending = consumePendingLogicGateArenaSelection(companyID);
+    if (!pending) return;
+    lastArenaSelectionChangedAtRef.current = pending.createdAt;
+    setSelectedLogicGate({ id: pending.logicGateID, label: pending.label, emptyMessage: "", nodeID: pending.nodeID });
+  }, [companyID]);
 
   const applySelection = useCallback((selection: LiveSelectionChange | null) => {
     if (!selection || selection.companyID !== companyID) return;
@@ -225,6 +234,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
           arenaMode
           forcedLogicGateID={selectedLogicGate.id}
           forcedLogicGateLabel={selectedLogicGate.label}
+          forcedHighlightedNodeID={selectedLogicGate.nodeID}
         />
       </section>
     </div>

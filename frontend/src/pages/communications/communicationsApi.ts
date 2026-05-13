@@ -267,6 +267,16 @@ export async function listNodes(companyID: string): Promise<NodeRecord[]> {
   return (payload.nodes ?? []).map((node) => ({ ...node }));
 }
 
+export async function updateNode(companyID: string, nodeID: string, update: Partial<Pick<NodeRecord, "status" | "status_color" | "priority" | "assignee_user_id">>): Promise<NodeRecord> {
+  return apiFetchJSON<NodeRecord>(`/v1/nodes/${encodeURIComponent(nodeID)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      company_id: companyID,
+      ...update,
+    }),
+  });
+}
+
 export async function listNodeFolders(companyID: string): Promise<CompanyExplorerFolder[]> {
   const params = new URLSearchParams({ company_id: companyID, folder_kind: "node" });
   const payload = await apiFetchJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?${params.toString()}`);

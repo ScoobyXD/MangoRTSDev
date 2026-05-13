@@ -403,6 +403,9 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 	if loadedNode.Status == nil || *loadedNode.Status != "Pending" {
 		t.Fatalf("status = %+v, want Pending", loadedNode.Status)
 	}
+	if len(loadedNode.LogicGateIDs) != 1 || loadedNode.LogicGateIDs[0] != firstGate.LogicGateID {
+		t.Fatalf("logic_gate_ids = %+v, want first gate", loadedNode.LogicGateIDs)
+	}
 
 	issue := true
 	moved, err := repo.MoveKanbanCard(KanbanCardMoveInput{
@@ -453,6 +456,9 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 	}
 	if loadedNode.Status == nil || *loadedNode.Status != "Done" {
 		t.Fatalf("status after supersede = %+v, want Done", loadedNode.Status)
+	}
+	if len(loadedNode.LogicGateIDs) != 1 || loadedNode.LogicGateIDs[0] != secondGate.LogicGateID {
+		t.Fatalf("logic_gate_ids after supersede = %+v, want second gate", loadedNode.LogicGateIDs)
 	}
 
 	dueDate := "2026-05-06"

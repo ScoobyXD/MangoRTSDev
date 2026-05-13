@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"strings"
@@ -31,13 +32,19 @@ n.priority,
 n.assignee_user_id::text,
 nullif(assignee.display_name, '') as assignee_name,
 nullif(assignee.email, '') as assignee_email,
-n.created_timestamp`
+n.created_timestamp,
+coalesce(node_logic_gates.logic_gate_ids_json, '[]') as logic_gate_ids_json`
 
 const nodeStatusJoin = `
-left join kanban_cards card
-  on card.company_id = n.company_id
- and card.node_id = n.node_id
- and card.logic_gate_id is not null
+left join lateral (
+  select card.*
+  from kanban_cards card
+  where card.company_id = n.company_id
+    and card.node_id = n.node_id
+    and card.logic_gate_id is not null
+  order by card.updated_timestamp desc, card.created_timestamp desc, card.card_id desc
+  limit 1
+) card on true
 left join kanban_columns column_row
   on column_row.company_id = card.company_id
  and column_row.board_id = card.board_id
@@ -46,7 +53,17 @@ left join company_memberships assignee_membership
   on assignee_membership.company_id = n.company_id
  and assignee_membership.user_id = n.assignee_user_id
 left join users assignee
-  on assignee.user_id = assignee_membership.user_id`
+  on assignee.user_id = assignee_membership.user_id
+left join lateral (
+  select coalesce(jsonb_agg(gate.logic_gate_id order by gate.logic_gate_id), '[]'::jsonb)::text as logic_gate_ids_json
+  from (
+    select distinct card.logic_gate_id::text as logic_gate_id
+    from kanban_cards card
+    where card.company_id = n.company_id
+      and card.node_id = n.node_id
+      and card.logic_gate_id is not null
+  ) gate
+) node_logic_gates on true`
 
 func scanNode(row interface {
 	Scan(dest ...any) error
@@ -59,6 +76,7 @@ func scanNode(row interface {
 	var assigneeUserID sql.NullString
 	var assigneeName sql.NullString
 	var assigneeEmail sql.NullString
+	var logicGateIDsJSON sql.NullString
 	err := row.Scan(
 		&item.CompanyID,
 		&item.NodeID,
@@ -71,6 +89,7 @@ func scanNode(row interface {
 		&assigneeName,
 		&assigneeEmail,
 		&item.CreatedTimestamp,
+		&logicGateIDsJSON,
 	)
 	if status.Valid {
 		item.Status = &status.String
@@ -94,7 +113,27 @@ func scanNode(row interface {
 	if assigneeEmail.Valid {
 		item.AssigneeEmail = &assigneeEmail.String
 	}
+	if logicGateIDsJSON.Valid {
+		var ids []string
+		if json.Unmarshal([]byte(logicGateIDsJSON.String), &ids) == nil {
+			item.LogicGateIDs = cleanStringList(ids)
+		}
+	}
 	return item, err
+}
+
+func cleanStringList(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		clean := strings.TrimSpace(value)
+		if clean == "" || seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		out = append(out, clean)
+	}
+	return out
 }
 
 func (r *PostgresRepo) CreateNode(companyID, title string) (domain.Node, error) {

@@ -117,6 +117,7 @@ type KanbanContentProps = {
   arenaMode?: boolean;
   forcedLogicGateID?: string;
   forcedLogicGateLabel?: string;
+  forcedHighlightedNodeID?: string;
 };
 
 type OverlayResizeState = {
@@ -305,6 +306,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   arenaMode = false,
   forcedLogicGateID = "",
   forcedLogicGateLabel = "",
+  forcedHighlightedNodeID = "",
 }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
@@ -644,7 +646,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     activeBoardIDRef.current = nextBoardID;
     setSelectedCardIDs(new Set());
     setSelectionAnchorCardID("");
-    setHighlightedEntity(null);
+    setHighlightedEntity(forcedHighlightedNodeID.trim() ? { nodeID: forcedHighlightedNodeID.trim() } : null);
     setActiveLogicGateID(logicGateID);
     setActiveLogicGateLabel(forcedLogicGateLabel.trim() || "Logic Gate Kanban");
     setNodeEditorOverlay(null);
@@ -652,7 +654,23 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const cachedBoard = boardsRef.current.find((board) => board.board_id === nextBoardID || board.logic_gate_id === logicGateID);
     if (cachedBoard) upsertBoardInList(cachedBoard);
     loadLogicGateArenaView(logicGateID, nextBoardID);
-  }, [activeLogicGateID, arenaMode, forcedLogicGateID, forcedLogicGateLabel, loadLogicGateArenaView, upsertBoardInList]);
+  }, [activeLogicGateID, arenaMode, forcedHighlightedNodeID, forcedLogicGateID, forcedLogicGateLabel, loadLogicGateArenaView, upsertBoardInList]);
+
+  useEffect(() => {
+    if (!arenaMode) return;
+    const nodeID = forcedHighlightedNodeID.trim();
+    if (!nodeID) return;
+    const logicGateID = forcedLogicGateID.trim();
+    const expectedBoardID = logicGateID ? logicGateKanbanBoardID(logicGateID) : "";
+    const matchingCards = cards.filter((card) => {
+      if (card.node_id !== nodeID) return false;
+      if (!logicGateID) return true;
+      return card.logic_gate_id === logicGateID || card.board_id === expectedBoardID;
+    });
+    setHighlightedEntity({ nodeID });
+    setSelectedCardIDs(new Set(matchingCards.map((card) => card.card_id)));
+    setSelectionAnchorCardID(matchingCards[0]?.card_id ?? "");
+  }, [arenaMode, cards, forcedHighlightedNodeID, forcedLogicGateID]);
 
   const refreshBoards = useCallback(async () => {
     setBoardsLoading(true);

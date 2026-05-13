@@ -161,6 +161,7 @@ type Node struct {
 	AssigneeUserID   *string   `json:"assignee_user_id"`
 	AssigneeName     *string   `json:"assignee_name,omitempty"`
 	AssigneeEmail    *string   `json:"assignee_email,omitempty"`
+	LogicGateIDs     []string  `json:"logic_gate_ids,omitempty"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 

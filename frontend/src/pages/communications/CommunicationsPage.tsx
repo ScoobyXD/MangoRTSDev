@@ -34,6 +34,7 @@ import {
   removeEmailMessageFromCache,
   sendEmail,
   updateEmailMessage,
+  updateNode,
   type CommunicationsSharedInbox,
   type EmailAddress,
   type EmailFolder,
@@ -66,10 +67,14 @@ import {
   attachStackedDragPreview,
   EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
   EVENT_KANBAN_BOARDS_UPDATED,
+  KANBAN_LOGIC_GATE_DONE_COLOR,
+  KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
+  KANBAN_LOGIC_GATE_PENDING_COLOR,
   logicGateKanbanBoardID,
   type KanbanBoardContentsUpdatedDetail,
   type KanbanBoardsUpdatedDetail,
 } from "../../modules/kanban/shared";
+import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 
 type CommunicationsPageProps = {
   me?: CurrentUserResponse;
@@ -1134,6 +1139,20 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     setNodeEditorOverlay({ nodeID, nodeTitle: nodeTitle(node) });
   }, []);
 
+  const openLogicGateArenaFromMatrix = useCallback((logicGateID: string, label: string, nodeID: string) => {
+    const cleanLogicGateID = logicGateID.trim();
+    if (!cleanLogicGateID) return;
+    writePendingLogicGateArenaSelection({
+      companyID,
+      logicGateID: cleanLogicGateID,
+      label,
+      nodeID,
+    });
+    preloadLogicGateArenaSurface();
+    if (onNavigate) onNavigate("/logic-gate-arena");
+    else window.location.assign("/logic-gate-arena");
+  }, [companyID, onNavigate]);
+
   const getLogicGateDragIDs = useCallback((logicGateID: string): string[] => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return [];
@@ -1167,6 +1186,40 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       return next;
     });
   }, [companyID]);
+
+  const placeNodesInResponsibleInbox = useCallback(async (nodeIDs: string[], status: ResponsibleInboxStatus, priority: InboxPriority) => {
+    const ids = cleanIDList(nodeIDs).filter((id) => nodeByID.has(id));
+    if (ids.length === 0) return;
+    if (!currentUserID || ids.some((id) => !isNodeAssignedToUser(nodeByID.get(id), currentUserID))) {
+      setNotice("");
+      setError("This node has not been assigned to you.");
+      return;
+    }
+    setBusy("r-inbox");
+    setError("");
+    try {
+      const statusLabel = responsibleStatusLabel(status);
+      const statusColor = responsibleStatusColor(status);
+      const updatedNodes = await Promise.all(ids.map((nodeID) => updateNode(companyID, nodeID, {
+        status: statusLabel,
+        status_color: statusColor,
+        priority,
+      })));
+      setNodes((previous) => {
+        const byID = new Map(updatedNodes.map((node) => [node.node_id, node]));
+        return previous.map((node) => byID.get(node.node_id) ?? node);
+      });
+      for (const node of updatedNodes) {
+        invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
+        upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+      }
+      setNotice(ids.length === 1 ? "Node placed." : `${ids.length} nodes placed.`);
+    } catch (responsibleError) {
+      setError(formatError(responsibleError, "Failed to update R Inbox"));
+    } finally {
+      setBusy("");
+    }
+  }, [apiBase, companyID, currentUserID, nodeByID]);
 
   const startColumnResize = useCallback((dividerIndex: 0 | 1 | 2, event: React.PointerEvent<HTMLButtonElement>) => {
     if (isNarrow) return;
@@ -1283,12 +1336,14 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                   placements={nodeAciPlacements}
                   nodes={nodes}
                   nodeByID={nodeByID}
+                  logicGateByID={logicGateByID}
                   folders={nodeFolders}
                   folderItems={nodeFolderItems}
                   selectedRowIDs={selectedNodeRowIDs}
                   getNodeDragIDs={getNodeDragIDs}
                   onSelectNode={selectNodeMatrixCard}
                   onOpenNode={openNodeEditorOverlay}
+                  onOpenLogicGate={openLogicGateArenaFromMatrix}
                   onPlaceNodes={placeNodesInAci}
                   onRemovePlacement={removeNodeFromAci}
                 />
@@ -1297,10 +1352,16 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                   loading={loadingNodes}
                   nodes={nodes}
                   nodeByID={nodeByID}
+                  logicGateByID={logicGateByID}
+                  folders={nodeFolders}
+                  folderItems={nodeFolderItems}
+                  currentUserID={currentUserID}
                   selectedRowIDs={selectedNodeRowIDs}
                   getNodeDragIDs={getNodeDragIDs}
                   onSelectNode={selectNodeMatrixCard}
                   onOpenNode={openNodeEditorOverlay}
+                  onOpenLogicGate={openLogicGateArenaFromMatrix}
+                  onPlaceNodes={placeNodesInResponsibleInbox}
                 />
               )}
               <NodeInboxRail
@@ -2052,12 +2113,14 @@ function AciInboxMatrix({
   placements,
   nodes,
   nodeByID,
+  logicGateByID,
   folders,
   folderItems,
   selectedRowIDs,
   getNodeDragIDs,
   onSelectNode,
   onOpenNode,
+  onOpenLogicGate,
   onPlaceNodes,
   onRemovePlacement,
 }: {
@@ -2065,12 +2128,14 @@ function AciInboxMatrix({
   placements: NodeAciPlacementMap;
   nodes: NodeRecord[];
   nodeByID: Map<string, NodeRecord>;
+  logicGateByID: Map<string, LogicGateRecord>;
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
   selectedRowIDs: Set<string>;
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
   onPlaceNodes: (nodeIDs: string[], role: AciInboxRole, priority: InboxPriority) => void;
   onRemovePlacement: (nodeID: string) => void;
 }) {
@@ -2165,9 +2230,11 @@ function AciInboxMatrix({
                           selected={selectedRowIDs.has(nodeTreeID(nodeID))}
                           orderedRowIDs={orderedRowIDs}
                           nodeByID={nodeByID}
+                          logicGateByID={logicGateByID}
                           getNodeDragIDs={getNodeDragIDs}
                           onSelectNode={onSelectNode}
                           onOpenNode={onOpenNode}
+                          onOpenLogicGate={onOpenLogicGate}
                           onRemovePlacement={placements[nodeID] ? onRemovePlacement : undefined}
                         />
                       );
@@ -2187,22 +2254,36 @@ function ResponsibleInboxMatrix({
   loading,
   nodes,
   nodeByID,
+  logicGateByID,
+  folders,
+  folderItems,
+  currentUserID,
   selectedRowIDs,
   getNodeDragIDs,
   onSelectNode,
   onOpenNode,
+  onOpenLogicGate,
+  onPlaceNodes,
 }: {
   loading: boolean;
   nodes: NodeRecord[];
   nodeByID: Map<string, NodeRecord>;
+  logicGateByID: Map<string, LogicGateRecord>;
+  folders: CompanyExplorerFolder[];
+  folderItems: CompanyExplorerFolderItem[];
+  currentUserID: string;
   selectedRowIDs: Set<string>;
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
+  onPlaceNodes: (nodeIDs: string[], status: ResponsibleInboxStatus, priority: InboxPriority) => void;
 }) {
+  const [dragOverCell, setDragOverCell] = useState<string>("");
   const cellNodeIDs = useMemo(() => {
     const byCell = new Map<string, string[]>();
     for (const node of nodes) {
+      if (!isNodeAssignedToUser(node, currentUserID)) continue;
       const priority = normalizeInboxPriority(node.priority);
       const status = normalizeResponsibleInboxStatus(node.status);
       if (priority === null || !status) continue;
@@ -2215,7 +2296,7 @@ function ResponsibleInboxMatrix({
       ids.sort((a, b) => nodeTitle(nodeByID.get(a)).localeCompare(nodeTitle(nodeByID.get(b)), undefined, { numeric: true, sensitivity: "base" }));
     }
     return byCell;
-  }, [nodeByID, nodes]);
+  }, [currentUserID, nodeByID, nodes]);
   const orderedRowIDs = useMemo(() => {
     const ids: string[] = [];
     for (const priority of INBOX_PRIORITIES) {
@@ -2226,6 +2307,15 @@ function ResponsibleInboxMatrix({
     return ids;
   }, [cellNodeIDs]);
   const placedCount = orderedRowIDs.length;
+
+  const dropIntoCell = (event: React.DragEvent<HTMLElement>, status: ResponsibleInboxStatus, priority: InboxPriority) => {
+    const payload = readExplorerDragPayload(event.dataTransfer);
+    const nodeIDs = nodeIDsFromExplorerPayload(payload, folders, folderItems);
+    setDragOverCell("");
+    if (nodeIDs.length === 0) return;
+    event.preventDefault();
+    onPlaceNodes(nodeIDs, status, priority);
+  };
 
   return (
     <section style={logicGateRaciPanelStyle}>
@@ -2251,8 +2341,28 @@ function ResponsibleInboxMatrix({
               {RESPONSIBLE_STATUS_COLUMNS.map((column) => {
                 const cellKey = responsibleCellKey(column.status, priority.value);
                 const nodeIDs = cellNodeIDs.get(cellKey) ?? [];
+                const activeDrop = dragOverCell === cellKey;
                 return (
-                  <div key={cellKey} style={logicGateRaciCellStyle(false)}>
+                  <div
+                    key={cellKey}
+                    style={logicGateRaciCellStyle(activeDrop)}
+                    onDragEnter={(event) => {
+                      if (!hasExplorerDrag(event.dataTransfer)) return;
+                      setDragOverCell(cellKey);
+                    }}
+                    onDragOver={(event) => {
+                      if (!hasExplorerDrag(event.dataTransfer)) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "copy";
+                      setDragOverCell(cellKey);
+                    }}
+                    onDragLeave={(event) => {
+                      const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+                      if (related && event.currentTarget.contains(related)) return;
+                      setDragOverCell((current) => (current === cellKey ? "" : current));
+                    }}
+                    onDrop={(event) => dropIntoCell(event, column.status, priority.value)}
+                  >
                     {nodeIDs.map((nodeID) => {
                       const node = nodeByID.get(nodeID);
                       if (!node) return null;
@@ -2263,9 +2373,11 @@ function ResponsibleInboxMatrix({
                           selected={selectedRowIDs.has(nodeTreeID(nodeID))}
                           orderedRowIDs={orderedRowIDs}
                           nodeByID={nodeByID}
+                          logicGateByID={logicGateByID}
                           getNodeDragIDs={getNodeDragIDs}
                           onSelectNode={onSelectNode}
                           onOpenNode={onOpenNode}
+                          onOpenLogicGate={onOpenLogicGate}
                         />
                       );
                     })}
@@ -2285,21 +2397,26 @@ function NodeInboxCard({
   selected,
   orderedRowIDs,
   nodeByID,
+  logicGateByID,
   getNodeDragIDs,
   onSelectNode,
   onOpenNode,
+  onOpenLogicGate,
   onRemovePlacement,
 }: {
   node: NodeRecord;
   selected: boolean;
   orderedRowIDs: string[];
   nodeByID: Map<string, NodeRecord>;
+  logicGateByID: Map<string, LogicGateRecord>;
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
   onRemovePlacement?: (nodeID: string) => void;
 }) {
   const nodeID = node.node_id;
+  const logicGateIDs = cleanIDList(node.logic_gate_ids ?? []).slice(0, 3);
   return (
     <div
       role="button"
@@ -2319,22 +2436,44 @@ function NodeInboxCard({
     >
       <span style={logicGateRaciCardIconStyle}><ExplorerRowIcon kind="node" /></span>
       <span style={logicGateRaciCardTextStyle}>{nodeTitle(node)}</span>
-      {onRemovePlacement ? (
-        <button
-          type="button"
-          aria-label="Remove from ACI inbox"
-          style={logicGateRaciCardRemoveStyle}
-          onClick={(event) => {
-            event.stopPropagation();
-            onRemovePlacement(nodeID);
-          }}
-          onDoubleClick={(event) => event.stopPropagation()}
-        >
-          x
-        </button>
-      ) : (
-        <span style={logicGateRaciCardStatusStyle}>{responsibleStatusLetter(node.status)}</span>
-      )}
+      <span style={logicGateRaciCardActionsStyle}>
+        {logicGateIDs.map((logicGateID) => {
+          const label = logicGateTitle(logicGateByID.get(logicGateID));
+          return (
+            <button
+              key={logicGateID}
+              type="button"
+              title={`Open ${label} in Logic Gate Arena`}
+              aria-label={`Open ${label} in Logic Gate Arena`}
+              style={logicGateRaciCardGateButtonStyle}
+              onClick={(event) => event.stopPropagation()}
+              onDoubleClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onOpenLogicGate(logicGateID, label, nodeID);
+              }}
+            >
+              <ExplorerRowIcon kind="logic_gate" />
+            </button>
+          );
+        })}
+        {onRemovePlacement ? (
+          <button
+            type="button"
+            aria-label="Remove from ACI inbox"
+            style={logicGateRaciCardRemoveStyle}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemovePlacement(nodeID);
+            }}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
+            x
+          </button>
+        ) : (
+          <span style={logicGateRaciCardStatusStyle}>{responsibleStatusLetter(node.status)}</span>
+        )}
+      </span>
     </div>
   );
 }
@@ -2725,12 +2864,29 @@ function normalizeResponsibleInboxStatus(value: unknown): ResponsibleInboxStatus
   return null;
 }
 
+function responsibleStatusLabel(status: ResponsibleInboxStatus): string {
+  if (status === "pending") return "Pending";
+  if (status === "in_progress") return "In Progress";
+  return "Done";
+}
+
+function responsibleStatusColor(status: ResponsibleInboxStatus): string {
+  if (status === "pending") return KANBAN_LOGIC_GATE_PENDING_COLOR;
+  if (status === "in_progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;
+  return KANBAN_LOGIC_GATE_DONE_COLOR;
+}
+
 function responsibleStatusLetter(value: unknown): string {
   const status = normalizeResponsibleInboxStatus(value);
   if (status === "pending") return "P";
   if (status === "in_progress") return "IP";
   if (status === "done") return "D";
   return "";
+}
+
+function isNodeAssignedToUser(node: NodeRecord | undefined, userID: string): boolean {
+  const cleanUserID = userID.trim();
+  return !!cleanUserID && node?.assignee_user_id?.trim() === cleanUserID;
 }
 
 function buildEffectiveAciPlacements(placements: NodeAciPlacementMap, nodes: NodeRecord[]): NodeAciPlacement[] {
@@ -3437,7 +3593,7 @@ function logicGateRaciCardStyle(selected: boolean): React.CSSProperties {
     position: "relative",
     minHeight: 42,
     display: "grid",
-    gridTemplateColumns: "20px minmax(0, 1fr) 20px",
+    gridTemplateColumns: "20px minmax(0, 1fr) auto",
     alignItems: "center",
     gap: 7,
     border: `1px solid ${selected ? "rgba(255, 136, 32, 0.72)" : "rgba(255, 136, 32, 0.24)"}`,
@@ -3450,6 +3606,27 @@ function logicGateRaciCardStyle(selected: boolean): React.CSSProperties {
     boxShadow: selected ? "0 0 0 2px rgba(255, 136, 32, 0.12) inset" : "0 2px 6px rgba(36, 18, 10, 0.04)",
   };
 }
+
+const logicGateRaciCardActionsStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 3,
+  minWidth: 20,
+};
+
+const logicGateRaciCardGateButtonStyle: React.CSSProperties = {
+  width: 20,
+  height: 20,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(255, 136, 32, 0.28)",
+  borderRadius: 4,
+  background: "rgba(255, 255, 255, 0.72)",
+  color: "#24120a",
+  cursor: "pointer",
+  padding: 0,
+};
 
 const logicGateRaciCardIconStyle: React.CSSProperties = {
   width: 20,
