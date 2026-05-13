@@ -141,7 +141,7 @@ const MAILBOX_OPTIONS: MailboxOption[] = [
   { value: "all", label: "All mail" },
 ];
 
-const MESSAGE_BATCH_SIZE = 25;
+const MESSAGE_BATCH_SIZE = 20;
 const TRIAGE_MESSAGE_DRAG_MIME = "application/x-mangorts-communications-triage-messages";
 const COMMUNICATIONS_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.communications.columnWidths.v1";
 const COMMUNICATIONS_COLUMN_RESIZER_WIDTH = 10;

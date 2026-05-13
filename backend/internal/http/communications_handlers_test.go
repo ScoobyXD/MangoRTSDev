@@ -663,6 +663,21 @@ func TestCommunicationsNylasRateLimitPreservesRetryAfter(t *testing.T) {
 	}
 }
 
+func TestParseNylasMessageQueryCapsLimitAtProviderFriendlySize(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages?limit=100", nil)
+	rec := httptest.NewRecorder()
+
+	query, ok := parseNylasMessageQuery(rec, req)
+	if !ok {
+		t.Fatalf("parseNylasMessageQuery rejected request: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if query.Limit != communicationsNylasMaxMessageLimit {
+		t.Fatalf("limit = %d, want %d", query.Limit, communicationsNylasMaxMessageLimit)
+	}
+}
+
 func signWebhookBody(secret, body string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(body))

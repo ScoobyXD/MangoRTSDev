@@ -223,7 +223,12 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, "email_message_update_required")
 			return
 		}
-		message, err := s.nylasClient.UpdateMessage(r.Context(), connection.GrantID, messageID, update)
+		var message NylasMessage
+		err := s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
+			var err error
+			message, err = s.nylasClient.UpdateMessage(ctx, connection.GrantID, messageID, update)
+			return err
+		})
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
 			return
@@ -232,7 +237,9 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 		s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", message.ID)
 		writeJSON(w, http.StatusOK, map[string]any{"message": message})
 	case http.MethodDelete:
-		if err := s.nylasClient.DeleteMessage(r.Context(), connection.GrantID, messageID); err != nil {
+		if err := s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
+			return s.nylasClient.DeleteMessage(ctx, connection.GrantID, messageID)
+		}); err != nil {
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
@@ -264,7 +271,12 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "email_content_required")
 		return
 	}
-	message, err := s.nylasClient.SendMessage(r.Context(), connection.GrantID, req)
+	var message NylasMessage
+	err := s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
+		var err error
+		message, err = s.nylasClient.SendMessage(ctx, connection.GrantID, req)
+		return err
+	})
 	if err != nil {
 		s.writeNylasError(w, r, connection, err)
 		return
@@ -397,12 +409,27 @@ func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connect
 	writeError(w, http.StatusBadGateway, "nylas_request_failed")
 }
 
+const (
+	communicationsNylasDefaultMessageLimit = 20
+	communicationsNylasMaxMessageLimit     = 20
+	communicationsNylasMinRequestInterval  = 250 * time.Millisecond
+)
+
 func (s *Server) communicationsFolders(ctx context.Context, connection domain.UserEmailConnection) ([]NylasFolder, error) {
 	now := time.Now().UTC()
 	if folders, ok := s.commCache.getFolders(connection.UserID, communicationsFoldersCacheTTL, now); ok {
 		return folders, nil
 	}
-	folders, err := s.nylasClient.ListFolders(ctx, connection.GrantID)
+	var folders []NylasFolder
+	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
+		if cached, ok := s.commCache.getFolders(connection.UserID, communicationsFoldersCacheTTL, time.Now().UTC()); ok {
+			folders = cached
+			return nil
+		}
+		var err error
+		folders, err = s.nylasClient.ListFolders(ctx, connection.GrantID)
+		return err
+	})
 	if err != nil {
 		if shouldServeStaleCommunicationsCache(err) {
 			if cached, ok := s.commCache.getFolders(connection.UserID, communicationsFoldersCacheTTL+communicationsMaxStaleTTL, now); ok {
@@ -420,7 +447,16 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 	if page, ok := s.commCache.getMessagePage(connection.UserID, query, communicationsMessagesCacheTTL, now); ok {
 		return page, nil
 	}
-	page, err := s.nylasClient.ListMessages(ctx, connection.GrantID, query)
+	var page NylasMessagePage
+	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
+		if cached, ok := s.commCache.getMessagePage(connection.UserID, query, communicationsMessagesCacheTTL, time.Now().UTC()); ok {
+			page = cached
+			return nil
+		}
+		var err error
+		page, err = s.nylasClient.ListMessages(ctx, connection.GrantID, query)
+		return err
+	})
 	if err != nil {
 		if shouldServeStaleCommunicationsCache(err) {
 			if cached, ok := s.commCache.getMessagePage(connection.UserID, query, communicationsMessagesCacheTTL+communicationsMaxStaleTTL, now); ok {
@@ -438,7 +474,16 @@ func (s *Server) communicationsMessage(ctx context.Context, connection domain.Us
 	if message, ok := s.commCache.getMessage(connection.UserID, messageID, communicationsMessageCacheTTL, now); ok {
 		return message, nil
 	}
-	message, err := s.nylasClient.GetMessage(ctx, connection.GrantID, messageID)
+	var message NylasMessage
+	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
+		if cached, ok := s.commCache.getMessage(connection.UserID, messageID, communicationsMessageCacheTTL, time.Now().UTC()); ok {
+			message = cached
+			return nil
+		}
+		var err error
+		message, err = s.nylasClient.GetMessage(ctx, connection.GrantID, messageID)
+		return err
+	})
 	if err != nil {
 		if shouldServeStaleCommunicationsCache(err) {
 			if cached, ok := s.commCache.getMessage(connection.UserID, messageID, communicationsMessageCacheTTL+communicationsMaxStaleTTL, now); ok {
@@ -463,7 +508,7 @@ func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessag
 			return NylasMessageQuery{}, false
 		}
 	}
-	limit := 25
+	limit := communicationsNylasDefaultMessageLimit
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed <= 0 {
@@ -472,8 +517,8 @@ func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessag
 		}
 		limit = parsed
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > communicationsNylasMaxMessageLimit {
+		limit = communicationsNylasMaxMessageLimit
 	}
 	query := NylasMessageQuery{
 		Limit:     limit,

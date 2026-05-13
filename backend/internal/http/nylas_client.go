@@ -13,6 +13,11 @@ import (
 	"time"
 )
 
+const (
+	nylasMessageListSelect   = "id,thread_id,subject,snippet,date,unread,starred,from,to,cc,bcc,reply_to,folders"
+	nylasMessageDetailSelect = "id,thread_id,subject,snippet,body,date,unread,starred,from,to,cc,bcc,reply_to,folders"
+)
+
 type NylasConfig struct {
 	ClientID            string
 	APIKey              string
@@ -309,7 +314,7 @@ func (c *NylasRESTClient) ListFolders(ctx context.Context, grantID string) ([]Ny
 }
 
 func (c *NylasRESTClient) ListMessages(ctx context.Context, grantID string, query NylasMessageQuery) (NylasMessagePage, error) {
-	values := url.Values{}
+	values := url.Values{"select": []string{nylasMessageListSelect}}
 	if query.Limit > 0 {
 		values.Set("limit", strconv.Itoa(query.Limit))
 	}
@@ -348,7 +353,8 @@ func (c *NylasRESTClient) GetMessage(ctx context.Context, grantID, messageID str
 	var response struct {
 		Data NylasMessage `json:"data"`
 	}
-	if err := c.do(ctx, http.MethodGet, grantPath(grantID, "messages", messageID), nil, nil, &response, true); err != nil {
+	values := url.Values{"select": []string{nylasMessageDetailSelect}}
+	if err := c.do(ctx, http.MethodGet, grantPath(grantID, "messages", messageID), values, nil, &response, true); err != nil {
 		return NylasMessage{}, err
 	}
 	return response.Data, nil

@@ -37,35 +37,21 @@ New Features:
 19. the internal messaging system has to look very official because many legacy companies make it an official way of doing things.
 20. moms idea
 	a. I should be able to upload files from my computer's file explorer to mango, and mango to computer's file explorer.
-
-=====
-1. There should be a separate history module and a separate metrics/kpi module that can all be combined into something like what company explorer is right now. Also I do not want to see the tab guides. 
-=====
-
-(WHEN WE ARE DOING USER LOGIN AND CREDENTIALS AND MATCHING THAT WITH COMPANY ID)
-Audit how we are making create,delete,and updates based and audit if it is actually well protected and well defined. so we dont ever accidentally touch another company's data or see it on accident. 
-Eventually need to do an audit on how well the system is set up for agentic apis
-
-eventually need to do backend tests
-
-eventually do an audit on the sacred text itself.
-
-dont forget to do indexing in database.
-
-remebmer we are trying to create the bloomberg terminal for companies. Can see the entirety of their business, where they are sourcing material,
-where the shipping container is, what is in which warehouse, how much of which product is going to which customers. everything. 
-
-While deploying this with 180Snacks, you really really really need to check the AWS usage because I have a suspicion it's going to come out to be a lot more than we think. 
-
-when you get to agents, read some of the chats and replies you got on reddit on how they use hermes
-
+21. There should be a separate history module and a separate metrics/kpi module that can all be combined into something like what company explorer is right now. Also I do not want to see the tab guides. 
+22. Audit how we are making create,delete,and updates users and user accounts based and audit if it is actually well protected and well defined. so we dont ever accidentally touch another company's data or see it on accident. 
+23. Eventually need to do an audit on how well the system is set up for agentic apis
+24. eventually need to do backend tests
+25. eventually do an audit on the sacred text itself.
+26. dont forget to do indexing in database.
+27. remebmer we are trying to create the bloomberg terminal for companies. Can see the entirety of their business, where they are sourcing material, where the shipping container is, what is in which warehouse, how much of which product is going to which customers. everything. 
+28. While deploying this with 180Snacks, you really really really need to check the AWS usage because I have a suspicion it's going to come out to be a lot more than we think. 
+29. when you get to agents, read some of the chats and replies you got on reddit on how they use hermes
 
 ========
 General changes:
 1. the caching still doesnt work well on company explorer logic gate arena, it doesnt work for nodes in logic gate arena kanban board, i still get whenever i move around pages including email. 
 	s. nylas still does inbound posting but much rarer and not as consistenly
 PROBLEM:
-1. at this point only view dev site in incognito mode, the logic gate arena is not pulling up lol
 2. Getting cucked my Nylas. can definitely make efficiencies pulling stuff from them .Look at Nylas api call logs to see how much were actually pulling. 
 3. need to break up the apps again its creasting too many merge conflicts.
 LATER: need to do an audit on how well equiped the app is for multiple people using it from different accounts all at once.

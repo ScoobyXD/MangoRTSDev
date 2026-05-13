@@ -22,6 +22,7 @@ type Server struct {
 	hub           *workspaceEventHub
 	emailHub      *workspaceEventHub
 	commCache     *communicationsCache
+	nylasGate     *nylasRequestGate
 	nylasWebhooks *nylasWebhookReceiptCache
 	authValidator *auth.Validator
 	cognitoAdmin  CognitoAdminClient
@@ -50,6 +51,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		hub:           newWorkspaceEventHub(),
 		emailHub:      newWorkspaceEventHub(),
 		commCache:     newCommunicationsCache(),
+		nylasGate:     newNylasRequestGate(communicationsNylasMinRequestInterval),
 		nylasWebhooks: newNylasWebhookReceiptCache(),
 		authValidator: options.AuthValidator,
 		cognitoAdmin:  options.CognitoAdmin,
