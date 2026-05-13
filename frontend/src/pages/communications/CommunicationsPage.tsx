@@ -45,6 +45,7 @@ import {
 import { subscribeCommunicationsStream } from "./communicationsStream";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import { EditorContent } from "../../modules/editor/EditorContent";
 import { getNodeTitle, type NodeRecord } from "../../modules/node-map/shared";
 import {
   collectFolderSubtreeIDs,
@@ -118,6 +119,11 @@ type CommunicationsViewID =
   | `shared:${string}`;
 
 type CommunicationsColumnWidths = [number, number, number, number];
+
+type NodeEditorOverlayState = {
+  nodeID: string;
+  nodeTitle: string;
+};
 
 type CommunicationsColumnResizeDrag = {
   dividerIndex: 0 | 1 | 2;
@@ -217,6 +223,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const [selectedLogicGateRowIDs, setSelectedLogicGateRowIDs] = useState<Set<string>>(new Set());
   const [logicGateSelectionAnchorID, setLogicGateSelectionAnchorID] = useState("");
   const [nodeAciPlacements, setNodeAciPlacements] = useState<NodeAciPlacementMap>(() => readNodeAciPlacements(companyID));
+  const [nodeEditorOverlay, setNodeEditorOverlay] = useState<NodeEditorOverlayState | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -588,7 +595,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
   useEffect(() => { if (status?.connected) void loadLogicGatePanel(); }, [loadLogicGatePanel, status?.connected]);
   useEffect(() => { void loadMessages(); }, [loadMessages]);
-  useEffect(() => { setNodeAciPlacements(readNodeAciPlacements(companyID)); }, [companyID]);
+  useEffect(() => {
+    setNodeAciPlacements(readNodeAciPlacements(companyID));
+    setNodeEditorOverlay(null);
+  }, [companyID]);
 
   useEffect(() => {
     const list = messageListRef.current;
@@ -873,6 +883,11 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     rootRowOrder: {},
   }).filter((row) => row.kind === "folder" || row.kind === "node"), [nodeExpandedIDs, nodeFolderItems, nodeFolders, nodes]);
   const visibleNodeRows = useMemo(() => filterExplorerRowsForSearch(allNodeRows, nodeSearch), [allNodeRows, nodeSearch]);
+  const currentUserID = me?.user.user_id?.trim() ?? "";
+  const myNodes = useMemo(() => {
+    if (!currentUserID) return [];
+    return sortNodesForInbox(nodes.filter((node) => node.assignee_user_id?.trim() === currentUserID));
+  }, [currentUserID, nodes]);
   const logicGateByID = useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
   const logicGateCanvasRecords = useMemo(() => logicGates.map((logicGate) => ({
     ...logicGate,
@@ -1113,6 +1128,12 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     return selectedNodeIDs.length > 0 ? selectedNodeIDs : [cleanNodeID];
   }, [nodeByID, selectedNodeRowIDs]);
 
+  const openNodeEditorOverlay = useCallback((node: NodeRecord) => {
+    const nodeID = node.node_id.trim();
+    if (!nodeID) return;
+    setNodeEditorOverlay({ nodeID, nodeTitle: nodeTitle(node) });
+  }, []);
+
   const getLogicGateDragIDs = useCallback((logicGateID: string): string[] => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return [];
@@ -1267,6 +1288,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                   selectedRowIDs={selectedNodeRowIDs}
                   getNodeDragIDs={getNodeDragIDs}
                   onSelectNode={selectNodeMatrixCard}
+                  onOpenNode={openNodeEditorOverlay}
                   onPlaceNodes={placeNodesInAci}
                   onRemovePlacement={removeNodeFromAci}
                 />
@@ -1278,15 +1300,18 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                   selectedRowIDs={selectedNodeRowIDs}
                   getNodeDragIDs={getNodeDragIDs}
                   onSelectNode={selectNodeMatrixCard}
+                  onOpenNode={openNodeEditorOverlay}
                 />
               )}
               <NodeInboxRail
                 loading={loadingNodes}
                 nodeByID={nodeByID}
                 allRows={visibleNodeRows}
+                myNodes={myNodes}
                 selectedRowIDs={selectedNodeRowIDs}
                 expandedRowIDs={nodeExpandedIDs}
                 search={nodeSearch}
+                getNodeDragIDs={getNodeDragIDs}
                 onSearchChange={setNodeSearch}
                 onToggleFolder={(rowID) => {
                   setNodeExpandedIDs((previous) => {
@@ -1297,6 +1322,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                   });
                 }}
                 onSelectRow={selectNodeRow}
+                onSelectNode={selectNodeMatrixCard}
+                onOpenNode={openNodeEditorOverlay}
               />
             </>
           ) : (
@@ -1476,6 +1503,13 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
           )}
         </main>
       )}
+      {nodeEditorOverlay && (
+        <NodeEditorPopup
+          nodeID={nodeEditorOverlay.nodeID}
+          nodeTitle={nodeEditorOverlay.nodeTitle}
+          onClose={() => setNodeEditorOverlay(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1483,6 +1517,58 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
 export const CommunicationsFrameContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "mango" | "teal" | "light" | "dark" }> = () => (
   <CommunicationsPage embedded />
 );
+
+function NodeEditorPopup({ nodeID, nodeTitle, onClose }: {
+  nodeID: string;
+  nodeTitle: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      style={nodeEditorPopupBackdropStyle}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${nodeTitle} node editor`}
+        data-frame-interactive="true"
+        style={nodeEditorPopupStyle}
+        onMouseDown={(event) => event.stopPropagation()}
+        onTouchStart={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          title="Close node editor"
+          onClick={onClose}
+          style={nodeEditorPopupCloseButtonStyle}
+        >
+          X
+        </button>
+        <EditorContent
+          accent="#ff8820"
+          widgetId={`communications-node-editor-overlay:${nodeID}`}
+          theme="mango"
+          forcedEntityKind="node"
+          forcedEntityID={nodeID}
+          forcedLabel={nodeTitle}
+        />
+      </div>
+    </div>
+  );
+}
 
 function CommunicationsNavButton({ label, active, depth = 0, onClick }: {
   label: string;
@@ -1800,25 +1886,62 @@ function NodeInboxRail({
   loading,
   nodeByID,
   allRows,
+  myNodes,
   selectedRowIDs,
   expandedRowIDs,
   search,
+  getNodeDragIDs,
   onSearchChange,
   onToggleFolder,
   onSelectRow,
+  onSelectNode,
+  onOpenNode,
 }: {
   loading: boolean;
   nodeByID: Map<string, NodeRecord>;
   allRows: ExplorerTreeNode[];
+  myNodes: NodeRecord[];
   selectedRowIDs: Set<string>;
   expandedRowIDs: Set<string>;
   search: string;
+  getNodeDragIDs: (nodeID: string) => string[];
   onSearchChange: (value: string) => void;
   onToggleFolder: (rowID: string) => void;
   onSelectRow: (row: ExplorerTreeNode, event: React.MouseEvent) => void;
+  onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onOpenNode: (node: NodeRecord) => void;
 }) {
+  const myNodeOrderedRowIDs = useMemo(() => myNodes.map((node) => nodeTreeID(node.node_id)), [myNodes]);
+
   return (
-    <aside style={{ ...logicGateRailStyle, gridTemplateRows: "minmax(0, 1fr)" }}>
+    <aside style={logicGateRailStyle}>
+      <section style={logicGateRailSectionStyle}>
+        <div style={logicGateRailHeaderStyle}>
+          <h2 style={panelTitleStyle}>My Nodes</h2>
+          {loading && <span style={mutedSmallStyle}>Loading</span>}
+        </div>
+        <div style={myLogicGatesListStyle}>
+          {myNodes.length === 0 && !loading ? (
+            <div style={emptySmallStyle}>No assigned nodes</div>
+          ) : (
+            <div style={myLogicGateGridStyle}>
+              {myNodes.map((node) => (
+                <MyNodeTile
+                  key={node.node_id}
+                  node={node}
+                  selected={selectedRowIDs.has(nodeTreeID(node.node_id))}
+                  orderedRowIDs={myNodeOrderedRowIDs}
+                  nodeByID={nodeByID}
+                  getNodeDragIDs={getNodeDragIDs}
+                  onSelectNode={onSelectNode}
+                  onOpenNode={onOpenNode}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
       <section style={{ ...logicGateRailSectionStyle, gridTemplateRows: "auto auto minmax(0, 1fr)" }}>
         <div style={logicGateRailHeaderStyle}>
           <h2 style={panelTitleStyle}>All Nodes</h2>
@@ -1844,6 +1967,12 @@ function NodeInboxRail({
                 draggable
                 style={logicGateTreeRowStyle(row.depth, selected, row.kind === "node")}
                 onClick={(event) => onSelectRow(row, event)}
+                onDoubleClick={(event) => {
+                  if (row.kind !== "node" || !node) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onOpenNode(node);
+                }}
                 onDragStart={(event) => {
                   const payload = getExplorerDragPayloadForSelection(row, selectedRowIDs, allRows);
                   if (!payload) return;
@@ -1878,6 +2007,46 @@ function NodeInboxRail({
   );
 }
 
+function MyNodeTile({
+  node,
+  selected,
+  orderedRowIDs,
+  nodeByID,
+  getNodeDragIDs,
+  onSelectNode,
+  onOpenNode,
+}: {
+  node: NodeRecord;
+  selected: boolean;
+  orderedRowIDs: string[];
+  nodeByID: Map<string, NodeRecord>;
+  getNodeDragIDs: (nodeID: string) => string[];
+  onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onOpenNode: (node: NodeRecord) => void;
+}) {
+  const nodeID = node.node_id;
+  return (
+    <button
+      type="button"
+      draggable
+      style={myLogicGateTileStyle(selected)}
+      onClick={(event) => onSelectNode(nodeID, orderedRowIDs, event)}
+      onDoubleClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenNode(node);
+      }}
+      onDragStart={(event) => {
+        const dragIDs = getNodeDragIDs(nodeID);
+        setNodeDragData(event.dataTransfer, dragIDs, nodeByID);
+      }}
+    >
+      <span style={myLogicGateTileIconStyle}><ExplorerRowIcon kind="node" /></span>
+      <span style={myLogicGateTileTextStyle}>{nodeTitle(node)}</span>
+    </button>
+  );
+}
+
 function AciInboxMatrix({
   loading,
   placements,
@@ -1888,6 +2057,7 @@ function AciInboxMatrix({
   selectedRowIDs,
   getNodeDragIDs,
   onSelectNode,
+  onOpenNode,
   onPlaceNodes,
   onRemovePlacement,
 }: {
@@ -1900,6 +2070,7 @@ function AciInboxMatrix({
   selectedRowIDs: Set<string>;
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onOpenNode: (node: NodeRecord) => void;
   onPlaceNodes: (nodeIDs: string[], role: AciInboxRole, priority: InboxPriority) => void;
   onRemovePlacement: (nodeID: string) => void;
 }) {
@@ -1996,6 +2167,7 @@ function AciInboxMatrix({
                           nodeByID={nodeByID}
                           getNodeDragIDs={getNodeDragIDs}
                           onSelectNode={onSelectNode}
+                          onOpenNode={onOpenNode}
                           onRemovePlacement={placements[nodeID] ? onRemovePlacement : undefined}
                         />
                       );
@@ -2018,6 +2190,7 @@ function ResponsibleInboxMatrix({
   selectedRowIDs,
   getNodeDragIDs,
   onSelectNode,
+  onOpenNode,
 }: {
   loading: boolean;
   nodes: NodeRecord[];
@@ -2025,6 +2198,7 @@ function ResponsibleInboxMatrix({
   selectedRowIDs: Set<string>;
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onOpenNode: (node: NodeRecord) => void;
 }) {
   const cellNodeIDs = useMemo(() => {
     const byCell = new Map<string, string[]>();
@@ -2091,6 +2265,7 @@ function ResponsibleInboxMatrix({
                           nodeByID={nodeByID}
                           getNodeDragIDs={getNodeDragIDs}
                           onSelectNode={onSelectNode}
+                          onOpenNode={onOpenNode}
                         />
                       );
                     })}
@@ -2112,6 +2287,7 @@ function NodeInboxCard({
   nodeByID,
   getNodeDragIDs,
   onSelectNode,
+  onOpenNode,
   onRemovePlacement,
 }: {
   node: NodeRecord;
@@ -2120,6 +2296,7 @@ function NodeInboxCard({
   nodeByID: Map<string, NodeRecord>;
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onOpenNode: (node: NodeRecord) => void;
   onRemovePlacement?: (nodeID: string) => void;
 }) {
   const nodeID = node.node_id;
@@ -2130,6 +2307,11 @@ function NodeInboxCard({
       draggable
       style={logicGateRaciCardStyle(selected)}
       onClick={(event) => onSelectNode(nodeID, orderedRowIDs, event)}
+      onDoubleClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenNode(node);
+      }}
       onDragStart={(event) => {
         const dragIDs = getNodeDragIDs(nodeID);
         setNodeDragData(event.dataTransfer, dragIDs, nodeByID);
@@ -2146,6 +2328,7 @@ function NodeInboxCard({
             event.stopPropagation();
             onRemovePlacement(nodeID);
           }}
+          onDoubleClick={(event) => event.stopPropagation()}
         >
           x
         </button>
@@ -2423,6 +2606,16 @@ function nodeIDFromTreeID(treeID: string): string {
 
 function nodeTitle(node?: Pick<NodeRecord, "title" | "node_id">): string {
   return node ? getNodeTitle(node) || node.node_id : "Node";
+}
+
+function sortNodesForInbox(nodes: NodeRecord[]): NodeRecord[] {
+  return [...nodes].sort((a, b) => {
+    const priorityA = normalizeInboxPriority(a.priority) ?? Number.MAX_SAFE_INTEGER;
+    const priorityB = normalizeInboxPriority(b.priority) ?? Number.MAX_SAFE_INTEGER;
+    return priorityA - priorityB
+      || nodeTitle(a).localeCompare(nodeTitle(b), undefined, { numeric: true, sensitivity: "base" })
+      || a.node_id.localeCompare(b.node_id);
+  });
 }
 
 function buildNodeExplorerPayload(nodeIDs: string[]): ExplorerDragPayload | null {
@@ -3319,6 +3512,47 @@ const messageContextMenuStyle: React.CSSProperties = {
   borderRadius: 7,
   background: "#ffffff",
   boxShadow: "0 12px 28px rgba(0, 0, 0, 0.16)",
+};
+
+const nodeEditorPopupBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 130,
+  display: "grid",
+  placeItems: "center",
+  background: "rgba(36, 18, 10, 0.18)",
+  padding: 22,
+};
+
+const nodeEditorPopupStyle: React.CSSProperties = {
+  position: "relative",
+  width: "min(1180px, calc(100vw - 44px))",
+  height: "min(820px, calc(100vh - 64px))",
+  minWidth: "min(420px, calc(100vw - 44px))",
+  minHeight: "min(320px, calc(100vh - 64px))",
+  border: "1px solid rgba(255, 136, 32, 0.54)",
+  borderRadius: 16,
+  background: "#ffffff",
+  boxShadow: "0 18px 42px rgba(36, 18, 10, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
+  overflow: "hidden",
+  cursor: "default",
+};
+
+const nodeEditorPopupCloseButtonStyle: React.CSSProperties = {
+  position: "absolute",
+  top: 7,
+  right: 8,
+  zIndex: 8,
+  width: 24,
+  height: 24,
+  border: "1px solid #8b0000",
+  borderRadius: 4,
+  background: "#ff1f1f",
+  color: "#ffffff",
+  fontSize: 16,
+  fontWeight: 600,
+  lineHeight: "20px",
+  cursor: "pointer",
 };
 
 const deleteModalBackdropStyle: React.CSSProperties = {

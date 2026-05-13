@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { HeaderCommunicationsIcon, HeaderLogicGateArenaIcon, HeaderMapIcon } from "./HeaderIcons";
+import type { CurrentUserResponse } from "../auth/cognitoAuth";
 import FrameCanvas from "./framecanvas";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { MangoWordmark } from "./MangoLogo";
@@ -74,11 +75,12 @@ function routeForPage(page: PrimaryPage): string {
 type AppProps = {
   accountChrome?: React.ReactNode;
   initialPage?: "map" | "communications" | "logic-gate-arena";
+  me?: CurrentUserResponse;
   onNavigate?: (path: string) => void;
   overrideContent?: React.ReactNode;
 };
 
-const App: React.FC<AppProps> = ({ accountChrome, initialPage, onNavigate, overrideContent }) => {
+const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, overrideContent }) => {
   const loaded = useMemo(() => loadViews(), []);
   const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(loaded.activeId);
@@ -751,7 +753,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, onNavigate, overr
         {isLogicGateArenaView ? (
           <React.Suspense fallback={fullPageFallback}><LazyLogicGateArenaPage frames={frames} updateFrames={updateActiveFrames} /></React.Suspense>
         ) : isCommunicationsView ? (
-          <React.Suspense fallback={fullPageFallback}><LazyCommunicationsPage embedded /></React.Suspense>
+          <React.Suspense fallback={fullPageFallback}><LazyCommunicationsPage embedded me={me} /></React.Suspense>
         ) : (
           <>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={canvasW} height={canvasH} color={crossColor} />

@@ -209,20 +209,20 @@ export default function AuthGate() {
   }
 
   if (normalizedPath === "/settings" || normalizedPath === "/admin/users") {
-    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} onNavigate={navigate} overrideContent={<SettingsPage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} embedded />} /></React.Suspense>;
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} overrideContent={<SettingsPage me={me} onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} embedded />} /></React.Suspense>;
   }
 
   if (normalizedPath === "/logic-gate-arena") {
-    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} onNavigate={navigate} initialPage="logic-gate-arena" /></React.Suspense>;
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="logic-gate-arena" /></React.Suspense>;
   }
 
   if (normalizedPath === "/home" || normalizedPath === "/communications" || normalizedPath === "/communication") {
-    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} onNavigate={navigate} initialPage="communications" /></React.Suspense>;
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="communications" /></React.Suspense>;
   }
 
   return (
     <>
-      <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} onNavigate={navigate} /></React.Suspense>
+      <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} /></React.Suspense>
     </>
   );
 }
