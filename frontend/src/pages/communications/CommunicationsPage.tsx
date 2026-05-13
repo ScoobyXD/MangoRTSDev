@@ -2454,6 +2454,7 @@ function NodeInboxCard({
               }}
             >
               <ExplorerRowIcon kind="logic_gate" />
+              <span style={logicGateRaciCardGateLabelStyle}>{label}</span>
             </button>
           );
         })}
@@ -3612,20 +3613,37 @@ const logicGateRaciCardActionsStyle: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "flex-end",
   gap: 3,
-  minWidth: 20,
+  minWidth: 0,
+  maxWidth: 118,
+  overflow: "hidden",
 };
 
 const logicGateRaciCardGateButtonStyle: React.CSSProperties = {
-  width: 20,
-  height: 20,
-  display: "grid",
-  placeItems: "center",
+  flex: "1 1 54px",
+  minWidth: 42,
+  maxWidth: 112,
+  height: 22,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "flex-start",
+  gap: 4,
   border: "1px solid rgba(255, 136, 32, 0.28)",
   borderRadius: 4,
   background: "rgba(255, 255, 255, 0.72)",
   color: "#24120a",
   cursor: "pointer",
-  padding: 0,
+  padding: "0 5px",
+  overflow: "hidden",
+};
+
+const logicGateRaciCardGateLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 10,
+  fontWeight: 800,
+  lineHeight: 1,
 };
 
 const logicGateRaciCardIconStyle: React.CSSProperties = {
