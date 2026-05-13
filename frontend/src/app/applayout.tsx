@@ -753,7 +753,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
         {isLogicGateArenaView ? (
           <React.Suspense fallback={fullPageFallback}><LazyLogicGateArenaPage frames={frames} updateFrames={updateActiveFrames} /></React.Suspense>
         ) : isCommunicationsView ? (
-          <React.Suspense fallback={fullPageFallback}><LazyCommunicationsPage embedded me={me} /></React.Suspense>
+          <React.Suspense fallback={fullPageFallback}><LazyCommunicationsPage embedded me={me} onNavigate={onNavigate} /></React.Suspense>
         ) : (
           <>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={canvasW} height={canvasH} color={crossColor} />

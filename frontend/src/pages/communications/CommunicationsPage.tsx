@@ -1139,7 +1139,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     setNodeEditorOverlay({ nodeID, nodeTitle: nodeTitle(node) });
   }, []);
 
-  const openLogicGateArenaFromMatrix = useCallback((logicGateID: string, label: string, nodeID: string) => {
+  const openLogicGateArena = useCallback((logicGateID: string, label: string, nodeID?: string) => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return;
     writePendingLogicGateArenaSelection({
@@ -1343,7 +1343,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                   getNodeDragIDs={getNodeDragIDs}
                   onSelectNode={selectNodeMatrixCard}
                   onOpenNode={openNodeEditorOverlay}
-                  onOpenLogicGate={openLogicGateArenaFromMatrix}
+                  onOpenLogicGate={openLogicGateArena}
                   onPlaceNodes={placeNodesInAci}
                   onRemovePlacement={removeNodeFromAci}
                 />
@@ -1360,7 +1360,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                   getNodeDragIDs={getNodeDragIDs}
                   onSelectNode={selectNodeMatrixCard}
                   onOpenNode={openNodeEditorOverlay}
-                  onOpenLogicGate={openLogicGateArenaFromMatrix}
+                  onOpenLogicGate={openLogicGateArena}
                   onPlaceNodes={placeNodesInResponsibleInbox}
                 />
               )}
@@ -1530,6 +1530,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
             }}
             onSelectRow={selectLogicGateRow}
             onSelectShortcut={selectLogicGateShortcut}
+            onOpenLogicGate={openLogicGateArena}
             onAddShortcuts={addShortcutsFromExplorerPayload}
             onRemoveShortcut={removeShortcut}
             onConvertMessages={convertMessagesToLogicGate}
@@ -1733,6 +1734,7 @@ function LogicGateRail({
   onToggleFolder,
   onSelectRow,
   onSelectShortcut,
+  onOpenLogicGate,
   onAddShortcuts,
   onRemoveShortcut,
   onConvertMessages,
@@ -1752,6 +1754,7 @@ function LogicGateRail({
   onToggleFolder: (rowID: string) => void;
   onSelectRow: (row: ExplorerTreeNode, event: React.MouseEvent) => void;
   onSelectShortcut: (logicGateID: string, event: React.MouseEvent) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onAddShortcuts: (payload: ExplorerDragPayload | null) => void;
   onRemoveShortcut: (logicGateID: string) => void;
   onConvertMessages: (logicGateID: string, messageIDs: string[]) => void;
@@ -1795,6 +1798,7 @@ function LogicGateRail({
                     getLogicGateDragIDs={getLogicGateDragIDs}
                     logicGateByID={logicGateByID}
                     onSelectShortcut={onSelectShortcut}
+                    onOpenLogicGate={onOpenLogicGate}
                     onRemoveShortcut={onRemoveShortcut}
                     onConvertMessages={onConvertMessages}
                   />
@@ -1830,6 +1834,12 @@ function LogicGateRail({
                 draggable
                 style={logicGateTreeRowStyle(row.depth, selected, row.kind === "logic_gate")}
                 onClick={(event) => onSelectRow(row, event)}
+                onDoubleClick={(event) => {
+                  if (row.kind !== "logic_gate" || !logicGateID) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onOpenLogicGate(logicGateID, logicGateTitle(logicGate));
+                }}
                 onDragStart={(event) => {
                   const payload = getExplorerDragPayloadForSelection(row, selectedRowIDs, allRows);
                   if (!payload) return;
@@ -1883,6 +1893,7 @@ function MyLogicGateTile({
   logicGateByID,
   getLogicGateDragIDs,
   onSelectShortcut,
+  onOpenLogicGate,
   onRemoveShortcut,
   onConvertMessages,
 }: {
@@ -1892,6 +1903,7 @@ function MyLogicGateTile({
   logicGateByID: Map<string, LogicGateRecord>;
   getLogicGateDragIDs: (logicGateID: string) => string[];
   onSelectShortcut: (logicGateID: string, event: React.MouseEvent) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onRemoveShortcut: (logicGateID: string) => void;
   onConvertMessages: (logicGateID: string, messageIDs: string[]) => void;
 }) {
@@ -1902,6 +1914,11 @@ function MyLogicGateTile({
       draggable
       style={myLogicGateTileStyle(selected)}
       onClick={(event) => onSelectShortcut(logicGateID, event)}
+      onDoubleClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenLogicGate(logicGateID, logicGateTitle(logicGate));
+      }}
       onDragStart={(event) => {
         const dragIDs = getLogicGateDragIDs(logicGateID);
         setLogicGateDragData(event.dataTransfer, dragIDs, logicGateByID);
@@ -1928,6 +1945,10 @@ function MyLogicGateTile({
         onClick={(event) => {
           event.stopPropagation();
           if (!busy) onRemoveShortcut(logicGateID);
+        }}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
         }}
         onKeyDown={(event) => {
           if ((event.key === "Enter" || event.key === " ") && !busy) {
