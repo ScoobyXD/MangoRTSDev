@@ -49,6 +49,9 @@ test("parses node text block chat projection payloads", () => {
     authorName: "Ada",
     message: "Check this section",
     createdTimestamp: "2026-05-04T01:00:00.000Z",
+    selectionQuote: "selected text",
+    selectionStart: 12,
+    selectionEnd: 25,
     attachments: [{ id: "attachment-1", name: "notes.csv", type: "text/csv", size: 42, dataURL: "data:text/csv;base64,YSxi" }],
   });
   const messages = parseEditorTextBlockChats([
@@ -58,6 +61,9 @@ test("parses node text block chat projection payloads", () => {
   assert.equal(messages.length, 1);
   assert.equal(messages[0].blockID, "block-1");
   assert.equal(messages[0].parentID, "chat-parent");
+  assert.equal(messages[0].selectionQuote, "selected text");
+  assert.equal(messages[0].selectionStart, 12);
+  assert.equal(messages[0].selectionEnd, 25);
   assert.equal(messages[0].authorName, "Ada");
   assert.equal(messages[0].message, "Check this section");
   assert.deepEqual(messages[0].attachments, [{ id: "attachment-1", name: "notes.csv", type: "text/csv", size: 42, dataURL: "data:text/csv;base64,YSxi" }]);

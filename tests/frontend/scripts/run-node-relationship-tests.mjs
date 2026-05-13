@@ -24,6 +24,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/mapGridBackground.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/relationshipDeleteSummary.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/nodeMapCommands.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/nodeInlineComments.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/node-map/editorCanvasKeydownRouting.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/explorerSync.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/treePresentation.test.js"),
@@ -59,6 +60,7 @@ for (const testFile of testFiles) {
   contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/relationshipProjection"', '"../../../../frontend/src/modules/node-map/relationshipProjection.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/relationshipDeleteSummary"', '"../../../../frontend/src/modules/node-map/relationshipDeleteSummary.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/nodeMapCommands"', '"../../../../frontend/src/modules/node-map/nodeMapCommands.js"');
+  contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/nodeInlineComments"', '"../../../../frontend/src/modules/node-map/nodeInlineComments.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/NodeMapControls"', '"../../../../frontend/src/modules/node-map/NodeMapControls.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/node-map/shared"', '"../../../../frontend/src/modules/node-map/shared.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/logic-gate-map/shared"', '"../../../../frontend/src/modules/logic-gate-map/shared.js"');

@@ -1,11 +1,13 @@
+import { useMemo, useRef } from "react";
 import type React from "react";
-import { getNodeTitle, type NodeDirection, type NodePosition, type NodeRecord } from "./shared";
+import { clamp, getNodeTitle, type NodeDirection, type NodePosition, type NodeRecord } from "./shared";
 import {
   type NodeMapDragState,
   resolveNodeMapDragStartSelection,
   resolveNodeMapPointerSelection,
 } from "./NodeMapControls";
 import { isLegalRelationshipSidePair } from "./relationshipProjection";
+import { buildNodeTitleCommentSegments, type NodeInlineCommentDraft, type NodeInlineCommentThread } from "./nodeInlineComments";
 
 type NodeMapNodeCardProps = {
   node: NodeRecord;
@@ -27,6 +29,9 @@ type NodeMapNodeCardProps = {
   nodeCardBorder: string;
   nodeCardText: string;
   selectionColor: string;
+  inlineCommentThreads: NodeInlineCommentThread[];
+  activeInlineCommentThreadID: string;
+  inlineCommentDraft: NodeInlineCommentDraft | null;
   onSetCanvasActive: React.Dispatch<React.SetStateAction<boolean>>;
   onSetContextMenu: React.Dispatch<React.SetStateAction<{ x: number; y: number; worldX: number; worldY: number } | null>>;
   onSetNodeContextMenu: React.Dispatch<React.SetStateAction<{ x: number; y: number; nodeID: string } | null>>;
@@ -37,7 +42,10 @@ type NodeMapNodeCardProps = {
   onSetDragState: React.Dispatch<React.SetStateAction<NodeMapDragState | null>>;
   onSetRelationshipDraft: React.Dispatch<React.SetStateAction<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>>;
   onSetEditingNodeTitleNodeID: React.Dispatch<React.SetStateAction<string | null>>;
+  onSetInlineCommentDraft: React.Dispatch<React.SetStateAction<NodeInlineCommentDraft | null>>;
   onSetError: React.Dispatch<React.SetStateAction<string>>;
+  onCreateInlineCommentThread: (draft: NodeInlineCommentDraft) => void;
+  onOpenInlineCommentThread: (threadID: string) => void;
   onCreateLinkedNode: (sourceNodeID: string, direction: NodeDirection) => Promise<void>;
   onCommitRelationshipBetweenNodes: (sourceNodeID: string, sourceSide: NodeDirection, targetNodeID: string, targetSide: NodeDirection) => Promise<void>;
   onUpdateNodeTitle: (nodeID: string, nextTitle: string) => Promise<void>;
@@ -75,6 +83,9 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
   nodeCardBorder,
   nodeCardText,
   selectionColor,
+  inlineCommentThreads,
+  activeInlineCommentThreadID,
+  inlineCommentDraft,
   onSetCanvasActive,
   onSetContextMenu,
   onSetNodeContextMenu,
@@ -85,7 +96,10 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
   onSetDragState,
   onSetRelationshipDraft,
   onSetEditingNodeTitleNodeID,
+  onSetInlineCommentDraft,
   onSetError,
+  onCreateInlineCommentThread,
+  onOpenInlineCommentThread,
   onCreateLinkedNode,
   onCommitRelationshipBetweenNodes,
   onUpdateNodeTitle,
@@ -95,9 +109,117 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
   const isSelected = selectedNodeIDs.has(node.node_id);
   const isPrimary = node.node_id === selectedNodeID;
   const isEditingTitle = editingNodeTitleNodeID === node.node_id;
+  const nodeTitle = getNodeTitle(node);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const titleElementRef = useRef<HTMLDivElement | null>(null);
+  const nodeInlineCommentDraft = inlineCommentDraft?.nodeID === node.node_id ? inlineCommentDraft : null;
+  const titleSegments = useMemo(() => buildNodeTitleCommentSegments(nodeTitle, inlineCommentThreads), [inlineCommentThreads, nodeTitle]);
+
+  const readNodeTitleSelection = (): NodeInlineCommentDraft | null => {
+    const cardElement = cardRef.current;
+    const titleElement = titleElementRef.current;
+    if (!cardElement || !titleElement) return null;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+    const range = selection.getRangeAt(0);
+    if (!titleElement.contains(range.startContainer) || !titleElement.contains(range.endContainer)) return null;
+    const rawSelectedText = range.toString();
+    const leadingTrim = rawSelectedText.length - rawSelectedText.trimStart().length;
+    const trailingTrim = rawSelectedText.length - rawSelectedText.trimEnd().length;
+    const selectedText = rawSelectedText.trim();
+    if (!selectedText) return null;
+
+    const beforeRange = range.cloneRange();
+    beforeRange.selectNodeContents(titleElement);
+    beforeRange.setEnd(range.startContainer, range.startOffset);
+    const startOffset = clamp(beforeRange.toString().length + leadingTrim, 0, nodeTitle.length);
+    const endOffset = clamp(startOffset + selectedText.length, startOffset, nodeTitle.length - trailingTrim);
+    if (endOffset <= startOffset) return null;
+
+    const selectionRect = range.getBoundingClientRect();
+    const cardRect = cardElement.getBoundingClientRect();
+    const anchorX = clamp((selectionRect.right - cardRect.left) / zoom + 6, 8, size.w - 8);
+    const anchorY = clamp((selectionRect.top - cardRect.top) / zoom - 32, -30, size.h - 20);
+    return {
+      nodeID: node.node_id,
+      quote: nodeTitle.slice(startOffset, endOffset),
+      startOffset,
+      endOffset,
+      anchorX,
+      anchorY,
+    };
+  };
+
+  const captureNodeTitleSelection = () => {
+    const draft = readNodeTitleSelection();
+    onSetInlineCommentDraft(draft);
+  };
+
+  const renderReadOnlyTitle = () => (
+    <div
+      ref={titleElementRef}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        onSetCanvasActive(true);
+        onSetContextMenu(null);
+        onSetNodeContextMenu(null);
+        onSetRelationshipContextMenu(null);
+        onSetSelectedRelationshipIDs(new Set());
+        onSetSelectedNodeID(node.node_id);
+        onSetSelectedNodeIDs(new Set([node.node_id]));
+      }}
+      onPointerUp={(event) => {
+        event.stopPropagation();
+        window.setTimeout(captureNodeTitleSelection, 0);
+      }}
+      style={{
+        whiteSpace: "normal",
+        overflowWrap: "anywhere",
+        wordBreak: "break-word",
+        overflow: "hidden",
+        maxWidth: "100%",
+        textOverflow: "ellipsis",
+        display: "-webkit-box",
+        WebkitLineClamp: 3,
+        WebkitBoxOrient: "vertical",
+        fontSize: 18,
+        fontWeight: 500,
+        lineHeight: 1.15,
+        letterSpacing: 0,
+        fontFamily: "var(--mango-font-family)",
+        userSelect: "text",
+        cursor: "text",
+      }}
+    >
+      {titleSegments.map((segment) => {
+        const isCommented = segment.threadIDs.length > 0;
+        const isActiveComment = segment.threadIDs.includes(activeInlineCommentThreadID);
+        return (
+          <span
+            key={`${segment.startOffset}:${segment.endOffset}`}
+            title={isCommented ? "Open comment thread" : undefined}
+            onClick={isCommented ? (event) => {
+              event.stopPropagation();
+              const threadID = segment.threadIDs[segment.threadIDs.length - 1];
+              onOpenInlineCommentThread(threadID);
+            } : undefined}
+            style={{
+              background: isCommented ? (isActiveComment ? "rgba(255, 202, 40, 0.72)" : "rgba(255, 213, 79, 0.46)") : "transparent",
+              borderBottom: isCommented ? `1px solid ${selectionColor}` : "none",
+              borderRadius: isCommented ? 3 : 0,
+              cursor: isCommented ? "pointer" : "text",
+            }}
+          >
+            {segment.text}
+          </span>
+        );
+      })}
+    </div>
+  );
 
   return (
     <div
+      ref={cardRef}
       data-node-card="true"
       style={{
         position: "absolute",
@@ -243,31 +365,48 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
               outline: "none",
             }}
           >
-            {getNodeTitle(node)}
+            {nodeTitle}
           </div>
         ) : (
-          <div
-            style={{
-              whiteSpace: "normal",
-              overflowWrap: "anywhere",
-              wordBreak: "break-word",
-              overflow: "hidden",
-              maxWidth: "100%",
-              textOverflow: "ellipsis",
-              display: "-webkit-box",
-              WebkitLineClamp: 3,
-              WebkitBoxOrient: "vertical",
-              fontSize: 18,
-              fontWeight: 500,
-              lineHeight: 1.15,
-              letterSpacing: 0,
-              fontFamily: "var(--mango-font-family)",
-            }}
-          >
-            {getNodeTitle(node)}
-          </div>
+          renderReadOnlyTitle()
         )}
       </div>
+      {nodeInlineCommentDraft && !isEditingTitle && (
+        <button
+          type="button"
+          title="Comment on selection"
+          aria-label="Comment on selection"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            onCreateInlineCommentThread(nodeInlineCommentDraft);
+          }}
+          style={{
+            position: "absolute",
+            left: nodeInlineCommentDraft.anchorX,
+            top: nodeInlineCommentDraft.anchorY,
+            width: 28,
+            height: 28,
+            borderRadius: 6,
+            border: `1px solid ${selectionColor}`,
+            background: panelSurface,
+            color: selectionColor,
+            boxShadow: "0 8px 20px rgba(0,0,0,0.24)",
+            display: "grid",
+            placeItems: "center",
+            cursor: "pointer",
+            padding: 0,
+            zIndex: 42,
+          }}
+        >
+          <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none">
+            <path d="M5 6.5A3.5 3.5 0 0 1 8.5 3h7A3.5 3.5 0 0 1 19 6.5v4A3.5 3.5 0 0 1 15.5 14H11l-4.5 4v-4H8.5A3.5 3.5 0 0 1 5 10.5v-4Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
       {isSelected && (
         <div style={{ position: "absolute", top: 6, left: 6, width: 12, height: 12, borderRadius: 999, background: selectionColor, opacity: 0.92 }} />
       )}

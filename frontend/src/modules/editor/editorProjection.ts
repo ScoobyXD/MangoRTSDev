@@ -27,6 +27,9 @@ export type EditorTextBlockChatMessage = {
   id: string;
   blockID: string;
   parentID?: string;
+  selectionQuote?: string;
+  selectionStart?: number;
+  selectionEnd?: number;
   authorID: string;
   authorName: string;
   message: string;
@@ -103,6 +106,9 @@ export function parseEditorAttachedEmails(items: EditorProjectionItem[]): Editor
 export function buildEditorTextBlockChatPayload(input: {
   blockID: string;
   parentID?: string;
+  selectionQuote?: string;
+  selectionStart?: number;
+  selectionEnd?: number;
   authorID?: string;
   authorName: string;
   message: string;
@@ -112,6 +118,9 @@ export function buildEditorTextBlockChatPayload(input: {
   return JSON.stringify({
     block_id: input.blockID,
     parent_id: input.parentID ?? "",
+    selection_quote: input.selectionQuote?.trim() ?? "",
+    selection_start: Number.isFinite(input.selectionStart) ? input.selectionStart : null,
+    selection_end: Number.isFinite(input.selectionEnd) ? input.selectionEnd : null,
     author_id: input.authorID ?? "",
     author_name: input.authorName,
     message: input.message,
@@ -187,6 +196,11 @@ function numberValue(payload: Record<string, unknown>, key: string): number | un
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function integerValue(payload: Record<string, unknown>, key: string): number | undefined {
+  const value = numberValue(payload, key);
+  return value === undefined ? undefined : Math.trunc(value);
+}
+
 function normalizeChatAttachments(items: EditorChatAttachment[]): EditorChatAttachment[] {
   return items
     .map((item) => ({
@@ -234,6 +248,9 @@ function parseEditorTextBlockChat(item: EditorProjectionItem): EditorTextBlockCh
     id: item.information_id,
     blockID,
     parentID: parentID || undefined,
+    selectionQuote: stringValue(record, "selection_quote") || undefined,
+    selectionStart: integerValue(record, "selection_start"),
+    selectionEnd: integerValue(record, "selection_end"),
     authorID: stringValue(record, "author_id"),
     authorName: stringValue(record, "author_name") || "Unknown user",
     message,

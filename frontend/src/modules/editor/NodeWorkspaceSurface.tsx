@@ -56,6 +56,18 @@ type TextBlockState = {
   pending: boolean;
 };
 
+type TextBlockSelectionAnchor = {
+  blockID: string;
+  quote: string;
+  startOffset: number;
+  endOffset: number;
+};
+
+type TextBlockSelectionDraft = TextBlockSelectionAnchor & {
+  x: number;
+  y: number;
+};
+
 type TimelineGranularity = "day" | "week" | "month" | "year";
 type ChatThreadNode = {
   message: EditorTextBlockChatMessage;
@@ -325,6 +337,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
   const [chatDraftAttachments, setChatDraftAttachments] = useState<Record<string, EditorChatAttachment[]>>({});
   const [chatReplyTargets, setChatReplyTargets] = useState<Record<string, string>>({});
+  const [chatSelectionAnchors, setChatSelectionAnchors] = useState<Record<string, TextBlockSelectionAnchor>>({});
   const [activeChatBlockID, setActiveChatBlockID] = useState("");
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set());
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
@@ -383,6 +396,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       if (nodeChanged) return {};
       return Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(messageIDsByBlock.get(blockID)?.has(messageID))));
     });
+    setChatSelectionAnchors((current) => (nodeChanged ? {} : Object.fromEntries(Object.entries(current).filter(([id]) => blockIDs.has(id)))));
     setActiveChatBlockID((current) => (nodeChanged || !blockIDs.has(current) ? "" : current));
     setClosedChatBlockIDs((current) => {
       if (nodeChanged) return new Set();
@@ -539,6 +553,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       delete next[blockID];
       return next;
     });
+    setChatSelectionAnchors((current) => {
+      if (!(blockID in current)) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
     setClosedChatBlockIDs((current) => {
       if (!current.has(blockID)) return current;
       const next = new Set(current);
@@ -574,6 +594,24 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [blocks, chatMessages]);
 
+  const openSelectionChat = useCallback((selection: TextBlockSelectionDraft) => {
+    setFocusedTextBlockID("");
+    setChatReplyTargets((current) => {
+      if (!current[selection.blockID]) return current;
+      const next = { ...current };
+      delete next[selection.blockID];
+      return next;
+    });
+    setChatSelectionAnchors((current) => ({ ...current, [selection.blockID]: selection }));
+    setClosedChatBlockIDs((current) => {
+      if (!current.has(selection.blockID)) return current;
+      const next = new Set(current);
+      next.delete(selection.blockID);
+      return next;
+    });
+    setActiveChatBlockID(selection.blockID);
+  }, []);
+
   const submitChat = useCallback(async (blockID: string) => {
     const message = (chatDrafts[blockID] ?? "").trim();
     const attachments = chatDraftAttachments[blockID] ?? [];
@@ -581,10 +619,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const now = new Date().toISOString();
     const id = generateStableInformationID();
     const parentID = chatReplyTargets[blockID] ?? "";
+    const selectionAnchor = parentID ? undefined : chatSelectionAnchors[blockID];
     const nextMessage: EditorTextBlockChatMessage = {
       id,
       blockID,
       parentID: parentID || undefined,
+      selectionQuote: selectionAnchor?.quote,
+      selectionStart: selectionAnchor?.startOffset,
+      selectionEnd: selectionAnchor?.endOffset,
       authorID: author.userID,
       authorName: author.name,
       message,
@@ -600,6 +642,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
     setChatReplyTargets((current) => {
       if (!current[blockID]) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
+    setChatSelectionAnchors((current) => {
+      if (!(blockID in current)) return current;
       const next = { ...current };
       delete next[blockID];
       return next;
@@ -620,6 +668,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           information: buildEditorTextBlockChatPayload({
             blockID,
             parentID,
+            selectionQuote: selectionAnchor?.quote,
+            selectionStart: selectionAnchor?.startOffset,
+            selectionEnd: selectionAnchor?.endOffset,
             authorID: author.userID,
             authorName: author.name,
             message,
@@ -633,7 +684,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "failed_to_save_chat_message");
     }
-  }, [author.name, author.userID, chatDraftAttachments, chatDrafts, chatReplyTargets, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
+  }, [author.name, author.userID, chatDraftAttachments, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
   const addChatDraftAttachments = useCallback(async (blockID: string, files: FileList | File[]) => {
     const candidates = Array.from(files);
@@ -815,6 +866,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const chatIsActive = activeChatBlockID === block.id;
           const chatIsVisible = chatIsActive || (messages.length > 0 && !closedChatBlockIDs.has(block.id));
           const textBlockIsFocused = focusedTextBlockID === block.id;
+          const selectionAnchor = chatSelectionAnchors[block.id];
           const toggleChat = () => {
             setFocusedTextBlockID("");
             const nextOpen = !chatIsVisible;
@@ -839,6 +891,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const replyToMessage = (messageID: string) => {
             focusChat();
             setChatReplyTargets((current) => ({ ...current, [block.id]: messageID }));
+            setChatSelectionAnchors((current) => {
+              if (!(block.id in current)) return current;
+              const next = { ...current };
+              delete next[block.id];
+              return next;
+            });
           };
           const clearReplyTarget = () => {
             setChatReplyTargets((current) => {
@@ -885,14 +943,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                         Created {formatTimestamp(block.createdTimestamp)}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      title={chatIsVisible ? "Hide chat" : "Open chat"}
-                      onClick={toggleChat}
-                      style={{ width: 26, height: 24, borderRadius: 5, border: `1px solid ${chatIsActive ? accent : strokeColor}`, background: chatIsActive ? accent : "#ffffff", color: chatIsActive ? "#ffffff" : accent, display: "grid", placeItems: "center", cursor: "pointer" }}
-                    >
-                      <ChatIcon color={chatIsActive ? "#ffffff" : accent} />
-                    </button>
+                    {messages.length > 0 || chatIsVisible ? (
+                      <button
+                        type="button"
+                        title={chatIsVisible ? "Hide chat" : "Open chat"}
+                        onClick={toggleChat}
+                        style={{ width: 26, height: 24, borderRadius: 5, border: `1px solid ${chatIsActive ? accent : strokeColor}`, background: chatIsActive ? accent : "#ffffff", color: chatIsActive ? "#ffffff" : accent, display: "grid", placeItems: "center", cursor: "pointer" }}
+                      >
+                        <ChatIcon color={chatIsActive ? "#ffffff" : accent} />
+                      </button>
+                    ) : (
+                      <div aria-hidden="true" style={{ width: 26, height: 24 }} />
+                    )}
                     <TextBlockActionsMenu
                       accent={accent}
                       surfaceText={surfaceText}
@@ -925,12 +987,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       updateTextBlockContent(block.id, { document });
                       flushTextBlockSave(block.id);
                     }}
+                    onSelectionChatRequest={openSelectionChat}
                   />
                 </div>
                 {compact && chatIsVisible && (
                   <ChatPane
                     blockID={block.id}
                     messages={messages}
+                    selectionAnchor={selectionAnchor}
                     draft={chatDrafts[block.id] ?? ""}
                     active={chatIsActive}
                     accent={accent}
@@ -956,6 +1020,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   <ChatPane
                     blockID={block.id}
                     messages={messages}
+                    selectionAnchor={selectionAnchor}
                     draft={chatDrafts[block.id] ?? ""}
                     active={chatIsActive}
                     accent={accent}
@@ -1236,6 +1301,7 @@ type NodeTextBlockEditorProps = {
   onBlur: () => void;
   onDocumentChange: (document: string) => void;
   onDocumentFlush: (document: string) => void;
+  onSelectionChatRequest: (selection: TextBlockSelectionDraft) => void;
 };
 
 function readStoredTextBlockHeight(storageKey: string): number {
@@ -1264,8 +1330,10 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   onBlur,
   onDocumentChange,
   onDocumentFlush,
+  onSelectionChatRequest,
 }) => {
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const restoringScrollRef = useRef(false);
   const documentTargetKey = `node-text-block:${nodeID}:${blockID}`;
   const targetKeyRef = useRef(documentTargetKey);
@@ -1280,6 +1348,7 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const [height, setHeight] = useState(() => readStoredTextBlockHeight(heightStorageKey));
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
+  const [selectionDraft, setSelectionDraft] = useState<TextBlockSelectionDraft | null>(null);
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
   const documentLineHeightPx = TEXT_BLOCK_FONT_SIZE * TEXT_BLOCK_LINE_HEIGHT;
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
@@ -1374,8 +1443,50 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     onBlur();
   };
 
+  const readSelectionDraft = (): TextBlockSelectionDraft | null => {
+    const editor = editorRef.current;
+    const wrapper = wrapperRef.current;
+    if (!editor || !wrapper) return null;
+    const selection = editor.ownerDocument.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.startContainer) || !editor.contains(range.endContainer)) return null;
+    const rawSelectedText = range.toString();
+    const leadingTrim = rawSelectedText.length - rawSelectedText.trimStart().length;
+    const selectedText = rawSelectedText.trim();
+    if (!selectedText) return null;
+
+    const beforeRange = range.cloneRange();
+    beforeRange.selectNodeContents(editor);
+    beforeRange.setEnd(range.startContainer, range.startOffset);
+    const documentTextLength = readEditorDocumentText(editor).length;
+    const startOffset = Math.max(0, Math.min(beforeRange.toString().length + leadingTrim, documentTextLength));
+    const endOffset = Math.max(startOffset, Math.min(startOffset + selectedText.length, documentTextLength));
+    if (endOffset <= startOffset) return null;
+
+    const selectionRect = range.getBoundingClientRect();
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const selectionRight = selectionRect.right - wrapperRect.left;
+    const selectionTop = selectionRect.top - wrapperRect.top;
+    const x = Math.max(8, Math.min(selectionRight + 8, wrapperRect.width - 34));
+    const y = Math.max(6, Math.min(selectionTop - 34, wrapperRect.height - 34));
+    return {
+      blockID,
+      quote: selectedText,
+      startOffset,
+      endOffset,
+      x,
+      y,
+    };
+  };
+
+  const captureSelectionDraft = () => {
+    window.setTimeout(() => setSelectionDraft(readSelectionDraft()), 0);
+  };
+
   return (
     <div
+      ref={wrapperRef}
       style={{
         position: "relative",
         width: "100%",
@@ -1435,9 +1546,16 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         onInput={handlers.onInput}
         onSelect={handlers.onSelect}
         onClick={handlers.onClick}
-        onPointerDown={handlers.onPointerDown}
+        onPointerDown={(event) => {
+          setSelectionDraft(null);
+          handlers.onPointerDown(event);
+        }}
+        onPointerUp={captureSelectionDraft}
         onPointerMove={handlers.onPointerMove}
-        onKeyUp={handlers.onKeyUp}
+        onKeyUp={(event) => {
+          handlers.onKeyUp(event);
+          captureSelectionDraft();
+        }}
         onBlur={handleBlur}
         onScroll={handlers.onScroll}
         onWheel={handlers.onWheel}
@@ -1472,6 +1590,42 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           ["--editor-document-scroll-track" as string]: scrollbarTrack,
         }}
       />
+      {selectionDraft && (
+        <button
+          type="button"
+          title="Comment on selection"
+          aria-label="Comment on selection"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelectionChatRequest(selectionDraft);
+            setSelectionDraft(null);
+            window.getSelection()?.removeAllRanges();
+          }}
+          style={{
+            position: "absolute",
+            left: selectionDraft.x,
+            top: selectionDraft.y,
+            zIndex: 5,
+            width: 28,
+            height: 28,
+            borderRadius: 6,
+            border: `1px solid ${accent}`,
+            background: "#ffffff",
+            color: accent,
+            display: "grid",
+            placeItems: "center",
+            padding: 0,
+            cursor: "pointer",
+            boxShadow: "0 8px 20px rgba(0,0,0,0.18)",
+          }}
+        >
+          <ChatIcon color={accent} />
+        </button>
+      )}
     </div>
   );
 };
@@ -1479,6 +1633,7 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
 type ChatPaneProps = {
   blockID: string;
   messages: EditorTextBlockChatMessage[];
+  selectionAnchor?: TextBlockSelectionAnchor;
   draft: string;
   draftAttachments: EditorChatAttachment[];
   replyTargetID: string;
@@ -1501,6 +1656,7 @@ type ChatPaneProps = {
 const ChatPane: React.FC<ChatPaneProps> = ({
   blockID,
   messages,
+  selectionAnchor,
   draft,
   draftAttachments,
   replyTargetID,
@@ -1547,6 +1703,12 @@ const ChatPane: React.FC<ChatPaneProps> = ({
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, [replyTargetID]);
+
+  useEffect(() => {
+    if (!active || replyTargetID) return;
+    const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, replyTargetID, selectionAnchor?.quote]);
 
   const focusComposer = () => {
     onFocus();
@@ -1618,6 +1780,11 @@ const ChatPane: React.FC<ChatPaneProps> = ({
           <span>{messages.length}</span>
         </div>
         <div className="editor-document-scroll" style={{ minHeight: 0, display: "grid", alignContent: "start", gap: 8, overflowY: "auto", overflowX: "hidden", padding: "9px 8px", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
+          {selectionAnchor && active && (
+            <div style={{ borderLeft: `3px solid ${accent}`, background: "rgba(255,136,32,0.08)", color: surfaceText, padding: "6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere" }}>
+              {selectionAnchor.quote}
+            </div>
+          )}
           {threads.map((thread) => (
             <ChatThreadItem
               key={thread.message.id}
@@ -1793,6 +1960,11 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.authorName}</span>
           <span style={{ opacity: 0.58, flex: "0 0 auto" }}>{formatTimestamp(message.createdTimestamp)}</span>
         </div>
+        {message.selectionQuote && (
+          <div style={{ borderLeft: `3px solid ${accent}`, background: "rgba(255,136,32,0.08)", color: surfaceText, padding: "5px 6px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere" }}>
+            {message.selectionQuote}
+          </div>
+        )}
         {message.message && <div style={{ color: surfaceText, fontSize: 12, lineHeight: 1.35, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{message.message}</div>}
         {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} surfaceText={surfaceText} strokeColor={ruleColor} onPreviewImage={onPreviewImage} />}
         <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>

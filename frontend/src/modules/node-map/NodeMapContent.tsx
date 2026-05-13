@@ -8,8 +8,10 @@ import { createMapEntityBatchClientID, createMapEntityBatchCommand, deleteNodeMa
 import { primeNodeRecordStoreCaches } from "./NodeRecordStore";
 import { NODE_MAP_CLIPBOARD_STORAGE_KEY, beginNodeMapMultiSelectSession, buildNodeMapClipboardPayload, parseNodeMapClipboardPayload, shouldIgnoreMapDeleteKeyTarget, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
 import { NodeMapContextMenus, type NodeMapCanvasContextMenuState, type NodeMapDeleteConfirmationState, type NodeMapNodeContextMenuState, type NodeMapRelationshipContextMenuState, type NodeMapRelationshipRole } from "./NodeMapContextMenus";
+import { NodeInlineCommentPanel } from "./NodeInlineCommentPanel";
 import { NodeMapNodeCard } from "./NodeMapNodeCard";
 import { NodeMapRelationshipHitLines } from "./NodeMapRelationshipHitLines";
+import { buildNodeInlineCommentsStorageKey, createNodeInlineCommentMessage, createNodeInlineCommentThread, readNodeInlineCommentThreads, writeNodeInlineCommentThreads, type NodeInlineCommentDraft, type NodeInlineCommentThread } from "./nodeInlineComments";
 import { buildNodeMapRelationshipRoutingGrid, getNodeMapAnchorPoint, routeNodeMapDraftPath, routeNodeMapOrthogonalPath } from "./nodeMapRouting";
 import { useNodeMapGraphPersistence } from "./useNodeMapGraphPersistence";
 import { useNodeMapGraphLoader } from "./useNodeMapGraphLoader";
@@ -42,6 +44,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const mapScope = widgetId?.trim() ? widgetId : "global";
   const mapStateKey = `node-map-state-v1:${companyID}:${mapScope}`;
   const fallbackMapStateKey = `node-map-state-v1:${companyID}:last-opened-map`;
+  const inlineCommentStorageKey = buildNodeInlineCommentsStorageKey(companyID);
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const relationshipCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -77,6 +80,9 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const [relationshipContextMenu, setRelationshipContextMenu] = useState<NodeMapRelationshipContextMenuState | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<NodeMapDeleteConfirmationState | null>(null);
   const [canvasActive, setCanvasActive] = useState(false);
+  const [inlineCommentThreads, setInlineCommentThreads] = useState<NodeInlineCommentThread[]>(() => readNodeInlineCommentThreads(inlineCommentStorageKey));
+  const [inlineCommentDraft, setInlineCommentDraft] = useState<NodeInlineCommentDraft | null>(null);
+  const [activeInlineCommentThreadID, setActiveInlineCommentThreadID] = useState("");
 
   const [dragState, setDragState] = useState<NodeMapDragState | null>(null);
   const [nodeResizeState, setNodeResizeState] = useState<{
@@ -179,6 +185,35 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     return selected ? getNodeTitle(selected) : "";
   }, [allNodes, nodes, selectedNodeID]);
 
+  const inlineCommentThreadsByNodeID = useMemo(() => {
+    const grouped: Record<string, NodeInlineCommentThread[]> = {};
+    for (const thread of inlineCommentThreads) {
+      if (!grouped[thread.nodeID]) grouped[thread.nodeID] = [];
+      grouped[thread.nodeID].push(thread);
+    }
+    return grouped;
+  }, [inlineCommentThreads]);
+
+  const activeInlineCommentThread = useMemo(
+    () => inlineCommentThreads.find((thread) => thread.id === activeInlineCommentThreadID && !thread.resolvedAt) ?? null,
+    [activeInlineCommentThreadID, inlineCommentThreads],
+  );
+
+  const activeInlineCommentPanelPosition = useMemo(() => {
+    if (!activeInlineCommentThread) return null;
+    const position = nodePositions[activeInlineCommentThread.nodeID];
+    if (!position) return null;
+    const size = nodeSizes[activeInlineCommentThread.nodeID] ?? { w: NODE_W, h: NODE_H };
+    return {
+      left: pan.x + (position.x + size.w) * zoom + 12,
+      top: pan.y + position.y * zoom,
+    };
+  }, [activeInlineCommentThread, nodePositions, nodeSizes, pan.x, pan.y, zoom]);
+
+  useEffect(() => {
+    writeNodeInlineCommentThreads(inlineCommentStorageKey, inlineCommentThreads);
+  }, [inlineCommentStorageKey, inlineCommentThreads]);
+
   const readLiveSelectionTargets = () => {
     const edges = readFrameLinksFromStorage();
     const registry = readFrameRegistryFromStorage();
@@ -216,6 +251,32 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       entities: uniqueNodeIDs.map((id) => ({ kind: "node", id })),
       changedAt: Date.now(),
     });
+  };
+
+  const createInlineCommentThreadFromDraft = (draft: NodeInlineCommentDraft) => {
+    const thread = createNodeInlineCommentThread(draft);
+    setInlineCommentThreads((previous) => [...previous, thread]);
+    setInlineCommentDraft(null);
+    setActiveInlineCommentThreadID(thread.id);
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const addInlineCommentMessage = (threadID: string, body: string) => {
+    const message = createNodeInlineCommentMessage(body);
+    if (!message) return;
+    setInlineCommentThreads((previous) => previous.map((thread) => (
+      thread.id === threadID
+        ? { ...thread, messages: [...thread.messages, message] }
+        : thread
+    )));
+  };
+
+  const resolveInlineCommentThread = (threadID: string) => {
+    const resolvedAt = new Date().toISOString();
+    setInlineCommentThreads((previous) => previous.map((thread) => (
+      thread.id === threadID ? { ...thread, resolvedAt } : thread
+    )));
+    setActiveInlineCommentThreadID((current) => (current === threadID ? "" : current));
   };
 
   useEffect(() => {
@@ -1036,6 +1097,12 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
       const persisted = { ...lastPersistedNodePositionsRef.current };
       for (const id of unique) delete persisted[id];
       lastPersistedNodePositionsRef.current = persisted;
+      setInlineCommentThreads((previous) => previous.filter((thread) => !unique.includes(thread.nodeID)));
+      setInlineCommentDraft((current) => (current && unique.includes(current.nodeID) ? null : current));
+      setActiveInlineCommentThreadID((current) => {
+        const activeThread = inlineCommentThreads.find((thread) => thread.id === current);
+        return activeThread && unique.includes(activeThread.nodeID) ? "" : current;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_delete_node");
     }
@@ -1298,6 +1365,10 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           backgroundColor: "transparent",
         }}
         {...viewportHandlers}
+        onPointerDown={(event) => {
+          setInlineCommentDraft(null);
+          viewportHandlers.onPointerDown(event);
+        }}
       >
         <div
           style={{
@@ -1358,6 +1429,9 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
               nodeCardBorder={nodeCardBorder}
               nodeCardText={nodeCardText}
               selectionColor={SELECTION_CYAN}
+              inlineCommentThreads={inlineCommentThreadsByNodeID[node.node_id] ?? []}
+              activeInlineCommentThreadID={activeInlineCommentThreadID}
+              inlineCommentDraft={inlineCommentDraft}
               onSetCanvasActive={setCanvasActive}
               onSetContextMenu={setContextMenu}
               onSetNodeContextMenu={setNodeContextMenu}
@@ -1368,7 +1442,10 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
               onSetDragState={setDragState}
               onSetRelationshipDraft={setRelationshipDraft}
               onSetEditingNodeTitleNodeID={setEditingNodeTitleNodeID}
+              onSetInlineCommentDraft={setInlineCommentDraft}
               onSetError={setError}
+              onCreateInlineCommentThread={createInlineCommentThreadFromDraft}
+              onOpenInlineCommentThread={setActiveInlineCommentThreadID}
               onCreateLinkedNode={createLinkedNode}
               onCommitRelationshipBetweenNodes={commitRelationshipBetweenNodes}
               onUpdateNodeTitle={updateNodeTitle}
@@ -1389,6 +1466,22 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
             />
           ))}
         </div>
+
+        {activeInlineCommentThread && activeInlineCommentPanelPosition && (
+          <NodeInlineCommentPanel
+            thread={activeInlineCommentThread}
+            left={activeInlineCommentPanelPosition.left}
+            top={activeInlineCommentPanelPosition.top}
+            accent={SELECTION_CYAN}
+            panelSurface={panelSurface}
+            panelSubtleSurface={panelSubtleSurface}
+            panelText={panelText}
+            panelMutedText={panelMutedText}
+            onAddMessage={addInlineCommentMessage}
+            onResolve={resolveInlineCommentThread}
+            onClose={() => setActiveInlineCommentThreadID("")}
+          />
+        )}
 
         {selectionBox.active && (
           <div
