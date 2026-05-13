@@ -101,7 +101,7 @@ export function createCommunicationsViewFrames(): FrameDataModel[] {
       y: 1,
       w: 42,
       h: 30,
-      title: "Communications",
+      title: "Home",
       ...WHITE_FRAME,
     },
   ];

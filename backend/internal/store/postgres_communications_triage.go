@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -46,6 +47,24 @@ func scanUserLogicGateShortcut(row interface {
 		&item.UpdatedTimestamp,
 	)
 	return item, err
+}
+
+func scanCommunicationsEmailPlacement(row interface {
+	Scan(dest ...any) error
+}) (domain.CommunicationsEmailPlacement, error) {
+	var placement domain.CommunicationsEmailPlacement
+	err := row.Scan(
+		&placement.CompanyID,
+		&placement.UserID,
+		&placement.MessageID,
+		&placement.NodeID,
+		&placement.BoardID,
+		&placement.CardID,
+		&placement.LogicGateID,
+		&placement.CreatedTimestamp,
+		&placement.UpdatedTimestamp,
+	)
+	return placement, err
 }
 
 func (r *PostgresRepo) ListCommunicationsTriageItems(userID string) ([]domain.CommunicationsTriageItem, error) {
@@ -266,6 +285,46 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 		return CommunicationsTriageConversionResult{}, err
 	}
 	return result, nil
+}
+
+func (r *PostgresRepo) ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error) {
+	userID = strings.TrimSpace(userID)
+	companyID = strings.TrimSpace(companyID)
+	if userID == "" || companyID == "" {
+		return nil, ErrInvalid
+	}
+	ids := normalizeUniqueStrings(messageIDs, 0)
+	if len(ids) == 0 {
+		return []domain.CommunicationsEmailPlacement{}, nil
+	}
+
+	args := []any{userID, companyID}
+	placeholders := make([]string, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+	}
+	rows, err := r.db.Query(`
+select company_id::text, user_id::text, message_id, node_id::text, board_id, card_id, logic_gate_id::text, created_timestamp, updated_timestamp
+from communications_email_nodes
+where user_id=$1
+  and company_id=$2
+  and message_id in (`+strings.Join(placeholders, ",")+`)
+order by created_timestamp desc, message_id asc, logic_gate_id asc`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	placements := make([]domain.CommunicationsEmailPlacement, 0)
+	for rows.Next() {
+		placement, err := scanCommunicationsEmailPlacement(rows)
+		if err != nil {
+			return nil, err
+		}
+		placements = append(placements, placement)
+	}
+	return placements, rows.Err()
 }
 
 func addEmailProjectionSQL(ctx context.Context, tx *sql.Tx, companyID, nodeID string, message domain.EmailMessageSnapshot, attachedAt time.Time) error {

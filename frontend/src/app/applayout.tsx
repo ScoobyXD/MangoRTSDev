@@ -51,7 +51,7 @@ function pageForTab(tab: ViewTab): PrimaryPage | null {
 
 function labelForTab(tab: ViewTab): string {
   const page = pageForTab(tab);
-  if (page === "communications") return "Communication";
+  if (page === "communications") return "Home";
   if (page === "logic-gate-arena") return "Logic Gate Arena";
   if (page === "map") return "Map";
   return tab.name;
@@ -66,7 +66,7 @@ function iconForTab(tab: ViewTab): React.ReactNode {
 }
 
 function routeForPage(page: PrimaryPage): string {
-  if (page === "communications") return "/communication";
+  if (page === "communications") return "/home";
   if (page === "logic-gate-arena") return "/logic-gate-arena";
   return "/";
 }
@@ -143,7 +143,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, onNavigate, overr
 
     const id = createTabId();
     const nextTab: ViewTab = initialPage === "communications"
-      ? { id, name: "Communication", page: "communications", frames: createCommunicationsViewFrames() }
+      ? { id, name: "Home", page: "communications", frames: createCommunicationsViewFrames() }
       : initialPage === "logic-gate-arena"
         ? { id, name: "Logic Gate Arena", page: "logic-gate-arena", frames: createLogicGateArenaFrames() }
         : { id, name: "Map", frames: createDefaultNodeViewFrames() };
@@ -558,7 +558,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, onNavigate, overr
     preloadCommunicationsSurface();
     const framesForView = createCommunicationsViewFrames();
     const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
-    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Communication", page: "communications", frames: framesForView } : tab)));
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Home", page: "communications", frames: framesForView } : tab)));
     setFrameLinks((previous) => previous.filter((edge) => !replacedFrameIDs.has(edge.a) && !replacedFrameIDs.has(edge.b)));
     setActiveTabId(tabID);
     setEditMode(false);
@@ -898,7 +898,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, onNavigate, overr
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
           <button style={menuBtnBase} onClick={() => { openDefaultNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Map</button>
           <button style={menuBtnBase} onPointerEnter={preloadLogicGateArenaSurface} onFocus={preloadLogicGateArenaSurface} onPointerDown={preloadLogicGateArenaSurface} onClick={() => { openLogicGateArena(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Logic Gate Arena</button>
-          <button style={menuBtnBase} onPointerEnter={preloadCommunicationsSurface} onFocus={preloadCommunicationsSurface} onPointerDown={preloadCommunicationsSurface} onClick={() => { openCommunicationsView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Communication</button>
+          <button style={menuBtnBase} onPointerEnter={preloadCommunicationsSurface} onFocus={preloadCommunicationsSurface} onPointerDown={preloadCommunicationsSurface} onClick={() => { openCommunicationsView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Home</button>
           <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>
         </FrameRightClickMenu>
       )}

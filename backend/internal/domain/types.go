@@ -128,6 +128,18 @@ type CommunicationsTriageItem struct {
 	UpdatedTimestamp time.Time            `json:"updated_timestamp"`
 }
 
+type CommunicationsEmailPlacement struct {
+	CompanyID        string    `json:"company_id"`
+	UserID           string    `json:"user_id"`
+	MessageID        string    `json:"message_id"`
+	NodeID           string    `json:"node_id"`
+	BoardID          string    `json:"board_id"`
+	CardID           string    `json:"card_id"`
+	LogicGateID      string    `json:"logic_gate_id"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
 type UserLogicGateShortcut struct {
 	UserID           string    `json:"user_id"`
 	CompanyID        string    `json:"company_id"`

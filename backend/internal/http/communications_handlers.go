@@ -155,6 +155,9 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 		if !valid {
 			return
 		}
+		if strings.TrimSpace(query.CompanyID) != "" && !requireCompanyAccess(w, r, query.CompanyID) {
+			return
+		}
 		query, err := s.applyCommunicationsMailboxQuery(r.Context(), connection, query)
 		if err != nil {
 			if errors.Is(err, errInvalidCommunicationsMailbox) {
@@ -202,6 +205,13 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
 			return
+		}
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID != "" {
+			if !requireCompanyAccess(w, r, companyID) {
+				return
+			}
+			message = s.enrichCommunicationsMessagePlacements(connection.UserID, companyID, message)
 		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"message": message})
 	case http.MethodPut:
@@ -445,7 +455,7 @@ func (s *Server) communicationsFolders(ctx context.Context, connection domain.Us
 func (s *Server) communicationsMessagePage(ctx context.Context, connection domain.UserEmailConnection, query NylasMessageQuery) (NylasMessagePage, error) {
 	now := time.Now().UTC()
 	if page, ok := s.commCache.getMessagePage(connection.UserID, query, communicationsMessagesCacheTTL, now); ok {
-		return page, nil
+		return s.enrichCommunicationsMessagePagePlacements(connection.UserID, query.CompanyID, page), nil
 	}
 	var page NylasMessagePage
 	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
@@ -466,7 +476,7 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 		return NylasMessagePage{}, err
 	}
 	s.commCache.setMessagePage(connection.UserID, query, page, now)
-	return page, nil
+	return s.enrichCommunicationsMessagePagePlacements(connection.UserID, query.CompanyID, page), nil
 }
 
 func (s *Server) communicationsMessage(ctx context.Context, connection domain.UserEmailConnection, messageID string) (NylasMessage, error) {
@@ -501,9 +511,75 @@ func shouldServeStaleCommunicationsCache(err error) bool {
 	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusTooManyRequests
 }
 
+func (s *Server) enrichCommunicationsMessagePagePlacements(userID, companyID string, page NylasMessagePage) NylasMessagePage {
+	page = cloneNylasMessagePage(page)
+	page.Messages = s.enrichCommunicationsMessagesPlacements(userID, companyID, page.Messages)
+	return page
+}
+
+func (s *Server) enrichCommunicationsMessagePlacements(userID, companyID string, message NylasMessage) NylasMessage {
+	messages := s.enrichCommunicationsMessagesPlacements(userID, companyID, []NylasMessage{message})
+	if len(messages) == 0 {
+		return message
+	}
+	return messages[0]
+}
+
+func (s *Server) enrichCommunicationsMessagesPlacements(userID, companyID string, messages []NylasMessage) []NylasMessage {
+	companyID = strings.TrimSpace(companyID)
+	if s == nil || s.repo == nil || strings.TrimSpace(userID) == "" || companyID == "" || len(messages) == 0 {
+		return messages
+	}
+	messageIDs := make([]string, 0, len(messages))
+	for _, message := range messages {
+		if strings.TrimSpace(message.ID) != "" {
+			messageIDs = append(messageIDs, message.ID)
+		}
+	}
+	messageIDs = cleanStringList(messageIDs)
+	if len(messageIDs) == 0 {
+		return messages
+	}
+	placements, err := s.repo.ListCommunicationsEmailPlacements(userID, companyID, messageIDs)
+	if err != nil {
+		log.Printf("failed to load communications email placements user_id=%s company_id=%s message_count=%d: %v", userID, companyID, len(messageIDs), err)
+		return messages
+	}
+	logicGateIDsByMessage := make(map[string][]string, len(messageIDs))
+	seenByMessage := make(map[string]map[string]bool, len(messageIDs))
+	for _, placement := range placements {
+		messageID := strings.TrimSpace(placement.MessageID)
+		logicGateID := strings.TrimSpace(placement.LogicGateID)
+		if messageID == "" || logicGateID == "" {
+			continue
+		}
+		seen := seenByMessage[messageID]
+		if seen == nil {
+			seen = map[string]bool{}
+			seenByMessage[messageID] = seen
+		}
+		if seen[logicGateID] {
+			continue
+		}
+		seen[logicGateID] = true
+		logicGateIDsByMessage[messageID] = append(logicGateIDsByMessage[messageID], logicGateID)
+	}
+	for i := range messages {
+		logicGateIDs := logicGateIDsByMessage[messages[i].ID]
+		if len(logicGateIDs) == 0 {
+			messages[i].LogicGateIDs = nil
+			messages[i].LogicGateCount = 0
+			continue
+		}
+		messages[i].LogicGateIDs = logicGateIDs
+		messages[i].LogicGateCount = len(logicGateIDs)
+	}
+	return messages
+}
+
 func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessageQuery, bool) {
 	for key := range r.URL.Query() {
-		if key != "limit" && key != "page_token" && key != "folder_id" && key != "q" && key != "mailbox" && key != "unread" {
+		if key != "limit" && key != "page_token" && key != "folder_id" && key != "q" && key != "mailbox" && key != "unread" && key != "company_id" {
 			writeError(w, http.StatusBadRequest, "unsupported_email_query_param")
 			return NylasMessageQuery{}, false
 		}
@@ -526,6 +602,7 @@ func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessag
 		FolderID:  strings.TrimSpace(r.URL.Query().Get("folder_id")),
 		Query:     strings.TrimSpace(r.URL.Query().Get("q")),
 		Mailbox:   normalizeCommunicationsMailbox(r.URL.Query().Get("mailbox")),
+		CompanyID: strings.TrimSpace(r.URL.Query().Get("company_id")),
 	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("mailbox")); raw != "" && query.Mailbox == "" {
 		writeError(w, http.StatusBadRequest, "invalid_email_mailbox")
@@ -692,11 +769,11 @@ func (s *Server) redirectCommunications(w http.ResponseWriter, r *http.Request, 
 func (s *Server) communicationsRedirectURL() *url.URL {
 	raw := strings.TrimSpace(s.nylasConfig.FrontendRedirectURL)
 	if raw == "" {
-		raw = "/communications"
+		raw = "/home"
 	}
 	target, err := url.Parse(raw)
 	if err != nil {
-		return &url.URL{Path: "/communications"}
+		return &url.URL{Path: "/home"}
 	}
 	return target
 }

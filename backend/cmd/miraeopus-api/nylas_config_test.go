@@ -19,7 +19,7 @@ func TestBuildNylasConfigExtractsJSONSecretValues(t *testing.T) {
 	t.Setenv("NYLAS_API_KEY", `{"api_key":"api-key"}`)
 	t.Setenv("NYLAS_API_BASE_URL", "https://api.us.nylas.com")
 	t.Setenv("NYLAS_REDIRECT_URI", "https://api.example.com/nylas/oauth/callback")
-	t.Setenv("NYLAS_FRONTEND_REDIRECT_URL", "https://app.example.com/communications")
+	t.Setenv("NYLAS_FRONTEND_REDIRECT_URL", "https://app.example.com/home")
 	t.Setenv("NYLAS_STATE_SECRET", `{"state_secret":"state-secret"}`)
 	t.Setenv("NYLAS_WEBHOOK_SECRET", `{"webhook_secret":"webhook-secret"}`)
 

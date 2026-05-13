@@ -2,6 +2,8 @@ export const AUTH_PATHS = new Set(["/login", "/accept-invite", "/forgot-password
 
 const LEGACY_AUTHENTICATED_PATHS = new Map([
   ["/admin/users", "/settings"],
+  ["/communication", "/home"],
+  ["/communications", "/home"],
 ]);
 
 export function isAuthPath(pathname: string): boolean {

@@ -712,7 +712,7 @@ func testNylasConfig() NylasConfig {
 		APIKey:              "api-key",
 		APIBaseURL:          "https://api.us.nylas.com",
 		RedirectURI:         "http://api.test/nylas/oauth/callback",
-		FrontendRedirectURL: "http://ui.test/communications",
+		FrontendRedirectURL: "http://ui.test/home",
 		StateSecret:         "state-secret",
 	}
 }

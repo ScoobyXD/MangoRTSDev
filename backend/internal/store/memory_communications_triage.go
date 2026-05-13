@@ -228,6 +228,53 @@ func (r *MemoryRepo) RevertCommunicationsTriageNode(input CommunicationsTriageRe
 	}, nil
 }
 
+func (r *MemoryRepo) ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error) {
+	userID = strings.TrimSpace(userID)
+	companyID = strings.TrimSpace(companyID)
+	if userID == "" || companyID == "" {
+		return nil, ErrInvalid
+	}
+	ids := normalizeUniqueStrings(messageIDs, 0)
+	if len(ids) == 0 {
+		return []domain.CommunicationsEmailPlacement{}, nil
+	}
+	idSet := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		idSet[id] = true
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	placements := make([]domain.CommunicationsEmailPlacement, 0)
+	for _, link := range r.emailNodeLinks {
+		if link.UserID != userID || link.CompanyID != companyID || !idSet[link.MessageID] {
+			continue
+		}
+		placements = append(placements, domain.CommunicationsEmailPlacement{
+			CompanyID:        link.CompanyID,
+			UserID:           link.UserID,
+			MessageID:        link.MessageID,
+			NodeID:           link.NodeID,
+			BoardID:          link.BoardID,
+			CardID:           link.CardID,
+			LogicGateID:      link.LogicGateID,
+			CreatedTimestamp: link.CreatedTimestamp,
+			UpdatedTimestamp: link.UpdatedTimestamp,
+		})
+	}
+	sort.Slice(placements, func(i, j int) bool {
+		if !placements[i].CreatedTimestamp.Equal(placements[j].CreatedTimestamp) {
+			return placements[i].CreatedTimestamp.After(placements[j].CreatedTimestamp)
+		}
+		if placements[i].MessageID != placements[j].MessageID {
+			return placements[i].MessageID < placements[j].MessageID
+		}
+		return placements[i].LogicGateID < placements[j].LogicGateID
+	})
+	return placements, nil
+}
+
 func (r *MemoryRepo) ListUserLogicGateShortcuts(userID, companyID string) ([]domain.UserLogicGateShortcut, error) {
 	userID = strings.TrimSpace(userID)
 	companyID = strings.TrimSpace(companyID)

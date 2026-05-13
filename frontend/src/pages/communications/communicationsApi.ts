@@ -53,6 +53,8 @@ export type EmailMessage = {
   reply_to?: EmailAddress[];
   folders?: string[];
   folder_ids?: string[];
+  logic_gate_ids?: string[];
+  logic_gate_count?: number;
 };
 
 export type ListMessagesParams = {
@@ -60,6 +62,7 @@ export type ListMessagesParams = {
   pageToken?: string;
   mailbox?: EmailMailbox;
   folderID?: string;
+  companyID?: string;
   q?: string;
   unread?: boolean;
 };
@@ -164,17 +167,19 @@ export async function listEmailMessages(params: ListMessagesParams): Promise<Mes
   messagePageCache.set(path, { value: normalized, fetchedAt: Date.now() });
   for (const message of normalized.messages) {
     if (isEmailMessageDetailed(message)) {
-      messageDetailCache.set(message.id, { value: cloneMessage(message), fetchedAt: Date.now() });
+      messageDetailCache.set(messageDetailCacheKey(message.id, params.companyID), { value: cloneMessage(message), fetchedAt: Date.now() });
     }
   }
   return page;
 }
 
-export async function getEmailMessage(messageID: string): Promise<EmailMessage> {
-  const cached = readCache(messageDetailCache.get(messageID) ?? null, MESSAGE_DETAIL_CACHE_TTL_MS, cloneMessage);
+export async function getEmailMessage(messageID: string, companyID?: string): Promise<EmailMessage> {
+  const cacheKey = messageDetailCacheKey(messageID, companyID);
+  const cached = readCache(messageDetailCache.get(cacheKey) ?? null, MESSAGE_DETAIL_CACHE_TTL_MS, cloneMessage);
   if (cached && isEmailMessageDetailed(cached)) return cached;
-  const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}`);
-  messageDetailCache.set(messageID, { value: cloneMessage(payload.message), fetchedAt: Date.now() });
+  const query = companyID?.trim() ? `?company_id=${encodeURIComponent(companyID.trim())}` : "";
+  const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}${query}`);
+  messageDetailCache.set(cacheKey, { value: cloneMessage(payload.message), fetchedAt: Date.now() });
   return payload.message;
 }
 
@@ -191,7 +196,7 @@ export async function updateEmailMessage(messageID: string, update: { unread?: b
 
 export async function deleteEmailMessage(messageID: string): Promise<void> {
   await apiFetchJSON<{ status: string }>(`/v1/communications/messages/${encodeURIComponent(messageID)}`, { method: "DELETE" });
-  messageDetailCache.delete(messageID);
+  invalidateEmailMessageCache(messageID);
   messagePageCache.clear();
   foldersCache = null;
 }
@@ -350,7 +355,11 @@ export function invalidateCommunicationsFolderCache(): void {
 }
 
 export function invalidateEmailMessageCache(messageID: string): void {
-  if (messageID.trim()) messageDetailCache.delete(messageID.trim());
+  const cleanMessageID = messageID.trim();
+  if (!cleanMessageID) return;
+  for (const key of messageDetailCache.keys()) {
+    if (key === cleanMessageID || key.endsWith(`\x1f${cleanMessageID}`)) messageDetailCache.delete(key);
+  }
 }
 
 export function primeEmailMessageCache(message: EmailMessage): void {
@@ -360,7 +369,7 @@ export function primeEmailMessageCache(message: EmailMessage): void {
 export function removeEmailMessageFromCache(messageID: string): void {
   const cleanMessageID = messageID.trim();
   if (!cleanMessageID) return;
-  messageDetailCache.delete(cleanMessageID);
+  invalidateEmailMessageCache(cleanMessageID);
   for (const [key, entry] of messagePageCache.entries()) {
     const messages = entry.value.messages.filter((message) => message.id !== cleanMessageID);
     if (messages.length !== entry.value.messages.length) {
@@ -418,6 +427,7 @@ export function createMessageQuery(params: ListMessagesParams): string {
   if (params.pageToken) query.set("page_token", params.pageToken);
   if (params.mailbox) query.set("mailbox", params.mailbox);
   if (params.folderID) query.set("folder_id", params.folderID);
+  if (params.companyID?.trim()) query.set("company_id", params.companyID.trim());
   if (params.q?.trim()) query.set("q", params.q.trim());
   if (params.unread !== undefined) query.set("unread", String(params.unread));
   const raw = query.toString();
@@ -457,6 +467,12 @@ function primeMessageCaches(message: EmailMessage): void {
   messageDetailCache.set(message.id, { value: cloneMessage(message), fetchedAt: Date.now() });
 }
 
+function messageDetailCacheKey(messageID: string, companyID?: string): string {
+  const cleanCompanyID = companyID?.trim() ?? "";
+  const cleanMessageID = messageID.trim();
+  return cleanCompanyID ? `${cleanCompanyID}\x1f${cleanMessageID}` : cleanMessageID;
+}
+
 function isEmailMessageDetailed(message: EmailMessage): boolean {
   return typeof message.body === "string" && message.body.trim().length > 0;
 }
@@ -492,6 +508,8 @@ function cloneMessage(message: EmailMessage): EmailMessage {
     reply_to: cloneEmailAddresses(message.reply_to),
     folders: message.folders ? [...message.folders] : undefined,
     folder_ids: message.folder_ids ? [...message.folder_ids] : undefined,
+    logic_gate_ids: message.logic_gate_ids ? [...message.logic_gate_ids] : undefined,
+    logic_gate_count: message.logic_gate_count,
   };
 }
 
@@ -536,6 +554,7 @@ function listMessageParamsFromCacheKey(path: string): ListMessagesParams {
     pageToken: query.get("page_token") ?? undefined,
     mailbox: normalizeMailbox(query.get("mailbox") ?? undefined),
     folderID: query.get("folder_id") ?? undefined,
+    companyID: query.get("company_id") ?? undefined,
     q: query.get("q") ?? undefined,
     unread: unread === "true" ? true : unread === "false" ? false : undefined,
   };

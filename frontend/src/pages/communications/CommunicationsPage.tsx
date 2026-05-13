@@ -6,7 +6,6 @@ import { preloadLogicGateArenaSurface } from "../../app/preloadDashboardModules"
 import {
   applyEmailMessageToCachedPages,
   createCommunicationsSharedInbox,
-  addMessagesToMyTriage,
   addMyLogicGateShortcuts,
   convertTriageMessagesToLogicGate,
   deleteEmailMessage,
@@ -21,7 +20,6 @@ import {
   listEmailFolders,
   listEmailMessages,
   listCommunicationsSharedInboxes,
-  listCommunicationsTriageItems,
   listLogicGateFolderItems,
   listLogicGateFolders,
   listLogicGates,
@@ -29,7 +27,6 @@ import {
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
   primeEmailMessageCache,
-  removeMessageFromMyTriage,
   removeMyLogicGateShortcut,
   removeEmailMessageFromCache,
   sendEmail,
@@ -136,12 +133,12 @@ type LogicGateRaciPlacement = {
 type LogicGateRaciPlacementMap = Record<string, LogicGateRaciPlacement>;
 
 const MAILBOX_OPTIONS: MailboxOption[] = [
-  { value: "primary", label: "Primary Inbox" },
+  { value: "primary", label: "My Triage" },
   { value: "sent", label: "Sent mail" },
   { value: "all", label: "All mail" },
 ];
 
-const MESSAGE_BATCH_SIZE = 20;
+const MESSAGE_BATCH_SIZE = 15;
 const TRIAGE_MESSAGE_DRAG_MIME = "application/x-mangorts-communications-triage-messages";
 const COMMUNICATIONS_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.communications.columnWidths.v1";
 const COMMUNICATIONS_COLUMN_RESIZER_WIDTH = 10;
@@ -173,7 +170,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [mailbox, setMailbox] = useState<EmailMailbox>("primary");
-  const [activeViewID, setActiveViewID] = useState<CommunicationsViewID>("primary");
+  const [activeViewID, setActiveViewID] = useState<CommunicationsViewID>("my-triage");
   const [selectedMessageID, setSelectedMessageID] = useState("");
   const [selectedMessageIDs, setSelectedMessageIDs] = useState<Set<string>>(new Set());
   const [selectionAnchorMessageID, setSelectionAnchorMessageID] = useState("");
@@ -214,7 +211,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const pendingMessageReloadRef = useRef(false);
   const messageRequestSeqRef = useRef(0);
   const selectedMessageIDRef = useRef("");
-  const activeViewIDRef = useRef<CommunicationsViewID>("primary");
+  const activeViewIDRef = useRef<CommunicationsViewID>("my-triage");
   const folderReloadTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<EmailMessage[]>([]);
   const mailboxRef = useRef<EmailMailbox>("primary");
@@ -230,7 +227,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const isNarrow = viewportWidth < 980;
 
   const markMessageReadOnOpen = useCallback((message: EmailMessage) => {
-    if (activeViewIDRef.current !== "primary" || !message.id || !message.unread) return;
+    if (activeViewIDRef.current !== "my-triage" || !message.id || !message.unread) return;
     if (markingReadMessageIDsRef.current.has(message.id)) return;
     markingReadMessageIDsRef.current.add(message.id);
 
@@ -245,7 +242,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     updateEmailMessage(message.id, { unread: false })
       .then((updated) => applyReadState(updated))
       .catch((markReadError) => {
-        if (activeViewIDRef.current === "primary") {
+        if (activeViewIDRef.current === "my-triage") {
           setError(formatError(markReadError, "Failed to mark message read"));
         }
       })
@@ -413,7 +410,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       setSharedInboxes(next);
       return true;
     } catch (sharedInboxError) {
-      setError(formatError(sharedInboxError, "Failed to load shared inboxes"));
+      setError(formatError(sharedInboxError, "Failed to load Shared Triage"));
       return false;
     } finally {
       sharedInboxesRequestInFlightRef.current = false;
@@ -460,7 +457,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       setNextPageToken("");
       return;
     }
-    const requestKey = JSON.stringify([activeViewID, mailbox, searchQuery, unreadOnly]);
+    const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
     messageListFilterKeyRef.current = requestKey;
     if (messageRequestKeyRef.current === requestKey) {
       pendingMessageReloadRef.current = true;
@@ -472,28 +469,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     setLoadingMessages(true);
     setError("");
     try {
-      if (activeViewID === "my-triage") {
-        const triageItems = await listCommunicationsTriageItems();
-        const nextMessages = triageItems
-          .map((item) => item.message)
-          .filter((message) => emailMessageMatchesListFilters(message, {
-            mailbox: "all",
-            q: searchQuery,
-            unread: unreadOnly ? true : undefined,
-          }));
-        if (messageRequestSeqRef.current !== requestSeq) return;
-        setMessages(nextMessages);
-        setNextPageToken("");
-        const currentSelectedMessageID = selectedMessageIDRef.current;
-        if (currentSelectedMessageID && !nextMessages.some((message) => message.id === currentSelectedMessageID)) {
-          setSelectedMessageID("");
-          setSelectedMessage(null);
-        }
-        return;
-      }
       const page = await listEmailMessages({
         limit: MESSAGE_BATCH_SIZE,
         mailbox,
+        companyID,
         q: searchQuery,
         unread: unreadOnly ? true : undefined,
       });
@@ -523,13 +502,13 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         }
       }
     }
-  }, [activeViewID, handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
+  }, [activeViewID, companyID, handleEmailAccessExpired, mailbox, searchQuery, status?.connected, unreadOnly]);
 
   const loadMoreMessages = useCallback(async () => {
-    if (!status?.connected || activeViewIDRef.current === "my-triage" || activeViewIDRef.current === "logic-gate" || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
+    if (!status?.connected || activeViewIDRef.current === "logic-gate" || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
     const pageToken = nextPageTokenRef.current.trim();
     if (!pageToken) return;
-    const filterKey = JSON.stringify([mailboxRef.current, searchQueryRef.current, unreadOnlyRef.current]);
+    const filterKey = messageListFilterKey(companyID, activeViewIDRef.current, mailboxRef.current, searchQueryRef.current, unreadOnlyRef.current);
     setLoadingMoreMessages(true);
     setError("");
     try {
@@ -537,6 +516,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         limit: MESSAGE_BATCH_SIZE,
         pageToken,
         mailbox: mailboxRef.current,
+        companyID,
         q: searchQueryRef.current,
         unread: unreadOnlyRef.current ? true : undefined,
       });
@@ -561,7 +541,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     } finally {
       setLoadingMoreMessages(false);
     }
-  }, [handleEmailAccessExpired, status?.connected]);
+  }, [companyID, handleEmailAccessExpired, status?.connected]);
 
   useEffect(() => { void loadStatus(); }, [loadStatus]);
   useEffect(() => { if (status?.connected) void loadFolders(); }, [loadFolders, status?.connected]);
@@ -581,6 +561,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     const currentMessageListParams = () => ({
       limit: MESSAGE_BATCH_SIZE,
       mailbox: mailboxRef.current,
+      companyID,
       q: searchQueryRef.current,
       unread: unreadOnlyRef.current ? true : undefined,
     });
@@ -647,7 +628,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
           starred: false,
         }, params);
         if (!visible && !selected && !shouldFetchCreated) return;
-        void getEmailMessage(messageID)
+        void getEmailMessage(messageID, companyID)
           .then((message) => {
             primeEmailMessageCache(message);
             applyMessageToCurrentView(message, trigger.startsWith("message.created"));
@@ -671,20 +652,14 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         folderReloadTimerRef.current = null;
       }
     };
-  }, [handleEmailAccessExpired, loadFolders, loadMessages, status?.connected]);
+  }, [companyID, handleEmailAccessExpired, loadFolders, loadMessages, status?.connected]);
 
   useEffect(() => {
-    if (activeViewID !== "my-triage" || !selectedMessageID) return;
-    setLoadingDetail(false);
-    setSelectedMessage(messages.find((message) => message.id === selectedMessageID) ?? null);
-  }, [activeViewID, messages, selectedMessageID]);
-
-  useEffect(() => {
-    if (!selectedMessageID || activeViewID === "my-triage") return;
+    if (!selectedMessageID) return;
     let cancelled = false;
     setLoadingDetail(true);
     setError("");
-    getEmailMessage(selectedMessageID)
+    getEmailMessage(selectedMessageID, companyID)
       .then((message) => {
         if (!cancelled) {
           setSelectedMessage(message);
@@ -704,7 +679,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         if (!cancelled) setLoadingDetail(false);
     });
     return () => { cancelled = true; };
-  }, [activeViewID, handleEmailAccessExpired, markMessageReadOnOpen, selectedMessageID]);
+  }, [companyID, handleEmailAccessExpired, markMessageReadOnOpen, selectedMessageID]);
 
   const archiveFolder = useMemo(() => findSystemFolder(folders, "archive"), [folders]);
   const connection = status?.connection;
@@ -841,7 +816,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       setNewSharedInboxName("");
       setActiveViewID(`shared:${folder.folder_id}`);
     } catch (sharedInboxError) {
-      setError(formatError(sharedInboxError, "Failed to create shared inbox"));
+      setError(formatError(sharedInboxError, "Failed to create Shared Triage"));
     } finally {
       setBusy("");
     }
@@ -904,49 +879,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const startMessageDrag = useCallback((message: EmailMessage, event: React.DragEvent<HTMLButtonElement>) => {
     if (activeViewID !== "my-triage") return;
     const messageIDs = selectedMessageIDs.has(message.id) ? Array.from(selectedMessageIDs) : [message.id];
-    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData(TRIAGE_MESSAGE_DRAG_MIME, JSON.stringify({ kind: "triage_messages", message_ids: messageIDs }));
     event.dataTransfer.setData("text/plain", messageIDs.join(","));
   }, [activeViewID, selectedMessageIDs]);
-
-  const addSelectedMessagesToTriage = useCallback(async (messageIDs: string[]) => {
-    const ids = cleanIDList(messageIDs);
-    if (ids.length === 0) return;
-    setBusy("triage");
-    setError("");
-    try {
-      await addMessagesToMyTriage(ids);
-      setNotice(ids.length === 1 ? "Added to My Triage." : `${ids.length} messages added to My Triage.`);
-      setMessageContextMenu(null);
-    } catch (triageError) {
-      setError(formatError(triageError, "Failed to add to My Triage"));
-    } finally {
-      setBusy("");
-    }
-  }, []);
-
-  const removeSelectedMessagesFromTriage = useCallback(async (messageIDs: string[]) => {
-    const ids = cleanIDList(messageIDs);
-    if (ids.length === 0) return;
-    setBusy("triage");
-    setError("");
-    try {
-      await Promise.all(ids.map(removeMessageFromMyTriage));
-      setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
-      if (selectedMessageID && ids.includes(selectedMessageID)) {
-        setSelectedMessageID("");
-        setSelectedMessage(null);
-      }
-      setSelectedMessageIDs(new Set());
-      setSelectionAnchorMessageID("");
-      setMessageContextMenu(null);
-      setNotice(ids.length === 1 ? "Removed from My Triage." : `${ids.length} messages removed from My Triage.`);
-    } catch (triageError) {
-      setError(formatError(triageError, "Failed to remove from My Triage"));
-    } finally {
-      setBusy("");
-    }
-  }, [selectedMessageID]);
 
   const getSelectedMessageIDsForAction = useCallback((): string[] => {
     const visibleIDs = new Set(messages.map((message) => message.id));
@@ -976,18 +912,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const deleteMessages = useCallback(async (messageIDs: string[]) => {
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
-    const shouldRemoveTriageItems = activeViewIDRef.current === "my-triage";
     setBusy("delete");
     setError("");
     try {
       await Promise.all(ids.map(deleteEmailMessage));
-      if (shouldRemoveTriageItems) {
-        await Promise.all(ids.map((id) => removeMessageFromMyTriage(id).catch((cause) => {
-          const message = formatError(cause, "failed_to_remove_triage_item").toLowerCase();
-          if (message.includes("triage item not found")) return;
-          throw cause;
-        })));
-      }
       setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
       if (selectedMessageID && ids.includes(selectedMessageID)) {
         setSelectedMessageID("");
@@ -1066,17 +994,13 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
         invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
         upsertNodeRelationshipGraphNode(apiBase, companyID, node);
       }
-      const removed = result.deleted_message_ids ?? ids;
-      setMessages((previous) => previous.filter((message) => !removed.includes(message.id)));
-      if (selectedMessageID && removed.includes(selectedMessageID)) {
-        setSelectedMessageID("");
-        setSelectedMessage(null);
-      }
-      setSelectedMessageIDs((previous) => new Set(Array.from(previous).filter((id) => !removed.includes(id))));
+      const converted = result.deleted_message_ids?.length ? result.deleted_message_ids : ids;
+      setMessages((previous) => previous.map((message) => converted.includes(message.id) ? markMessageSentToLogicGate(message, logicGateID) : message));
+      setSelectedMessage((current) => current && converted.includes(current.id) ? markMessageSentToLogicGate(current, logicGateID) : current);
       const title = logicGateByID.get(logicGateID)?.header || "Logic Gate";
-      setNotice(removed.length === 1 ? `Moved to ${title}.` : `${removed.length} messages moved to ${title}.`);
+      setNotice(converted.length === 1 ? `Sent to ${title}.` : `${converted.length} messages sent to ${title}.`);
     } catch (convertError) {
-      setError(formatError(convertError, "Failed to move messages to Logic Gate"));
+      setError(formatError(convertError, "Failed to send messages to Logic Gate"));
     } finally {
       setBusy("");
     }
@@ -1166,7 +1090,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
             <MangoWordmark size={22} weight={500} />
           </h1>
           <span style={headerDividerStyle} />
-          <span style={titleStyle}>Communications</span>
+          <span style={titleStyle}>Home</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           {me && <span style={userPillStyle}>{me.user.display_name?.trim() || me.user.email}</span>}
@@ -1207,16 +1131,15 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       ) : (
         <main ref={workspaceRef} style={{ ...workspaceStyle, gridTemplateColumns: workspaceGridTemplateColumns, gap: isNarrow || isLogicGateInboxView ? 10 : 0 }}>
           <aside style={sidebarStyle}>
-            <nav style={sidebarNavStyle} aria-label="Communication inboxes">
-              <CommunicationsNavButton label="Primary Inbox" active={activeViewID === "primary"} onClick={() => selectCommunicationsView("primary", "primary")} />
-              <CommunicationsNavButton label="My Triage" active={activeViewID === "my-triage"} onClick={() => selectCommunicationsView("my-triage", "all")} />
+            <nav style={sidebarNavStyle} aria-label="Home triage">
+              <CommunicationsNavButton label="My Triage" active={activeViewID === "my-triage" || activeViewID === "primary"} onClick={() => selectCommunicationsView("my-triage", "primary")} />
               <section style={sidebarSectionStyle}>
                 <button
                   type="button"
                   style={navButtonStyle(activeViewID === "shared-root")}
                   onClick={() => selectCommunicationsView("shared-root", "all")}
                 >
-                  <span style={navLabelStyle}>Shared Inbox</span>
+                  <span style={navLabelStyle}>Shared Triage</span>
                   {loadingSharedInboxes && <span style={navMetaStyle}>Loading</span>}
                 </button>
                 <div style={sharedInboxRowsStyle}>
@@ -1235,9 +1158,9 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                     style={sharedInboxInputStyle}
                     value={newSharedInboxName}
                     onChange={(event) => setNewSharedInboxName(event.target.value)}
-                    placeholder="New shared inbox"
+                    placeholder="New shared triage"
                   />
-                  <button style={sharedInboxCreateButtonStyle} disabled={busy === "shared-inbox" || !newSharedInboxName.trim()} aria-label="Create shared inbox">+</button>
+                  <button style={sharedInboxCreateButtonStyle} disabled={busy === "shared-inbox" || !newSharedInboxName.trim()} aria-label="Create Shared Triage">+</button>
                 </form>
               </section>
               <CommunicationsNavButton label="Logic Gate Inbox" active={activeViewID === "logic-gate"} onClick={() => selectCommunicationsView("logic-gate", "all")} />
@@ -1298,12 +1221,12 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                 <h2 style={panelTitleStyle}>{activeViewLabel}</h2>
                 {isTriageView && <span style={mutedSmallStyle}>{messages.length} message{messages.length === 1 ? "" : "s"}</span>}
               </div>
-              {!isTriageView && <button style={primaryButtonStyle} onClick={openNewCompose}>Compose</button>}
+              <button style={primaryButtonStyle} onClick={openNewCompose}>Compose</button>
             </div>
-            {!isTriageView && <div style={accountRowStyle}>
+            <div style={accountRowStyle}>
               <span style={mutedSmallStyle}>{connection?.account_email}</span>
               <button style={smallButtonStyle} disabled={busy === "disconnect"} onClick={disconnect}>Disconnect</button>
-            </div>}
+            </div>
             <form style={searchRowStyle} onSubmit={submitSearch}>
               <input
                 style={inputStyle}
@@ -1354,7 +1277,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                 >
                   {isTriageView ? (
                     <>
-                      <span style={messageSelectDotStyle(selectedMessageIDs.has(message.id) || selectedMessageID === message.id, message.unread)} />
+                      <MessagePlacementIcon message={message} active={selectedMessageIDs.has(message.id) || selectedMessageID === message.id} />
                       <span style={triageMessageContentStyle}>
                         <strong style={triageSenderStyle}>{formatAddressList(message.from) || "Unknown sender"}</strong>
                         <span style={triageSubjectStyle}>{message.subject || "(no subject)"}</span>
@@ -1402,7 +1325,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                 onToggleStar={() => patchSelectedMessage({ starred: !selectedMessage.starred })}
               />
             ) : (
-              <div style={emptyStateStyle}>{isTriageView ? "Select a triage message" : "Select a message or compose a new one"}</div>
+              <div style={emptyStateStyle}>Select a message or compose a new one</div>
             )}
           </section>
 
@@ -1440,11 +1363,6 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
               style={{ ...messageContextMenuStyle, left: messageContextMenu.x, top: messageContextMenu.y }}
               onMouseLeave={() => setMessageContextMenu(null)}
             >
-              {activeViewID === "my-triage" ? (
-                <button style={contextMenuActionStyle} disabled={busy === "triage"} onClick={() => removeSelectedMessagesFromTriage(messageContextMenu.messageIDs)}>Remove from triage</button>
-              ) : (
-                <button style={contextMenuActionStyle} disabled={busy === "triage"} onClick={() => addSelectedMessagesToTriage(messageContextMenu.messageIDs)}>Add to My Triage</button>
-              )}
               <button
                 style={{ ...contextMenuActionStyle, color: "#8b123f" }}
                 disabled={busy === "delete"}
@@ -1491,6 +1409,18 @@ function CommunicationsNavButton({ label, active, depth = 0, onClick }: {
   );
 }
 
+function MessagePlacementIcon({ message, active }: { message: EmailMessage; active: boolean }) {
+  const count = message.logic_gate_count ?? message.logic_gate_ids?.length ?? 0;
+  if (count > 0) {
+    return (
+      <span style={messagePlacementIconStyle(active)} title={count === 1 ? "Sent to a Logic Gate" : `Sent to ${count} Logic Gates`}>
+        <ExplorerRowIcon kind="logic_gate" />
+      </span>
+    );
+  }
+  return <span style={messageSelectDotStyle(active, message.unread)} title="Not sent to a Logic Gate" />;
+}
+
 function buildSharedInboxRows(folders: CommunicationsSharedInbox[]): Array<{ folder: CommunicationsSharedInbox; depth: number }> {
   const byParent = new Map<string, CommunicationsSharedInbox[]>();
   for (const folder of sortSharedInboxes(folders)) {
@@ -1516,14 +1446,14 @@ function sortSharedInboxes(folders: CommunicationsSharedInbox[]): Communications
 }
 
 function getCommunicationsViewLabel(viewID: CommunicationsViewID, sharedInboxes: CommunicationsSharedInbox[]): string {
-  if (viewID === "primary") return "Primary Inbox";
+  if (viewID === "primary") return "My Triage";
   if (viewID === "my-triage") return "My Triage";
-  if (viewID === "shared-root") return "Shared Inbox";
+  if (viewID === "shared-root") return "Shared Triage";
   if (viewID === "logic-gate") return "Logic Gate Inbox";
   if (viewID === "my-nodes") return "My Nodes";
   if (viewID === "my-logic-gates") return "My Logic Gates";
   const folderID = viewID.startsWith("shared:") ? viewID.slice("shared:".length) : "";
-  return sharedInboxes.find((folder) => folder.folder_id === folderID)?.name || "Shared Inbox";
+  return sharedInboxes.find((folder) => folder.folder_id === folderID)?.name || "Shared Triage";
 }
 
 type MyLogicGateGroup = {
@@ -1542,7 +1472,7 @@ function CommunicationsColumnResizeHandle({
   return (
     <button
       type="button"
-      aria-label={`Resize communications column ${dividerIndex + 1}`}
+      aria-label={`Resize Home column ${dividerIndex + 1}`}
       style={columnResizeHandleStyle}
       onPointerDown={(event) => onPointerDown(dividerIndex, event)}
     >
@@ -1674,7 +1604,7 @@ function LogicGateRail({
                 onDragOver={(event) => {
                   if (row.kind !== "logic_gate" || !hasTriageMessageDrag(event.dataTransfer)) return;
                   event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
+                  event.dataTransfer.dropEffect = "copy";
                 }}
                 onDrop={(event) => {
                   if (row.kind !== "logic_gate" || !logicGateID) return;
@@ -1743,7 +1673,7 @@ function MyLogicGateTile({
       onDragOver={(event) => {
         if (!hasTriageMessageDrag(event.dataTransfer)) return;
         event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
+        event.dataTransfer.dropEffect = "copy";
       }}
       onDrop={(event) => {
         const messageIDs = readTriageMessageIDs(event.dataTransfer);
@@ -2374,6 +2304,22 @@ function findSystemFolder(folders: EmailFolder[], system: string): EmailFolder |
 
 function mailboxLabel(mailbox: EmailMailbox): string {
   return MAILBOX_OPTIONS.find((option) => option.value === mailbox)?.label ?? "Mail";
+}
+
+function messageListFilterKey(companyID: string, viewID: CommunicationsViewID, mailbox: EmailMailbox, query: string, unreadOnly: boolean): string {
+  return JSON.stringify([companyID.trim(), viewID, mailbox, query.trim(), unreadOnly]);
+}
+
+function markMessageSentToLogicGate(message: EmailMessage, logicGateID: string): EmailMessage {
+  const cleanLogicGateID = logicGateID.trim();
+  if (!cleanLogicGateID) return message;
+  const logicGateIDs = message.logic_gate_ids ? [...message.logic_gate_ids] : [];
+  if (!logicGateIDs.includes(cleanLogicGateID)) logicGateIDs.push(cleanLogicGateID);
+  return {
+    ...message,
+    logic_gate_ids: logicGateIDs,
+    logic_gate_count: logicGateIDs.length,
+  };
 }
 
 function formatAddressList(addresses?: EmailAddress[]): string {
@@ -3228,7 +3174,7 @@ function messageRowStyle(active: boolean, unread: boolean): React.CSSProperties 
 function triageMessageRowStyle(active: boolean, unread: boolean): React.CSSProperties {
   return {
     display: "grid",
-    gridTemplateColumns: "12px minmax(0, 1fr) auto",
+    gridTemplateColumns: "20px minmax(0, 1fr) auto",
     gap: 9,
     alignItems: "start",
     minHeight: 82,
@@ -3253,6 +3199,18 @@ function messageSelectDotStyle(active: boolean, unread: boolean): React.CSSPrope
     borderRadius: 9,
     background: active ? "#ff8820" : unread ? "rgba(255, 136, 32, 0.72)" : "rgba(36, 18, 10, 0.16)",
     boxShadow: active ? "0 0 0 3px rgba(255, 136, 32, 0.14)" : undefined,
+  };
+}
+
+function messagePlacementIconStyle(active: boolean): React.CSSProperties {
+  return {
+    width: 18,
+    height: 18,
+    marginTop: 0,
+    display: "grid",
+    placeItems: "center",
+    color: active ? "#24120a" : "#ff8820",
+    transform: "scale(1.05)",
   };
 }
 

@@ -132,6 +132,24 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		return
 	}
 
+	for _, messageID := range req.MessageIDs {
+		message, err := s.communicationsMessage(r.Context(), connection, messageID)
+		if err != nil {
+			s.writeNylasError(w, r, connection, err)
+			return
+		}
+		if _, err := s.repo.UpsertCommunicationsTriageItem(connection.UserID, emailMessageSnapshotFromNylas(message)); errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_triage_message")
+			return
+		} else if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "user_not_found")
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_upsert_triage_item")
+			return
+		}
+	}
+
 	result, err := s.repo.ConvertCommunicationsTriageItems(store.CommunicationsTriageConversionInput{
 		UserID:      connection.UserID,
 		CompanyID:   req.CompanyID,

@@ -422,7 +422,7 @@ function friendlyApiError(code: string): string {
     case "nylas_reauth_required":
       return "Email access expired. Disconnect and reconnect your mailbox.";
     case "nylas_not_connected":
-      return "Connect your mailbox before opening communications.";
+      return "Connect your mailbox before opening Home.";
     case "failed_to_delete_cognito_user":
       return "The user could not be deleted in Cognito. Try again shortly.";
     case "failed_to_delete_company_user":

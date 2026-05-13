@@ -427,6 +427,7 @@ func cloneNylasMessage(message NylasMessage) NylasMessage {
 	message.ReplyTo = cloneNylasEmailAddresses(message.ReplyTo)
 	message.Folders = cloneStringSlice(message.Folders)
 	message.FolderIDs = cloneStringSlice(message.FolderIDs)
+	message.LogicGateIDs = cloneStringSlice(message.LogicGateIDs)
 	return message
 }
 
