@@ -299,6 +299,14 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   return target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
 }
 
+function formatKanbanLoadError(error: unknown, fallback: string): string {
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message) return message;
+  }
+  return fallback;
+}
+
 export const KanbanContent: React.FC<KanbanContentProps> = ({
   accent,
   widgetId,
@@ -624,9 +632,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         setError("");
         setLoading(false);
       })
-      .catch(() => {
+      .catch((err) => {
         if (activeBoardIDRef.current !== expectedBoardID) return;
-        setError("Logic gate arena API unavailable");
+        setError(formatKanbanLoadError(err, "Logic gate arena API unavailable"));
         setLoading(false);
       });
   }, [apiBase, companyID, upsertBoardInList]);

@@ -202,9 +202,27 @@ type NodeDetails struct {
 }
 
 type LogicGate struct {
+	CompanyID        string                    `json:"company_id"`
+	LogicGateID      string                    `json:"logic_gate_id"`
+	Header           string                    `json:"header"`
+	RaciAssignments  []LogicGateRaciAssignment `json:"raci_assignments"`
+	CreatedTimestamp time.Time                 `json:"created_timestamp"`
+}
+
+const (
+	LogicGateRaciRoleResponsible = "responsible"
+	LogicGateRaciRoleAccountable = "accountable"
+	LogicGateRaciRoleConsulted   = "consulted"
+	LogicGateRaciRoleInformed    = "informed"
+)
+
+type LogicGateRaciAssignment struct {
 	CompanyID        string    `json:"company_id"`
 	LogicGateID      string    `json:"logic_gate_id"`
-	Header           string    `json:"header"`
+	Role             string    `json:"role"`
+	UserID           string    `json:"user_id"`
+	UserDisplayName  string    `json:"user_display_name,omitempty"`
+	UserEmail        string    `json:"user_email,omitempty"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 

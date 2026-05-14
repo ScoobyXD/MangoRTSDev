@@ -181,6 +181,101 @@ func TestLogicGateCRUDRelationshipAndInformationAPI(t *testing.T) {
 	}
 }
 
+func TestLogicGateRaciAssignmentsAPIAndReadModel(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-logic-gate-raci-test"
+	otherCompanyID := "company-logic-gate-raci-other"
+	repo.EnsureCompany(companyID, "RACI Test Company")
+	repo.EnsureCompany(otherCompanyID, "Other Company")
+
+	logicGate, err := repo.CreateLogicGate(companyID, "approval gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate() error = %v", err)
+	}
+	responsible, err := repo.UpsertAuthUser("raci-responsible", "responsible@example.com", "Responsible User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser responsible error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("raci-responsible", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership responsible error = %v", err)
+	}
+	accountable, err := repo.UpsertAuthUser("raci-accountable", "accountable@example.com", "Accountable User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser accountable error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("raci-accountable", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership accountable error = %v", err)
+	}
+	outsider, err := repo.UpsertAuthUser("raci-outsider", "outsider@example.com", "Outsider User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser outsider error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("raci-outsider", otherCompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership outsider error = %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"assignments": []map[string]string{
+			{"role": "responsible", "user_id": responsible.UserID},
+			{"role": "accountable", "user_id": accountable.UserID},
+			{"role": "accountable", "user_id": accountable.UserID},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT logic gate raci status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Assignments []domain.LogicGateRaciAssignment `json:"raci_assignments"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode raci payload: %v", err)
+	}
+	if len(payload.Assignments) != 2 {
+		t.Fatalf("assignment count = %d, want 2", len(payload.Assignments))
+	}
+	if payload.Assignments[0].Role != domain.LogicGateRaciRoleResponsible || payload.Assignments[0].UserDisplayName != "Responsible User" {
+		t.Fatalf("responsible assignment = %+v", payload.Assignments[0])
+	}
+
+	details, err := repo.GetLogicGateDetails(companyID, logicGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("GetLogicGateDetails() error = %v", err)
+	}
+	if len(details.LogicGate.RaciAssignments) != 2 {
+		t.Fatalf("details raci assignments = %+v, want 2 assignments", details.LogicGate.RaciAssignments)
+	}
+	logicGates, err := repo.ListLogicGates(companyID)
+	if err != nil {
+		t.Fatalf("ListLogicGates() error = %v", err)
+	}
+	if len(logicGates) != 1 || len(logicGates[0].RaciAssignments) != 2 {
+		t.Fatalf("listed logic gates = %+v, want raci read model", logicGates)
+	}
+
+	outsiderBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"assignments": []map[string]string{
+			{"role": "consulted", "user_id": outsider.UserID},
+		},
+	})
+	outsiderReq := httptest.NewRequest(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci", bytes.NewReader(outsiderBody))
+	outsiderReq.Header.Set("Content-Type", "application/json")
+	outsiderRec := httptest.NewRecorder()
+	handler.ServeHTTP(outsiderRec, outsiderReq)
+	if outsiderRec.Code != http.StatusBadRequest || !strings.Contains(outsiderRec.Body.String(), "raci_user_not_in_company") {
+		t.Fatalf("PUT outsider raci status = %d body=%s, want raci_user_not_in_company", outsiderRec.Code, outsiderRec.Body.String())
+	}
+}
+
 func TestLogicGateInformationProjectionAPIKeepsLatestValueAndHistory(t *testing.T) {
 	t.Parallel()
 

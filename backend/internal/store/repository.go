@@ -17,6 +17,7 @@ var (
 	ErrInvitationReplaced        = errors.New("invitation replaced")
 	ErrInvitationEmailMismatch   = errors.New("invitation email mismatch")
 	ErrAssigneeNotInCompany      = errors.New("assignee not in company")
+	ErrRaciStorageUnavailable    = errors.New("raci storage unavailable")
 )
 
 type Repository interface {
@@ -64,6 +65,7 @@ type Repository interface {
 	CreateLogicGate(companyID, header string) (domain.LogicGate, error)
 	UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error)
 	ListLogicGates(companyID string) ([]domain.LogicGate, error)
+	SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUpdateInput) ([]domain.LogicGateRaciAssignment, error)
 	ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error)
 	DeleteLogicGateRelationship(companyID, relationshipID string) error
 	GetLogicGate(companyID, logicGateID string) (domain.LogicGate, error)
@@ -297,6 +299,17 @@ type UpdateNodeInput struct {
 	AssigneeUserIDSet bool
 }
 
+type LogicGateRaciAssignmentInput struct {
+	Role   string `json:"role"`
+	UserID string `json:"user_id"`
+}
+
+type LogicGateRaciAssignmentUpdateInput struct {
+	CompanyID   string
+	LogicGateID string
+	Assignments []LogicGateRaciAssignmentInput
+}
+
 type CreateInvitationInput struct {
 	CompanyID       string
 	Email           string
@@ -322,6 +335,21 @@ func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {
 		query.Limit = 100
 	}
 	return query
+}
+
+func NormalizeLogicGateRaciRole(role string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case domain.LogicGateRaciRoleResponsible:
+		return domain.LogicGateRaciRoleResponsible, true
+	case domain.LogicGateRaciRoleAccountable:
+		return domain.LogicGateRaciRoleAccountable, true
+	case domain.LogicGateRaciRoleConsulted:
+		return domain.LogicGateRaciRoleConsulted, true
+	case domain.LogicGateRaciRoleInformed:
+		return domain.LogicGateRaciRoleInformed, true
+	default:
+		return "", false
+	}
 }
 
 func LogicGateKanbanBoardID(logicGateID string) string {

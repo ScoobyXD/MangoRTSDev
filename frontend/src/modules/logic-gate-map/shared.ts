@@ -71,6 +71,19 @@ export type LogicGateRecord = {
   company_id: string;
   logic_gate_id: string;
   header: string;
+  raci_assignments?: LogicGateRaciAssignment[];
+  created_timestamp: string;
+};
+
+export type LogicGateRaciRole = "responsible" | "accountable" | "consulted" | "informed";
+
+export type LogicGateRaciAssignment = {
+  company_id: string;
+  logic_gate_id: string;
+  role: LogicGateRaciRole;
+  user_id: string;
+  user_display_name?: string;
+  user_email?: string;
   created_timestamp: string;
 };
 

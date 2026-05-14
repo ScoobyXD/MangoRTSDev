@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, type NodeRecord } from "../node-map/shared";
-import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, toLogicGateCanvasRecord, type LogicGateRecord } from "../logic-gate-map/shared";
+import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, toLogicGateCanvasRecord, type LogicGateRaciAssignment, type LogicGateRaciRole, type LogicGateRecord } from "../logic-gate-map/shared";
 import { EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches, type NodeProjectionItem } from "../node-map/NodeRecordStore";
@@ -52,6 +52,7 @@ import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHand
 import { useEditorDocumentPersistence } from "./useEditorDocumentPersistence";
 import { createEditorDocumentUndoHistory, recordEditorDocumentUndoChange, resetEditorDocumentUndoHistory, snapshotEditorDocumentHTML } from "./editorUndoHistory";
 import { getActiveCompanyID } from "../../auth/currentCompany";
+import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import {
   createEditorCollaborationClientID,
@@ -211,6 +212,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [nodeDueDateDraft, setNodeDueDateDraft] = useState("");
   const [nodeAssigneeDraft, setNodeAssigneeDraft] = useState("");
   const [nodeAssigneeUserID, setNodeAssigneeUserID] = useState("");
+  const [logicGateRaciAssignments, setLogicGateRaciAssignments] = useState<LogicGateRaciAssignment[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [documentInformationID, setDocumentInformationID] = useState("");
   const [collaborators, setCollaborators] = useState<EditorCollaboratorPresence[]>([]);
@@ -223,9 +225,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editorHeaderHeightPx, setEditorHeaderHeightPx] = useState(0);
   const editingTitleRef = useRef<HTMLSpanElement | null>(null);
   const editingTitleDraftRef = useRef("");
   const editorDocumentRef = useRef<HTMLDivElement | null>(null);
+  const editorHeaderRef = useRef<HTMLDivElement | null>(null);
   const activeTabRef = useRef<EditorTabID>("editor");
   const restoringScrollRef = useRef(false);
   const scrollMemoryRef = useRef(createEditorScrollMemory());
@@ -255,6 +259,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const pendingRemoteCollaborationRef = useRef<EditorCollaborationEventPayload | null>(null);
   const remoteCollaborationTimerRef = useRef<number | null>(null);
   const remoteRevisionByClientRef = useRef(new Map<string, number>());
+  const hasLinkedDocument = linkedNodeID.trim().length > 0;
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -859,6 +864,55 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     void updateNodePresetPatch({ assignee_user_id: value });
   }, [companyUsers, syncNodeAssignee, updateNodePresetPatch]);
 
+  const saveLogicGateRaciAssignments = useCallback(async (nextAssignments: LogicGateRaciAssignment[]) => {
+    if (!linkedNodeID || linkedEntityKind !== "logic_gate") return;
+    setError("");
+    try {
+      const payload = await requestJSON<{ raci_assignments?: LogicGateRaciAssignment[] }>(`/v1/logic-gates/${linkedNodeID}/raci`, {
+        method: "PUT",
+        body: JSON.stringify({
+          company_id: companyID,
+          assignments: nextAssignments.map((assignment) => ({
+            role: assignment.role,
+            user_id: assignment.user_id,
+          })),
+        }),
+      });
+      setLogicGateRaciAssignments(payload.raci_assignments ?? []);
+      invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
+      invalidateWorkspaceSnapshot(apiBase, companyID);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_update_logic_gate_raci");
+    }
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
+
+  const addLogicGateRaciUser = useCallback((role: LogicGateRaciRole, userID: string) => {
+    const cleanUserID = userID.trim();
+    if (!cleanUserID) return;
+    if (logicGateRaciAssignments.some((assignment) => assignment.role === role && assignment.user_id === cleanUserID)) return;
+    const user = companyUsers.find((candidate) => candidate.user_id === cleanUserID);
+    void saveLogicGateRaciAssignments([
+      ...logicGateRaciAssignments,
+      {
+        company_id: companyID,
+        logic_gate_id: linkedNodeID,
+        role,
+        user_id: cleanUserID,
+        user_display_name: user?.display_name,
+        user_email: user?.email,
+        created_timestamp: new Date().toISOString(),
+      },
+    ]);
+  }, [companyID, companyUsers, linkedNodeID, logicGateRaciAssignments, saveLogicGateRaciAssignments]);
+
+  const removeLogicGateRaciUser = useCallback((role: LogicGateRaciRole, userID: string) => {
+    const cleanUserID = userID.trim();
+    if (!cleanUserID) return;
+    const next = logicGateRaciAssignments.filter((assignment) => !(assignment.role === role && assignment.user_id === cleanUserID));
+    if (next.length === logicGateRaciAssignments.length) return;
+    void saveLogicGateRaciAssignments(next);
+  }, [logicGateRaciAssignments, saveLogicGateRaciAssignments]);
+
   useEffect(() => {
     setIsEditingTitle(false);
     editingTitleDraftRef.current = "";
@@ -876,6 +930,33 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     selection.removeAllRanges();
     selection.addRange(nextRange);
   }, [isEditingTitle]);
+
+  useEffect(() => {
+    const element = editorHeaderRef.current;
+    if (!hasLinkedDocument || !element) {
+      setEditorHeaderHeightPx(0);
+      return;
+    }
+
+    let frameID = 0;
+    const measure = () => {
+      if (frameID) window.cancelAnimationFrame(frameID);
+      frameID = window.requestAnimationFrame(() => {
+        frameID = 0;
+        setEditorHeaderHeightPx(Math.ceil(element.getBoundingClientRect().height));
+      });
+    };
+
+    measure();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    observer?.observe(element);
+    window.addEventListener("resize", measure);
+    return () => {
+      if (frameID) window.cancelAnimationFrame(frameID);
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [activeTab, hasLinkedDocument, linkedEntityKind]);
 
   useEffect(() => {
     if (!companyID || !linkedNodeID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) {
@@ -1116,6 +1197,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodePriorityDraft("");
       setNodeDueDateDraft("");
       syncNodeAssignee("");
+      setLogicGateRaciAssignments([]);
       documentDraftRef.current = "";
       persistedDocumentRef.current = "";
       documentInformationIDRef.current = "";
@@ -1149,6 +1231,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodePriorityDraft("");
           setNodeDueDateDraft("");
           syncNodeAssignee("");
+          setLogicGateRaciAssignments(details.logic_gate.raci_assignments ?? []);
           setNodeWorkspaceProjections([]);
           const nonText = details.information.filter((item) => item.type !== EDITOR_TEXT_BLOCK_TYPE);
           const textBoxes = projections.filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE);
@@ -1181,6 +1264,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodePriorityDraft(details.node.priority == null ? "" : String(details.node.priority));
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
         syncNodeAssignee(details.node.assignee_user_id);
+        setLogicGateRaciAssignments([]);
         setNodeWorkspaceProjections(projections);
         const visibleNodeInformation = details.information.filter((item) => !isNodeWorkspaceHeaderInformationType(item.type));
         const textBoxes = projections.filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE);
@@ -1217,10 +1301,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const indentGuideColor = isDarkTheme ? "rgba(255,255,255,0.22)" : "rgba(36,18,10,0.2)";
   const editorPrimaryText = isDarkTheme ? surfaceText : "#111111";
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
-  const hasLinkedDocument = linkedNodeID.trim().length > 0;
   const emptyMessage = forcedEntityKind && !hasLinkedDocument ? forcedEmptyMessage : "";
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
-  const documentTopPx = linkedEntityKind === "node" ? 150 : EDITOR_DOCUMENT_TOP_PX;
+  const fallbackDocumentTopPx = linkedEntityKind === "node" ? 150 : linkedEntityKind === "logic_gate" ? 188 : EDITOR_DOCUMENT_TOP_PX;
+  const documentTopPx = hasLinkedDocument ? Math.max(fallbackDocumentTopPx, editorHeaderHeightPx + 16) : fallbackDocumentTopPx;
   const documentLineHeightPx = documentFontSize * EDITOR_DOCUMENT_LINE_HEIGHT;
   const documentBottomBufferPx = Math.round(documentLineHeightPx * EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES);
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
@@ -1257,7 +1341,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     >
       <div style={{ position: "relative", width: "100%", height: "100%", minHeight: 0, cursor: "text" }}>
         {hasLinkedDocument && (
-          <div style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 5, pointerEvents: "none" }}>
+          <div ref={editorHeaderRef} style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 5, pointerEvents: "none" }}>
           <EditorTabBar
             activeTab={activeTab}
             outlineStyle={outlineStyle}
@@ -1294,6 +1378,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               assigneeDraft: nodeAssigneeDraft,
               dueDateDraft: nodeDueDateDraft,
             } : null}
+            logicGateRaciFields={linkedEntityKind === "logic_gate" ? {
+              assignments: logicGateRaciAssignments,
+            } : null}
             companyUsers={companyUsers}
             isEditingTitle={isEditingTitle}
             editingTitleRef={editingTitleRef}
@@ -1310,6 +1397,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onCommitNodeAssigneeDraft={commitNodeAssigneeDraft}
             onSetNodeDueDateDraft={setNodeDueDateDraft}
             onCommitNodeDueDateDraft={commitNodeDueDateDraft}
+            onAddLogicGateRaciUser={addLogicGateRaciUser}
+            onRemoveLogicGateRaciUser={removeLogicGateRaciUser}
           />
 
           </div>

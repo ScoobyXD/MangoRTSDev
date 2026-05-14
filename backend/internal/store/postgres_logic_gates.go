@@ -5,7 +5,116 @@ import (
 	"database/sql"
 	"errors"
 	"miraeopus/backend/internal/domain"
+	"strings"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+const postgresUndefinedTableCode = "42P01"
+
+func isPostgresUndefinedTable(err error, tableName string) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != postgresUndefinedTableCode {
+		return false
+	}
+	if tableName == "" {
+		return true
+	}
+	return strings.Contains(pgErr.Message, tableName)
+}
+
+func scanLogicGateRaciAssignment(row interface {
+	Scan(dest ...any) error
+}) (domain.LogicGateRaciAssignment, error) {
+	var item domain.LogicGateRaciAssignment
+	var displayName sql.NullString
+	var email sql.NullString
+	err := row.Scan(
+		&item.CompanyID,
+		&item.LogicGateID,
+		&item.Role,
+		&item.UserID,
+		&displayName,
+		&email,
+		&item.CreatedTimestamp,
+	)
+	if displayName.Valid {
+		item.UserDisplayName = displayName.String
+	}
+	if email.Valid {
+		item.UserEmail = email.String
+	}
+	return item, err
+}
+
+func (r *PostgresRepo) listLogicGateRaciAssignments(ctx context.Context, companyID string, logicGateIDs []string) (map[string][]domain.LogicGateRaciAssignment, error) {
+	assignmentsByGate := map[string][]domain.LogicGateRaciAssignment{}
+	if len(logicGateIDs) == 0 {
+		return assignmentsByGate, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+select
+  assignment.company_id::text,
+  assignment.logic_gate_id::text,
+  assignment.role,
+  assignment.user_id::text,
+  nullif(app_user.display_name, ''),
+  nullif(app_user.email, ''),
+  assignment.created_timestamp
+from logic_gate_raci_assignments assignment
+join company_memberships membership
+  on membership.company_id = assignment.company_id
+ and membership.user_id = assignment.user_id
+join users app_user
+  on app_user.user_id = assignment.user_id
+where assignment.company_id = $1
+  and assignment.logic_gate_id = any(string_to_array($2, ',')::uuid[])
+order by assignment.logic_gate_id::text asc,
+  case assignment.role
+    when 'responsible' then 1
+    when 'accountable' then 2
+    when 'consulted' then 3
+    when 'informed' then 4
+    else 5
+  end,
+  lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), assignment.user_id::text)) asc,
+  assignment.user_id::text asc`,
+		companyID, strings.Join(logicGateIDs, ","),
+	)
+	if err != nil {
+		if isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {
+			return assignmentsByGate, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		item, err := scanLogicGateRaciAssignment(rows)
+		if err != nil {
+			return nil, err
+		}
+		assignmentsByGate[item.LogicGateID] = append(assignmentsByGate[item.LogicGateID], item)
+	}
+	return assignmentsByGate, rows.Err()
+}
+
+func (r *PostgresRepo) attachLogicGateRaciAssignments(ctx context.Context, companyID string, gates []domain.LogicGate) ([]domain.LogicGate, error) {
+	ids := make([]string, 0, len(gates))
+	for _, gate := range gates {
+		ids = append(ids, gate.LogicGateID)
+	}
+	assignments, err := r.listLogicGateRaciAssignments(ctx, companyID, ids)
+	if err != nil {
+		return nil, err
+	}
+	for index := range gates {
+		gates[index].RaciAssignments = assignments[gates[index].LogicGateID]
+		if gates[index].RaciAssignments == nil {
+			gates[index].RaciAssignments = []domain.LogicGateRaciAssignment{}
+		}
+	}
+	return gates, nil
+}
 
 func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGate, error) {
 	ctx := context.Background()
@@ -31,7 +140,11 @@ func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGa
 	if err := tx.Commit(); err != nil {
 		return domain.LogicGate{}, err
 	}
-	return item, nil
+	items, err := r.attachLogicGateRaciAssignments(ctx, companyID, []domain.LogicGate{item})
+	if err != nil {
+		return domain.LogicGate{}, err
+	}
+	return items[0], nil
 }
 
 func (r *PostgresRepo) UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error) {
@@ -66,7 +179,11 @@ where company_id=$1 and logic_gate_id=$2::uuid`,
 	if err := tx.Commit(); err != nil {
 		return domain.LogicGate{}, err
 	}
-	return item, nil
+	items, err := r.attachLogicGateRaciAssignments(ctx, companyID, []domain.LogicGate{item})
+	if err != nil {
+		return domain.LogicGate{}, err
+	}
+	return items[0], nil
 }
 
 func (r *PostgresRepo) ListLogicGates(companyID string) ([]domain.LogicGate, error) {
@@ -91,7 +208,10 @@ func (r *PostgresRepo) ListLogicGates(companyID string) ([]domain.LogicGate, err
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return r.attachLogicGateRaciAssignments(ctx, companyID, items)
 }
 
 func (r *PostgresRepo) GetLogicGate(companyID, logicGateID string) (domain.LogicGate, error) {
@@ -108,7 +228,113 @@ func (r *PostgresRepo) GetLogicGate(companyID, logicGateID string) (domain.Logic
 	if err != nil {
 		return domain.LogicGate{}, err
 	}
-	return item, nil
+	items, err := r.attachLogicGateRaciAssignments(ctx, companyID, []domain.LogicGate{item})
+	if err != nil {
+		return domain.LogicGate{}, err
+	}
+	return items[0], nil
+}
+
+func (r *PostgresRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUpdateInput) ([]domain.LogicGateRaciAssignment, error) {
+	companyID := strings.TrimSpace(input.CompanyID)
+	logicGateID := strings.TrimSpace(input.LogicGateID)
+	if companyID == "" || logicGateID == "" {
+		return nil, ErrInvalid
+	}
+
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var exists bool
+	if err := tx.QueryRowContext(ctx,
+		`select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`,
+		companyID, logicGateID,
+	).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+
+	type normalizedAssignment struct {
+		role   string
+		userID string
+	}
+	normalized := make([]normalizedAssignment, 0, len(input.Assignments))
+	seen := map[string]bool{}
+	for _, assignment := range input.Assignments {
+		role, ok := NormalizeLogicGateRaciRole(assignment.Role)
+		userID := strings.TrimSpace(assignment.UserID)
+		if !ok || userID == "" {
+			return nil, ErrInvalid
+		}
+		key := role + ":" + userID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		var userInCompany bool
+		if err := tx.QueryRowContext(ctx, `
+select exists(
+  select 1
+  from company_memberships
+  where company_id=$1 and user_id::text=$2
+)`, companyID, userID).Scan(&userInCompany); err != nil {
+			return nil, err
+		}
+		if !userInCompany {
+			return nil, ErrAssigneeNotInCompany
+		}
+		normalized = append(normalized, normalizedAssignment{role: role, userID: userID})
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`delete from logic_gate_raci_assignments where company_id=$1 and logic_gate_id=$2`,
+		companyID, logicGateID,
+	); err != nil {
+		if isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {
+			return nil, ErrRaciStorageUnavailable
+		}
+		return nil, err
+	}
+	for _, assignment := range normalized {
+		if _, err := tx.ExecContext(ctx, `
+insert into logic_gate_raci_assignments (
+  company_id,
+  logic_gate_id,
+  role,
+  user_id,
+  created_timestamp
+) values ($1, $2, $3, $4, now())
+on conflict (company_id, logic_gate_id, role, user_id) do nothing`,
+			companyID, logicGateID, assignment.role, assignment.userID,
+		); err != nil {
+			if isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {
+				return nil, ErrRaciStorageUnavailable
+			}
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	assignmentsByGate, err := r.listLogicGateRaciAssignments(ctx, companyID, []string{logicGateID})
+	if err != nil {
+		if isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {
+			return nil, ErrRaciStorageUnavailable
+		}
+		return nil, err
+	}
+	assignments := assignmentsByGate[logicGateID]
+	if assignments == nil {
+		assignments = []domain.LogicGateRaciAssignment{}
+	}
+	return assignments, nil
 }
 
 func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
@@ -195,6 +421,15 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 		companyID, logicGateID,
 	); err != nil {
 		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`delete from logic_gate_raci_assignments
+		 where company_id=$1 and logic_gate_id=$2`,
+		companyID, logicGateID,
+	); err != nil {
+		if !isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {
+			return err
+		}
 	}
 	// Projection rows reference logic gates directly, so remove them before the gate.
 	if _, err := tx.ExecContext(ctx,

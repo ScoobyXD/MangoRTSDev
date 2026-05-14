@@ -2,7 +2,7 @@ import { apiFetchJSON, readAuthConfig } from "../../auth/cognitoAuth.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders.js";
 import type { KanbanBoard, KanbanCard } from "../../modules/kanban/shared.js";
 import type { NodeRecord } from "../../modules/node-map/shared.js";
-import type { LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
+import type { LogicGateRaciAssignment, LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 import { fetchWorkspaceSnapshot, invalidateWorkspaceSnapshot } from "../../modules/workspace/workspaceSnapshotCache.js";
 
 export type EmailProvider = "google" | "microsoft";
@@ -97,6 +97,14 @@ export type UserLogicGateShortcut = {
   position: number;
   created_timestamp: string;
   updated_timestamp: string;
+};
+
+export type CompanyUser = {
+  company_id: string;
+  user_id: string;
+  email?: string;
+  display_name?: string;
+  role?: string;
 };
 
 export type CommunicationsWorkspacePanel = {
@@ -343,6 +351,30 @@ export async function listLogicGates(companyID: string): Promise<LogicGateRecord
   }, cloneLogicGates);
 }
 
+export async function listCompanyUsers(companyID: string): Promise<CompanyUser[]> {
+  const cleanCompanyID = companyID.trim();
+  return cachedRead(`company-users:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+    const payload = await apiFetchJSON<{ users?: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(cleanCompanyID)}/users`);
+    return cloneCompanyUsers(payload.users ?? []);
+  }, cloneCompanyUsers);
+}
+
+export async function updateLogicGateRaciAssignments(
+  companyID: string,
+  logicGateID: string,
+  assignments: Array<{ role: LogicGateRaciRole; user_id: string }>,
+): Promise<LogicGateRaciAssignment[]> {
+  const payload = await apiFetchJSON<{ raci_assignments?: LogicGateRaciAssignment[] }>(`/v1/logic-gates/${encodeURIComponent(logicGateID)}/raci`, {
+    method: "PUT",
+    body: JSON.stringify({
+      company_id: companyID,
+      assignments,
+    }),
+  });
+  invalidateWorkspacePanelCache(companyID);
+  return cloneLogicGateRaciAssignments(payload.raci_assignments ?? []);
+}
+
 export async function listNodes(companyID: string): Promise<NodeRecord[]> {
   const cleanCompanyID = companyID.trim();
   return cachedRead(`nodes:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
@@ -538,6 +570,10 @@ export function invalidateEmailMessageCache(messageID: string): void {
   }
 }
 
+export function invalidateCommunicationsWorkspacePanelCache(companyID: string): void {
+  invalidateWorkspacePanelCache(companyID);
+}
+
 export function primeEmailMessageCache(message: EmailMessage): void {
   primeMessageCaches(message);
 }
@@ -681,6 +717,7 @@ function invalidateWorkspacePanelCache(companyID: string): void {
     `node-folder-items:${cleanCompanyID}`,
     `logic-gate-folders:${cleanCompanyID}`,
     `logic-gate-folder-items:${cleanCompanyID}`,
+    `company-users:${cleanCompanyID}`,
   ]) {
     invalidateCacheKey(key);
   }
@@ -773,7 +810,18 @@ function cloneCompanyExplorerFolderItems(items: CompanyExplorerFolderItem[]): Co
 }
 
 function cloneLogicGates(logicGates: LogicGateRecord[]): LogicGateRecord[] {
-  return logicGates.map((logicGate) => ({ ...logicGate }));
+  return logicGates.map((logicGate) => ({
+    ...logicGate,
+    raci_assignments: cloneLogicGateRaciAssignments(logicGate.raci_assignments ?? []),
+  }));
+}
+
+function cloneLogicGateRaciAssignments(assignments: LogicGateRaciAssignment[]): LogicGateRaciAssignment[] {
+  return assignments.map((assignment) => ({ ...assignment }));
+}
+
+function cloneCompanyUsers(users: CompanyUser[]): CompanyUser[] {
+  return users.map((user) => ({ ...user }));
 }
 
 function cloneLogicGateShortcuts(shortcuts: UserLogicGateShortcut[]): UserLogicGateShortcut[] {

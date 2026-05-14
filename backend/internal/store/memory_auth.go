@@ -355,6 +355,20 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 			r.nodes[key] = node
 		}
 	}
+	for gateKey, assignments := range r.logicGateRaci {
+		filtered := assignments[:0]
+		for _, assignment := range assignments {
+			if assignment.CompanyID == companyID && assignment.UserID == userID {
+				continue
+			}
+			filtered = append(filtered, assignment)
+		}
+		if len(filtered) == 0 {
+			delete(r.logicGateRaci, gateKey)
+		} else {
+			r.logicGateRaci[gateKey] = filtered
+		}
+	}
 
 	hasRemainingMembership := false
 	for _, membership := range r.memberships {
@@ -383,6 +397,20 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string) (DeleteCompanyU
 		if node.AssigneeUserID != nil && *node.AssigneeUserID == userID {
 			node.AssigneeUserID = nil
 			r.nodes[key] = node
+		}
+	}
+	for gateKey, assignments := range r.logicGateRaci {
+		filtered := assignments[:0]
+		for _, assignment := range assignments {
+			if assignment.UserID == userID {
+				continue
+			}
+			filtered = append(filtered, assignment)
+		}
+		if len(filtered) == 0 {
+			delete(r.logicGateRaci, gateKey)
+		} else {
+			r.logicGateRaci[gateKey] = filtered
 		}
 	}
 	delete(r.users, user.CognitoSubject)

@@ -3,8 +3,72 @@ package store
 import (
 	"miraeopus/backend/internal/domain"
 	"sort"
+	"strings"
 	"time"
 )
+
+func raciRoleSortValue(role string) int {
+	switch role {
+	case domain.LogicGateRaciRoleResponsible:
+		return 0
+	case domain.LogicGateRaciRoleAccountable:
+		return 1
+	case domain.LogicGateRaciRoleConsulted:
+		return 2
+	case domain.LogicGateRaciRoleInformed:
+		return 3
+	default:
+		return 4
+	}
+}
+
+func (r *MemoryRepo) companyUserByIDLocked(companyID, userID string) (domain.User, bool) {
+	if _, ok := r.memberships[membershipKey(companyID, userID)]; !ok {
+		return domain.User{}, false
+	}
+	for _, user := range r.users {
+		if user.UserID == userID {
+			return user, true
+		}
+	}
+	return domain.User{}, false
+}
+
+func sortLogicGateRaciAssignments(items []domain.LogicGateRaciAssignment) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].LogicGateID != items[j].LogicGateID {
+			return items[i].LogicGateID < items[j].LogicGateID
+		}
+		if raciRoleSortValue(items[i].Role) != raciRoleSortValue(items[j].Role) {
+			return raciRoleSortValue(items[i].Role) < raciRoleSortValue(items[j].Role)
+		}
+		iLabel := strings.ToLower(strings.TrimSpace(items[i].UserDisplayName))
+		if iLabel == "" {
+			iLabel = strings.ToLower(strings.TrimSpace(items[i].UserEmail))
+		}
+		if iLabel == "" {
+			iLabel = items[i].UserID
+		}
+		jLabel := strings.ToLower(strings.TrimSpace(items[j].UserDisplayName))
+		if jLabel == "" {
+			jLabel = strings.ToLower(strings.TrimSpace(items[j].UserEmail))
+		}
+		if jLabel == "" {
+			jLabel = items[j].UserID
+		}
+		if iLabel != jLabel {
+			return iLabel < jLabel
+		}
+		return items[i].UserID < items[j].UserID
+	})
+}
+
+func (r *MemoryRepo) withLogicGateRaciLocked(gate domain.LogicGate) domain.LogicGate {
+	assignments := append([]domain.LogicGateRaciAssignment{}, r.logicGateRaci[key(gate.CompanyID, gate.LogicGateID)]...)
+	sortLogicGateRaciAssignments(assignments)
+	gate.RaciAssignments = assignments
+	return gate
+}
 
 func newestLogicGateTextProjectionKey(items map[string]domain.LogicGateProjection) string {
 	keyValue := ""
@@ -33,7 +97,7 @@ func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate
 	}
 	r.logicGates[key(companyID, item.LogicGateID)] = item
 	r.ensureLogicGateKanbanBoardLocked(companyID, item.LogicGateID, item.Header)
-	return item, nil
+	return r.withLogicGateRaciLocked(item), nil
 }
 
 func (r *MemoryRepo) UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error) {
@@ -52,7 +116,7 @@ func (r *MemoryRepo) UpdateLogicGateHeader(companyID, logicGateID, header string
 		board.UpdatedTimestamp = time.Now().UTC()
 		r.kanbanBoards[boardKeyValue] = board
 	}
-	return item, nil
+	return r.withLogicGateRaciLocked(item), nil
 }
 
 func (r *MemoryRepo) ListLogicGates(companyID string) ([]domain.LogicGate, error) {
@@ -62,7 +126,7 @@ func (r *MemoryRepo) ListLogicGates(companyID string) ([]domain.LogicGate, error
 	items := make([]domain.LogicGate, 0)
 	for _, gate := range r.logicGates {
 		if gate.CompanyID == companyID {
-			items = append(items, gate)
+			items = append(items, r.withLogicGateRaciLocked(gate))
 		}
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -78,7 +142,53 @@ func (r *MemoryRepo) GetLogicGate(companyID, logicGateID string) (domain.LogicGa
 	if !ok {
 		return domain.LogicGate{}, ErrNotFound
 	}
-	return item, nil
+	return r.withLogicGateRaciLocked(item), nil
+}
+
+func (r *MemoryRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUpdateInput) ([]domain.LogicGateRaciAssignment, error) {
+	companyID := strings.TrimSpace(input.CompanyID)
+	logicGateID := strings.TrimSpace(input.LogicGateID)
+	if companyID == "" || logicGateID == "" {
+		return nil, ErrInvalid
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
+		return nil, ErrNotFound
+	}
+	now := time.Now().UTC()
+	seen := map[string]bool{}
+	assignments := make([]domain.LogicGateRaciAssignment, 0, len(input.Assignments))
+	for _, inputAssignment := range input.Assignments {
+		role, ok := NormalizeLogicGateRaciRole(inputAssignment.Role)
+		userID := strings.TrimSpace(inputAssignment.UserID)
+		if !ok || userID == "" {
+			return nil, ErrInvalid
+		}
+		user, ok := r.companyUserByIDLocked(companyID, userID)
+		if !ok {
+			return nil, ErrAssigneeNotInCompany
+		}
+		assignmentKey := role + ":" + userID
+		if seen[assignmentKey] {
+			continue
+		}
+		seen[assignmentKey] = true
+		assignments = append(assignments, domain.LogicGateRaciAssignment{
+			CompanyID:        companyID,
+			LogicGateID:      logicGateID,
+			Role:             role,
+			UserID:           user.UserID,
+			UserDisplayName:  strings.TrimSpace(user.DisplayName),
+			UserEmail:        strings.TrimSpace(user.Email),
+			CreatedTimestamp: now,
+		})
+	}
+	sortLogicGateRaciAssignments(assignments)
+	r.logicGateRaci[key(companyID, logicGateID)] = assignments
+	return append([]domain.LogicGateRaciAssignment{}, assignments...), nil
 }
 
 func (r *MemoryRepo) DeleteLogicGate(companyID, logicGateID string) error {
@@ -96,6 +206,7 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 	delete(r.logicGates, k)
 	delete(r.logicGateInfo, k)
 	delete(r.logicGateText, k)
+	delete(r.logicGateRaci, k)
 	delete(r.folderItems, folderItemKey(companyID, "logic_gate", logicGateID))
 	delete(r.logicMapPositions, k)
 	for boardKeyValue, board := range r.kanbanBoards {
@@ -342,7 +453,7 @@ func (r *MemoryRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.
 	})
 
 	return domain.LogicGateDetails{
-		LogicGate:     logicGate,
+		LogicGate:     r.withLogicGateRaciLocked(logicGate),
 		Information:   info,
 		Relationships: relationships,
 	}, nil

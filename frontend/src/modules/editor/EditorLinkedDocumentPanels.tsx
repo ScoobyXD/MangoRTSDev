@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { EditorTabID } from "./editorTabs";
 import { normalizeNodeDueDateDraft } from "./editorDates";
+import type { LogicGateRaciAssignment, LogicGateRaciRole } from "../logic-gate-map/shared";
 
 type EditorLinkedDocumentPanelsProps = {
   activeTab: EditorTabID;
@@ -15,6 +16,9 @@ type EditorLinkedDocumentPanelsProps = {
     priorityDraft: string;
     assigneeDraft: string;
     dueDateDraft: string;
+  } | null;
+  logicGateRaciFields: {
+    assignments: LogicGateRaciAssignment[];
   } | null;
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   isEditingTitle: boolean;
@@ -32,6 +36,8 @@ type EditorLinkedDocumentPanelsProps = {
   onCommitNodeAssigneeDraft: (draft: string) => void;
   onSetNodeDueDateDraft: React.Dispatch<React.SetStateAction<string>>;
   onCommitNodeDueDateDraft: (draft: string) => void;
+  onAddLogicGateRaciUser: (role: LogicGateRaciRole, userID: string) => void;
+  onRemoveLogicGateRaciUser: (role: LogicGateRaciRole, userID: string) => void;
 };
 
 const NODE_PRIORITY_OPTIONS = [
@@ -43,11 +49,38 @@ const NODE_PRIORITY_OPTIONS = [
   { value: "0", label: "0\u00A0\u00A0Unassigned", color: "#64748b" },
 ] as const;
 
+const LOGIC_GATE_RACI_ROLES: ReadonlyArray<{ role: LogicGateRaciRole; label: string }> = [
+  { role: "responsible", label: "Responsible" },
+  { role: "accountable", label: "Accountable" },
+  { role: "consulted", label: "Consulted" },
+  { role: "informed", label: "Informed" },
+];
+
 function companyUserOptionLabel(user: { user_id: string; email?: string; display_name?: string }): string {
   const name = (user.display_name ?? "").trim();
   const email = (user.email ?? "").trim();
   if (name && email) return `${name} <${email}>`;
   return name || email || user.user_id;
+}
+
+function raciAssignmentLabel(assignment: LogicGateRaciAssignment): string {
+  const name = (assignment.user_display_name ?? "").trim();
+  const email = (assignment.user_email ?? "").trim();
+  return name || email || assignment.user_id;
+}
+
+function findCompanyUserByDraft(users: Array<{ user_id: string; email?: string; display_name?: string }>, draft: string) {
+  const value = draft.trim().toLowerCase();
+  if (!value) return null;
+  return users.find((user) => {
+    const labels = [
+      companyUserOptionLabel(user),
+      user.display_name ?? "",
+      user.email ?? "",
+      user.user_id,
+    ];
+    return labels.some((label) => label.trim().toLowerCase() === value);
+  }) ?? null;
 }
 
 function validHexColor(value: string): string {
@@ -96,6 +129,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   linkedNodeMetadataRows,
   linkedNodeHistoryRows,
   nodePresetFields,
+  logicGateRaciFields,
   companyUsers,
   isEditingTitle,
   editingTitleRef,
@@ -112,6 +146,8 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   onCommitNodeAssigneeDraft,
   onSetNodeDueDateDraft,
   onCommitNodeDueDateDraft,
+  onAddLogicGateRaciUser,
+  onRemoveLogicGateRaciUser,
 }) => {
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
   const assigneeListID = useId();
@@ -462,6 +498,39 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               </label>
             </div>
           )}
+          {logicGateRaciFields && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 176px), 1fr))",
+                columnGap: 10,
+                rowGap: 10,
+                maxWidth: "min(840px, 100%)",
+                padding: "2px 0 8px",
+                borderBottom: `1px dashed ${ruleColor}`,
+                fontFamily: "var(--mango-font-family)",
+                fontSize: 12,
+                lineHeight: 1.3,
+                color: "inherit",
+                pointerEvents: "auto",
+              }}
+            >
+              {LOGIC_GATE_RACI_ROLES.map((column) => (
+                <LogicGateRaciRoleEditor
+                  key={column.role}
+                  role={column.role}
+                  label={column.label}
+                  assignments={logicGateRaciFields.assignments.filter((assignment) => assignment.role === column.role)}
+                  companyUsers={companyUsers}
+                  accent={accent}
+                  panelBackground={panelBackground}
+                  ruleColor={ruleColor}
+                  onAddUser={onAddLogicGateRaciUser}
+                  onRemoveUser={onRemoveLogicGateRaciUser}
+                />
+              ))}
+            </div>
+          )}
           {linkedNodeInfoPreview.length > 0 && <div style={{ minWidth: 0, fontSize: 10, opacity: 0.7, overflowWrap: "anywhere", wordBreak: "break-word" }}>{linkedNodeInfoPreview.join(" - ")}</div>}
         </div>
       )}
@@ -491,3 +560,156 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     </>
   );
 };
+
+function LogicGateRaciRoleEditor({
+  role,
+  label,
+  assignments,
+  companyUsers,
+  accent,
+  panelBackground,
+  ruleColor,
+  onAddUser,
+  onRemoveUser,
+}: {
+  role: LogicGateRaciRole;
+  label: string;
+  assignments: LogicGateRaciAssignment[];
+  companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
+  accent: string;
+  panelBackground: string;
+  ruleColor: string;
+  onAddUser: (role: LogicGateRaciRole, userID: string) => void;
+  onRemoveUser: (role: LogicGateRaciRole, userID: string) => void;
+}) {
+  const inputID = useId();
+  const [draft, setDraft] = useState("");
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const assignedIDs = useMemo(() => new Set(assignments.map((assignment) => assignment.user_id)), [assignments]);
+  const matches = useMemo(() => {
+    const query = draft.trim().toLowerCase();
+    const candidates = companyUsers.filter((user) => !assignedIDs.has(user.user_id));
+    const filtered = query
+      ? candidates.filter((user) => companyUserOptionLabel(user).toLowerCase().includes(query) || (user.email ?? "").toLowerCase().includes(query) || (user.display_name ?? "").toLowerCase().includes(query))
+      : candidates;
+    return filtered.slice(0, 8);
+  }, [assignedIDs, companyUsers, draft]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [open]);
+
+  const addUser = (userID: string) => {
+    onAddUser(role, userID);
+    setDraft("");
+    setOpen(false);
+  };
+
+  const commitDraft = () => {
+    const selected = findCompanyUserByDraft(companyUsers, draft) ?? matches[0] ?? null;
+    if (!selected || assignedIDs.has(selected.user_id)) return;
+    addUser(selected.user_id);
+  };
+
+  return (
+    <div style={{ minWidth: 0, display: "grid", gap: 6, alignContent: "start" }}>
+      <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</strong>
+      <div style={{ minHeight: 30, display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {assignments.length === 0 ? (
+          <span style={{ color: "rgba(36,18,10,0.52)", fontSize: 11 }}>No people</span>
+        ) : assignments.map((assignment) => (
+          <span
+            key={`${assignment.role}:${assignment.user_id}`}
+            title={assignment.user_email || assignment.user_id}
+            style={{ minWidth: 0, maxWidth: "100%", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 16px", alignItems: "center", gap: 4, border: `1px solid ${ruleColor}`, borderRadius: 6, background: panelBackground, padding: "2px 3px 2px 6px", color: "inherit" }}
+          >
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 600 }}>{raciAssignmentLabel(assignment)}</span>
+            <button
+              type="button"
+              aria-label={`Remove ${raciAssignmentLabel(assignment)} from ${label}`}
+              onClick={() => onRemoveUser(role, assignment.user_id)}
+              style={{ width: 16, height: 16, display: "grid", placeItems: "center", border: "none", borderRadius: 4, background: "transparent", color: accent, cursor: "pointer", padding: 0, font: "inherit", fontSize: 11, fontWeight: 800 }}
+            >
+              x
+            </button>
+          </span>
+        ))}
+      </div>
+      <div ref={menuRef} style={{ position: "relative", minWidth: 0 }}>
+        <input
+          id={inputID}
+          value={draft}
+          onFocus={() => setOpen(true)}
+          onChange={(event) => {
+            const next = event.currentTarget.value;
+            setDraft(next);
+            setOpen(true);
+            const exact = findCompanyUserByDraft(companyUsers, next);
+            if (exact && !assignedIDs.has(exact.user_id) && companyUserOptionLabel(exact) === next) addUser(exact.user_id);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commitDraft();
+            }
+          }}
+          placeholder="Add person"
+          aria-label={`Add ${label} person`}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-controls={`${inputID}-options`}
+          style={{ width: "100%", minWidth: 0, minHeight: 24, boxSizing: "border-box", border: `1px solid ${open ? accent : ruleColor}`, borderRadius: 6, background: "rgba(255,255,255,0.92)", color: "#111827", font: "inherit", fontSize: 11, fontWeight: 500, padding: "3px 8px", outline: "none" }}
+        />
+        {open && (
+          <div
+            id={`${inputID}-options`}
+            role="listbox"
+            aria-label={`${label} people`}
+            style={{ position: "absolute", zIndex: 30, top: "calc(100% + 5px)", left: 0, width: "min(330px, 86vw)", maxHeight: 250, overflowY: "auto", padding: "4px 0", border: `1px solid ${ruleColor}`, borderRadius: 8, background: "#ffffff", boxShadow: "0 14px 30px rgba(15,23,42,0.18)", color: "#111827" }}
+          >
+            {matches.length === 0 ? (
+              <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 500 }}>{companyUsers.length === assignedIDs.size ? "All people added" : "No matches"}</div>
+            ) : matches.map((user) => {
+              const optionLabel = companyUserOptionLabel(user);
+              const name = (user.display_name ?? "").trim() || optionLabel;
+              const email = (user.email ?? "").trim();
+              return (
+                <button
+                  key={user.user_id}
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => addUser(user.user_id)}
+                  style={{ width: "100%", minHeight: 32, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "none", background: "transparent", color: "#111827", cursor: "pointer", padding: "5px 10px", textAlign: "left", font: "inherit" }}
+                >
+                  <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: "rgba(255, 136, 32, 0.13)", color: accent }}>
+                    <PersonIcon color={accent} />
+                  </span>
+                  <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 500 }}>{name}</span>
+                    {email && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 9.5, fontWeight: 500 }}>{email}</span>}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

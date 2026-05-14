@@ -133,6 +133,79 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if len(parts) == 2 && parts[1] == "raci" {
+		if r.Method == http.MethodGet {
+			companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+			if companyID == "" {
+				writeError(w, http.StatusBadRequest, "company_id_required")
+				return
+			}
+			logicGate, err := s.repo.GetLogicGate(companyID, logicGateID)
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "logic_gate_not_found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_raci")
+				return
+			}
+			writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+				"company_id":       companyID,
+				"logic_gate_id":    logicGateID,
+				"raci_assignments": logicGate.RaciAssignments,
+			})
+			return
+		}
+		if r.Method != http.MethodPut {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		var req struct {
+			CompanyID   string                               `json:"company_id"`
+			Assignments []store.LogicGateRaciAssignmentInput `json:"assignments"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		if strings.TrimSpace(req.CompanyID) == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		assignments, err := s.repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+			CompanyID:   req.CompanyID,
+			LogicGateID: logicGateID,
+			Assignments: req.Assignments,
+		})
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_raci_assignments")
+			return
+		}
+		if errors.Is(err, store.ErrAssigneeNotInCompany) {
+			writeError(w, http.StatusBadRequest, "raci_user_not_in_company")
+			return
+		}
+		if errors.Is(err, store.ErrRaciStorageUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, "logic_gate_raci_storage_unavailable")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "logic_gate_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_update_logic_gate_raci")
+			return
+		}
+		s.publishWorkspaceEvent(req.CompanyID, "logic_gate_raci_updated", map[string]any{"logic_gate_id": logicGateID, "raci_assignments": assignments})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"company_id":       req.CompanyID,
+			"logic_gate_id":    logicGateID,
+			"raci_assignments": assignments,
+		})
+		return
+	}
+
 	if len(parts) == 2 && parts[1] == "projection" {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
