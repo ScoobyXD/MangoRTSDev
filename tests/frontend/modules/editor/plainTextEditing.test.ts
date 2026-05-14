@@ -79,6 +79,23 @@ test("Shift+Tab removes one indent level in indent guides mode", () => {
   });
 });
 
+test("Shift+Tab keeps an empty indented line at its left edge after the final outdent", () => {
+  const value = `alpha\n${EDITOR_TAB_TEXT}`;
+  const edit = insertEditorTabText(value, value.length, value.length, "indent-guides", "outdent");
+
+  assert.deepEqual(edit, {
+    value: "alpha\n",
+    selectionStart: "alpha\n".length,
+    selectionEnd: "alpha\n".length,
+  });
+
+  assert.deepEqual(insertEditorTabText(edit.value, edit.selectionStart, edit.selectionEnd, "indent-guides", "outdent"), {
+    value: "alpha\n",
+    selectionStart: "alpha\n".length,
+    selectionEnd: "alpha\n".length,
+  });
+});
+
 test("Backspace deletes one inserted tab-sized space run", () => {
   const value = `alpha${EDITOR_TAB_TEXT}`;
   const edit = deleteEditorBackspaceText(value, value.length, value.length);

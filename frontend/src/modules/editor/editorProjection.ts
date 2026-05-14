@@ -37,6 +37,12 @@ export type EditorTextBlockChatMessage = {
   attachments: EditorChatAttachment[];
 };
 
+export function canDeleteEditorTextBlockChatMessage(message: Pick<EditorTextBlockChatMessage, "authorID">, currentUserID: string): boolean {
+  const authorID = message.authorID.trim();
+  const userID = currentUserID.trim();
+  return Boolean(authorID && userID && authorID === userID);
+}
+
 export type EditorAttachedEmail = {
   id: string;
   messageID: string;

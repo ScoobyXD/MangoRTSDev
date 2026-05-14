@@ -40,6 +40,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorScroll.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorIndentGuides.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorProjection.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTextBlockChatHighlights.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorDates.test.js"),
 ];
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
@@ -75,6 +76,7 @@ for (const testFile of testFiles) {
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/richTextEditing"', '"../../../../frontend/src/modules/editor/richTextEditing.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/editorUndoHistory"', '"../../../../frontend/src/modules/editor/editorUndoHistory.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/editorProjection"', '"../../../../frontend/src/modules/editor/editorProjection.js"');
+  contents = contents.replaceAll('"../../../../frontend/src/modules/editor/editorTextBlockChatHighlights"', '"../../../../frontend/src/modules/editor/editorTextBlockChatHighlights.js"');
   contents = contents.replaceAll('"../../../frontend/src/hooks/keyboardShortcutRouting"', '"../../../frontend/src/hooks/keyboardShortcutRouting.js"');
   writeFileSync(testFile, contents, "utf8");
 }

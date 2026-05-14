@@ -4,6 +4,7 @@ import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockContentPayload,
   buildEditorTextBlockChatPayload,
+  canDeleteEditorTextBlockChatMessage,
   listEditorTextBlockProjections,
   parseEditorAttachedEmails,
   parseEditorTextBlockContent,
@@ -104,6 +105,12 @@ test("parses attachment-only chat payloads", () => {
   assert.equal(messages.length, 1);
   assert.equal(messages[0].message, "");
   assert.equal(messages[0].attachments[0].name, "image.png");
+});
+
+test("chat message deletion is limited to the author", () => {
+  assert.equal(canDeleteEditorTextBlockChatMessage({ authorID: "user-a" }, "user-a"), true);
+  assert.equal(canDeleteEditorTextBlockChatMessage({ authorID: "user-a" }, "user-b"), false);
+  assert.equal(canDeleteEditorTextBlockChatMessage({ authorID: "" }, "user-a"), false);
 });
 
 test("parses titled node text block content payloads with legacy fallback", () => {

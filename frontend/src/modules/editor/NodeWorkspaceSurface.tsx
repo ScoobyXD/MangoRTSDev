@@ -9,6 +9,7 @@ import {
   EDITOR_ATTACHED_EMAIL_TYPE,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
   EDITOR_TEXT_BLOCK_TYPE,
+  canDeleteEditorTextBlockChatMessage,
   listEditorTextBlockProjections,
   parseEditorAttachedEmails,
   parseEditorTextBlockContent,
@@ -24,6 +25,7 @@ import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from 
 import { EDITOR_TAB_TEXT, type EditorOutlineStyleID } from "./plainTextEditing";
 import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import { deserializeEditorDocumentHTML, readEditorDocumentText, serializeEditorDocumentHTML } from "./richTextEditing";
+import { resolveEditorTextBlockChatAnchorMessageID, resolveEditorTextBlockChatAnchorRanges } from "./editorTextBlockChatHighlights";
 import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHandlers";
 import { getEditorDocumentFontFamily } from "./useEditorPreferences";
 
@@ -77,16 +79,17 @@ type ChatThreadNode = {
 const EMAIL_DRAG_MIME = "application/x-mango-email-message";
 const CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 const CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES = 12 * 1024 * 1024;
-const CHAT_PANE_MIN_HEIGHT = 220;
-const CHAT_PANE_MAX_HEIGHT = 760;
+const CHAT_PANE_MIN_HEIGHT = 440;
+const CHAT_PANE_MAX_HEIGHT = 900;
 const TEXT_BLOCK_MIN_HEIGHT = CHAT_PANE_MIN_HEIGHT;
-const TEXT_BLOCK_MAX_HEIGHT = 900;
+const TEXT_BLOCK_MAX_HEIGHT = 1200;
 const TEXT_BLOCK_FONT_SIZE = 14;
 const TEXT_BLOCK_LINE_HEIGHT = 1.45;
 const TEXT_BLOCK_PADDING_TOP = 12;
 const TEXT_BLOCK_PADDING_RIGHT = 13;
 const TEXT_BLOCK_PADDING_BOTTOM = 12;
 const TEXT_BLOCK_PADDING_LEFT = 13;
+const TEXT_BLOCK_BOTTOM_BUFFER_ROWS = 10;
 const TEXT_BLOCK_HEADER_CHROME_HEIGHT = 38;
 const TEXT_BLOCK_DEFAULT_CARD_HEIGHT = TEXT_BLOCK_MIN_HEIGHT + TEXT_BLOCK_HEADER_CHROME_HEIGHT;
 const CHAT_PANE_DEFAULT_HEIGHT = TEXT_BLOCK_DEFAULT_CARD_HEIGHT;
@@ -338,6 +341,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [chatDraftAttachments, setChatDraftAttachments] = useState<Record<string, EditorChatAttachment[]>>({});
   const [chatReplyTargets, setChatReplyTargets] = useState<Record<string, string>>({});
   const [chatSelectionAnchors, setChatSelectionAnchors] = useState<Record<string, TextBlockSelectionAnchor>>({});
+  const [activeChatMessageIDs, setActiveChatMessageIDs] = useState<Record<string, string>>({});
   const [activeChatBlockID, setActiveChatBlockID] = useState("");
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set());
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
@@ -397,6 +401,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(messageIDsByBlock.get(blockID)?.has(messageID))));
     });
     setChatSelectionAnchors((current) => (nodeChanged ? {} : Object.fromEntries(Object.entries(current).filter(([id]) => blockIDs.has(id)))));
+    setActiveChatMessageIDs((current) => {
+      if (nodeChanged) return {};
+      return Object.fromEntries(Object.entries(current).filter(([blockID, messageID]) => Boolean(messageIDsByBlock.get(blockID)?.has(messageID))));
+    });
     setActiveChatBlockID((current) => (nodeChanged || !blockIDs.has(current) ? "" : current));
     setClosedChatBlockIDs((current) => {
       if (nodeChanged) return new Set();
@@ -559,6 +567,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       delete next[blockID];
       return next;
     });
+    setActiveChatMessageIDs((current) => {
+      if (!(blockID in current)) return current;
+      const next = { ...current };
+      delete next[blockID];
+      return next;
+    });
     setClosedChatBlockIDs((current) => {
       if (!current.has(blockID)) return current;
       const next = new Set(current);
@@ -603,6 +617,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return next;
     });
     setChatSelectionAnchors((current) => ({ ...current, [selection.blockID]: selection }));
+    setActiveChatMessageIDs((current) => {
+      if (!current[selection.blockID]) return current;
+      const next = { ...current };
+      delete next[selection.blockID];
+      return next;
+    });
     setClosedChatBlockIDs((current) => {
       if (!current.has(selection.blockID)) return current;
       const next = new Set(current);
@@ -653,6 +673,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return next;
     });
     setChatMessages((current) => [...current, nextMessage]);
+    setActiveChatMessageIDs((current) => ({ ...current, [blockID]: id }));
     setClosedChatBlockIDs((current) => {
       if (!current.has(blockID)) return current;
       const next = new Set(current);
@@ -685,6 +706,33 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       onError(cause instanceof Error ? cause.message : "failed_to_save_chat_message");
     }
   }, [author.name, author.userID, chatDraftAttachments, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
+
+  const deleteChatMessage = useCallback(async (messageID: string) => {
+    const message = chatMessages.find((item) => item.id === messageID);
+    if (!message || !nodeID || !companyID) return;
+    if (!canDeleteEditorTextBlockChatMessage(message, author.userID)) {
+      onError("cannot_delete_other_users_chat_message");
+      return;
+    }
+
+    setChatMessages((current) => current.filter((item) => item.id !== messageID));
+    setChatReplyTargets((current) => {
+      const nextEntries = Object.entries(current).filter(([, targetID]) => targetID !== messageID);
+      return nextEntries.length === Object.keys(current).length ? current : Object.fromEntries(nextEntries);
+    });
+    setActiveChatMessageIDs((current) => {
+      const nextEntries = Object.entries(current).filter(([, activeID]) => activeID !== messageID);
+      return nextEntries.length === Object.keys(current).length ? current : Object.fromEntries(nextEntries);
+    });
+
+    try {
+      await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection/${messageID}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+      onProjectionMutation();
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_delete_chat_message");
+      onProjectionMutation();
+    }
+  }, [author.userID, chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
   const addChatDraftAttachments = useCallback(async (blockID: string, files: FileList | File[]) => {
     const candidates = Array.from(files);
@@ -867,6 +915,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const chatIsVisible = chatIsActive || (messages.length > 0 && !closedChatBlockIDs.has(block.id));
           const textBlockIsFocused = focusedTextBlockID === block.id;
           const selectionAnchor = chatSelectionAnchors[block.id];
+          const activeChatMessageID = activeChatMessageIDs[block.id] ?? "";
+          const activeChatAnchorMessageID = resolveEditorTextBlockChatAnchorMessageID(messages, activeChatMessageID);
           const toggleChat = () => {
             setFocusedTextBlockID("");
             const nextOpen = !chatIsVisible;
@@ -895,6 +945,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               if (!(block.id in current)) return current;
               const next = { ...current };
               delete next[block.id];
+              return next;
+            });
+          };
+          const activateChatMessage = (messageID: string) => {
+            focusChat();
+            setActiveChatMessageIDs((current) => {
+              const next = { ...current };
+              if (next[block.id] === messageID) {
+                delete next[block.id];
+                return next;
+              }
+              next[block.id] = messageID;
               return next;
             });
           };
@@ -970,6 +1032,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     companyID={companyID}
                     currentUserID={author.userID || "local-user"}
                     documentValue={block.document}
+                    chatMessages={messages}
+                    activeChatAnchorMessageID={activeChatAnchorMessageID}
                     surfaceText={surfaceText}
                     accent={accent}
                     outlineStyle={outlineStyle}
@@ -997,6 +1061,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     selectionAnchor={selectionAnchor}
                     draft={chatDrafts[block.id] ?? ""}
                     active={chatIsActive}
+                    currentUserID={author.userID}
+                    activeMessageID={activeChatMessageID}
                     accent={accent}
                     surfaceText={surfaceText}
                     panelBackground={panelBackground}
@@ -1007,7 +1073,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     heightStorageKey={`node-editor-chat-pane-height-v1:${companyID}:${nodeID}:${block.id}`}
                     onFocus={focusChat}
                     onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
+                    onActivateMessage={activateChatMessage}
                     onReply={replyToMessage}
+                    onDeleteMessage={(messageID) => { void deleteChatMessage(messageID); }}
                     onClearReply={clearReplyTarget}
                     onAttachFiles={(files) => { void addChatDraftAttachments(block.id, files); }}
                     onRemoveDraftAttachment={(attachmentID) => removeChatDraftAttachment(block.id, attachmentID)}
@@ -1023,6 +1091,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     selectionAnchor={selectionAnchor}
                     draft={chatDrafts[block.id] ?? ""}
                     active={chatIsActive}
+                    currentUserID={author.userID}
+                    activeMessageID={activeChatMessageID}
                     accent={accent}
                     surfaceText={surfaceText}
                     panelBackground={panelBackground}
@@ -1033,7 +1103,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     heightStorageKey={`node-editor-chat-pane-height-v1:${companyID}:${nodeID}:${block.id}`}
                     onFocus={focusChat}
                     onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
+                    onActivateMessage={activateChatMessage}
                     onReply={replyToMessage}
+                    onDeleteMessage={(messageID) => { void deleteChatMessage(messageID); }}
                     onClearReply={clearReplyTarget}
                     onAttachFiles={(files) => { void addChatDraftAttachments(block.id, files); }}
                     onRemoveDraftAttachment={(attachmentID) => removeChatDraftAttachment(block.id, attachmentID)}
@@ -1292,6 +1364,8 @@ type NodeTextBlockEditorProps = {
   companyID: string;
   currentUserID: string;
   documentValue: string;
+  chatMessages: EditorTextBlockChatMessage[];
+  activeChatAnchorMessageID: string;
   surfaceText: string;
   accent: string;
   outlineStyle: EditorOutlineStyleID;
@@ -1315,12 +1389,122 @@ function storeTextBlockHeight(storageKey: string, height: number) {
   localStorage.setItem(storageKey, String(Math.max(TEXT_BLOCK_MIN_HEIGHT, Math.min(Math.round(height), TEXT_BLOCK_MAX_HEIGHT))));
 }
 
+type TextHighlightRect = {
+  key: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  active: boolean;
+};
+
+type TextRangeBoundary = {
+  container: Node;
+  offset: number;
+};
+
+function locateTextRangeBoundary(root: HTMLElement, targetOffset: number): TextRangeBoundary {
+  const target = Math.max(0, Math.trunc(targetOffset));
+  let currentOffset = 0;
+
+  const walk = (parent: Node): TextRangeBoundary | null => {
+    for (let index = 0; index < parent.childNodes.length; index += 1) {
+      const child = parent.childNodes[index];
+      if (child.nodeType === Node.TEXT_NODE) {
+        const length = child.textContent?.length ?? 0;
+        if (target <= currentOffset + length) {
+          return {
+            container: child,
+            offset: Math.max(0, Math.min(length, target - currentOffset)),
+          };
+        }
+        currentOffset += length;
+        continue;
+      }
+      if (child instanceof HTMLElement && child.tagName === "BR") {
+        if (target <= currentOffset + 1) {
+          return { container: parent, offset: index + (target > currentOffset ? 1 : 0) };
+        }
+        currentOffset += 1;
+        continue;
+      }
+      const nested = walk(child);
+      if (nested) return nested;
+    }
+    return null;
+  };
+
+  return walk(root) ?? { container: root, offset: root.childNodes.length };
+}
+
+function createTextRangeFromOffsets(root: HTMLElement, startOffset: number, endOffset: number): Range | null {
+  if (endOffset <= startOffset) return null;
+  const range = root.ownerDocument.createRange();
+  const start = locateTextRangeBoundary(root, startOffset);
+  const end = locateTextRangeBoundary(root, endOffset);
+  try {
+    range.setStart(start.container, start.offset);
+    range.setEnd(end.container, end.offset);
+    return range.collapsed ? null : range;
+  } catch {
+    return null;
+  }
+}
+
+function getSelectionPointDocumentOffset(root: HTMLElement, container: Node | null, offset: number): number | null {
+  if (!container || !(container === root || root.contains(container))) return null;
+  const range = root.ownerDocument.createRange();
+  try {
+    range.selectNodeContents(root);
+    range.setEnd(container, offset);
+    return range.toString().length;
+  } catch {
+    return null;
+  }
+}
+
+function buildTextHighlightRects(root: HTMLElement, wrapper: HTMLElement, activeMessageID: string, messages: EditorTextBlockChatMessage[]): TextHighlightRect[] {
+  const documentText = readEditorDocumentText(root);
+  const ranges = resolveEditorTextBlockChatAnchorRanges(documentText, messages);
+  if (ranges.length === 0) return [];
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const editorRect = root.getBoundingClientRect();
+  const rects: TextHighlightRect[] = [];
+
+  for (const anchorRange of ranges) {
+    const range = createTextRangeFromOffsets(root, anchorRange.startOffset, anchorRange.endOffset);
+    if (!range) continue;
+    const active = anchorRange.messageID === activeMessageID;
+    Array.from(range.getClientRects()).forEach((rect, rectIndex) => {
+      const left = Math.max(rect.left, editorRect.left) - wrapperRect.left;
+      const right = Math.min(rect.right, editorRect.right) - wrapperRect.left;
+      const top = Math.max(rect.top, editorRect.top) - wrapperRect.top;
+      const bottom = Math.min(rect.bottom, editorRect.bottom) - wrapperRect.top;
+      const width = right - left;
+      const height = bottom - top;
+      if (width < 1 || height < 2) return;
+      rects.push({
+        key: `${anchorRange.messageID}:${rectIndex}:${Math.round(left)}:${Math.round(top)}`,
+        left,
+        top,
+        width,
+        height,
+        active,
+      });
+    });
+  }
+
+  return rects;
+}
+
 const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   blockID,
   nodeID,
   companyID,
   currentUserID,
   documentValue,
+  chatMessages,
+  activeChatAnchorMessageID,
   surfaceText,
   accent,
   outlineStyle,
@@ -1342,6 +1526,7 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
   const pendingFontSizeRef = useRef<number | null>(null);
   const indentGuideFrameRef = useRef<number | null>(null);
+  const selectionPointerDownRef = useRef(false);
   const lastAppliedDocumentRef = useRef("");
   const lastStoredHeightRef = useRef(0);
   const heightStorageKey = `node-editor-text-block-height-v2:${currentUserID}:${companyID}:${nodeID}:${blockID}`;
@@ -1349,9 +1534,23 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const [selectionDraft, setSelectionDraft] = useState<TextBlockSelectionDraft | null>(null);
+  const [textHighlightRects, setTextHighlightRects] = useState<TextHighlightRect[]>([]);
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
   const documentLineHeightPx = TEXT_BLOCK_FONT_SIZE * TEXT_BLOCK_LINE_HEIGHT;
+  const textBlockBottomBufferPx = documentLineHeightPx * TEXT_BLOCK_BOTTOM_BUFFER_ROWS;
+  const textBlockPaddingBottomPx = TEXT_BLOCK_PADDING_BOTTOM + textBlockBottomBufferPx;
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
+
+  const refreshTextHighlights = useCallback(() => {
+    const editor = editorRef.current;
+    const wrapper = wrapperRef.current;
+    if (!editor || !wrapper) {
+      setTextHighlightRects((current) => current.length > 0 ? [] : current);
+      return;
+    }
+    const nextRects = buildTextHighlightRects(editor, wrapper, activeChatAnchorMessageID, chatMessages);
+    setTextHighlightRects(nextRects);
+  }, [activeChatAnchorMessageID, chatMessages]);
 
   useEffect(() => {
     targetKeyRef.current = documentTargetKey;
@@ -1380,6 +1579,7 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     if (!element || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
       const nextHeight = Math.round(element.getBoundingClientRect().height);
+      refreshTextHighlights();
       if (!Number.isFinite(nextHeight) || Math.abs(nextHeight - lastStoredHeightRef.current) < 2) return;
       lastStoredHeightRef.current = nextHeight;
       setHeight(nextHeight);
@@ -1387,7 +1587,12 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [heightStorageKey]);
+  }, [heightStorageKey, refreshTextHighlights]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(refreshTextHighlights);
+    return () => window.cancelAnimationFrame(frame);
+  }, [documentValue, documentScrollTop, height, refreshTextHighlights]);
 
   const scheduleTextBlockIndentGuideUpdate = useCallback((text: string) => {
     if (indentGuideFrameRef.current !== null) {
@@ -1443,7 +1648,7 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     onBlur();
   };
 
-  const readSelectionDraft = (): TextBlockSelectionDraft | null => {
+  const readSelectionDraft = useCallback((): TextBlockSelectionDraft | null => {
     const editor = editorRef.current;
     const wrapper = wrapperRef.current;
     if (!editor || !wrapper) return null;
@@ -1464,12 +1669,21 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     const endOffset = Math.max(startOffset, Math.min(startOffset + selectedText.length, documentTextLength));
     if (endOffset <= startOffset) return null;
 
+    const rangeRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
     const selectionRect = range.getBoundingClientRect();
     const wrapperRect = wrapper.getBoundingClientRect();
-    const selectionRight = selectionRect.right - wrapperRect.left;
-    const selectionTop = selectionRect.top - wrapperRect.top;
-    const x = Math.max(8, Math.min(selectionRight + 8, wrapperRect.width - 34));
-    const y = Math.max(6, Math.min(selectionTop - 34, wrapperRect.height - 34));
+    const anchorOffset = getSelectionPointDocumentOffset(editor, selection.anchorNode, selection.anchorOffset);
+    const focusOffset = getSelectionPointDocumentOffset(editor, selection.focusNode, selection.focusOffset);
+    const isForwardSelection = anchorOffset === null || focusOffset === null || anchorOffset <= focusOffset;
+    const firstRect = rangeRects[0] ?? selectionRect;
+    const lastRect = rangeRects[rangeRects.length - 1] ?? selectionRect;
+    const iconRect = isForwardSelection ? lastRect : firstRect;
+    const preferredX = isForwardSelection
+      ? iconRect.right - wrapperRect.left + 8
+      : iconRect.left - wrapperRect.left - 36;
+    const preferredY = iconRect.top - wrapperRect.top + ((iconRect.height - 28) / 2);
+    const x = Math.max(8, Math.min(preferredX, wrapperRect.width - 34));
+    const y = Math.max(6, Math.min(preferredY, wrapperRect.height - 34));
     return {
       blockID,
       quote: selectedText,
@@ -1478,11 +1692,55 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       x,
       y,
     };
-  };
+  }, [blockID]);
 
-  const captureSelectionDraft = () => {
-    window.setTimeout(() => setSelectionDraft(readSelectionDraft()), 0);
-  };
+  const captureSelectionDraft = useCallback(() => {
+    window.setTimeout(() => {
+      if (selectionPointerDownRef.current) return;
+      setSelectionDraft(readSelectionDraft());
+    }, 0);
+  }, [readSelectionDraft]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const ownerDocument = editor.ownerDocument;
+    const onSelectionChange = () => {
+      const selection = ownerDocument.getSelection();
+      const anchorNode = selection?.anchorNode ?? null;
+      const focusNode = selection?.focusNode ?? null;
+      if (!anchorNode && !focusNode) {
+        setSelectionDraft(null);
+        return;
+      }
+      if ((anchorNode && editor.contains(anchorNode)) || (focusNode && editor.contains(focusNode))) {
+        if (selectionPointerDownRef.current) return;
+        captureSelectionDraft();
+      }
+    };
+    ownerDocument.addEventListener("selectionchange", onSelectionChange);
+    return () => ownerDocument.removeEventListener("selectionchange", onSelectionChange);
+  }, [captureSelectionDraft]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const ownerDocument = editor.ownerDocument;
+    const onPointerUp = () => {
+      if (!selectionPointerDownRef.current) return;
+      selectionPointerDownRef.current = false;
+      captureSelectionDraft();
+    };
+    const onPointerCancel = () => {
+      selectionPointerDownRef.current = false;
+    };
+    ownerDocument.addEventListener("pointerup", onPointerUp, true);
+    ownerDocument.addEventListener("pointercancel", onPointerCancel, true);
+    return () => {
+      ownerDocument.removeEventListener("pointerup", onPointerUp, true);
+      ownerDocument.removeEventListener("pointercancel", onPointerCancel, true);
+    };
+  }, [captureSelectionDraft]);
 
   return (
     <div
@@ -1504,7 +1762,7 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
             pointerEvents: "none",
             boxSizing: "border-box",
             overflow: "hidden",
-            padding: `${TEXT_BLOCK_PADDING_TOP}px ${TEXT_BLOCK_PADDING_RIGHT}px ${TEXT_BLOCK_PADDING_BOTTOM}px ${TEXT_BLOCK_PADDING_LEFT}px`,
+            padding: `${TEXT_BLOCK_PADDING_TOP}px ${TEXT_BLOCK_PADDING_RIGHT}px ${textBlockPaddingBottomPx}px ${TEXT_BLOCK_PADDING_LEFT}px`,
             fontSize: TEXT_BLOCK_FONT_SIZE,
             lineHeight: TEXT_BLOCK_LINE_HEIGHT,
             fontFamily: documentFontFamily,
@@ -1529,6 +1787,34 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           </div>
         </div>
       )}
+      {textHighlightRects.length > 0 && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 1,
+            pointerEvents: "none",
+            overflow: "hidden",
+          }}
+        >
+          {textHighlightRects.map((rect) => (
+            <div
+              key={rect.key}
+              style={{
+                position: "absolute",
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height,
+                borderRadius: 3,
+                background: rect.active ? "rgba(255, 180, 44, 0.52)" : "rgba(255, 213, 79, 0.34)",
+                boxShadow: rect.active ? `0 0 0 1px ${accent}, 0 0 0 3px rgba(255,136,32,0.16)` : "none",
+              }}
+            />
+          ))}
+        </div>
+      )}
       <div
         ref={editorRef}
         className="editor-document-scroll"
@@ -1548,9 +1834,9 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         onClick={handlers.onClick}
         onPointerDown={(event) => {
           setSelectionDraft(null);
+          if (event.button === 0) selectionPointerDownRef.current = true;
           handlers.onPointerDown(event);
         }}
-        onPointerUp={captureSelectionDraft}
         onPointerMove={handlers.onPointerMove}
         onKeyUp={(event) => {
           handlers.onKeyUp(event);
@@ -1562,7 +1848,7 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         onKeyDown={handlers.onKeyDown}
         style={{
           position: "relative",
-          zIndex: 1,
+          zIndex: 2,
           display: "block",
           width: "100%",
           height,
@@ -1571,7 +1857,7 @@ const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           resize: "vertical",
           border: 0,
           outline: "none",
-          padding: `${TEXT_BLOCK_PADDING_TOP}px ${TEXT_BLOCK_PADDING_RIGHT}px ${TEXT_BLOCK_PADDING_BOTTOM}px ${TEXT_BLOCK_PADDING_LEFT}px`,
+          padding: `${TEXT_BLOCK_PADDING_TOP}px ${TEXT_BLOCK_PADDING_RIGHT}px ${textBlockPaddingBottomPx}px ${TEXT_BLOCK_PADDING_LEFT}px`,
           boxSizing: "border-box",
           color: surfaceText,
           background: "transparent",
@@ -1639,6 +1925,8 @@ type ChatPaneProps = {
   replyTargetID: string;
   heightStorageKey: string;
   active: boolean;
+  currentUserID: string;
+  activeMessageID: string;
   accent: string;
   surfaceText: string;
   panelBackground: string;
@@ -1646,7 +1934,9 @@ type ChatPaneProps = {
   ruleColor: string;
   onFocus: () => void;
   onDraftChange: (draft: string) => void;
+  onActivateMessage: (messageID: string) => void;
   onReply: (messageID: string) => void;
+  onDeleteMessage: (messageID: string) => void;
   onClearReply: () => void;
   onAttachFiles: (files: FileList | File[]) => void;
   onRemoveDraftAttachment: (attachmentID: string) => void;
@@ -1662,6 +1952,8 @@ const ChatPane: React.FC<ChatPaneProps> = ({
   replyTargetID,
   heightStorageKey,
   active,
+  currentUserID,
+  activeMessageID,
   accent,
   surfaceText,
   panelBackground,
@@ -1669,7 +1961,9 @@ const ChatPane: React.FC<ChatPaneProps> = ({
   ruleColor,
   onFocus,
   onDraftChange,
+  onActivateMessage,
   onReply,
+  onDeleteMessage,
   onClearReply,
   onAttachFiles,
   onRemoveDraftAttachment,
@@ -1716,6 +2010,7 @@ const ChatPane: React.FC<ChatPaneProps> = ({
   };
 
   const handleReply = (messageID: string) => {
+    onActivateMessage(messageID);
     onReply(messageID);
     window.requestAnimationFrame(() => textareaRef.current?.focus());
   };
@@ -1780,28 +2075,32 @@ const ChatPane: React.FC<ChatPaneProps> = ({
           <span>{messages.length}</span>
         </div>
         <div className="editor-document-scroll" style={{ minHeight: 0, display: "grid", alignContent: "start", gap: 8, overflowY: "auto", overflowX: "hidden", padding: "9px 8px", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
-          {selectionAnchor && active && (
-            <div style={{ borderLeft: `3px solid ${accent}`, background: "rgba(255,136,32,0.08)", color: surfaceText, padding: "6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere" }}>
-              {selectionAnchor.quote}
-            </div>
-          )}
           {threads.map((thread) => (
             <ChatThreadItem
               key={thread.message.id}
               node={thread}
               depth={0}
               isLastSibling={false}
+              currentUserID={currentUserID}
+              activeMessageID={activeMessageID}
               accent={accent}
               surfaceText={surfaceText}
               ruleColor={ruleColor}
               collapsedThreadIDs={collapsedThreadIDs}
               onToggleCollapse={toggleThreadCollapse}
+              onActivate={onActivateMessage}
               onReply={handleReply}
+              onDelete={onDeleteMessage}
               onPreviewImage={setPreviewAttachment}
             />
           ))}
         </div>
         <div style={{ display: "grid", gap: 6, padding: 8, borderTop: `1px solid ${ruleColor}` }}>
+          {selectionAnchor && active && (
+            <div style={{ borderLeft: `3px solid ${accent}`, background: "rgba(255,136,32,0.08)", color: surfaceText, padding: "6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere", maxHeight: 72, overflowY: "auto" }}>
+              {selectionAnchor.quote}
+            </div>
+          )}
           {draftAttachments.length > 0 && (
             <DraftAttachmentList
               attachments={draftAttachments}
@@ -1900,26 +2199,49 @@ type ChatThreadItemProps = {
   node: ChatThreadNode;
   depth: number;
   isLastSibling: boolean;
+  currentUserID: string;
+  activeMessageID: string;
   accent: string;
   surfaceText: string;
   ruleColor: string;
   collapsedThreadIDs: Set<string>;
   onToggleCollapse: (messageID: string) => void;
+  onActivate: (messageID: string) => void;
   onReply: (messageID: string) => void;
+  onDelete: (messageID: string) => void;
   onPreviewImage: (attachment: EditorChatAttachment) => void;
 };
 
-const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onReply, onPreviewImage }) => {
+const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, currentUserID, activeMessageID, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onReply, onDelete, onPreviewImage }) => {
   const { message, children } = node;
   const hasChildren = children.length > 0;
   const collapsed = collapsedThreadIDs.has(message.id);
   const hiddenReplyCount = collapsed ? countChatThreadDescendants(node) : 0;
+  const isActive = activeMessageID === message.id;
+  const canDelete = canDeleteEditorTextBlockChatMessage(message, currentUserID);
   const guideColor = "rgba(100,116,139,0.24)";
   const guideStyle: React.CSSProperties = isLastSibling
     ? { position: "absolute", top: -10, left: 13, width: 1, height: 23, background: guideColor }
     : { position: "absolute", top: -10, bottom: -8, left: 13, width: 1, background: guideColor };
   return (
-    <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "28px minmax(0, 1fr)", columnGap: 7, alignItems: "start" }}>
+    <div
+      onClick={(event) => {
+        event.stopPropagation();
+        onActivate(message.id);
+      }}
+      style={{
+        minWidth: 0,
+        display: "grid",
+        gridTemplateColumns: "28px minmax(0, 1fr)",
+        columnGap: 7,
+        alignItems: "start",
+        borderRadius: 6,
+        background: isActive ? "rgba(255,136,32,0.08)" : "transparent",
+        boxShadow: isActive ? `inset 0 0 0 1px ${accent}` : "none",
+        padding: "4px 4px 4px 0",
+        cursor: "pointer",
+      }}
+    >
       <div style={{ position: "relative", gridRow: hasChildren && !collapsed ? "1 / span 2" : undefined, alignSelf: "stretch", display: "grid", justifyItems: "center", minHeight: 28 }}>
         {depth > 0 && <div aria-hidden="true" style={guideStyle} />}
         {hasChildren && (
@@ -1927,7 +2249,10 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
             type="button"
             aria-label={collapsed ? "Expand replies" : "Collapse replies"}
             title={collapsed ? "Expand replies" : "Collapse replies"}
-            onClick={() => onToggleCollapse(message.id)}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleCollapse(message.id);
+            }}
             style={{
               position: "absolute",
               zIndex: 2,
@@ -1960,22 +2285,34 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.authorName}</span>
           <span style={{ opacity: 0.58, flex: "0 0 auto" }}>{formatTimestamp(message.createdTimestamp)}</span>
         </div>
-        {message.selectionQuote && (
-          <div style={{ borderLeft: `3px solid ${accent}`, background: "rgba(255,136,32,0.08)", color: surfaceText, padding: "5px 6px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere" }}>
-            {message.selectionQuote}
-          </div>
-        )}
         {message.message && <div style={{ color: surfaceText, fontSize: 12, lineHeight: 1.35, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{message.message}</div>}
         {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} surfaceText={surfaceText} strokeColor={ruleColor} onPreviewImage={onPreviewImage} />}
         <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" onClick={() => onReply(message.id)} style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: accent, cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}>
+          <button type="button" onClick={(event) => { event.stopPropagation(); onReply(message.id); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: accent, cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}>
             <ChatIcon color={accent} />
             Reply
           </button>
+          {canDelete && (
+            <button
+              type="button"
+              aria-label="Delete message"
+              title="Delete message"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDelete(message.id);
+              }}
+              style={{ border: "none", background: "transparent", color: "rgba(162,0,38,0.82)", cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}
+            >
+              Delete
+            </button>
+          )}
           {hiddenReplyCount > 0 && (
             <button
               type="button"
-              onClick={() => onToggleCollapse(message.id)}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleCollapse(message.id);
+              }}
               style={{ border: "none", background: "transparent", color: "rgba(36,18,10,0.54)", cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}
             >
               {hiddenReplyCount} {hiddenReplyCount === 1 ? "reply" : "replies"} hidden
@@ -1991,12 +2328,16 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
               node={child}
               depth={depth + 1}
               isLastSibling={childIndex === children.length - 1}
+              currentUserID={currentUserID}
+              activeMessageID={activeMessageID}
               accent={accent}
               surfaceText={surfaceText}
               ruleColor={ruleColor}
               collapsedThreadIDs={collapsedThreadIDs}
               onToggleCollapse={onToggleCollapse}
+              onActivate={onActivate}
               onReply={onReply}
+              onDelete={onDelete}
               onPreviewImage={onPreviewImage}
             />
           ))}

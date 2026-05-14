@@ -1194,6 +1194,18 @@ export function useEditorDocumentSurfaceHandlers({
       const edit = event.shiftKey
         ? insertEditorTabText(currentText, offsets.start, offsets.end, outlineStyle, "outdent")
         : insertEditorTabText(currentText, offsets.start, offsets.end, outlineStyle, "indent");
+      if (edit.value === currentText && edit.selectionStart === offsets.start && edit.selectionEnd === offsets.end) return;
+      if (event.shiftKey && outlineStyle === "indent-guides" && offsets.start === offsets.end) {
+        const deletionMatchesOutdent = edit.selectionStart <= offsets.start
+          && `${currentText.slice(0, edit.selectionStart)}${currentText.slice(offsets.start)}` === edit.value;
+        if (deletionMatchesOutdent) {
+          if (deleteTextByOffsets(root, edit.selectionStart, offsets.start, { preserveTrailingNewline: edit.value.endsWith("\n") })) {
+            recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "tab");
+            commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          }
+          return;
+        }
+      }
       const simpleInsertedText = edit.value.slice(offsets.start, edit.selectionStart);
       const simpleReplacement = `${currentText.slice(0, offsets.start)}${simpleInsertedText}${currentText.slice(offsets.end)}`;
       if (!event.shiftKey && simpleReplacement === edit.value) {
