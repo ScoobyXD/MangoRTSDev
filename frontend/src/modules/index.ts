@@ -45,7 +45,7 @@ const kanbanModule = createLazyModule(() => import("./kanban/KanbanContent").the
 const communicationsModule = createLazyModule(() => import("../pages/communications/CommunicationsPage").then((module) => ({ default: module.CommunicationsFrameContent as ModuleComponent })));
 
 const moduleEntries = [
-  { kind: "company-explorer", label: "Company Explorer", defaultW: 18, defaultH: 14, ...companyExplorerModule },
+  { kind: "company-explorer", label: "Explorer", defaultW: 18, defaultH: 14, ...companyExplorerModule },
   { kind: "editor", label: "Editor", defaultW: 16, defaultH: 14, ...editorModule },
   { kind: "kanban", label: "Kanban board", defaultW: 18, defaultH: 7, ...kanbanModule },
   { kind: "communications", label: "Home", defaultW: 24, defaultH: 16, ...communicationsModule },

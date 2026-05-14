@@ -215,7 +215,7 @@ export const LogicGateMapContextMenus: React.FC<LogicGateMapContextMenusProps> =
         onPointerDown={(event) => event.stopPropagation()}
       >
         <button style={contextMenuButtonStyle} onClick={() => onFindNodeSelection(nodeContextMenu.nodeID)}>
-          Find on Company Explorer
+          Find on Explorer
         </button>
         <button style={contextMenuButtonStyle} onClick={() => onRenameNode(nodeContextMenu.nodeID)}>
           Rename logic gate

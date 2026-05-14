@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { preloadCommunicationsSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface } from "../app/preloadDashboardModules";
-import { HeaderPersonIcon, HeaderSettingsIcon } from "../app/HeaderIcons";
+import { HeaderSettingsIcon } from "../app/HeaderIcons";
 import { MangoWordmark } from "../app/MangoLogo";
-import { loadSettings } from "../app/useFramePersistence";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
 import {
   acceptInvitation,
@@ -1047,32 +1046,30 @@ function AuthPanel({ title, error, children }: { title: string; error?: string; 
 
 function AccountBar({ me, onNavigate }: { me: CurrentUserResponse; onNavigate: (path: string) => void }) {
   const displayName = me.user.display_name?.trim() || me.user.email;
-  const headerText = loadSettings().headerTextColor || "#60646c";
   const navButtonStyle: React.CSSProperties = {
-    height: 28,
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    border: "none",
-    background: "transparent",
+    width: 30,
+    height: 30,
+    display: "grid",
+    placeItems: "center",
+    border: "1px solid rgba(255, 136, 32, 0.22)",
+    borderRadius: 6,
+    background: "#ffffff",
     color: "#60646c",
     cursor: "pointer",
     font: "inherit",
     fontWeight: 500,
-    padding: "0 2px",
-    whiteSpace: "nowrap",
+    padding: 0,
   };
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, minWidth: 0, height: "100%", color: headerText, fontFamily: "var(--mango-font-family)", fontSize: 12 }}>
-      <span style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, maxWidth: 180, color: "#ff8820", fontWeight: 500 }}>
-        <HeaderPersonIcon />
-        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
-      </span>
-      <button type="button" style={navButtonStyle} onClick={() => onNavigate("/settings")}>
-        <HeaderSettingsIcon />
-        <span>Settings</span>
-      </button>
-    </div>
+    <button
+      type="button"
+      aria-label={`Settings for ${displayName}`}
+      title="Settings"
+      style={navButtonStyle}
+      onClick={() => onNavigate("/settings")}
+    >
+      <HeaderSettingsIcon />
+    </button>
   );
 }
 

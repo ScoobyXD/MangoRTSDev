@@ -167,10 +167,10 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
     style={{ overflowY: "auto", overflowX: "hidden", minWidth: 0, outline: "none", scrollbarGutter: "stable", ["--company-explorer-scroll-accent" as string]: scrollbarAccent, ["--company-explorer-scroll-track" as string]: scrollbarTrack }}
   >
     <div style={{ position: "sticky", top: 0, zIndex: 5, padding: "13px 10px 8px", borderBottom: `1px solid ${ruleColor}`, background: surfaceBackground, display: "grid", gap: 7 }}>
-      <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: 0, color: accent }}>Company Explorer</div>
+      <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: 0, color: accent }}>Explorer</div>
       <div data-frame-interactive="true" style={{ position: "relative", display: "block", minWidth: 0, height: 25 }}>
         <input
-          aria-label="Search Company Explorer"
+          aria-label="Search Explorer"
           value={explorerSearchQuery}
           onFocus={() => onSetExplorerSearchFocused(true)}
           onBlur={() => window.setTimeout(() => onSetExplorerSearchFocused(false), 120)}
@@ -187,7 +187,7 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
               onSelectExplorerSearchResult(explorerSearchResults[0]);
             }
           }}
-          placeholder="Search Company Explorer"
+          placeholder="Search Explorer"
           style={{ width: "100%", height: "100%", boxSizing: "border-box", border: `1px solid ${ruleColor}`, background: isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.94)", color: surfaceText, fontSize: 11, fontWeight: 500, padding: "0 28px 0 8px", outline: "none" }}
         />
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ position: "absolute", right: 8, top: 5, color: folderToggleColor, pointerEvents: "none" }}>

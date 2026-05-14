@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type NodeRecord } from "../node-map/shared";
 import { LogicGateRecord as LogicGateApiRecord, NodeRecord as LogicGateRecord, toLogicGateCanvasRecord } from "../logic-gate-map/shared";
-import { emitDashboardEvent, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_FOCUS_REQUESTED } from "../node-map/eventbus";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_FOCUS_REQUESTED } from "../node-map/eventbus";
 import { getNodeRelationshipGraphSnapshot, hasNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, removeNodeRelationshipGraphRelationshipsForNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { getLogicGateRelationshipGraphSnapshot, hasLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, removeLogicGateRelationshipGraphRelationshipsForLogicGate, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { type ExplorerSelectionState } from "./explorerSync";
@@ -1143,6 +1143,22 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
     focusTreeRow(row, { selectionIntent: "navigate" });
   }, [focusTreeRow]);
 
+  const emitExplorerEntityActivation = useCallback((row: ExplorerTreeNode) => {
+    const kind = row.kind === "node" || row.kind === "logic_gate" ? row.kind : "";
+    const id = kind === "node" ? (row.nodeID ?? "") : kind === "logic_gate" ? (row.logicGateID ?? "") : "";
+    const cleanID = id.trim();
+    if (!kind || !cleanID) return;
+    emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
+      companyID,
+      sourceFrameID: scope,
+      kind,
+      id: cleanID,
+      label: row.label,
+      selectedTreeID: row.id,
+      changedAt: Date.now(),
+    });
+  }, [companyID, scope]);
+
   const selectTreeRow = useCallback((row: ExplorerTreeNode, event?: React.MouseEvent, options: { selectionIntent?: SelectionIntent } = {}) => {
     const orderedIDs = treeRows.map((item) => item.id);
     treeKeyboardActiveRef.current = true;
@@ -1158,10 +1174,15 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
     if (selected.selectedIDs.size === 0) selected.selectedIDs.add(row.id);
     const orderedSelectedIDs = orderedIDs.filter((id) => selected.selectedIDs.has(id));
     const primaryID = selected.selectedIDs.has(row.id) ? row.id : (orderedSelectedIDs[0] ?? row.id);
+    const primaryRow = rowByID.get(primaryID) ?? row;
+    const selectionIntent = options.selectionIntent ?? "activate";
     setSelectedTreeIDs(new Set(orderedSelectedIDs));
     setSelectionAnchorTreeID(selected.anchorID);
-    focusTreeRow(rowByID.get(primaryID) ?? row, { selectionIntent: options.selectionIntent ?? "activate" });
-  }, [focusTreeRow, rowByID, selectedTreeIDs, selectionAnchorTreeID, treeRows]);
+    focusTreeRow(primaryRow, { selectionIntent });
+    if (selectionIntent === "activate" && !event?.shiftKey && !event?.ctrlKey && !event?.metaKey) {
+      emitExplorerEntityActivation(primaryRow);
+    }
+  }, [emitExplorerEntityActivation, focusTreeRow, rowByID, selectedTreeIDs, selectionAnchorTreeID, treeRows]);
 
   const expandTreeIDs = useCallback((treeIDs: string[]) => {
     const folderByID = new Map(folders.map((folder) => [folder.folder_id, folder]));
@@ -1279,9 +1300,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
     setSelectedTreeIDs(new Set([row.id]));
     setSelectionAnchorTreeID(row.id);
     focusTreeRow(row, { selectionIntent: "activate" });
+    emitExplorerEntityActivation(row);
     pendingScrollAlignRef.current = "center";
     pendingScrollTreeIDRef.current = row.id;
-  }, [expandTreeIDs, focusTreeRow]);
+  }, [emitExplorerEntityActivation, expandTreeIDs, focusTreeRow]);
 
   useEffect(() => {
     const rowID = pendingScrollTreeIDRef.current;
@@ -1686,7 +1708,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
   };
 
   return (
-    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(240px, 1fr)", background: surfaceBackground, color: surfaceText, overflow: "hidden", minWidth: 0 }}>
+    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", background: surfaceBackground, color: surfaceText, overflow: "hidden", minWidth: 0 }}>
       <CompanyExplorerTree
         error={error}
         accent={accent}

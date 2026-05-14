@@ -12,7 +12,6 @@ export const LEGACY_DEFAULT_NODE_VIEW_FRAME_IDS = {
 
 export function createDefaultNodeViewFrames(): FrameDataModel[] {
   const mapID = createFrameId();
-  const explorerID = createFrameId();
   const editorID = createFrameId();
 
   return [
@@ -24,17 +23,6 @@ export function createDefaultNodeViewFrames(): FrameDataModel[] {
       w: 42,
       h: 30,
       title: "Default Map View",
-      ...WHITE_FRAME,
-    },
-    {
-      id: explorerID,
-      kind: "company-explorer",
-      parentId: mapID,
-      x: 1.5,
-      y: 1.5,
-      w: 11,
-      h: 27,
-      title: "Company Explorer",
       ...WHITE_FRAME,
     },
     {
@@ -52,25 +40,14 @@ export function createDefaultNodeViewFrames(): FrameDataModel[] {
 }
 
 export function createLogicGateArenaFrames(): FrameDataModel[] {
-  const explorerID = createFrameId();
   const editorID = createFrameId();
   const kanbanID = createFrameId();
 
   return [
     {
-      id: explorerID,
-      kind: "company-explorer",
-      x: 1,
-      y: 1,
-      w: 10,
-      h: 30,
-      title: "Company Explorer",
-      ...WHITE_FRAME,
-    },
-    {
       id: editorID,
       kind: "editor",
-      x: 12,
+      x: 1,
       y: 1,
       w: 16,
       h: 30,
@@ -80,7 +57,7 @@ export function createLogicGateArenaFrames(): FrameDataModel[] {
     {
       id: kanbanID,
       kind: "kanban",
-      x: 29,
+      x: 18,
       y: 1,
       w: 34,
       h: 30,

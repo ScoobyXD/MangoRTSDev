@@ -66,7 +66,11 @@ function coerceFrame(value: unknown): FrameDataModel | null {
   ) return null;
 
   const normalizedKind = kind === "node-doc" ? "editor" : kind;
-  const normalizedTitle = normalizedKind === "kanban" && title === "Kanban" ? "Kanban board" : title;
+  const normalizedTitle = normalizedKind === "kanban" && title === "Kanban"
+    ? "Kanban board"
+    : normalizedKind === "company-explorer" && title === "Company Explorer"
+      ? "Explorer"
+      : title;
   if (!SUPPORTED_PERSISTED_FRAME_KINDS.has(normalizedKind)) return null;
 
   const normalizedTheme: ColorwayKey = isColorway(theme)

@@ -62,11 +62,6 @@ LATER: need to do an audit on how well equiped the app is for multiple people us
 Editor changes
 1. Outbound email when node is done.
 2. @ mentions summoning or notifying user.
-3. the chat should be linked to specific highlighted text on the text box.
-
-Home page/ Email:
-
-
 
 4. RACI inboxes should be public view.
 	a. when place node in logic gate, it inherits those RACI matrix
@@ -75,9 +70,7 @@ Home page/ Email:
 6. when there is a state change, live show difference on the R and ACI inbox
 7. @ mentions, only if part of raci matrix.
 
-the inbox list in communication needs to merge with the company explorer. 
-were basically going to turn communications into home page and put logo gate arena on there
-	when you select a logic gate it by default shows the logic gate arena.
+
 1. We need to capture history of what email from primary moved to what triage and then to what logic gate so we can fine tune hermes agent
 2. have a way to just easily shift multi select and delete many emails
 3. I think we put wayyyyy too much code in the communications page alone and needs to be broken apart. also for nodes.
@@ -96,15 +89,6 @@ were basically going to turn communications into home page and put logo gate are
 	b. team comments.
 	c. shared drafts
 	
-6. There should be a button in communications to show an email kanban board on the right side of the screen. In it should be very similar to the group by mode of the logic gate arena kanban board.
-	a. The columns should default be the RACI matrix which is from left to right: Responsible, Accountable, Consulted, and Informed.
-	b. the rows should default be 5 Urgent all the way to 0 unnassigned on the bottom.
-	c. So you see this is much like the structure of rows and columns on the logic gate arena kanban board.
-	d.of course this means were going to implemetn the x and y axis grouping and the ascending and descending features.
-	e. IMPORTANT: ultimately i can drag an email and drag it into one of these cells and it automatically turns it into a node with the characteristics given to it by the psotion of the row and column its in.
-		i. Of course, that means when i double click on a node here, it will pop open the editor with the node's information in it, much much like the popup node in the logic gate arena kanban board when you double click on a node.
-	f. an extra bonus would be if here too on the email kanban board you can right click on a node card and send to a logic gate where you can search pick a logic gate to send it to and it will uatomatically send it to the pending column of that logic gate.
-7. Keep the UI consistent to the font and colors and styling that we have right now.
 1. When you have successfuly accepted invite and you are now a user, you should get some kind of confirmation email saying you have successfully signed up with <name of company>
 
 after that:
@@ -115,14 +99,11 @@ after that:
 
 Logic gate inbox
 Can group by and organize by columns (I have 2 photos for the 2 groupings)
-On the right side of the kanban board will be the email and chat communications of that thing. Same will occur for the node popup. 
 
 Things to do bar:
 1. Have a pinned node section.
-2. There should be a notion board like thing where you can see all nodes in a timeline view.
-3. This 
-
-the bottom of the page should be the thing to do task bar which is chronologically ordered left to right for the day today. basically its a schedule bar
+2. There should be a notion board like thing where you can see all nodes in a timeline view. 
+3. the bottom of the page should be the thing to do task bar which is chronologically ordered left to right for the day today. basically its a schedule bar
 
 General Bugs:
 3.  On another note when I have multi-select on for node or logic gates and I right-click, I should not automatically select one node or logic gate. I should keep all of the selected stuff selected. I should only be able to deselect when I single-click on another part of the map without dragging. 

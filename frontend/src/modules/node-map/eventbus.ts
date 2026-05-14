@@ -6,6 +6,7 @@ export const EVENT_EXPLORER_CONTEXT_UPDATED = "mangorts:explorer-context-updated
 export const EVENT_NODE_MAP_FOCUS_REQUESTED = "mangorts:node-map-focus-requested";
 export const EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED = "mangorts:logic-gate-map-focus-requested";
 export const EVENT_COMPANY_EXPLORER_FIND_REQUESTED = "mangorts:company-explorer-find-requested";
+export const EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED = "mangorts:company-explorer-entity-activated";
 
 // Typed CustomEvent emitter so modules can react without tight component coupling.
 export function emitDashboardEvent<T>(eventName: string, detail: T): void {

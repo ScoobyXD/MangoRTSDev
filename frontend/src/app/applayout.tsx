@@ -11,7 +11,7 @@ import { ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcon
 import { readExplorerDragPayload } from "../modules/company-explorer/companyExplorerDragDrop";
 import type { FrameDataModel, DragState } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { emitDashboardEvent, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
 import { publishLiveSelection } from "../modules/selectionCoordinator";
 import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, mergeLinkPlan, type FrameLinkEdge } from "./frameLinking";
 import { createCommunicationsViewFrames, createDefaultNodeViewFrames, createLogicGateArenaFrames } from "./DefaultViews";
@@ -42,15 +42,28 @@ import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/l
 import { useFrameDragResize } from "./useFrameDragResize";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
+const SidebarCompanyExplorerContent = React.lazy(() => import("../modules/company-explorer/CompanyExplorerContent").then((module) => ({ default: module.CompanyExplorerContent })));
+const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorContent").then((module) => ({
+  default: module.EditorContent as React.FC<{
+    accent: string;
+    widgetId?: string;
+    theme?: "mango" | "teal" | "light" | "dark";
+    forcedEntityKind?: "node" | "logic_gate";
+    forcedEntityID?: string;
+    forcedLabel?: string;
+  }>,
+})));
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
 const PAGE_EDGE_GAP = 10;
 const PAGE_SURFACE_RADIUS = 16;
-const APP_SIDEBAR_W = 190;
-const APP_SIDEBAR_MIN_W = 148;
-const APP_SIDEBAR_MAX_W = 320;
+const APP_SIDEBAR_W = 320;
+const APP_SIDEBAR_MIN_W = 240;
+const APP_SIDEBAR_MAX_W = 420;
 const APP_RESIZE_HANDLE_W = 10;
+const SIDEBAR_EXPLORER_WIDGET_ID = "app-sidebar-explorer";
 const SIDEBAR_PINS_KEY = "mangorts.app-sidebar-pins.v1";
 const SIDEBAR_WIDTH_KEY = "mangorts.app-sidebar-width.v1";
+const SHOW_LEGACY_HEADER = false;
 
 type PrimaryPage = "map" | "communications" | "logic-gate-arena";
 type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox";
@@ -60,6 +73,17 @@ type SidebarPin = {
   kind: SidebarPinKind;
   label: string;
   addedAt: number;
+};
+type ExplorerEntityActivatedDetail = {
+  companyID?: string;
+  sourceFrameID?: string;
+  kind?: string;
+  id?: string;
+  label?: string;
+};
+type NodeEditorPopupState = {
+  nodeID: string;
+  nodeTitle: string;
 };
 
 const HOME_NAV_ITEMS: Array<{ view: HomeSidebarView; label: string }> = [
@@ -80,6 +104,28 @@ function ensurePrimaryPageTab(tabs: ViewTab[], page: PrimaryPage): { tabs: ViewT
   if (existing) return { tabs, tab: existing };
   const tab = createPrimaryPageTab(page);
   return { tabs: [...tabs, tab], tab };
+}
+
+function isExplorerSelectionTargetFrame(frame: FrameDataModel): boolean {
+  return frame.kind === "map"
+    || frame.kind === "nodes"
+    || frame.kind === "nodes-map"
+    || frame.kind === "logic-map"
+    || frame.kind === "editor"
+    || frame.kind === "kanban";
+}
+
+function getSidebarExplorerSelectionTargetFrameIDs(tab: ViewTab | undefined): string[] {
+  if (!tab) return [];
+  const page = pageForTab(tab);
+  if (page === "communications") return [];
+  if (page === "logic-gate-arena") {
+    const editorFrame = tab.frames.find((frame) => frame.kind === "editor");
+    return editorFrame ? [editorFrame.id] : [];
+  }
+  return tab.frames
+    .filter((frame) => frame.kind !== "company-explorer" && isExplorerSelectionTargetFrame(frame))
+    .map((frame) => frame.id);
 }
 
 function isSidebarPin(value: unknown): value is SidebarPin {
@@ -210,10 +256,12 @@ type AppProps = {
 };
 
 type AppSidebarProps = {
+  accountChrome?: React.ReactNode;
   activePage: PrimaryPage | null;
   activeHomeView: HomeSidebarView;
   pins: SidebarPin[];
   pinDropActive: boolean;
+  explorerSelectionTargetFrameIDs: string[];
   onHomeViewSelect: (view: HomeSidebarView) => void;
   onPageSelect: (page: PrimaryPage) => void;
   onPinOpen: (pin: SidebarPin) => void;
@@ -225,10 +273,12 @@ type AppSidebarProps = {
 };
 
 function AppSidebar({
+  accountChrome,
   activePage,
   activeHomeView,
   pins,
   pinDropActive,
+  explorerSelectionTargetFrameIDs,
   onHomeViewSelect,
   onPageSelect,
   onPinOpen,
@@ -241,7 +291,10 @@ function AppSidebar({
   const homeActive = activePage === "communications";
   return (
     <aside style={appSidebarStyle}>
-      <div style={appSidebarTitleStyle}>Explorer</div>
+      <div style={appSidebarBrandStyle} aria-label="MangoRTS">
+        <MangoWordmark size={22} weight={600} />
+        {accountChrome && <div style={appSidebarAccountChromeStyle}>{accountChrome}</div>}
+      </div>
 
       <section style={appSidebarSectionStyle} aria-label="Home inboxes">
         {HOME_NAV_ITEMS.map((item) => (
@@ -304,6 +357,17 @@ function AppSidebar({
           onClick={() => onPageSelect("map")}
         />
       </section>
+
+      <section style={appSidebarExplorerSectionStyle} aria-label="Explorer tree">
+        <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
+          <SidebarCompanyExplorerContent
+            accent={COLORWAYS.light.accent}
+            widgetId={SIDEBAR_EXPLORER_WIDGET_ID}
+            theme="light"
+            selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
+          />
+        </React.Suspense>
+      </section>
     </aside>
   );
 }
@@ -340,14 +404,68 @@ function AppSidebarButton({
   );
 }
 
+function AppNodeEditorPopup({ nodeID, nodeTitle, onClose }: {
+  nodeID: string;
+  nodeTitle: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      style={nodeEditorPopupBackdropStyle}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${nodeTitle} node editor`}
+        data-frame-interactive="true"
+        style={nodeEditorPopupStyle}
+        onMouseDown={(event) => event.stopPropagation()}
+        onTouchStart={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          title="Close node editor"
+          onClick={onClose}
+          style={nodeEditorPopupCloseButtonStyle}
+        >
+          X
+        </button>
+        <React.Suspense fallback={fullPageFallback}>
+          <AppNodeEditorContent
+            accent="#ff8820"
+            widgetId={`app-explorer-node-editor-popup:${nodeID}`}
+            theme="mango"
+            forcedEntityKind="node"
+            forcedEntityID={nodeID}
+            forcedLabel={nodeTitle}
+          />
+        </React.Suspense>
+      </div>
+    </div>
+  );
+}
+
 function appBodyStyle(sidebarWidth: number): React.CSSProperties {
   return {
-    height: `calc(100vh - ${HEADER_H}px)`,
+    height: "100vh",
     minHeight: 0,
     display: "grid",
     gridTemplateColumns: `${sidebarWidth}px ${APP_RESIZE_HANDLE_W}px minmax(0, 1fr)`,
     gap: 0,
-    padding: `0 ${PAGE_EDGE_GAP}px ${PAGE_EDGE_GAP}px`,
+    padding: `${PAGE_EDGE_GAP}px ${PAGE_EDGE_GAP}px ${PAGE_EDGE_GAP}px`,
     alignItems: "stretch",
   };
 }
@@ -375,9 +493,9 @@ const appResizeGripStyle: React.CSSProperties = {
 
 const appSidebarStyle: React.CSSProperties = {
   minHeight: 0,
+  height: "100%",
   display: "grid",
-  gridTemplateRows: "auto auto minmax(88px, auto) auto",
-  alignContent: "start",
+  gridTemplateRows: "auto auto minmax(88px, auto) auto minmax(0, 1fr)",
   gap: 10,
   padding: 10,
   borderRadius: PAGE_SURFACE_RADIUS,
@@ -387,15 +505,22 @@ const appSidebarStyle: React.CSSProperties = {
   overflow: "hidden",
 };
 
-const appSidebarTitleStyle: React.CSSProperties = {
-  minHeight: 28,
+const appSidebarBrandStyle: React.CSSProperties = {
+  minHeight: 38,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: 8,
+  padding: "2px 6px 4px",
+  color: "#24120a",
+  minWidth: 0,
+};
+
+const appSidebarAccountChromeStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
-  padding: "0 6px",
-  color: "#24120a",
-  fontSize: 13,
-  fontWeight: 700,
-  letterSpacing: 0,
+  justifyContent: "flex-end",
+  minWidth: 0,
 };
 
 const appSidebarSectionStyle: React.CSSProperties = {
@@ -536,6 +661,62 @@ const appSidebarPinRemoveStyle: React.CSSProperties = {
   lineHeight: 1,
 };
 
+const appSidebarExplorerSectionStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 0,
+  overflow: "hidden",
+  borderRadius: 6,
+  border: "1px solid rgba(255, 136, 32, 0.16)",
+  background: "#ffffff",
+};
+
+const appSidebarExplorerFallbackStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  background: "#ffffff",
+};
+
+const nodeEditorPopupBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 130,
+  display: "grid",
+  placeItems: "center",
+  background: "rgba(36, 18, 10, 0.18)",
+  padding: 22,
+};
+
+const nodeEditorPopupStyle: React.CSSProperties = {
+  position: "relative",
+  width: "min(1180px, calc(100vw - 44px))",
+  height: "min(820px, calc(100vh - 64px))",
+  minWidth: "min(420px, calc(100vw - 44px))",
+  minHeight: "min(320px, calc(100vh - 64px))",
+  border: "1px solid rgba(255, 136, 32, 0.54)",
+  borderRadius: 16,
+  background: "#ffffff",
+  boxShadow: "0 18px 42px rgba(36, 18, 10, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
+  overflow: "hidden",
+  cursor: "default",
+};
+
+const nodeEditorPopupCloseButtonStyle: React.CSSProperties = {
+  position: "absolute",
+  top: 7,
+  right: 8,
+  zIndex: 8,
+  width: 24,
+  height: 24,
+  border: "1px solid #8b0000",
+  borderRadius: 4,
+  background: "#ff1f1f",
+  color: "#ffffff",
+  fontSize: 16,
+  fontWeight: 600,
+  lineHeight: "20px",
+  cursor: "pointer",
+};
+
 const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, overrideContent }) => {
   const loaded = useMemo(() => loadViews(), []);
   const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
@@ -562,6 +743,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   const [appSidebarWidth, setAppSidebarWidth] = useState(readSidebarWidth);
   const [sidebarPins, setSidebarPins] = useState<SidebarPin[]>(readSidebarPins);
   const [pinDropActive, setPinDropActive] = useState(false);
+  const [explorerNodePopup, setExplorerNodePopup] = useState<NodeEditorPopupState | null>(null);
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [frameRightClickMenu, setFrameRightClickMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -587,6 +769,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   const headerTabs = useMemo(() => tabs.filter((tab) => !pageForTab(tab)), [tabs]);
   const frames = activeTab?.frames ?? [];
   const activePrimaryPage = activeTab ? pageForTab(activeTab) : null;
+  const sidebarExplorerSelectionTargetFrameIDs = useMemo(() => getSidebarExplorerSelectionTargetFrameIDs(activeTab), [activeTab]);
   const isLogicGateArenaView = activeTab?.page === "logic-gate-arena";
   const isCommunicationsView = activeTab?.page === "communications";
   const isFullPageView = isLogicGateArenaView || isCommunicationsView;
@@ -732,7 +915,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   }, [buildSnapshot]);
 
   const canvasW = Math.max(1, viewSize.w - appSidebarWidth - APP_RESIZE_HANDLE_W - PAGE_EDGE_GAP * 2);
-  const canvasH = Math.max(1, viewSize.h - HEADER_H - PAGE_EDGE_GAP);
+  const canvasH = Math.max(1, viewSize.h - PAGE_EDGE_GAP * 2);
   const gridCols = Math.max(1, Math.round(canvasW / CELL_SIZE));
   const gridRows = Math.max(1, Math.round(canvasH / CELL_SIZE));
   const stepX = canvasW / gridCols;
@@ -1166,6 +1349,35 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     addSidebarPins(pins);
   }, [addSidebarPins]);
 
+  useEffect(() => {
+    const onExplorerEntityActivated = (event: Event) => {
+      const detail = (event as CustomEvent<ExplorerEntityActivatedDetail>).detail;
+      const companyID = getActiveCompanyID();
+      if (!detail || (detail.companyID && detail.companyID !== companyID)) return;
+      const id = typeof detail.id === "string" ? detail.id.trim() : "";
+      if (!id) return;
+      const label = typeof detail.label === "string" && detail.label.trim() ? detail.label.trim() : id;
+
+      if (detail.kind === "logic_gate") {
+        setExplorerNodePopup(null);
+        writePendingLogicGateArenaSelection({
+          companyID: detail.companyID || companyID,
+          logicGateID: id,
+          label,
+        });
+        selectPrimaryPage("logic-gate-arena");
+        return;
+      }
+
+      if (detail.kind === "node") {
+        closeMenus();
+        setExplorerNodePopup({ nodeID: id, nodeTitle: label });
+      }
+    };
+    window.addEventListener(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, onExplorerEntityActivated);
+    return () => window.removeEventListener(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, onExplorerEntityActivated);
+  }, [closeMenus, selectPrimaryPage]);
+
 
 
   useEffect(() => {
@@ -1209,6 +1421,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           100% { opacity: 0; transform: scaleY(0.18); }
         }
       `}</style>
+      {SHOW_LEGACY_HEADER && (
       <header
         style={{ height: HEADER_H, padding: "6px 14px", display: "flex", alignItems: "center", background: "transparent", borderBottom: "none", boxShadow: "none" }}
         onContextMenu={(e) => { e.preventDefault(); setHeaderMenu({ x: e.clientX, y: e.clientY }); setCanvasMenu(null); setFrameRightClickMenu(null); setModuleTypeMenu(null); }}
@@ -1288,13 +1501,16 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           </div>
         </div>
       </header>
+      )}
 
       <div style={appBodyStyle(appSidebarWidth)}>
         <AppSidebar
+          accountChrome={accountChrome}
           activePage={activePrimaryPage}
           activeHomeView={homeViewID}
           pins={sidebarPins}
           pinDropActive={pinDropActive}
+          explorerSelectionTargetFrameIDs={sidebarExplorerSelectionTargetFrameIDs}
           onHomeViewSelect={selectHomeSidebarView}
           onPageSelect={selectPrimaryPage}
           onPinOpen={openSidebarPin}
@@ -1574,6 +1790,14 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           ))}
           <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { confirmDeleteFrameSelection([frameRightClickMenu.id]); closeMenus(); }} {...hoverHandlers}>Delete</button>
         </FrameRightClickMenu>
+      )}
+
+      {explorerNodePopup && (
+        <AppNodeEditorPopup
+          nodeID={explorerNodePopup.nodeID}
+          nodeTitle={explorerNodePopup.nodeTitle}
+          onClose={() => setExplorerNodePopup(null)}
+        />
       )}
 
       {frameDeleteConfirmation && (
