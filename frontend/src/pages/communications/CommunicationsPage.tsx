@@ -153,7 +153,7 @@ type CommunicationsColumnResizeDrag = {
 
 type AciInboxRole = Extract<LogicGateRaciRole, "accountable" | "consulted" | "informed">;
 type ResponsibleInboxStatus = "pending" | "in_progress" | "done";
-type InboxPriority = 1 | 2 | 3 | 4 | 5;
+type InboxPriority = 0 | 1 | 2 | 3 | 4 | 5;
 
 type InboxLogicGateNodeGroup = {
   logicGateID: string;
@@ -199,6 +199,7 @@ const INBOX_PRIORITIES: ReadonlyArray<{ value: InboxPriority; label: string }> =
   { value: 3, label: "3\u00A0\u00A0Within a few days" },
   { value: 4, label: "4\u00A0\u00A0Within the week" },
   { value: 5, label: "5\u00A0\u00A0Later (low priority)" },
+  { value: 0, label: "0\u00A0\u00A0Unassigned" },
 ];
 
 export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavigation = false, initialViewID = "my-triage" }: CommunicationsPageProps) {
@@ -651,6 +652,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
   useEffect(() => { if (status?.connected) void loadFolders(); }, [loadFolders, status?.connected]);
   useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
   useEffect(() => { void loadLogicGatePanel(); }, [loadLogicGatePanel]);
+  useEffect(() => {
+    if (!isWorkspacePanelCommunicationsViewID(activeViewID)) return;
+    void loadLogicGatePanel();
+  }, [activeViewID, loadLogicGatePanel]);
   useEffect(() => { void loadMessages(); }, [loadMessages]);
   useEffect(() => {
     setNodeEditorOverlay(null);
@@ -805,6 +810,20 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
       }
     };
   }, [apiBase, companyID, scheduleWorkspacePanelReload]);
+
+  useEffect(() => {
+    const handleKanbanChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ companyID?: string }>).detail;
+      if (detail?.companyID && detail.companyID !== companyID) return;
+      scheduleWorkspacePanelReload();
+    };
+    window.addEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, handleKanbanChange);
+    window.addEventListener(EVENT_KANBAN_BOARDS_UPDATED, handleKanbanChange);
+    return () => {
+      window.removeEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, handleKanbanChange);
+      window.removeEventListener(EVENT_KANBAN_BOARDS_UPDATED, handleKanbanChange);
+    };
+  }, [companyID, scheduleWorkspacePanelReload]);
 
   useEffect(() => {
     if (!selectedMessageID) return;
@@ -3145,12 +3164,17 @@ function buildResponsibleInboxGroupsByCell(
 
 function sortNodesForInbox(nodes: NodeRecord[]): NodeRecord[] {
   return [...nodes].sort((a, b) => {
-    const priorityA = normalizeInboxPriority(a.priority) ?? Number.MAX_SAFE_INTEGER;
-    const priorityB = normalizeInboxPriority(b.priority) ?? Number.MAX_SAFE_INTEGER;
+    const priorityA = inboxPrioritySortRank(normalizeInboxPriority(a.priority));
+    const priorityB = inboxPrioritySortRank(normalizeInboxPriority(b.priority));
     return priorityA - priorityB
       || nodeTitle(a).localeCompare(nodeTitle(b), undefined, { numeric: true, sensitivity: "base" })
       || a.node_id.localeCompare(b.node_id);
   });
+}
+
+function inboxPrioritySortRank(priority: InboxPriority | null): number {
+  if (priority === null) return Number.MAX_SAFE_INTEGER;
+  return priority === 0 ? 6 : priority;
 }
 
 function buildNodeExplorerPayload(nodeIDs: string[]): ExplorerDragPayload | null {
@@ -3199,10 +3223,12 @@ function responsibleCellKey(status: ResponsibleInboxStatus, priority: InboxPrior
 }
 
 function normalizeInboxPriority(value: unknown): InboxPriority | null {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === "string" && value.trim() === "") return 0;
   const priority = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : Number.NaN;
   if (!Number.isFinite(priority)) return null;
   const rounded = Math.round(priority);
-  return rounded >= 1 && rounded <= 5 ? rounded as InboxPriority : null;
+  return rounded >= 0 && rounded <= 5 ? rounded as InboxPriority : null;
 }
 
 function normalizeResponsibleInboxStatus(value: unknown): ResponsibleInboxStatus | null {
@@ -3340,6 +3366,10 @@ function workspaceEventTouchesCommunicationsPanel(type: string): boolean {
     || cleanType.startsWith("logic_gate_")
     || cleanType.startsWith("kanban_")
     || cleanType.startsWith("company_explorer_folder_");
+}
+
+function isWorkspacePanelCommunicationsViewID(viewID: CommunicationsViewID): boolean {
+  return viewID === "aci-inbox" || viewID === "r-inbox" || viewID === "my-nodes" || viewID === "my-logic-gates";
 }
 
 function mailboxForCommunicationsView(viewID: CommunicationsViewID): EmailMailbox {

@@ -1,4 +1,5 @@
 import { requestJSON } from "../api/requestJSON.js";
+import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache.js";
 import { logicGateIDFromKanbanBoardID } from "./shared.js";
 import type { KanbanBoard, KanbanCard, KanbanColumn, LogicGateArenaView } from "./shared.js";
 
@@ -67,6 +68,7 @@ export async function createKanbanBoard(apiBase: string, companyID: string, titl
     body: { company_id: companyID, board_id: boardID, title, position },
   });
   invalidateKanbanBoardListCache(apiBase, companyID);
+  invalidateWorkspaceSnapshot(apiBase, companyID);
   return board;
 }
 
@@ -77,6 +79,7 @@ export async function updateKanbanBoard(apiBase: string, companyID: string, boar
   });
   invalidateKanbanBoardListCache(apiBase, companyID);
   invalidateLogicGateArenaViewCache(apiBase, companyID, board.logic_gate_id ?? logicGateIDFromKanbanBoardID(board.board_id));
+  invalidateWorkspaceSnapshot(apiBase, companyID);
   return board;
 }
 
@@ -85,6 +88,7 @@ export async function deleteKanbanBoard(apiBase: string, companyID: string, boar
   await fetchJSON<{ status?: string }>(apiBase, `/v1/kanban/boards/${encodeURIComponent(boardID)}?${params}`, { method: "DELETE" });
   invalidateKanbanBoardListCache(apiBase, companyID);
   invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateIDFromKanbanBoardID(boardID));
+  invalidateWorkspaceSnapshot(apiBase, companyID);
 }
 
 export async function createKanbanColumn(apiBase: string, companyID: string, boardID: string, title: string, position?: number, widthPx?: number, heightPx?: number, itemColor?: string): Promise<KanbanColumn> {
@@ -93,6 +97,7 @@ export async function createKanbanColumn(apiBase: string, companyID: string, boa
     body: { company_id: companyID, board_id: boardID, title, position, width_px: widthPx, height_px: heightPx, item_color: itemColor },
   });
   invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateIDFromKanbanBoardID(boardID));
+  invalidateWorkspaceSnapshot(apiBase, companyID);
   return column;
 }
 
@@ -120,6 +125,7 @@ export async function updateKanbanColumn(args: {
     },
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
+  invalidateWorkspaceSnapshot(args.apiBase, args.companyID);
   return column;
 }
 
@@ -127,6 +133,7 @@ export async function deleteKanbanColumn(apiBase: string, companyID: string, boa
   const params = query({ company_id: companyID, board_id: boardID });
   await fetchJSON<{ status?: string }>(apiBase, `/v1/kanban/columns/${encodeURIComponent(columnID)}?${params}`, { method: "DELETE" });
   invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateIDFromKanbanBoardID(boardID));
+  invalidateWorkspaceSnapshot(apiBase, companyID);
 }
 
 export async function listKanbanCards(apiBase: string, companyID: string, boardID: string, columnID = "", limit = 200, afterPosition = 0): Promise<KanbanCard[]> {
@@ -158,6 +165,7 @@ export async function upsertKanbanCard(args: {
     },
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
+  invalidateWorkspaceSnapshot(args.apiBase, args.companyID);
   return card;
 }
 
@@ -181,6 +189,7 @@ export async function moveKanbanCard(args: {
     },
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
+  invalidateWorkspaceSnapshot(args.apiBase, args.companyID);
   return card;
 }
 
@@ -188,6 +197,7 @@ export async function deleteKanbanCard(apiBase: string, companyID: string, board
   const params = query({ company_id: companyID, board_id: boardID });
   await fetchJSON<{ status?: string }>(apiBase, `/v1/kanban/cards/${encodeURIComponent(cardID)}?${params}`, { method: "DELETE" });
   invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateIDFromKanbanBoardID(boardID));
+  invalidateWorkspaceSnapshot(apiBase, companyID);
 }
 
 export function invalidateKanbanBoardListCache(apiBase: string, companyID: string): void {

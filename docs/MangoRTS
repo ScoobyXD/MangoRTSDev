@@ -48,7 +48,7 @@ New Features:
 29. when you get to agents, read some of the chats and replies you got on reddit on how they use hermes
 30. Every so often, it's important that you have an audit on the company. For example, when I crashed out at how shitty the Wispr Phone app is. It's important to always be vigilant and make sure to fan out to your entire user base and to see. Ask yourself this question: Could anyone else be crashing out over our shitty UI while using Mango? 
 31. Do we want positions of all the modules, columns, resizing to be stored in database per user? or just browser based.
-
+32. need to be able to use with excel and other files.
 ========
 General changes:
 1. the caching still doesnt work well on company explorer logic gate arena, it doesnt work for nodes in logic gate arena kanban board, i still get whenever i move around pages including email. 
@@ -63,6 +63,7 @@ Editor changes
 1. Outbound email when node is done.
 2. @ mentions summoning or notifying user.
 
+11. Add a little section on the top of logic gate arena SOP of RACI
 4. RACI inboxes should be public view.
 	a. when place node in logic gate, it inherits those RACI matrix
 	b. RACI matrix assigned to the logic gate, not a node.
@@ -78,7 +79,7 @@ Editor changes
 6. archive feature. ususally business guys press archive to remove emails from the email list
 
 
-11. Add a little section on the top of logic gate arena SOP of RACI
+
 
 2. Try to create a shared inbox feature with other users in the same company like how Front (the tech company) has it.
 	a. same goes for read receipts
@@ -92,9 +93,6 @@ after that:
 4. Shared inboxes and email sharing
 5. Internal and external read receipts.
 
-
-Logic gate inbox
-Can group by and organize by columns (I have 2 photos for the 2 groupings)
 
 Things to do bar:
 1. Have a pinned node section.

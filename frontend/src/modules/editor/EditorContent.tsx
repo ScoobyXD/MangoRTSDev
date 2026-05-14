@@ -795,6 +795,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
         upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
       }
+      invalidateWorkspaceSnapshot(apiBase, companyID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_entity");
     }
@@ -815,6 +816,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       syncNodeAssignee(updated.assignee_user_id);
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
       upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
+      invalidateWorkspaceSnapshot(apiBase, companyID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_node_fields");
     }
