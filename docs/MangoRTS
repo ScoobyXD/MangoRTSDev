@@ -53,6 +53,8 @@ New Features:
 General changes:
 1. the caching still doesnt work well on company explorer logic gate arena, it doesnt work for nodes in logic gate arena kanban board, i still get whenever i move around pages including email. 
 	s. nylas still does inbound posting but much rarer and not as consistenly
+2. Its kind of hard to see the borders where you can resize things.
+
 PROBLEM:3. need to break up the apps again its creasting too many merge conflicts.
 LATER: need to do an audit on how well equiped the app is for multiple people using it from different accounts all at once.
 1. This thing is getting really, really slow, especially the part when I drag an email into a Logic Gate. That takes like almost a second! It should be literally 90% faster. 
@@ -65,7 +67,7 @@ Editor changes
 Home page/ Email:
 
 
-3. Assigned should be accountable
+
 4. RACI inboxes should be public view.
 	a. when place node in logic gate, it inherits those RACI matrix
 	b. RACI matrix assigned to the logic gate, not a node.

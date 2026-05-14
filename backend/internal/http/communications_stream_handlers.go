@@ -45,9 +45,7 @@ func (s *Server) handleCommunicationsStream(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
+	prepareSSEHeaders(w)
 
 	ch := s.emailHub.subscribe(actor.User.UserID)
 	defer s.emailHub.unsubscribe(actor.User.UserID, ch)
@@ -55,7 +53,7 @@ func (s *Server) handleCommunicationsStream(w http.ResponseWriter, r *http.Reque
 	fmt.Fprintf(w, "event: ready\ndata: {\"user_id\":%q}\n\n", actor.User.UserID)
 	flusher.Flush()
 
-	heartbeat := time.NewTicker(15 * time.Second)
+	heartbeat := time.NewTicker(sseHeartbeatInterval)
 	defer heartbeat.Stop()
 
 	for {

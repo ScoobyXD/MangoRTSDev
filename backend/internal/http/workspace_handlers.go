@@ -103,9 +103,7 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
+	prepareSSEHeaders(w)
 
 	ch := s.hub.subscribe(companyID)
 	defer s.hub.unsubscribe(companyID, ch)
@@ -113,7 +111,7 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "event: ready\ndata: {\"company_id\":%q}\n\n", companyID)
 	flusher.Flush()
 
-	heartbeat := time.NewTicker(15 * time.Second)
+	heartbeat := time.NewTicker(sseHeartbeatInterval)
 	defer heartbeat.Stop()
 
 	for {

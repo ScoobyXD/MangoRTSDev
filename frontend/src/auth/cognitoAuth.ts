@@ -54,6 +54,11 @@ export type CurrentUserResponse = {
 const TOKEN_KEY = "mangorts:cognito-token-v2";
 const COGNITO_PASSWORD_RESET_SECONDS = 60 * 60;
 const PUBLIC_AUTH_PATHS = new Set(["/v1/invitations/validate", "/v1/password-resets/request"]);
+const CURRENT_USER_CACHE_TTL_MS = 30_000;
+
+let currentUserCache: { value: CurrentUserResponse; fetchedAt: number } | null = null;
+let currentUserInflight: Promise<CurrentUserResponse> | null = null;
+let currentUserCacheGeneration = 0;
 
 export function bootstrapAuth(): Promise<void> {
   return Promise.resolve();
@@ -187,7 +192,24 @@ export async function acceptInvitation(token: string, displayName: string): Prom
 }
 
 export async function fetchCurrentUser(): Promise<CurrentUserResponse> {
-  return apiFetchJSON<CurrentUserResponse>("/v1/me");
+  if (currentUserCache && Date.now() - currentUserCache.fetchedAt <= CURRENT_USER_CACHE_TTL_MS) {
+    return cloneCurrentUserResponse(currentUserCache.value);
+  }
+  if (currentUserInflight) return cloneCurrentUserResponse(await currentUserInflight);
+
+  const generation = currentUserCacheGeneration;
+  currentUserInflight = apiFetchJSON<CurrentUserResponse>("/v1/me")
+    .then((current) => {
+      const value = cloneCurrentUserResponse(current);
+      if (generation === currentUserCacheGeneration) {
+        currentUserCache = { value, fetchedAt: Date.now() };
+      }
+      return value;
+    })
+    .finally(() => {
+      if (generation === currentUserCacheGeneration) currentUserInflight = null;
+    });
+  return cloneCurrentUserResponse(await currentUserInflight);
 }
 
 export function logout(): void {
@@ -473,6 +495,7 @@ function shouldAuthorizeRequest(config: CognitoConfig, input: RequestInfo | URL)
 }
 
 function writeAuthResult(result: CognitoAuthResult): void {
+  clearCurrentUserCache();
   const token: TokenSet = {
     access_token: result.AccessToken,
     id_token: result.IdToken,
@@ -494,7 +517,22 @@ function readToken(): TokenSet | null {
 }
 
 function clearToken(): void {
+  clearCurrentUserCache();
   sessionStorage.removeItem(TOKEN_KEY);
+}
+
+function clearCurrentUserCache(): void {
+  currentUserCacheGeneration += 1;
+  currentUserCache = null;
+  currentUserInflight = null;
+}
+
+function cloneCurrentUserResponse(current: CurrentUserResponse): CurrentUserResponse {
+  return {
+    ...current,
+    user: { ...current.user },
+    memberships: current.memberships.map((membership) => ({ ...membership })),
+  };
 }
 
 function assertConfigured(config: CognitoConfig): void {

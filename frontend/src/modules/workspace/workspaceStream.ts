@@ -8,9 +8,11 @@ type WorkspaceStreamSubscriber = {
 type WorkspaceStreamEntry = {
   subscribers: Set<WorkspaceStreamSubscriber>;
   source?: SseConnection;
+  closeTimer?: ReturnType<typeof window.setTimeout>;
 };
 
 const workspaceStreams = new Map<string, WorkspaceStreamEntry>();
+const STREAM_CLOSE_GRACE_MS = 1500;
 
 function streamKey(apiBase: string, companyID: string): string {
   return `${apiBase}:${companyID}`;
@@ -39,6 +41,10 @@ function ensureWorkspaceStream(apiBase: string, companyID: string, entry: Worksp
 export function subscribeWorkspaceStream(apiBase: string, companyID: string, subscriber: WorkspaceStreamSubscriber): () => void {
   const key = streamKey(apiBase, companyID);
   const entry = getEntry(key);
+  if (entry.closeTimer !== undefined) {
+    window.clearTimeout(entry.closeTimer);
+    entry.closeTimer = undefined;
+  }
   entry.subscribers.add(subscriber);
   ensureWorkspaceStream(apiBase, companyID, entry);
 
@@ -47,8 +53,12 @@ export function subscribeWorkspaceStream(apiBase: string, companyID: string, sub
     if (!current) return;
     current.subscribers.delete(subscriber);
     if (current.subscribers.size === 0) {
-      current.source?.close();
-      workspaceStreams.delete(key);
+      current.closeTimer = window.setTimeout(() => {
+        const closingEntry = workspaceStreams.get(key);
+        if (closingEntry !== current || current.subscribers.size > 0) return;
+        current.source?.close();
+        workspaceStreams.delete(key);
+      }, STREAM_CLOSE_GRACE_MS);
     }
   };
 }

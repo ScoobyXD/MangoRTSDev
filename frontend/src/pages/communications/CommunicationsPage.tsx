@@ -12,6 +12,7 @@ import {
   disconnectCommunications,
   emailMessageMatchesListFilters,
   fetchCommunicationsAuthURL,
+  fetchCommunicationsWorkspacePanel,
   fetchCommunicationsStatus,
   getEmailMessage,
   invalidateCommunicationsCache,
@@ -20,13 +21,6 @@ import {
   listEmailFolders,
   listEmailMessages,
   listCommunicationsSharedInboxes,
-  listNodeFolderItems,
-  listNodeFolders,
-  listNodes,
-  listLogicGateFolderItems,
-  listLogicGateFolders,
-  listLogicGates,
-  listMyLogicGateShortcuts,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
   primeEmailMessageCache,
@@ -250,6 +244,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const foldersRequestInFlightRef = useRef(false);
   const sharedInboxesRequestInFlightRef = useRef(false);
+  const logicGatePanelRequestInFlightRef = useRef(false);
   const messageRequestKeyRef = useRef("");
   const pendingMessageReloadRef = useRef(false);
   const messageRequestSeqRef = useRef(0);
@@ -468,41 +463,27 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
 
   const loadLogicGatePanel = useCallback(async (): Promise<boolean> => {
     if (!companyID) return false;
+    if (logicGatePanelRequestInFlightRef.current) return false;
+    logicGatePanelRequestInFlightRef.current = true;
     setLoadingLogicGates(true);
     setLoadingNodes(true);
     try {
-      const [
-        nextFolders,
-        nextFolderItems,
-        nextLogicGates,
-        nextShortcuts,
-        nextNodeFolders,
-        nextNodeFolderItems,
-        nextNodes,
-      ] = await Promise.all([
-        listLogicGateFolders(companyID),
-        listLogicGateFolderItems(companyID),
-        listLogicGates(companyID),
-        listMyLogicGateShortcuts(companyID),
-        listNodeFolders(companyID),
-        listNodeFolderItems(companyID),
-        listNodes(companyID),
-      ]);
-      setLogicGateFolders(nextFolders);
-      setLogicGateFolderItems(nextFolderItems);
-      setLogicGates(nextLogicGates);
-      setMyLogicGateShortcuts(sortLogicGateShortcuts(nextShortcuts));
-      setNodeFolders(nextNodeFolders);
-      setNodeFolderItems(nextNodeFolderItems);
-      setNodes(nextNodes);
+      const panel = await fetchCommunicationsWorkspacePanel(companyID);
+      setLogicGateFolders(panel.logicGateFolders);
+      setLogicGateFolderItems(panel.logicGateFolderItems);
+      setLogicGates(panel.logicGates);
+      setMyLogicGateShortcuts(sortLogicGateShortcuts(panel.myLogicGateShortcuts));
+      setNodeFolders(panel.nodeFolders);
+      setNodeFolderItems(panel.nodeFolderItems);
+      setNodes(panel.nodes);
       setLogicGateExpandedIDs((previous) => {
         const next = new Set(previous);
-        for (const folder of nextFolders) next.add(`workspace-folder-${folder.folder_id}`);
+        for (const folder of panel.logicGateFolders) next.add(`workspace-folder-${folder.folder_id}`);
         return next;
       });
       setNodeExpandedIDs((previous) => {
         const next = new Set(previous);
-        for (const folder of nextNodeFolders) next.add(`workspace-folder-${folder.folder_id}`);
+        for (const folder of panel.nodeFolders) next.add(`workspace-folder-${folder.folder_id}`);
         return next;
       });
       return true;
@@ -510,6 +491,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
       setError(formatError(logicGateError, "Failed to load Home nodes"));
       return false;
     } finally {
+      logicGatePanelRequestInFlightRef.current = false;
       setLoadingLogicGates(false);
       setLoadingNodes(false);
     }

@@ -1,8 +1,9 @@
-import { apiFetchJSON } from "../../auth/cognitoAuth.js";
+import { apiFetchJSON, readAuthConfig } from "../../auth/cognitoAuth.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders.js";
 import type { KanbanBoard, KanbanCard } from "../../modules/kanban/shared.js";
 import type { NodeRecord } from "../../modules/node-map/shared.js";
 import type { LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
+import { fetchWorkspaceSnapshot, invalidateWorkspaceSnapshot } from "../../modules/workspace/workspaceSnapshotCache.js";
 
 export type EmailProvider = "google" | "microsoft";
 
@@ -97,6 +98,16 @@ export type UserLogicGateShortcut = {
   updated_timestamp: string;
 };
 
+export type CommunicationsWorkspacePanel = {
+  logicGateFolders: CompanyExplorerFolder[];
+  logicGateFolderItems: CompanyExplorerFolderItem[];
+  logicGates: LogicGateRecord[];
+  myLogicGateShortcuts: UserLogicGateShortcut[];
+  nodeFolders: CompanyExplorerFolder[];
+  nodeFolderItems: CompanyExplorerFolderItem[];
+  nodes: NodeRecord[];
+};
+
 export type MessagePage = {
   messages: EmailMessage[];
   next_page_token?: string;
@@ -125,18 +136,34 @@ const STATUS_CACHE_TTL_MS = 60_000;
 const FOLDERS_CACHE_TTL_MS = 10 * 60_000;
 const MESSAGE_PAGE_CACHE_TTL_MS = 5 * 60_000;
 const MESSAGE_DETAIL_CACHE_TTL_MS = 10 * 60_000;
+const SHARED_INBOX_CACHE_TTL_MS = 5 * 60_000;
+const WORKSPACE_PANEL_CACHE_TTL_MS = 5 * 60_000;
 
 let statusCache: CacheEntry<CommunicationsStatus> | null = null;
 let foldersCache: CacheEntry<EmailFolder[]> | null = null;
 const messagePageCache = new Map<string, CacheEntry<MessagePage>>();
 const messageDetailCache = new Map<string, CacheEntry<EmailMessage>>();
+let statusInflight: Promise<CommunicationsStatus> | null = null;
+let foldersInflight: Promise<EmailFolder[]> | null = null;
+const messagePageInflight = new Map<string, Promise<MessagePage>>();
+const messageDetailInflight = new Map<string, Promise<EmailMessage>>();
+const communicationsReadCache = new Map<string, CacheEntry<unknown>>();
+const communicationsReadInflight = new Map<string, Promise<unknown>>();
 
 export async function fetchCommunicationsStatus(): Promise<CommunicationsStatus> {
   const cached = readCache(statusCache, STATUS_CACHE_TTL_MS, cloneStatus);
   if (cached) return cached;
-  const status = await apiFetchJSON<CommunicationsStatus>("/v1/communications/status");
-  statusCache = { value: cloneStatus(status), fetchedAt: Date.now() };
-  return status;
+  if (statusInflight) return cloneStatus(await statusInflight);
+  statusInflight = apiFetchJSON<CommunicationsStatus>("/v1/communications/status")
+    .then((status) => {
+      const value = cloneStatus(status);
+      statusCache = { value, fetchedAt: Date.now() };
+      return value;
+    })
+    .finally(() => {
+      statusInflight = null;
+    });
+  return cloneStatus(await statusInflight);
 }
 
 export async function fetchCommunicationsAuthURL(provider: EmailProvider): Promise<string> {
@@ -152,17 +179,30 @@ export async function disconnectCommunications(): Promise<void> {
 export async function listEmailFolders(): Promise<EmailFolder[]> {
   const cached = readCache(foldersCache, FOLDERS_CACHE_TTL_MS, cloneFolders);
   if (cached) return cached;
-  const payload = await apiFetchJSON<{ folders?: EmailFolder[] }>("/v1/communications/folders");
-  const folders = payload.folders ?? [];
-  foldersCache = { value: cloneFolders(folders), fetchedAt: Date.now() };
-  return folders;
+  if (foldersInflight) return cloneFolders(await foldersInflight);
+  foldersInflight = apiFetchJSON<{ folders?: EmailFolder[] }>("/v1/communications/folders")
+    .then((payload) => {
+      const folders = cloneFolders(payload.folders ?? []);
+      foldersCache = { value: folders, fetchedAt: Date.now() };
+      return folders;
+    })
+    .finally(() => {
+      foldersInflight = null;
+    });
+  return cloneFolders(await foldersInflight);
 }
 
 export async function listEmailMessages(params: ListMessagesParams): Promise<MessagePage> {
   const path = `/v1/communications/messages${createMessageQuery(params)}`;
   const cached = readCache(messagePageCache.get(path) ?? null, MESSAGE_PAGE_CACHE_TTL_MS, cloneMessagePage);
   if (cached) return cached;
-  const page = await apiFetchJSON<MessagePage>(path);
+  const existingInflight = messagePageInflight.get(path);
+  if (existingInflight) return cloneMessagePage(await existingInflight);
+  const pagePromise = apiFetchJSON<MessagePage>(path).finally(() => {
+    messagePageInflight.delete(path);
+  });
+  messagePageInflight.set(path, pagePromise);
+  const page = await pagePromise;
   const normalized = cloneMessagePage(page);
   messagePageCache.set(path, { value: normalized, fetchedAt: Date.now() });
   for (const message of normalized.messages) {
@@ -177,10 +217,20 @@ export async function getEmailMessage(messageID: string, companyID?: string): Pr
   const cacheKey = messageDetailCacheKey(messageID, companyID);
   const cached = readCache(messageDetailCache.get(cacheKey) ?? null, MESSAGE_DETAIL_CACHE_TTL_MS, cloneMessage);
   if (cached && isEmailMessageDetailed(cached)) return cached;
+  const existingInflight = messageDetailInflight.get(cacheKey);
+  if (existingInflight) return cloneMessage(await existingInflight);
   const query = companyID?.trim() ? `?company_id=${encodeURIComponent(companyID.trim())}` : "";
-  const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}${query}`);
-  messageDetailCache.set(cacheKey, { value: cloneMessage(payload.message), fetchedAt: Date.now() });
-  return payload.message;
+  const request = apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}${query}`)
+    .then((payload) => {
+      const message = cloneMessage(payload.message);
+      messageDetailCache.set(cacheKey, { value: message, fetchedAt: Date.now() });
+      return message;
+    })
+    .finally(() => {
+      messageDetailInflight.delete(cacheKey);
+    });
+  messageDetailInflight.set(cacheKey, request);
+  return cloneMessage(await request);
 }
 
 export async function updateEmailMessage(messageID: string, update: { unread?: boolean; starred?: boolean; folders?: string[] }): Promise<EmailMessage> {
@@ -189,16 +239,16 @@ export async function updateEmailMessage(messageID: string, update: { unread?: b
     body: JSON.stringify(update),
   });
   primeMessageCaches(payload.message);
-  messagePageCache.clear();
-  if (update.folders) foldersCache = null;
+  clearMessagePageCache();
+  if (update.folders) clearEmailFolderCache();
   return payload.message;
 }
 
 export async function deleteEmailMessage(messageID: string): Promise<void> {
   await apiFetchJSON<{ status: string }>(`/v1/communications/messages/${encodeURIComponent(messageID)}`, { method: "DELETE" });
   invalidateEmailMessageCache(messageID);
-  messagePageCache.clear();
-  foldersCache = null;
+  clearMessagePageCache();
+  clearEmailFolderCache();
 }
 
 export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
@@ -207,18 +257,21 @@ export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
     body: JSON.stringify(input),
   });
   primeMessageCaches(payload.message);
-  messagePageCache.clear();
-  foldersCache = null;
+  clearMessagePageCache();
+  clearEmailFolderCache();
   return payload.message;
 }
 
 export async function listCommunicationsSharedInboxes(companyID: string): Promise<CommunicationsSharedInbox[]> {
-  const params = new URLSearchParams({
-    company_id: companyID,
-    folder_kind: "communications",
-  });
-  const payload = await apiFetchJSON<{ folders?: CommunicationsSharedInbox[] }>(`/v1/company-explorer/folders?${params.toString()}`);
-  return cloneSharedInboxes(payload.folders ?? []);
+  const cleanCompanyID = companyID.trim();
+  return cachedRead(`shared-inboxes:${cleanCompanyID}`, SHARED_INBOX_CACHE_TTL_MS, async () => {
+    const params = new URLSearchParams({
+      company_id: cleanCompanyID,
+      folder_kind: "communications",
+    });
+    const payload = await apiFetchJSON<{ folders?: CommunicationsSharedInbox[] }>(`/v1/company-explorer/folders?${params.toString()}`);
+    return cloneSharedInboxes(payload.folders ?? []);
+  }, cloneSharedInboxes);
 }
 
 export async function createCommunicationsSharedInbox(input: {
@@ -235,6 +288,7 @@ export async function createCommunicationsSharedInbox(input: {
       name: input.name.trim(),
     }),
   });
+  invalidateCacheKey(`shared-inboxes:${input.companyID.trim()}`);
   return cloneSharedInbox(folder);
 }
 
@@ -256,55 +310,78 @@ export async function removeMessageFromMyTriage(messageID: string): Promise<void
 }
 
 export async function listLogicGates(companyID: string): Promise<LogicGateRecord[]> {
-  const params = new URLSearchParams({ company_id: companyID });
-  const payload = await apiFetchJSON<{ logic_gates?: LogicGateRecord[] }>(`/v1/logic-gates?${params.toString()}`);
-  return (payload.logic_gates ?? []).map((logicGate) => ({ ...logicGate }));
+  const cleanCompanyID = companyID.trim();
+  return cachedRead(`logic-gates:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+    const params = new URLSearchParams({ company_id: cleanCompanyID });
+    const payload = await apiFetchJSON<{ logic_gates?: LogicGateRecord[] }>(`/v1/logic-gates?${params.toString()}`);
+    return cloneLogicGates(payload.logic_gates ?? []);
+  }, cloneLogicGates);
 }
 
 export async function listNodes(companyID: string): Promise<NodeRecord[]> {
-  const params = new URLSearchParams({ company_id: companyID });
-  const payload = await apiFetchJSON<{ nodes?: NodeRecord[] }>(`/v1/nodes?${params.toString()}`);
-  return (payload.nodes ?? []).map((node) => ({ ...node }));
+  const cleanCompanyID = companyID.trim();
+  return cachedRead(`nodes:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+    const params = new URLSearchParams({ company_id: cleanCompanyID });
+    const payload = await apiFetchJSON<{ nodes?: NodeRecord[] }>(`/v1/nodes?${params.toString()}`);
+    return cloneNodes(payload.nodes ?? []);
+  }, cloneNodes);
 }
 
 export async function updateNode(companyID: string, nodeID: string, update: Partial<Pick<NodeRecord, "status" | "status_color" | "priority" | "assignee_user_id">>): Promise<NodeRecord> {
-  return apiFetchJSON<NodeRecord>(`/v1/nodes/${encodeURIComponent(nodeID)}`, {
+  const node = await apiFetchJSON<NodeRecord>(`/v1/nodes/${encodeURIComponent(nodeID)}`, {
     method: "PUT",
     body: JSON.stringify({
       company_id: companyID,
       ...update,
     }),
   });
+  invalidateWorkspacePanelCache(companyID);
+  return { ...node };
 }
 
 export async function listNodeFolders(companyID: string): Promise<CompanyExplorerFolder[]> {
-  const params = new URLSearchParams({ company_id: companyID, folder_kind: "node" });
-  const payload = await apiFetchJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?${params.toString()}`);
-  return (payload.folders ?? []).map((folder) => ({ ...folder }));
+  const cleanCompanyID = companyID.trim();
+  return cachedRead(`node-folders:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+    const params = new URLSearchParams({ company_id: cleanCompanyID, folder_kind: "node" });
+    const payload = await apiFetchJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?${params.toString()}`);
+    return cloneCompanyExplorerFolders(payload.folders ?? []);
+  }, cloneCompanyExplorerFolders);
 }
 
 export async function listNodeFolderItems(companyID: string): Promise<CompanyExplorerFolderItem[]> {
-  const params = new URLSearchParams({ company_id: companyID, item_type: "node" });
-  const payload = await apiFetchJSON<{ folder_items?: CompanyExplorerFolderItem[] }>(`/v1/company-explorer/folder-items?${params.toString()}`);
-  return (payload.folder_items ?? []).map((item) => ({ ...item }));
+  const cleanCompanyID = companyID.trim();
+  return cachedRead(`node-folder-items:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+    const params = new URLSearchParams({ company_id: cleanCompanyID, item_type: "node" });
+    const payload = await apiFetchJSON<{ folder_items?: CompanyExplorerFolderItem[] }>(`/v1/company-explorer/folder-items?${params.toString()}`);
+    return cloneCompanyExplorerFolderItems(payload.folder_items ?? []);
+  }, cloneCompanyExplorerFolderItems);
 }
 
 export async function listLogicGateFolders(companyID: string): Promise<CompanyExplorerFolder[]> {
-  const params = new URLSearchParams({ company_id: companyID, folder_kind: "logic_gate" });
-  const payload = await apiFetchJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?${params.toString()}`);
-  return (payload.folders ?? []).map((folder) => ({ ...folder }));
+  const cleanCompanyID = companyID.trim();
+  return cachedRead(`logic-gate-folders:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+    const params = new URLSearchParams({ company_id: cleanCompanyID, folder_kind: "logic_gate" });
+    const payload = await apiFetchJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?${params.toString()}`);
+    return cloneCompanyExplorerFolders(payload.folders ?? []);
+  }, cloneCompanyExplorerFolders);
 }
 
 export async function listLogicGateFolderItems(companyID: string): Promise<CompanyExplorerFolderItem[]> {
-  const params = new URLSearchParams({ company_id: companyID, item_type: "logic_gate" });
-  const payload = await apiFetchJSON<{ folder_items?: CompanyExplorerFolderItem[] }>(`/v1/company-explorer/folder-items?${params.toString()}`);
-  return (payload.folder_items ?? []).map((item) => ({ ...item }));
+  const cleanCompanyID = companyID.trim();
+  return cachedRead(`logic-gate-folder-items:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+    const params = new URLSearchParams({ company_id: cleanCompanyID, item_type: "logic_gate" });
+    const payload = await apiFetchJSON<{ folder_items?: CompanyExplorerFolderItem[] }>(`/v1/company-explorer/folder-items?${params.toString()}`);
+    return cloneCompanyExplorerFolderItems(payload.folder_items ?? []);
+  }, cloneCompanyExplorerFolderItems);
 }
 
 export async function listMyLogicGateShortcuts(companyID: string): Promise<UserLogicGateShortcut[]> {
-  const params = new URLSearchParams({ company_id: companyID });
-  const payload = await apiFetchJSON<{ shortcuts?: UserLogicGateShortcut[] }>(`/v1/communications/my-logic-gates?${params.toString()}`);
-  return (payload.shortcuts ?? []).map((item) => ({ ...item }));
+  const cleanCompanyID = companyID.trim();
+  return cachedRead(`my-logic-gates:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+    const params = new URLSearchParams({ company_id: cleanCompanyID });
+    const payload = await apiFetchJSON<{ shortcuts?: UserLogicGateShortcut[] }>(`/v1/communications/my-logic-gates?${params.toString()}`);
+    return cloneLogicGateShortcuts(payload.shortcuts ?? []);
+  }, cloneLogicGateShortcuts);
 }
 
 export async function addMyLogicGateShortcuts(companyID: string, logicGateIDs: string[]): Promise<UserLogicGateShortcut[]> {
@@ -312,12 +389,35 @@ export async function addMyLogicGateShortcuts(companyID: string, logicGateIDs: s
     method: "POST",
     body: JSON.stringify({ company_id: companyID, logic_gate_ids: cleanIDs(logicGateIDs) }),
   });
-  return (payload.shortcuts ?? []).map((item) => ({ ...item }));
+  invalidateCacheKey(`my-logic-gates:${companyID.trim()}`);
+  return cloneLogicGateShortcuts(payload.shortcuts ?? []);
 }
 
 export async function removeMyLogicGateShortcut(companyID: string, logicGateID: string): Promise<void> {
   const params = new URLSearchParams({ company_id: companyID });
   await apiFetchJSON<{ status?: string }>(`/v1/communications/my-logic-gates/${encodeURIComponent(logicGateID)}?${params.toString()}`, { method: "DELETE" });
+  invalidateCacheKey(`my-logic-gates:${companyID.trim()}`);
+}
+
+export async function fetchCommunicationsWorkspacePanel(companyID: string): Promise<CommunicationsWorkspacePanel> {
+  const cleanCompanyID = companyID.trim();
+  const apiBase = readAuthConfig().apiBase;
+  const [snapshotResult, shortcuts] = await Promise.all([
+    fetchWorkspaceSnapshot(apiBase, cleanCompanyID, { maxAgeMs: WORKSPACE_PANEL_CACHE_TTL_MS }),
+    listMyLogicGateShortcuts(cleanCompanyID),
+  ]);
+  const payload = snapshotResult.payload ?? {};
+  const folders = cloneCompanyExplorerFolders(snapshotItems<CompanyExplorerFolder>(payload.folders));
+  const folderItems = cloneCompanyExplorerFolderItems(snapshotItems<CompanyExplorerFolderItem>(payload.folder_items));
+  return {
+    logicGateFolders: folders.filter((folder) => folder.folder_kind === "logic_gate"),
+    logicGateFolderItems: folderItems.filter((item) => item.item_type === "logic_gate"),
+    logicGates: cloneLogicGates(snapshotItems<LogicGateRecord>(payload.logic_gates)),
+    myLogicGateShortcuts: cloneLogicGateShortcuts(shortcuts),
+    nodeFolders: folders.filter((folder) => folder.folder_kind === "node"),
+    nodeFolderItems: folderItems.filter((item) => item.item_type === "node"),
+    nodes: cloneNodes(snapshotItems<NodeRecord>(payload.nodes)),
+  };
 }
 
 export async function convertTriageMessagesToLogicGate(input: {
@@ -331,7 +431,7 @@ export async function convertTriageMessagesToLogicGate(input: {
   folder_items?: CompanyExplorerFolderItem[];
   deleted_message_ids: string[];
 }> {
-  return apiFetchJSON<{
+  const result = await apiFetchJSON<{
     board: KanbanBoard;
     cards: KanbanCard[];
     nodes: NodeRecord[];
@@ -345,6 +445,8 @@ export async function convertTriageMessagesToLogicGate(input: {
       message_ids: cleanIDs(input.messageIDs),
     }),
   });
+  invalidateWorkspacePanelCache(input.companyID);
+  return result;
 }
 
 export async function revertKanbanCardToMyTriage(input: {
@@ -357,7 +459,7 @@ export async function revertKanbanCardToMyTriage(input: {
   deleted_card_id: string;
   board_id: string;
 }> {
-  return apiFetchJSON<{
+  const result = await apiFetchJSON<{
     triage_item: CommunicationsTriageItem;
     deleted_node_id: string;
     deleted_card_id: string;
@@ -370,18 +472,34 @@ export async function revertKanbanCardToMyTriage(input: {
       card_id: input.cardID,
     }),
   });
+  invalidateWorkspacePanelCache(input.companyID);
+  return result;
 }
 
 export function invalidateCommunicationsCache(scope?: { status?: boolean; folders?: boolean; messagePages?: boolean; messages?: boolean }): void {
   const full = !scope;
-  if (full || scope?.status) statusCache = null;
-  if (full || scope?.folders) foldersCache = null;
-  if (full || scope?.messagePages) messagePageCache.clear();
-  if (full || scope?.messages) messageDetailCache.clear();
+  if (full || scope?.status) {
+    statusCache = null;
+    statusInflight = null;
+  }
+  if (full || scope?.folders) {
+    clearEmailFolderCache();
+  }
+  if (full || scope?.messagePages) {
+    clearMessagePageCache();
+  }
+  if (full || scope?.messages) {
+    messageDetailCache.clear();
+    messageDetailInflight.clear();
+  }
+  if (full) {
+    communicationsReadCache.clear();
+    communicationsReadInflight.clear();
+  }
 }
 
 export function invalidateCommunicationsFolderCache(): void {
-  foldersCache = null;
+  clearEmailFolderCache();
 }
 
 export function invalidateEmailMessageCache(messageID: string): void {
@@ -389,6 +507,9 @@ export function invalidateEmailMessageCache(messageID: string): void {
   if (!cleanMessageID) return;
   for (const key of messageDetailCache.keys()) {
     if (key === cleanMessageID || key.endsWith(`\x1f${cleanMessageID}`)) messageDetailCache.delete(key);
+  }
+  for (const key of messageDetailInflight.keys()) {
+    if (key === cleanMessageID || key.endsWith(`\x1f${cleanMessageID}`)) messageDetailInflight.delete(key);
   }
 }
 
@@ -488,6 +609,61 @@ function parseEmailAddress(raw: string): EmailAddress | null {
   return name ? { name, email } : { email };
 }
 
+async function cachedRead<T>(key: string, maxAgeMs: number, load: () => Promise<T>, clone: (value: T) => T): Promise<T> {
+  const cachedEntry = communicationsReadCache.get(key) as CacheEntry<T> | undefined;
+  const cached = readCache(cachedEntry ?? null, maxAgeMs, clone);
+  if (cached) return cached;
+
+  const inflight = communicationsReadInflight.get(key) as Promise<T> | undefined;
+  if (inflight) return clone(await inflight);
+
+  const request = load()
+    .then((value) => {
+      const cachedValue = clone(value);
+      communicationsReadCache.set(key, { value: cachedValue, fetchedAt: Date.now() });
+      return cachedValue;
+    })
+    .finally(() => {
+      communicationsReadInflight.delete(key);
+    });
+  communicationsReadInflight.set(key, request);
+  return clone(await request);
+}
+
+function invalidateCacheKey(key: string): void {
+  communicationsReadCache.delete(key);
+  communicationsReadInflight.delete(key);
+}
+
+function clearEmailFolderCache(): void {
+  foldersCache = null;
+  foldersInflight = null;
+}
+
+function clearMessagePageCache(): void {
+  messagePageCache.clear();
+  messagePageInflight.clear();
+}
+
+function invalidateWorkspacePanelCache(companyID: string): void {
+  const cleanCompanyID = companyID.trim();
+  invalidateWorkspaceSnapshot(readAuthConfig().apiBase, cleanCompanyID);
+  for (const key of [
+    `logic-gates:${cleanCompanyID}`,
+    `nodes:${cleanCompanyID}`,
+    `node-folders:${cleanCompanyID}`,
+    `node-folder-items:${cleanCompanyID}`,
+    `logic-gate-folders:${cleanCompanyID}`,
+    `logic-gate-folder-items:${cleanCompanyID}`,
+  ]) {
+    invalidateCacheKey(key);
+  }
+}
+
+function snapshotItems<T>(value: unknown[] | undefined): T[] {
+  return Array.isArray(value) ? value.map((item) => item as T) : [];
+}
+
 function readCache<T>(entry: CacheEntry<T> | null, maxAgeMs: number, clone: (value: T) => T): T | null {
   if (!entry || Date.now() - entry.fetchedAt > maxAgeMs) return null;
   return clone(entry.value);
@@ -560,6 +736,29 @@ function cloneTriageItem(item: CommunicationsTriageItem): CommunicationsTriageIt
     ...item,
     message: cloneMessage(item.message),
   };
+}
+
+function cloneCompanyExplorerFolders(folders: CompanyExplorerFolder[]): CompanyExplorerFolder[] {
+  return folders.map((folder) => ({ ...folder }));
+}
+
+function cloneCompanyExplorerFolderItems(items: CompanyExplorerFolderItem[]): CompanyExplorerFolderItem[] {
+  return items.map((item) => ({ ...item }));
+}
+
+function cloneLogicGates(logicGates: LogicGateRecord[]): LogicGateRecord[] {
+  return logicGates.map((logicGate) => ({ ...logicGate }));
+}
+
+function cloneLogicGateShortcuts(shortcuts: UserLogicGateShortcut[]): UserLogicGateShortcut[] {
+  return shortcuts.map((shortcut) => ({ ...shortcut }));
+}
+
+function cloneNodes(nodes: NodeRecord[]): NodeRecord[] {
+  return nodes.map((node) => ({
+    ...node,
+    logic_gate_ids: node.logic_gate_ids ? [...node.logic_gate_ids] : undefined,
+  }));
 }
 
 function cleanIDs(values: string[]): string[] {
