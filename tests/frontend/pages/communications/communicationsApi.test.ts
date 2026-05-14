@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  archiveEmailMessage,
   createMessageQuery,
   emailMessageMatchesListFilters,
   getEmailMessage,
@@ -8,6 +9,7 @@ import {
   listEmailMessages,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
+  unarchiveEmailMessage,
   type EmailMessage,
 } from "../../../../frontend/src/pages/communications/communicationsApi.js";
 
@@ -16,6 +18,7 @@ test("communications message query omits empty values and encodes filters", () =
     createMessageQuery({ limit: 25, mailbox: "primary", folderID: "inbox", q: " invoice #42 ", unread: true, pageToken: "next/token" }),
     "?limit=25&page_token=next%2Ftoken&mailbox=primary&folder_id=inbox&q=invoice+%2342&unread=true",
   );
+  assert.equal(createMessageQuery({ mailbox: "archive", limit: 10 }), "?limit=10&mailbox=archive");
   assert.equal(createMessageQuery({ q: "   " }), "");
 });
 
@@ -58,6 +61,33 @@ test("communications stream helpers remove updated messages that no longer match
     mergeEmailMessageIntoMessageList(existing, updated, { limit: 25, mailbox: "primary", unread: true }).map((item) => item.id),
     [],
   );
+});
+
+test("archive mailbox filter matches messages outside inbox but not trash or sent", () => {
+  assert.equal(emailMessageMatchesListFilters(message("archived", { folders: ["UNREAD", "CATEGORY_PERSONAL"] }), { mailbox: "archive" }), true);
+  assert.equal(emailMessageMatchesListFilters(message("inbox", { folders: ["INBOX", "CATEGORY_PERSONAL"] }), { mailbox: "archive" }), false);
+  assert.equal(emailMessageMatchesListFilters(message("sent", { folders: ["SENT"] }), { mailbox: "archive" }), false);
+});
+
+test("archive helpers call mailbox action endpoints", async () => {
+  invalidateCommunicationsCache();
+  const calls: Array<{ path: string; method: string }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ path: input.toString(), method: init?.method ?? "GET" });
+    return jsonResponse({ message: message("msg 1") });
+  };
+  try {
+    await archiveEmailMessage("msg 1");
+    await unarchiveEmailMessage("msg 1");
+    assert.deepEqual(calls, [
+      { path: "/v1/communications/messages/msg%201/archive", method: "POST" },
+      { path: "/v1/communications/messages/msg%201/unarchive", method: "POST" },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
 });
 
 test("email detail fetch ignores preview-only list cache entries", async () => {

@@ -66,20 +66,16 @@ Editor changes
 4. RACI inboxes should be public view.
 	a. when place node in logic gate, it inherits those RACI matrix
 	b. RACI matrix assigned to the logic gate, not a node.
-5. in ACI and R inbox, it should be logic gate acting as folder, and the node as the child per cell. and its collapsable
 6. when there is a state change, live show difference on the R and ACI inbox
 7. @ mentions, only if part of raci matrix.
 
 
 1. We need to capture history of what email from primary moved to what triage and then to what logic gate so we can fine tune hermes agent
-2. have a way to just easily shift multi select and delete many emails
 3. I think we put wayyyyy too much code in the communications page alone and needs to be broken apart. also for nodes.
 	a. for example nodeworkspacesurface keeps getting a merge conflict.
 
 	a. and call logic gate inbox into logic gate triage.
 6. archive feature. ususally business guys press archive to remove emails from the email list
-
-8. My nodes is all nodes assigned to me, in RACI matrix. group by logic gate. 
 
 
 11. Add a little section on the top of logic gate arena SOP of RACI

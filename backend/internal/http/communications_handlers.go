@@ -14,7 +14,10 @@ import (
 	"time"
 )
 
-var errInvalidCommunicationsMailbox = errors.New("invalid communications mailbox")
+var (
+	errInvalidCommunicationsMailbox     = errors.New("invalid communications mailbox")
+	errCommunicationsArchiveUnavailable = errors.New("communications archive folder unavailable")
+)
 
 func (s *Server) handleCommunicationsStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -164,6 +167,10 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 				writeError(w, http.StatusBadRequest, "invalid_email_mailbox")
 				return
 			}
+			if errors.Is(err, errCommunicationsArchiveUnavailable) {
+				writeError(w, http.StatusConflict, "archive_folder_unavailable")
+				return
+			}
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
@@ -181,8 +188,17 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.Request) {
-	messageID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/communications/messages/"), "/")
-	if messageID == "" || strings.Contains(messageID, "/") {
+	suffix := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/communications/messages/"), "/")
+	parts := strings.Split(suffix, "/")
+	messageID := ""
+	action := ""
+	if len(parts) >= 1 {
+		messageID = strings.TrimSpace(parts[0])
+	}
+	if len(parts) == 2 {
+		action = strings.TrimSpace(parts[1])
+	}
+	if messageID == "" || len(parts) > 2 || (len(parts) == 2 && action != "archive" && action != "unarchive") {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
@@ -191,11 +207,31 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 		return
 	}
 	if messageID == "send" {
+		if action != "" {
+			writeError(w, http.StatusNotFound, "not_found")
+			return
+		}
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
 		}
 		s.sendCommunicationsMessage(w, r, connection)
+		return
+	}
+	if action == "archive" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		s.archiveCommunicationsMessage(w, r, connection, messageID)
+		return
+	}
+	if action == "unarchive" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		s.unarchiveCommunicationsMessage(w, r, connection, messageID)
 		return
 	}
 
@@ -259,6 +295,80 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
+}
+
+func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, messageID string) {
+	message, err := s.communicationsMessage(r.Context(), connection, messageID)
+	if err != nil {
+		s.writeNylasError(w, r, connection, err)
+		return
+	}
+
+	folders := archiveMessageFolderIDs(connection.Provider, message.Folders, "")
+	if connection.Provider != "google" {
+		emailFolders, err := s.communicationsFolders(r.Context(), connection)
+		if err != nil {
+			s.writeNylasError(w, r, connection, err)
+			return
+		}
+		archiveFolderID := findNylasArchiveFolderID(emailFolders)
+		if archiveFolderID == "" {
+			writeError(w, http.StatusConflict, "archive_folder_unavailable")
+			return
+		}
+		folders = []string{archiveFolderID}
+	}
+
+	var archived NylasMessage
+	err = s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
+		var err error
+		archived, err = s.nylasClient.UpdateMessage(ctx, connection.GrantID, messageID, NylasMessageUpdate{Folders: folders})
+		return err
+	})
+	if err != nil {
+		s.writeNylasError(w, r, connection, err)
+		return
+	}
+	s.commCache.invalidateUser(connection.UserID)
+	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", archived.ID)
+	writeJSON(w, http.StatusOK, map[string]any{"message": archived})
+}
+
+func (s *Server) unarchiveCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, messageID string) {
+	message, err := s.communicationsMessage(r.Context(), connection, messageID)
+	if err != nil {
+		s.writeNylasError(w, r, connection, err)
+		return
+	}
+
+	folders := unarchiveMessageFolderIDs(connection.Provider, message.Folders, "INBOX")
+	if connection.Provider != "google" {
+		emailFolders, err := s.communicationsFolders(r.Context(), connection)
+		if err != nil {
+			s.writeNylasError(w, r, connection, err)
+			return
+		}
+		inboxFolderID := findNylasSystemFolderID(emailFolders, "inbox")
+		if inboxFolderID == "" {
+			writeError(w, http.StatusConflict, "inbox_folder_unavailable")
+			return
+		}
+		folders = []string{inboxFolderID}
+	}
+
+	var restored NylasMessage
+	err = s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
+		var err error
+		restored, err = s.nylasClient.UpdateMessage(ctx, connection.GrantID, messageID, NylasMessageUpdate{Folders: folders})
+		return err
+	})
+	if err != nil {
+		s.writeNylasError(w, r, connection, err)
+		return
+	}
+	s.commCache.invalidateUser(connection.UserID)
+	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", restored.ID)
+	writeJSON(w, http.StatusOK, map[string]any{"message": restored})
 }
 
 func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection) {
@@ -641,6 +751,15 @@ func (s *Server) applyCommunicationsMailboxQuery(ctx context.Context, connection
 			return query, nil
 		}
 		return s.applySystemFolderMailbox(ctx, connection, query, "sent")
+	case "archive":
+		if connection.Provider == "google" {
+			query.SearchQueryNative = gmailArchiveSearch(query.Query, query.Unread)
+			query.Query = ""
+			query.Unread = nil
+			query.FolderID = ""
+			return query, nil
+		}
+		return s.applyRequiredSystemFolderMailbox(ctx, connection, query, "archive")
 	default:
 		return NylasMessageQuery{}, errInvalidCommunicationsMailbox
 	}
@@ -662,8 +781,38 @@ func (s *Server) applySystemFolderMailbox(ctx context.Context, connection domain
 	return query, nil
 }
 
+func (s *Server) applyRequiredSystemFolderMailbox(ctx context.Context, connection domain.UserEmailConnection, query NylasMessageQuery, system string) (NylasMessageQuery, error) {
+	if strings.TrimSpace(query.FolderID) != "" {
+		return query, nil
+	}
+	folders, err := s.communicationsFolders(ctx, connection)
+	if err != nil {
+		return NylasMessageQuery{}, err
+	}
+	folderID := findNylasSystemFolderID(folders, system)
+	if folderID == "" && system == "archive" {
+		folderID = findNylasArchiveFolderID(folders)
+	}
+	if folderID == "" {
+		return NylasMessageQuery{}, errCommunicationsArchiveUnavailable
+	}
+	query.FolderID = folderID
+	return query, nil
+}
+
 func gmailPrimarySearch(userQuery string, unread *bool) string {
 	parts := []string{"category:primary", "in:inbox"}
+	if trimmed := strings.TrimSpace(userQuery); trimmed != "" {
+		parts = append(parts, trimmed)
+	}
+	if unread != nil && *unread {
+		parts = append(parts, "is:unread")
+	}
+	return strings.Join(parts, " ")
+}
+
+func gmailArchiveSearch(userQuery string, unread *bool) string {
+	parts := []string{"in:all", "-in:inbox", "-in:trash", "-in:spam", "-in:sent", "-in:drafts"}
 	if trimmed := strings.TrimSpace(userQuery); trimmed != "" {
 		parts = append(parts, trimmed)
 	}
@@ -690,12 +839,33 @@ func findNylasSystemFolderID(folders []NylasFolder, system string) string {
 	return ""
 }
 
+func findNylasArchiveFolderID(folders []NylasFolder) string {
+	if folderID := findNylasSystemFolderID(folders, "archive"); folderID != "" {
+		return folderID
+	}
+	for _, folder := range folders {
+		name := normalizeNylasFolderToken(firstNonBlank(folder.Name, folder.DisplayName))
+		if name == "archive" || name == "archives" || name == "archived" {
+			return strings.TrimSpace(folder.ID)
+		}
+		for _, attribute := range folder.Attributes {
+			value := normalizeNylasFolderToken(attribute)
+			if value == "archive" || value == "archives" || value == "archived" {
+				return strings.TrimSpace(folder.ID)
+			}
+		}
+	}
+	return ""
+}
+
 func normalizeCommunicationsMailbox(mailbox string) string {
 	switch strings.TrimSpace(strings.ToLower(mailbox)) {
 	case "", "primary", "primary_inbox", "primary inbox":
 		return "primary"
 	case "sent", "sent_mail", "sent mail":
 		return "sent"
+	case "archive", "archives", "archived":
+		return "archive"
 	case "all", "all_mail", "all mail":
 		return "all"
 	default:
@@ -744,6 +914,75 @@ func cleanStringList(items []string) []string {
 		cleaned = append(cleaned, value)
 	}
 	return cleaned
+}
+
+func archiveMessageFolderIDs(provider string, currentFolders []string, inboxFolderID string) []string {
+	if strings.TrimSpace(strings.ToLower(provider)) != "google" {
+		return cleanStringList(currentFolders)
+	}
+	inboxToken := normalizeNylasFolderToken(inboxFolderID)
+	archivedFolders := make([]string, 0, len(currentFolders))
+	seen := map[string]bool{}
+	for _, folder := range currentFolders {
+		clean := strings.TrimSpace(folder)
+		if clean == "" {
+			continue
+		}
+		token := normalizeNylasFolderToken(clean)
+		if token == "inbox" || (inboxToken != "" && token == inboxToken) {
+			continue
+		}
+		if isGmailSystemFolderToken(token) {
+			continue
+		}
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		archivedFolders = append(archivedFolders, clean)
+	}
+	return archivedFolders
+}
+
+func unarchiveMessageFolderIDs(provider string, currentFolders []string, inboxFolderID string) []string {
+	cleanInboxFolderID := strings.TrimSpace(inboxFolderID)
+	if cleanInboxFolderID == "" {
+		cleanInboxFolderID = "INBOX"
+	}
+	if strings.TrimSpace(strings.ToLower(provider)) != "google" {
+		folders := cleanStringList(currentFolders)
+		inboxToken := normalizeNylasFolderToken(cleanInboxFolderID)
+		for _, folder := range folders {
+			if normalizeNylasFolderToken(folder) == inboxToken {
+				return folders
+			}
+		}
+		return append(folders, cleanInboxFolderID)
+	}
+	folders := archiveMessageFolderIDs(provider, currentFolders, cleanInboxFolderID)
+	inboxToken := normalizeNylasFolderToken(cleanInboxFolderID)
+	for _, folder := range folders {
+		if normalizeNylasFolderToken(folder) == inboxToken {
+			return folders
+		}
+	}
+	return append(folders, cleanInboxFolderID)
+}
+
+func isGmailSystemFolderToken(token string) bool {
+	if strings.HasPrefix(token, "category_") || strings.HasPrefix(token, "category:") {
+		return true
+	}
+	switch token {
+	case "all", "all_mail", "all mail", "chat", "draft", "drafts", "important", "inbox", "muted", "sent", "snoozed", "spam", "starred", "trash", "unread":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeNylasFolderToken(value string) string {
+	return strings.Trim(strings.ToLower(strings.TrimSpace(value)), "\\")
 }
 
 func normalizeEmailForCompare(email string) string {

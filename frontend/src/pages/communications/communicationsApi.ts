@@ -68,7 +68,7 @@ export type ListMessagesParams = {
   unread?: boolean;
 };
 
-export type EmailMailbox = "primary" | "sent" | "all";
+export type EmailMailbox = "primary" | "sent" | "all" | "archive";
 
 export type CommunicationsSharedInbox = {
   company_id: string;
@@ -241,6 +241,26 @@ export async function updateEmailMessage(messageID: string, update: { unread?: b
   primeMessageCaches(payload.message);
   clearMessagePageCache();
   if (update.folders) clearEmailFolderCache();
+  return payload.message;
+}
+
+export async function archiveEmailMessage(messageID: string): Promise<EmailMessage> {
+  const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}/archive`, {
+    method: "POST",
+  });
+  primeMessageCaches(payload.message);
+  clearMessagePageCache();
+  clearEmailFolderCache();
+  return payload.message;
+}
+
+export async function unarchiveEmailMessage(messageID: string): Promise<EmailMessage> {
+  const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}/unarchive`, {
+    method: "POST",
+  });
+  primeMessageCaches(payload.message);
+  clearMessagePageCache();
+  clearEmailFolderCache();
   return payload.message;
 }
 
@@ -790,15 +810,21 @@ function listMessageParamsFromCacheKey(path: string): ListMessagesParams {
 }
 
 function normalizeMailbox(value: string | undefined): EmailMailbox | undefined {
-  if (value === "primary" || value === "sent" || value === "all") return value;
+  if (value === "primary" || value === "sent" || value === "all" || value === "archive") return value;
   return undefined;
 }
 
 function messageMatchesMailbox(message: EmailMessage, mailbox: EmailMailbox): boolean {
   if (mailbox === "all") return true;
   if (mailbox === "sent") return messageHasAnyFolder(message, ["sent", "\\sent"]);
+  if (mailbox === "archive") return messageIsArchived(message);
   if (messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"])) return false;
   return messageFolderTokens(message).length === 0 || messageHasAnyFolder(message, ["inbox", "\\inbox", "primary", "category:primary", "important", "\\important"]);
+}
+
+function messageIsArchived(message: EmailMessage): boolean {
+  if (messageHasAnyFolder(message, ["trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "sent", "\\sent", "draft", "\\draft", "drafts", "\\drafts"])) return false;
+  return !messageHasAnyFolder(message, ["inbox", "\\inbox"]);
 }
 
 function messageMatchesSearch(message: EmailMessage, query: string): boolean {

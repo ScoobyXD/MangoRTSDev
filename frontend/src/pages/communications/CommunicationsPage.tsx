@@ -5,6 +5,7 @@ import { MangoWordmark } from "../../app/MangoLogo";
 import { preloadLogicGateArenaSurface } from "../../app/preloadDashboardModules";
 import {
   applyEmailMessageToCachedPages,
+  archiveEmailMessage,
   createCommunicationsSharedInbox,
   addMyLogicGateShortcuts,
   convertTriageMessagesToLogicGate,
@@ -27,6 +28,7 @@ import {
   removeMyLogicGateShortcut,
   removeEmailMessageFromCache,
   sendEmail,
+  unarchiveEmailMessage,
   updateEmailMessage,
   updateNode,
   type CommunicationsSharedInbox,
@@ -103,6 +105,12 @@ type MailboxOption = {
   label: string;
 };
 
+type MessageSelectionModifiers = {
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+};
+
 type CommunicationsStreamEnvelope = {
   type?: string;
   trigger?: string;
@@ -156,6 +164,7 @@ const MAILBOX_OPTIONS: MailboxOption[] = [
   { value: "primary", label: "My Triage" },
   { value: "sent", label: "Sent mail" },
   { value: "all", label: "All mail" },
+  { value: "archive", label: "Archives" },
 ];
 
 const MESSAGE_BATCH_SIZE = 15;
@@ -194,7 +203,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
   const [status, setStatus] = useState<CommunicationsStatus | null>(null);
-  const [folders, setFolders] = useState<EmailFolder[]>([]);
+  const [, setFolders] = useState<EmailFolder[]>([]);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [mailbox, setMailbox] = useState<EmailMailbox>("primary");
@@ -735,7 +744,6 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
     return () => { cancelled = true; };
   }, [companyID, handleEmailAccessExpired, markMessageReadOnOpen, selectedMessageID]);
 
-  const archiveFolder = useMemo(() => findSystemFolder(folders, "archive"), [folders]);
   const connection = status?.connection;
 
   const startConnection = async (provider: "google" | "microsoft") => {
@@ -806,10 +814,71 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
     }
   };
 
+  const archiveMessages = useCallback(async (messageIDs: string[]) => {
+    const ids = cleanIDList(messageIDs);
+    if (ids.length === 0) return;
+    setBusy("archive");
+    setError("");
+    setNotice("");
+    try {
+      await Promise.all(ids.map(archiveEmailMessage));
+      setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
+      if (selectedMessageID && ids.includes(selectedMessageID)) {
+        setSelectedMessageID("");
+        setSelectedMessage(null);
+      }
+      setSelectedMessageIDs(new Set());
+      setSelectionAnchorMessageID("");
+      setMessageContextMenu(null);
+      setNotice(ids.length === 1 ? "Message archived." : `${ids.length} messages archived.`);
+      await loadMessages();
+    } catch (archiveError) {
+      setError(formatError(archiveError, ids.length === 1 ? "Failed to archive message" : "Failed to archive messages"));
+    } finally {
+      setBusy("");
+    }
+  }, [loadMessages, selectedMessageID]);
+
+  const unarchiveMessages = useCallback(async (messageIDs: string[]) => {
+    const ids = cleanIDList(messageIDs);
+    if (ids.length === 0) return;
+    setBusy("unarchive");
+    setError("");
+    setNotice("");
+    try {
+      await Promise.all(ids.map(unarchiveEmailMessage));
+      setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
+      if (selectedMessageID && ids.includes(selectedMessageID)) {
+        setSelectedMessageID("");
+        setSelectedMessage(null);
+      }
+      setSelectedMessageIDs(new Set());
+      setSelectionAnchorMessageID("");
+      setMessageContextMenu(null);
+      setNotice(ids.length === 1 ? "Message moved to My Triage." : `${ids.length} messages moved to My Triage.`);
+      await loadMessages();
+    } catch (unarchiveError) {
+      setError(formatError(unarchiveError, ids.length === 1 ? "Failed to unarchive message" : "Failed to unarchive messages"));
+    } finally {
+      setBusy("");
+    }
+  }, [loadMessages, selectedMessageID]);
+
   const archiveSelected = async () => {
-    if (!selectedMessage || !archiveFolder) return;
-    await patchSelectedMessage({ folders: [archiveFolder.id] });
+    if (!selectedMessage) return;
+    if (mailboxRef.current === "archive") await unarchiveMessages([selectedMessage.id]);
+    else await archiveMessages([selectedMessage.id]);
   };
+
+  const openArchives = useCallback(() => {
+    setCompose(emptyCompose);
+    selectMailbox("archive");
+  }, [selectMailbox]);
+
+  const openMyTriageMailbox = useCallback(() => {
+    setCompose(emptyCompose);
+    selectMailbox("primary");
+  }, [selectMailbox]);
 
   const openNewCompose = () => {
     setCompose({ ...emptyCompose, open: true });
@@ -922,15 +991,15 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
   const myLogicGateOrderedRowIDs = useMemo(() => myLogicGateGroups
     .flatMap((group) => group.logicGates.map((logicGate) => logicGateTreeID(logicGate.logic_gate_id))), [myLogicGateGroups]);
 
-  const selectMessageRow = useCallback((message: EmailMessage, event: React.MouseEvent) => {
+  const selectMessageRow = useCallback((message: EmailMessage, modifiers: MessageSelectionModifiers) => {
     const orderedIDs = messages.map((item) => item.id);
     const next = resolveExplorerClickSelection({
       orderedIDs,
       previousSelectedIDs: selectedMessageIDs,
       anchorID: selectionAnchorMessageID,
       clickedID: message.id,
-      shiftKey: event.shiftKey,
-      ctrlKey: event.ctrlKey || event.metaKey,
+      shiftKey: modifiers.shiftKey,
+      ctrlKey: modifiers.ctrlKey || modifiers.metaKey,
     });
     if (next.selectedIDs.size === 0) next.selectedIDs.add(message.id);
     const orderedSelectedIDs = orderedIDs.filter((id) => next.selectedIDs.has(id));
@@ -951,8 +1020,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
     setMessageContextMenu({ x: event.clientX, y: event.clientY, messageIDs: nextIDs });
   }, [selectedMessageIDs]);
 
-  const startMessageDrag = useCallback((message: EmailMessage, event: React.DragEvent<HTMLButtonElement>) => {
-    if (activeViewID !== "my-triage") return;
+  const startMessageDrag = useCallback((message: EmailMessage, event: React.DragEvent<HTMLElement>) => {
+    if (activeViewID !== "my-triage" || mailboxRef.current === "archive") return;
     const messageIDs = selectedMessageIDs.has(message.id) ? Array.from(selectedMessageIDs) : [message.id];
     event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData(TRIAGE_MESSAGE_DRAG_MIME, JSON.stringify({ kind: "triage_messages", message_ids: messageIDs }));
@@ -967,6 +1036,14 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
     }
     return cleanIDList(ids);
   }, [messages, selectedMessageID, selectedMessageIDs]);
+
+  const archiveSelection = useCallback(() => {
+    void archiveMessages(getSelectedMessageIDsForAction());
+  }, [archiveMessages, getSelectedMessageIDsForAction]);
+
+  const unarchiveSelection = useCallback(() => {
+    void unarchiveMessages(getSelectedMessageIDsForAction());
+  }, [getSelectedMessageIDsForAction, unarchiveMessages]);
 
   const requestDeleteMessages = useCallback((messageIDs: string[]) => {
     const ids = cleanIDList(messageIDs);
@@ -1237,10 +1314,19 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
   }, [columnWidths, isNarrow]);
 
   const activeViewLabel = getCommunicationsViewLabel(activeViewID, sharedInboxes);
-  const isTriageView = activeViewID === "my-triage";
+  const isArchivableListView = isArchivableCommunicationsViewID(activeViewID);
+  const isArchiveMailbox = isArchivableListView && mailbox === "archive";
+  const listViewLabel = isArchiveMailbox ? "All Archives" : activeViewLabel;
+  const returnMailboxLabel = activeViewID === "my-triage" || activeViewID === "primary" ? "My Triage" : activeViewLabel;
+  const mailboxActionBusy = busy === "archive" || busy === "unarchive";
+  const unreadMessageCount = messages.reduce((count, message) => count + (message.unread ? 1 : 0), 0);
+  const mailFilterStatus = selectedMessageIDs.size > 1
+    ? `${selectedMessageIDs.size} selected`
+    : (loadingMessages || loadingMoreMessages) ? "Loading" : "";
   const isAciInboxView = activeViewID === "aci-inbox";
   const isResponsibleInboxView = activeViewID === "r-inbox";
   const isInboxMatrixView = isAciInboxView || isResponsibleInboxView;
+  const selectedMessageActionCount = getSelectedMessageIDsForAction().length;
   const workspaceGridTemplateColumns = isNarrow
     ? "1fr"
     : hideNavigation
@@ -1271,8 +1357,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
       </header>
       )}
 
-      {error && <div style={errorStyle}>{error}</div>}
-      {notice && <div style={noticeStyle}>{notice}</div>}
+      {error && !status?.connected && <div style={errorStyle}>{error}</div>}
+      {notice && !status?.connected && <div style={noticeStyle}>{notice}</div>}
 
       {loadingStatus ? (
         <main style={centerStyle}>Loading email connection</main>
@@ -1307,7 +1393,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
                 <button
                   type="button"
                   style={navButtonStyle(activeViewID === "shared-root")}
-                  onClick={() => selectCommunicationsView("shared-root", "all")}
+                  onClick={() => selectCommunicationsView("shared-root", "primary")}
                 >
                   <span style={navLabelStyle}>Shared Triage</span>
                   {loadingSharedInboxes && <span style={navMetaStyle}>Loading</span>}
@@ -1319,7 +1405,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
                       label={row.folder.name}
                       depth={row.depth}
                       active={activeViewID === `shared:${row.folder.folder_id}`}
-                      onClick={() => selectCommunicationsView(`shared:${row.folder.folder_id}`, "all")}
+                      onClick={() => selectCommunicationsView(`shared:${row.folder.folder_id}`, "primary")}
                     />
                   ))}
                 </div>
@@ -1404,44 +1490,99 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
             <>
           {!hideNavigation && !isNarrow && <CommunicationsColumnResizeHandle dividerIndex={0} onPointerDown={startColumnResize} />}
 
-          <section style={mailPanelStyle(isTriageView)}>
-            <div style={isTriageView ? triageMailListToolbarStyle : mailListToolbarStyle}>
-              <div style={mailListTitleStackStyle}>
-                <h2 style={panelTitleStyle}>{activeViewLabel}</h2>
-                {isTriageView && <span style={mutedSmallStyle}>{messages.length} message{messages.length === 1 ? "" : "s"}</span>}
-              </div>
-              <button style={primaryButtonStyle} onClick={openNewCompose}>Compose</button>
-            </div>
-            <div style={accountRowStyle}>
-              <span style={mutedSmallStyle}>{connection?.account_email}</span>
-              <button style={smallButtonStyle} disabled={busy === "disconnect"} onClick={disconnect}>Disconnect</button>
-            </div>
-            <form style={searchRowStyle} onSubmit={submitSearch}>
-              <input
-                style={inputStyle}
-                value={searchDraft}
-                onChange={(event) => setSearchDraft(event.target.value)}
-                placeholder="Search mail"
-              />
-              <button type="submit" style={searchButtonStyle}>Search</button>
-            </form>
-            <div style={mailFiltersRowStyle}>
-              <label style={checkboxStyle}>
+          <section style={mailPanelStyle}>
+            <div style={mailPanelControlsStyle}>
+              {isArchivableListView ? (
+                <div style={triageMailListHeaderStyle}>
+                  <div style={mailListTitleStackStyle}>
+                    <h2 style={panelTitleStyle}>{listViewLabel}</h2>
+                    <span style={mutedSmallStyle}>{unreadMessageCount} unread</span>
+                  </div>
+                  <div style={accountRowStyle}>
+                    <span style={accountEmailStyle}>{connection?.account_email}</span>
+                    <button style={smallButtonStyle} disabled={busy === "disconnect"} onClick={disconnect}>Disconnect</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={mailListToolbarStyle}>
+                  <div style={mailListTitleStackStyle}>
+                    <h2 style={panelTitleStyle}>{listViewLabel}</h2>
+                  </div>
+                  <button style={primaryButtonStyle} onClick={openNewCompose}>Compose</button>
+                </div>
+              )}
+              {error && <div style={inlineErrorStyle}>{error}</div>}
+              {notice && !error && <div style={inlineNoticeStyle}>{notice}</div>}
+              {isArchivableListView && (
+                <div style={mailArchiveActionsStyle}>
+                  <button
+                    type="button"
+                    style={mailArchiveActionButtonStyle(!isArchiveMailbox)}
+                    onClick={() => {
+                      if (isArchiveMailbox) openMyTriageMailbox();
+                    }}
+                  >
+                    {returnMailboxLabel}
+                  </button>
+                  <button
+                    type="button"
+                    style={mailArchiveActionButtonStyle(isArchiveMailbox)}
+                    onClick={() => {
+                      if (!isArchiveMailbox) openArchives();
+                    }}
+                  >
+                    All Archives
+                  </button>
+                  <button
+                    type="button"
+                    style={mailArchiveActionButtonStyle(false)}
+                    disabled={mailboxActionBusy || selectedMessageActionCount === 0}
+                    onClick={isArchiveMailbox ? unarchiveSelection : archiveSelection}
+                  >
+                    {mailboxActionBusy
+                      ? isArchiveMailbox ? "Moving" : "Archiving"
+                      : selectedMessageActionCount > 1
+                        ? `${isArchiveMailbox ? "Unarchive" : "Archive"} ${selectedMessageActionCount}`
+                        : isArchiveMailbox ? "Unarchive" : "Archive"}
+                  </button>
+                </div>
+              )}
+              {isArchivableListView && <button style={primaryButtonStyle} onClick={openNewCompose}>Compose</button>}
+              {!isArchivableListView && (
+                <div style={accountRowStyle}>
+                  <span style={accountEmailStyle}>{connection?.account_email}</span>
+                  <button style={smallButtonStyle} disabled={busy === "disconnect"} onClick={disconnect}>Disconnect</button>
+                </div>
+              )}
+              <form style={searchRowStyle} onSubmit={submitSearch}>
                 <input
-                  type="checkbox"
-                  checked={unreadOnly}
-                  onChange={(event) => {
-                    setUnreadOnly(event.target.checked);
-                    setNextPageToken("");
-                  }}
+                  style={inputStyle}
+                  value={searchDraft}
+                  onChange={(event) => setSearchDraft(event.target.value)}
+                  placeholder="Search mail"
                 />
-                <span>Unread only</span>
-              </label>
-              {selectedMessageIDs.size > 1 && <span style={selectedCountStyle}>{selectedMessageIDs.size} selected</span>}
-            </div>
-            <div style={listHeaderStyle}>
-              <span>{activeViewID === "my-triage" ? "My Triage" : mailboxLabel(mailbox)}</span>
-              {(loadingMessages || loadingMoreMessages) && <span>Loading</span>}
+                <button type="submit" style={searchButtonStyle}>Search</button>
+              </form>
+              <div style={mailFiltersRowStyle}>
+                <label style={checkboxStyle}>
+                  <input
+                    type="checkbox"
+                    checked={unreadOnly}
+                    onChange={(event) => {
+                      setUnreadOnly(event.target.checked);
+                      setNextPageToken("");
+                    }}
+                  />
+                  <span>Unread only</span>
+                </label>
+                {mailFilterStatus && <span style={selectedCountStyle}>{mailFilterStatus}</span>}
+              </div>
+              {!isArchivableListView && (
+                <div style={listHeaderStyle}>
+                  <span>{mailboxLabel(mailbox)}</span>
+                  {(loadingMessages || loadingMoreMessages) && <span>Loading</span>}
+                </div>
+              )}
             </div>
             <div
               ref={messageListRef}
@@ -1452,27 +1593,52 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
               }}
             >
               {messages.length === 0 && !loadingMessages ? (
-                <div style={emptyStateStyle}>No messages</div>
-              ) : messages.map((message) => (
-                <button
+                <div style={emptyStateStyle}>{isArchiveMailbox ? "No archived messages" : "No messages"}</div>
+              ) : messages.map((message) => {
+                const active = selectedMessageIDs.has(message.id) || selectedMessageID === message.id;
+                const draggable = activeViewID === "my-triage" && !isArchiveMailbox;
+                return (
+                <div
                   key={message.id}
-                  style={isTriageView
-                    ? triageMessageRowStyle(selectedMessageIDs.has(message.id) || selectedMessageID === message.id, message.unread)
-                    : messageRowStyle(selectedMessageIDs.has(message.id) || selectedMessageID === message.id, message.unread)}
-                  draggable={activeViewID === "my-triage"}
+                  role="button"
+                  tabIndex={0}
+                  style={isArchivableListView
+                    ? triageMessageRowStyle(active, message.unread, draggable)
+                    : messageRowStyle(active, message.unread)}
+                  draggable={draggable}
                   onClick={(event) => selectMessageRow(message, event)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    selectMessageRow(message, event);
+                  }}
                   onContextMenu={(event) => openMessageContextMenu(message, event)}
                   onDragStart={(event) => startMessageDrag(message, event)}
                 >
-                  {isTriageView ? (
+                  {isArchivableListView ? (
                     <>
-                      <MessagePlacementIcon message={message} active={selectedMessageIDs.has(message.id) || selectedMessageID === message.id} />
+                      <MessagePlacementIcon message={message} active={active} />
                       <span style={triageMessageContentStyle}>
                         <strong style={triageSenderStyle}>{formatAddressList(message.from) || "Unknown sender"}</strong>
                         <span style={triageSubjectStyle}>{message.subject || "(no subject)"}</span>
                         <span style={snippetStyle}>{message.snippet || ""}</span>
                       </span>
-                      <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
+                      <span style={triageMessageMetaStyle}>
+                        <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
+                        <button
+                          type="button"
+                          style={messageArchiveButtonStyle}
+                          disabled={mailboxActionBusy}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (isArchiveMailbox) void unarchiveMessages([message.id]);
+                            else void archiveMessages([message.id]);
+                          }}
+                        >
+                          {isArchiveMailbox ? "Unarchive" : "Archive"}
+                        </button>
+                      </span>
                     </>
                   ) : (
                     <>
@@ -1484,8 +1650,9 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
                       <span style={snippetStyle}>{message.snippet || ""}</span>
                     </>
                   )}
-                </button>
-              ))}
+                </div>
+                );
+              })}
               {loadingMoreMessages && <div style={loadingMoreStyle}>Loading</div>}
             </div>
           </section>
@@ -1505,7 +1672,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
               <MessageDetail
                 message={selectedMessage}
                 loading={loadingDetail}
-                archiveAvailable={!!archiveFolder}
+                archiveAvailable
+                archiveLabel={isArchiveMailbox ? "Unarchive" : "Archive"}
                 busy={!!busy}
                 onReply={openReply}
                 onArchive={archiveSelected}
@@ -1553,6 +1721,16 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
               style={{ ...messageContextMenuStyle, left: messageContextMenu.x, top: messageContextMenu.y }}
               onMouseLeave={() => setMessageContextMenu(null)}
             >
+              <button
+                style={contextMenuActionStyle}
+                disabled={mailboxActionBusy}
+                onClick={() => {
+                  if (isArchiveMailbox) void unarchiveMessages(messageContextMenu.messageIDs);
+                  else void archiveMessages(messageContextMenu.messageIDs);
+                }}
+              >
+                {isArchiveMailbox ? "Unarchive" : "Archive"}
+              </button>
               <button
                 style={{ ...contextMenuActionStyle, color: "#8b123f" }}
                 disabled={busy === "delete"}
@@ -2660,10 +2838,11 @@ function ComposePanel({ compose, busy, onChange, onCancel, onSubmit }: {
   );
 }
 
-function MessageDetail({ message, loading, archiveAvailable, busy, onReply, onArchive, onDelete, onToggleRead, onToggleStar }: {
+function MessageDetail({ message, loading, archiveAvailable, archiveLabel, busy, onReply, onArchive, onDelete, onToggleRead, onToggleStar }: {
   message: EmailMessage;
   loading: boolean;
   archiveAvailable: boolean;
+  archiveLabel: string;
   busy: boolean;
   onReply: () => void;
   onArchive: () => void;
@@ -2684,7 +2863,7 @@ function MessageDetail({ message, loading, archiveAvailable, busy, onReply, onAr
         <button style={smallButtonStyle} disabled={busy} onClick={onReply}>Reply</button>
         <button style={smallButtonStyle} disabled={busy} onClick={onToggleRead}>{message.unread ? "Mark read" : "Mark unread"}</button>
         <button style={smallButtonStyle} disabled={busy} onClick={onToggleStar}>{message.starred ? "Unstar" : "Star"}</button>
-        <button style={smallButtonStyle} disabled={busy || !archiveAvailable} onClick={onArchive}>Archive</button>
+        <button style={smallButtonStyle} disabled={busy || !archiveAvailable} onClick={onArchive}>{archiveLabel}</button>
         <button style={{ ...smallButtonStyle, ...dangerButtonStyle }} disabled={busy} onClick={onDelete}>Delete</button>
       </div>
       <iframe title="Email body" sandbox="" srcDoc={messageDocument(message.body || message.snippet || "")} style={iframeStyle} />
@@ -3293,16 +3472,6 @@ function filterExplorerRowsForSearch(rows: ExplorerTreeNode[], rawQuery: string)
   return rows.filter((row) => included.has(row.id));
 }
 
-function findSystemFolder(folders: EmailFolder[], system: string): EmailFolder | null {
-  const normalized = system.toLowerCase();
-  return folders.find((folder) => {
-    const systemFolder = (folder.system_folder || "").toLowerCase();
-    const name = (folder.name || folder.display_name || "").toLowerCase();
-    const attributes = (folder.attributes ?? []).map((item) => item.toLowerCase());
-    return systemFolder === normalized || name === normalized || attributes.includes(`\\${normalized}`);
-  }) ?? null;
-}
-
 function mailboxLabel(mailbox: EmailMailbox): string {
   return MAILBOX_OPTIONS.find((option) => option.value === mailbox)?.label ?? "Mail";
 }
@@ -3312,11 +3481,15 @@ function isInboxMatrixViewID(viewID: CommunicationsViewID): boolean {
 }
 
 function mailboxForCommunicationsView(viewID: CommunicationsViewID): EmailMailbox {
-  return viewID === "my-triage" || viewID === "primary" ? "primary" : "all";
+  return isArchivableCommunicationsViewID(viewID) ? "primary" : "all";
 }
 
 function messageListFilterKey(companyID: string, viewID: CommunicationsViewID, mailbox: EmailMailbox, query: string, unreadOnly: boolean): string {
   return JSON.stringify([companyID.trim(), viewID, mailbox, query.trim(), unreadOnly]);
+}
+
+function isArchivableCommunicationsViewID(viewID: CommunicationsViewID): boolean {
+  return viewID === "my-triage" || viewID === "primary" || viewID === "shared-root" || viewID.startsWith("shared:");
 }
 
 function markMessageSentToLogicGate(message: EmailMessage, logicGateID: string): EmailMessage {
@@ -3588,14 +3761,16 @@ const panelStyle: React.CSSProperties = {
   overflow: "hidden",
 };
 
-function mailPanelStyle(triage: boolean): React.CSSProperties {
-  return {
-    ...panelStyle,
-    gridTemplateRows: triage
-      ? "auto auto auto auto minmax(0, 1fr)"
-      : "auto auto auto auto auto minmax(0, 1fr)",
-  };
-}
+const mailPanelStyle: React.CSSProperties = {
+  ...panelStyle,
+  gridTemplateRows: "auto minmax(0, 1fr)",
+};
+
+const mailPanelControlsStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 8,
+};
 
 function logicGateRailStyle(topHeight: number): React.CSSProperties {
   return {
@@ -4238,9 +4413,11 @@ const mailListToolbarStyle: React.CSSProperties = {
   alignItems: "center",
 };
 
-const triageMailListToolbarStyle: React.CSSProperties = {
+const triageMailListHeaderStyle: React.CSSProperties = {
   display: "grid",
-  gap: 3,
+  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.35fr)",
+  gap: 10,
+  alignItems: "start",
   minWidth: 0,
 };
 
@@ -4255,6 +4432,17 @@ const accountRowStyle: React.CSSProperties = {
   gridTemplateColumns: "minmax(0, 1fr) auto",
   gap: 8,
   alignItems: "center",
+  justifySelf: "end",
+  minWidth: 0,
+  maxWidth: "100%",
+};
+
+const accountEmailStyle: React.CSSProperties = {
+  ...mutedSmallStyle,
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 };
 
 const searchRowStyle: React.CSSProperties = {
@@ -4270,6 +4458,28 @@ const searchButtonStyle: React.CSSProperties = {
   height: 34,
   alignSelf: "center",
 };
+
+const mailArchiveActionsStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 6,
+  alignItems: "center",
+};
+
+function mailArchiveActionButtonStyle(active: boolean): React.CSSProperties {
+  return {
+    ...smallButtonStyle,
+    width: "100%",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontWeight: 700,
+    borderColor: active ? "#ff8820" : smallButtonStyle.borderColor,
+    background: active ? "#fff2e0" : smallButtonStyle.background,
+    color: active ? "#8a3d00" : smallButtonStyle.color,
+  };
+}
 
 const mailFiltersRowStyle: React.CSSProperties = {
   minWidth: 0,
@@ -4336,17 +4546,17 @@ function messageRowStyle(active: boolean, unread: boolean): React.CSSProperties 
   };
 }
 
-function triageMessageRowStyle(active: boolean, unread: boolean): React.CSSProperties {
+function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean): React.CSSProperties {
   return {
     display: "grid",
-    gridTemplateColumns: "20px minmax(0, 1fr) auto",
+    gridTemplateColumns: "20px minmax(0, 1fr) 62px",
     gap: 9,
     alignItems: "start",
     minHeight: 82,
     border: `1px solid ${active ? "#ff8820" : unread ? "rgba(255, 136, 32, 0.48)" : "rgba(255, 136, 32, 0.16)"}`,
     borderRadius: 7,
     background: active ? "#fff2e0" : unread ? "#fff8ef" : "#ffffff",
-    cursor: "grab",
+    cursor: draggable ? "grab" : "pointer",
     color: "#24120a",
     font: "inherit",
     fontSize: 12,
@@ -4406,6 +4616,23 @@ const triageDateStyle: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
   whiteSpace: "nowrap",
+};
+
+const triageMessageMetaStyle: React.CSSProperties = {
+  display: "grid",
+  justifyItems: "end",
+  alignContent: "start",
+  gap: 6,
+  minWidth: 58,
+};
+
+const messageArchiveButtonStyle: React.CSSProperties = {
+  ...smallButtonStyle,
+  width: "100%",
+  minHeight: 24,
+  padding: "0 7px",
+  fontSize: 10,
+  fontWeight: 700,
 };
 
 const messageRowTopStyle: React.CSSProperties = {
@@ -4485,4 +4712,25 @@ const noticeStyle: React.CSSProperties = {
   borderBottom: "1px solid rgba(15, 123, 63, 0.22)",
   fontSize: 12,
   fontWeight: 600,
+};
+
+const inlineErrorStyle: React.CSSProperties = {
+  padding: "8px 10px",
+  border: "1px solid rgba(255, 61, 127, 0.28)",
+  borderRadius: 6,
+  background: "#fff0f4",
+  color: "#8b123f",
+  fontSize: 11,
+  lineHeight: 1.35,
+};
+
+const inlineNoticeStyle: React.CSSProperties = {
+  padding: "8px 10px",
+  border: "1px solid rgba(15, 123, 63, 0.22)",
+  borderRadius: 6,
+  background: "#effff6",
+  color: "#0f7b3f",
+  fontSize: 11,
+  fontWeight: 700,
+  lineHeight: 1.35,
 };

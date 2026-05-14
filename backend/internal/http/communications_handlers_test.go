@@ -505,6 +505,197 @@ func TestCommunicationsPrimaryMailboxUsesGmailNativeSearch(t *testing.T) {
 	}
 }
 
+func TestCommunicationsArchiveMailboxUsesGmailNativeSearch(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=archive&q=invoice&unread=true", "", token, http.StatusOK)
+	if nylas.lastQuery.SearchQueryNative != "in:all -in:inbox -in:trash -in:spam -in:sent -in:drafts invoice is:unread" {
+		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
+	}
+	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.FolderID != "" {
+		t.Fatalf("query = %+v, want Gmail-native archive search only", nylas.lastQuery)
+	}
+}
+
+func TestCommunicationsArchiveMessageRemovesGmailInboxLabel(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{
+		message: NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"INBOX", "UNREAD", "CATEGORY_PERSONAL", "SNOOZED", "CHAT", "Label_123"}},
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/archive", "", token, http.StatusOK)
+	if got, want := strings.Join(nylas.update.Folders, ","), "Label_123"; got != want {
+		t.Fatalf("folders = %q, want %q", got, want)
+	}
+	raw, err := json.Marshal(NylasMessageUpdate{Folders: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"folders":[]}` {
+		t.Fatalf("empty folder update JSON = %s, want explicit folders array", raw)
+	}
+}
+
+func TestCommunicationsArchiveMessageMovesFolderProvidersToArchiveFolder(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "microsoft",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{
+		folders: []NylasFolder{
+			{ID: "inbox-id", Name: "Inbox"},
+			{ID: "archive-id", Name: "Archive"},
+		},
+		message: NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"inbox-id"}},
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/archive", "", token, http.StatusOK)
+	if len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "archive-id" {
+		t.Fatalf("folders = %+v, want archive-id", nylas.update.Folders)
+	}
+}
+
+func TestCommunicationsUnarchiveMessageAddsGmailInboxLabel(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{
+		message: NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"UNREAD", "CATEGORY_PERSONAL", "Label_123"}},
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/unarchive", "", token, http.StatusOK)
+	if got, want := strings.Join(nylas.update.Folders, ","), "Label_123,INBOX"; got != want {
+		t.Fatalf("folders = %q, want %q", got, want)
+	}
+}
+
+func TestCommunicationsUnarchiveMessageMovesFolderProvidersToInboxFolder(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "microsoft",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{
+		folders: []NylasFolder{
+			{ID: "inbox-id", Name: "Inbox"},
+			{ID: "archive-id", Name: "Archive"},
+		},
+		message: NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"archive-id"}},
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/unarchive", "", token, http.StatusOK)
+	if len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "inbox-id" {
+		t.Fatalf("folders = %+v, want inbox-id", nylas.update.Folders)
+	}
+}
+
 func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	user, err := repo.UpsertAuthUser("subject", "user@example.com", "User")

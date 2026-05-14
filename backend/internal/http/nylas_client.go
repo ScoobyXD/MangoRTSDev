@@ -259,6 +259,20 @@ type NylasMessageUpdate struct {
 	Folders []string `json:"folders,omitempty"`
 }
 
+func (u NylasMessageUpdate) MarshalJSON() ([]byte, error) {
+	payload := map[string]any{}
+	if u.Unread != nil {
+		payload["unread"] = *u.Unread
+	}
+	if u.Starred != nil {
+		payload["starred"] = *u.Starred
+	}
+	if u.Folders != nil {
+		payload["folders"] = u.Folders
+	}
+	return json.Marshal(payload)
+}
+
 type NylasSendMessageRequest struct {
 	To               []NylasEmailAddress `json:"to"`
 	Cc               []NylasEmailAddress `json:"cc,omitempty"`
