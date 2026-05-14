@@ -47,13 +47,15 @@ New Features:
 28. While deploying this with 180Snacks, you really really really need to check the AWS usage because I have a suspicion it's going to come out to be a lot more than we think. 
 29. when you get to agents, read some of the chats and replies you got on reddit on how they use hermes
 30. Every so often, it's important that you have an audit on the company. For example, when I crashed out at how shitty the Wispr Phone app is. It's important to always be vigilant and make sure to fan out to your entire user base and to see. Ask yourself this question: Could anyone else be crashing out over our shitty UI while using Mango? 
+31. Do we want positions of all the modules, columns, resizing to be stored in database per user? or just browser based.
+
 ========
 General changes:
 1. the caching still doesnt work well on company explorer logic gate arena, it doesnt work for nodes in logic gate arena kanban board, i still get whenever i move around pages including email. 
 	s. nylas still does inbound posting but much rarer and not as consistenly
 PROBLEM:3. need to break up the apps again its creasting too many merge conflicts.
 LATER: need to do an audit on how well equiped the app is for multiple people using it from different accounts all at once.
-
+1. This thing is getting really, really slow, especially the part when I drag an email into a Logic Gate. That takes like almost a second! It should be literally 90% faster. 
 
 Editor changes
 1. Outbound email when node is done.
@@ -61,8 +63,8 @@ Editor changes
 3. the chat should be linked to specific highlighted text on the text box.
 
 Home page/ Email:
-1. make the chat highlighting persistent on chat
-2. make default size of text box and chat taller on node
+
+
 3. Assigned should be accountable
 4. RACI inboxes should be public view.
 	a. when place node in logic gate, it inherits those RACI matrix

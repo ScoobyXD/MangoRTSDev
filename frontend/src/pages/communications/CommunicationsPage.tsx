@@ -80,6 +80,8 @@ type CommunicationsPageProps = {
   me?: CurrentUserResponse;
   onNavigate?: (path: string) => void;
   embedded?: boolean;
+  hideNavigation?: boolean;
+  initialViewID?: CommunicationsViewID;
 };
 
 type ComposeState = {
@@ -150,6 +152,12 @@ type NodeAciPlacement = {
 
 type NodeAciPlacementMap = Record<string, NodeAciPlacement>;
 
+type InboxLogicGateNodeGroup = {
+  logicGateID: string;
+  label: string;
+  nodeIDs: string[];
+};
+
 const MAILBOX_OPTIONS: MailboxOption[] = [
   { value: "primary", label: "My Triage" },
   { value: "sent", label: "Sent mail" },
@@ -160,12 +168,16 @@ const MESSAGE_BATCH_SIZE = 15;
 const TRIAGE_MESSAGE_DRAG_MIME = "application/x-mangorts-communications-triage-messages";
 const COMMUNICATIONS_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.communications.columnWidths.v1";
 const COMMUNICATIONS_COLUMN_RESIZER_WIDTH = 10;
+const COMMUNICATIONS_ROW_RESIZER_HEIGHT = 10;
+const COMMUNICATIONS_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY = "mangorts.communications.logicGateRailTopHeight.v1";
+const COMMUNICATIONS_NODE_RAIL_HEIGHT_STORAGE_KEY = "mangorts.communications.nodeRailTopHeight.v1";
 const COMMUNICATIONS_COLUMN_MIN_WIDTHS: CommunicationsColumnWidths = [170, 280, 220, 280];
 const COMMUNICATIONS_COLUMN_MAX_WIDTHS: CommunicationsColumnWidths = [360, 760, 1600, 1600];
 const NODE_ACI_STORAGE_KEY_PREFIX = "mangorts.communications.nodeAciPlacements.v1";
+const INBOX_NO_LOGIC_GATE_ID = "__mango_inbox_no_logic_gate__";
 
 const ACI_COLUMNS: ReadonlyArray<{ role: AciInboxRole; letter: string; label: string }> = [
-  { role: "assigned", letter: "A", label: "Assigned" },
+  { role: "assigned", letter: "A", label: "Accountable" },
   { role: "consulted", letter: "C", label: "Consulted" },
   { role: "informed", letter: "I", label: "Informed" },
 ];
@@ -184,7 +196,7 @@ const INBOX_PRIORITIES: ReadonlyArray<{ value: InboxPriority; label: string }> =
   { value: 5, label: "5\u00A0\u00A0Later (low priority)" },
 ];
 
-export function CommunicationsPage({ me, onNavigate, embedded = false }: CommunicationsPageProps) {
+export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavigation = false, initialViewID = "my-triage" }: CommunicationsPageProps) {
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
   const [status, setStatus] = useState<CommunicationsStatus | null>(null);
@@ -192,7 +204,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [mailbox, setMailbox] = useState<EmailMailbox>("primary");
-  const [activeViewID, setActiveViewID] = useState<CommunicationsViewID>("my-triage");
+  const [activeViewID, setActiveViewID] = useState<CommunicationsViewID>(initialViewID);
   const [selectedMessageID, setSelectedMessageID] = useState("");
   const [selectedMessageIDs, setSelectedMessageIDs] = useState<Set<string>>(new Set());
   const [selectionAnchorMessageID, setSelectionAnchorMessageID] = useState("");
@@ -242,7 +254,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const pendingMessageReloadRef = useRef(false);
   const messageRequestSeqRef = useRef(0);
   const selectedMessageIDRef = useRef("");
-  const activeViewIDRef = useRef<CommunicationsViewID>("my-triage");
+  const activeViewIDRef = useRef<CommunicationsViewID>(initialViewID);
   const folderReloadTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<EmailMessage[]>([]);
   const mailboxRef = useRef<EmailMailbox>("primary");
@@ -335,7 +347,12 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     const onPointerMove = (event: PointerEvent) => {
       event.preventDefault();
       const delta = event.clientX - columnResizeDrag.startX;
-      setColumnWidths(resizeCommunicationsColumns(columnResizeDrag.startWidths, columnResizeDrag.dividerIndex, delta, columnResizeDrag.availableWidth));
+      const nextWidths = hideNavigation
+        ? isInboxMatrixViewID(activeViewIDRef.current)
+          ? resizeInboxMatrixColumnsWithoutSidebar(columnResizeDrag.startWidths, columnResizeDrag.dividerIndex, delta, columnResizeDrag.availableWidth)
+          : resizeCommunicationsColumnsWithoutSidebar(columnResizeDrag.startWidths, columnResizeDrag.dividerIndex, delta, columnResizeDrag.availableWidth)
+        : resizeCommunicationsColumns(columnResizeDrag.startWidths, columnResizeDrag.dividerIndex, delta, columnResizeDrag.availableWidth);
+      setColumnWidths(nextWidths);
     };
     const onPointerUp = () => setColumnResizeDrag(null);
     const previousCursor = document.body.style.cursor;
@@ -354,11 +371,11 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointercancel", onPointerUp);
     };
-  }, [columnResizeDrag]);
+  }, [columnResizeDrag, hideNavigation]);
 
   useEffect(() => {
     if (isNarrow) return;
-    localStorage.setItem(COMMUNICATIONS_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(columnWidths));
+    saveCommunicationsColumnWidths(columnWidths);
   }, [columnWidths, isNarrow]);
 
   useEffect(() => {
@@ -771,7 +788,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     setNextPageToken("");
   };
 
-  const selectMailbox = (nextMailbox: EmailMailbox) => {
+  const selectMailbox = useCallback((nextMailbox: EmailMailbox) => {
     setMailbox(nextMailbox);
     setNextPageToken("");
     setSelectedMessageID("");
@@ -779,12 +796,17 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
     setSelectionAnchorMessageID("");
     setSelectedMessage(null);
     setMessageContextMenu(null);
-  };
+  }, []);
 
-  const selectCommunicationsView = (viewID: CommunicationsViewID, nextMailbox: EmailMailbox = "primary") => {
+  const selectCommunicationsView = useCallback((viewID: CommunicationsViewID, nextMailbox: EmailMailbox = "primary") => {
     setActiveViewID(viewID);
     selectMailbox(nextMailbox);
-  };
+  }, [selectMailbox]);
+
+  useEffect(() => {
+    if (activeViewID === initialViewID) return;
+    selectCommunicationsView(initialViewID, mailboxForCommunicationsView(initialViewID));
+  }, [activeViewID, initialViewID, selectCommunicationsView]);
 
   const patchSelectedMessage = async (update: { unread?: boolean; starred?: boolean; folders?: string[] }) => {
     if (!selectedMessage) return;
@@ -1237,7 +1259,15 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
   const isAciInboxView = activeViewID === "aci-inbox";
   const isResponsibleInboxView = activeViewID === "r-inbox";
   const isInboxMatrixView = isAciInboxView || isResponsibleInboxView;
-  const workspaceGridTemplateColumns = isNarrow ? "1fr" : isInboxMatrixView ? getInboxMatrixGridTemplateColumns(columnWidths) : getCommunicationsGridTemplateColumns(columnWidths);
+  const workspaceGridTemplateColumns = isNarrow
+    ? "1fr"
+    : hideNavigation
+      ? isInboxMatrixView
+        ? getInboxMatrixGridTemplateColumnsWithoutSidebar(columnWidths)
+        : getCommunicationsGridTemplateColumnsWithoutSidebar(columnWidths)
+      : isInboxMatrixView
+        ? getInboxMatrixGridTemplateColumns(columnWidths)
+        : getCommunicationsGridTemplateColumns(columnWidths);
 
   return (
     <div style={embedded ? { ...pageStyle, height: "100%" } : pageStyle}>
@@ -1287,8 +1317,8 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
           </section>
         </main>
       ) : (
-        <main ref={workspaceRef} style={{ ...workspaceStyle, gridTemplateColumns: workspaceGridTemplateColumns, gap: isNarrow || isInboxMatrixView ? 10 : 0 }}>
-          <aside style={sidebarStyle}>
+        <main ref={workspaceRef} style={{ ...workspaceStyle, gridTemplateColumns: workspaceGridTemplateColumns, gap: isNarrow || (isInboxMatrixView && !hideNavigation) ? 10 : 0 }}>
+          {!hideNavigation && <aside style={sidebarStyle}>
             <nav style={sidebarNavStyle} aria-label="Home triage">
               <CommunicationsNavButton label="My Triage" active={activeViewID === "my-triage" || activeViewID === "primary"} onClick={() => selectCommunicationsView("my-triage", "primary")} />
               <section style={sidebarSectionStyle}>
@@ -1326,7 +1356,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
               <CommunicationsNavButton label="My Nodes" active={activeViewID === "my-nodes"} onClick={() => selectCommunicationsView("my-nodes", "all")} />
               <CommunicationsNavButton label="My Logic Gates" active={activeViewID === "my-logic-gates"} onClick={() => selectCommunicationsView("my-logic-gates", "all")} />
             </nav>
-          </aside>
+          </aside>}
 
           {isInboxMatrixView ? (
             <>
@@ -1364,6 +1394,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
                   onPlaceNodes={placeNodesInResponsibleInbox}
                 />
               )}
+              {hideNavigation && !isNarrow && <CommunicationsColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
               <NodeInboxRail
                 loading={loadingNodes}
                 nodeByID={nodeByID}
@@ -1389,7 +1420,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false }: Communi
             </>
           ) : (
             <>
-          {!isNarrow && <CommunicationsColumnResizeHandle dividerIndex={0} onPointerDown={startColumnResize} />}
+          {!hideNavigation && !isNarrow && <CommunicationsColumnResizeHandle dividerIndex={0} onPointerDown={startColumnResize} />}
 
           <section style={mailPanelStyle(isTriageView)}>
             <div style={isTriageView ? triageMailListToolbarStyle : mailListToolbarStyle}>
@@ -1718,6 +1749,78 @@ function CommunicationsColumnResizeHandle({
   );
 }
 
+function useRailTopResize(storageKey: string, fallbackHeight = 240) {
+  const railRef = useRef<HTMLElement | null>(null);
+  const dragRef = useRef<{ startY: number; startHeight: number; availableHeight: number } | null>(null);
+  const [topHeight, setTopHeight] = useState(() => readRailTopHeight(storageKey, fallbackHeight));
+
+  useEffect(() => {
+    saveRailTopHeight(storageKey, topHeight);
+  }, [storageKey, topHeight]);
+
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      event.preventDefault();
+      const maxTopHeight = Math.max(120, drag.availableHeight - COMMUNICATIONS_ROW_RESIZER_HEIGHT - 160);
+      setTopHeight(clampNumber(drag.startHeight + event.clientY - drag.startY, 96, maxTopHeight));
+    };
+    const onPointerUp = () => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+  }, []);
+
+  const startResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const availableHeight = railRef.current?.clientHeight ?? window.innerHeight;
+    dragRef.current = { startY: event.clientY, startHeight: topHeight, availableHeight };
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+  }, [topHeight]);
+
+  return { railRef, topHeight, startResize };
+}
+
+function readRailTopHeight(storageKey: string, fallbackHeight: number): number {
+  try {
+    const stored = Number(localStorage.getItem(storageKey));
+    return Number.isFinite(stored) ? clampNumber(stored, 96, 520) : fallbackHeight;
+  } catch {
+    return fallbackHeight;
+  }
+}
+
+function saveRailTopHeight(storageKey: string, height: number): void {
+  try {
+    localStorage.setItem(storageKey, String(Math.round(height)));
+  } catch {}
+}
+
+function RailRowResizeHandle({ onPointerDown }: { onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="Resize rail sections"
+      style={railRowResizeHandleStyle}
+      onPointerDown={onPointerDown}
+    >
+      <span style={railRowResizeGripStyle} />
+    </button>
+  );
+}
+
 function LogicGateRail({
   loading,
   logicGateByID,
@@ -1759,8 +1862,10 @@ function LogicGateRail({
   onRemoveShortcut: (logicGateID: string) => void;
   onConvertMessages: (logicGateID: string, messageIDs: string[]) => void;
 }) {
+  const railSplit = useRailTopResize(COMMUNICATIONS_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, 240);
+
   return (
-    <aside style={logicGateRailStyle}>
+    <aside ref={railSplit.railRef} style={logicGateRailStyle(railSplit.topHeight)}>
       <section
         style={logicGateRailSectionStyle}
         onDragOver={(event) => {
@@ -1808,6 +1913,8 @@ function LogicGateRail({
           ))}
         </div>
       </section>
+
+      <RailRowResizeHandle onPointerDown={railSplit.startResize} />
 
       <section style={{ ...logicGateRailSectionStyle, gridTemplateRows: "auto auto minmax(0, 1fr)" }}>
         <div style={logicGateRailHeaderStyle}>
@@ -1994,9 +2101,10 @@ function NodeInboxRail({
   onOpenNode: (node: NodeRecord) => void;
 }) {
   const myNodeOrderedRowIDs = useMemo(() => myNodes.map((node) => nodeTreeID(node.node_id)), [myNodes]);
+  const railSplit = useRailTopResize(COMMUNICATIONS_NODE_RAIL_HEIGHT_STORAGE_KEY, 220);
 
   return (
-    <aside style={logicGateRailStyle}>
+    <aside ref={railSplit.railRef} style={logicGateRailStyle(railSplit.topHeight)}>
       <section style={logicGateRailSectionStyle}>
         <div style={logicGateRailHeaderStyle}>
           <h2 style={panelTitleStyle}>My Nodes</h2>
@@ -2023,6 +2131,8 @@ function NodeInboxRail({
           )}
         </div>
       </section>
+
+      <RailRowResizeHandle onPointerDown={railSplit.startResize} />
 
       <section style={{ ...logicGateRailSectionStyle, gridTemplateRows: "auto auto minmax(0, 1fr)" }}>
         <div style={logicGateRailHeaderStyle}>
@@ -2175,15 +2285,20 @@ function AciInboxMatrix({
     }
     return byCell;
   }, [nodeByID, nodes, placements]);
+  const cellLogicGateGroups = useMemo(
+    () => buildInboxLogicGateGroupsByCell(cellNodeIDs, nodeByID, logicGateByID),
+    [cellNodeIDs, logicGateByID, nodeByID],
+  );
   const orderedRowIDs = useMemo(() => {
     const ids: string[] = [];
     for (const priority of INBOX_PRIORITIES) {
       for (const column of ACI_COLUMNS) {
-        ids.push(...(cellNodeIDs.get(aciCellKey(column.role, priority.value)) ?? []).map(nodeTreeID));
+        const groups = cellLogicGateGroups.get(aciCellKey(column.role, priority.value)) ?? [];
+        for (const group of groups) ids.push(...group.nodeIDs);
       }
     }
-    return ids;
-  }, [cellNodeIDs]);
+    return cleanIDList(ids).map(nodeTreeID);
+  }, [cellLogicGateGroups]);
   const placedCount = orderedRowIDs.length;
 
   const dropIntoCell = (event: React.DragEvent<HTMLElement>, role: AciInboxRole, priority: InboxPriority) => {
@@ -2218,7 +2333,7 @@ function AciInboxMatrix({
               <div style={logicGateRaciPriorityHeaderStyle}>{priority.label}</div>
               {ACI_COLUMNS.map((column) => {
                 const cellKey = aciCellKey(column.role, priority.value);
-                const nodeIDs = cellNodeIDs.get(cellKey) ?? [];
+                const logicGateGroups = cellLogicGateGroups.get(cellKey) ?? [];
                 const activeDrop = dragOverCell === cellKey;
                 return (
                   <div
@@ -2241,25 +2356,23 @@ function AciInboxMatrix({
                     }}
                     onDrop={(event) => dropIntoCell(event, column.role, priority.value)}
                   >
-                    {nodeIDs.map((nodeID) => {
-                      const node = nodeByID.get(nodeID);
-                      if (!node) return null;
-                      return (
-                        <NodeInboxCard
-                          key={nodeID}
-                          node={node}
-                          selected={selectedRowIDs.has(nodeTreeID(nodeID))}
-                          orderedRowIDs={orderedRowIDs}
-                          nodeByID={nodeByID}
-                          logicGateByID={logicGateByID}
-                          getNodeDragIDs={getNodeDragIDs}
-                          onSelectNode={onSelectNode}
-                          onOpenNode={onOpenNode}
-                          onOpenLogicGate={onOpenLogicGate}
-                          onRemovePlacement={placements[nodeID] ? onRemovePlacement : undefined}
-                        />
-                      );
-                    })}
+                    {logicGateGroups.map((group) => (
+                      <LogicGateInboxNodeGroupCard
+                        key={group.logicGateID}
+                        group={group}
+                        selectedRowIDs={selectedRowIDs}
+                        orderedRowIDs={orderedRowIDs}
+                        nodeByID={nodeByID}
+                        getNodeDragIDs={getNodeDragIDs}
+                        onSelectNode={onSelectNode}
+                        onOpenNode={onOpenNode}
+                        onOpenLogicGate={onOpenLogicGate}
+                        canRemoveNode={(nodeID) => Boolean(placements[nodeID])}
+                        onRemovePlacement={(nodeID) => {
+                          if (placements[nodeID]) onRemovePlacement(nodeID);
+                        }}
+                      />
+                    ))}
                   </div>
                 );
               })}
@@ -2318,15 +2431,20 @@ function ResponsibleInboxMatrix({
     }
     return byCell;
   }, [currentUserID, nodeByID, nodes]);
+  const cellLogicGateGroups = useMemo(
+    () => buildInboxLogicGateGroupsByCell(cellNodeIDs, nodeByID, logicGateByID),
+    [cellNodeIDs, logicGateByID, nodeByID],
+  );
   const orderedRowIDs = useMemo(() => {
     const ids: string[] = [];
     for (const priority of INBOX_PRIORITIES) {
       for (const column of RESPONSIBLE_STATUS_COLUMNS) {
-        ids.push(...(cellNodeIDs.get(responsibleCellKey(column.status, priority.value)) ?? []).map(nodeTreeID));
+        const groups = cellLogicGateGroups.get(responsibleCellKey(column.status, priority.value)) ?? [];
+        for (const group of groups) ids.push(...group.nodeIDs);
       }
     }
-    return ids;
-  }, [cellNodeIDs]);
+    return cleanIDList(ids).map(nodeTreeID);
+  }, [cellLogicGateGroups]);
   const placedCount = orderedRowIDs.length;
 
   const dropIntoCell = (event: React.DragEvent<HTMLElement>, status: ResponsibleInboxStatus, priority: InboxPriority) => {
@@ -2361,7 +2479,7 @@ function ResponsibleInboxMatrix({
               <div style={logicGateRaciPriorityHeaderStyle}>{priority.label}</div>
               {RESPONSIBLE_STATUS_COLUMNS.map((column) => {
                 const cellKey = responsibleCellKey(column.status, priority.value);
-                const nodeIDs = cellNodeIDs.get(cellKey) ?? [];
+                const logicGateGroups = cellLogicGateGroups.get(cellKey) ?? [];
                 const activeDrop = dragOverCell === cellKey;
                 return (
                   <div
@@ -2384,24 +2502,19 @@ function ResponsibleInboxMatrix({
                     }}
                     onDrop={(event) => dropIntoCell(event, column.status, priority.value)}
                   >
-                    {nodeIDs.map((nodeID) => {
-                      const node = nodeByID.get(nodeID);
-                      if (!node) return null;
-                      return (
-                        <NodeInboxCard
-                          key={nodeID}
-                          node={node}
-                          selected={selectedRowIDs.has(nodeTreeID(nodeID))}
-                          orderedRowIDs={orderedRowIDs}
-                          nodeByID={nodeByID}
-                          logicGateByID={logicGateByID}
-                          getNodeDragIDs={getNodeDragIDs}
-                          onSelectNode={onSelectNode}
-                          onOpenNode={onOpenNode}
-                          onOpenLogicGate={onOpenLogicGate}
-                        />
-                      );
-                    })}
+                    {logicGateGroups.map((group) => (
+                      <LogicGateInboxNodeGroupCard
+                        key={group.logicGateID}
+                        group={group}
+                        selectedRowIDs={selectedRowIDs}
+                        orderedRowIDs={orderedRowIDs}
+                        nodeByID={nodeByID}
+                        getNodeDragIDs={getNodeDragIDs}
+                        onSelectNode={onSelectNode}
+                        onOpenNode={onOpenNode}
+                        onOpenLogicGate={onOpenLogicGate}
+                      />
+                    ))}
                   </div>
                 );
               })}
@@ -2413,37 +2526,100 @@ function ResponsibleInboxMatrix({
   );
 }
 
-function NodeInboxCard({
-  node,
-  selected,
+function LogicGateInboxNodeGroupCard({
+  group,
+  selectedRowIDs,
   orderedRowIDs,
   nodeByID,
-  logicGateByID,
   getNodeDragIDs,
   onSelectNode,
   onOpenNode,
   onOpenLogicGate,
+  canRemoveNode,
+  onRemovePlacement,
+}: {
+  group: InboxLogicGateNodeGroup;
+  selectedRowIDs: Set<string>;
+  orderedRowIDs: string[];
+  nodeByID: Map<string, NodeRecord>;
+  getNodeDragIDs: (nodeID: string) => string[];
+  onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onOpenNode: (node: NodeRecord) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
+  canRemoveNode?: (nodeID: string) => boolean;
+  onRemovePlacement?: (nodeID: string) => void;
+}) {
+  const canOpenLogicGate = group.logicGateID !== INBOX_NO_LOGIC_GATE_ID;
+  const firstNodeID = group.nodeIDs[0] ?? "";
+  return (
+    <div style={logicGateInboxGroupStyle}>
+      <button
+        type="button"
+        disabled={!canOpenLogicGate}
+        title={canOpenLogicGate ? `Open ${group.label} in Logic Gate Arena` : group.label}
+        aria-label={canOpenLogicGate ? `Open ${group.label} in Logic Gate Arena` : group.label}
+        style={logicGateInboxGroupHeaderStyle(canOpenLogicGate)}
+        onClick={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => {
+          if (!canOpenLogicGate) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onOpenLogicGate(group.logicGateID, group.label, firstNodeID);
+        }}
+      >
+        <ExplorerRowIcon kind="logic_gate" />
+        <span style={logicGateInboxGroupTitleStyle}>{group.label}</span>
+        <span style={logicGateInboxGroupCountStyle}>{group.nodeIDs.length}</span>
+      </button>
+      <div className="kanban-board-scroll" style={logicGateInboxNodeListStyle}>
+        {group.nodeIDs.map((nodeID) => {
+          const node = nodeByID.get(nodeID);
+          if (!node) return null;
+          return (
+            <LogicGateInboxNodeRow
+              key={nodeID}
+              node={node}
+              selected={selectedRowIDs.has(nodeTreeID(nodeID))}
+              orderedRowIDs={orderedRowIDs}
+              nodeByID={nodeByID}
+              getNodeDragIDs={getNodeDragIDs}
+              onSelectNode={onSelectNode}
+              onOpenNode={onOpenNode}
+              onRemovePlacement={canRemoveNode?.(nodeID) ? onRemovePlacement : undefined}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function LogicGateInboxNodeRow({
+  node,
+  selected,
+  orderedRowIDs,
+  nodeByID,
+  getNodeDragIDs,
+  onSelectNode,
+  onOpenNode,
   onRemovePlacement,
 }: {
   node: NodeRecord;
   selected: boolean;
   orderedRowIDs: string[];
   nodeByID: Map<string, NodeRecord>;
-  logicGateByID: Map<string, LogicGateRecord>;
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord) => void;
-  onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
   onRemovePlacement?: (nodeID: string) => void;
 }) {
   const nodeID = node.node_id;
-  const logicGateIDs = cleanIDList(node.logic_gate_ids ?? []).slice(0, 3);
   return (
     <div
       role="button"
       tabIndex={0}
       draggable
-      style={logicGateRaciCardStyle(selected)}
+      style={logicGateInboxNodeRowStyle(selected)}
       onClick={(event) => onSelectNode(nodeID, orderedRowIDs, event)}
       onDoubleClick={(event) => {
         event.preventDefault();
@@ -2455,47 +2631,25 @@ function NodeInboxCard({
         setNodeDragData(event.dataTransfer, dragIDs, nodeByID);
       }}
     >
-      <span style={logicGateRaciCardIconStyle}><ExplorerRowIcon kind="node" /></span>
-      <span style={logicGateRaciCardTextStyle}>{nodeTitle(node)}</span>
-      <span style={logicGateRaciCardActionsStyle}>
-        {logicGateIDs.map((logicGateID) => {
-          const label = logicGateTitle(logicGateByID.get(logicGateID));
-          return (
-            <button
-              key={logicGateID}
-              type="button"
-              title={`Open ${label} in Logic Gate Arena`}
-              aria-label={`Open ${label} in Logic Gate Arena`}
-              style={logicGateRaciCardGateButtonStyle}
-              onClick={(event) => event.stopPropagation()}
-              onDoubleClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onOpenLogicGate(logicGateID, label, nodeID);
-              }}
-            >
-              <ExplorerRowIcon kind="logic_gate" />
-              <span style={logicGateRaciCardGateLabelStyle}>{label}</span>
-            </button>
-          );
-        })}
-        {onRemovePlacement ? (
-          <button
-            type="button"
-            aria-label="Remove from ACI inbox"
-            style={logicGateRaciCardRemoveStyle}
-            onClick={(event) => {
-              event.stopPropagation();
-              onRemovePlacement(nodeID);
-            }}
-            onDoubleClick={(event) => event.stopPropagation()}
-          >
-            x
-          </button>
-        ) : (
-          <span style={logicGateRaciCardStatusStyle}>{responsibleStatusLetter(node.status)}</span>
-        )}
-      </span>
+      <span style={logicGateInboxNodeGuideStyle} />
+      <span style={logicGateInboxNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
+      <span style={logicGateInboxNodeTitleStyle}>{nodeTitle(node)}</span>
+      {onRemovePlacement ? (
+        <button
+          type="button"
+          aria-label={`Remove ${nodeTitle(node)} from ACI inbox`}
+          style={logicGateInboxNodeRemoveStyle}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemovePlacement(nodeID);
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
+          x
+        </button>
+      ) : (
+        <span style={logicGateInboxNodeStatusStyle(node.status)}>{responsibleStatusLetter(node.status)}</span>
+      )}
     </div>
   );
 }
@@ -2587,13 +2741,23 @@ function DeleteMessagesConfirmationModal({ count, busy, onConfirm, onCancel }: {
 function readCommunicationsColumnWidths(): CommunicationsColumnWidths {
   try {
     const parsed = JSON.parse(localStorage.getItem(COMMUNICATIONS_COLUMN_WIDTHS_STORAGE_KEY) ?? "null") as unknown;
-    if (Array.isArray(parsed) && parsed.length === 4 && parsed.every((value) => typeof value === "number" && Number.isFinite(value))) {
+    if (isCommunicationsColumnWidths(parsed)) {
       return normalizeCommunicationsColumnWidths(parsed as CommunicationsColumnWidths);
     }
   } catch {
     // Stored UI preferences are optional; fall back to viewport-aware defaults.
   }
   return defaultCommunicationsColumnWidths();
+}
+
+function saveCommunicationsColumnWidths(widths: CommunicationsColumnWidths): void {
+  try {
+    localStorage.setItem(COMMUNICATIONS_COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(widths));
+  } catch {}
+}
+
+function isCommunicationsColumnWidths(value: unknown): value is CommunicationsColumnWidths {
+  return Array.isArray(value) && value.length === 4 && value.every((item) => typeof item === "number" && Number.isFinite(item));
 }
 
 function defaultCommunicationsColumnWidths(): CommunicationsColumnWidths {
@@ -2637,10 +2801,55 @@ function resizeCommunicationsColumns(startWidths: CommunicationsColumnWidths, di
   return normalizeCommunicationsColumnWidths(next);
 }
 
+function resizeCommunicationsColumnsWithoutSidebar(startWidths: CommunicationsColumnWidths, dividerIndex: 0 | 1 | 2, delta: number, availableWidth: number): CommunicationsColumnWidths {
+  const next: CommunicationsColumnWidths = [startWidths[0], startWidths[1], startWidths[2], startWidths[3]];
+  const resizerTotal = COMMUNICATIONS_COLUMN_RESIZER_WIDTH * 2;
+
+  if (dividerIndex === 1) {
+    const maxList = Math.min(
+      COMMUNICATIONS_COLUMN_MAX_WIDTHS[1],
+      Math.max(COMMUNICATIONS_COLUMN_MIN_WIDTHS[1], availableWidth - next[3] - resizerTotal - COMMUNICATIONS_COLUMN_MIN_WIDTHS[2]),
+    );
+    next[1] = clampNumber(startWidths[1] + delta, COMMUNICATIONS_COLUMN_MIN_WIDTHS[1], maxList);
+  } else if (dividerIndex === 2) {
+    const maxRail = Math.min(
+      COMMUNICATIONS_COLUMN_MAX_WIDTHS[3],
+      Math.max(COMMUNICATIONS_COLUMN_MIN_WIDTHS[3], availableWidth - next[1] - resizerTotal - COMMUNICATIONS_COLUMN_MIN_WIDTHS[2]),
+    );
+    next[3] = clampNumber(startWidths[3] - delta, COMMUNICATIONS_COLUMN_MIN_WIDTHS[3], maxRail);
+  }
+
+  next[2] = Math.max(COMMUNICATIONS_COLUMN_MIN_WIDTHS[2], availableWidth - next[1] - next[3] - resizerTotal);
+  return normalizeCommunicationsColumnWidths(next);
+}
+
+function resizeInboxMatrixColumnsWithoutSidebar(startWidths: CommunicationsColumnWidths, dividerIndex: 0 | 1 | 2, delta: number, availableWidth: number): CommunicationsColumnWidths {
+  const next: CommunicationsColumnWidths = [startWidths[0], startWidths[1], startWidths[2], startWidths[3]];
+  if (dividerIndex !== 2) return normalizeCommunicationsColumnWidths(next);
+
+  const maxRail = Math.min(
+    COMMUNICATIONS_COLUMN_MAX_WIDTHS[3],
+    Math.max(COMMUNICATIONS_COLUMN_MIN_WIDTHS[3], availableWidth - COMMUNICATIONS_COLUMN_RESIZER_WIDTH - 760),
+  );
+  next[3] = clampNumber(startWidths[3] - delta, COMMUNICATIONS_COLUMN_MIN_WIDTHS[3], maxRail);
+  next[2] = Math.max(760, availableWidth - next[3] - COMMUNICATIONS_COLUMN_RESIZER_WIDTH);
+  return normalizeCommunicationsColumnWidths(next);
+}
+
 function getCommunicationsGridTemplateColumns(widths: CommunicationsColumnWidths): string {
   return [
     `${widths[0]}px`,
     `${COMMUNICATIONS_COLUMN_RESIZER_WIDTH}px`,
+    `${widths[1]}px`,
+    `${COMMUNICATIONS_COLUMN_RESIZER_WIDTH}px`,
+    `minmax(${COMMUNICATIONS_COLUMN_MIN_WIDTHS[2]}px, 1fr)`,
+    `${COMMUNICATIONS_COLUMN_RESIZER_WIDTH}px`,
+    `${widths[3]}px`,
+  ].join(" ");
+}
+
+function getCommunicationsGridTemplateColumnsWithoutSidebar(widths: CommunicationsColumnWidths): string {
+  return [
     `${widths[1]}px`,
     `${COMMUNICATIONS_COLUMN_RESIZER_WIDTH}px`,
     `minmax(${COMMUNICATIONS_COLUMN_MIN_WIDTHS[2]}px, 1fr)`,
@@ -2661,6 +2870,14 @@ function getInboxMatrixGridTemplateColumns(widths: CommunicationsColumnWidths): 
   return [
     `${widths[0]}px`,
     "minmax(760px, 1fr)",
+    `${widths[3]}px`,
+  ].join(" ");
+}
+
+function getInboxMatrixGridTemplateColumnsWithoutSidebar(widths: CommunicationsColumnWidths): string {
+  return [
+    "minmax(760px, 1fr)",
+    `${COMMUNICATIONS_COLUMN_RESIZER_WIDTH}px`,
     `${widths[3]}px`,
   ].join(" ");
 }
@@ -2767,6 +2984,55 @@ function nodeIDFromTreeID(treeID: string): string {
 
 function nodeTitle(node?: Pick<NodeRecord, "title" | "node_id">): string {
   return node ? getNodeTitle(node) || node.node_id : "Node";
+}
+
+function inboxLogicGateLabel(logicGateID: string, logicGateByID: Map<string, LogicGateRecord>): string {
+  if (logicGateID === INBOX_NO_LOGIC_GATE_ID) return "No Logic Gate";
+  const logicGate = logicGateByID.get(logicGateID);
+  return logicGate ? logicGateTitle(logicGate) : logicGateID || "Logic Gate";
+}
+
+function buildInboxLogicGateGroups(
+  nodeIDs: string[],
+  nodeByID: Map<string, NodeRecord>,
+  logicGateByID: Map<string, LogicGateRecord>,
+): InboxLogicGateNodeGroup[] {
+  const byLogicGate = new Map<string, Set<string>>();
+  for (const nodeID of cleanIDList(nodeIDs)) {
+    const node = nodeByID.get(nodeID);
+    if (!node) continue;
+    const logicGateIDs = cleanIDList(node.logic_gate_ids ?? []);
+    const parentIDs = logicGateIDs.length > 0 ? logicGateIDs : [INBOX_NO_LOGIC_GATE_ID];
+    for (const logicGateID of parentIDs) {
+      const childIDs = byLogicGate.get(logicGateID) ?? new Set<string>();
+      childIDs.add(nodeID);
+      byLogicGate.set(logicGateID, childIDs);
+    }
+  }
+  return Array.from(byLogicGate.entries())
+    .map(([logicGateID, childIDs]) => ({
+      logicGateID,
+      label: inboxLogicGateLabel(logicGateID, logicGateByID),
+      nodeIDs: Array.from(childIDs).sort((a, b) => nodeTitle(nodeByID.get(a)).localeCompare(nodeTitle(nodeByID.get(b)), undefined, { numeric: true, sensitivity: "base" }) || a.localeCompare(b)),
+    }))
+    .sort((a, b) => {
+      if (a.logicGateID === INBOX_NO_LOGIC_GATE_ID && b.logicGateID !== INBOX_NO_LOGIC_GATE_ID) return 1;
+      if (b.logicGateID === INBOX_NO_LOGIC_GATE_ID && a.logicGateID !== INBOX_NO_LOGIC_GATE_ID) return -1;
+      return a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" })
+        || a.logicGateID.localeCompare(b.logicGateID);
+    });
+}
+
+function buildInboxLogicGateGroupsByCell(
+  cellNodeIDs: Map<string, string[]>,
+  nodeByID: Map<string, NodeRecord>,
+  logicGateByID: Map<string, LogicGateRecord>,
+): Map<string, InboxLogicGateNodeGroup[]> {
+  const byCell = new Map<string, InboxLogicGateNodeGroup[]>();
+  for (const [cellKey, nodeIDs] of cellNodeIDs.entries()) {
+    byCell.set(cellKey, buildInboxLogicGateGroups(nodeIDs, nodeByID, logicGateByID));
+  }
+  return byCell;
 }
 
 function sortNodesForInbox(nodes: NodeRecord[]): NodeRecord[] {
@@ -3063,6 +3329,10 @@ function isInboxMatrixViewID(viewID: CommunicationsViewID): boolean {
   return viewID === "aci-inbox" || viewID === "r-inbox";
 }
 
+function mailboxForCommunicationsView(viewID: CommunicationsViewID): EmailMailbox {
+  return viewID === "my-triage" || viewID === "primary" ? "primary" : "all";
+}
+
 function messageListFilterKey(companyID: string, viewID: CommunicationsViewID, mailbox: EmailMailbox, query: string, unreadOnly: boolean): string {
   return JSON.stringify([companyID.trim(), viewID, mailbox, query.trim(), unreadOnly]);
 }
@@ -3205,6 +3475,27 @@ const columnResizeGripStyle: React.CSSProperties = {
   background: "rgba(255, 136, 32, 0.2)",
 };
 
+const railRowResizeHandleStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  minHeight: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "stretch",
+  padding: 0,
+  border: 0,
+  background: "transparent",
+  cursor: "row-resize",
+  touchAction: "none",
+};
+
+const railRowResizeGripStyle: React.CSSProperties = {
+  width: "100%",
+  height: 2,
+  borderRadius: 2,
+  background: "rgba(255, 136, 32, 0.24)",
+};
+
 const sidebarStyle: React.CSSProperties = {
   minHeight: 0,
   minWidth: 0,
@@ -3324,17 +3615,19 @@ function mailPanelStyle(triage: boolean): React.CSSProperties {
   };
 }
 
-const logicGateRailStyle: React.CSSProperties = {
-  position: "sticky",
-  right: 0,
-  zIndex: 2,
-  minHeight: 0,
-  display: "grid",
-  gridTemplateRows: "minmax(0, 1fr) minmax(0, 1fr)",
-  gap: 10,
-  overflow: "hidden",
-  background: "#ffffff",
-};
+function logicGateRailStyle(topHeight: number): React.CSSProperties {
+  return {
+    position: "sticky",
+    right: 0,
+    zIndex: 2,
+    minHeight: 0,
+    display: "grid",
+    gridTemplateRows: `${topHeight}px ${COMMUNICATIONS_ROW_RESIZER_HEIGHT}px minmax(0, 1fr)`,
+    gap: 0,
+    overflow: "hidden",
+    background: "#ffffff",
+  };
+}
 
 const logicGateRailSectionStyle: React.CSSProperties = {
   minHeight: 0,
@@ -3610,72 +3903,106 @@ function logicGateRaciCellStyle(activeDrop: boolean): React.CSSProperties {
   };
 }
 
-function logicGateRaciCardStyle(selected: boolean): React.CSSProperties {
+const logicGateInboxGroupStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gridTemplateRows: "30px minmax(0, auto)",
+  border: "1px solid rgba(255, 136, 32, 0.28)",
+  borderRadius: 7,
+  background: "#fffdf9",
+  overflow: "hidden",
+  boxShadow: "0 2px 7px rgba(36, 18, 10, 0.05)",
+};
+
+function logicGateInboxGroupHeaderStyle(interactive: boolean): React.CSSProperties {
   return {
-    position: "relative",
-    minHeight: 42,
+    width: "100%",
+    height: 30,
     display: "grid",
-    gridTemplateColumns: "20px minmax(0, 1fr) auto",
+    gridTemplateColumns: "18px minmax(0, 1fr) auto",
     alignItems: "center",
-    gap: 7,
-    border: `1px solid ${selected ? "rgba(255, 136, 32, 0.72)" : "rgba(255, 136, 32, 0.24)"}`,
-    borderRadius: 7,
-    background: selected ? "#fff2e0" : "#fffaf3",
+    gap: 6,
+    border: "none",
+    borderBottom: "1px solid rgba(255, 136, 32, 0.20)",
+    background: "#fff4e6",
     color: "#24120a",
-    cursor: "grab",
-    padding: "7px 6px",
+    cursor: interactive ? "pointer" : "default",
+    padding: "0 8px",
     minWidth: 0,
-    boxShadow: selected ? "0 0 0 2px rgba(255, 136, 32, 0.12) inset" : "0 2px 6px rgba(36, 18, 10, 0.04)",
+    textAlign: "left",
+    opacity: 1,
   };
 }
 
-const logicGateRaciCardActionsStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "flex-end",
-  gap: 3,
-  minWidth: 0,
-  maxWidth: 118,
-  overflow: "hidden",
-};
-
-const logicGateRaciCardGateButtonStyle: React.CSSProperties = {
-  flex: "1 1 54px",
-  minWidth: 42,
-  maxWidth: 112,
-  height: 22,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "flex-start",
-  gap: 4,
-  border: "1px solid rgba(255, 136, 32, 0.28)",
-  borderRadius: 4,
-  background: "rgba(255, 255, 255, 0.72)",
-  color: "#24120a",
-  cursor: "pointer",
-  padding: "0 5px",
-  overflow: "hidden",
-};
-
-const logicGateRaciCardGateLabelStyle: React.CSSProperties = {
+const logicGateInboxGroupTitleStyle: React.CSSProperties = {
   minWidth: 0,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
+  fontSize: 11,
+  fontWeight: 800,
+};
+
+const logicGateInboxGroupCountStyle: React.CSSProperties = {
+  minWidth: 21,
+  height: 18,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(255, 136, 32, 0.24)",
+  borderRadius: 4,
+  background: "rgba(255, 255, 255, 0.78)",
+  color: "rgba(36, 18, 10, 0.62)",
   fontSize: 10,
   fontWeight: 800,
   lineHeight: 1,
 };
 
-const logicGateRaciCardIconStyle: React.CSSProperties = {
-  width: 20,
-  height: 20,
+const logicGateInboxNodeListStyle: React.CSSProperties = {
+  maxHeight: 124,
+  minHeight: 0,
   display: "grid",
-  placeItems: "center",
-  transform: "scale(1.1)",
+  alignContent: "start",
+  gap: 3,
+  overflowY: "auto",
+  overflowX: "hidden",
+  padding: "5px 5px 6px 7px",
+  background: "#fffdf9",
 };
 
-const logicGateRaciCardTextStyle: React.CSSProperties = {
+function logicGateInboxNodeRowStyle(selected: boolean): React.CSSProperties {
+  return {
+    minHeight: 28,
+    minWidth: 0,
+    display: "grid",
+    gridTemplateColumns: "10px 16px minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: 5,
+    border: `1px solid ${selected ? "rgba(255, 136, 32, 0.72)" : "rgba(255, 136, 32, 0.16)"}`,
+    borderRadius: 5,
+    background: selected ? "#fff2e0" : "#ffffff",
+    color: "#24120a",
+    cursor: "grab",
+    padding: "3px 4px 3px 0",
+    boxShadow: selected ? "0 0 0 2px rgba(255, 136, 32, 0.10) inset" : "none",
+  };
+}
+
+const logicGateInboxNodeGuideStyle: React.CSSProperties = {
+  width: 10,
+  height: "100%",
+  borderLeft: "1px solid rgba(255, 136, 32, 0.28)",
+  borderBottom: "1px solid rgba(255, 136, 32, 0.18)",
+  justifySelf: "end",
+};
+
+const logicGateInboxNodeIconStyle: React.CSSProperties = {
+  width: 16,
+  height: 16,
+  display: "grid",
+  placeItems: "center",
+};
+
+const logicGateInboxNodeTitleStyle: React.CSSProperties = {
   minWidth: 0,
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -3684,9 +4011,9 @@ const logicGateRaciCardTextStyle: React.CSSProperties = {
   fontWeight: 700,
 };
 
-const logicGateRaciCardRemoveStyle: React.CSSProperties = {
-  width: 20,
-  height: 20,
+const logicGateInboxNodeRemoveStyle: React.CSSProperties = {
+  width: 18,
+  height: 18,
   display: "grid",
   placeItems: "center",
   border: "none",
@@ -3700,16 +4027,23 @@ const logicGateRaciCardRemoveStyle: React.CSSProperties = {
   padding: 0,
 };
 
-const logicGateRaciCardStatusStyle: React.CSSProperties = {
-  width: 20,
-  height: 20,
-  display: "grid",
-  placeItems: "center",
-  color: "rgba(36, 18, 10, 0.58)",
-  fontSize: 10,
-  fontWeight: 800,
-  lineHeight: 1,
-};
+function logicGateInboxNodeStatusStyle(value: unknown): React.CSSProperties {
+  const status = normalizeResponsibleInboxStatus(value);
+  const color = status ? responsibleStatusColor(status) : "rgba(36, 18, 10, 0.48)";
+  return {
+    minWidth: 21,
+    height: 18,
+    display: "grid",
+    placeItems: "center",
+    border: `1px solid ${status ? color : "rgba(36, 18, 10, 0.16)"}`,
+    borderRadius: 4,
+    background: "rgba(255, 255, 255, 0.72)",
+    color,
+    fontSize: 9,
+    fontWeight: 800,
+    lineHeight: 1,
+  };
+}
 
 const emptySmallStyle: React.CSSProperties = {
   minHeight: 64,

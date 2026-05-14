@@ -1,14 +1,18 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { HeaderCommunicationsIcon, HeaderLogicGateArenaIcon, HeaderMapIcon } from "./HeaderIcons";
 import type { CurrentUserResponse } from "../auth/cognitoAuth";
+import { getActiveCompanyID } from "../auth/currentCompany";
 import FrameCanvas from "./framecanvas";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { MangoWordmark } from "./MangoLogo";
 import ModulePickerMenu from "./menus/ModulePickerMenu";
 import { MODULE_LIBRARY as FRAME_MODULE_LIBRARY, preloadModuleKind } from "../modules";
+import { ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
+import { readExplorerDragPayload } from "../modules/company-explorer/companyExplorerDragDrop";
 import type { FrameDataModel, DragState } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { emitDashboardEvent, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
+import { publishLiveSelection } from "../modules/selectionCoordinator";
 import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, mergeLinkPlan, type FrameLinkEdge } from "./frameLinking";
 import { createCommunicationsViewFrames, createDefaultNodeViewFrames, createLogicGateArenaFrames } from "./DefaultViews";
 import { FrameCard, GridCrosses, PlacementSplash } from "./FrameChrome";
@@ -34,14 +38,139 @@ import {
 import { loadFrameLinks, loadSettings, loadViews, persistFrameLinks, persistFrameRegistry, saveSettings, saveViews } from "./useFramePersistence";
 import { preloadCommunicationsSurface, preloadDefaultDashboardModules, preloadLogicGateArenaSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
 import { LazyCommunicationsPage, LazyLogicGateArenaPage } from "../pages/lazyPages";
+import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
 import { useFrameDragResize } from "./useFrameDragResize";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
 const PAGE_EDGE_GAP = 10;
 const PAGE_SURFACE_RADIUS = 16;
+const APP_SIDEBAR_W = 190;
+const APP_SIDEBAR_MIN_W = 148;
+const APP_SIDEBAR_MAX_W = 320;
+const APP_RESIZE_HANDLE_W = 10;
+const SIDEBAR_PINS_KEY = "mangorts.app-sidebar-pins.v1";
+const SIDEBAR_WIDTH_KEY = "mangorts.app-sidebar-width.v1";
 
 type PrimaryPage = "map" | "communications" | "logic-gate-arena";
+type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox";
+type SidebarPinKind = "node" | "logic_gate";
+type SidebarPin = {
+  id: string;
+  kind: SidebarPinKind;
+  label: string;
+  addedAt: number;
+};
+
+const HOME_NAV_ITEMS: Array<{ view: HomeSidebarView; label: string }> = [
+  { view: "my-triage", label: "My Triage" },
+  { view: "shared-root", label: "Shared Triage" },
+  { view: "aci-inbox", label: "ACI Inbox" },
+  { view: "r-inbox", label: "R Inbox" },
+];
+
+function createPrimaryPageTab(page: PrimaryPage, id = createTabId()): ViewTab {
+  if (page === "communications") return { id, name: "Home", page: "communications", frames: createCommunicationsViewFrames() };
+  if (page === "logic-gate-arena") return { id, name: "Logic Gate Arena", page: "logic-gate-arena", frames: createLogicGateArenaFrames() };
+  return { id, name: "Map", frames: createDefaultNodeViewFrames() };
+}
+
+function ensurePrimaryPageTab(tabs: ViewTab[], page: PrimaryPage): { tabs: ViewTab[]; tab: ViewTab } {
+  const existing = tabs.find((tab) => pageForTab(tab) === page);
+  if (existing) return { tabs, tab: existing };
+  const tab = createPrimaryPageTab(page);
+  return { tabs: [...tabs, tab], tab };
+}
+
+function isSidebarPin(value: unknown): value is SidebarPin {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<SidebarPin>;
+  return (
+    (candidate.kind === "node" || candidate.kind === "logic_gate") &&
+    typeof candidate.id === "string" &&
+    candidate.id.trim().length > 0 &&
+    typeof candidate.label === "string" &&
+    typeof candidate.addedAt === "number"
+  );
+}
+
+function readSidebarPins(): SidebarPin[] {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_PINS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isSidebarPin).map((pin) => ({
+      id: pin.id.trim(),
+      kind: pin.kind,
+      label: pin.label.trim() || sidebarPinFallbackLabel(pin.kind, pin.id),
+      addedAt: pin.addedAt,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function saveSidebarPins(pins: SidebarPin[]): void {
+  try {
+    localStorage.setItem(SIDEBAR_PINS_KEY, JSON.stringify(pins));
+  } catch {
+    // Sidebar pins are convenience state; losing storage should not block navigation.
+  }
+}
+
+function clampSidebarWidth(width: number): number {
+  return clamp(Math.round(width), APP_SIDEBAR_MIN_W, APP_SIDEBAR_MAX_W);
+}
+
+function readSidebarWidth(): number {
+  try {
+    const raw = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    return Number.isFinite(raw) ? clampSidebarWidth(raw) : APP_SIDEBAR_W;
+  } catch {
+    return APP_SIDEBAR_W;
+  }
+}
+
+function saveSidebarWidth(width: number): void {
+  try {
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(clampSidebarWidth(width)));
+  } catch {}
+}
+
+function sidebarPinFallbackLabel(kind: SidebarPinKind, id: string): string {
+  const prefix = kind === "logic_gate" ? "Logic Gate" : "Node";
+  return `${prefix} ${id.trim().slice(0, 8) || "pin"}`;
+}
+
+function sidebarPinsFromDrop(dataTransfer: DataTransfer): SidebarPin[] {
+  const payload = readExplorerDragPayload(dataTransfer);
+  if (!payload) return [];
+  const droppedText = dataTransfer.getData("text/plain").trim();
+  const now = Date.now();
+
+  if ((payload.kind === "node" || payload.kind === "logic_gate") && payload.itemID) {
+    const kind = payload.kind;
+    return [{
+      id: payload.itemID.trim(),
+      kind,
+      label: droppedText || sidebarPinFallbackLabel(kind, payload.itemID),
+      addedAt: now,
+    }];
+  }
+
+  if (payload.kind === "batch" && (payload.itemType === "node" || payload.itemType === "logic_gate")) {
+    const kind = payload.itemType;
+    return (payload.items ?? []).map((item, index) => ({
+      id: item.itemID.trim(),
+      kind,
+      label: sidebarPinFallbackLabel(kind, item.itemID),
+      addedAt: now + index,
+    }));
+  }
+
+  return [];
+}
 
 function pageForTab(tab: ViewTab): PrimaryPage | null {
   if (tab.page === "communications") return "communications";
@@ -80,10 +209,338 @@ type AppProps = {
   overrideContent?: React.ReactNode;
 };
 
+type AppSidebarProps = {
+  activePage: PrimaryPage | null;
+  activeHomeView: HomeSidebarView;
+  pins: SidebarPin[];
+  pinDropActive: boolean;
+  onHomeViewSelect: (view: HomeSidebarView) => void;
+  onPageSelect: (page: PrimaryPage) => void;
+  onPinOpen: (pin: SidebarPin) => void;
+  onPinRemove: (pin: SidebarPin) => void;
+  onPinDragEnter: () => void;
+  onPinDragLeave: () => void;
+  onPinDragOver: (event: React.DragEvent<HTMLElement>) => void;
+  onPinDrop: (event: React.DragEvent<HTMLElement>) => void;
+};
+
+function AppSidebar({
+  activePage,
+  activeHomeView,
+  pins,
+  pinDropActive,
+  onHomeViewSelect,
+  onPageSelect,
+  onPinOpen,
+  onPinRemove,
+  onPinDragEnter,
+  onPinDragLeave,
+  onPinDragOver,
+  onPinDrop,
+}: AppSidebarProps) {
+  const homeActive = activePage === "communications";
+  return (
+    <aside style={appSidebarStyle}>
+      <div style={appSidebarTitleStyle}>Explorer</div>
+
+      <section style={appSidebarSectionStyle} aria-label="Home inboxes">
+        {HOME_NAV_ITEMS.map((item) => (
+          <AppSidebarButton
+            key={item.view}
+            label={item.label}
+            active={homeActive && activeHomeView === item.view}
+            onClick={() => onHomeViewSelect(item.view)}
+          />
+        ))}
+      </section>
+
+      <section
+        style={appSidebarPinnedSectionStyle(pinDropActive)}
+        aria-label="Pinned"
+        onDragEnter={onPinDragEnter}
+        onDragOver={onPinDragOver}
+        onDragLeave={(event) => {
+          const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+          if (related && event.currentTarget.contains(related)) return;
+          onPinDragLeave();
+        }}
+        onDrop={onPinDrop}
+      >
+        <div style={appSidebarSectionTitleStyle}>Pinned</div>
+        <div style={appSidebarPinListStyle}>
+          {pins.length === 0 ? (
+            <div style={appSidebarEmptyStyle}>No pins</div>
+          ) : pins.map((pin) => (
+            <div key={`${pin.kind}:${pin.id}`} style={appSidebarPinRowStyle}>
+              <button type="button" style={appSidebarPinButtonStyle} onClick={() => onPinOpen(pin)}>
+                <span style={appSidebarPinIconStyle}><ExplorerRowIcon kind={pin.kind} /></span>
+                <span style={appSidebarTextStyle}>{pin.label}</span>
+              </button>
+              <button type="button" aria-label={`Remove ${pin.label}`} style={appSidebarPinRemoveStyle} onClick={() => onPinRemove(pin)}>
+                X
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section style={appSidebarSectionStyle} aria-label="Primary pages">
+        <AppSidebarButton
+          label="Logic Gate Arena"
+          active={activePage === "logic-gate-arena"}
+          icon={<HeaderLogicGateArenaIcon />}
+          onPointerEnter={preloadLogicGateArenaSurface}
+          onFocus={preloadLogicGateArenaSurface}
+          onPointerDown={preloadLogicGateArenaSurface}
+          onClick={() => onPageSelect("logic-gate-arena")}
+        />
+        <AppSidebarButton
+          label="Map"
+          active={activePage === "map"}
+          icon={<HeaderMapIcon />}
+          onPointerEnter={preloadDefaultDashboardModules}
+          onFocus={preloadDefaultDashboardModules}
+          onPointerDown={preloadDefaultDashboardModules}
+          onClick={() => onPageSelect("map")}
+        />
+      </section>
+    </aside>
+  );
+}
+
+function AppSidebarButton({
+  label,
+  active,
+  icon,
+  onClick,
+  onPointerEnter,
+  onFocus,
+  onPointerDown,
+}: {
+  label: string;
+  active: boolean;
+  icon?: React.ReactNode;
+  onClick: () => void;
+  onPointerEnter?: () => void;
+  onFocus?: () => void;
+  onPointerDown?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      style={appSidebarButtonStyle(active, !!icon)}
+      onPointerEnter={onPointerEnter}
+      onFocus={onFocus}
+      onPointerDown={onPointerDown}
+      onClick={onClick}
+    >
+      {icon && <span style={appSidebarButtonIconStyle}>{icon}</span>}
+      <span style={appSidebarTextStyle}>{label}</span>
+    </button>
+  );
+}
+
+function appBodyStyle(sidebarWidth: number): React.CSSProperties {
+  return {
+    height: `calc(100vh - ${HEADER_H}px)`,
+    minHeight: 0,
+    display: "grid",
+    gridTemplateColumns: `${sidebarWidth}px ${APP_RESIZE_HANDLE_W}px minmax(0, 1fr)`,
+    gap: 0,
+    padding: `0 ${PAGE_EDGE_GAP}px ${PAGE_EDGE_GAP}px`,
+    alignItems: "stretch",
+  };
+}
+
+const appResizeHandleStyle: React.CSSProperties = {
+  minHeight: 0,
+  width: "100%",
+  height: "100%",
+  display: "flex",
+  alignItems: "stretch",
+  justifyContent: "center",
+  padding: 0,
+  border: 0,
+  background: "transparent",
+  cursor: "col-resize",
+  touchAction: "none",
+};
+
+const appResizeGripStyle: React.CSSProperties = {
+  width: 2,
+  minHeight: 0,
+  borderRadius: 2,
+  background: "rgba(255, 136, 32, 0.24)",
+};
+
+const appSidebarStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  gridTemplateRows: "auto auto minmax(88px, auto) auto",
+  alignContent: "start",
+  gap: 10,
+  padding: 10,
+  borderRadius: PAGE_SURFACE_RADIUS,
+  background: "#ffffff",
+  color: UI_THEME.text,
+  boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(132, 51, 0, 0.18)",
+  overflow: "hidden",
+};
+
+const appSidebarTitleStyle: React.CSSProperties = {
+  minHeight: 28,
+  display: "flex",
+  alignItems: "center",
+  padding: "0 6px",
+  color: "#24120a",
+  fontSize: 13,
+  fontWeight: 700,
+  letterSpacing: 0,
+};
+
+const appSidebarSectionStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 4,
+  minWidth: 0,
+  paddingBottom: 10,
+  borderBottom: "1px solid rgba(255, 136, 32, 0.2)",
+};
+
+function appSidebarPinnedSectionStyle(active: boolean): React.CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateRows: "auto minmax(44px, auto)",
+    gap: 5,
+    minWidth: 0,
+    padding: "0 0 10px",
+    borderBottom: "1px solid rgba(255, 136, 32, 0.2)",
+    outline: active ? "2px solid rgba(255, 136, 32, 0.32)" : "2px solid transparent",
+    outlineOffset: 2,
+    borderRadius: 6,
+  };
+}
+
+const appSidebarSectionTitleStyle: React.CSSProperties = {
+  padding: "0 6px",
+  color: "rgba(36, 18, 10, 0.62)",
+  fontSize: 10,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: 0,
+};
+
+function appSidebarButtonStyle(active: boolean, hasIcon: boolean): React.CSSProperties {
+  return {
+    width: "100%",
+    minHeight: 31,
+    display: "grid",
+    gridTemplateColumns: hasIcon ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)",
+    alignItems: "center",
+    gap: 7,
+    border: `1px solid ${active ? "rgba(255, 136, 32, 0.68)" : "transparent"}`,
+    borderRadius: 6,
+    background: active ? "rgba(255, 136, 32, 0.13)" : "transparent",
+    color: active ? "#ff8820" : "#3f332b",
+    cursor: "pointer",
+    font: "inherit",
+    fontSize: 12,
+    fontWeight: active ? 700 : 600,
+    letterSpacing: 0,
+    padding: "0 8px",
+    textAlign: "left",
+    minWidth: 0,
+  };
+}
+
+const appSidebarButtonIconStyle: React.CSSProperties = {
+  width: 16,
+  display: "grid",
+  placeItems: "center",
+};
+
+const appSidebarTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const appSidebarPinListStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  alignContent: "start",
+  gap: 4,
+  maxHeight: 180,
+  overflowY: "auto",
+  overflowX: "hidden",
+  padding: "0 2px",
+};
+
+const appSidebarEmptyStyle: React.CSSProperties = {
+  minHeight: 34,
+  display: "flex",
+  alignItems: "center",
+  padding: "0 6px",
+  color: "rgba(36, 18, 10, 0.48)",
+  fontSize: 11,
+  fontWeight: 600,
+};
+
+const appSidebarPinRowStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 24px",
+  alignItems: "center",
+  gap: 4,
+};
+
+const appSidebarPinButtonStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 30,
+  display: "grid",
+  gridTemplateColumns: "18px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 6,
+  border: "1px solid rgba(255, 136, 32, 0.15)",
+  borderRadius: 6,
+  background: "#ffffff",
+  color: "#3f332b",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 600,
+  padding: "0 7px",
+  textAlign: "left",
+};
+
+const appSidebarPinIconStyle: React.CSSProperties = {
+  width: 18,
+  display: "grid",
+  placeItems: "center",
+  color: "#ff8820",
+};
+
+const appSidebarPinRemoveStyle: React.CSSProperties = {
+  width: 24,
+  height: 24,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(255, 136, 32, 0.18)",
+  borderRadius: 5,
+  background: "#ffffff",
+  color: "rgba(36, 18, 10, 0.58)",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 10,
+  fontWeight: 700,
+  lineHeight: 1,
+};
+
 const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, overrideContent }) => {
   const loaded = useMemo(() => loadViews(), []);
   const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(loaded.activeId);
+  const [homeViewID, setHomeViewID] = useState<HomeSidebarView>("my-triage");
   const [movingTabId, setMovingTabId] = useState<string | null>(null);
   const [isDraggingTab, setIsDraggingTab] = useState(false);
 
@@ -102,6 +559,9 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     const loadedFrameIDs = new Set(loaded.tabs.flatMap((tab) => tab.frames.map((frame) => frame.id)));
     return loadFrameLinks().filter((edge) => loadedFrameIDs.has(edge.a) && loadedFrameIDs.has(edge.b));
   });
+  const [appSidebarWidth, setAppSidebarWidth] = useState(readSidebarWidth);
+  const [sidebarPins, setSidebarPins] = useState<SidebarPin[]>(readSidebarPins);
+  const [pinDropActive, setPinDropActive] = useState(false);
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [frameRightClickMenu, setFrameRightClickMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -113,6 +573,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
 
   const dragRef = useRef<DragState | null>(null);
   const tabDragRef = useRef<{ id: string; startX: number; startY: number } | null>(null);
+  const appSidebarResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const copiedFrameRef = useRef<FrameDataModel | null>(null);
   const undoStackRef = useRef<DashboardSnapshot[]>([]);
   const redoStackRef = useRef<DashboardSnapshot[]>([]);
@@ -123,7 +584,9 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   const frameLinkRevisionRef = useRef(0);
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId) ?? tabs[0], [tabs, activeTabId]);
+  const headerTabs = useMemo(() => tabs.filter((tab) => !pageForTab(tab)), [tabs]);
   const frames = activeTab?.frames ?? [];
+  const activePrimaryPage = activeTab ? pageForTab(activeTab) : null;
   const isLogicGateArenaView = activeTab?.page === "logic-gate-arena";
   const isCommunicationsView = activeTab?.page === "communications";
   const isFullPageView = isLogicGateArenaView || isCommunicationsView;
@@ -223,8 +686,33 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      const drag = appSidebarResizeRef.current;
+      if (!drag) return;
+      event.preventDefault();
+      setAppSidebarWidth(clampSidebarWidth(drag.startWidth + event.clientX - drag.startX));
+    };
+    const onPointerUp = () => {
+      if (!appSidebarResizeRef.current) return;
+      appSidebarResizeRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+  }, []);
+
   useEffect(() => { saveViews(tabs, activeTabId); }, [tabs, activeTabId]);
   useEffect(() => { saveSettings({ bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor }); }, [bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor]);
+  useEffect(() => { saveSidebarWidth(appSidebarWidth); }, [appSidebarWidth]);
+  useEffect(() => { saveSidebarPins(sidebarPins); }, [sidebarPins]);
   useEffect(() => {
     const snapshot = buildSnapshot();
     if (restoringRef.current) {
@@ -243,7 +731,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     lastSnapshotRef.current = snapshot;
   }, [buildSnapshot]);
 
-  const canvasW = Math.max(1, viewSize.w - PAGE_EDGE_GAP * 2);
+  const canvasW = Math.max(1, viewSize.w - appSidebarWidth - APP_RESIZE_HANDLE_W - PAGE_EDGE_GAP * 2);
   const canvasH = Math.max(1, viewSize.h - HEADER_H - PAGE_EDGE_GAP);
   const gridCols = Math.max(1, Math.round(canvasW / CELL_SIZE));
   const gridRows = Math.max(1, Math.round(canvasH / CELL_SIZE));
@@ -585,6 +1073,99 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     setActiveTabId(id);
   }, [tabs]);
 
+  const selectPrimaryPage = useCallback((page: PrimaryPage) => {
+    if (page === "communications") preloadCommunicationsSurface();
+    if (page === "logic-gate-arena") preloadLogicGateArenaSurface();
+    if (page === "map") preloadDefaultDashboardModules();
+
+    const ensured = ensurePrimaryPageTab(tabs, page);
+    setTabs(ensured.tabs);
+    setActiveTabId(ensured.tab.id);
+    setEditMode(page === "map");
+    setSelectedFrameId(null);
+    setSelectedFrameIds(new Set());
+    closeMenus();
+    if (onNavigate) {
+      saveViews(ensured.tabs, ensured.tab.id);
+      onNavigate(routeForPage(page));
+    }
+  }, [closeMenus, onNavigate, tabs]);
+
+  const selectHomeSidebarView = useCallback((view: HomeSidebarView) => {
+    setHomeViewID(view);
+    selectPrimaryPage("communications");
+  }, [selectPrimaryPage]);
+
+  const addSidebarPins = useCallback((pins: SidebarPin[]) => {
+    const cleanPins = pins.filter((pin) => pin.id.trim() && (pin.kind === "node" || pin.kind === "logic_gate"));
+    if (cleanPins.length === 0) return;
+    setSidebarPins((previous) => {
+      const byKey = new Map(previous.map((pin) => [`${pin.kind}:${pin.id}`, pin]));
+      for (const pin of cleanPins) {
+        byKey.set(`${pin.kind}:${pin.id}`, {
+          ...pin,
+          id: pin.id.trim(),
+          label: pin.label.trim() || sidebarPinFallbackLabel(pin.kind, pin.id),
+        });
+      }
+      return Array.from(byKey.values()).sort((a, b) => a.addedAt - b.addedAt || a.label.localeCompare(b.label));
+    });
+  }, []);
+
+  const removeSidebarPin = useCallback((pin: SidebarPin) => {
+    setSidebarPins((previous) => previous.filter((item) => item.kind !== pin.kind || item.id !== pin.id));
+  }, []);
+
+  const openSidebarPin = useCallback((pin: SidebarPin) => {
+    const companyID = getActiveCompanyID();
+    if (pin.kind === "logic_gate") {
+      writePendingLogicGateArenaSelection({
+        companyID,
+        logicGateID: pin.id,
+        label: pin.label,
+      });
+      selectPrimaryPage("logic-gate-arena");
+      return;
+    }
+
+    preloadDefaultDashboardModules();
+    const ensured = ensurePrimaryPageTab(tabs, "map");
+    const targetFrameIDs = ensured.tab.frames
+      .filter((frame) => ["map", "nodes", "nodes-map", "editor"].includes(frame.kind))
+      .map((frame) => frame.id);
+    setTabs(ensured.tabs);
+    setActiveTabId(ensured.tab.id);
+    setEditMode(true);
+    setSelectedFrameId(null);
+    setSelectedFrameIds(new Set());
+    closeMenus();
+    if (onNavigate) {
+      saveViews(ensured.tabs, ensured.tab.id);
+      onNavigate(routeForPage("map"));
+    }
+    window.setTimeout(() => {
+      if (targetFrameIDs.length === 0) return;
+      publishLiveSelection({
+        companyID,
+        entityKind: "node",
+        entityID: pin.id,
+        label: pin.label,
+        sourceFrameID: "app-sidebar",
+        sourceModule: "company-explorer",
+        targetFrameIDs,
+        selectionIntent: "activate",
+      });
+    }, 0);
+  }, [closeMenus, onNavigate, tabs]);
+
+  const handleSidebarPinDrop = useCallback((event: React.DragEvent<HTMLElement>) => {
+    const pins = sidebarPinsFromDrop(event.dataTransfer);
+    setPinDropActive(false);
+    if (pins.length === 0) return;
+    event.preventDefault();
+    addSidebarPins(pins);
+  }, [addSidebarPins]);
+
 
 
   useEffect(() => {
@@ -638,7 +1219,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 4, justifySelf: "center", minWidth: 0, maxWidth: "100%", overflowX: "auto", padding: "2px 0", scrollbarWidth: "none" }}>
-            {tabs.map((tab) => {
+            {headerTabs.map((tab) => {
               const selected = activeTabId === tab.id;
               const tabIcon = iconForTab(tab);
               return (
@@ -708,13 +1289,47 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
         </div>
       </header>
 
+      <div style={appBodyStyle(appSidebarWidth)}>
+        <AppSidebar
+          activePage={activePrimaryPage}
+          activeHomeView={homeViewID}
+          pins={sidebarPins}
+          pinDropActive={pinDropActive}
+          onHomeViewSelect={selectHomeSidebarView}
+          onPageSelect={selectPrimaryPage}
+          onPinOpen={openSidebarPin}
+          onPinRemove={removeSidebarPin}
+          onPinDragEnter={() => setPinDropActive(true)}
+          onPinDragLeave={() => setPinDropActive(false)}
+          onPinDragOver={(event) => {
+            if (sidebarPinsFromDrop(event.dataTransfer).length === 0) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+            setPinDropActive(true);
+          }}
+          onPinDrop={handleSidebarPinDrop}
+        />
+        <button
+          type="button"
+          aria-label="Resize left sidebar"
+          style={appResizeHandleStyle}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            appSidebarResizeRef.current = { startX: event.clientX, startWidth: appSidebarWidth };
+            document.body.style.cursor = "col-resize";
+            document.body.style.userSelect = "none";
+          }}
+        >
+          <span style={appResizeGripStyle} />
+        </button>
+
       {overrideContent ? (
         <main
           style={{
             position: "relative",
             width: canvasW,
             height: canvasH,
-            margin: `0 ${PAGE_EDGE_GAP}px ${PAGE_EDGE_GAP}px`,
+            margin: 0,
             overflow: "auto",
             background: "#ffffff",
             borderRadius: PAGE_SURFACE_RADIUS,
@@ -729,7 +1344,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           position: "relative",
           width: canvasW,
           height: canvasH,
-          margin: `0 ${PAGE_EDGE_GAP}px ${PAGE_EDGE_GAP}px`,
+          margin: 0,
           overflow: "hidden",
           background: bgColor || UI_THEME.surface,
           borderRadius: PAGE_SURFACE_RADIUS,
@@ -753,7 +1368,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
         {isLogicGateArenaView ? (
           <React.Suspense fallback={fullPageFallback}><LazyLogicGateArenaPage frames={frames} updateFrames={updateActiveFrames} /></React.Suspense>
         ) : isCommunicationsView ? (
-          <React.Suspense fallback={fullPageFallback}><LazyCommunicationsPage embedded me={me} onNavigate={onNavigate} /></React.Suspense>
+          <React.Suspense fallback={fullPageFallback}><LazyCommunicationsPage embedded hideNavigation initialViewID={homeViewID} me={me} onNavigate={onNavigate} /></React.Suspense>
         ) : (
           <>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={canvasW} height={canvasH} color={crossColor} />
@@ -893,6 +1508,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
         )}
       </FrameCanvas>
       )}
+      </div>
 
       {tabMenu && (
         <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
