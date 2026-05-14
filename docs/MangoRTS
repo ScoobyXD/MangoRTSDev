@@ -58,6 +58,8 @@ General changes:
 PROBLEM:3. need to break up the apps again its creasting too many merge conflicts.
 LATER: need to do an audit on how well equiped the app is for multiple people using it from different accounts all at once.
 1. This thing is getting really, really slow, especially the part when I drag an email into a Logic Gate. That takes like almost a second! It should be literally 90% faster. 
+2. theres also a bug with the resizing on the my triage page when you first load into dev site. idk its really weird, and then it goes back to normal and works. who knows.
+
 
 Editor changes
 1. Outbound email when node is done.

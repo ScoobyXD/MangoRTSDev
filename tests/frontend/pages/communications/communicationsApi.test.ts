@@ -64,6 +64,38 @@ test("communications stream helpers remove updated messages that no longer match
   );
 });
 
+test("message pages are ordered newest first by message date", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => jsonResponse({
+    messages: [
+      message("older", { date: 100, folders: ["inbox"] }),
+      message("newest", { date: 300, folders: ["inbox"] }),
+      message("middle", { date: 200, folders: ["inbox"] }),
+    ],
+  });
+  try {
+    const page = await listEmailMessages({ mailbox: "primary", limit: 25 });
+    assert.deepEqual(page.messages.map((item) => item.id), ["newest", "middle", "older"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("communications stream helpers insert created messages by message date", () => {
+  const existing: EmailMessage[] = [
+    message("newest", { date: 300, folders: ["inbox"] }),
+    message("oldest", { date: 100, folders: ["inbox"] }),
+  ];
+  const created = message("middle", { date: 200, folders: ["inbox"], unread: true });
+
+  assert.deepEqual(
+    mergeEmailMessageIntoMessageList(existing, created, { limit: 25, mailbox: "primary" }, { prependIfMissing: true }).map((item) => item.id),
+    ["newest", "middle", "oldest"],
+  );
+});
+
 test("archive mailbox filter matches messages outside inbox but not trash or sent", () => {
   assert.equal(emailMessageMatchesListFilters(message("archived", { folders: ["UNREAD", "CATEGORY_PERSONAL"] }), { mailbox: "archive" }), true);
   assert.equal(emailMessageMatchesListFilters(message("inbox", { folders: ["INBOX", "CATEGORY_PERSONAL"] }), { mailbox: "archive" }), false);
@@ -152,6 +184,7 @@ function message(id: string, patch: Partial<EmailMessage> = {}): EmailMessage {
     subject: patch.subject ?? id,
     snippet: patch.snippet,
     body: patch.body,
+    date: patch.date,
     unread: patch.unread ?? false,
     starred: patch.starred ?? false,
     folders: patch.folders,

@@ -221,7 +221,6 @@ export async function listEmailMessages(params: ListMessagesParams): Promise<Mes
   messagePageInflight.set(cachePath, pagePromise);
   const page = await pagePromise;
   const normalized = applyLocalMessageOverlaysToPage(cloneMessagePage(page), cacheParams);
-  rememberRecentMessagesFromPage(normalized, cacheParams);
   messagePageCache.set(cachePath, { value: normalized, fetchedAt: Date.now() });
   for (const message of normalized.messages) {
     if (isEmailMessageDetailed(message)) {
@@ -229,6 +228,16 @@ export async function listEmailMessages(params: ListMessagesParams): Promise<Mes
     }
   }
   return cloneMessagePage(normalized);
+}
+
+export function sortEmailMessagesByDateDescending(messages: EmailMessage[]): EmailMessage[] {
+  return messages
+    .map((message, index) => ({ message: cloneMessage(message), index }))
+    .sort((a, b) => {
+      const dateDelta = emailMessageSortTimestamp(b.message) - emailMessageSortTimestamp(a.message);
+      return dateDelta || a.index - b.index;
+    })
+    .map((item) => item.message);
 }
 
 export async function getEmailMessage(messageID: string, companyID?: string): Promise<EmailMessage> {
@@ -562,6 +571,8 @@ export function invalidateCommunicationsCache(scope?: { status?: boolean; folder
     messageDetailInflight.clear();
   }
   if (full) {
+    recentArchivedMessages.clear();
+    recentPrimaryMessages.clear();
     communicationsReadCache.clear();
     communicationsReadInflight.clear();
   }
@@ -638,13 +649,13 @@ export function mergeEmailMessageIntoMessageList(
 
   if (existingIndex >= 0) {
     if (!matches && shouldRemoveExistingMessageFromList(message, params)) {
-      return current.filter((item) => item.id !== cleanMessageID).map(cloneMessage);
+      return sortEmailMessagesByDateDescending(current.filter((item) => item.id !== cleanMessageID));
     }
-    return current.map((item) => (item.id === cleanMessageID ? mergeExistingMessageForList(item, message, !matches) : cloneMessage(item)));
+    return sortEmailMessagesByDateDescending(current.map((item) => (item.id === cleanMessageID ? mergeExistingMessageForList(item, message, !matches) : item)));
   }
 
-  if (!options.prependIfMissing || !matches || params.pageToken) return current.map(cloneMessage);
-  return [cloneMessage(message), ...current.map(cloneMessage)].slice(0, maxMessages);
+  if (!options.prependIfMissing || !matches || params.pageToken) return sortEmailMessagesByDateDescending(current);
+  return sortEmailMessagesByDateDescending([message, ...current]).slice(0, maxMessages);
 }
 
 function mergeExistingMessageForList(previous: EmailMessage, next: EmailMessage, preservePreviousFolders: boolean): EmailMessage {
@@ -688,12 +699,11 @@ function prependRecentMessages(messages: EmailMessage[], recent: Map<string, Cac
     .map((entry) => entry.value)
     .filter((message) => !seen.has(message.id) && emailMessageMatchesListFilters(message, params));
   if (additions.length === 0) return messages;
-  return [...additions.map(cloneMessage), ...messages].slice(0, params.limit && params.limit > 0 ? params.limit : messages.length + additions.length);
+  return sortEmailMessagesByDateDescending([...additions, ...messages]).slice(0, params.limit && params.limit > 0 ? params.limit : messages.length + additions.length);
 }
 
-function rememberRecentMessagesFromPage(page: MessagePage, params: ListMessagesParams): void {
-  if (params.pageToken || (params.mailbox ?? "primary") !== "primary") return;
-  for (const message of page.messages) rememberRecentlyPrimaryMessage(message);
+function emailMessageSortTimestamp(message: EmailMessage): number {
+  return typeof message.date === "number" && Number.isFinite(message.date) ? message.date : 0;
 }
 
 function rememberRecentlyPrimaryMessage(message: EmailMessage): void {
@@ -890,7 +900,7 @@ function cloneFolders(folders: EmailFolder[]): EmailFolder[] {
 
 function cloneMessagePage(page: MessagePage): MessagePage {
   return {
-    messages: (page.messages ?? []).map(cloneMessage),
+    messages: sortEmailMessagesByDateDescending(page.messages ?? []),
     next_page_token: page.next_page_token,
   };
 }

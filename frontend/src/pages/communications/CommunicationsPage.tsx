@@ -29,6 +29,7 @@ import {
   removeMyLogicGateShortcut,
   removeEmailMessageFromCache,
   sendEmail,
+  sortEmailMessagesByDateDescending,
   unarchiveEmailMessage,
   updateEmailMessage,
   type CommunicationsSharedInbox,
@@ -267,6 +268,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
   const workspacePanelReloadTimerRef = useRef<number | null>(null);
   const messageListRefreshTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<EmailMessage[]>([]);
+  const locallyReadMessageIDsRef = useRef<Set<string>>(new Set());
   const mailboxRef = useRef<EmailMailbox>("primary");
   const nextPageTokenRef = useRef("");
   const searchQueryRef = useRef("");
@@ -585,7 +587,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
           seen.add(message.id);
           next.push(message);
         }
-        return next;
+        return sortEmailMessagesByDateDescending(next);
       });
       setNextPageToken(page.next_page_token ?? "");
     } catch (messageError) {
@@ -807,7 +809,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
     getEmailMessage(selectedMessageID, companyID)
       .then((message) => {
         if (!cancelled) {
-          setSelectedMessage(message);
+          setSelectedMessage(locallyReadMessageIDsRef.current.has(message.id) ? { ...message, unread: false } : message);
         }
       })
       .catch((detailError) => {
@@ -885,8 +887,11 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
     setError("");
     try {
       const updated = await updateEmailMessage(selectedMessage.id, update);
-      setSelectedMessage(updated);
-      setMessages((previous) => previous.map((message) => (message.id === updated.id ? { ...message, ...updated } : message)));
+      if (update.unread === false) locallyReadMessageIDsRef.current.add(updated.id);
+      if (update.unread === true) locallyReadMessageIDsRef.current.delete(updated.id);
+      const normalized = update.unread === undefined ? updated : { ...updated, unread: update.unread };
+      setSelectedMessage(normalized);
+      setMessages((previous) => sortEmailMessagesByDateDescending(previous.map((message) => (message.id === normalized.id ? { ...message, ...normalized } : message))));
       if (update.folders) await loadMessages();
     } catch (updateError) {
       setError(formatError(updateError, "Failed to update message"));
@@ -1077,6 +1082,44 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
   const myLogicGateOrderedRowIDs = useMemo(() => myLogicGateGroups
     .flatMap((group) => group.logicGates.map((logicGate) => logicGateTreeID(logicGate.logic_gate_id))), [myLogicGateGroups]);
 
+  const markMessageReadFromListSelection = useCallback((message: EmailMessage) => {
+    const messageID = message.id.trim();
+    if (!messageID || !message.unread) return;
+    if (!isArchivableCommunicationsViewID(activeViewIDRef.current) || mailboxRef.current !== "primary") return;
+
+    locallyReadMessageIDsRef.current.add(messageID);
+    const optimistic = { ...message, unread: false };
+    const listParams = () => ({
+      limit: MESSAGE_BATCH_SIZE,
+      mailbox: mailboxRef.current,
+      companyID,
+      q: searchQueryRef.current,
+      unread: unreadOnlyRef.current ? true : undefined,
+    });
+
+    setMessages((previous) => mergeEmailMessageIntoMessageList(previous, optimistic, listParams()));
+    setSelectedMessage((current) => (current?.id === messageID ? { ...current, unread: false } : current));
+
+    void updateEmailMessage(messageID, { unread: false })
+      .then((updated) => {
+        const readUpdated = { ...updated, unread: false };
+        setMessages((previous) => mergeEmailMessageIntoMessageList(previous, readUpdated, listParams()));
+        if (selectedMessageIDRef.current === messageID) {
+          setSelectedMessage((current) => (current?.id === messageID ? { ...current, ...readUpdated } : readUpdated));
+        }
+      })
+      .catch((markError) => {
+        locallyReadMessageIDsRef.current.delete(messageID);
+        invalidateEmailMessageCache(messageID);
+        if (isEmailAccessExpiredError(markError)) {
+          void handleEmailAccessExpired(markError);
+          return;
+        }
+        setError(formatError(markError, "Failed to mark message read"));
+        scheduleMessageListRefresh();
+      });
+  }, [companyID, handleEmailAccessExpired, scheduleMessageListRefresh]);
+
   const selectMessageRow = useCallback((message: EmailMessage, modifiers: MessageSelectionModifiers) => {
     const orderedIDs = messages.map((item) => item.id);
     const next = resolveExplorerClickSelection({
@@ -1090,11 +1133,13 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
     if (next.selectedIDs.size === 0) next.selectedIDs.add(message.id);
     const orderedSelectedIDs = orderedIDs.filter((id) => next.selectedIDs.has(id));
     const primaryID = next.selectedIDs.has(message.id) ? message.id : (orderedSelectedIDs[0] ?? message.id);
+    const primaryMessage = messages.find((item) => item.id === primaryID) ?? message;
     setSelectedMessageIDs(new Set(orderedSelectedIDs));
     setSelectionAnchorMessageID(next.anchorID);
     setSelectedMessageID(primaryID);
     setMessageContextMenu(null);
-  }, [messages, selectedMessageIDs, selectionAnchorMessageID]);
+    markMessageReadFromListSelection(primaryMessage);
+  }, [markMessageReadFromListSelection, messages, selectedMessageIDs, selectionAnchorMessageID]);
 
   const openMessageContextMenu = useCallback((message: EmailMessage, event: React.MouseEvent) => {
     event.preventDefault();
