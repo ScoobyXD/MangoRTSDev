@@ -46,14 +46,12 @@ New Features:
 27. remebmer we are trying to create the bloomberg terminal for companies. Can see the entirety of their business, where they are sourcing material, where the shipping container is, what is in which warehouse, how much of which product is going to which customers. everything. 
 28. While deploying this with 180Snacks, you really really really need to check the AWS usage because I have a suspicion it's going to come out to be a lot more than we think. 
 29. when you get to agents, read some of the chats and replies you got on reddit on how they use hermes
-
+30. Every so often, it's important that you have an audit on the company. For example, when I crashed out at how shitty the Wispr Phone app is. It's important to always be vigilant and make sure to fan out to your entire user base and to see. Ask yourself this question: Could anyone else be crashing out over our shitty UI while using Mango? 
 ========
 General changes:
 1. the caching still doesnt work well on company explorer logic gate arena, it doesnt work for nodes in logic gate arena kanban board, i still get whenever i move around pages including email. 
 	s. nylas still does inbound posting but much rarer and not as consistenly
-PROBLEM:
-2. Getting cucked my Nylas. can definitely make efficiencies pulling stuff from them .Look at Nylas api call logs to see how much were actually pulling. 
-3. need to break up the apps again its creasting too many merge conflicts.
+PROBLEM:3. need to break up the apps again its creasting too many merge conflicts.
 LATER: need to do an audit on how well equiped the app is for multiple people using it from different accounts all at once.
 
 
@@ -63,6 +61,16 @@ Editor changes
 3. the chat should be linked to specific highlighted text on the text box.
 
 Home page/ Email:
+1. make the chat highlighting persistent on chat
+2. make default size of text box and chat taller on node
+3. Assigned should be accountable
+4. RACI inboxes should be public view.
+	a. when place node in logic gate, it inherits those RACI matrix
+	b. RACI matrix assigned to the logic gate, not a node.
+5. in ACI and R inbox, it should be logic gate acting as folder, and the node as the child per cell. and its collapsable
+6. when there is a state change, live show difference on the R and ACI inbox
+7. @ mentions, only if part of raci matrix.
+
 the inbox list in communication needs to merge with the company explorer. 
 were basically going to turn communications into home page and put logo gate arena on there
 	when you select a logic gate it by default shows the logic gate arena.
@@ -70,15 +78,13 @@ were basically going to turn communications into home page and put logo gate are
 2. have a way to just easily shift multi select and delete many emails
 3. I think we put wayyyyy too much code in the communications page alone and needs to be broken apart. also for nodes.
 	a. for example nodeworkspacesurface keeps getting a merge conflict.
-4. Need the email list to be able to keep scrolling down lol
-5. call it My Triage and Shared triage, were merging the primary inbox and my triage together. 
+
 	a. and call logic gate inbox into logic gate triage.
 6. archive feature. ususally business guys press archive to remove emails from the email list
-7. we need to keep loading emails as we keep scrolling down
+
 8. My nodes is all nodes assigned to me, in RACI matrix. group by logic gate. 
-9. Change urgent priority where 1. is URGENT and 5 is Low priority.
-	a. Dont give generic medium or high urgency, give it a date. or <1hr. or End of Day.
-10. RACI inboxes should be public view.
+
+
 11. Add a little section on the top of logic gate arena SOP of RACI
 
 2. Try to create a shared inbox feature with other users in the same company like how Front (the tech company) has it.
@@ -228,7 +234,7 @@ BACKEND:
 aws sso login --profile mangorts-dev
 .\scripts\start_local_cognito_backend.ps1 -AwsProfile mangorts-dev -StopExisting
 
---------------------------
+-----!!!!!!---------!!!!!!!------------!!!!
 
 running new sql schema:
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/db/migrations/<name>.sql
