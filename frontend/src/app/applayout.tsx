@@ -39,6 +39,7 @@ import { loadFrameLinks, loadSettings, loadViews, persistFrameLinks, persistFram
 import { preloadCommunicationsSurface, preloadDefaultDashboardModules, preloadLogicGateArenaSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
 import { LazyCommunicationsPage, LazyLogicGateArenaPage } from "../pages/lazyPages";
 import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
+import { AppLiveFreshnessBridge } from "./AppLiveFreshnessBridge";
 import { useFrameDragResize } from "./useFrameDragResize";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
@@ -1411,6 +1412,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
 
   return (
     <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "var(--mango-gradient)" }}>
+      <AppLiveFreshnessBridge />
       <style>{`
         @keyframes frame-edge-bump-x {
           0% { opacity: 0.75; transform: scaleX(1); }

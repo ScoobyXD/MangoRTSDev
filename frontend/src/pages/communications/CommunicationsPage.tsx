@@ -274,35 +274,9 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
   const loadingMessagesRef = useRef(false);
   const loadingMoreMessagesRef = useRef(false);
   const messageListFilterKeyRef = useRef("");
-  const markingReadMessageIDsRef = useRef<Set<string>>(new Set());
   const workspaceRef = useRef<HTMLElement | null>(null);
 
   const isNarrow = viewportWidth < 980;
-
-  const markMessageReadOnOpen = useCallback((message: EmailMessage) => {
-    if (activeViewIDRef.current !== "my-triage" || !message.id || !message.unread) return;
-    if (markingReadMessageIDsRef.current.has(message.id)) return;
-    markingReadMessageIDsRef.current.add(message.id);
-
-    const applyReadState = (readMessage: EmailMessage) => {
-      setMessages((previous) => unreadOnlyRef.current
-        ? previous.filter((item) => item.id !== readMessage.id)
-        : previous.map((item) => (item.id === readMessage.id ? { ...item, ...readMessage, unread: false } : item)));
-      setSelectedMessage((current) => current?.id === readMessage.id ? { ...current, ...readMessage, unread: false } : current);
-    };
-
-    applyReadState({ ...message, unread: false });
-    updateEmailMessage(message.id, { unread: false })
-      .then((updated) => applyReadState(updated))
-      .catch((markReadError) => {
-        if (activeViewIDRef.current === "my-triage") {
-          setError(formatError(markReadError, "Failed to mark message read"));
-        }
-      })
-      .finally(() => {
-        markingReadMessageIDsRef.current.delete(message.id);
-      });
-  }, []);
 
   useEffect(() => {
     selectedMessageIDRef.current = selectedMessageID;
@@ -834,7 +808,6 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
       .then((message) => {
         if (!cancelled) {
           setSelectedMessage(message);
-          markMessageReadOnOpen(message);
         }
       })
       .catch((detailError) => {
@@ -850,7 +823,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
         if (!cancelled) setLoadingDetail(false);
     });
     return () => { cancelled = true; };
-  }, [companyID, handleEmailAccessExpired, markMessageReadOnOpen, selectedMessageID]);
+  }, [companyID, handleEmailAccessExpired, selectedMessageID]);
 
   const connection = status?.connection;
 
@@ -1121,8 +1094,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
     setSelectionAnchorMessageID(next.anchorID);
     setSelectedMessageID(primaryID);
     setMessageContextMenu(null);
-    markMessageReadOnOpen(messages.find((item) => item.id === primaryID) ?? message);
-  }, [markMessageReadOnOpen, messages, selectedMessageIDs, selectionAnchorMessageID]);
+  }, [messages, selectedMessageIDs, selectionAnchorMessageID]);
 
   const openMessageContextMenu = useCallback((message: EmailMessage, event: React.MouseEvent) => {
     event.preventDefault();

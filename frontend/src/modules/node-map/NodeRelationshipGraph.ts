@@ -48,6 +48,13 @@ function notify(entry: CacheEntry): void {
   for (const subscriber of entry.subscribers) subscriber();
 }
 
+export function invalidateNodeRelationshipGraphSnapshot(apiBase: string, companyID: string): void {
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  entry.hydrated = false;
+  if (entry.subscribers.size > 0) void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+}
+
 // Some graph events are intentionally non-relationship mutations (e.g. node information writes).
 // For those, refreshing the graph snapshot is unnecessary and adds avoidable hot-path GET load.
 function isNonGraphWorkspaceEvent(eventType: string): boolean {

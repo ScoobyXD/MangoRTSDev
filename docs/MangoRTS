@@ -52,7 +52,7 @@ New Features:
 ========
 General changes:
 1. the caching still doesnt work well on company explorer logic gate arena, it doesnt work for nodes in logic gate arena kanban board, i still get whenever i move around pages including email. 
-	s. nylas still does inbound posting but much rarer and not as consistenly
+2. We seriously need to figure out proper caching + displaying updated info for all our pages and all node popups and stuff
 2. Its kind of hard to see the borders where you can resize things.
 
 PROBLEM:3. need to break up the apps again its creasting too many merge conflicts.

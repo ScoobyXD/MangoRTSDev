@@ -57,6 +57,13 @@ function notify(entry: CacheEntry): void {
   for (const subscriber of entry.subscribers) subscriber();
 }
 
+export function invalidateLogicGateRelationshipGraphSnapshot(apiBase: string, companyID: string): void {
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  entry.hydrated = false;
+  if (entry.subscribers.size > 0) void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+}
+
 function isNonLogicGateGraphWorkspaceEvent(eventType: string): boolean {
   return eventType === "logic_gate_information_created";
 }

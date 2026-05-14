@@ -3,7 +3,7 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../mod
 import type { KanbanBoard, KanbanCard } from "../../modules/kanban/shared.js";
 import type { NodeRecord } from "../../modules/node-map/shared.js";
 import type { LogicGateRaciAssignment, LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
-import { fetchWorkspaceSnapshot, invalidateWorkspaceSnapshot } from "../../modules/workspace/workspaceSnapshotCache.js";
+import { fetchWorkspaceSnapshot, invalidateWorkspaceSnapshot, markWorkspaceSnapshotStale } from "../../modules/workspace/workspaceSnapshotCache.js";
 
 export type EmailProvider = "google" | "microsoft";
 
@@ -147,11 +147,15 @@ const MESSAGE_PAGE_CACHE_TTL_MS = 5 * 60_000;
 const MESSAGE_DETAIL_CACHE_TTL_MS = 10 * 60_000;
 const SHARED_INBOX_CACHE_TTL_MS = 5 * 60_000;
 const WORKSPACE_PANEL_CACHE_TTL_MS = 5 * 60_000;
+const RECENT_ARCHIVED_MESSAGE_TTL_MS = 10 * 60_000;
+const RECENT_PRIMARY_MESSAGE_TTL_MS = 10 * 60_000;
 
 let statusCache: CacheEntry<CommunicationsStatus> | null = null;
 let foldersCache: CacheEntry<EmailFolder[]> | null = null;
 const messagePageCache = new Map<string, CacheEntry<MessagePage>>();
 const messageDetailCache = new Map<string, CacheEntry<EmailMessage>>();
+const recentArchivedMessages = new Map<string, CacheEntry<EmailMessage>>();
+const recentPrimaryMessages = new Map<string, CacheEntry<EmailMessage>>();
 let statusInflight: Promise<CommunicationsStatus> | null = null;
 let foldersInflight: Promise<EmailFolder[]> | null = null;
 const messagePageInflight = new Map<string, Promise<MessagePage>>();
@@ -207,23 +211,24 @@ export async function listEmailMessages(params: ListMessagesParams): Promise<Mes
   const requestPath = params.refresh ? `/v1/communications/messages${createMessageQuery(params)}` : cachePath;
   if (!params.refresh) {
     const cached = readCache(messagePageCache.get(cachePath) ?? null, MESSAGE_PAGE_CACHE_TTL_MS, cloneMessagePage);
-    if (cached) return cached;
+    if (cached) return applyLocalMessageOverlaysToPage(cached, cacheParams);
     const existingInflight = messagePageInflight.get(cachePath);
-    if (existingInflight) return cloneMessagePage(await existingInflight);
+    if (existingInflight) return applyLocalMessageOverlaysToPage(cloneMessagePage(await existingInflight), cacheParams);
   }
   const pagePromise = apiFetchJSON<MessagePage>(requestPath).finally(() => {
     messagePageInflight.delete(cachePath);
   });
   messagePageInflight.set(cachePath, pagePromise);
   const page = await pagePromise;
-  const normalized = cloneMessagePage(page);
+  const normalized = applyLocalMessageOverlaysToPage(cloneMessagePage(page), cacheParams);
+  rememberRecentMessagesFromPage(normalized, cacheParams);
   messagePageCache.set(cachePath, { value: normalized, fetchedAt: Date.now() });
   for (const message of normalized.messages) {
     if (isEmailMessageDetailed(message)) {
       messageDetailCache.set(messageDetailCacheKey(message.id, params.companyID), { value: cloneMessage(message), fetchedAt: Date.now() });
     }
   }
-  return page;
+  return cloneMessagePage(normalized);
 }
 
 export async function getEmailMessage(messageID: string, companyID?: string): Promise<EmailMessage> {
@@ -261,16 +266,21 @@ export async function archiveEmailMessage(messageID: string): Promise<EmailMessa
   const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}/archive`, {
     method: "POST",
   });
-  primeMessageCaches(payload.message);
+  const message = archivedEmailMessageForLocalLists(payload.message);
+  recentPrimaryMessages.delete(message.id.trim());
+  rememberRecentlyArchivedMessage(message);
+  primeMessageCaches(message);
   clearMessagePageCache();
   clearEmailFolderCache();
-  return payload.message;
+  return message;
 }
 
 export async function unarchiveEmailMessage(messageID: string): Promise<EmailMessage> {
   const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}/unarchive`, {
     method: "POST",
   });
+  recentArchivedMessages.delete(messageID.trim());
+  rememberRecentlyPrimaryMessage(payload.message);
   primeMessageCaches(payload.message);
   clearMessagePageCache();
   clearEmailFolderCache();
@@ -279,6 +289,8 @@ export async function unarchiveEmailMessage(messageID: string): Promise<EmailMes
 
 export async function deleteEmailMessage(messageID: string): Promise<void> {
   await apiFetchJSON<{ status: string }>(`/v1/communications/messages/${encodeURIComponent(messageID)}`, { method: "DELETE" });
+  recentArchivedMessages.delete(messageID.trim());
+  recentPrimaryMessages.delete(messageID.trim());
   invalidateEmailMessageCache(messageID);
   clearMessagePageCache();
   clearEmailFolderCache();
@@ -574,6 +586,12 @@ export function invalidateCommunicationsWorkspacePanelCache(companyID: string): 
   invalidateWorkspacePanelCache(companyID);
 }
 
+export function markCommunicationsWorkspacePanelStale(companyID: string): void {
+  const cleanCompanyID = companyID.trim();
+  markWorkspaceSnapshotStale(readAuthConfig().apiBase, cleanCompanyID);
+  clearWorkspacePanelReadCache(cleanCompanyID);
+}
+
 export function primeEmailMessageCache(message: EmailMessage): void {
   primeMessageCaches(message);
 }
@@ -581,6 +599,8 @@ export function primeEmailMessageCache(message: EmailMessage): void {
 export function removeEmailMessageFromCache(messageID: string): void {
   const cleanMessageID = messageID.trim();
   if (!cleanMessageID) return;
+  recentArchivedMessages.delete(cleanMessageID);
+  recentPrimaryMessages.delete(cleanMessageID);
   invalidateEmailMessageCache(cleanMessageID);
   for (const [key, entry] of messagePageCache.entries()) {
     const messages = entry.value.messages.filter((message) => message.id !== cleanMessageID);
@@ -592,6 +612,7 @@ export function removeEmailMessageFromCache(messageID: string): void {
 
 export function applyEmailMessageToCachedPages(message: EmailMessage, options: MergeEmailMessageOptions = {}): void {
   primeMessageCaches(message);
+  if (options.prependIfMissing && messageMatchesMailbox(message, "primary")) rememberRecentlyPrimaryMessage(message);
   for (const [key, entry] of messagePageCache.entries()) {
     const params = listMessageParamsFromCacheKey(key);
     const maxMessages = params.limit ?? options.maxMessages;
@@ -616,12 +637,115 @@ export function mergeEmailMessageIntoMessageList(
   const matches = emailMessageMatchesListFilters(message, params);
 
   if (existingIndex >= 0) {
-    if (!matches) return current.filter((item) => item.id !== cleanMessageID).map(cloneMessage);
-    return current.map((item) => (item.id === cleanMessageID ? cloneMessage(message) : cloneMessage(item)));
+    if (!matches && shouldRemoveExistingMessageFromList(message, params)) {
+      return current.filter((item) => item.id !== cleanMessageID).map(cloneMessage);
+    }
+    return current.map((item) => (item.id === cleanMessageID ? mergeExistingMessageForList(item, message, !matches) : cloneMessage(item)));
   }
 
   if (!options.prependIfMissing || !matches || params.pageToken) return current.map(cloneMessage);
   return [cloneMessage(message), ...current.map(cloneMessage)].slice(0, maxMessages);
+}
+
+function mergeExistingMessageForList(previous: EmailMessage, next: EmailMessage, preservePreviousFolders: boolean): EmailMessage {
+  const merged: EmailMessage = { ...previous, ...next };
+  if (preservePreviousFolders) {
+    merged.folders = previous.folders ? [...previous.folders] : undefined;
+    merged.folder_ids = previous.folder_ids ? [...previous.folder_ids] : undefined;
+  }
+  return cloneMessage(merged);
+}
+
+function applyLocalMessageOverlaysToPage(page: MessagePage, params: ListMessagesParams): MessagePage {
+  pruneRecentMessages();
+  const mailbox = params.mailbox ?? "primary";
+  if (params.pageToken) return page;
+
+  const archivedIDs = new Set(recentArchivedMessages.keys());
+  if (mailbox === "primary") {
+    const messages = page.messages.filter((message) => !archivedIDs.has(message.id)).map(cloneMessage);
+    const withRecent = prependRecentMessages(messages, recentPrimaryMessages, params);
+    return {
+      ...page,
+      messages: withRecent,
+    };
+  }
+
+  if (mailbox !== "archive") return page;
+  const messages = page.messages.map(cloneMessage);
+  const withRecent = prependRecentMessages(messages, recentArchivedMessages, params);
+  return {
+    ...page,
+    messages: withRecent,
+  };
+}
+
+function prependRecentMessages(messages: EmailMessage[], recent: Map<string, CacheEntry<EmailMessage>>, params: ListMessagesParams): EmailMessage[] {
+  if (recent.size === 0) return messages;
+  const seen = new Set(messages.map((message) => message.id));
+  const additions = Array.from(recent.values())
+    .sort((a, b) => b.fetchedAt - a.fetchedAt)
+    .map((entry) => entry.value)
+    .filter((message) => !seen.has(message.id) && emailMessageMatchesListFilters(message, params));
+  if (additions.length === 0) return messages;
+  return [...additions.map(cloneMessage), ...messages].slice(0, params.limit && params.limit > 0 ? params.limit : messages.length + additions.length);
+}
+
+function rememberRecentMessagesFromPage(page: MessagePage, params: ListMessagesParams): void {
+  if (params.pageToken || (params.mailbox ?? "primary") !== "primary") return;
+  for (const message of page.messages) rememberRecentlyPrimaryMessage(message);
+}
+
+function rememberRecentlyPrimaryMessage(message: EmailMessage): void {
+  const cleanMessageID = message.id.trim();
+  if (!cleanMessageID || !messageMatchesMailbox(message, "primary")) return;
+  recentArchivedMessages.delete(cleanMessageID);
+  recentPrimaryMessages.set(cleanMessageID, { value: cloneMessage(message), fetchedAt: Date.now() });
+}
+
+function rememberRecentlyArchivedMessage(message: EmailMessage): void {
+  const cleanMessageID = message.id.trim();
+  if (!cleanMessageID) return;
+  recentPrimaryMessages.delete(cleanMessageID);
+  recentArchivedMessages.set(cleanMessageID, { value: archivedEmailMessageForLocalLists(message), fetchedAt: Date.now() });
+}
+
+function pruneRecentMessages(): void {
+  const now = Date.now();
+  for (const [messageID, entry] of recentArchivedMessages.entries()) {
+    if (now - entry.fetchedAt > RECENT_ARCHIVED_MESSAGE_TTL_MS) recentArchivedMessages.delete(messageID);
+  }
+  for (const [messageID, entry] of recentPrimaryMessages.entries()) {
+    if (now - entry.fetchedAt > RECENT_PRIMARY_MESSAGE_TTL_MS) recentPrimaryMessages.delete(messageID);
+  }
+}
+
+function archivedEmailMessageForLocalLists(message: EmailMessage): EmailMessage {
+  const archived = cloneMessage(message);
+  archived.folders = stripInboxFolders(archived.folders);
+  archived.folder_ids = stripInboxFolders(archived.folder_ids);
+  return archived;
+}
+
+function stripInboxFolders(folders: string[] | undefined): string[] | undefined {
+  if (!folders) return folders;
+  return folders.filter((folder) => normalizeFolderToken(folder) !== "inbox");
+}
+
+function shouldRemoveExistingMessageFromList(message: EmailMessage, params: ListMessagesParams): boolean {
+  if (params.unread === true && !message.unread) return true;
+  if (params.folderID && !messageHasFolder(message, params.folderID)) return true;
+  const query = params.q?.trim().toLowerCase() ?? "";
+  if (query && !messageMatchesSearch(message, query)) return true;
+
+  const mailbox = params.mailbox ?? "primary";
+  if (mailbox === "primary") {
+    return messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"]);
+  }
+  if (mailbox === "archive") {
+    return messageHasAnyFolder(message, ["inbox", "\\inbox", "sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk", "draft", "drafts", "\\draft", "\\drafts"]);
+  }
+  return !messageMatchesMailbox(message, mailbox);
 }
 
 export function emailMessageMatchesListFilters(message: EmailMessage, params: ListMessagesParams): boolean {
@@ -710,6 +834,10 @@ function clearMessagePageCache(): void {
 function invalidateWorkspacePanelCache(companyID: string): void {
   const cleanCompanyID = companyID.trim();
   invalidateWorkspaceSnapshot(readAuthConfig().apiBase, cleanCompanyID);
+  clearWorkspacePanelReadCache(cleanCompanyID);
+}
+
+function clearWorkspacePanelReadCache(cleanCompanyID: string): void {
   for (const key of [
     `logic-gates:${cleanCompanyID}`,
     `nodes:${cleanCompanyID}`,
@@ -873,7 +1001,7 @@ function messageMatchesMailbox(message: EmailMessage, mailbox: EmailMailbox): bo
   if (mailbox === "sent") return messageHasAnyFolder(message, ["sent", "\\sent"]);
   if (mailbox === "archive") return messageIsArchived(message);
   if (messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"])) return false;
-  return messageFolderTokens(message).length === 0 || messageHasAnyFolder(message, ["inbox", "\\inbox", "primary", "category:primary", "important", "\\important"]);
+  return messageFolderTokens(message).length === 0 || messageHasAnyFolder(message, ["inbox", "\\inbox", "primary", "category:primary", "category:personal", "important", "\\important"]);
 }
 
 function messageIsArchived(message: EmailMessage): boolean {
@@ -915,5 +1043,8 @@ function messageFolderTokens(message: EmailMessage): string[] {
 }
 
 function normalizeFolderToken(value: string): string {
-  return value.trim().toLowerCase();
+  let token = value.trim().toLowerCase();
+  while (token.startsWith("\\")) token = token.slice(1);
+  if (token.startsWith("category_")) token = `category:${token.slice("category_".length)}`;
+  return token;
 }

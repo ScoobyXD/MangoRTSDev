@@ -57,6 +57,17 @@ export function invalidateWorkspaceSnapshot(apiBase?: string, companyID?: string
   workspaceSnapshots.clear();
 }
 
+export function markWorkspaceSnapshotStale(apiBase?: string, companyID?: string): void {
+  const cleanApiBase = apiBase?.trim() ?? "";
+  const cleanCompanyID = companyID?.trim() ?? "";
+  if (cleanApiBase && cleanCompanyID) {
+    const entry = workspaceSnapshots.get(key(cleanApiBase, cleanCompanyID));
+    if (entry) entry.fetchedAt = undefined;
+    return;
+  }
+  for (const entry of workspaceSnapshots.values()) entry.fetchedAt = undefined;
+}
+
 export async function fetchWorkspaceSnapshot(apiBase: string, companyID: string, options: FetchWorkspaceSnapshotOptions = {}): Promise<WorkspaceSnapshotResult> {
   const entry = getEntry(apiBase, companyID);
   const maxAgeMs = Math.max(0, options.maxAgeMs ?? 0);

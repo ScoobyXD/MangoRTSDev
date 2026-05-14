@@ -823,7 +823,7 @@ func gmailPrimarySearch(userQuery string, unread *bool) string {
 }
 
 func gmailArchiveSearch(userQuery string, unread *bool) string {
-	parts := []string{"in:all", "-in:inbox", "-in:trash", "-in:spam", "-in:sent", "-in:drafts"}
+	parts := []string{"in:anywhere", "-in:inbox", "-in:trash", "-in:spam", "-in:sent", "-in:drafts"}
 	if trimmed := strings.TrimSpace(userQuery); trimmed != "" {
 		parts = append(parts, trimmed)
 	}
