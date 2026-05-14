@@ -174,6 +174,9 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
+		if query.Refresh {
+			s.commCache.invalidateMessagePages(connection.UserID)
+		}
 		page, err := s.communicationsMessagePage(r.Context(), connection, query)
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
@@ -689,7 +692,7 @@ func (s *Server) enrichCommunicationsMessagesPlacements(userID, companyID string
 
 func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessageQuery, bool) {
 	for key := range r.URL.Query() {
-		if key != "limit" && key != "page_token" && key != "folder_id" && key != "q" && key != "mailbox" && key != "unread" && key != "company_id" {
+		if key != "limit" && key != "page_token" && key != "folder_id" && key != "q" && key != "mailbox" && key != "unread" && key != "company_id" && key != "refresh" {
 			writeError(w, http.StatusBadRequest, "unsupported_email_query_param")
 			return NylasMessageQuery{}, false
 		}
@@ -725,6 +728,14 @@ func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessag
 			return NylasMessageQuery{}, false
 		}
 		query.Unread = &parsed
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("refresh")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_refresh")
+			return NylasMessageQuery{}, false
+		}
+		query.Refresh = parsed
 	}
 	return query, true
 }

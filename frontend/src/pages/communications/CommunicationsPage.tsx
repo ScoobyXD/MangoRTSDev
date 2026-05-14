@@ -117,6 +117,10 @@ type CommunicationsStreamEnvelope = {
   message_id?: string;
 };
 
+type LoadMessagesOptions = {
+  refresh?: boolean;
+};
+
 type CommunicationsViewID =
   | "primary"
   | "my-triage"
@@ -168,6 +172,8 @@ const MAILBOX_OPTIONS: MailboxOption[] = [
 ];
 
 const MESSAGE_BATCH_SIZE = 15;
+const MESSAGE_EVENT_REFRESH_DELAY_MS = 1_200;
+const SELF_SEND_DELIVERY_REFRESH_DELAY_MS = 4_000;
 const TRIAGE_MESSAGE_DRAG_MIME = "application/x-mangorts-communications-triage-messages";
 const COMMUNICATIONS_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.communications.columnWidths.v1";
 const COMMUNICATIONS_COLUMN_RESIZER_WIDTH = 10;
@@ -256,10 +262,13 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
   const logicGatePanelRequestInFlightRef = useRef(false);
   const messageRequestKeyRef = useRef("");
   const pendingMessageReloadRef = useRef(false);
+  const pendingMessageRefreshRef = useRef(false);
   const messageRequestSeqRef = useRef(0);
+  const loadMessagesRef = useRef<((options?: LoadMessagesOptions) => Promise<void>) | null>(null);
   const selectedMessageIDRef = useRef("");
   const activeViewIDRef = useRef<CommunicationsViewID>(initialViewID);
   const folderReloadTimerRef = useRef<number | null>(null);
+  const messageListRefreshTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<EmailMessage[]>([]);
   const mailboxRef = useRef<EmailMailbox>("primary");
   const nextPageTokenRef = useRef("");
@@ -506,7 +515,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
     }
   }, [companyID]);
 
-  const loadMessages = useCallback(async () => {
+  const loadMessages = useCallback(async (options: LoadMessagesOptions = {}) => {
     if (!status?.connected) return;
     if (isInboxMatrixViewID(activeViewID)) {
       setMessages([]);
@@ -521,6 +530,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
     messageListFilterKeyRef.current = requestKey;
     if (messageRequestKeyRef.current === requestKey) {
       pendingMessageReloadRef.current = true;
+      pendingMessageRefreshRef.current = pendingMessageRefreshRef.current || options.refresh === true;
       return;
     }
     messageRequestKeyRef.current = requestKey;
@@ -535,6 +545,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
         companyID,
         q: searchQuery,
         unread: unreadOnly ? true : undefined,
+        refresh: options.refresh,
       });
       if (messageRequestSeqRef.current !== requestSeq) return;
       setMessages(page.messages ?? []);
@@ -557,8 +568,10 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
         setLoadingMessages(false);
         messageRequestKeyRef.current = "";
         if (pendingMessageReloadRef.current) {
+          const refresh = pendingMessageRefreshRef.current;
           pendingMessageReloadRef.current = false;
-          window.setTimeout(() => { void loadMessages(); }, 0);
+          pendingMessageRefreshRef.current = false;
+          window.setTimeout(() => { void loadMessages({ refresh }); }, 0);
         }
       }
     }
@@ -603,6 +616,29 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
     }
   }, [companyID, handleEmailAccessExpired, status?.connected]);
 
+  useEffect(() => {
+    loadMessagesRef.current = loadMessages;
+  }, [loadMessages]);
+
+  const scheduleMessageListRefresh = useCallback((delayMs = MESSAGE_EVENT_REFRESH_DELAY_MS) => {
+    if (messageListRefreshTimerRef.current !== null) window.clearTimeout(messageListRefreshTimerRef.current);
+    messageListRefreshTimerRef.current = window.setTimeout(() => {
+      messageListRefreshTimerRef.current = null;
+      if (!status?.connected || isInboxMatrixViewID(activeViewIDRef.current)) return;
+      invalidateCommunicationsCache({ messagePages: true });
+      void loadMessagesRef.current?.({ refresh: true });
+    }, delayMs);
+  }, [status?.connected]);
+
+  useEffect(() => {
+    return () => {
+      if (messageListRefreshTimerRef.current !== null) {
+        window.clearTimeout(messageListRefreshTimerRef.current);
+        messageListRefreshTimerRef.current = null;
+      }
+    };
+  }, []);
+
   useEffect(() => { void loadStatus(); }, [loadStatus]);
   useEffect(() => { if (status?.connected) void loadFolders(); }, [loadFolders, status?.connected]);
   useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
@@ -621,6 +657,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
 
   useEffect(() => {
     if (!status?.connected) return undefined;
+    const connectedAccountEmail = status.connection?.account_email ?? "";
     const currentMessageListParams = () => ({
       limit: MESSAGE_BATCH_SIZE,
       mailbox: mailboxRef.current,
@@ -664,7 +701,13 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
           scheduleFolderRefresh();
           return;
         }
-        if (!trigger.startsWith("message.") || !messageID) return;
+        if (!trigger.startsWith("message.")) return;
+        if (!messageID) {
+          if (trigger.startsWith("message.created") || trigger.startsWith("message.updated") || trigger.startsWith("message.deleted")) {
+            scheduleMessageListRefresh();
+          }
+          return;
+        }
         if (trigger.startsWith("message.deleted")) {
           removeEmailMessageFromCache(messageID);
           setMessages((previous) => previous.filter((message) => message.id !== messageID));
@@ -694,7 +737,16 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
         void getEmailMessage(messageID, companyID)
           .then((message) => {
             primeEmailMessageCache(message);
+            const matchesCurrentView = emailMessageMatchesListFilters(message, params);
             applyMessageToCurrentView(message, trigger.startsWith("message.created"));
+            if (
+              trigger.startsWith("message.created") &&
+              mailboxRef.current === "primary" &&
+              !matchesCurrentView &&
+              messageHasRecipient(message, connectedAccountEmail)
+            ) {
+              scheduleMessageListRefresh(SELF_SEND_DELIVERY_REFRESH_DELAY_MS);
+            }
           })
           .catch((messageError) => {
             if (isEmailAccessExpiredError(messageError)) {
@@ -702,6 +754,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
               return;
             }
             if (trigger.startsWith("message.deleted")) removeEmailMessageFromCache(messageID);
+            if (trigger.startsWith("message.created") || trigger.startsWith("message.updated")) scheduleMessageListRefresh();
           });
       },
       onError() {
@@ -715,7 +768,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
         folderReloadTimerRef.current = null;
       }
     };
-  }, [companyID, handleEmailAccessExpired, loadFolders, loadMessages, status?.connected]);
+  }, [companyID, handleEmailAccessExpired, loadFolders, loadMessages, scheduleMessageListRefresh, status?.connected, status?.connection?.account_email]);
 
   useEffect(() => {
     if (!selectedMessageID) return;
@@ -913,6 +966,7 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
     setBusy("send");
     setError("");
     try {
+      const sentToConnectedAccount = emailAddressListContains([...to, ...cc, ...bcc], connection?.account_email ?? "");
       await sendEmail({
         to,
         cc,
@@ -923,7 +977,11 @@ export function CommunicationsPage({ me, onNavigate, embedded = false, hideNavig
       });
       setCompose(emptyCompose);
       setNotice("Message sent.");
-      await loadMessages();
+      if (sentToConnectedAccount && mailboxRef.current === "primary") {
+        scheduleMessageListRefresh(SELF_SEND_DELIVERY_REFRESH_DELAY_MS);
+      } else {
+        await loadMessages();
+      }
     } catch (sendError) {
       setError(formatError(sendError, "Failed to send message"));
     } finally {
@@ -3507,6 +3565,16 @@ function markMessageSentToLogicGate(message: EmailMessage, logicGateID: string):
 function formatAddressList(addresses?: EmailAddress[]): string {
   if (!addresses?.length) return "";
   return addresses.map((address) => address.name ? `${address.name} <${address.email}>` : address.email).join(", ");
+}
+
+function messageHasRecipient(message: EmailMessage, email: string): boolean {
+  return emailAddressListContains([...(message.to ?? []), ...(message.cc ?? []), ...(message.bcc ?? [])], email);
+}
+
+function emailAddressListContains(addresses: EmailAddress[], email: string): boolean {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail) return false;
+  return addresses.some((address) => address.email.trim().toLowerCase() === cleanEmail);
 }
 
 function formatMessageDate(epochSeconds?: number): string {

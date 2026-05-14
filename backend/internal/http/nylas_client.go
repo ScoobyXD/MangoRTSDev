@@ -246,6 +246,7 @@ type NylasMessageQuery struct {
 	Mailbox           string
 	CompanyID         string
 	Unread            *bool
+	Refresh           bool
 }
 
 type NylasMessagePage struct {

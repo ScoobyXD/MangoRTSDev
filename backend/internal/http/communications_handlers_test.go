@@ -376,6 +376,14 @@ func TestCommunicationsCacheAvoidsRepeatedNylasReads(t *testing.T) {
 	if nylas.messageCalls != 1 {
 		t.Fatalf("message list calls = %d, want 1", nylas.messageCalls)
 	}
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5&refresh=true", "", token, http.StatusOK)
+	if nylas.messageCalls != 2 {
+		t.Fatalf("message list calls after refresh = %d, want 2", nylas.messageCalls)
+	}
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5", "", token, http.StatusOK)
+	if nylas.messageCalls != 2 {
+		t.Fatalf("message list calls after refreshed cache read = %d, want 2", nylas.messageCalls)
+	}
 
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages/message-1", "", token, http.StatusOK)
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages/message-1", "", token, http.StatusOK)

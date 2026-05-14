@@ -19,6 +19,7 @@ test("communications message query omits empty values and encodes filters", () =
     "?limit=25&page_token=next%2Ftoken&mailbox=primary&folder_id=inbox&q=invoice+%2342&unread=true",
   );
   assert.equal(createMessageQuery({ mailbox: "archive", limit: 10 }), "?limit=10&mailbox=archive");
+  assert.equal(createMessageQuery({ mailbox: "primary", refresh: true }), "?mailbox=primary&refresh=true");
   assert.equal(createMessageQuery({ q: "   " }), "");
 });
 
@@ -112,6 +113,32 @@ test("email detail fetch ignores preview-only list cache entries", async () => {
     assert.deepEqual(calls, [
       "/v1/communications/messages?limit=25&mailbox=primary",
       "/v1/communications/messages/msg-1",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("message list refresh bypasses stale page cache and replaces the normal cache entry", async () => {
+  invalidateCommunicationsCache();
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const path = input.toString();
+    calls.push(path);
+    if (path.includes("refresh=true")) {
+      return jsonResponse({ messages: [message("fresh")] });
+    }
+    return jsonResponse({ messages: [message("stale")] });
+  };
+  try {
+    assert.equal((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages[0]?.id, "stale");
+    assert.equal((await listEmailMessages({ mailbox: "primary", limit: 25, refresh: true })).messages[0]?.id, "fresh");
+    assert.equal((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages[0]?.id, "fresh");
+    assert.deepEqual(calls, [
+      "/v1/communications/messages?limit=25&mailbox=primary",
+      "/v1/communications/messages?limit=25&mailbox=primary&refresh=true",
     ]);
   } finally {
     globalThis.fetch = originalFetch;

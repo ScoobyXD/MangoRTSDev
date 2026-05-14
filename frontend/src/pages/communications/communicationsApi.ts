@@ -66,6 +66,7 @@ export type ListMessagesParams = {
   companyID?: string;
   q?: string;
   unread?: boolean;
+  refresh?: boolean;
 };
 
 export type EmailMailbox = "primary" | "sent" | "all" | "archive";
@@ -193,18 +194,22 @@ export async function listEmailFolders(): Promise<EmailFolder[]> {
 }
 
 export async function listEmailMessages(params: ListMessagesParams): Promise<MessagePage> {
-  const path = `/v1/communications/messages${createMessageQuery(params)}`;
-  const cached = readCache(messagePageCache.get(path) ?? null, MESSAGE_PAGE_CACHE_TTL_MS, cloneMessagePage);
-  if (cached) return cached;
-  const existingInflight = messagePageInflight.get(path);
-  if (existingInflight) return cloneMessagePage(await existingInflight);
-  const pagePromise = apiFetchJSON<MessagePage>(path).finally(() => {
-    messagePageInflight.delete(path);
+  const cacheParams = { ...params, refresh: false };
+  const cachePath = `/v1/communications/messages${createMessageQuery(cacheParams)}`;
+  const requestPath = params.refresh ? `/v1/communications/messages${createMessageQuery(params)}` : cachePath;
+  if (!params.refresh) {
+    const cached = readCache(messagePageCache.get(cachePath) ?? null, MESSAGE_PAGE_CACHE_TTL_MS, cloneMessagePage);
+    if (cached) return cached;
+    const existingInflight = messagePageInflight.get(cachePath);
+    if (existingInflight) return cloneMessagePage(await existingInflight);
+  }
+  const pagePromise = apiFetchJSON<MessagePage>(requestPath).finally(() => {
+    messagePageInflight.delete(cachePath);
   });
-  messagePageInflight.set(path, pagePromise);
+  messagePageInflight.set(cachePath, pagePromise);
   const page = await pagePromise;
   const normalized = cloneMessagePage(page);
-  messagePageCache.set(path, { value: normalized, fetchedAt: Date.now() });
+  messagePageCache.set(cachePath, { value: normalized, fetchedAt: Date.now() });
   for (const message of normalized.messages) {
     if (isEmailMessageDetailed(message)) {
       messageDetailCache.set(messageDetailCacheKey(message.id, params.companyID), { value: cloneMessage(message), fetchedAt: Date.now() });
@@ -601,6 +606,7 @@ export function createMessageQuery(params: ListMessagesParams): string {
   if (params.companyID?.trim()) query.set("company_id", params.companyID.trim());
   if (params.q?.trim()) query.set("q", params.q.trim());
   if (params.unread !== undefined) query.set("unread", String(params.unread));
+  if (params.refresh === true) query.set("refresh", "true");
   const raw = query.toString();
   return raw ? `?${raw}` : "";
 }
