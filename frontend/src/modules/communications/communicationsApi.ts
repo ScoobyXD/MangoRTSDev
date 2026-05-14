@@ -1,9 +1,9 @@
 import { apiFetchJSON, readAuthConfig } from "../../auth/cognitoAuth.js";
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders.js";
-import type { KanbanBoard, KanbanCard } from "../../modules/kanban/shared.js";
-import type { NodeRecord } from "../../modules/node-map/shared.js";
-import type { LogicGateRaciAssignment, LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
-import { fetchWorkspaceSnapshot, invalidateWorkspaceSnapshot, markWorkspaceSnapshotStale } from "../../modules/workspace/workspaceSnapshotCache.js";
+import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
+import type { KanbanBoard, KanbanCard } from "../kanban/shared.js";
+import type { NodeRecord } from "../node-map/shared.js";
+import type { LogicGateRaciAssignment, LogicGateRaciRole, LogicGateRecord } from "../logic-gate-map/shared.js";
+import { fetchWorkspaceSnapshot, invalidateWorkspaceSnapshot, markWorkspaceSnapshotStale } from "../workspace/workspaceSnapshotCache.js";
 
 export type EmailProvider = "google" | "microsoft";
 

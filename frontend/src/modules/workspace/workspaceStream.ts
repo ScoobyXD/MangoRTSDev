@@ -8,7 +8,7 @@ type WorkspaceStreamSubscriber = {
 type WorkspaceStreamEntry = {
   subscribers: Set<WorkspaceStreamSubscriber>;
   source?: SseConnection;
-  closeTimer?: ReturnType<typeof window.setTimeout>;
+  closeTimer?: ReturnType<typeof setTimeout>;
 };
 
 const workspaceStreams = new Map<string, WorkspaceStreamEntry>();
@@ -42,7 +42,7 @@ export function subscribeWorkspaceStream(apiBase: string, companyID: string, sub
   const key = streamKey(apiBase, companyID);
   const entry = getEntry(key);
   if (entry.closeTimer !== undefined) {
-    window.clearTimeout(entry.closeTimer);
+    clearTimeout(entry.closeTimer);
     entry.closeTimer = undefined;
   }
   entry.subscribers.add(subscriber);
@@ -53,7 +53,7 @@ export function subscribeWorkspaceStream(apiBase: string, companyID: string, sub
     if (!current) return;
     current.subscribers.delete(subscriber);
     if (current.subscribers.size === 0) {
-      current.closeTimer = window.setTimeout(() => {
+      current.closeTimer = setTimeout(() => {
         const closingEntry = workspaceStreams.get(key);
         if (closingEntry !== current || current.subscribers.size > 0) return;
         current.source?.close();

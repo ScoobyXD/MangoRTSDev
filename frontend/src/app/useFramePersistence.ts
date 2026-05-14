@@ -1,6 +1,6 @@
 import type { FrameDataModel } from "../types";
 import { FRAME_REGISTRY_KEY } from "../modules/linkingGraph";
-import { createCommunicationsViewFrames, createDefaultNodeViewFrames, createLogicGateArenaFrames, LEGACY_DEFAULT_NODE_VIEW_FRAME_IDS } from "./DefaultViews";
+import { createDefaultNodeViewFrames, createHomeViewFrames, createLogicGateArenaFrames, LEGACY_DEFAULT_NODE_VIEW_FRAME_IDS } from "./DefaultViews";
 import {
   FRAME_LINKS_KEY,
   sanitizeFrameLinks,
@@ -24,6 +24,7 @@ const SUPPORTED_PERSISTED_FRAME_KINDS = new Set<string>([
   "company-explorer",
   "communications",
   "editor",
+  "home",
   "kanban",
   "logic-map",
   "map",
@@ -65,7 +66,7 @@ function coerceFrame(value: unknown): FrameDataModel | null {
     typeof w !== "number" || typeof h !== "number" || typeof title !== "string" || typeof color !== "string" || typeof accent !== "string"
   ) return null;
 
-  const normalizedKind = kind === "node-doc" ? "editor" : kind;
+  const normalizedKind = kind === "node-doc" ? "editor" : kind === "communications" ? "home" : kind;
   const normalizedTitle = normalizedKind === "kanban" && title === "Kanban"
     ? "Kanban board"
     : normalizedKind === "company-explorer" && title === "Company Explorer"
@@ -110,7 +111,8 @@ function sanitizeFrames(value: unknown): FrameDataModel[] {
 }
 
 function sanitizePage(value: unknown): ViewTab["page"] {
-  return value === "logic-gate-arena" || value === "communications" ? value : undefined;
+  if (value === "communications") return "home";
+  return value === "logic-gate-arena" || value === "home" ? value : undefined;
 }
 
 function createUniqueFrameID(usedFrameIDs: Set<string>): string {
@@ -122,7 +124,7 @@ function createUniqueFrameID(usedFrameIDs: Set<string>): string {
 }
 
 function isCommunicationsTab(tab: ViewTab): boolean {
-  return tab.page === "communications" || /^(home|communications?)$/i.test(tab.name.trim());
+  return tab.page === "home" || tab.page === "communications" || /^(home|communications?)$/i.test(tab.name.trim());
 }
 
 function isLogicGateArenaTab(tab: ViewTab): boolean {
@@ -134,7 +136,7 @@ function isPrimaryMapTab(tab: ViewTab): boolean {
 }
 
 function normalizePrimaryTab(tab: ViewTab): ViewTab {
-  if (isCommunicationsTab(tab)) return { ...tab, name: "Home", page: "communications" };
+  if (isCommunicationsTab(tab)) return { ...tab, name: "Home", page: "home" };
   if (isLogicGateArenaTab(tab)) return { ...tab, name: "Logic Gate Arena", page: "logic-gate-arena" };
   if (isPrimaryMapTab(tab)) return { ...tab, name: "Map", page: undefined };
   return tab;
@@ -142,7 +144,7 @@ function normalizePrimaryTab(tab: ViewTab): ViewTab {
 
 function createPrimaryTabs(): ViewTab[] {
   return [
-    { id: "view-home", name: "Home", page: "communications", frames: createCommunicationsViewFrames() },
+    { id: "view-home", name: "Home", page: "home", frames: createHomeViewFrames() },
     { id: "view-logic-gate-arena", name: "Logic Gate Arena", page: "logic-gate-arena", frames: createLogicGateArenaFrames() },
     { id: "view-default", name: "Map", frames: createDefaultNodeViewFrames() },
   ];

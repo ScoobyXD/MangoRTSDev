@@ -42,13 +42,13 @@ const logicMapModule = createLazyModule(() => import("./map/MapContent").then((m
 const editorModule = createLazyModule(() => import("./editor/EditorContent").then((module) => ({ default: module.EditorContent as ModuleComponent })));
 const companyExplorerModule = createLazyModule(() => import("./company-explorer/CompanyExplorerContent").then((module) => ({ default: module.CompanyExplorerContent as ModuleComponent })));
 const kanbanModule = createLazyModule(() => import("./kanban/KanbanContent").then((module) => ({ default: module.KanbanContent as ModuleComponent })));
-const communicationsModule = createLazyModule(() => import("../pages/communications/CommunicationsPage").then((module) => ({ default: module.CommunicationsFrameContent as ModuleComponent })));
+const homeModule = createLazyModule(() => import("../pages/home/HomePage").then((module) => ({ default: module.HomeFrameContent as ModuleComponent })));
 
 const moduleEntries = [
   { kind: "company-explorer", label: "Explorer", defaultW: 18, defaultH: 14, ...companyExplorerModule },
   { kind: "editor", label: "Editor", defaultW: 16, defaultH: 14, ...editorModule },
   { kind: "kanban", label: "Kanban board", defaultW: 18, defaultH: 7, ...kanbanModule },
-  { kind: "communications", label: "Home", defaultW: 24, defaultH: 16, ...communicationsModule },
+  { kind: "home", label: "Home", defaultW: 24, defaultH: 16, ...homeModule },
   { kind: "map", label: "Map", defaultW: 16, defaultH: 14, ...mapModule },
 ];
 
@@ -65,12 +65,14 @@ MODULE_CONTENT_MAP.nodes = mapModule.render;
 MODULE_CONTENT_MAP["nodes-map"] = mapModule.render;
 MODULE_CONTENT_MAP["logic-map"] = logicMapModule.render;
 MODULE_CONTENT_MAP["node-doc"] = editorModule.render;
+MODULE_CONTENT_MAP.communications = homeModule.render;
 
 const MODULE_PRELOADERS: Record<string, () => void> = Object.fromEntries(moduleEntries.map((entry) => [entry.kind, entry.preload]));
 MODULE_PRELOADERS.nodes = mapModule.preload;
 MODULE_PRELOADERS["nodes-map"] = mapModule.preload;
 MODULE_PRELOADERS["logic-map"] = logicMapModule.preload;
 MODULE_PRELOADERS["node-doc"] = editorModule.preload;
+MODULE_PRELOADERS.communications = homeModule.preload;
 
 export function preloadModuleKind(kind: string): void {
   MODULE_PRELOADERS[kind]?.();

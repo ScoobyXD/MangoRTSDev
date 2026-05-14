@@ -30,7 +30,7 @@ export const HeaderLogicGateArenaIcon: React.FC<{ color?: string }> = ({ color =
   </svg>
 );
 
-export const HeaderCommunicationsIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+export const HeaderHomeIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
   <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
     <rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1.5" fill="none" stroke={color} strokeWidth="1.35" />
     <path d="m3.2 4.8 4.8 3.6 4.8-3.6" fill="none" stroke={color} strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />

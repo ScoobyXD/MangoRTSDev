@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { preloadCommunicationsSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface } from "../app/preloadDashboardModules";
+import { preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface } from "../app/preloadDashboardModules";
 import { HeaderSettingsIcon } from "../app/HeaderIcons";
 import { MangoWordmark } from "../app/MangoLogo";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
@@ -49,7 +49,7 @@ function preloadRouteSurface(path: string): void {
     preloadLogicGateArenaSurface();
     return;
   }
-  if (path === "/home" || path === "/communication" || path === "/communications") preloadCommunicationsSurface();
+  if (path === "/home" || path === "/communication" || path === "/communications") preloadHomeSurface();
 }
 function prefetchHandlers(preload: () => void) {
   return {
@@ -60,7 +60,7 @@ function prefetchHandlers(preload: () => void) {
 }
 
 const logicGateArenaPrefetch = prefetchHandlers(preloadLogicGateArenaSurface);
-const communicationsPrefetch = prefetchHandlers(preloadCommunicationsSurface);
+const homePrefetch = prefetchHandlers(preloadHomeSurface);
 
 type CompanyUser = {
   company_id: string;
@@ -216,7 +216,7 @@ export default function AuthGate() {
   }
 
   if (normalizedPath === "/home" || normalizedPath === "/communications" || normalizedPath === "/communication") {
-    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="communications" /></React.Suspense>;
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="home" /></React.Suspense>;
   }
 
   return (
@@ -779,7 +779,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
         {!embedded && <div style={settingsNavStyle}>
           <button style={smallButtonStyle} onClick={() => onNavigate("/")}>MangoRTS</button>
           <button style={smallButtonStyle} onClick={() => onNavigate("/logic-gate-arena")} {...logicGateArenaPrefetch}>Logic Gate Arena</button>
-          <button style={smallButtonStyle} onClick={() => onNavigate("/home")} {...communicationsPrefetch}>Home</button>
+          <button style={smallButtonStyle} onClick={() => onNavigate("/home")} {...homePrefetch}>Home</button>
         </div>}
       </div>
       {error && <div style={settingsErrorStyle}>{error}</div>}

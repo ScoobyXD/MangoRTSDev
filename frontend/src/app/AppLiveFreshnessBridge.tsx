@@ -9,8 +9,8 @@ import {
   invalidateEmailMessageCache,
   markCommunicationsWorkspacePanelStale,
   removeEmailMessageFromCache,
-} from "../pages/communications/communicationsApi";
-import { subscribeCommunicationsStream } from "../pages/communications/communicationsStream";
+} from "../modules/communications/communicationsApi";
+import { subscribeCommunicationsStream } from "../modules/communications/communicationsStream";
 import { invalidateLogicGateRelationshipGraphSnapshot } from "../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateNodeRelationshipGraphSnapshot } from "../modules/node-map/NodeRelationshipGraph";
 import { markWorkspaceSnapshotStale } from "../modules/workspace/workspaceSnapshotCache";

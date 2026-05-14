@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { HeaderCommunicationsIcon, HeaderLogicGateArenaIcon, HeaderMapIcon } from "./HeaderIcons";
+import { HeaderHomeIcon, HeaderLogicGateArenaIcon, HeaderMapIcon } from "./HeaderIcons";
 import type { CurrentUserResponse } from "../auth/cognitoAuth";
 import { getActiveCompanyID } from "../auth/currentCompany";
 import FrameCanvas from "./framecanvas";
@@ -14,7 +14,7 @@ import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
 import { publishLiveSelection } from "../modules/selectionCoordinator";
 import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, mergeLinkPlan, type FrameLinkEdge } from "./frameLinking";
-import { createCommunicationsViewFrames, createDefaultNodeViewFrames, createLogicGateArenaFrames } from "./DefaultViews";
+import { createDefaultNodeViewFrames, createHomeViewFrames, createLogicGateArenaFrames } from "./DefaultViews";
 import { FrameCard, GridCrosses, PlacementSplash } from "./FrameChrome";
 import {
   CELL_SIZE,
@@ -36,8 +36,8 @@ import {
   type ViewTab,
 } from "./frameLayoutTypes";
 import { loadFrameLinks, loadSettings, loadViews, persistFrameLinks, persistFrameRegistry, saveSettings, saveViews } from "./useFramePersistence";
-import { preloadCommunicationsSurface, preloadDefaultDashboardModules, preloadLogicGateArenaSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
-import { LazyCommunicationsPage, LazyLogicGateArenaPage } from "../pages/lazyPages";
+import { preloadDefaultDashboardModules, preloadHomeSurface, preloadLogicGateArenaSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
+import { LazyHomePage, LazyLogicGateArenaPage } from "../pages/lazyPages";
 import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
 import { AppLiveFreshnessBridge } from "./AppLiveFreshnessBridge";
 import { useFrameDragResize } from "./useFrameDragResize";
@@ -66,7 +66,7 @@ const SIDEBAR_PINS_KEY = "mangorts.app-sidebar-pins.v1";
 const SIDEBAR_WIDTH_KEY = "mangorts.app-sidebar-width.v1";
 const SHOW_LEGACY_HEADER = false;
 
-type PrimaryPage = "map" | "communications" | "logic-gate-arena";
+type PrimaryPage = "map" | "home" | "logic-gate-arena";
 type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox";
 type SidebarPinKind = "node" | "logic_gate";
 type SidebarPin = {
@@ -95,7 +95,7 @@ const HOME_NAV_ITEMS: Array<{ view: HomeSidebarView; label: string }> = [
 ];
 
 function createPrimaryPageTab(page: PrimaryPage, id = createTabId()): ViewTab {
-  if (page === "communications") return { id, name: "Home", page: "communications", frames: createCommunicationsViewFrames() };
+  if (page === "home") return { id, name: "Home", page: "home", frames: createHomeViewFrames() };
   if (page === "logic-gate-arena") return { id, name: "Logic Gate Arena", page: "logic-gate-arena", frames: createLogicGateArenaFrames() };
   return { id, name: "Map", frames: createDefaultNodeViewFrames() };
 }
@@ -119,7 +119,7 @@ function isExplorerSelectionTargetFrame(frame: FrameDataModel): boolean {
 function getSidebarExplorerSelectionTargetFrameIDs(tab: ViewTab | undefined): string[] {
   if (!tab) return [];
   const page = pageForTab(tab);
-  if (page === "communications") return [];
+  if (page === "home") return [];
   if (page === "logic-gate-arena") {
     const editorFrame = tab.frames.find((frame) => frame.kind === "editor");
     return editorFrame ? [editorFrame.id] : [];
@@ -220,7 +220,7 @@ function sidebarPinsFromDrop(dataTransfer: DataTransfer): SidebarPin[] {
 }
 
 function pageForTab(tab: ViewTab): PrimaryPage | null {
-  if (tab.page === "communications") return "communications";
+  if (tab.page === "home" || tab.page === "communications") return "home";
   if (tab.page === "logic-gate-arena") return "logic-gate-arena";
   if (!tab.page && /^(map|default node view|default map view)$/i.test(tab.name.trim())) return "map";
   return null;
@@ -228,7 +228,7 @@ function pageForTab(tab: ViewTab): PrimaryPage | null {
 
 function labelForTab(tab: ViewTab): string {
   const page = pageForTab(tab);
-  if (page === "communications") return "Home";
+  if (page === "home") return "Home";
   if (page === "logic-gate-arena") return "Logic Gate Arena";
   if (page === "map") return "Map";
   return tab.name;
@@ -236,21 +236,21 @@ function labelForTab(tab: ViewTab): string {
 
 function iconForTab(tab: ViewTab): React.ReactNode {
   const page = pageForTab(tab);
-  if (page === "communications") return <HeaderCommunicationsIcon />;
+  if (page === "home") return <HeaderHomeIcon />;
   if (page === "logic-gate-arena") return <HeaderLogicGateArenaIcon />;
   if (page === "map") return <HeaderMapIcon />;
   return null;
 }
 
 function routeForPage(page: PrimaryPage): string {
-  if (page === "communications") return "/home";
+  if (page === "home") return "/home";
   if (page === "logic-gate-arena") return "/logic-gate-arena";
   return "/";
 }
 
 type AppProps = {
   accountChrome?: React.ReactNode;
-  initialPage?: "map" | "communications" | "logic-gate-arena";
+  initialPage?: "map" | "home" | "logic-gate-arena";
   me?: CurrentUserResponse;
   onNavigate?: (path: string) => void;
   overrideContent?: React.ReactNode;
@@ -289,7 +289,7 @@ function AppSidebar({
   onPinDragOver,
   onPinDrop,
 }: AppSidebarProps) {
-  const homeActive = activePage === "communications";
+  const homeActive = activePage === "home";
   return (
     <aside style={appSidebarStyle}>
       <div style={appSidebarBrandStyle} aria-label="MangoRTS">
@@ -772,8 +772,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   const activePrimaryPage = activeTab ? pageForTab(activeTab) : null;
   const sidebarExplorerSelectionTargetFrameIDs = useMemo(() => getSidebarExplorerSelectionTargetFrameIDs(activeTab), [activeTab]);
   const isLogicGateArenaView = activeTab?.page === "logic-gate-arena";
-  const isCommunicationsView = activeTab?.page === "communications";
-  const isFullPageView = isLogicGateArenaView || isCommunicationsView;
+  const isHomeView = activePrimaryPage === "home";
+  const isFullPageView = isLogicGateArenaView || isHomeView;
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
 
   useEffect(() => {
@@ -791,8 +791,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     }
 
     const id = createTabId();
-    const nextTab: ViewTab = initialPage === "communications"
-      ? { id, name: "Home", page: "communications", frames: createCommunicationsViewFrames() }
+    const nextTab: ViewTab = initialPage === "home"
+      ? { id, name: "Home", page: "home", frames: createHomeViewFrames() }
       : initialPage === "logic-gate-arena"
         ? { id, name: "Logic Gate Arena", page: "logic-gate-arena", frames: createLogicGateArenaFrames() }
         : { id, name: "Map", frames: createDefaultNodeViewFrames() };
@@ -804,12 +804,12 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
       preloadLogicGateArenaSurface();
       return;
     }
-    if (isCommunicationsView) {
-      preloadCommunicationsSurface();
+    if (isHomeView) {
+      preloadHomeSurface();
       return;
     }
     preloadVisibleFrameModules(frames);
-  }, [frames, isCommunicationsView, isLogicGateArenaView]);
+  }, [frames, isHomeView, isLogicGateArenaView]);
   const childrenByParent = useMemo(() => {
     const grouped = new Map<string, FrameDataModel[]>();
     for (const frame of frames) {
@@ -1228,11 +1228,11 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     setEditMode(false);
   }, [tabs]);
 
-  const openCommunicationsView = useCallback((tabID: string) => {
-    preloadCommunicationsSurface();
-    const framesForView = createCommunicationsViewFrames();
+  const openHomeView = useCallback((tabID: string) => {
+    preloadHomeSurface();
+    const framesForView = createHomeViewFrames();
     const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
-    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Home", page: "communications", frames: framesForView } : tab)));
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Home", page: "home", frames: framesForView } : tab)));
     setFrameLinks((previous) => previous.filter((edge) => !replacedFrameIDs.has(edge.a) && !replacedFrameIDs.has(edge.b)));
     setActiveTabId(tabID);
     setEditMode(false);
@@ -1258,7 +1258,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   }, [tabs]);
 
   const selectPrimaryPage = useCallback((page: PrimaryPage) => {
-    if (page === "communications") preloadCommunicationsSurface();
+    if (page === "home") preloadHomeSurface();
     if (page === "logic-gate-arena") preloadLogicGateArenaSurface();
     if (page === "map") preloadDefaultDashboardModules();
 
@@ -1277,7 +1277,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
 
   const selectHomeSidebarView = useCallback((view: HomeSidebarView) => {
     setHomeViewID(view);
-    selectPrimaryPage("communications");
+    selectPrimaryPage("home");
   }, [selectPrimaryPage]);
 
   const addSidebarPins = useCallback((pins: SidebarPin[]) => {
@@ -1585,8 +1585,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
       >
         {isLogicGateArenaView ? (
           <React.Suspense fallback={fullPageFallback}><LazyLogicGateArenaPage frames={frames} updateFrames={updateActiveFrames} /></React.Suspense>
-        ) : isCommunicationsView ? (
-          <React.Suspense fallback={fullPageFallback}><LazyCommunicationsPage embedded hideNavigation initialViewID={homeViewID} me={me} onNavigate={onNavigate} /></React.Suspense>
+        ) : isHomeView ? (
+          <React.Suspense fallback={fullPageFallback}><LazyHomePage embedded hideNavigation initialViewID={homeViewID} me={me} onNavigate={onNavigate} /></React.Suspense>
         ) : (
           <>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={canvasW} height={canvasH} color={crossColor} />
@@ -1734,7 +1734,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#c62828" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
           <button style={menuBtnBase} onClick={() => { openDefaultNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Map</button>
           <button style={menuBtnBase} onPointerEnter={preloadLogicGateArenaSurface} onFocus={preloadLogicGateArenaSurface} onPointerDown={preloadLogicGateArenaSurface} onClick={() => { openLogicGateArena(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Logic Gate Arena</button>
-          <button style={menuBtnBase} onPointerEnter={preloadCommunicationsSurface} onFocus={preloadCommunicationsSurface} onPointerDown={preloadCommunicationsSurface} onClick={() => { openCommunicationsView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Home</button>
+          <button style={menuBtnBase} onPointerEnter={preloadHomeSurface} onFocus={preloadHomeSurface} onPointerDown={preloadHomeSurface} onClick={() => { openHomeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Home</button>
           <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>
         </FrameRightClickMenu>
       )}

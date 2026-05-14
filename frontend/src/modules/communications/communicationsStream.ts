@@ -9,7 +9,7 @@ type CommunicationsStreamSubscriber = {
 type CommunicationsStreamEntry = {
   subscribers: Set<CommunicationsStreamSubscriber>;
   source?: SseConnection;
-  closeTimer?: ReturnType<typeof window.setTimeout>;
+  closeTimer?: ReturnType<typeof setTimeout>;
 };
 
 let streamEntry: CommunicationsStreamEntry | null = null;
@@ -32,7 +32,7 @@ export function subscribeCommunicationsStream(subscriber: CommunicationsStreamSu
   const entry = streamEntry ?? { subscribers: new Set<CommunicationsStreamSubscriber>() };
   streamEntry = entry;
   if (entry.closeTimer !== undefined) {
-    window.clearTimeout(entry.closeTimer);
+    clearTimeout(entry.closeTimer);
     entry.closeTimer = undefined;
   }
   entry.subscribers.add(subscriber);
@@ -43,7 +43,7 @@ export function subscribeCommunicationsStream(subscriber: CommunicationsStreamSu
     streamEntry.subscribers.delete(subscriber);
     if (streamEntry.subscribers.size === 0) {
       const closingEntry = streamEntry;
-      closingEntry.closeTimer = window.setTimeout(() => {
+      closingEntry.closeTimer = setTimeout(() => {
         if (streamEntry !== closingEntry || closingEntry.subscribers.size > 0) return;
         closingEntry.source?.close();
         streamEntry = null;

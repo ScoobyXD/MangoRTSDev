@@ -11,7 +11,7 @@ import {
   parseEmailAddressList,
   unarchiveEmailMessage,
   type EmailMessage,
-} from "../../../../frontend/src/pages/communications/communicationsApi.js";
+} from "../../../../frontend/src/modules/communications/communicationsApi.js";
 
 test("communications message query omits empty values and encodes filters", () => {
   assert.equal(

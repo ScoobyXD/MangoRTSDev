@@ -67,13 +67,13 @@ export function createLogicGateArenaFrames(): FrameDataModel[] {
   ];
 }
 
-export function createCommunicationsViewFrames(): FrameDataModel[] {
-  const communicationsID = createFrameId();
+export function createHomeViewFrames(): FrameDataModel[] {
+  const homeID = createFrameId();
 
   return [
     {
-      id: communicationsID,
-      kind: "communications",
+      id: homeID,
+      kind: "home",
       x: 1,
       y: 1,
       w: 42,

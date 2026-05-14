@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
-import { getEmailMessage, listEmailMessages, type EmailAddress, type EmailMessage } from "../../pages/communications/communicationsApi";
+import { getEmailMessage, listEmailMessages, type EmailAddress, type EmailMessage } from "../communications/communicationsApi";
 import type { NodeProjectionItem } from "../node-map/NodeRecordStore";
 import {
   buildEditorAttachedEmailPayload,

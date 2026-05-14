@@ -9,7 +9,8 @@ const frontendRoot = resolve(repoRoot, "frontend");
 const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/auth/authRoutes.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/auth/authenticatedSse.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/pages/communications/communicationsApi.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/communicationsApi.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeUtils.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/workspace/workspaceStream.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/hooks/keyboardShortcutRouting.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/frameLinking.test.js"),

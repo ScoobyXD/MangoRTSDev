@@ -1,16 +1,16 @@
 import type { FrameDataModel } from "../types";
 import { preloadModuleKinds, preloadModulesForFrames } from "../modules";
-import { preloadCommunicationsPage, preloadLogicGateArenaPage } from "../pages/lazyPages";
+import { preloadHomePage, preloadLogicGateArenaPage } from "../pages/lazyPages";
 import { loadViews } from "./useFramePersistence";
 
-const HOT_DASHBOARD_MODULE_KINDS = ["map", "company-explorer", "editor", "kanban", "communications"];
+const HOT_DASHBOARD_MODULE_KINDS = ["map", "company-explorer", "editor", "kanban", "home"];
 const DEFAULT_DASHBOARD_MODULE_KINDS = ["map", "company-explorer", "editor"];
 const LOGIC_GATE_ARENA_MODULE_KINDS = ["company-explorer", "editor", "kanban"];
-const COMMUNICATIONS_MODULE_KINDS = ["communications"];
+const HOME_MODULE_KINDS = ["home"];
 
 export function preloadHotDashboardModules(): void {
   preloadLogicGateArenaPage();
-  preloadCommunicationsPage();
+  preloadHomePage();
   preloadModuleKinds(HOT_DASHBOARD_MODULE_KINDS);
 }
 
@@ -23,9 +23,9 @@ export function preloadLogicGateArenaSurface(): void {
   preloadModuleKinds(LOGIC_GATE_ARENA_MODULE_KINDS);
 }
 
-export function preloadCommunicationsSurface(): void {
-  preloadCommunicationsPage();
-  preloadModuleKinds(COMMUNICATIONS_MODULE_KINDS);
+export function preloadHomeSurface(): void {
+  preloadHomePage();
+  preloadModuleKinds(HOME_MODULE_KINDS);
 }
 
 export function preloadVisibleFrameModules(frames: Iterable<Pick<FrameDataModel, "kind">>): void {
@@ -39,7 +39,7 @@ export function preloadLikelyDashboardModules(): void {
     const activeTab = views.tabs.find((tab) => tab.id === views.activeId) ?? views.tabs[0];
     if (!activeTab) return;
     if (activeTab.page === "logic-gate-arena") preloadLogicGateArenaPage();
-    if (activeTab.page === "communications") preloadCommunicationsPage();
+    if (activeTab.page === "home" || activeTab.page === "communications") preloadHomePage();
     if (activeTab.frames.length > 0) preloadVisibleFrameModules(activeTab.frames);
   } catch {
     preloadDefaultDashboardModules();
