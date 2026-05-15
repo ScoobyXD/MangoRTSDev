@@ -1,0 +1,1524 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getEmailMessage, listEmailMessages, type EmailMessage } from "../communications/communicationsApi";
+import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
+import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
+import { createEditorScrollMemory } from "./editorScroll";
+import { EDITOR_TAB_TEXT, type EditorOutlineStyleID } from "./plainTextEditing";
+import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
+import { deserializeEditorDocumentHTML, readEditorDocumentText, serializeEditorDocumentHTML } from "./richTextEditing";
+import { resolveEditorTextBlockChatAnchorRanges } from "./editorTextBlockChatHighlights";
+import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHandlers";
+import { getEditorDocumentFontFamily } from "./useEditorPreferences";
+import {
+  ArrowRightIcon,
+  avatarBackgroundForName,
+  buildChatThreads,
+  clampChatPaneHeight,
+  ChatIcon,
+  type ChatThreadNode,
+  countChatThreadDescendants,
+  EMAIL_DRAG_MIME,
+  formatAddressList,
+  formatFileSize,
+  formatTimestamp,
+  imageFilesFromTransfer,
+  initialsForName,
+  isImageAttachment,
+  MailIcon,
+  messageAttachmentPayload,
+  PlusIcon,
+  readStoredChatPaneHeight,
+  storeChatPaneHeight,
+  TEXT_BLOCK_BOTTOM_BUFFER_ROWS,
+  TEXT_BLOCK_FONT_SIZE,
+  TEXT_BLOCK_LINE_HEIGHT,
+  TEXT_BLOCK_MAX_HEIGHT,
+  TEXT_BLOCK_MIN_HEIGHT,
+  TEXT_BLOCK_PADDING_BOTTOM,
+  TEXT_BLOCK_PADDING_LEFT,
+  TEXT_BLOCK_PADDING_RIGHT,
+  TEXT_BLOCK_PADDING_TOP,
+  type TextBlockSelectionAnchor,
+  type TextBlockSelectionDraft,
+  useCloseFloatingMenu,
+} from "./NodeWorkspaceSurfaceShared";
+type TimelineCellProps = {
+  accent: string;
+  muted: boolean;
+  isLast: boolean;
+};
+
+export const TimelineCell: React.FC<TimelineCellProps> = ({ accent, muted, isLast }) => (
+  <div style={{ position: "relative", alignSelf: "stretch", minHeight: TEXT_BLOCK_MIN_HEIGHT, paddingTop: 9, color: "inherit", boxSizing: "border-box" }}>
+    <div
+      aria-hidden="true"
+      style={{
+        position: "absolute",
+        top: 0,
+        bottom: isLast ? "auto" : -12,
+        height: isLast ? 25 : undefined,
+        left: 15,
+        width: 1,
+        background: muted ? "rgba(100,116,139,0.18)" : "rgba(255,136,32,0.35)",
+      }}
+    />
+    <div aria-hidden="true" style={{ position: "relative", width: 31, height: 31, borderRadius: 999, border: `2px solid ${muted ? "rgba(100,116,139,0.28)" : accent}`, background: "#ffffff", boxShadow: "0 0 0 4px rgba(255,136,32,0.08)" }} />
+  </div>
+);
+
+type TextBlockActionsMenuProps = {
+  accent: string;
+  surfaceText: string;
+  panelBackground: string;
+  strokeColor: string;
+  onRename: () => void;
+  onDelete: () => void;
+};
+
+export const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
+  accent,
+  surfaceText,
+  panelBackground,
+  strokeColor,
+  onRename,
+  onDelete,
+}) => {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useCloseFloatingMenu(open, rootRef, close);
+  const menuItemStyle: React.CSSProperties = {
+    width: "100%",
+    minHeight: 30,
+    border: "none",
+    borderRadius: 6,
+    background: "#ffffff",
+    color: surfaceText,
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 700,
+    letterSpacing: 0,
+    padding: "7px 9px",
+    textAlign: "left",
+  };
+  return (
+    <div ref={rootRef} style={{ position: "relative", width: 26, height: 24 }}>
+      <button
+        type="button"
+        aria-label="Text box actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Text box actions"
+        onClick={() => setOpen((nextOpen) => !nextOpen)}
+        style={{ width: 26, height: 24, borderRadius: 5, border: `1px solid ${open ? accent : strokeColor}`, background: open ? "rgba(255,136,32,0.12)" : panelBackground, color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 13, fontWeight: 900, lineHeight: 1, letterSpacing: 0 }}
+      >
+        ...
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label="Text box actions"
+          style={{
+            position: "absolute",
+            zIndex: 50,
+            top: "calc(100% + 6px)",
+            right: 0,
+            width: 148,
+            display: "grid",
+            gap: 3,
+            padding: 5,
+            border: `1px solid ${strokeColor}`,
+            borderRadius: 8,
+            background: "#ffffff",
+            boxShadow: "0 12px 28px rgba(0,0,0,0.14)",
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onRename();
+            }}
+            style={menuItemStyle}
+          >
+            Rename title
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+            style={{ ...menuItemStyle, color: "#b42318" }}
+          >
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+type DeleteTextBlockConfirmationModalProps = {
+  title: string;
+  chatCount: number;
+  accent: string;
+  surfaceText: string;
+  panelBackground: string;
+  ruleColor: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+};
+
+export const DeleteTextBlockConfirmationModal: React.FC<DeleteTextBlockConfirmationModalProps> = ({
+  title,
+  chatCount,
+  accent,
+  surfaceText,
+  panelBackground,
+  ruleColor,
+  onConfirm,
+  onCancel,
+}) => (
+  <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
+    <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: `1px solid ${ruleColor}`, background: panelBackground, color: surfaceText, padding: 12, display: "grid", gap: 10, boxShadow: "0 18px 44px rgba(0,0,0,0.20)" }}>
+      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0 }}>
+        Are you sure you want to delete this?
+      </div>
+      <div style={{ fontSize: 11, lineHeight: 1.35, color: surfaceText, opacity: 0.72 }}>
+        This removes "{title}" from the middle column{chatCount > 0 ? ` and deletes ${chatCount} chat repl${chatCount === 1 ? "y" : "ies"} attached to it` : ""}.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <button type="button" onClick={onConfirm} style={{ minHeight: 28, border: `1px solid ${accent}`, background: "#ffffff", color: "#111111", cursor: "pointer", fontWeight: 700 }}>
+          Yes
+        </button>
+        <button type="button" onClick={onCancel} style={{ minHeight: 28, border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#ffffff", cursor: "pointer", fontWeight: 700 }}>
+          No
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+type NodeTextBlockEditorProps = {
+  blockID: string;
+  nodeID: string;
+  companyID: string;
+  currentUserID: string;
+  documentValue: string;
+  chatMessages: EditorTextBlockChatMessage[];
+  activeChatAnchorMessageID: string;
+  surfaceText: string;
+  accent: string;
+  outlineStyle: EditorOutlineStyleID;
+  indentGuideColor: string;
+  scrollbarTrack: string;
+  onFocus: () => void;
+  onBlur: () => void;
+  onDocumentChange: (document: string) => void;
+  onDocumentFlush: (document: string) => void;
+  onSelectionChatRequest: (selection: TextBlockSelectionDraft) => void;
+};
+
+function readStoredTextBlockHeight(storageKey: string): number {
+  if (typeof localStorage === "undefined") return TEXT_BLOCK_MIN_HEIGHT;
+  const parsed = Number.parseInt(localStorage.getItem(storageKey) ?? "", 10);
+  return Number.isFinite(parsed) ? Math.max(TEXT_BLOCK_MIN_HEIGHT, Math.min(parsed, TEXT_BLOCK_MAX_HEIGHT)) : TEXT_BLOCK_MIN_HEIGHT;
+}
+
+function storeTextBlockHeight(storageKey: string, height: number) {
+  if (typeof localStorage === "undefined" || !Number.isFinite(height)) return;
+  localStorage.setItem(storageKey, String(Math.max(TEXT_BLOCK_MIN_HEIGHT, Math.min(Math.round(height), TEXT_BLOCK_MAX_HEIGHT))));
+}
+
+type TextHighlightRect = {
+  key: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  active: boolean;
+};
+
+type TextRangeBoundary = {
+  container: Node;
+  offset: number;
+};
+
+function locateTextRangeBoundary(root: HTMLElement, targetOffset: number): TextRangeBoundary {
+  const target = Math.max(0, Math.trunc(targetOffset));
+  let currentOffset = 0;
+
+  const walk = (parent: Node): TextRangeBoundary | null => {
+    for (let index = 0; index < parent.childNodes.length; index += 1) {
+      const child = parent.childNodes[index];
+      if (child.nodeType === Node.TEXT_NODE) {
+        const length = child.textContent?.length ?? 0;
+        if (target <= currentOffset + length) {
+          return {
+            container: child,
+            offset: Math.max(0, Math.min(length, target - currentOffset)),
+          };
+        }
+        currentOffset += length;
+        continue;
+      }
+      if (child instanceof HTMLElement && child.tagName === "BR") {
+        if (target <= currentOffset + 1) {
+          return { container: parent, offset: index + (target > currentOffset ? 1 : 0) };
+        }
+        currentOffset += 1;
+        continue;
+      }
+      const nested = walk(child);
+      if (nested) return nested;
+    }
+    return null;
+  };
+
+  return walk(root) ?? { container: root, offset: root.childNodes.length };
+}
+
+function createTextRangeFromOffsets(root: HTMLElement, startOffset: number, endOffset: number): Range | null {
+  if (endOffset <= startOffset) return null;
+  const range = root.ownerDocument.createRange();
+  const start = locateTextRangeBoundary(root, startOffset);
+  const end = locateTextRangeBoundary(root, endOffset);
+  try {
+    range.setStart(start.container, start.offset);
+    range.setEnd(end.container, end.offset);
+    return range.collapsed ? null : range;
+  } catch {
+    return null;
+  }
+}
+
+function getSelectionPointDocumentOffset(root: HTMLElement, container: Node | null, offset: number): number | null {
+  if (!container || !(container === root || root.contains(container))) return null;
+  const range = root.ownerDocument.createRange();
+  try {
+    range.selectNodeContents(root);
+    range.setEnd(container, offset);
+    return range.toString().length;
+  } catch {
+    return null;
+  }
+}
+
+function buildTextHighlightRects(root: HTMLElement, wrapper: HTMLElement, activeMessageID: string, messages: EditorTextBlockChatMessage[]): TextHighlightRect[] {
+  const documentText = readEditorDocumentText(root);
+  const ranges = resolveEditorTextBlockChatAnchorRanges(documentText, messages);
+  if (ranges.length === 0) return [];
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const editorRect = root.getBoundingClientRect();
+  const rects: TextHighlightRect[] = [];
+
+  for (const anchorRange of ranges) {
+    const range = createTextRangeFromOffsets(root, anchorRange.startOffset, anchorRange.endOffset);
+    if (!range) continue;
+    const active = anchorRange.messageID === activeMessageID;
+    Array.from(range.getClientRects()).forEach((rect, rectIndex) => {
+      const left = Math.max(rect.left, editorRect.left) - wrapperRect.left;
+      const right = Math.min(rect.right, editorRect.right) - wrapperRect.left;
+      const top = Math.max(rect.top, editorRect.top) - wrapperRect.top;
+      const bottom = Math.min(rect.bottom, editorRect.bottom) - wrapperRect.top;
+      const width = right - left;
+      const height = bottom - top;
+      if (width < 1 || height < 2) return;
+      rects.push({
+        key: `${anchorRange.messageID}:${rectIndex}:${Math.round(left)}:${Math.round(top)}`,
+        left,
+        top,
+        width,
+        height,
+        active,
+      });
+    });
+  }
+
+  return rects;
+}
+
+export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
+  blockID,
+  nodeID,
+  companyID,
+  currentUserID,
+  documentValue,
+  chatMessages,
+  activeChatAnchorMessageID,
+  surfaceText,
+  accent,
+  outlineStyle,
+  indentGuideColor,
+  scrollbarTrack,
+  onFocus,
+  onBlur,
+  onDocumentChange,
+  onDocumentFlush,
+  onSelectionChatRequest,
+}) => {
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const restoringScrollRef = useRef(false);
+  const documentTargetKey = `node-text-block:${nodeID}:${blockID}`;
+  const targetKeyRef = useRef(documentTargetKey);
+  const loadedDocumentTargetKeyRef = useRef(documentTargetKey);
+  const scrollMemoryRef = useRef(createEditorScrollMemory());
+  const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
+  const pendingFontSizeRef = useRef<number | null>(null);
+  const indentGuideFrameRef = useRef<number | null>(null);
+  const selectionPointerDownRef = useRef(false);
+  const lastAppliedDocumentRef = useRef("");
+  const lastStoredHeightRef = useRef(0);
+  const heightStorageKey = `node-editor-text-block-height-v2:${currentUserID}:${companyID}:${nodeID}:${blockID}`;
+  const [height, setHeight] = useState(() => readStoredTextBlockHeight(heightStorageKey));
+  const [documentScrollTop, setDocumentScrollTop] = useState(0);
+  const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
+  const [selectionDraft, setSelectionDraft] = useState<TextBlockSelectionDraft | null>(null);
+  const [textHighlightRects, setTextHighlightRects] = useState<TextHighlightRect[]>([]);
+  const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
+  const documentLineHeightPx = TEXT_BLOCK_FONT_SIZE * TEXT_BLOCK_LINE_HEIGHT;
+  const textBlockBottomBufferPx = documentLineHeightPx * TEXT_BLOCK_BOTTOM_BUFFER_ROWS;
+  const textBlockPaddingBottomPx = TEXT_BLOCK_PADDING_BOTTOM + textBlockBottomBufferPx;
+  const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
+
+  const refreshTextHighlights = useCallback(() => {
+    const editor = editorRef.current;
+    const wrapper = wrapperRef.current;
+    if (!editor || !wrapper) {
+      setTextHighlightRects((current) => current.length > 0 ? [] : current);
+      return;
+    }
+    const nextRects = buildTextHighlightRects(editor, wrapper, activeChatAnchorMessageID, chatMessages);
+    setTextHighlightRects(nextRects);
+  }, [activeChatAnchorMessageID, chatMessages]);
+
+  useEffect(() => {
+    targetKeyRef.current = documentTargetKey;
+  }, [documentTargetKey]);
+
+  useEffect(() => {
+    const nextHeight = readStoredTextBlockHeight(heightStorageKey);
+    lastStoredHeightRef.current = nextHeight;
+    setHeight(nextHeight);
+  }, [heightStorageKey]);
+
+  useEffect(() => {
+    const element = editorRef.current;
+    if (!element) return;
+    const nextHTML = deserializeEditorDocumentHTML(documentValue);
+    const targetChanged = loadedDocumentTargetKeyRef.current !== documentTargetKey;
+    if (!targetChanged && documentValue === lastAppliedDocumentRef.current && element.innerHTML === nextHTML) return;
+    element.innerHTML = nextHTML;
+    resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
+    lastAppliedDocumentRef.current = documentValue;
+    loadedDocumentTargetKeyRef.current = documentTargetKey;
+  }, [documentTargetKey, documentValue]);
+
+  useEffect(() => {
+    const element = editorRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      const nextHeight = Math.round(element.getBoundingClientRect().height);
+      refreshTextHighlights();
+      if (!Number.isFinite(nextHeight) || Math.abs(nextHeight - lastStoredHeightRef.current) < 2) return;
+      lastStoredHeightRef.current = nextHeight;
+      setHeight(nextHeight);
+      storeTextBlockHeight(heightStorageKey, nextHeight);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [heightStorageKey, refreshTextHighlights]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(refreshTextHighlights);
+    return () => window.cancelAnimationFrame(frame);
+  }, [documentValue, documentScrollTop, height, refreshTextHighlights]);
+
+  const scheduleTextBlockIndentGuideUpdate = useCallback((text: string) => {
+    if (indentGuideFrameRef.current !== null) {
+      window.cancelAnimationFrame(indentGuideFrameRef.current);
+      indentGuideFrameRef.current = null;
+    }
+    if (outlineStyle !== "indent-guides") {
+      setIndentGuideSegments((current) => current.length > 0 ? [] : current);
+      return;
+    }
+    indentGuideFrameRef.current = window.requestAnimationFrame(() => {
+      indentGuideFrameRef.current = null;
+      setIndentGuideSegments(buildEditorIndentGuideSegments(text, EDITOR_TAB_TEXT.length));
+    });
+  }, [outlineStyle]);
+
+  useEffect(() => {
+    scheduleTextBlockIndentGuideUpdate(editorRef.current ? readEditorDocumentText(editorRef.current) : documentValue);
+  }, [documentValue, scheduleTextBlockIndentGuideUpdate]);
+
+  useEffect(() => () => {
+    if (indentGuideFrameRef.current !== null) {
+      window.cancelAnimationFrame(indentGuideFrameRef.current);
+      indentGuideFrameRef.current = null;
+    }
+  }, []);
+
+  const handlers = useEditorDocumentSurfaceHandlers({
+    restoringScrollRef,
+    currentDocumentTargetKeyRef: targetKeyRef,
+    scrollMemoryRef,
+    documentUndoHistoryRef,
+    pendingEditorFontSizeRef: pendingFontSizeRef,
+    outlineStyle,
+    setDocumentScrollTop,
+    scheduleDocumentSave: (nextDocument, immediate = false) => {
+      lastAppliedDocumentRef.current = nextDocument;
+      onDocumentChange(nextDocument);
+      if (immediate) onDocumentFlush(nextDocument);
+    },
+    scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
+    rememberCurrentDocumentScroll: () => undefined,
+    flushPendingDocumentSave: (fallbackDocument) => {
+      const nextDocument = fallbackDocument ?? (editorRef.current ? serializeEditorDocumentHTML(editorRef.current) : lastAppliedDocumentRef.current);
+      lastAppliedDocumentRef.current = nextDocument;
+      onDocumentFlush(nextDocument);
+    },
+    onSelectionFontSizeChange: () => undefined,
+  });
+
+  const handleBlur: React.FocusEventHandler<HTMLDivElement> = (event) => {
+    handlers.onBlur(event);
+    onBlur();
+  };
+
+  const readSelectionDraft = useCallback((): TextBlockSelectionDraft | null => {
+    const editor = editorRef.current;
+    const wrapper = wrapperRef.current;
+    if (!editor || !wrapper) return null;
+    const selection = editor.ownerDocument.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.startContainer) || !editor.contains(range.endContainer)) return null;
+    const rawSelectedText = range.toString();
+    const leadingTrim = rawSelectedText.length - rawSelectedText.trimStart().length;
+    const selectedText = rawSelectedText.trim();
+    if (!selectedText) return null;
+
+    const beforeRange = range.cloneRange();
+    beforeRange.selectNodeContents(editor);
+    beforeRange.setEnd(range.startContainer, range.startOffset);
+    const documentTextLength = readEditorDocumentText(editor).length;
+    const startOffset = Math.max(0, Math.min(beforeRange.toString().length + leadingTrim, documentTextLength));
+    const endOffset = Math.max(startOffset, Math.min(startOffset + selectedText.length, documentTextLength));
+    if (endOffset <= startOffset) return null;
+
+    const rangeRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+    const selectionRect = range.getBoundingClientRect();
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const anchorOffset = getSelectionPointDocumentOffset(editor, selection.anchorNode, selection.anchorOffset);
+    const focusOffset = getSelectionPointDocumentOffset(editor, selection.focusNode, selection.focusOffset);
+    const isForwardSelection = anchorOffset === null || focusOffset === null || anchorOffset <= focusOffset;
+    const firstRect = rangeRects[0] ?? selectionRect;
+    const lastRect = rangeRects[rangeRects.length - 1] ?? selectionRect;
+    const iconRect = isForwardSelection ? lastRect : firstRect;
+    const preferredX = isForwardSelection
+      ? iconRect.right - wrapperRect.left + 8
+      : iconRect.left - wrapperRect.left - 36;
+    const preferredY = iconRect.top - wrapperRect.top + ((iconRect.height - 28) / 2);
+    const x = Math.max(8, Math.min(preferredX, wrapperRect.width - 34));
+    const y = Math.max(6, Math.min(preferredY, wrapperRect.height - 34));
+    return {
+      blockID,
+      quote: selectedText,
+      startOffset,
+      endOffset,
+      x,
+      y,
+    };
+  }, [blockID]);
+
+  const captureSelectionDraft = useCallback(() => {
+    window.setTimeout(() => {
+      if (selectionPointerDownRef.current) return;
+      setSelectionDraft(readSelectionDraft());
+    }, 0);
+  }, [readSelectionDraft]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const ownerDocument = editor.ownerDocument;
+    const onSelectionChange = () => {
+      const selection = ownerDocument.getSelection();
+      const anchorNode = selection?.anchorNode ?? null;
+      const focusNode = selection?.focusNode ?? null;
+      if (!anchorNode && !focusNode) {
+        setSelectionDraft(null);
+        return;
+      }
+      if ((anchorNode && editor.contains(anchorNode)) || (focusNode && editor.contains(focusNode))) {
+        if (selectionPointerDownRef.current) return;
+        captureSelectionDraft();
+      }
+    };
+    ownerDocument.addEventListener("selectionchange", onSelectionChange);
+    return () => ownerDocument.removeEventListener("selectionchange", onSelectionChange);
+  }, [captureSelectionDraft]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const ownerDocument = editor.ownerDocument;
+    const onPointerUp = () => {
+      if (!selectionPointerDownRef.current) return;
+      selectionPointerDownRef.current = false;
+      captureSelectionDraft();
+    };
+    const onPointerCancel = () => {
+      selectionPointerDownRef.current = false;
+    };
+    ownerDocument.addEventListener("pointerup", onPointerUp, true);
+    ownerDocument.addEventListener("pointercancel", onPointerCancel, true);
+    return () => {
+      ownerDocument.removeEventListener("pointerup", onPointerUp, true);
+      ownerDocument.removeEventListener("pointercancel", onPointerCancel, true);
+    };
+  }, [captureSelectionDraft]);
+
+  return (
+    <div
+      ref={wrapperRef}
+      style={{
+        position: "relative",
+        width: "100%",
+        minWidth: 0,
+        background: "#ffffff",
+      }}
+    >
+      {showIndentGuides && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 0,
+            pointerEvents: "none",
+            boxSizing: "border-box",
+            overflow: "hidden",
+            padding: `${TEXT_BLOCK_PADDING_TOP}px ${TEXT_BLOCK_PADDING_RIGHT}px ${textBlockPaddingBottomPx}px ${TEXT_BLOCK_PADDING_LEFT}px`,
+            fontSize: TEXT_BLOCK_FONT_SIZE,
+            lineHeight: TEXT_BLOCK_LINE_HEIGHT,
+            fontFamily: documentFontFamily,
+            letterSpacing: 0,
+            tabSize: EDITOR_TAB_TEXT.length,
+          }}
+        >
+          <div style={{ position: "relative", transform: `translateY(-${documentScrollTop}px)` }}>
+            {indentGuideSegments.map((segment) => (
+              <div
+                key={`${segment.depth}-${segment.lineStart}-${segment.lineEnd}`}
+                style={{
+                  position: "absolute",
+                  top: segment.lineStart * documentLineHeightPx,
+                  left: `${(segment.depth - 1) * EDITOR_TAB_TEXT.length}ch`,
+                  height: Math.max(documentLineHeightPx, (segment.lineEnd - segment.lineStart + 1) * documentLineHeightPx),
+                  borderLeft: `1px solid ${indentGuideColor}`,
+                  opacity: 0.9,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      {textHighlightRects.length > 0 && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 1,
+            pointerEvents: "none",
+            overflow: "hidden",
+          }}
+        >
+          {textHighlightRects.map((rect) => (
+            <div
+              key={rect.key}
+              style={{
+                position: "absolute",
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height,
+                borderRadius: 3,
+                background: rect.active ? "rgba(255, 180, 44, 0.52)" : "rgba(255, 213, 79, 0.34)",
+                boxShadow: rect.active ? `0 0 0 1px ${accent}, 0 0 0 3px rgba(255,136,32,0.16)` : "none",
+              }}
+            />
+          ))}
+        </div>
+      )}
+      <div
+        ref={editorRef}
+        className="editor-document-scroll"
+        data-node-text-block-id={blockID}
+        role="textbox"
+        aria-label="Node text block"
+        aria-multiline="true"
+        contentEditable
+        suppressContentEditableWarning
+        spellCheck
+        onFocus={onFocus}
+        onBeforeInput={handlers.onBeforeInput}
+        onPaste={handlers.onPaste}
+        onDrop={handlers.onDrop}
+        onInput={handlers.onInput}
+        onSelect={handlers.onSelect}
+        onClick={handlers.onClick}
+        onPointerDown={(event) => {
+          setSelectionDraft(null);
+          if (event.button === 0) selectionPointerDownRef.current = true;
+          handlers.onPointerDown(event);
+        }}
+        onPointerMove={handlers.onPointerMove}
+        onKeyUp={(event) => {
+          handlers.onKeyUp(event);
+          captureSelectionDraft();
+        }}
+        onBlur={handleBlur}
+        onScroll={handlers.onScroll}
+        onWheel={handlers.onWheel}
+        onKeyDown={handlers.onKeyDown}
+        style={{
+          position: "relative",
+          zIndex: 2,
+          display: "block",
+          width: "100%",
+          height,
+          minHeight: TEXT_BLOCK_MIN_HEIGHT,
+          maxHeight: TEXT_BLOCK_MAX_HEIGHT,
+          resize: "vertical",
+          border: 0,
+          outline: "none",
+          padding: `${TEXT_BLOCK_PADDING_TOP}px ${TEXT_BLOCK_PADDING_RIGHT}px ${textBlockPaddingBottomPx}px ${TEXT_BLOCK_PADDING_LEFT}px`,
+          boxSizing: "border-box",
+          color: surfaceText,
+          background: "transparent",
+          fontSize: TEXT_BLOCK_FONT_SIZE,
+          lineHeight: TEXT_BLOCK_LINE_HEIGHT,
+          fontFamily: documentFontFamily,
+          tabSize: EDITOR_TAB_TEXT.length,
+          letterSpacing: 0,
+          overflowWrap: "anywhere",
+          wordBreak: "break-word",
+          whiteSpace: "pre-wrap",
+          overflowY: "auto",
+          overflowX: "hidden",
+          cursor: "text",
+          ["--editor-document-scroll-accent" as string]: accent,
+          ["--editor-document-scroll-track" as string]: scrollbarTrack,
+        }}
+      />
+      {selectionDraft && (
+        <button
+          type="button"
+          title="Comment on selection"
+          aria-label="Comment on selection"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelectionChatRequest(selectionDraft);
+            setSelectionDraft(null);
+            window.getSelection()?.removeAllRanges();
+          }}
+          style={{
+            position: "absolute",
+            left: selectionDraft.x,
+            top: selectionDraft.y,
+            zIndex: 5,
+            width: 28,
+            height: 28,
+            borderRadius: 6,
+            border: `1px solid ${accent}`,
+            background: "#ffffff",
+            color: accent,
+            display: "grid",
+            placeItems: "center",
+            padding: 0,
+            cursor: "pointer",
+            boxShadow: "0 8px 20px rgba(0,0,0,0.18)",
+          }}
+        >
+          <ChatIcon color={accent} />
+        </button>
+      )}
+    </div>
+  );
+};
+
+type ChatPaneProps = {
+  blockID: string;
+  messages: EditorTextBlockChatMessage[];
+  selectionAnchor?: TextBlockSelectionAnchor;
+  draft: string;
+  draftAttachments: EditorChatAttachment[];
+  replyTargetID: string;
+  heightStorageKey: string;
+  active: boolean;
+  currentUserID: string;
+  activeMessageID: string;
+  accent: string;
+  surfaceText: string;
+  panelBackground: string;
+  strokeColor: string;
+  ruleColor: string;
+  onFocus: () => void;
+  onDraftChange: (draft: string) => void;
+  onActivateMessage: (messageID: string) => void;
+  onReply: (messageID: string) => void;
+  onDeleteMessage: (messageID: string) => void;
+  onClearReply: () => void;
+  onAttachFiles: (files: FileList | File[]) => void;
+  onRemoveDraftAttachment: (attachmentID: string) => void;
+  onSubmit: () => void;
+};
+
+export const ChatPane: React.FC<ChatPaneProps> = ({
+  blockID,
+  messages,
+  selectionAnchor,
+  draft,
+  draftAttachments,
+  replyTargetID,
+  heightStorageKey,
+  active,
+  currentUserID,
+  activeMessageID,
+  accent,
+  surfaceText,
+  panelBackground,
+  strokeColor,
+  ruleColor,
+  onFocus,
+  onDraftChange,
+  onActivateMessage,
+  onReply,
+  onDeleteMessage,
+  onClearReply,
+  onAttachFiles,
+  onRemoveDraftAttachment,
+  onSubmit,
+}) => {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const threads = useMemo(() => buildChatThreads(messages), [messages]);
+  const replyTarget = replyTargetID ? messages.find((message) => message.id === replyTargetID) : undefined;
+  const lineCount = Math.min(5, Math.max(1, draft.split(/\r\n|\r|\n/).length));
+  const composerHeight = 34 + ((lineCount - 1) * 17);
+  const canSubmit = draft.trim().length > 0 || draftAttachments.length > 0;
+  const [height, setHeight] = useState(() => readStoredChatPaneHeight(heightStorageKey));
+  const [previewAttachment, setPreviewAttachment] = useState<EditorChatAttachment | null>(null);
+  const [collapsedThreadIDs, setCollapsedThreadIDs] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    setHeight(readStoredChatPaneHeight(heightStorageKey));
+  }, [heightStorageKey]);
+
+  useEffect(() => {
+    const visibleMessageIDs = new Set(messages.map((message) => message.id));
+    setCollapsedThreadIDs((previous) => {
+      const next = new Set(Array.from(previous).filter((messageID) => visibleMessageIDs.has(messageID)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [messages]);
+
+  useEffect(() => {
+    if (!replyTargetID) return;
+    const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [replyTargetID]);
+
+  useEffect(() => {
+    if (!active || replyTargetID) return;
+    const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, replyTargetID, selectionAnchor?.quote]);
+
+  const focusComposer = () => {
+    onFocus();
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const handleReply = (messageID: string) => {
+    onActivateMessage(messageID);
+    onReply(messageID);
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const toggleThreadCollapse = (messageID: string) => {
+    setCollapsedThreadIDs((previous) => {
+      const next = new Set(previous);
+      if (next.has(messageID)) next.delete(messageID);
+      else next.add(messageID);
+      return next;
+    });
+  };
+
+  const attachTransferredImages = (dataTransfer: DataTransfer): boolean => {
+    const files = imageFilesFromTransfer(dataTransfer);
+    if (files.length === 0) return false;
+    onAttachFiles(files);
+    return true;
+  };
+
+  const beginResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startY = event.clientY;
+    const startHeight = height;
+    let nextHeight = startHeight;
+    const onPointerMove = (pointerEvent: PointerEvent) => {
+      nextHeight = clampChatPaneHeight(startHeight + pointerEvent.clientY - startY);
+      setHeight(nextHeight);
+    };
+    const onPointerUp = () => {
+      storeChatPaneHeight(heightStorageKey, nextHeight);
+      window.removeEventListener("pointermove", onPointerMove);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+  };
+
+  return (
+    <>
+      <div
+        data-node-chat-block-id={blockID}
+        onMouseDown={(event) => {
+          event.stopPropagation();
+          onFocus();
+        }}
+        style={{
+          minWidth: 0,
+          height,
+          marginTop: 0,
+          display: "grid",
+          gridTemplateRows: "auto minmax(0, 1fr) auto 7px",
+          border: `1px solid ${active ? accent : strokeColor}`,
+          borderRadius: 8,
+          background: active ? "#ffffff" : panelBackground,
+          overflow: "hidden",
+          opacity: active || messages.length > 0 ? 1 : 0.72,
+        }}
+      >
+        <div style={{ minHeight: 30, display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${ruleColor}`, padding: "6px 8px", color: surfaceText, fontSize: 11, fontWeight: 800 }}>
+          <ChatIcon color={active ? accent : "rgba(100,116,139,0.85)"} />
+          <span>{messages.length}</span>
+        </div>
+        <div className="editor-document-scroll" style={{ minHeight: 0, display: "grid", alignContent: "start", gap: 8, overflowY: "auto", overflowX: "hidden", padding: "9px 8px", ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
+          {threads.map((thread) => (
+            <ChatThreadItem
+              key={thread.message.id}
+              node={thread}
+              depth={0}
+              isLastSibling={false}
+              currentUserID={currentUserID}
+              activeMessageID={activeMessageID}
+              accent={accent}
+              surfaceText={surfaceText}
+              ruleColor={ruleColor}
+              collapsedThreadIDs={collapsedThreadIDs}
+              onToggleCollapse={toggleThreadCollapse}
+              onActivate={onActivateMessage}
+              onReply={handleReply}
+              onDelete={onDeleteMessage}
+              onPreviewImage={setPreviewAttachment}
+            />
+          ))}
+        </div>
+        <div style={{ display: "grid", gap: 6, padding: 8, borderTop: `1px solid ${ruleColor}` }}>
+          {selectionAnchor && active && (
+            <div style={{ borderLeft: `3px solid ${accent}`, background: "rgba(255,136,32,0.08)", color: surfaceText, padding: "6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere", maxHeight: 72, overflowY: "auto" }}>
+              {selectionAnchor.quote}
+            </div>
+          )}
+          {draftAttachments.length > 0 && (
+            <DraftAttachmentList
+              attachments={draftAttachments}
+              surfaceText={surfaceText}
+              strokeColor={strokeColor}
+              onRemove={onRemoveDraftAttachment}
+              onPreviewImage={setPreviewAttachment}
+            />
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "32px minmax(0, 1fr) 32px", alignItems: "end", gap: 6 }}>
+            <button
+              type="button"
+              aria-label="Add attachment"
+              title="Add attachment"
+              onClick={() => {
+                focusComposer();
+                fileInputRef.current?.click();
+              }}
+              style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: accent, display: "grid", placeItems: "center", cursor: "pointer" }}
+            >
+              <PlusIcon color={accent} />
+            </button>
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              rows={lineCount}
+              placeholder={replyTarget ? `↖ Replying to ${replyTarget.authorName}` : ""}
+              onFocus={onFocus}
+              onPaste={(event) => {
+                if (attachTransferredImages(event.clipboardData)) event.preventDefault();
+              }}
+              onDragOver={(event) => {
+                if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+              }}
+              onDrop={(event) => {
+                if (attachTransferredImages(event.dataTransfer)) event.preventDefault();
+              }}
+              onChange={(event) => onDraftChange(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && replyTarget) {
+                  event.preventDefault();
+                  onClearReply();
+                  return;
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  onSubmit();
+                }
+              }}
+              style={{ width: "100%", height: composerHeight, minHeight: 34, maxHeight: 102, resize: "none", overflowY: lineCount >= 5 ? "auto" : "hidden", border: `1px solid ${strokeColor}`, borderRadius: 6, outline: "none", padding: "7px 8px", color: surfaceText, background: "#ffffff", fontSize: 12, lineHeight: 1.35, letterSpacing: 0 }}
+            />
+            <button
+              type="button"
+              aria-label="Send"
+              title="Send"
+              disabled={!canSubmit}
+              onClick={onSubmit}
+              style={{ width: 32, height: 32, border: `1px solid ${accent}`, background: canSubmit && active ? accent : "#ffffff", color: canSubmit && active ? "#ffffff" : accent, borderRadius: 6, display: "grid", placeItems: "center", cursor: canSubmit ? "pointer" : "default", opacity: canSubmit ? 1 : 0.44 }}
+            >
+              <ArrowRightIcon color={canSubmit && active ? "#ffffff" : accent} />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              tabIndex={-1}
+              style={{ display: "none" }}
+              onChange={(event) => {
+                if (event.currentTarget.files) onAttachFiles(event.currentTarget.files);
+                event.currentTarget.value = "";
+              }}
+            />
+          </div>
+        </div>
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          title="Resize chat"
+          onPointerDown={beginResize}
+          style={{ cursor: "ns-resize", borderTop: `1px solid ${ruleColor}`, background: active ? "rgba(255,136,32,0.10)" : "rgba(100,116,139,0.08)" }}
+        />
+      </div>
+      {previewAttachment && (
+        <ImageAttachmentPreviewModal
+          attachment={previewAttachment}
+          surfaceText={surfaceText}
+          strokeColor={strokeColor}
+          onClose={() => setPreviewAttachment(null)}
+        />
+      )}
+    </>
+  );
+};
+
+type ChatThreadItemProps = {
+  node: ChatThreadNode;
+  depth: number;
+  isLastSibling: boolean;
+  currentUserID: string;
+  activeMessageID: string;
+  accent: string;
+  surfaceText: string;
+  ruleColor: string;
+  collapsedThreadIDs: Set<string>;
+  onToggleCollapse: (messageID: string) => void;
+  onActivate: (messageID: string) => void;
+  onReply: (messageID: string) => void;
+  onDelete: (messageID: string) => void;
+  onPreviewImage: (attachment: EditorChatAttachment) => void;
+};
+
+const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, currentUserID, activeMessageID, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onReply, onDelete, onPreviewImage }) => {
+  const { message, children } = node;
+  const hasChildren = children.length > 0;
+  const collapsed = collapsedThreadIDs.has(message.id);
+  const hiddenReplyCount = collapsed ? countChatThreadDescendants(node) : 0;
+  const isActive = activeMessageID === message.id;
+  const canDelete = canDeleteEditorTextBlockChatMessage(message, currentUserID);
+  const guideColor = "rgba(100,116,139,0.24)";
+  const guideStyle: React.CSSProperties = isLastSibling
+    ? { position: "absolute", top: -10, left: 13, width: 1, height: 23, background: guideColor }
+    : { position: "absolute", top: -10, bottom: -8, left: 13, width: 1, background: guideColor };
+  return (
+    <div
+      onClick={(event) => {
+        event.stopPropagation();
+        onActivate(message.id);
+      }}
+      style={{
+        minWidth: 0,
+        display: "grid",
+        gridTemplateColumns: "28px minmax(0, 1fr)",
+        columnGap: 7,
+        alignItems: "start",
+        borderRadius: 6,
+        background: isActive ? "rgba(255,136,32,0.08)" : "transparent",
+        boxShadow: isActive ? `inset 0 0 0 1px ${accent}` : "none",
+        padding: "4px 4px 4px 0",
+        cursor: "pointer",
+      }}
+    >
+      <div style={{ position: "relative", gridRow: hasChildren && !collapsed ? "1 / span 2" : undefined, alignSelf: "stretch", display: "grid", justifyItems: "center", minHeight: 28 }}>
+        {depth > 0 && <div aria-hidden="true" style={guideStyle} />}
+        {hasChildren && (
+          <button
+            type="button"
+            aria-label={collapsed ? "Expand replies" : "Collapse replies"}
+            title={collapsed ? "Expand replies" : "Collapse replies"}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleCollapse(message.id);
+            }}
+            style={{
+              position: "absolute",
+              zIndex: 2,
+              top: -5,
+              left: -2,
+              width: 14,
+              height: 14,
+              border: `1px solid ${ruleColor}`,
+              borderRadius: 999,
+              background: "#ffffff",
+              color: "rgba(36,18,10,0.72)",
+              display: "grid",
+              placeItems: "center",
+              padding: 0,
+              cursor: "pointer",
+              fontSize: 11,
+              fontWeight: 900,
+              lineHeight: 1,
+            }}
+          >
+            {collapsed ? "+" : "-"}
+          </button>
+        )}
+        <div style={{ position: "relative", zIndex: 1, width: 26, height: 26, borderRadius: 999, border: `1px solid ${ruleColor}`, background: avatarBackgroundForName(message.authorName || message.authorID), color: surfaceText, display: "grid", placeItems: "center", fontSize: 9, fontWeight: 800, letterSpacing: 0 }}>
+          {initialsForName(message.authorName || message.authorID)}
+        </div>
+      </div>
+      <div style={{ minWidth: 0, display: "grid", gap: 4 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 6, minWidth: 0, color: surfaceText, fontSize: 10, fontWeight: 800 }}>
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.authorName}</span>
+          <span style={{ opacity: 0.58, flex: "0 0 auto" }}>{formatTimestamp(message.createdTimestamp)}</span>
+        </div>
+        {message.message && <div style={{ color: surfaceText, fontSize: 12, lineHeight: 1.35, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{message.message}</div>}
+        {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} surfaceText={surfaceText} strokeColor={ruleColor} onPreviewImage={onPreviewImage} />}
+        <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" onClick={(event) => { event.stopPropagation(); onReply(message.id); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: accent, cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}>
+            <ChatIcon color={accent} />
+            Reply
+          </button>
+          {canDelete && (
+            <button
+              type="button"
+              aria-label="Delete message"
+              title="Delete message"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDelete(message.id);
+              }}
+              style={{ border: "none", background: "transparent", color: "rgba(162,0,38,0.82)", cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}
+            >
+              Delete
+            </button>
+          )}
+          {hiddenReplyCount > 0 && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleCollapse(message.id);
+              }}
+              style={{ border: "none", background: "transparent", color: "rgba(36,18,10,0.54)", cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}
+            >
+              {hiddenReplyCount} {hiddenReplyCount === 1 ? "reply" : "replies"} hidden
+            </button>
+          )}
+        </div>
+      </div>
+      {hasChildren && !collapsed && (
+        <div style={{ gridColumn: "2", minWidth: 0, marginTop: 4, display: "grid", gap: 8 }}>
+          {children.map((child, childIndex) => (
+            <ChatThreadItem
+              key={child.message.id}
+              node={child}
+              depth={depth + 1}
+              isLastSibling={childIndex === children.length - 1}
+              currentUserID={currentUserID}
+              activeMessageID={activeMessageID}
+              accent={accent}
+              surfaceText={surfaceText}
+              ruleColor={ruleColor}
+              collapsedThreadIDs={collapsedThreadIDs}
+              onToggleCollapse={onToggleCollapse}
+              onActivate={onActivate}
+              onReply={onReply}
+              onDelete={onDelete}
+              onPreviewImage={onPreviewImage}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+type ChatAttachmentListProps = {
+  attachments: EditorChatAttachment[];
+  surfaceText: string;
+  strokeColor: string;
+  onPreviewImage: (attachment: EditorChatAttachment) => void;
+};
+
+const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, surfaceText, strokeColor, onPreviewImage }) => (
+  <div style={{ minWidth: 0, display: "flex", flexWrap: "wrap", gap: 5 }}>
+    {attachments.map((attachment) => {
+      const image = isImageAttachment(attachment);
+      const content = (
+        <>
+          <AttachmentThumb attachment={attachment} />
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
+          <span style={{ flex: "0 0 auto", opacity: 0.58 }}>{formatFileSize(attachment.size)}</span>
+        </>
+      );
+      const style: React.CSSProperties = {
+        maxWidth: "100%",
+        minHeight: 30,
+        display: "inline-grid",
+        gridTemplateColumns: "24px minmax(0, 1fr) auto",
+        alignItems: "center",
+        gap: 6,
+        border: `1px solid ${strokeColor}`,
+        borderRadius: 6,
+        background: "#ffffff",
+        color: surfaceText,
+        padding: "3px 6px",
+        fontSize: 10,
+        fontWeight: 800,
+        letterSpacing: 0,
+        textDecoration: "none",
+      };
+      if (image) {
+        return (
+          <button key={attachment.id} type="button" onClick={() => onPreviewImage(attachment)} style={{ ...style, cursor: "pointer" }}>
+            {content}
+          </button>
+        );
+      }
+      return attachment.dataURL ? (
+        <a key={attachment.id} href={attachment.dataURL} download={attachment.name} style={style}>
+          {content}
+        </a>
+      ) : (
+        <span key={attachment.id} style={style}>{content}</span>
+      );
+    })}
+  </div>
+);
+
+type DraftAttachmentListProps = {
+  attachments: EditorChatAttachment[];
+  surfaceText: string;
+  strokeColor: string;
+  onRemove: (attachmentID: string) => void;
+  onPreviewImage: (attachment: EditorChatAttachment) => void;
+};
+
+const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, surfaceText, strokeColor, onRemove, onPreviewImage }) => (
+  <div style={{ minWidth: 0, display: "flex", flexWrap: "wrap", gap: 5 }}>
+    {attachments.map((attachment) => (
+      <span key={attachment.id} style={{ maxWidth: "100%", minHeight: 30, display: "inline-grid", gridTemplateColumns: "24px minmax(0, 1fr) auto 18px", alignItems: "center", gap: 5, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: surfaceText, padding: "3px 4px 3px 5px", fontSize: 10, fontWeight: 800, letterSpacing: 0 }}>
+        <button type="button" aria-label={isImageAttachment(attachment) ? `Preview ${attachment.name}` : attachment.name} onClick={() => { if (isImageAttachment(attachment)) onPreviewImage(attachment); }} style={{ width: 24, height: 24, border: "none", background: "transparent", padding: 0, cursor: isImageAttachment(attachment) ? "pointer" : "default" }}>
+          <AttachmentThumb attachment={attachment} />
+        </button>
+        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
+        <span style={{ flex: "0 0 auto", opacity: 0.58 }}>{formatFileSize(attachment.size)}</span>
+        <button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => onRemove(attachment.id)} style={{ width: 18, height: 18, border: "none", borderRadius: 4, background: "transparent", color: surfaceText, cursor: "pointer", fontSize: 12, fontWeight: 800, lineHeight: 1 }}>
+          x
+        </button>
+      </span>
+    ))}
+  </div>
+);
+
+const AttachmentThumb: React.FC<{ attachment: EditorChatAttachment }> = ({ attachment }) => {
+  if (isImageAttachment(attachment)) {
+    return <img alt="" src={attachment.dataURL} style={{ width: 24, height: 24, borderRadius: 4, objectFit: "cover", display: "block", border: "1px solid rgba(17,17,17,0.12)" }} />;
+  }
+  return (
+    <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 4, border: "1px solid rgba(17,17,17,0.14)", background: "rgba(255,136,32,0.10)", display: "grid", placeItems: "center", color: "rgba(36,18,10,0.78)", fontSize: 8, fontWeight: 900 }}>
+      FILE
+    </span>
+  );
+};
+
+type ImageAttachmentPreviewModalProps = {
+  attachment: EditorChatAttachment;
+  surfaceText: string;
+  strokeColor: string;
+  onClose: () => void;
+};
+
+const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = ({ attachment, surfaceText, strokeColor, onClose }) => {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={attachment.name}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      style={{ position: "fixed", inset: 0, zIndex: 1200, background: "rgba(17,24,39,0.46)", display: "grid", placeItems: "center", padding: 18 }}
+    >
+      <div style={{ width: "min(920px, 96vw)", maxHeight: "92vh", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", border: `1px solid ${strokeColor}`, borderRadius: 8, background: "#ffffff", color: surfaceText, boxShadow: "0 18px 48px rgba(0,0,0,0.26)", overflow: "hidden" }}>
+        <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: `1px solid ${strokeColor}` }}>
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 800 }}>{attachment.name}</span>
+          <button type="button" aria-label="Close image preview" onClick={onClose} style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>
+            x
+          </button>
+        </div>
+        <div style={{ minHeight: 0, overflow: "auto", display: "grid", placeItems: "center", background: "#111827", padding: 10 }}>
+          <img alt={attachment.name} src={attachment.dataURL} style={{ maxWidth: "100%", maxHeight: "78vh", objectFit: "contain", display: "block" }} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+type AttachedEmailsPanelProps = {
+  emails: EditorAttachedEmail[];
+  accent: string;
+  surfaceText: string;
+  panelBackground: string;
+  strokeColor: string;
+  onOpenEmail: (messageID: string) => void;
+};
+
+export const AttachedEmailsPanel: React.FC<AttachedEmailsPanelProps> = ({ emails, accent, surfaceText, panelBackground, strokeColor, onOpenEmail }) => (
+  <div style={{ minWidth: 0, display: "grid", gap: 7, border: `1px solid ${strokeColor}`, borderRadius: 8, background: panelBackground, padding: 8, maxHeight: 260, overflowY: "auto" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 7, color: surfaceText, fontSize: 11, fontWeight: 800 }}>
+      <MailIcon color={accent} />
+      <span>{emails.length}</span>
+    </div>
+    {emails.map((email) => (
+      <button key={email.id} type="button" title={email.subject} onClick={() => onOpenEmail(email.messageID)} style={{ display: "grid", gap: 2, minWidth: 0, border: 0, borderTop: `1px solid ${strokeColor}`, padding: "7px 0 0", background: "transparent", textAlign: "left", cursor: "pointer" }}>
+        <div style={{ color: surfaceText, fontSize: 11, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email.subject}</div>
+        <div style={{ color: surfaceText, opacity: 0.62, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email.from || formatTimestamp(email.date)}</div>
+      </button>
+    ))}
+  </div>
+);
+
+type EmailPickerModalProps = {
+  accent: string;
+  surfaceText: string;
+  panelBackground: string;
+  strokeColor: string;
+  onClose: () => void;
+  onAttach: (message: EmailMessage) => void;
+};
+
+export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surfaceText, panelBackground, strokeColor, onClose, onAttach }) => {
+  const [query, setQuery] = useState("");
+  const [messages, setMessages] = useState<EmailMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      setError("");
+      void listEmailMessages({ mailbox: "primary", limit: 30, q: query.trim() || undefined })
+        .then((page) => {
+          if (!cancelled) setMessages(page.messages ?? []);
+        })
+        .catch((cause) => {
+          if (!cancelled) setError(cause instanceof Error ? cause.message : "failed_to_load_email");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }, query.trim() ? 220 : 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{ position: "fixed", inset: 0, zIndex: 140, background: "rgba(17, 24, 39, 0.32)", display: "grid", placeItems: "center", padding: 18 }}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div style={{ width: "min(560px, 100%)", maxHeight: "min(680px, 92%)", display: "grid", gridTemplateRows: "auto 1fr", border: `1px solid ${strokeColor}`, borderRadius: 8, background: "#ffffff", color: surfaceText, boxShadow: "0 18px 48px rgba(0,0,0,0.24)", overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", padding: 12, borderBottom: `1px solid ${strokeColor}`, background: panelBackground }}>
+          <input
+            autoFocus
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            placeholder="Search email"
+            style={{ minWidth: 0, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, padding: "0 10px", outline: "none", color: surfaceText, fontSize: 13, letterSpacing: 0 }}
+          />
+          <button type="button" onClick={onClose} style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>
+            x
+          </button>
+        </div>
+        <div className="editor-document-scroll" style={{ overflowY: "auto", minHeight: 220, padding: 10, display: "grid", alignContent: "start", gap: 8, ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}>
+          {loading && <div style={{ padding: 12, color: surfaceText, opacity: 0.68, fontSize: 12, fontWeight: 700 }}>Loading</div>}
+          {error && <div style={{ padding: 12, color: "#b00020", fontSize: 12, fontWeight: 700 }}>{error}</div>}
+          {!loading && !error && messages.length === 0 && <div style={{ padding: 12, color: surfaceText, opacity: 0.68, fontSize: 12, fontWeight: 700 }}>No email</div>}
+          {messages.map((message) => (
+            <button
+              key={message.id}
+              type="button"
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "copy";
+                event.dataTransfer.setData(EMAIL_DRAG_MIME, JSON.stringify(messageAttachmentPayload(message)));
+              }}
+              onClick={() => onAttach(message)}
+              style={{ display: "grid", gap: 4, width: "100%", minWidth: 0, textAlign: "left", border: `1px solid ${strokeColor}`, borderRadius: 8, background: "#ffffff", color: surfaceText, padding: "9px 10px", cursor: "grab" }}
+            >
+              <span style={{ display: "flex", justifyContent: "space-between", gap: 8, minWidth: 0 }}>
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 800 }}>{message.subject || "(no subject)"}</span>
+                <span style={{ color: accent, fontSize: 10, fontWeight: 800, flex: "0 0 auto" }}>{formatTimestamp(message.date, "day")}</span>
+              </span>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, opacity: 0.68 }}>{formatAddressList(message.from)}</span>
+              {message.snippet && <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, opacity: 0.72 }}>{message.snippet}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+type EmailDetailModalProps = {
+  messageID: string;
+  accent: string;
+  surfaceText: string;
+  panelBackground: string;
+  strokeColor: string;
+  onClose: () => void;
+};
+
+export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ messageID, accent, surfaceText, panelBackground, strokeColor, onClose }) => {
+  const [message, setMessage] = useState<EmailMessage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    void getEmailMessage(messageID)
+      .then((payload) => {
+        if (!cancelled) setMessage(payload);
+      })
+      .catch((cause) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : "failed_to_load_email");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [messageID]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{ position: "fixed", inset: 0, zIndex: 142, background: "rgba(17, 24, 39, 0.32)", display: "grid", placeItems: "center", padding: 18 }}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div style={{ width: "min(720px, 100%)", maxHeight: "min(760px, 92%)", display: "grid", gridTemplateRows: "auto auto minmax(260px, 1fr)", border: `1px solid ${strokeColor}`, borderRadius: 8, background: "#ffffff", color: surfaceText, boxShadow: "0 18px 48px rgba(0,0,0,0.24)", overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "start", padding: 12, borderBottom: `1px solid ${strokeColor}`, background: panelBackground }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: surfaceText, fontSize: 15, fontWeight: 800, overflowWrap: "anywhere" }}>{message?.subject || "(no subject)"}</div>
+            <div style={{ marginTop: 4, color: surfaceText, opacity: 0.64, fontSize: 11, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {message ? `${formatAddressList(message.from) || "Unknown sender"}${message.date ? ` - ${formatTimestamp(message.date)}` : ""}` : "Email"}
+            </div>
+          </div>
+          <button type="button" onClick={onClose} style={{ width: 32, height: 32, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>
+            x
+          </button>
+        </div>
+        {(loading || error) && (
+          <div style={{ padding: "9px 12px", borderBottom: `1px solid ${strokeColor}`, color: error ? "#b00020" : accent, fontSize: 12, fontWeight: 800 }}>
+            {error || "Loading"}
+          </div>
+        )}
+        <iframe title="Attached email body" sandbox="" srcDoc={messageDocument(message?.body || message?.snippet || "")} style={{ width: "100%", height: "100%", minHeight: 320, border: 0, background: "#ffffff" }} />
+      </div>
+    </div>
+  );
+};
+
+function messageDocument(body: string): string {
+  const value = body.trim();
+  const content = /<\/?[a-z][\s\S]*>/i.test(value) ? value : `<pre>${escapeHTML(value)}</pre>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><style>body{font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#111;margin:0;padding:14px;overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}</style></head><body>${content}</body></html>`;
+}
+
+function escapeHTML(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}

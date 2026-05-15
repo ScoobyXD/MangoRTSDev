@@ -1,12 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import FrameRightClickMenu from "../../app/framerightclickmenu";
-import { EditorContent } from "../editor/EditorContent";
-import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
-import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, type NodeRecord } from "../node-map/shared";
+import { getNodeTitle, type NodeRecord } from "../node-map/shared";
 import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
-import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
+import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import {
   createKanbanBoard,
@@ -34,9 +31,11 @@ import {
   toggleKanbanCardIssueCommand,
   type KanbanCommandContext,
 } from "./kanbanCommands";
+import { KanbanArenaGroupedBoard, KanbanArenaGroupingControls } from "./KanbanArenaGrouping";
 import { KanbanBoardSidebar } from "./KanbanBoardSidebar";
 import { KanbanCardView } from "./KanbanCardView";
 import { KanbanColumnView } from "./KanbanColumnView";
+import { KanbanContextMenus, KanbanDeleteConfirmations, KanbanNodeEditorOverlay } from "./KanbanOverlays";
 import {
   EXPLORER_ENTITY_DRAG_MIME,
   EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
@@ -45,7 +44,6 @@ import {
   KANBAN_COLUMN_DRAG_MIME,
   KANBAN_DEFAULT_BOARD_TITLE,
   KANBAN_DEFAULT_COLUMN_HEIGHT_PX,
-  KANBAN_GROUP_FIELDS,
   KANBAN_MODULE_TOP_CLEARANCE_PX,
   attachStackedDragPreview,
   buildKanbanGroupedBoardLayout,
@@ -79,234 +77,26 @@ import {
 } from "./shared";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 
-type HighlightedEntity = { nodeID: string } | null;
-
-type CompanyUser = {
-  user_id: string;
-  email?: string;
-  display_name?: string;
-};
-
-type WorkspaceStreamEnvelope = {
-  company_id: string;
-  type: string;
-  data?: Record<string, unknown>;
-};
-
-type ColumnResizeState = {
-  axis: "width" | "height";
-  columnID: string;
-  startX: number;
-  startY: number;
-  startWidth: number;
-  startHeight: number;
-  currentWidth: number;
-  currentHeight: number;
-};
-
-type NodeEditorOverlayState = {
-  nodeID: string;
-  nodeTitle: string;
-};
-
-type KanbanContentProps = {
-  accent: string;
-  widgetId?: string;
-  hideTopControls?: boolean;
-  theme?: "mango" | "teal" | "light" | "dark";
-  arenaMode?: boolean;
-  forcedLogicGateID?: string;
-  forcedLogicGateLabel?: string;
-  forcedHighlightedNodeID?: string;
-};
-
-type OverlayResizeState = {
-  edges: Partial<Record<"left" | "right" | "top" | "bottom", true>>;
-  startX: number;
-  startY: number;
-  startWidth: number;
-  startHeight: number;
-  boardWidth: number;
-  boardHeight: number;
-};
-
-type NodeEditorOverlayRatio = {
-  width: number;
-  height: number;
-};
-
-const nodeEditorOverlayResizeHandles: Array<{
-  key: string;
-  edges: OverlayResizeState["edges"];
-  cursor: string;
-  style: React.CSSProperties;
-}> = [
-  { key: "top-left", edges: { top: true, left: true }, cursor: "nwse-resize", style: { top: -5, left: -5, width: 10, height: 10 } },
-  { key: "top-right", edges: { top: true, right: true }, cursor: "nesw-resize", style: { top: -5, right: -5, width: 10, height: 10 } },
-  { key: "bottom-left", edges: { bottom: true, left: true }, cursor: "nesw-resize", style: { bottom: -5, left: -5, width: 10, height: 10 } },
-  { key: "bottom-right", edges: { bottom: true, right: true }, cursor: "nwse-resize", style: { bottom: -5, right: -5, width: 10, height: 10 } },
-  { key: "top", edges: { top: true }, cursor: "ns-resize", style: { top: -4, left: 18, right: 18, height: 8 } },
-  { key: "bottom", edges: { bottom: true }, cursor: "ns-resize", style: { bottom: -4, left: 18, right: 18, height: 8 } },
-  { key: "left", edges: { left: true }, cursor: "ew-resize", style: { left: -4, top: 18, bottom: 18, width: 8 } },
-  { key: "right", edges: { right: true }, cursor: "ew-resize", style: { right: -4, top: 18, bottom: 18, width: 8 } },
-];
-
-const DEFAULT_NODE_EDITOR_OVERLAY_RATIO: NodeEditorOverlayRatio = { width: 0.78, height: 0.82 };
-
-function nodeEditorOverlayRatioStorageKey(companyID: string, frameID: string): string {
-  return `kanban-node-editor-overlay-ratio-v1:${companyID}:${frameID}`;
-}
-
-function clampNodeEditorOverlayRatio(value: NodeEditorOverlayRatio): NodeEditorOverlayRatio {
-  return {
-    width: Math.max(0.42, Math.min(value.width, 0.96)),
-    height: Math.max(0.42, Math.min(value.height, 0.94)),
-  };
-}
-
-function readNodeEditorOverlayRatio(companyID: string, frameID: string): NodeEditorOverlayRatio {
-  if (typeof localStorage === "undefined") return DEFAULT_NODE_EDITOR_OVERLAY_RATIO;
-  try {
-    const parsed = JSON.parse(localStorage.getItem(nodeEditorOverlayRatioStorageKey(companyID, frameID)) ?? "") as Partial<NodeEditorOverlayRatio>;
-    const width = typeof parsed.width === "number" && Number.isFinite(parsed.width) ? parsed.width : DEFAULT_NODE_EDITOR_OVERLAY_RATIO.width;
-    const height = typeof parsed.height === "number" && Number.isFinite(parsed.height) ? parsed.height : DEFAULT_NODE_EDITOR_OVERLAY_RATIO.height;
-    return clampNodeEditorOverlayRatio({ width, height });
-  } catch {
-    return DEFAULT_NODE_EDITOR_OVERLAY_RATIO;
-  }
-}
-
-function storeNodeEditorOverlayRatio(companyID: string, frameID: string, ratio: NodeEditorOverlayRatio) {
-  if (typeof localStorage === "undefined") return;
-  localStorage.setItem(nodeEditorOverlayRatioStorageKey(companyID, frameID), JSON.stringify(clampNodeEditorOverlayRatio(ratio)));
-}
-
-const contextMenuButtonStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  width: "100%",
-  padding: "9px 16px",
-  fontSize: 12,
-  fontWeight: 600,
-  letterSpacing: 0,
-  fontFamily: "var(--mango-font-family)",
-  background: "none",
-  border: "none",
-  color: "#333",
-  cursor: "pointer",
-  textAlign: "left",
-};
-
-const contextMenuHoverHandlers = {
-  onMouseEnter: (event: React.MouseEvent) => { (event.currentTarget as HTMLElement).style.background = "#f5f5f5"; },
-  onMouseLeave: (event: React.MouseEvent) => { (event.currentTarget as HTMLElement).style.background = "none"; },
-};
-
-const ARENA_GROUP_COLUMN_WIDTH_PX = 300;
-const ARENA_GROUP_ROW_LABEL_WIDTH_PX = 104;
-const ARENA_GROUP_MIN_CELL_HEIGHT_PX = 86;
-const ARENA_GROUP_FRAME_BACKGROUND = "#ffffff";
-const ARENA_GROUP_GLASS_BORDER_LIGHT = "rgba(255, 136, 32, 0.32)";
-const ARENA_GROUP_GLASS_BORDER_DARK = "rgba(255, 136, 32, 0.28)";
-const ARENA_GROUP_FRAME_SHADOW = "0 1px 2px rgba(15,23,42,0.06)";
-
-const KanbanDisclosureIcon: React.FC<{ color: string }> = ({ color }) => (
-  <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style={{ display: "block" }}>
-    <path d="M3.25 4.55 6 7.3l2.75-2.75" fill="none" stroke={color} strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const KanbanCheckIcon: React.FC<{ color: string }> = ({ color }) => (
-  <svg aria-hidden="true" width="13" height="13" viewBox="0 0 13 13" style={{ display: "block" }}>
-    <path d="m3.1 6.55 2.05 2.05 4.75-4.75" fill="none" stroke={color} strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-function readLinkedExplorerSelection(companyID: string, scope: string): HighlightedEntity {
-  try {
-    const nodeRaw = localStorage.getItem(`${NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX}:${companyID}:${scope}`);
-    if (nodeRaw) {
-      const parsed = JSON.parse(nodeRaw) as { selectedNodeID?: unknown };
-      if (typeof parsed.selectedNodeID === "string" && parsed.selectedNodeID.trim()) {
-        return { nodeID: parsed.selectedNodeID.trim() };
-      }
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-function publishKanbanSelectionToLinkedFrames(companyID: string, sourceFrameID: string, nodeID: string, nodeTitle: string, selectedNodeIDs: string[] = [nodeID]): void {
-  if (!nodeID) return;
-  try {
-    const edges = readFrameLinksFromStorage();
-    const registry = readFrameRegistryFromStorage();
-    const targetFrameIDs = resolveConnectedFrameTargets({ sourceFrameID, edges, registry });
-    publishLiveSelection({
-      companyID,
-      entityKind: "node",
-      entityID: nodeID,
-      label: nodeTitle,
-      sourceFrameID,
-      sourceModule: "kanban",
-      targetFrameIDs,
-      selectedTreeID: `node-${nodeID}`,
-      selectedTreeIDs: selectedNodeIDs.map((id) => `node-${id}`),
-      selectedEntityIDs: selectedNodeIDs,
-    });
-  } catch {
-    // Selection handoff is a UI convenience; card selection must still work if the link graph is unavailable.
-  }
-}
-
-function publishKanbanBoardSelectionToLinkedFrames(companyID: string, sourceFrameID: string, boardID: string, boardTitle: string): void {
-  if (!boardID) return;
-  try {
-    const edges = readFrameLinksFromStorage();
-    const registry = readFrameRegistryFromStorage();
-    const targetFrameIDs = resolveConnectedFrameTargets({ sourceFrameID, edges, registry });
-    publishLiveSelection({
-      companyID,
-      entityKind: "kanban",
-      entityID: boardID,
-      label: boardTitle,
-      sourceFrameID,
-      sourceModule: "kanban",
-      targetFrameIDs,
-      selectedTreeID: `kanban-${boardID}`,
-      selectedTreeIDs: [`kanban-${boardID}`],
-      selectedEntityIDs: [boardID],
-    });
-  } catch {
-    // Board selection should not depend on link graph storage.
-  }
-}
-
-function dataTransferIncludes(event: React.DragEvent, mime: string): boolean {
-  return Array.from(event.dataTransfer.types).includes(mime);
-}
-
-function cardDropPlacement(event: React.DragEvent<HTMLElement>): KanbanCardDropPlacement {
-  const bounds = event.currentTarget.getBoundingClientRect();
-  return event.clientY > bounds.top + bounds.height / 2 ? "after" : "before";
-}
-
-function isEditableKeyboardTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName.toLowerCase();
-  return target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
-}
-
-function formatKanbanLoadError(error: unknown, fallback: string): string {
-  if (error instanceof Error) {
-    const message = error.message.trim();
-    if (message) return message;
-  }
-  return fallback;
-}
-
+import {
+  cardDropPlacement,
+  clampNodeEditorOverlayRatio,
+  dataTransferIncludes,
+  formatKanbanLoadError,
+  isEditableKeyboardTarget,
+  publishKanbanBoardSelectionToLinkedFrames,
+  publishKanbanSelectionToLinkedFrames,
+  readLinkedExplorerSelection,
+  readNodeEditorOverlayRatio,
+  storeNodeEditorOverlayRatio,
+  type ColumnResizeState,
+  type CompanyUser,
+  type HighlightedEntity,
+  type KanbanContentProps,
+  type NodeEditorOverlayRatio,
+  type NodeEditorOverlayState,
+  type OverlayResizeState,
+  type WorkspaceStreamEnvelope,
+} from "./KanbanContentModel";
 export const KanbanContent: React.FC<KanbanContentProps> = ({
   accent,
   widgetId,
@@ -1554,307 +1344,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setArenaYSortDirection(getDefaultKanbanYAxisSortDirection(field));
   }, []);
 
-  const renderArenaGroupSelect = (
-    value: KanbanGroupField,
-    onChange: (value: KanbanGroupField) => void,
-    label: "X-Axis" | "Y-axis",
-    axis: "x" | "y",
-    sortDirection: KanbanGroupSortDirection,
-    onToggleSortDirection: () => void,
-    layout: "inline" | "compact" = "inline",
-  ) => {
-    const selectedField = KANBAN_GROUP_FIELDS.find((field) => field.value === value) ?? KANBAN_GROUP_FIELDS[0];
-    const menuOpen = arenaGroupMenuOpen === axis;
-    const groupMenuAccent = theme === "light" ? "rgb(255, 136, 32)" : "rgb(255, 136, 32)";
-    const selectedBackground = isDark ? "rgba(255, 136, 32, 0.18)" : "rgba(255, 136, 32, 0.22)";
-    const hoveredBackground = "rgba(255, 136, 32, 0.14)";
-    const menuText = "#24120a";
-    const sortLabel = sortDirection === "asc" ? "Asc" : "Desc";
-    const compact = layout === "compact";
-    const sortButton = (
-      <button
-        type="button"
-        title={`${label} sort ${sortDirection === "asc" ? "ascending" : "descending"}`}
-        onClick={onToggleSortDirection}
-        style={{
-          height: compact ? 20 : 28,
-          minWidth: compact ? 44 : undefined,
-          border: `1px solid ${line}`,
-          borderRadius: compact ? 4 : 6,
-          background: cardBackground,
-          color: text,
-          font: "inherit",
-          fontSize: compact ? 9 : 10.5,
-          fontWeight: 500,
-          cursor: "pointer",
-          padding: compact ? "0 5px" : "0 8px",
-          textAlign: "center",
-        }}
-      >
-        {sortLabel}
-      </button>
-    );
-    const selectButton = (
-      <span style={{ position: "relative", minWidth: 0, width: "100%" }}>
-        <button
-          type="button"
-          aria-haspopup="listbox"
-          aria-expanded={menuOpen}
-          onClick={() => setArenaGroupMenuOpen((open) => (open === axis ? null : axis))}
-          style={{
-            width: "100%",
-            minHeight: 28,
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) 16px",
-            alignItems: "center",
-            gap: 8,
-            border: `1px solid ${menuOpen ? groupMenuAccent : line}`,
-            borderRadius: 6,
-            background: menuOpen ? selectedBackground : cardBackground,
-            color: menuOpen ? groupMenuAccent : text,
-            font: "inherit",
-            fontSize: 11,
-            fontWeight: 500,
-            padding: compact ? "4px 6px" : "4px 8px",
-            cursor: "pointer",
-            textAlign: "left",
-            boxShadow: menuOpen ? `0 0 0 2px rgba(255, 136, 32, 0.14)` : "none",
-          }}
-        >
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedField.label}</span>
-          <span aria-hidden="true" style={{ display: "grid", placeItems: "center", transform: menuOpen ? "rotate(180deg)" : "none", transition: "transform 120ms ease" }}>
-            <KanbanDisclosureIcon color="currentColor" />
-          </span>
-        </button>
-        {menuOpen && (
-          <div
-            role="listbox"
-            aria-label={`${label} grouping`}
-            style={{
-              position: "absolute",
-              zIndex: 20,
-              top: "calc(100% + 5px)",
-              left: 0,
-              width: "min(220px, 78vw)",
-              padding: 5,
-              border: `1px solid rgba(255, 136, 32, 0.34)`,
-              borderRadius: 6,
-              background: "#ffffff",
-              boxShadow: "0 12px 28px rgba(0,16,20,0.18)",
-              color: menuText,
-            }}
-          >
-            {KANBAN_GROUP_FIELDS.map((field) => {
-              const selected = field.value === value;
-              return (
-                <button
-                  key={field.value}
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  onClick={() => {
-                    onChange(field.value);
-                    setArenaGroupMenuOpen(null);
-                  }}
-                  style={{
-                    width: "100%",
-                    display: "grid",
-                    gridTemplateColumns: "minmax(0, 1fr) 16px",
-                    alignItems: "center",
-                    gap: 8,
-                    border: "none",
-                    borderRadius: 4,
-                    background: selected ? selectedBackground : "transparent",
-                    color: selected ? groupMenuAccent : menuText,
-                    font: "inherit",
-                    fontSize: 11,
-                    fontWeight: selected ? 600 : 500,
-                    padding: "7px 8px",
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                  onMouseEnter={(event) => {
-                    if (!selected) event.currentTarget.style.background = hoveredBackground;
-                  }}
-                  onMouseLeave={(event) => {
-                    event.currentTarget.style.background = selected ? selectedBackground : "transparent";
-                  }}
-                >
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{field.label}</span>
-                  <span aria-hidden="true" style={{ display: "grid", placeItems: "center", color: groupMenuAccent }}>
-                    {selected ? <KanbanCheckIcon color={groupMenuAccent} /> : null}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </span>
-    );
-
-    if (compact) {
-      return (
-        <label style={{ width: "100%", minWidth: 0, display: "grid", gridTemplateRows: "20px 28px", alignItems: "end", gap: 4, fontSize: 11, fontWeight: 500 }}>
-          <span style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: subtext }}>{label}</span>
-            {sortButton}
-          </span>
-          {selectButton}
-        </label>
-      );
-    }
-
-    return (
-      <label style={{ display: "inline-grid", gridTemplateColumns: "max-content minmax(136px, 190px) 56px", alignItems: "center", gap: 7, fontSize: 11, fontWeight: 500 }}>
-        <span style={{ color: subtext }}>{label}</span>
-        {selectButton}
-        {sortButton}
-      </label>
-    );
-  };
-
-  const renderArenaGroupingControls = () => {
-    return (
-      <div ref={arenaGroupControlsRef} data-arena-group-controls="true" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: arenaGroupingOpen ? 8 : 10 }}>
-        <button
-          type="button"
-          onClick={() => setArenaGroupingOpen((open) => !open)}
-          style={{ justifySelf: "start", height: 28, border: `1px solid ${arenaGroupingOpen ? accent : line}`, borderRadius: 6, background: arenaGroupingOpen ? `${accent}22` : cardBackground, color: arenaGroupingOpen ? accent : text, fontSize: 11, fontWeight: 500, cursor: "pointer", padding: "0 10px" }}
-        >
-          Group
-        </button>
-      </div>
-    );
-  };
-
-  const renderArenaGroupedBoard = () => {
-    const groupColumns = arenaGroupedBoard.columns;
-    const groupRows = arenaGroupedBoard.rows;
-    const columnCount = groupColumns.length;
-    const rowCount = groupRows.length;
-    if (columnCount === 0 || rowCount === 0) {
-      return (
-        <div style={{ minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX, display: "grid", placeItems: "center", color: subtext, fontSize: 12, fontWeight: 500, opacity: loading ? 0.72 : 1 }}>
-          No grouped cards
-        </div>
-      );
-    }
-    const groupFrameBackground = ARENA_GROUP_FRAME_BACKGROUND;
-    const glassBorder = isDark ? ARENA_GROUP_GLASS_BORDER_DARK : ARENA_GROUP_GLASS_BORDER_LIGHT;
-    const groupFrameShadow = ARENA_GROUP_FRAME_SHADOW;
-    const groupFrameText = "#24120a";
-    const gridWidth = ARENA_GROUP_ROW_LABEL_WIDTH_PX + (columnCount * ARENA_GROUP_COLUMN_WIDTH_PX) + (columnCount * 8);
-    const xAxisControlColumn = Math.min(columnCount, 2) + 1;
-    const axisControlCellStyle: React.CSSProperties = {
-      minWidth: 0,
-      minHeight: 56,
-      display: "grid",
-      alignItems: "end",
-      border: `1px solid ${glassBorder}`,
-      background: groupFrameBackground,
-      boxShadow: groupFrameShadow,
-      padding: 6,
-      zIndex: 3,
-    };
-    return (
-      <div
-        style={{
-          minWidth: gridWidth,
-          display: "grid",
-          gridTemplateColumns: `${ARENA_GROUP_ROW_LABEL_WIDTH_PX}px repeat(${columnCount}, ${ARENA_GROUP_COLUMN_WIDTH_PX}px)`,
-          gridTemplateRows: `minmax(56px, auto) minmax(56px, auto) repeat(${rowCount}, minmax(${ARENA_GROUP_MIN_CELL_HEIGHT_PX}px, auto))`,
-          columnGap: 8,
-          rowGap: 0,
-          alignItems: "stretch",
-          paddingBottom: 16,
-          opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1,
-        }}
-      >
-        <div data-arena-group-controls="true" style={{ ...axisControlCellStyle, gridColumn: 1, gridRow: 2 }}>
-          {renderArenaGroupSelect(arenaYGroupBy, selectArenaYGroupBy, "Y-axis", "y", arenaYSortDirection, () => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc")), "compact")}
-        </div>
-        <div data-arena-group-controls="true" style={{ ...axisControlCellStyle, gridColumn: xAxisControlColumn, gridRow: 1 }}>
-          {renderArenaGroupSelect(arenaXGroupBy, setArenaXGroupBy, "X-Axis", "x", arenaXSortDirection, () => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc")), "compact")}
-        </div>
-        {groupColumns.map((groupColumn, columnIndex) => {
-          const cardCount = groupColumn.cells.reduce((sum, cell) => sum + cell.cards.length, 0);
-          return (
-            <div
-              key={groupColumn.key}
-              style={{
-                gridColumn: columnIndex + 2,
-                gridRow: 2,
-                minWidth: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 8,
-                border: `1px solid ${glassBorder}`,
-                borderBottom: "none",
-                borderTopLeftRadius: 8,
-                borderTopRightRadius: 8,
-                background: groupFrameBackground,
-                color: groupFrameText,
-                boxShadow: groupFrameShadow,
-                padding: "0 9px",
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              <span style={{ minWidth: 0, overflowWrap: "anywhere", whiteSpace: "normal", lineHeight: 1.2 }}>{groupColumn.label}</span>
-              <span style={{ flexShrink: 0, color: subtext }}>{cardCount}</span>
-            </div>
-          );
-        })}
-        {groupRows.map((row, rowIndex) => (
-          <div
-            key={row.key}
-            style={{
-              gridColumn: 1,
-              gridRow: rowIndex + 3,
-              minHeight: ARENA_GROUP_MIN_CELL_HEIGHT_PX,
-              minWidth: 0,
-              display: "grid",
-              alignItems: "start",
-              borderTop: `1px solid ${line}`,
-              color: subtext,
-              fontSize: 10,
-              fontWeight: 500,
-              lineHeight: 1.2,
-              padding: "9px 8px 9px 0",
-              textAlign: "right",
-              overflowWrap: "anywhere",
-            }}
-          >
-            {row.label}
-          </div>
-        ))}
-        {groupColumns.map((groupColumn, columnIndex) => groupColumn.cells.map((cell, rowIndex) => (
-          <div
-            key={`${groupColumn.key}:${cell.rowKey}`}
-            style={{
-              gridColumn: columnIndex + 2,
-              gridRow: rowIndex + 3,
-              minHeight: ARENA_GROUP_MIN_CELL_HEIGHT_PX,
-              display: "grid",
-              alignContent: "start",
-              gap: 8,
-              border: `1px solid ${glassBorder}`,
-              borderTop: rowIndex === 0 ? `1px solid ${glassBorder}` : "none",
-              borderBottomLeftRadius: rowIndex === rowCount - 1 ? 8 : 0,
-              borderBottomRightRadius: rowIndex === rowCount - 1 ? 8 : 0,
-              background: groupFrameBackground,
-              boxShadow: groupFrameShadow,
-              padding: 8,
-            }}
-          >
-            {cell.cards.map((card) => renderCard(card))}
-          </div>
-        )))}
-      </div>
-    );
-  };
-
   return (
     <div
       ref={boardRootRef}
@@ -1917,8 +1406,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       />
       <div className="kanban-board-scroll" style={{ height: "100%", overflow: "auto", padding: arenaMode ? "8px 8px 14px 4px" : "12px 12px 14px", boxSizing: "border-box", ["--kanban-board-scroll-accent" as string]: theme === "light" ? "rgb(255, 136, 32)" : accent, ["--kanban-board-scroll-track" as string]: isDark ? "rgba(255,255,255,0.08)" : "rgba(255, 136, 32, 0.08)" }}>
         {error && <div style={{ marginBottom: 8, color: "#c62828", fontSize: 11, fontWeight: 700 }}>{error}</div>}
-        {arenaMode && renderArenaGroupingControls()}
-        {arenaMode && arenaGroupingOpen ? renderArenaGroupedBoard() : (
+        {arenaMode && <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={() => setArenaGroupingOpen((open) => !open)} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />}
+        {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} yGroupBy={arenaYGroupBy} xGroupBy={arenaXGroupBy} ySortDirection={arenaYSortDirection} xSortDirection={arenaXSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetYGroupBy={selectArenaYGroupBy} onSetXGroupBy={setArenaXGroupBy} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} renderCard={renderCard} /> : (
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX + 18, paddingBottom: 16, width: arenaMode ? "100%" : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
           {orderedColumns.map((column) => {
             const columnCards = cardsByColumn.get(column.column_id) ?? [];
@@ -1989,263 +1478,59 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         </div>
         )}
       </div>
-      {contextColumn && columnContextMenu && (
-        <FrameRightClickMenu x={columnContextMenu.x} y={columnContextMenu.y} onClose={() => setColumnContextMenu(null)}>
-          <button
-            type="button"
-            style={contextMenuButtonStyle}
-            onClick={() => {
-              setColumnContextMenu(null);
-              void createNodeInColumn(contextColumn.column_id);
-            }}
-            {...contextMenuHoverHandlers}
-          >
-            Create new node
-          </button>
-          <button
-            type="button"
-            style={contextMenuButtonStyle}
-            onClick={() => {
-              setEditingColumnID(contextColumn.column_id);
-              setColumnContextMenu(null);
-            }}
-            {...contextMenuHoverHandlers}
-          >
-            Rename column
-          </button>
-          <button
-            type="button"
-            style={{ ...contextMenuButtonStyle, color: "#c62828" }}
-            onClick={() => requestColumnDelete(contextColumn.column_id)}
-            {...contextMenuHoverHandlers}
-          >
-            Delete column
-          </button>
-          <label style={{ ...contextMenuButtonStyle, cursor: "default", justifyContent: "space-between" }}>
-            <span>Column color</span>
-            <input
-              type="color"
-              value={normalizeKanbanColumnItemColor(contextColumn.item_color)}
-              onChange={(event) => void persistColumnItemColor(contextColumn.column_id, event.target.value)}
-              style={{ width: 34, height: 24, border: "1px solid #d0d0d0", background: "#fff", cursor: "pointer", padding: 0 }}
-            />
-          </label>
-        </FrameRightClickMenu>
-      )}
-      {contextCard && cardContextMenu && (
-        <FrameRightClickMenu x={cardContextMenu.x} y={cardContextMenu.y} onClose={() => setCardContextMenu(null)}>
-          {!arenaMode && (
-            <button
-              type="button"
-              style={contextMenuButtonStyle}
-              onClick={() => void toggleCardIssue(contextCard, !contextCard.is_issue)}
-              {...contextMenuHoverHandlers}
-            >
-              {contextCard.is_issue ? "Clear Issue" : "Mark Issue"}
-            </button>
-          )}
-          <button
-            type="button"
-            style={contextMenuButtonStyle}
-            onClick={() => void revertCardsToMyTriage(contextCardSelectionIDs)}
-            {...contextMenuHoverHandlers}
-          >
-            Revert back to My Triage
-          </button>
-          <button
-            type="button"
-            style={{ ...contextMenuButtonStyle, color: "#c62828" }}
-            onClick={() => requestNodeDeleteFromCards(contextCardSelectionIDs)}
-            {...contextMenuHoverHandlers}
-          >
-            Delete node
-          </button>
-          <button
-            type="button"
-            style={contextMenuButtonStyle}
-            onClick={() => requestCardDelete(contextCardSelectionIDs)}
-            {...contextMenuHoverHandlers}
-          >
-            Remove node from Kanban Board
-          </button>
-        </FrameRightClickMenu>
-      )}
-      {nodeEditorOverlay && (
-        <div
-          data-frame-interactive="true"
-          onMouseDown={(event) => event.stopPropagation()}
-          onTouchStart={(event) => event.stopPropagation()}
-          style={{
-            position: "absolute",
-            zIndex: 40,
-            top: "6%",
-            left: "50%",
-            width: `${Math.round(nodeEditorOverlayRatio.width * 1000) / 10}%`,
-            height: `${Math.round(nodeEditorOverlayRatio.height * 1000) / 10}%`,
-            maxWidth: "calc(100% - 44px)",
-            maxHeight: "calc(100% - 64px)",
-            transform: "translateX(-50%)",
-            minWidth: "min(420px, calc(100% - 44px))",
-            minHeight: "min(320px, calc(100% - 64px))",
-            border: "1px solid rgba(255, 136, 32, 0.54)",
-            borderRadius: 16,
-            background: "#ffffff",
-            boxShadow: "0 18px 42px rgba(36, 18, 10, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
-            overflow: "hidden",
-            cursor: "default",
-          }}
-        >
-          <button
-            type="button"
-            title="Close node editor"
-            onClick={() => setNodeEditorOverlay(null)}
-            style={{
-              position: "absolute",
-              top: 7,
-              right: 8,
-              zIndex: 8,
-              width: 24,
-              height: 24,
-              border: "1px solid #8b0000",
-              borderRadius: 4,
-              background: "#ff1f1f",
-              color: "#ffffff",
-              fontSize: 16,
-              fontWeight: 600,
-              lineHeight: "20px",
-              cursor: "pointer",
-            }}
-          >
-            X
-          </button>
-          <EditorContent
-            accent={accent}
-            widgetId={`${frameID}:node-editor-overlay:${nodeEditorOverlay.nodeID}`}
-            theme={theme}
-            forcedEntityKind="node"
-            forcedEntityID={nodeEditorOverlay.nodeID}
-            forcedLabel={nodeEditorOverlay.nodeTitle}
-          />
-          {nodeEditorOverlayResizeHandles.map((handle) => (
-            <span
-              key={handle.key}
-              aria-hidden="true"
-              onMouseDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                nodeEditorOverlayResizeRef.current = {
-                  edges: handle.edges,
-                  startX: event.clientX,
-                  startY: event.clientY,
-                  startWidth: (boardRootRef.current?.getBoundingClientRect().width ?? window.innerWidth) * nodeEditorOverlayRatio.width,
-                  startHeight: (boardRootRef.current?.getBoundingClientRect().height ?? window.innerHeight) * nodeEditorOverlayRatio.height,
-                  boardWidth: boardRootRef.current?.getBoundingClientRect().width ?? window.innerWidth,
-                  boardHeight: boardRootRef.current?.getBoundingClientRect().height ?? window.innerHeight,
-                };
-              }}
-              style={{
-                position: "absolute",
-                zIndex: 9,
-                cursor: handle.cursor,
-                ...handle.style,
-              }}
-            />
-          ))}
-        </div>
-      )}
-      {deleteNodeConfirmation && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(255,136,32,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#111111" }}>
-              Are you sure you want to delete {deleteNodeConfirmation.nodeIDs.length} node{deleteNodeConfirmation.nodeIDs.length === 1 ? "" : "s"}?
-            </div>
-            <div style={{ fontSize: 11, lineHeight: 1.35, color: "#2e2e2e" }}>
-              This deletes the underlying node data and removes its Kanban placements.
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  void removeNodes(deleteNodeConfirmation.nodeIDs);
-                  setDeleteNodeConfirmation(null);
-                }}
-                style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}
-              >
-                Yes
-              </button>
-              <button
-                type="button"
-                onClick={() => setDeleteNodeConfirmation(null)}
-                style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#fff", cursor: "pointer", fontWeight: 700 }}
-              >
-                No
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {deleteCardConfirmation && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(255,136,32,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#111111" }}>
-              Are you sure you want to remove {deleteCardConfirmation.cardIDs.length} node{deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"} from this Kanban Board?
-            </div>
-            <div style={{ fontSize: 11, lineHeight: 1.35, color: "#2e2e2e" }}>
-              The underlying node{deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"} will continue to exist outside this board.
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  void removeCards(deleteCardConfirmation.cardIDs);
-                  setDeleteCardConfirmation(null);
-                }}
-                style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}
-              >
-                Yes
-              </button>
-              <button
-                type="button"
-                onClick={() => setDeleteCardConfirmation(null)}
-                style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#fff", cursor: "pointer", fontWeight: 700 }}
-              >
-                No
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {deleteColumnConfirmation && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(255,136,32,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#111111" }}>
-              Are you sure you want to delete this Kanban column?
-            </div>
-            <div style={{ fontSize: 11, lineHeight: 1.35, color: "#2e2e2e" }}>
-              This removes "{deleteColumnConfirmation.title}" and all cards in that column immediately.
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  void removeColumn(deleteColumnConfirmation.columnID);
-                  setDeleteColumnConfirmation(null);
-                }}
-                style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}
-              >
-                Yes
-              </button>
-              <button
-                type="button"
-                onClick={() => setDeleteColumnConfirmation(null)}
-                style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#fff", cursor: "pointer", fontWeight: 700 }}
-              >
-                No
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <KanbanContextMenus
+        contextColumn={contextColumn ?? null}
+        columnContextMenu={columnContextMenu}
+        contextCard={contextCard ?? null}
+        cardContextMenu={cardContextMenu}
+        arenaMode={arenaMode}
+        contextCardSelectionIDs={contextCardSelectionIDs}
+        onCloseColumnMenu={() => setColumnContextMenu(null)}
+        onCloseCardMenu={() => setCardContextMenu(null)}
+        onCreateNodeInColumn={(columnID) => {
+          setColumnContextMenu(null);
+          void createNodeInColumn(columnID);
+        }}
+        onEditColumn={(columnID) => {
+          setEditingColumnID(columnID);
+          setColumnContextMenu(null);
+        }}
+        onRequestColumnDelete={requestColumnDelete}
+        onPersistColumnItemColor={(columnID, color) => void persistColumnItemColor(columnID, color)}
+        onToggleCardIssue={(card, isIssue) => void toggleCardIssue(card, isIssue)}
+        onRevertCardsToMyTriage={(cardIDs) => void revertCardsToMyTriage(cardIDs)}
+        onRequestNodeDeleteFromCards={requestNodeDeleteFromCards}
+        onRequestCardDelete={requestCardDelete}
+      />      {nodeEditorOverlay && (
+        <KanbanNodeEditorOverlay
+          overlay={nodeEditorOverlay}
+          ratio={nodeEditorOverlayRatio}
+          boardRootRef={boardRootRef}
+          resizeRef={nodeEditorOverlayResizeRef}
+          frameID={frameID}
+          accent={accent}
+          theme={theme}
+          onClose={() => setNodeEditorOverlay(null)}
+        />
+      )}      <KanbanDeleteConfirmations
+        deleteNodeConfirmation={deleteNodeConfirmation}
+        deleteCardConfirmation={deleteCardConfirmation}
+        deleteColumnConfirmation={deleteColumnConfirmation}
+        onRemoveNodes={(nodeIDs) => {
+          void removeNodes(nodeIDs);
+          setDeleteNodeConfirmation(null);
+        }}
+        onRemoveCards={(cardIDs) => {
+          void removeCards(cardIDs);
+          setDeleteCardConfirmation(null);
+        }}
+        onRemoveColumn={(columnID) => {
+          void removeColumn(columnID);
+          setDeleteColumnConfirmation(null);
+        }}
+        onCancelNodeDelete={() => setDeleteNodeConfirmation(null)}
+        onCancelCardDelete={() => setDeleteCardConfirmation(null)}
+        onCancelColumnDelete={() => setDeleteColumnConfirmation(null)}
+      />    </div>
   );
 };

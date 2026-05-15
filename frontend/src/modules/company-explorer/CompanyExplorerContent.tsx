@@ -13,6 +13,7 @@ import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchResults, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
+import { CompanyExplorerDeleteBlockedDialog, CompanyExplorerDeleteConfirmationDialog, CompanyExplorerFolderShareDialogView } from "./CompanyExplorerDialogs";
 import { CompanyExplorerTree } from "./CompanyExplorerTree";
 import {
   collectFolderSubtreeIDs,
@@ -29,8 +30,6 @@ import {
 } from "./companyExplorerDragDrop";
 import {
   type CompanyExplorerContextMenuState,
-  type CompanyExplorerShareTarget,
-  type ExplorerDeleteTarget,
   type ExplorerDeleteTargetWithLabel,
   type ExplorerDragPayload,
   type ExplorerFindTarget,
@@ -45,166 +44,19 @@ import { useCompanyExplorerSelectionBridge } from "./useCompanyExplorerSelection
 import { useCompanyExplorerTreeModel } from "./useCompanyExplorerTreeModel";
 import { COMPANY_EXPLORER_TREE_ROW_HEIGHT } from "./useCompanyExplorerVirtualTree";
 import { buildCompanyExplorerTreeRows } from "./companyExplorerTreeRows";
+import { useCompanyExplorerFolderShares } from "./useCompanyExplorerFolderShares";
 import { getActiveCompanyID } from "../../auth/currentCompany";
-
-type WorkspaceStreamEnvelope = {
-  company_id: string;
-  type: string;
-  data?: Record<string, unknown>;
-};
-
-type CompanyExplorerFolderItemAssignment = {
-  folder_id: string;
-  item_type: CompanyExplorerItemType;
-  item_id: string;
-  position?: number;
-};
-
-type CompanyExplorerFolderItemsBatchResponse = {
-  folder_items?: CompanyExplorerFolderItem[];
-};
-
-type CompanyExplorerMapEntityBatchResponse = {
-  nodes?: NodeRecord[];
-  logic_gates?: LogicGateApiRecord[];
-  folder_items?: CompanyExplorerFolderItem[];
-};
-
-type CompanyExplorerDeleteBatchResponse = {
-  status?: string;
-  targets?: Array<{ kind: string; id: string }>;
-};
-
-type CompanyExplorerFolderShare = {
-  company_id: string;
-  folder_id: string;
-  email: string;
-  user_id?: string;
-  status: string;
-  invited_by_user_id: string;
-  created_timestamp: string;
-  updated_timestamp: string;
-};
-
-type CompanyExplorerFolderSharesResponse = {
-  shares?: CompanyExplorerFolderShare[];
-};
-
-type CompanyExplorerFolderShareInviteResponse = {
-  share?: CompanyExplorerFolderShare;
-  invitation?: { token?: string; email?: string };
-  cognito_invite_status?: string;
-};
-
-type CompanyExplorerFolderShareDialog = {
-  folderID: string;
-  label: string;
-  email: string;
-  shares: CompanyExplorerFolderShare[];
-  loading: boolean;
-  busy: boolean;
-  error: string;
-  message: string;
-  invitationToken: string;
-};
-
-const SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX: Array<[string, CompanyExplorerSystemFolderKey]> = [
-  ["system-kanban-", "kanban_boards"],
-  ["system-active-node-", "active_nodes"],
-  ["system-history-node-", "history"],
-];
-
-function getSystemFolderKeyForTreeRowID(rowID: string): CompanyExplorerSystemFolderKey | "" {
-  return SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX.find(([prefix]) => rowID.startsWith(prefix))?.[1] ?? "";
-}
-
-function getDeleteVocabulary(kind: ExplorerDeleteTarget["kind"], plural = false): string {
-  if (kind === "folder") return plural ? "folders" : "folder";
-  if (kind === "node") return plural ? "nodes" : "node";
-  if (kind === "logic_gate") return plural ? "Logic Gates" : "Logic Gate";
-  return plural ? "Kanban Boards" : "Kanban Board";
-}
-
-function joinHumanList(items: string[]): string {
-  if (items.length <= 1) return items[0] ?? "";
-  if (items.length === 2) return `${items[0]} and ${items[1]}`;
-  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
-}
-
-function getDeleteTargetLabel(target: ExplorerDeleteTargetWithLabel): string {
-  const label = target.label?.trim() || target.id;
-  return `${getDeleteVocabulary(target.kind)} "${label}"`;
-}
-
-function buildDeleteConfirmationSummary(input: {
-  targets: ExplorerDeleteTargetWithLabel[];
-  folders: CompanyExplorerFolder[];
-  folderItems: CompanyExplorerFolderItem[];
-}): {
-  title: string;
-  detail: string;
-  targetList: string;
-  totalThings: number;
-  requiresFolderAcknowledgement: boolean;
-} {
-  const counts = new Map<ExplorerDeleteTarget["kind"], number>();
-  let totalThings = 0;
-  for (const target of input.targets) {
-    counts.set(target.kind, (counts.get(target.kind) ?? 0) + 1);
-    if (target.kind === "folder") {
-      const subtreeIDs = collectFolderSubtreeIDs(input.folders, target.id);
-      const folderCount = subtreeIDs.size || 1;
-      const itemCount = input.folderItems.filter((item) => subtreeIDs.has(item.folder_id)).length;
-      totalThings += folderCount + itemCount;
-    } else {
-      totalThings += 1;
-    }
-  }
-  totalThings = Math.max(totalThings, input.targets.length);
-  const requiresFolderAcknowledgement = input.targets.some((target) => target.kind === "folder");
-  const targetList = input.targets.slice(0, 6).map(getDeleteTargetLabel);
-  if (input.targets.length > targetList.length) targetList.push(`${input.targets.length - targetList.length} more`);
-
-  if (input.targets.length === 1) {
-    const target = input.targets[0];
-    const vocabulary = getDeleteVocabulary(target.kind);
-    return {
-      title: `Are you sure you want to delete this ${vocabulary}: ${target.label?.trim() || target.id}?`,
-      detail: `This deletes ${totalThings} thing${totalThings === 1 ? "" : "s"}.`,
-      targetList: getDeleteTargetLabel(target),
-      totalThings,
-      requiresFolderAcknowledgement,
-    };
-  }
-
-  const kindDetails = Array.from(counts.entries())
-    .map(([kind, count]) => `${count} ${getDeleteVocabulary(kind, count !== 1)}`);
-  return {
-    title: `Are you sure you want to delete these ${totalThings} things?`,
-    detail: `This batch includes ${joinHumanList(kindDetails)}.`,
-    targetList: joinHumanList(targetList),
-    totalThings,
-    requiresFolderAcknowledgement,
-  };
-}
-
-function findProtectedSystemFolderInDeleteTargets(targets: ExplorerDeleteTargetWithLabel[], folders: CompanyExplorerFolder[]): CompanyExplorerFolder | null {
-  for (const target of targets) {
-    if (target.kind !== "folder") continue;
-    const subtreeIDs = collectFolderSubtreeIDs(folders, target.id);
-    const protectedFolder = folders.find((folder) => subtreeIDs.has(folder.folder_id) && isExplorerSystemFolderKey(folder.system_key));
-    if (protectedFolder) return protectedFolder;
-  }
-  return null;
-}
-
-type CompanyExplorerContentProps = {
-  accent: string;
-  widgetId?: string;
-  hideTopControls?: boolean;
-  theme?: "mango" | "teal" | "light" | "dark";
-  selectionTargetFrameIDs?: string[];
-};
+import {
+  buildDeleteConfirmationSummary,
+  findProtectedSystemFolderInDeleteTargets,
+  getSystemFolderKeyForTreeRowID,
+  type CompanyExplorerContentProps,
+  type CompanyExplorerDeleteBatchResponse,
+  type CompanyExplorerFolderItemAssignment,
+  type CompanyExplorerFolderItemsBatchResponse,
+  type CompanyExplorerMapEntityBatchResponse,
+  type WorkspaceStreamEnvelope,
+} from "./CompanyExplorerContentModel";
 
 // Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
 export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ accent, widgetId, theme = "mango", selectionTargetFrameIDs }) => {
@@ -253,7 +105,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ targets: ExplorerDeleteTargetWithLabel[] } | null>(null);
   const [deleteBlockedMessage, setDeleteBlockedMessage] = useState("");
   const [deleteFolderAcknowledged, setDeleteFolderAcknowledged] = useState(false);
-  const [folderShareDialog, setFolderShareDialog] = useState<CompanyExplorerFolderShareDialog | null>(null);
   const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
   const [explorerSearchFocused, setExplorerSearchFocused] = useState(false);
   const [linkRevision, setLinkRevision] = useState(0);
@@ -565,115 +416,15 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
     return response.json() as Promise<T>;
   }, [apiBase]);
 
-  const folderSharesPath = useCallback((folderID: string): string => (
-    `/v1/company-explorer/folders/${encodeURIComponent(folderID)}/shares?company_id=${encodeURIComponent(companyID)}`
-  ), [companyID]);
-
-  const loadFolderShares = useCallback(async (folderID: string) => {
-    const payload = await requestJSON<CompanyExplorerFolderSharesResponse>(folderSharesPath(folderID));
-    return payload.shares ?? [];
-  }, [folderSharesPath, requestJSON]);
-
-  const openFolderShareDialog = useCallback((target: CompanyExplorerShareTarget) => {
-    setFolderShareDialog({
-      folderID: target.folderID,
-      label: target.label,
-      email: "",
-      shares: [],
-      loading: true,
-      busy: false,
-      error: "",
-      message: "",
-      invitationToken: "",
-    });
-    void (async () => {
-      try {
-        const shares = await loadFolderShares(target.folderID);
-        setFolderShareDialog((current) => (
-          current?.folderID === target.folderID
-            ? { ...current, shares, loading: false, error: "" }
-            : current
-        ));
-      } catch (err) {
-        setFolderShareDialog((current) => (
-          current?.folderID === target.folderID
-            ? { ...current, loading: false, error: err instanceof Error ? err.message : "failed_to_load_folder_shares" }
-            : current
-        ));
-      }
-    })();
-  }, [loadFolderShares]);
-
-  const submitFolderShare = useCallback(async () => {
-    const current = folderShareDialog;
-    if (!current) return;
-    const email = current.email.trim().toLowerCase();
-    if (!email) {
-      setFolderShareDialog({ ...current, error: "email_required", message: "", invitationToken: "" });
-      return;
-    }
-    setFolderShareDialog({ ...current, busy: true, error: "", message: "", invitationToken: "" });
-    try {
-      const payload = await requestJSON<CompanyExplorerFolderShareInviteResponse>(folderSharesPath(current.folderID), {
-        method: "POST",
-        body: JSON.stringify({ company_id: companyID, email }),
-      });
-      const share = payload.share;
-      setFolderShareDialog((latest) => {
-        if (!latest || latest.folderID !== current.folderID) return latest;
-        const shares = share
-          ? [
-            ...latest.shares.filter((item) => item.email !== share.email),
-            share,
-          ].sort((a, b) => (a.status === b.status ? a.email.localeCompare(b.email) : a.status.localeCompare(b.status)))
-          : latest.shares;
-        return {
-          ...latest,
-          email: "",
-          shares,
-          busy: false,
-          error: "",
-          message: share?.status === "active" ? "Folder shared." : "Invitation created.",
-          invitationToken: payload.invitation?.token ?? "",
-        };
-      });
-    } catch (err) {
-      setFolderShareDialog((latest) => (
-        latest?.folderID === current.folderID
-          ? { ...latest, busy: false, error: err instanceof Error ? err.message : "failed_to_share_folder", message: "", invitationToken: "" }
-          : latest
-      ));
-    }
-  }, [companyID, folderShareDialog, folderSharesPath, requestJSON]);
-
-  const removeFolderShare = useCallback(async (share: CompanyExplorerFolderShare) => {
-    const current = folderShareDialog;
-    if (!current) return;
-    setFolderShareDialog({ ...current, busy: true, error: "", message: "", invitationToken: "" });
-    try {
-      await requestJSON<{ status?: string }>(`${folderSharesPath(current.folderID)}&email=${encodeURIComponent(share.email)}`, {
-        method: "DELETE",
-      });
-      setFolderShareDialog((latest) => (
-        latest?.folderID === current.folderID
-          ? {
-            ...latest,
-            shares: latest.shares.filter((item) => item.email !== share.email),
-            busy: false,
-            error: "",
-            message: "Share removed.",
-            invitationToken: "",
-          }
-          : latest
-      ));
-    } catch (err) {
-      setFolderShareDialog((latest) => (
-        latest?.folderID === current.folderID
-          ? { ...latest, busy: false, error: err instanceof Error ? err.message : "failed_to_remove_folder_share", message: "", invitationToken: "" }
-          : latest
-      ));
-    }
-  }, [folderShareDialog, folderSharesPath, requestJSON]);
+  const {
+    closeFolderShareDialog,
+    folderShareDialog,
+    openFolderShareDialog,
+    refreshFolderShares,
+    removeFolderShare,
+    submitFolderShare,
+    updateFolderShareEmail,
+  } = useCompanyExplorerFolderShares(companyID, requestJSON);
 
   const createFolder = useCallback(async (folderKind: CompanyExplorerFolderKind, parentFolderID: string, position?: number) => {
     setError("");
@@ -1804,164 +1555,44 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
       />
 
       {folderShareDialog && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center", padding: 12 }}>
-          <div style={{ width: "min(520px, 94%)", maxHeight: "min(680px, 92vh)", overflow: "auto", borderRadius: 8, border: "1px solid rgba(255,136,32,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.96)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 14, display: "grid", gap: 12, boxShadow: "0 18px 44px rgba(0,0,0,0.22)" }}>
-            <div style={{ display: "grid", gap: 4 }}>
-              <div style={{ fontSize: 13, fontWeight: 800 }}>Share folder</div>
-              <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#b8c4cc" : "#333333", overflowWrap: "anywhere" }}>{folderShareDialog.label}</div>
-            </div>
-            <form
-              style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, alignItems: "stretch" }}
-              onSubmit={(event) => {
-                event.preventDefault();
-                void submitFolderShare();
-              }}
-            >
-              <input
-                value={folderShareDialog.email}
-                onChange={(event) => setFolderShareDialog((current) => current ? { ...current, email: event.target.value.toLowerCase(), error: "", message: "", invitationToken: "" } : current)}
-                type="email"
-                placeholder="Email"
-                disabled={folderShareDialog.busy}
-                style={{ minHeight: 32, minWidth: 0, border: `1px solid ${ruleColor}`, background: isDarkTheme ? "#0f1216" : "#ffffff", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: "0 9px", fontSize: 12, boxSizing: "border-box" }}
-              />
-              <button
-                type="submit"
-                disabled={folderShareDialog.busy || !folderShareDialog.email.trim()}
-                style={{ minHeight: 32, border: "1px solid rgba(255,136,32,0.55)", background: "#ff8820", color: "#111111", cursor: folderShareDialog.busy || !folderShareDialog.email.trim() ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 800, padding: "0 12px", opacity: folderShareDialog.busy || !folderShareDialog.email.trim() ? 0.6 : 1 }}
-              >
-                {folderShareDialog.busy ? "Sharing" : "Invite"}
-              </button>
-            </form>
-            {folderShareDialog.error && <div style={{ fontSize: 11, color: "#c62828", lineHeight: 1.35 }}>{folderShareDialog.error}</div>}
-            {folderShareDialog.message && <div style={{ fontSize: 11, color: isDarkTheme ? "#9be7c1" : "#0b6b43", lineHeight: 1.35 }}>{folderShareDialog.message}</div>}
-            {folderShareDialog.invitationToken && (
-              <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#d6e0e6" : "#222222", border: `1px solid ${rowRuleColor}`, padding: 8, overflowWrap: "anywhere" }}>
-                Invite token: {folderShareDialog.invitationToken}
-              </div>
-            )}
-            <div style={{ display: "grid", gap: 6 }}>
-              <div style={{ fontSize: 11, fontWeight: 800, color: isDarkTheme ? "#d6e0e6" : "#222222" }}>People</div>
-              {folderShareDialog.loading ? (
-                <div style={{ fontSize: 11, color: isDarkTheme ? "#b8c4cc" : "#333333" }}>Loading</div>
-              ) : folderShareDialog.shares.length === 0 ? (
-                <div style={{ fontSize: 11, color: isDarkTheme ? "#b8c4cc" : "#333333" }}>No shares yet.</div>
-              ) : (
-                <div style={{ display: "grid", border: `1px solid ${rowRuleColor}` }}>
-                  {folderShareDialog.shares.map((share) => (
-                    <div key={share.email} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", gap: 8, alignItems: "center", minHeight: 34, padding: "6px 8px", borderTop: `1px solid ${rowRuleColor}` }}>
-                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 }}>{share.email}</span>
-                      <span style={{ fontSize: 10, fontWeight: 800, color: share.status === "active" ? (isDarkTheme ? "#9be7c1" : "#0b6b43") : (isDarkTheme ? "#ffd8a6" : "#8a3b10") }}>{share.status}</span>
-                      <button
-                        type="button"
-                        onClick={() => void removeFolderShare(share)}
-                        disabled={folderShareDialog.busy}
-                        style={{ minHeight: 24, border: "1px solid rgba(198,40,40,0.35)", background: isDarkTheme ? "#191216" : "#fff", color: "#c62828", cursor: folderShareDialog.busy ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 800, padding: "0 8px", opacity: folderShareDialog.busy ? 0.6 : 1 }}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => setFolderShareDialog(null)}
-                style={{ minHeight: 30, border: "1px solid rgba(255,136,32,0.45)", background: "#fff", color: "#111111", cursor: "pointer", fontSize: 12, fontWeight: 800 }}
-              >
-                Done
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFolderShareDialog((current) => current ? { ...current, loading: true, error: "", message: "", invitationToken: "" } : current);
-                  void (async () => {
-                    try {
-                      const shares = await loadFolderShares(folderShareDialog.folderID);
-                      setFolderShareDialog((current) => current?.folderID === folderShareDialog.folderID ? { ...current, shares, loading: false } : current);
-                    } catch (err) {
-                      setFolderShareDialog((current) => current?.folderID === folderShareDialog.folderID ? { ...current, loading: false, error: err instanceof Error ? err.message : "failed_to_load_folder_shares" } : current);
-                    }
-                  })();
-                }}
-                disabled={folderShareDialog.loading || folderShareDialog.busy}
-                style={{ minHeight: 30, border: `1px solid ${ruleColor}`, background: isDarkTheme ? "#0f1216" : "#ffffff", color: isDarkTheme ? "#f6f8fb" : "#111111", cursor: folderShareDialog.loading || folderShareDialog.busy ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 800, opacity: folderShareDialog.loading || folderShareDialog.busy ? 0.6 : 1 }}
-              >
-                Refresh
-              </button>
-            </div>
-          </div>
-        </div>
+        <CompanyExplorerFolderShareDialogView
+          dialog={folderShareDialog}
+          isDarkTheme={isDarkTheme}
+          ruleColor={ruleColor}
+          rowRuleColor={rowRuleColor}
+          onEmailChange={updateFolderShareEmail}
+          onSubmit={() => void submitFolderShare()}
+          onRemoveShare={(share) => void removeFolderShare(share)}
+          onClose={closeFolderShareDialog}
+          onRefresh={refreshFolderShares}
+        />
       )}
 
       {deleteBlockedMessage && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(255,136,32,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 700 }}>Folder cannot be deleted</div>
-            <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#d6e0e6" : "#222222" }}>{deleteBlockedMessage}</div>
-            <button
-              type="button"
-              onClick={() => setDeleteBlockedMessage("")}
-              style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#fff", color: "#111111", cursor: "pointer", fontWeight: 700, minHeight: 28 }}
-            >
-              OK
-            </button>
-          </div>
-        </div>
+        <CompanyExplorerDeleteBlockedDialog
+          message={deleteBlockedMessage}
+          isDarkTheme={isDarkTheme}
+          onClose={() => setDeleteBlockedMessage("")}
+        />
       )}
 
       {deleteConfirmation && deleteSummary && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(255,136,32,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 700 }}>
-              {deleteSummary.title}
-            </div>
-            <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#b8c4cc" : "#2e2e2e" }}>
-              {deleteSummary.detail}
-            </div>
-            <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#d6e0e6" : "#222222" }}>
-              Selected: {deleteSummary.targetList}
-            </div>
-            {deleteSummary.requiresFolderAcknowledgement && (
-              <label style={{ display: "grid", gridTemplateColumns: "18px minmax(0, 1fr)", gap: 7, alignItems: "start", fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#f6f8fb" : "#111111" }}>
-                <input
-                  type="checkbox"
-                  checked={deleteFolderAcknowledged}
-                  onChange={(event) => setDeleteFolderAcknowledged(event.currentTarget.checked)}
-                  style={{ marginTop: 1 }}
-                />
-                <span>I understand that deleting this folder deletes all contents inside of this folder.</span>
-              </label>
-            )}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  const targets = deleteConfirmation.targets;
-                  setDeleteConfirmation(null);
-                  setDeleteFolderAcknowledged(false);
-                  void deleteExplorerTargets(targets);
-                }}
-                disabled={deleteSummary.requiresFolderAcknowledgement && !deleteFolderAcknowledged}
-                style={{ border: "1px solid rgba(255,136,32,0.45)", background: "#fff", color: "#111111", cursor: deleteSummary.requiresFolderAcknowledgement && !deleteFolderAcknowledged ? "not-allowed" : "pointer", fontWeight: 700, opacity: deleteSummary.requiresFolderAcknowledgement && !deleteFolderAcknowledged ? 0.55 : 1 }}
-              >
-                Yes
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setDeleteConfirmation(null);
-                  setDeleteFolderAcknowledged(false);
-                }}
-                style={{ border: "1px solid #ff3d7f", boxShadow: "inset 0 0 0 1px rgba(255,130,170,0.25), 0 0 10px rgba(255,61,127,0.18)", color: "#8b123f", background: "#fff", cursor: "pointer", fontWeight: 700 }}
-              >
-                No
-              </button>
-            </div>
-          </div>
-        </div>
+        <CompanyExplorerDeleteConfirmationDialog
+          targets={deleteConfirmation.targets}
+          summary={deleteSummary}
+          acknowledged={deleteFolderAcknowledged}
+          isDarkTheme={isDarkTheme}
+          onAcknowledgedChange={setDeleteFolderAcknowledged}
+          onConfirm={(targets) => {
+            setDeleteConfirmation(null);
+            setDeleteFolderAcknowledged(false);
+            void deleteExplorerTargets(targets);
+          }}
+          onCancel={() => {
+            setDeleteConfirmation(null);
+            setDeleteFolderAcknowledged(false);
+          }}
+        />
       )}
     </div>
   );
