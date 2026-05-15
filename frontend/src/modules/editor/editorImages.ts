@@ -4,11 +4,12 @@ export const EDITOR_IMAGE_WRAP_ATTRIBUTE = "data-mango-editor-image-wrap";
 export const EDITOR_IMAGE_SELECTED_ATTRIBUTE = "data-mango-editor-image-selected";
 
 const SAFE_IMAGE_DATA_URL_PATTERN = /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/]+=*$/i;
-const MAX_STORED_IMAGE_BYTES = 220_000;
-const MIN_STORED_IMAGE_BYTES = 48_000;
-const TARGET_EDITOR_DOCUMENT_HTML_BYTES = 760_000;
+const MAX_STORED_IMAGE_BYTES = 8 * 1024 * 1024;
+const MIN_STORED_IMAGE_BYTES = 512 * 1024;
+const TARGET_EDITOR_DOCUMENT_HTML_BYTES = 12 * 1024 * 1024;
 const MAX_EDITOR_IMAGE_WIDTH_PX = 960;
 const MAX_EDITOR_IMAGE_HEIGHT_PX = 1_600;
+const MAX_COMPRESSED_IMAGE_EDGE_PX = 4_096;
 const MIN_EDITOR_IMAGE_WIDTH_PX = 48;
 const MIN_EDITOR_IMAGE_HEIGHT_PX = 36;
 const EDITOR_IMAGE_INLINE_TEXT_GAP_PX = 12;
@@ -278,7 +279,7 @@ export async function createEditorImageDataFromSource(
   const maxImageBytes = clampEditorImageSize(options.maxStoredBytes ?? MAX_STORED_IMAGE_BYTES, MIN_STORED_IMAGE_BYTES, MAX_STORED_IMAGE_BYTES);
   const src = imageDataURLByteLength(source) <= maxImageBytes
     ? source
-    : compressImageToDataURL(image, dimensions.width, dimensions.height, maxImageBytes);
+    : compressImageToDataURL(image, maxImageBytes);
   if (!isSafeEditorImageSource(src)) throw new Error("failed_to_prepare_image");
   return {
     src,
@@ -368,30 +369,65 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function compressImageToDataURL(image: HTMLImageElement, width: number, height: number, maxStoredBytes: number): string {
-  let nextWidth = Math.max(MIN_EDITOR_IMAGE_WIDTH_PX, Math.round(width));
-  let nextHeight = Math.max(MIN_EDITOR_IMAGE_HEIGHT_PX, Math.round(height));
-  let quality = 0.86;
+function compressImageToDataURL(image: HTMLImageElement, maxStoredBytes: number): string {
+  const naturalWidth = Math.max(1, image.naturalWidth || MAX_EDITOR_IMAGE_WIDTH_PX);
+  const naturalHeight = Math.max(1, image.naturalHeight || naturalWidth);
+  const edgeScale = Math.min(1, MAX_COMPRESSED_IMAGE_EDGE_PX / Math.max(naturalWidth, naturalHeight));
+  const startWidth = Math.max(MIN_EDITOR_IMAGE_WIDTH_PX, Math.round(naturalWidth * edgeScale));
+  const startHeight = Math.max(MIN_EDITOR_IMAGE_HEIGHT_PX, Math.round(naturalHeight * edgeScale));
+  const pngOutput = compressImageLosslessFirst(image, startWidth, startHeight, maxStoredBytes);
+  if (imageDataURLByteLength(pngOutput) <= maxStoredBytes) return pngOutput;
+  return compressImageLossy(image, startWidth, startHeight, maxStoredBytes, pngOutput);
+}
+
+function compressImageLosslessFirst(image: HTMLImageElement, startWidth: number, startHeight: number, maxStoredBytes: number): string {
+  let nextWidth = startWidth;
+  let nextHeight = startHeight;
   let output = "";
-  for (let attempt = 0; attempt < 14; attempt += 1) {
-    const canvas = document.createElement("canvas");
-    canvas.width = nextWidth;
-    canvas.height = nextHeight;
-    const context = canvas.getContext("2d");
-    if (!context) break;
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, nextWidth, nextHeight);
-    context.drawImage(image, 0, 0, nextWidth, nextHeight);
-    output = canvas.toDataURL("image/jpeg", quality);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    output = renderImageToDataURL(image, nextWidth, nextHeight, "image/png");
     if (imageDataURLByteLength(output) <= maxStoredBytes) return output;
-    if (quality > 0.46) {
-      quality -= 0.1;
+    nextWidth = Math.max(MIN_EDITOR_IMAGE_WIDTH_PX, Math.round(nextWidth * 0.88));
+    nextHeight = Math.max(MIN_EDITOR_IMAGE_HEIGHT_PX, Math.round(nextHeight * 0.88));
+  }
+  return output;
+}
+
+function compressImageLossy(image: HTMLImageElement, startWidth: number, startHeight: number, maxStoredBytes: number, fallbackOutput: string): string {
+  let nextWidth = startWidth;
+  let nextHeight = startHeight;
+  let quality = 0.94;
+  let output = fallbackOutput;
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    output = renderImageToDataURL(image, nextWidth, nextHeight, "image/jpeg", quality);
+    if (imageDataURLByteLength(output) <= maxStoredBytes) return output;
+    if (quality > 0.78) {
+      quality -= 0.04;
+    } else if (quality > 0.62) {
+      quality -= 0.08;
     } else {
-      nextWidth = Math.max(MIN_EDITOR_IMAGE_WIDTH_PX, Math.round(nextWidth * 0.78));
-      nextHeight = Math.max(MIN_EDITOR_IMAGE_HEIGHT_PX, Math.round(nextHeight * 0.78));
+      nextWidth = Math.max(MIN_EDITOR_IMAGE_WIDTH_PX, Math.round(nextWidth * 0.86));
+      nextHeight = Math.max(MIN_EDITOR_IMAGE_HEIGHT_PX, Math.round(nextHeight * 0.86));
+      quality = 0.86;
     }
   }
   return output;
+}
+
+function renderImageToDataURL(image: HTMLImageElement, width: number, height: number, type: "image/png" | "image/jpeg", quality?: number): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(MIN_EDITOR_IMAGE_WIDTH_PX, Math.round(width));
+  canvas.height = Math.max(MIN_EDITOR_IMAGE_HEIGHT_PX, Math.round(height));
+  const context = canvas.getContext("2d");
+  if (!context) return "";
+  if (type === "image/jpeg") {
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL(type, quality);
 }
 
 function imageDataURLByteLength(dataURL: string): number {

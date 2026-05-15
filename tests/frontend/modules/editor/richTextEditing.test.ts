@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { sanitizeAPIErrorMessage } from "../../../../frontend/src/modules/api/requestJSON.js";
-import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, deserializeEditorDocumentHTML, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
+import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, deserializeEditorDocumentHTML, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { clampEditorImageVerticalOffset, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isSafeEditorImageSource } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
@@ -48,6 +48,12 @@ test("editor sanitizer collapses nested font-size wrappers to the final size", (
   assert.equal(html, '<span style="font-size: 16px;">nice</span>');
 });
 
+test("editor sanitizer preserves image clear breaks", () => {
+  const html = sanitizeEditorDocumentHTML(`<br ${EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE}="true" style="clear: both;">after`);
+
+  assert.match(html, new RegExp(`<br ${EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE}="true"(?: clear="all")? style="clear: both;?">after`));
+});
+
 test("editor image source sanitizer only accepts raster data images", () => {
   assert.equal(isSafeEditorImageSource("data:image/png;base64,iVBORw0KGgo="), true);
   assert.equal(isSafeEditorImageSource("data:image/svg+xml;base64,PHN2Zy8+"), false);
@@ -80,7 +86,7 @@ test("editor image vertical offset allows moving above the insertion point", () 
 });
 
 test("editor image storage budget shrinks near the document save limit", () => {
-  assert.equal(getEditorImageStorageBudgetForDocumentBytes(1_000), 220_000);
-  assert.equal(getEditorImageStorageBudgetForDocumentBytes(650_000), 74_800);
-  assert.equal(getEditorImageStorageBudgetForDocumentBytes(740_000), 48_000);
+  assert.equal(getEditorImageStorageBudgetForDocumentBytes(1_000), 8_388_608);
+  assert.equal(getEditorImageStorageBudgetForDocumentBytes(11_800_000), 532_380);
+  assert.equal(getEditorImageStorageBudgetForDocumentBytes(12_100_000), 524_288);
 });

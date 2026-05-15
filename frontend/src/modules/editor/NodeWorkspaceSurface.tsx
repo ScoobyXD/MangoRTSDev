@@ -49,6 +49,32 @@ import {
   type TextBlockSelectionDraft,
   type TextBlockState,
 } from "./NodeWorkspaceSurfaceShared";
+
+const DEFAULT_TEXT_CHAT_SPLIT_RATIO = 0.704;
+const TEXT_CHAT_SPLIT_MIN_RATIO = 0.50;
+const TEXT_CHAT_SPLIT_MAX_RATIO = 0.84;
+const TEXT_CHAT_SPLIT_STORAGE_KEY_PREFIX = "node-editor-text-chat-split-ratio-v1";
+
+function clampTextChatSplitRatio(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_TEXT_CHAT_SPLIT_RATIO;
+  return Math.max(TEXT_CHAT_SPLIT_MIN_RATIO, Math.min(TEXT_CHAT_SPLIT_MAX_RATIO, value));
+}
+
+function textChatSplitStorageKey(companyID: string, nodeID: string): string {
+  return `${TEXT_CHAT_SPLIT_STORAGE_KEY_PREFIX}:${companyID || "company"}:${nodeID || "node"}`;
+}
+
+function readStoredTextChatSplitRatio(companyID: string, nodeID: string): number {
+  if (typeof localStorage === "undefined") return DEFAULT_TEXT_CHAT_SPLIT_RATIO;
+  const parsed = Number.parseFloat(localStorage.getItem(textChatSplitStorageKey(companyID, nodeID)) ?? "");
+  return Number.isFinite(parsed) ? clampTextChatSplitRatio(parsed) : DEFAULT_TEXT_CHAT_SPLIT_RATIO;
+}
+
+function storeTextChatSplitRatio(companyID: string, nodeID: string, ratio: number) {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(textChatSplitStorageKey(companyID, nodeID), String(clampTextChatSplitRatio(ratio)));
+}
+
 export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   companyID,
   nodeID,
@@ -81,6 +107,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [chatSelectionAnchors, setChatSelectionAnchors] = useState<Record<string, TextBlockSelectionAnchor>>({});
   const [activeChatMessageIDs, setActiveChatMessageIDs] = useState<Record<string, string>>({});
   const [activeChatBlockID, setActiveChatBlockID] = useState("");
+  const [chatNavigationRequest, setChatNavigationRequest] = useState<{ blockID: string; anchorMessageID: string; requestID: number } | null>(null);
   const [closedChatBlockIDs, setClosedChatBlockIDs] = useState<Set<string>>(() => new Set());
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
   const [emailPickerOpen, setEmailPickerOpen] = useState(false);
@@ -88,9 +115,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
   const [deleteTextBlockConfirmation, setDeleteTextBlockConfirmation] = useState<{ blockID: string; title: string; chatCount: number } | null>(null);
+  const [textChatSplitRatio, setTextChatSplitRatio] = useState(() => readStoredTextChatSplitRatio(companyID, nodeID));
+  const textChatSplitRatioRef = useRef(textChatSplitRatio);
 
   const projectionIdentity = useMemo(() => projectionsKey(projections), [projections]);
   const compact = width > 0 && width < 720;
+  const editorGridTemplateColumns = compact
+    ? "58px minmax(0, 1fr)"
+    : `62px minmax(0, ${textChatSplitRatio}fr) 8px minmax(0, ${1 - textChatSplitRatio}fr)`;
 
   useEffect(() => {
     const root = rootRef.current;
@@ -105,6 +137,16 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     observer.observe(root);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    const nextRatio = readStoredTextChatSplitRatio(companyID, nodeID);
+    textChatSplitRatioRef.current = nextRatio;
+    setTextChatSplitRatio(nextRatio);
+  }, [companyID, nodeID]);
+
+  useEffect(() => {
+    textChatSplitRatioRef.current = textChatSplitRatio;
+  }, [textChatSplitRatio]);
 
   useEffect(() => {
     const textBlocks = listEditorTextBlockProjections(projections).map((item) => {
@@ -370,6 +412,25 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setActiveChatBlockID(selection.blockID);
   }, []);
 
+  const navigateToChatMessage = useCallback((blockID: string, messages: EditorTextBlockChatMessage[], messageID: string) => {
+    const anchorMessageID = resolveEditorTextBlockChatAnchorMessageID(messages, messageID);
+    if (!anchorMessageID) return;
+    setFocusedTextBlockID(blockID);
+    setClosedChatBlockIDs((current) => {
+      if (!current.has(blockID)) return current;
+      const next = new Set(current);
+      next.delete(blockID);
+      return next;
+    });
+    setActiveChatBlockID(blockID);
+    setActiveChatMessageIDs((current) => ({ ...current, [blockID]: messageID }));
+    setChatNavigationRequest((current) => ({
+      blockID,
+      anchorMessageID,
+      requestID: (current?.requestID ?? 0) + 1,
+    }));
+  }, []);
+
   const submitChat = useCallback(async (blockID: string) => {
     const message = (chatDrafts[blockID] ?? "").trim();
     const attachments = chatDraftAttachments[blockID] ?? [];
@@ -556,6 +617,43 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     void attachEmail({ ...email, attachedTimestamp: new Date().toISOString() });
   }, [attachEmail]);
 
+  const startTextChatSplitResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const previousColumn = event.currentTarget.previousElementSibling;
+    const nextColumn = event.currentTarget.nextElementSibling;
+    if (!(previousColumn instanceof HTMLElement) || !(nextColumn instanceof HTMLElement)) return;
+    const previousRect = previousColumn.getBoundingClientRect();
+    const nextRect = nextColumn.getBoundingClientRect();
+    const left = previousRect.left;
+    const widthPx = Math.max(1, nextRect.right - previousRect.left);
+    const ownerDocument = event.currentTarget.ownerDocument;
+    const previousCursor = ownerDocument.body.style.cursor;
+    ownerDocument.body.style.cursor = "col-resize";
+
+    const updateRatio = (clientX: number) => {
+      const nextRatio = clampTextChatSplitRatio((clientX - left) / widthPx);
+      textChatSplitRatioRef.current = nextRatio;
+      setTextChatSplitRatio(nextRatio);
+    };
+    const onPointerMove = (pointerEvent: PointerEvent) => {
+      pointerEvent.preventDefault();
+      updateRatio(pointerEvent.clientX);
+    };
+    const finish = () => {
+      ownerDocument.body.style.cursor = previousCursor;
+      ownerDocument.removeEventListener("pointermove", onPointerMove);
+      ownerDocument.removeEventListener("pointerup", finish);
+      ownerDocument.removeEventListener("pointercancel", finish);
+      storeTextChatSplitRatio(companyID, nodeID, textChatSplitRatioRef.current);
+    };
+
+    updateRatio(event.clientX);
+    ownerDocument.addEventListener("pointermove", onPointerMove);
+    ownerDocument.addEventListener("pointerup", finish);
+    ownerDocument.addEventListener("pointercancel", finish);
+  }, [companyID, nodeID]);
+
   const chatMessagesByBlock = useMemo(() => {
     const grouped = new Map<string, EditorTextBlockChatMessage[]>();
     for (const message of chatMessages) {
@@ -565,6 +663,41 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return grouped;
   }, [chatMessages]);
+
+  const renderTextChatSplitHandle = (enabled: boolean) => {
+    if (compact) return null;
+    if (!enabled) return <div aria-hidden="true" />;
+    return (
+      <div
+        role="separator"
+        aria-label="Resize text and chat columns"
+        aria-orientation="vertical"
+        data-frame-interactive="true"
+        onPointerDown={startTextChatSplitResize}
+        style={{
+          alignSelf: "stretch",
+          minHeight: 40,
+          display: "flex",
+          justifyContent: "center",
+          padding: "0 2px",
+          cursor: "col-resize",
+          touchAction: "none",
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            width: 2,
+            height: "100%",
+            minHeight: 40,
+            borderRadius: 2,
+            background: ruleColor,
+            opacity: 0.62,
+          }}
+        />
+      </div>
+    );
+  };
 
   return (
     <div
@@ -586,10 +719,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         ["--editor-document-scroll-track" as string]: scrollbarTrack,
       }}
     >
-      <div style={{ display: "grid", gridTemplateColumns: compact ? "58px minmax(0, 1fr)" : "62px minmax(0, 1fr) minmax(0, 0.42fr)", columnGap: 8, rowGap: 12, alignItems: "start", minWidth: 0 }}>
-        <div aria-hidden="true" style={{ position: "sticky", top: 0, zIndex: 2, minHeight: 32, padding: "2px 0 10px", background: "inherit" }} />
+      <div style={{ display: "grid", gridTemplateColumns: editorGridTemplateColumns, columnGap: 8, rowGap: 12, alignItems: "start", minWidth: 0 }}>
+        <div aria-hidden="true" style={{ minHeight: 32, padding: "2px 0 10px", background: "inherit" }} />
 
-        <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", alignItems: "center", gap: 8, padding: "2px 0 10px", background: "inherit" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0 10px", background: "inherit" }}>
           <button
             type="button"
             title="Add text box"
@@ -633,8 +766,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           </button>
         </div>
 
+        {!compact && <div aria-hidden="true" />}
         {!compact && (
-          <div style={{ position: "sticky", top: 0, zIndex: 2, minHeight: 32, borderBottom: `1px solid ${ruleColor}`, background: "inherit" }} />
+          <div style={{ minHeight: 32, borderBottom: `1px solid ${ruleColor}`, background: "inherit" }} />
         )}
 
         {blocks.length === 0 && (
@@ -643,6 +777,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, minHeight: 92, display: "grid", placeItems: "center", color: surfaceText, opacity: 0.7, fontSize: 13, fontWeight: 700 }}>
               No text boxes
             </div>
+            {!compact && <div />}
             {!compact && <div />}
           </>
         )}
@@ -772,6 +907,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     documentValue={block.document}
                     chatMessages={messages}
                     activeChatAnchorMessageID={activeChatAnchorMessageID}
+                    chatNavigationRequest={chatNavigationRequest?.blockID === block.id
+                      ? { anchorMessageID: chatNavigationRequest.anchorMessageID, requestID: chatNavigationRequest.requestID }
+                      : null}
                     surfaceText={surfaceText}
                     accent={accent}
                     outlineStyle={outlineStyle}
@@ -812,6 +950,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     onFocus={focusChat}
                     onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
                     onActivateMessage={activateChatMessage}
+                    onNavigateToMessage={(messageID) => navigateToChatMessage(block.id, messages, messageID)}
                     onReply={replyToMessage}
                     onDeleteMessage={(messageID) => { void deleteChatMessage(messageID); }}
                     onClearReply={clearReplyTarget}
@@ -821,6 +960,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   />
                 )}
               </div>
+              {renderTextChatSplitHandle(chatIsVisible)}
               {!compact && (
                 chatIsVisible ? (
                   <ChatPane
@@ -842,6 +982,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     onFocus={focusChat}
                     onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
                     onActivateMessage={activateChatMessage}
+                    onNavigateToMessage={(messageID) => navigateToChatMessage(block.id, messages, messageID)}
                     onReply={replyToMessage}
                     onDeleteMessage={(messageID) => { void deleteChatMessage(messageID); }}
                     onClearReply={clearReplyTarget}
@@ -893,6 +1034,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           </div>
           <AttachedEmailsPanel emails={attachedEmails} accent={accent} surfaceText={surfaceText} panelBackground={panelBackground} strokeColor={strokeColor} onOpenEmail={setSelectedEmailID} />
         </div>
+        {!compact && <div aria-hidden="true" />}
         {!compact && <div />}
       </div>
 

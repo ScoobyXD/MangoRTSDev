@@ -12,6 +12,7 @@ import {
 } from "./plainTextEditing";
 import {
   EDITOR_TERMINAL_BREAK_ATTRIBUTE,
+  EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE,
   deserializeEditorDocumentHTML,
   getEditorLinkHrefForText,
   linkifyEditorPlainTextToHTML,
@@ -275,6 +276,14 @@ function rangeIsStillInsideRoot(root: HTMLElement, range: Range | null): range i
   }
 }
 
+function createEditorImageClearBreak(ownerDocument: Document): HTMLBRElement {
+  const clearBreak = ownerDocument.createElement("br");
+  clearBreak.setAttribute(EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, "true");
+  clearBreak.setAttribute("clear", "all");
+  clearBreak.style.clear = "both";
+  return clearBreak;
+}
+
 async function insertEditorImageFile(
   root: HTMLElement,
   file: File,
@@ -320,22 +329,28 @@ function insertPreparedEditorImage(
   scheduleIndentGuideUpdate: (text: string) => void,
 ) {
   const frame = createEditorImageFrame(root.ownerDocument, imageData);
+  const clearBreak = createEditorImageClearBreak(root.ownerDocument);
+  const caretNode = root.ownerDocument.createTextNode("");
   removeEditorTerminalBreaks(root);
   const range = rangeIsStillInsideRoot(root, savedRange) ? savedRange : getEditorSelectionRange(root);
   if (range) {
     range.deleteContents();
     range.insertNode(frame);
-    range.setStartAfter(frame);
+    frame.after(clearBreak, caretNode);
+    range.setStart(caretNode, 0);
     range.collapse(true);
   } else {
-    root.appendChild(frame);
+    root.append(frame, clearBreak, caretNode);
   }
   const selection = root.ownerDocument.getSelection();
-  if (range) {
-    selection?.removeAllRanges();
-    selection?.addRange(range);
+  clearEditorImageSelection(root);
+  const caretRange = range ?? root.ownerDocument.createRange();
+  if (!range) {
+    caretRange.setStart(caretNode, 0);
+    caretRange.collapse(true);
   }
-  selectEditorImageFrame(root, frame);
+  selection?.removeAllRanges();
+  selection?.addRange(caretRange);
   recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, "image");
   commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
 }

@@ -3,6 +3,7 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folder
 import { getNodeTitle, type NodeRecord } from "../node-map/shared";
 import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
+import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import {
@@ -97,6 +98,12 @@ import {
   type OverlayResizeState,
   type WorkspaceStreamEnvelope,
 } from "./KanbanContentModel";
+
+type KanbanNodeCreateBatchResponse = {
+  nodes?: NodeRecord[];
+  folder_items?: CompanyExplorerFolderItem[];
+};
+
 export const KanbanContent: React.FC<KanbanContentProps> = ({
   accent,
   widgetId,
@@ -200,6 +207,21 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const cardBackground = isDark ? "#101418" : "#ffffff";
   const topClearancePx = arenaMode ? 34 : KANBAN_MODULE_TOP_CLEARANCE_PX;
   const boardHeaderLeftPaddingPx = arenaMode ? 0 : 162;
+
+  const resolveActiveNodesFolderID = useCallback(async (): Promise<string> => {
+    const currentActiveFolder = explorerFolders.find((folder) => folder.folder_kind === "node" && folder.system_key === "active_nodes");
+    if (currentActiveFolder?.folder_id) return currentActiveFolder.folder_id;
+    const response = await fetch(`${apiBase}/v1/company-explorer/folders?company_id=${encodeURIComponent(companyID)}&folder_kind=node`);
+    if (!response.ok) return "";
+    const payload = await response.json() as { folders?: CompanyExplorerFolder[] };
+    const folders = payload.folders ?? [];
+    setExplorerFolders((previous) => {
+      const byID = new Map(previous.map((folder) => [folder.folder_id, folder]));
+      for (const folder of folders) byID.set(folder.folder_id, folder);
+      return Array.from(byID.values());
+    });
+    return folders.find((folder) => folder.folder_kind === "node" && folder.system_key === "active_nodes")?.folder_id ?? "";
+  }, [apiBase, companyID, explorerFolders]);
 
   useEffect(() => {
     setActiveBoardID(frameBoardID);
@@ -1186,10 +1208,29 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const createNodeInColumn = useCallback(async (columnID: string) => {
     setError("");
     try {
-      const node = await requestJSON<NodeRecord>("/v1/nodes", {
-        method: "POST",
-        body: JSON.stringify({ company_id: companyID, title: "new node" }),
+      const activeNodesFolderID = await resolveActiveNodesFolderID();
+      if (!activeNodesFolderID) throw new Error("active_nodes_folder_not_found");
+      const response = await createMapEntityBatchCommand<KanbanNodeCreateBatchResponse>({
+        companyID,
+        entityKind: "node",
+        folderID: activeNodesFolderID,
+        items: [{
+          client_id: createMapEntityBatchClientID("kanban-node"),
+          title: "new node",
+          x: 120,
+          y: 120,
+        }],
+        requestJSON,
       });
+      const node = response.nodes?.[0];
+      if (!node) throw new Error("node_batch_create_missing_node");
+      if (response.folder_items?.length) {
+        setExplorerFolderItems((previous) => {
+          const byKey = new Map(previous.map((item) => [`${item.item_type}:${item.item_id}`, item]));
+          for (const item of response.folder_items ?? []) byKey.set(`${item.item_type}:${item.item_id}`, item);
+          return Array.from(byKey.values());
+        });
+      }
       upsertNodeRelationshipGraphNode(apiBase, companyID, node);
       const label = getNodeTitle(node) || node.node_id;
       const result = await addExplorerNodesToKanbanColumnCommand({
@@ -1215,7 +1256,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       setError("Node create failed");
       refreshBoard();
     }
-  }, [apiBase, cards, companyID, frameID, kanbanCommandContext, refreshBoard, requestJSON, syncNodeStatusesFromCards]);
+  }, [apiBase, cards, companyID, frameID, kanbanCommandContext, refreshBoard, requestJSON, resolveActiveNodesFolderID, syncNodeStatusesFromCards]);
 
   const onDropColumn = useCallback((event: React.DragEvent<HTMLElement>, columnID: string) => {
     event.preventDefault();

@@ -210,6 +210,7 @@ type NodeTextBlockEditorProps = {
   documentValue: string;
   chatMessages: EditorTextBlockChatMessage[];
   activeChatAnchorMessageID: string;
+  chatNavigationRequest: { anchorMessageID: string; requestID: number } | null;
   surfaceText: string;
   accent: string;
   outlineStyle: EditorOutlineStyleID;
@@ -295,6 +296,14 @@ function createTextRangeFromOffsets(root: HTMLElement, startOffset: number, endO
   }
 }
 
+function scrollTextRangeIntoEditorView(root: HTMLElement, range: Range) {
+  const rect = Array.from(range.getClientRects()).find((item) => item.width > 0 && item.height > 0) ?? range.getBoundingClientRect();
+  if (!Number.isFinite(rect.top) || rect.height <= 0) return;
+  const rootRect = root.getBoundingClientRect();
+  const targetTop = root.scrollTop + rect.top - rootRect.top - root.clientHeight * 0.28;
+  root.scrollTo({ top: Math.max(0, Math.round(targetTop)), behavior: "smooth" });
+}
+
 function getSelectionPointDocumentOffset(root: HTMLElement, container: Node | null, offset: number): number | null {
   if (!container || !(container === root || root.contains(container))) return null;
   const range = root.ownerDocument.createRange();
@@ -349,6 +358,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   documentValue,
   chatMessages,
   activeChatAnchorMessageID,
+  chatNavigationRequest,
   surfaceText,
   accent,
   outlineStyle,
@@ -437,6 +447,23 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     const frame = window.requestAnimationFrame(refreshTextHighlights);
     return () => window.cancelAnimationFrame(frame);
   }, [documentValue, documentScrollTop, height, refreshTextHighlights]);
+
+  useEffect(() => {
+    if (!chatNavigationRequest?.anchorMessageID) return;
+    const editor = editorRef.current;
+    if (!editor) return;
+    const frame = window.requestAnimationFrame(() => {
+      const documentText = readEditorDocumentText(editor);
+      const anchorRange = resolveEditorTextBlockChatAnchorRanges(documentText, chatMessages)
+        .find((item) => item.messageID === chatNavigationRequest.anchorMessageID);
+      if (!anchorRange) return;
+      const range = createTextRangeFromOffsets(editor, anchorRange.startOffset, anchorRange.endOffset);
+      if (!range) return;
+      scrollTextRangeIntoEditorView(editor, range);
+      refreshTextHighlights();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [chatMessages, chatNavigationRequest?.anchorMessageID, chatNavigationRequest?.requestID, refreshTextHighlights]);
 
   const scheduleTextBlockIndentGuideUpdate = useCallback((text: string) => {
     if (indentGuideFrameRef.current !== null) {
@@ -779,6 +806,7 @@ type ChatPaneProps = {
   onFocus: () => void;
   onDraftChange: (draft: string) => void;
   onActivateMessage: (messageID: string) => void;
+  onNavigateToMessage: (messageID: string) => void;
   onReply: (messageID: string) => void;
   onDeleteMessage: (messageID: string) => void;
   onClearReply: () => void;
@@ -806,6 +834,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   onFocus,
   onDraftChange,
   onActivateMessage,
+  onNavigateToMessage,
   onReply,
   onDeleteMessage,
   onClearReply,
@@ -933,6 +962,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               collapsedThreadIDs={collapsedThreadIDs}
               onToggleCollapse={toggleThreadCollapse}
               onActivate={onActivateMessage}
+              onNavigate={onNavigateToMessage}
               onReply={handleReply}
               onDelete={onDeleteMessage}
               onPreviewImage={setPreviewAttachment}
@@ -1051,12 +1081,13 @@ type ChatThreadItemProps = {
   collapsedThreadIDs: Set<string>;
   onToggleCollapse: (messageID: string) => void;
   onActivate: (messageID: string) => void;
+  onNavigate: (messageID: string) => void;
   onReply: (messageID: string) => void;
   onDelete: (messageID: string) => void;
   onPreviewImage: (attachment: EditorChatAttachment) => void;
 };
 
-const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, currentUserID, activeMessageID, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onReply, onDelete, onPreviewImage }) => {
+const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, currentUserID, activeMessageID, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onDelete, onPreviewImage }) => {
   const { message, children } = node;
   const hasChildren = children.length > 0;
   const collapsed = collapsedThreadIDs.has(message.id);
@@ -1072,6 +1103,10 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
       onClick={(event) => {
         event.stopPropagation();
         onActivate(message.id);
+      }}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        onNavigate(message.id);
       }}
       style={{
         minWidth: 0,
@@ -1180,6 +1215,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
               collapsedThreadIDs={collapsedThreadIDs}
               onToggleCollapse={onToggleCollapse}
               onActivate={onActivate}
+              onNavigate={onNavigate}
               onReply={onReply}
               onDelete={onDelete}
               onPreviewImage={onPreviewImage}

@@ -1,6 +1,7 @@
 import { requestJSON } from "../api/requestJSON";
 
 export const EDITOR_COLLABORATION_WORKSPACE_EVENT = "editor_collaboration_event";
+export const EDITOR_COLLABORATION_MAX_DOCUMENT_HTML_BYTES = 850_000;
 
 const EDITOR_COLLABORATION_CLIENT_ID_KEY = "mango-editor-collaboration-client-id-v1";
 
@@ -81,6 +82,14 @@ export async function publishEditorCollaborationEvent(
       revision: payload.revision,
     },
   });
+}
+
+export function canPublishEditorCollaborationDocumentHTML(documentHTML: string): boolean {
+  if (!documentHTML) return true;
+  const documentBytes = typeof TextEncoder !== "undefined"
+    ? new TextEncoder().encode(documentHTML).length
+    : documentHTML.length;
+  return documentBytes <= EDITOR_COLLABORATION_MAX_DOCUMENT_HTML_BYTES;
 }
 
 export function parseEditorCollaborationWorkspaceEvent(rawData: string): EditorCollaborationEventPayload | null {

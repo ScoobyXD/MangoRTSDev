@@ -58,6 +58,7 @@ import {
   createEditorCollaborationClientID,
   editorCollaborationLabel,
   editorCollaboratorColor,
+  canPublishEditorCollaborationDocumentHTML,
   parseEditorCollaborationWorkspaceEvent,
   publishEditorCollaborationEvent,
   sameEditorCollaborationTarget,
@@ -433,6 +434,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const queueCollaborationDocumentUpdate = useCallback((documentHTML: string, immediate = false) => {
     if (applyingRemoteCollaborationRef.current) return;
     lastLocalCollaborationEditAtRef.current = Date.now();
+    if (!canPublishEditorCollaborationDocumentHTML(documentHTML)) {
+      pendingCollaborationHTMLRef.current = null;
+      return;
+    }
     pendingCollaborationHTMLRef.current = documentHTML;
     if (collaborationSendTimerRef.current !== null) {
       window.clearTimeout(collaborationSendTimerRef.current);

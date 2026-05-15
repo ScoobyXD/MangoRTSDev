@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
+import { getActiveCompanyID } from "../../auth/currentCompany";
 import type { CommunicationsSharedInbox, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
@@ -14,11 +15,86 @@ import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCel
 import { allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
+const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
+const NODE_EDITOR_POPUP_MIN_HEIGHT = 320;
+const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
+const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
+const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "home-node-editor-popup-size-v1";
+
+type NodeEditorPopupResizeHandle = {
+  key: string;
+  horizontal: -1 | 0 | 1;
+  vertical: -1 | 0 | 1;
+  cursor: string;
+  style: React.CSSProperties;
+};
+
+const NODE_EDITOR_POPUP_RESIZE_HANDLES: NodeEditorPopupResizeHandle[] = [
+  { key: "nw", horizontal: -1, vertical: -1, cursor: "nwse-resize", style: { top: -6, left: -6, width: 12, height: 12 } },
+  { key: "ne", horizontal: 1, vertical: -1, cursor: "nesw-resize", style: { top: -6, right: -6, width: 12, height: 12 } },
+  { key: "sw", horizontal: -1, vertical: 1, cursor: "nesw-resize", style: { bottom: -6, left: -6, width: 12, height: 12 } },
+  { key: "se", horizontal: 1, vertical: 1, cursor: "nwse-resize", style: { right: -6, bottom: -6, width: 12, height: 12 } },
+  { key: "n", horizontal: 0, vertical: -1, cursor: "ns-resize", style: { top: -5, left: 18, right: 18, height: 10 } },
+  { key: "s", horizontal: 0, vertical: 1, cursor: "ns-resize", style: { bottom: -5, left: 18, right: 18, height: 10 } },
+  { key: "w", horizontal: -1, vertical: 0, cursor: "ew-resize", style: { left: -5, top: 18, bottom: 18, width: 10 } },
+  { key: "e", horizontal: 1, vertical: 0, cursor: "ew-resize", style: { right: -5, top: 18, bottom: 18, width: 10 } },
+];
+
+function nodeEditorPopupMaxSize(): { width: number; height: number } {
+  if (typeof window === "undefined") return { width: 1180, height: 820 };
+  return {
+    width: Math.max(NODE_EDITOR_POPUP_MIN_WIDTH, window.innerWidth - NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET),
+    height: Math.max(NODE_EDITOR_POPUP_MIN_HEIGHT, window.innerHeight - NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET),
+  };
+}
+
+function clampNodeEditorPopupSize(size: { width: number; height: number }): { width: number; height: number } {
+  const max = nodeEditorPopupMaxSize();
+  return {
+    width: Math.max(NODE_EDITOR_POPUP_MIN_WIDTH, Math.min(Math.round(size.width), max.width)),
+    height: Math.max(NODE_EDITOR_POPUP_MIN_HEIGHT, Math.min(Math.round(size.height), max.height)),
+  };
+}
+
+function nodeEditorPopupSizeStorageKey(): string {
+  const companyID = getActiveCompanyID().trim() || "global";
+  return `${NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX}:${companyID}`;
+}
+
+function readStoredNodeEditorPopupSize(): { width: number; height: number } | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(nodeEditorPopupSizeStorageKey()) ?? "") as Partial<{ width: number; height: number }>;
+    const width = parsed.width;
+    const height = parsed.height;
+    if (typeof width !== "number" || typeof height !== "number") return null;
+    return clampNodeEditorPopupSize({ width, height });
+  } catch {
+    return null;
+  }
+}
+
+function storeNodeEditorPopupSize(size: { width: number; height: number }) {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(nodeEditorPopupSizeStorageKey(), JSON.stringify(clampNodeEditorPopupSize(size)));
+}
+
+function defaultNodeEditorPopupSize(): { width: number; height: number } {
+  return readStoredNodeEditorPopupSize() ?? clampNodeEditorPopupSize({ width: 1180, height: 820 });
+}
+
 export function NodeEditorPopup({ nodeID, nodeTitle, onClose }: {
   nodeID: string;
   nodeTitle: string;
   onClose: () => void;
 }) {
+  const [popupSize, setPopupSize] = useState(defaultNodeEditorPopupSize);
+  const popupSizeRef = useRef(popupSize);
+
+  useEffect(() => {
+    popupSizeRef.current = popupSize;
+  }, [popupSize]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
@@ -28,6 +104,43 @@ export function NodeEditorPopup({ nodeID, nodeTitle, onClose }: {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+    const onResize = () => setPopupSize((current) => clampNodeEditorPopupSize(current));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const startPopupResize = useCallback((event: React.PointerEvent<HTMLDivElement>, handle: NodeEditorPopupResizeHandle) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const ownerDocument = event.currentTarget.ownerDocument;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startSize = popupSizeRef.current;
+    const previousCursor = ownerDocument.body.style.cursor;
+    ownerDocument.body.style.cursor = handle.cursor;
+
+    const onPointerMove = (pointerEvent: PointerEvent) => {
+      const nextSize = clampNodeEditorPopupSize({
+        width: startSize.width + (pointerEvent.clientX - startX) * handle.horizontal,
+        height: startSize.height + (pointerEvent.clientY - startY) * handle.vertical,
+      });
+      popupSizeRef.current = nextSize;
+      setPopupSize(nextSize);
+    };
+    const finish = () => {
+      ownerDocument.body.style.cursor = previousCursor;
+      ownerDocument.removeEventListener("pointermove", onPointerMove);
+      ownerDocument.removeEventListener("pointerup", finish);
+      ownerDocument.removeEventListener("pointercancel", finish);
+      storeNodeEditorPopupSize(popupSizeRef.current);
+    };
+
+    ownerDocument.addEventListener("pointermove", onPointerMove);
+    ownerDocument.addEventListener("pointerup", finish);
+    ownerDocument.addEventListener("pointercancel", finish);
+  }, []);
 
   return (
     <div
@@ -41,10 +154,27 @@ export function NodeEditorPopup({ nodeID, nodeTitle, onClose }: {
         aria-modal="true"
         aria-label={`${nodeTitle} node editor`}
         data-frame-interactive="true"
-        style={nodeEditorPopupStyle}
+        style={{ ...nodeEditorPopupStyle, width: popupSize.width, height: popupSize.height }}
         onMouseDown={(event) => event.stopPropagation()}
         onTouchStart={(event) => event.stopPropagation()}
       >
+        {NODE_EDITOR_POPUP_RESIZE_HANDLES.map((handle) => (
+          <div
+            key={handle.key}
+            role="separator"
+            aria-label={`Resize node editor ${handle.key}`}
+            data-frame-interactive="true"
+            onPointerDown={(event) => startPopupResize(event, handle)}
+            style={{
+              position: "absolute",
+              zIndex: 9,
+              touchAction: "none",
+              cursor: handle.cursor,
+              background: "transparent",
+              ...handle.style,
+            }}
+          />
+        ))}
         <button
           type="button"
           title="Close node editor"
