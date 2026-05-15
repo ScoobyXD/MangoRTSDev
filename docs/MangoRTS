@@ -55,20 +55,71 @@ General changes:
 2. We seriously need to figure out proper caching + displaying updated info for all our pages and all node popups and stuff
 2. Its kind of hard to see the borders where you can resize things.
 
-PROBLEM:3. need to break up the apps again its creasting too many merge conflicts.
+
 LATER: need to do an audit on how well equiped the app is for multiple people using it from different accounts all at once.
 1. This thing is getting really, really slow, especially the part when I drag an email into a Logic Gate. That takes like almost a second! It should be literally 90% faster. 
 2. theres also a bug with the resizing on the my triage page when you first load into dev site. idk its really weird, and then it goes back to normal and works. who knows.
 
+===============
+notes:
+1. There is an argument that there is no need for Done section in R Inbox.
+	a. Because things just get piled up
+	b. So consciously, I'm using the art inbox as a list of things to do, whether it be pending or in progress. If I have something in the done section, subconsciously I still think of it as something that I have to do. 
+	
+	
+The #1 thing for customer service is having a dedicated logic gate called customer support and having customers put node tickets in there and some dev admin checks it out and fixes it. This is 100% nexessary. 
+Go live notes:
+Monday go live: 
 
-Editor changes
+Notes: scrolling past emails on my triage automatically puts into archive.
+
+My triage tab should be pending, then starred, archived, then all.
+
+Archive button on email list should be starred
+
+Shared triage thoughts notes check that out RACI matrix for shared inbox
+
+Group shared triages into folders
+
+Pasted images don’t maintain resolution
+
+Search on explorer should be like click up where searching literally changes the view of the explorer
+
+Can collapse logic gates and nodes into bottom tabs on bottom sidebar like on click up
+
+Logic gate arena we only show logic gate folders on the explorer. 
+
+Pinned nodes and pinned logic gates.
+
+Replace logic gate arena with Logic gates by function and logic gates by person should be its own section like logic gate arena.
+
+Idea where multiple people do group huddle on node with each their own textbox
+
+Be able to create node from any piece of text.
+
+
+======================
+
+
+
+ACI/R Inbox
+1. Make it possible to increase the cell height.
+2. On R Inbox in my nodes section, organize the nodes by logic gate. 
+
+Node Editor changes
 1. Outbound email when node is done.
 2. @ mentions summoning or notifying user.
+3. double clicking on text should send me to the highlighted text
+4. The control z still sucks ass
+5. screenshot copy and paste quality is bad
+6. i cant actually copy the images from the node text boxes.
+7.when i scroll down the + sign and attach email buttons bleed into the text box being scrolled up.
 
-11. Add a little section on the top of logic gate arena SOP of RACI
+
+
+
 4. RACI inboxes should be public view.
-	a. when place node in logic gate, it inherits those RACI matrix
-	b. RACI matrix assigned to the logic gate, not a node.
+
 6. when there is a state change, live show difference on the R and ACI inbox
 7. @ mentions, only if part of raci matrix.
 

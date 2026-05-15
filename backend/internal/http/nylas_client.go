@@ -246,6 +246,7 @@ type NylasMessageQuery struct {
 	Mailbox           string
 	CompanyID         string
 	Unread            *bool
+	Starred           *bool
 	Refresh           bool
 }
 
@@ -350,6 +351,9 @@ func (c *NylasRESTClient) ListMessages(ctx context.Context, grantID string, quer
 	}
 	if query.Unread != nil {
 		values.Set("unread", strconv.FormatBool(*query.Unread))
+	}
+	if query.Starred != nil {
+		values.Set("starred", strconv.FormatBool(*query.Starred))
 	}
 
 	var response struct {

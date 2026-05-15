@@ -63,7 +63,7 @@ import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGa
 import { AciInboxMatrix, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
-import { buildMyLogicGateGroups, cleanIDList, emailAddressListContains, filterExplorerRowsForSearch, formatAddressList, formatError, formatErrorCode, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeHasLogicGateRaciRole, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sortLogicGateShortcuts, sortNodesForInbox, sortSharedInboxes, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, cleanIDList, emailAddressListContains, filterExplorerRowsForSearch, formatAddressList, formatError, formatErrorCode, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeHasLogicGateRaciRole, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sortLogicGateShortcuts, sortNodesForInbox, sortSharedInboxes, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type WorkspaceStreamEnvelope } from "./homeTypes";
 export function HomePage({ me, onNavigate, embedded = false, hideNavigation = false, initialViewID = "my-triage" }: HomePageProps) {
@@ -132,6 +132,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const messageListRefreshTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<EmailMessage[]>([]);
   const locallyReadMessageIDsRef = useRef<Set<string>>(new Set());
+  const autoArchivingMessageIDsRef = useRef<Set<string>>(new Set());
   const mailboxRef = useRef<EmailMailbox>("primary");
   const nextPageTokenRef = useRef("");
   const searchQueryRef = useRef("");
@@ -702,6 +703,34 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     if (activeViewID === initialViewID) return;
     selectHomeView(initialViewID, mailboxForHomeView(initialViewID));
   }, [activeViewID, initialViewID, selectHomeView]);
+  const currentMessageListParams = useCallback(() => ({
+    limit: MESSAGE_BATCH_SIZE,
+    mailbox: mailboxRef.current,
+    companyID,
+    q: searchQueryRef.current,
+    unread: unreadOnlyRef.current ? true : undefined,
+  }), [companyID]);
+  const applyUpdatedMessageToCurrentView = useCallback((message: EmailMessage) => {
+    const params = currentMessageListParams();
+    const stillVisible = emailMessageMatchesListFilters(message, params);
+    setMessages((previous) => mergeEmailMessageIntoMessageList(previous, message, params));
+    if (selectedMessageIDRef.current === message.id) {
+      if (stillVisible) {
+        setSelectedMessage((current) => (current?.id === message.id ? { ...current, ...message } : message));
+      } else {
+        setSelectedMessageID("");
+        setSelectedMessage(null);
+      }
+    }
+    if (!stillVisible) {
+      setSelectedMessageIDs((previous) => {
+        if (!previous.has(message.id)) return previous;
+        const next = new Set(previous);
+        next.delete(message.id);
+        return next;
+      });
+    }
+  }, [currentMessageListParams]);
   const patchSelectedMessage = async (update: { unread?: boolean; starred?: boolean; folders?: string[] }) => {
     if (!selectedMessage) return;
     setBusy("message");
@@ -711,8 +740,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       if (update.unread === false) locallyReadMessageIDsRef.current.add(updated.id);
       if (update.unread === true) locallyReadMessageIDsRef.current.delete(updated.id);
       const normalized = update.unread === undefined ? updated : { ...updated, unread: update.unread };
-      setSelectedMessage(normalized);
-      setMessages((previous) => sortEmailMessagesByDateDescending(previous.map((message) => (message.id === normalized.id ? { ...message, ...normalized } : message))));
+      applyUpdatedMessageToCurrentView(normalized);
       if (update.folders) await loadMessages();
     } catch (updateError) {
       setError(formatError(updateError, "Failed to update message"));
@@ -720,6 +748,26 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setBusy("");
     }
   };
+  const toggleMessageStar = useCallback((message: EmailMessage) => {
+    const messageID = message.id.trim();
+    if (!messageID) return;
+    const nextStarred = !message.starred;
+    const optimistic = { ...message, starred: nextStarred };
+    applyUpdatedMessageToCurrentView(optimistic);
+    void updateEmailMessage(messageID, { starred: nextStarred })
+      .then((updated) => {
+        applyUpdatedMessageToCurrentView({ ...updated, starred: nextStarred });
+      })
+      .catch((starError) => {
+        invalidateEmailMessageCache(messageID);
+        if (isEmailAccessExpiredError(starError)) {
+          void handleEmailAccessExpired(starError);
+          return;
+        }
+        setError(formatError(starError, "Failed to update message star"));
+        scheduleMessageListRefresh();
+      });
+  }, [applyUpdatedMessageToCurrentView, handleEmailAccessExpired, scheduleMessageListRefresh]);
   const archiveMessages = useCallback(async (messageIDs: string[]) => {
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
@@ -760,7 +808,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setSelectedMessageIDs(new Set());
       setSelectionAnchorMessageID("");
       setMessageContextMenu(null);
-      setNotice(ids.length === 1 ? "Message moved to My Triage." : `${ids.length} messages moved to My Triage.`);
+      setNotice(ids.length === 1 ? "Message moved to Pending." : `${ids.length} messages moved to Pending.`);
       await loadMessages();
     } catch (unarchiveError) {
       setError(formatError(unarchiveError, ids.length === 1 ? "Failed to unarchive message" : "Failed to unarchive messages"));
@@ -768,18 +816,56 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setBusy("");
     }
   }, [loadMessages, selectedMessageID]);
+  const autoArchiveScrolledMessages = useCallback((messageIDs: string[]) => {
+    if (!status?.connected || activeViewIDRef.current !== "my-triage" || mailboxRef.current !== "primary") return;
+    const ids = cleanIDList(messageIDs).filter((id) => !autoArchivingMessageIDsRef.current.has(id));
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    ids.forEach((id) => autoArchivingMessageIDsRef.current.add(id));
+    setMessages((previous) => previous.filter((message) => !idSet.has(message.id)));
+    setSelectedMessageIDs((previous) => {
+      const next = new Set(Array.from(previous).filter((id) => !idSet.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+    setSelectionAnchorMessageID((current) => (idSet.has(current) ? "" : current));
+    if (selectedMessageIDRef.current && idSet.has(selectedMessageIDRef.current)) {
+      setSelectedMessageID("");
+      setSelectedMessage(null);
+    }
+    setMessageContextMenu((current) => current && current.messageIDs.some((id) => idSet.has(id)) ? null : current);
+    void Promise.allSettled(ids.map(archiveEmailMessage))
+      .then((results) => {
+        ids.forEach((id) => autoArchivingMessageIDsRef.current.delete(id));
+        const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+        if (!rejected) return;
+        if (isEmailAccessExpiredError(rejected.reason)) {
+          void handleEmailAccessExpired(rejected.reason);
+          return;
+        }
+        setError(formatError(rejected.reason, ids.length === 1 ? "Failed to archive scrolled message" : "Failed to archive scrolled messages"));
+        scheduleMessageListRefresh();
+      });
+  }, [handleEmailAccessExpired, scheduleMessageListRefresh, status?.connected]);
   const archiveSelected = async () => {
     if (!selectedMessage) return;
     if (mailboxRef.current === "archive") await unarchiveMessages([selectedMessage.id]);
     else await archiveMessages([selectedMessage.id]);
   };
-  const openArchives = useCallback(() => {
+  const openPendingMailbox = useCallback(() => {
+    setCompose(emptyCompose);
+    selectMailbox("primary");
+  }, [selectMailbox]);
+  const openStarredMailbox = useCallback(() => {
+    setCompose(emptyCompose);
+    selectMailbox("starred");
+  }, [selectMailbox]);
+  const openArchivedMailbox = useCallback(() => {
     setCompose(emptyCompose);
     selectMailbox("archive");
   }, [selectMailbox]);
-  const openMyTriageMailbox = useCallback(() => {
+  const openAllMailbox = useCallback(() => {
     setCompose(emptyCompose);
-    selectMailbox("primary");
+    selectMailbox("all");
   }, [selectMailbox]);
   const openNewCompose = () => {
     setCompose({ ...emptyCompose, open: true });
@@ -969,12 +1055,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     }
     return cleanIDList(ids);
   }, [messages, selectedMessageID, selectedMessageIDs]);
-  const archiveSelection = useCallback(() => {
-    void archiveMessages(getSelectedMessageIDsForAction());
-  }, [archiveMessages, getSelectedMessageIDsForAction]);
-  const unarchiveSelection = useCallback(() => {
-    void unarchiveMessages(getSelectedMessageIDsForAction());
-  }, [getSelectedMessageIDsForAction, unarchiveMessages]);
   const requestDeleteMessages = useCallback((messageIDs: string[]) => {
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
@@ -1168,8 +1248,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const activeViewLabel = getHomeViewLabel(activeViewID, sharedInboxes);
   const isArchivableListView = isArchivableHomeViewID(activeViewID);
   const isArchiveMailbox = isArchivableListView && mailbox === "archive";
-  const listViewLabel = isArchiveMailbox ? "All Archives" : activeViewLabel;
-  const returnMailboxLabel = activeViewID === "my-triage" || activeViewID === "primary" ? "My Triage" : activeViewLabel;
+  const listViewLabel = isArchivableListView ? mailboxLabel(mailbox) : activeViewLabel;
   const mailboxActionBusy = busy === "archive" || busy === "unarchive";
   const unreadMessageCount = messages.reduce((count, message) => count + (message.unread ? 1 : 0), 0);
   const mailFilterStatus = selectedMessageIDs.size > 1
@@ -1178,7 +1257,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const isAciInboxView = activeViewID === "aci-inbox";
   const isResponsibleInboxView = activeViewID === "r-inbox";
   const isInboxMatrixView = isAciInboxView || isResponsibleInboxView;
-  const selectedMessageActionCount = getSelectedMessageIDsForAction().length;
   const workspaceGridTemplateColumns = isNarrow
     ? "1fr"
     : hideNavigation
@@ -1319,46 +1397,43 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             loadingMoreMessages={loadingMoreMessages}
             mailFilterStatus={mailFilterStatus}
             mailbox={mailbox}
-            mailboxActionBusy={mailboxActionBusy}
             messageListRef={messageListRef}
             messages={messages}
             notice={notice}
-            returnMailboxLabel={returnMailboxLabel}
             searchDraft={searchDraft}
             selectedMessage={selectedMessage}
             selectedMessageID={selectedMessageID}
             selectedMessageIDs={selectedMessageIDs}
-            selectedMessageActionCount={selectedMessageActionCount}
             showDetailResizeHandle={!isNarrow}
             unreadOnly={unreadOnly}
             unreadMessageCount={unreadMessageCount}
-            onArchiveMessage={(messageID) => { void archiveMessages([messageID]); }}
             onArchiveSelected={archiveSelected}
-            onArchiveSelection={archiveSelection}
+            onAutoArchiveMessages={autoArchiveScrolledMessages}
             onCancelCompose={() => setCompose(emptyCompose)}
             onColumnResizeStart={startColumnResize}
             onComposeChange={setCompose}
             onDeleteSelected={deleteSelected}
             onDisconnect={disconnect}
             onLoadMoreMessages={() => { void loadMoreMessages(); }}
-            onOpenArchives={openArchives}
+            onOpenAllMailbox={openAllMailbox}
+            onOpenArchivedMailbox={openArchivedMailbox}
             onOpenContextMenu={openMessageContextMenu}
-            onOpenMyTriageMailbox={openMyTriageMailbox}
             onOpenNewCompose={openNewCompose}
+            onOpenPendingMailbox={openPendingMailbox}
             onOpenReply={openReply}
+            onOpenStarredMailbox={openStarredMailbox}
             onSearchDraftChange={setSearchDraft}
             onSelectMessage={selectMessageRow}
             onStartMessageDrag={startMessageDrag}
             onSubmitCompose={submitCompose}
             onSubmitSearch={submitSearch}
+            onToggleMessageStar={toggleMessageStar}
             onToggleRead={() => { if (selectedMessage) void patchSelectedMessage({ unread: !selectedMessage.unread }); }}
             onToggleStar={() => { if (selectedMessage) void patchSelectedMessage({ starred: !selectedMessage.starred }); }}
             onToggleUnreadOnly={(checked) => {
               setUnreadOnly(checked);
               setNextPageToken("");
             }}
-            onUnarchiveMessage={(messageID) => { void unarchiveMessages([messageID]); }}
-            onUnarchiveSelection={unarchiveSelection}
           />
           {!isNarrow && <HomeColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
           <LogicGateRail

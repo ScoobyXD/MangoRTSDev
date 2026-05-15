@@ -30,7 +30,7 @@ export const emptyCompose: ComposeState = {
 };
 
 export type MailboxOption = {
-  value: "primary" | "sent" | "all" | "archive";
+  value: "primary" | "sent" | "starred" | "all" | "archive";
   label: string;
 };
 

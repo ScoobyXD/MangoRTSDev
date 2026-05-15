@@ -909,7 +909,7 @@ export const searchButtonStyle: React.CSSProperties = {
 
 export const mailArchiveActionsStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
   gap: 6,
   alignItems: "center",
 };
@@ -1073,6 +1073,21 @@ export const triageMessageMetaStyle: React.CSSProperties = {
   gap: 6,
   minWidth: 58,
 };
+
+export function messageStarButtonStyle(active: boolean): React.CSSProperties {
+  return {
+    ...smallButtonStyle,
+    width: 28,
+    height: 28,
+    minHeight: 28,
+    padding: 0,
+    display: "grid",
+    placeItems: "center",
+    color: active ? "#b85f00" : "rgba(36, 18, 10, 0.45)",
+    background: active ? "#fff2d8" : "#ffffff",
+    borderColor: active ? "rgba(255, 136, 32, 0.62)" : "rgba(36, 18, 10, 0.16)",
+  };
+}
 
 export const messageArchiveButtonStyle: React.CSSProperties = {
   ...smallButtonStyle,

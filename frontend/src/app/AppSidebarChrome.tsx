@@ -33,7 +33,7 @@ export type SidebarPin = {
 type AppSidebarPrimaryPage = "map" | "home" | "logic-gate-arena";
 
 const HOME_NAV_ITEMS: Array<{ view: HomeSidebarView; label: string }> = [
-  { view: "my-triage", label: "My Triage" },
+  { view: "my-triage", label: "Pending" },
   { view: "shared-root", label: "Shared Triage" },
   { view: "aci-inbox", label: "ACI Inbox" },
   { view: "r-inbox", label: "R Inbox" },

@@ -762,6 +762,10 @@ func (s *Server) applyCommunicationsMailboxQuery(ctx context.Context, connection
 			return query, nil
 		}
 		return s.applySystemFolderMailbox(ctx, connection, query, "sent")
+	case "starred":
+		starred := true
+		query.Starred = &starred
+		return query, nil
 	case "archive":
 		if connection.Provider == "google" {
 			query.SearchQueryNative = gmailArchiveSearch(query.Query, query.Unread)
@@ -875,6 +879,8 @@ func normalizeCommunicationsMailbox(mailbox string) string {
 		return "primary"
 	case "sent", "sent_mail", "sent mail":
 		return "sent"
+	case "star", "starred":
+		return "starred"
 	case "archive", "archives", "archived":
 		return "archive"
 	case "all", "all_mail", "all mail":

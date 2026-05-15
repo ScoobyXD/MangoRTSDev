@@ -49,7 +49,7 @@ function logicGate(id: string, roles: LogicGateRecord["raci_assignments"]): Logi
 test("Home view helpers map labels and mailboxes without changing backend mailbox names", () => {
   const shared = [sharedInbox("shared-a", "Team Triage", 1000)];
 
-  assert.equal(getHomeViewLabel("my-triage", shared), "My Triage");
+  assert.equal(getHomeViewLabel("my-triage", shared), "Pending");
   assert.equal(getHomeViewLabel("shared:shared-a", shared), "Team Triage");
   assert.equal(getHomeViewLabel("shared:missing", shared), "Shared Triage");
   assert.equal(mailboxForHomeView("aci-inbox"), "all");

@@ -78,7 +78,7 @@ export function KanbanContextMenus({
             </button>
           )}
           <button type="button" style={contextMenuButtonStyle} onClick={() => onRevertCardsToMyTriage(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
-            Revert back to My Triage
+            Revert back to Pending
           </button>
           <button type="button" style={{ ...contextMenuButtonStyle, color: "#c62828" }} onClick={() => onRequestNodeDeleteFromCards(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
             Delete node

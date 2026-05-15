@@ -553,7 +553,7 @@ export function sortSharedInboxes(folders: CommunicationsSharedInbox[]): Communi
 
 export function getHomeViewLabel(viewID: HomeViewID, sharedInboxes: CommunicationsSharedInbox[]): string {
   if (viewID === "primary") return "Primary";
-  if (viewID === "my-triage") return "My Triage";
+  if (viewID === "my-triage") return "Pending";
   if (viewID === "shared-root") return "Shared Triage";
   if (viewID === "aci-inbox") return "ACI Inbox";
   if (viewID === "r-inbox") return "R Inbox";

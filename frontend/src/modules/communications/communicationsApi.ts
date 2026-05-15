@@ -69,7 +69,7 @@ export type ListMessagesParams = {
   refresh?: boolean;
 };
 
-export type EmailMailbox = "primary" | "sent" | "all" | "archive";
+export type EmailMailbox = "primary" | "sent" | "starred" | "all" | "archive";
 
 export type CommunicationsSharedInbox = {
   company_id: string;
@@ -1002,13 +1002,14 @@ function listMessageParamsFromCacheKey(path: string): ListMessagesParams {
 }
 
 function normalizeMailbox(value: string | undefined): EmailMailbox | undefined {
-  if (value === "primary" || value === "sent" || value === "all" || value === "archive") return value;
+  if (value === "primary" || value === "sent" || value === "starred" || value === "all" || value === "archive") return value;
   return undefined;
 }
 
 function messageMatchesMailbox(message: EmailMessage, mailbox: EmailMailbox): boolean {
   if (mailbox === "all") return true;
   if (mailbox === "sent") return messageHasAnyFolder(message, ["sent", "\\sent"]);
+  if (mailbox === "starred") return message.starred;
   if (mailbox === "archive") return messageIsArchived(message);
   if (messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"])) return false;
   return messageFolderTokens(message).length === 0 || messageHasAnyFolder(message, ["inbox", "\\inbox", "primary", "category:primary", "category:personal", "important", "\\important"]);

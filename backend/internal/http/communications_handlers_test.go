@@ -549,6 +549,42 @@ func TestCommunicationsArchiveMailboxUsesGmailNativeSearch(t *testing.T) {
 	}
 }
 
+func TestCommunicationsStarredMailboxAppliesStarredFilter(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=starred&q=invoice&unread=true", "", token, http.StatusOK)
+	if nylas.lastQuery.Starred == nil || !*nylas.lastQuery.Starred {
+		t.Fatalf("starred = %v, want true", nylas.lastQuery.Starred)
+	}
+	if nylas.lastQuery.Query != "invoice" || nylas.lastQuery.Unread == nil || !*nylas.lastQuery.Unread {
+		t.Fatalf("query = %+v, want normal query and unread filters preserved", nylas.lastQuery)
+	}
+}
+
 func TestCommunicationsArchiveMessageRemovesGmailInboxLabel(t *testing.T) {
 	t.Parallel()
 

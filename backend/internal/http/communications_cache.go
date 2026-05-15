@@ -231,6 +231,10 @@ func communicationsMessagePageCacheKey(userID string, query NylasMessageQuery) s
 	if query.Unread != nil {
 		unread = strconv.FormatBool(*query.Unread)
 	}
+	starred := ""
+	if query.Starred != nil {
+		starred = strconv.FormatBool(*query.Starred)
+	}
 	return strings.Join([]string{
 		userID,
 		strconv.Itoa(query.Limit),
@@ -240,6 +244,7 @@ func communicationsMessagePageCacheKey(userID string, query NylasMessageQuery) s
 		strings.TrimSpace(query.SearchQueryNative),
 		strings.TrimSpace(query.Mailbox),
 		unread,
+		starred,
 	}, communicationsCacheKeySeparator)
 }
 

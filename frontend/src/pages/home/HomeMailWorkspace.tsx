@@ -21,11 +21,11 @@ import {
   mailListToolbarStyle,
   mailPanelControlsStyle,
   mailPanelStyle,
-  messageArchiveButtonStyle,
   messageContextMenuStyle,
   messageListStyle,
   messageRowStyle,
   messageRowTopStyle,
+  messageStarButtonStyle,
   mutedSmallStyle,
   panelStyle,
   panelTitleStyle,
@@ -44,6 +44,31 @@ import {
   triageSubjectStyle,
 } from "./homeStyles";
 
+function collectScrolledOutMessageIDs(container: HTMLDivElement): string[] {
+  if (container.scrollTop <= 0) return [];
+  const containerTop = container.getBoundingClientRect().top;
+  const ids: string[] = [];
+  container.querySelectorAll<HTMLElement>("[data-home-mail-message-id]").forEach((row) => {
+    if (row.getBoundingClientRect().bottom > containerTop + 1) return;
+    const messageID = row.dataset.homeMailMessageId?.trim();
+    if (messageID) ids.push(messageID);
+  });
+  return ids;
+}
+
+function StarIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} style={{ display: "block" }}>
+      <path
+        d="M12 3.2l2.67 5.42 5.98.87-4.33 4.22 1.02 5.96L12 16.86l-5.35 2.81 1.02-5.96-4.33-4.22 5.98-.87L12 3.2z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function HomeMailWorkspace({
   activeViewID,
   accountEmail,
@@ -60,7 +85,6 @@ export function HomeMailWorkspace({
   loadingMoreMessages,
   mailFilterStatus,
   mailbox,
-  mailboxActionBusy,
   messageListRef,
   messages,
   notice,
@@ -68,35 +92,33 @@ export function HomeMailWorkspace({
   selectedMessage,
   selectedMessageID,
   selectedMessageIDs,
-  selectedMessageActionCount,
-  returnMailboxLabel,
   showDetailResizeHandle,
   unreadOnly,
   unreadMessageCount,
-  onArchiveMessage,
   onArchiveSelected,
-  onArchiveSelection,
+  onAutoArchiveMessages,
   onCancelCompose,
   onColumnResizeStart,
   onComposeChange,
   onDeleteSelected,
   onDisconnect,
   onLoadMoreMessages,
-  onOpenArchives,
+  onOpenAllMailbox,
+  onOpenArchivedMailbox,
   onOpenContextMenu,
-  onOpenMyTriageMailbox,
   onOpenNewCompose,
+  onOpenPendingMailbox,
   onOpenReply,
+  onOpenStarredMailbox,
   onSearchDraftChange,
   onSelectMessage,
   onStartMessageDrag,
   onSubmitCompose,
   onSubmitSearch,
+  onToggleMessageStar,
   onToggleRead,
   onToggleStar,
   onToggleUnreadOnly,
-  onUnarchiveMessage,
-  onUnarchiveSelection,
 }: {
   activeViewID: HomeViewID;
   accountEmail?: string;
@@ -113,7 +135,6 @@ export function HomeMailWorkspace({
   loadingMoreMessages: boolean;
   mailFilterStatus: string;
   mailbox: EmailMailbox;
-  mailboxActionBusy: boolean;
   messageListRef: React.RefObject<HTMLDivElement>;
   messages: EmailMessage[];
   notice: string;
@@ -121,35 +142,33 @@ export function HomeMailWorkspace({
   selectedMessage: EmailMessage | null;
   selectedMessageID: string;
   selectedMessageIDs: Set<string>;
-  selectedMessageActionCount: number;
-  returnMailboxLabel: string;
   showDetailResizeHandle: boolean;
   unreadOnly: boolean;
   unreadMessageCount: number;
-  onArchiveMessage: (messageID: string) => void;
   onArchiveSelected: () => void;
-  onArchiveSelection: () => void;
+  onAutoArchiveMessages: (messageIDs: string[]) => void;
   onCancelCompose: () => void;
   onColumnResizeStart: (dividerIndex: 0 | 1 | 2, event: React.PointerEvent<HTMLButtonElement>) => void;
   onComposeChange: React.Dispatch<React.SetStateAction<ComposeState>>;
   onDeleteSelected: () => void;
   onDisconnect: () => void;
   onLoadMoreMessages: () => void;
-  onOpenArchives: () => void;
+  onOpenAllMailbox: () => void;
+  onOpenArchivedMailbox: () => void;
   onOpenContextMenu: (message: EmailMessage, event: React.MouseEvent) => void;
-  onOpenMyTriageMailbox: () => void;
   onOpenNewCompose: () => void;
+  onOpenPendingMailbox: () => void;
   onOpenReply: () => void;
+  onOpenStarredMailbox: () => void;
   onSearchDraftChange: (value: string) => void;
   onSelectMessage: (message: EmailMessage, modifiers: MessageSelectionModifiers) => void;
   onStartMessageDrag: (message: EmailMessage, event: React.DragEvent<HTMLElement>) => void;
   onSubmitCompose: (event: React.FormEvent) => void;
   onSubmitSearch: (event: React.FormEvent) => void;
+  onToggleMessageStar: (message: EmailMessage) => void;
   onToggleRead: () => void;
   onToggleStar: () => void;
   onToggleUnreadOnly: (checked: boolean) => void;
-  onUnarchiveMessage: (messageID: string) => void;
-  onUnarchiveSelection: () => void;
 }) {
   return (
     <>
@@ -180,33 +199,39 @@ export function HomeMailWorkspace({
             <div style={mailArchiveActionsStyle}>
               <button
                 type="button"
-                style={mailArchiveActionButtonStyle(!isArchiveMailbox)}
+                style={mailArchiveActionButtonStyle(mailbox === "primary")}
                 onClick={() => {
-                  if (isArchiveMailbox) onOpenMyTriageMailbox();
+                  if (mailbox !== "primary") onOpenPendingMailbox();
                 }}
               >
-                {returnMailboxLabel}
+                Pending
               </button>
               <button
                 type="button"
-                style={mailArchiveActionButtonStyle(isArchiveMailbox)}
+                style={mailArchiveActionButtonStyle(mailbox === "starred")}
                 onClick={() => {
-                  if (!isArchiveMailbox) onOpenArchives();
+                  if (mailbox !== "starred") onOpenStarredMailbox();
                 }}
               >
-                All Archives
+                Starred
               </button>
               <button
                 type="button"
-                style={mailArchiveActionButtonStyle(false)}
-                disabled={mailboxActionBusy || selectedMessageActionCount === 0}
-                onClick={isArchiveMailbox ? onUnarchiveSelection : onArchiveSelection}
+                style={mailArchiveActionButtonStyle(mailbox === "archive")}
+                onClick={() => {
+                  if (mailbox !== "archive") onOpenArchivedMailbox();
+                }}
               >
-                {mailboxActionBusy
-                  ? isArchiveMailbox ? "Moving" : "Archiving"
-                  : selectedMessageActionCount > 1
-                    ? `${isArchiveMailbox ? "Unarchive" : "Archive"} ${selectedMessageActionCount}`
-                    : isArchiveMailbox ? "Unarchive" : "Archive"}
+                Archived
+              </button>
+              <button
+                type="button"
+                style={mailArchiveActionButtonStyle(mailbox === "all")}
+                onClick={() => {
+                  if (mailbox !== "all") onOpenAllMailbox();
+                }}
+              >
+                All
               </button>
             </div>
           )}
@@ -249,6 +274,10 @@ export function HomeMailWorkspace({
           style={messageListStyle}
           onScroll={(event) => {
             const target = event.currentTarget;
+            if ((activeViewID === "my-triage" || activeViewID === "primary") && mailbox === "primary") {
+              const scrolledOutIDs = collectScrolledOutMessageIDs(target);
+              if (scrolledOutIDs.length > 0) onAutoArchiveMessages(scrolledOutIDs);
+            }
             if (target.scrollHeight - target.scrollTop - target.clientHeight < 160) onLoadMoreMessages();
           }}
         >
@@ -256,10 +285,11 @@ export function HomeMailWorkspace({
             <div style={emptyStateStyle}>{isArchiveMailbox ? "No archived messages" : "No messages"}</div>
           ) : messages.map((message) => {
             const active = selectedMessageIDs.has(message.id) || selectedMessageID === message.id;
-            const draggable = activeViewID === "my-triage" && !isArchiveMailbox;
+            const draggable = activeViewID === "my-triage" && mailbox === "primary";
             return (
               <div
                 key={message.id}
+                data-home-mail-message-id={message.id}
                 role="button"
                 tabIndex={0}
                 style={isArchivableListView
@@ -288,15 +318,17 @@ export function HomeMailWorkspace({
                       <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
                       <button
                         type="button"
-                        style={messageArchiveButtonStyle}
-                        disabled={mailboxActionBusy}
+                        aria-label={message.starred ? "Remove star" : "Star message"}
+                        title={message.starred ? "Remove star" : "Star message"}
+                        draggable={false}
+                        style={messageStarButtonStyle(message.starred)}
+                        disabled={busy === "message"}
                         onClick={(event) => {
                           event.stopPropagation();
-                          if (isArchiveMailbox) onUnarchiveMessage(message.id);
-                          else onArchiveMessage(message.id);
+                          onToggleMessageStar(message);
                         }}
                       >
-                        {isArchiveMailbox ? "Unarchive" : "Archive"}
+                        <StarIcon filled={message.starred} />
                       </button>
                     </span>
                   </>

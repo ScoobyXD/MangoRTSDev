@@ -2,10 +2,11 @@ import type { EmailMailbox } from "../../modules/communications/communicationsAp
 import type { MailboxOption, AciInboxRole, ResponsibleInboxStatus, InboxPriority, HomeColumnWidths } from "./homeTypes.js";
 
 export const MAILBOX_OPTIONS: MailboxOption[] = [
-  { value: "primary", label: "My Triage" },
+  { value: "primary", label: "Pending" },
+  { value: "starred", label: "Starred" },
   { value: "sent", label: "Sent mail" },
-  { value: "all", label: "All mail" },
-  { value: "archive", label: "Archives" },
+  { value: "archive", label: "Archived" },
+  { value: "all", label: "All" },
 ];
 
 export const MESSAGE_BATCH_SIZE = 15;

@@ -1100,7 +1100,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       }
       invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
     } catch {
-      setError("Only cards created from My Triage can be reverted.");
+      setError("Only cards created from Pending can be reverted.");
       setCards(previousCards);
     }
   }, [apiBase, boardID, cards, companyID, requestJSON]);
