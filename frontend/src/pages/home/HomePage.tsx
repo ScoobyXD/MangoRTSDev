@@ -9,6 +9,7 @@ import {
   createCommunicationsSharedInbox,
   addMyLogicGateShortcuts,
   convertTriageMessagesToLogicGate,
+  deleteCommunicationsSharedInbox,
   deleteEmailMessage,
   disconnectCommunications,
   emailMessageMatchesListFilters,
@@ -32,6 +33,7 @@ import {
   sortEmailMessagesByDateDescending,
   unarchiveEmailMessage,
   updateEmailMessage,
+  updateCommunicationsSharedInbox,
   type CommunicationsSharedInbox,
   type EmailFolder,
   type EmailMailbox,
@@ -63,7 +65,7 @@ import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGa
 import { AciInboxMatrix, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
-import { buildMyLogicGateGroups, cleanIDList, emailAddressListContains, filterExplorerRowsForSearch, formatAddressList, formatError, formatErrorCode, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeHasLogicGateRaciRole, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sortLogicGateShortcuts, sortNodesForInbox, sortSharedInboxes, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, cleanIDList, collectSharedInboxSubtreeIDs, emailAddressListContains, filterExplorerRowsForSearch, formatAddressList, formatError, formatErrorCode, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeHasLogicGateRaciRole, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sortLogicGateShortcuts, sortNodesForInbox, sortSharedInboxes, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type WorkspaceStreamEnvelope } from "./homeTypes";
 export function HomePage({ me, onNavigate, embedded = false, hideNavigation = false, initialViewID = "my-triage" }: HomePageProps) {
@@ -920,23 +922,86 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setBusy("");
     }
   };
-  const submitSharedInbox = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const name = newSharedInboxName.trim();
-    if (!name) return;
-    const parentFolderID = activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length) : "";
+  const createSharedInboxFolder = useCallback(async (parentFolderID: string, rawName = "New Folder"): Promise<CommunicationsSharedInbox | null> => {
+    const name = rawName.trim();
+    if (!name) return null;
     setBusy("shared-inbox");
     setError("");
+    setNotice("");
     try {
       const folder = await createCommunicationsSharedInbox({ companyID, name, parentFolderID });
-      setSharedInboxes((previous) => sortSharedInboxes([...previous, folder]));
-      setNewSharedInboxName("");
+      setSharedInboxes((previous) => sortSharedInboxes([
+        ...previous.filter((item) => item.folder_id !== folder.folder_id),
+        folder,
+      ]));
       setActiveViewID(`shared:${folder.folder_id}`);
+      selectMailbox("primary");
+      return folder;
     } catch (sharedInboxError) {
       setError(formatError(sharedInboxError, "Failed to create Shared Triage"));
+      return null;
     } finally {
       setBusy("");
     }
+  }, [companyID, selectMailbox]);
+
+  const renameSharedInboxFolder = useCallback(async (folderID: string, name: string): Promise<void> => {
+    const cleanName = name.trim();
+    if (!folderID.trim() || !cleanName) return;
+    setBusy("shared-inbox");
+    setError("");
+    setNotice("");
+    try {
+      const folder = await updateCommunicationsSharedInbox({ companyID, folderID, name: cleanName });
+      setSharedInboxes((previous) => sortSharedInboxes(previous.map((item) => item.folder_id === folder.folder_id ? folder : item)));
+    } catch (sharedInboxError) {
+      setError(formatError(sharedInboxError, "Failed to rename Shared Triage folder"));
+    } finally {
+      setBusy("");
+    }
+  }, [companyID]);
+
+  const moveSharedInboxFolder = useCallback(async (folderID: string, parentFolderID: string, position: number): Promise<void> => {
+    if (!folderID.trim()) return;
+    setBusy("shared-inbox");
+    setError("");
+    setNotice("");
+    try {
+      const folder = await updateCommunicationsSharedInbox({ companyID, folderID, parentFolderID, position });
+      setSharedInboxes((previous) => sortSharedInboxes(previous.map((item) => item.folder_id === folder.folder_id ? folder : item)));
+    } catch (sharedInboxError) {
+      setError(formatError(sharedInboxError, "Failed to move Shared Triage folder"));
+    } finally {
+      setBusy("");
+    }
+  }, [companyID]);
+
+  const deleteSharedInboxFolder = useCallback(async (folderID: string): Promise<void> => {
+    const cleanFolderID = folderID.trim();
+    if (!cleanFolderID) return;
+    const deletedIDs = collectSharedInboxSubtreeIDs(sharedInboxes, cleanFolderID);
+    if (deletedIDs.size === 0) deletedIDs.add(cleanFolderID);
+    setBusy("shared-inbox");
+    setError("");
+    setNotice("");
+    try {
+      await deleteCommunicationsSharedInbox(companyID, cleanFolderID);
+      setSharedInboxes((previous) => previous.filter((folder) => !deletedIDs.has(folder.folder_id)));
+      const currentView = activeViewIDRef.current;
+      const activeFolderID = currentView.startsWith("shared:") ? currentView.slice("shared:".length) : "";
+      if (activeFolderID && deletedIDs.has(activeFolderID)) setActiveViewID("shared-root");
+    } catch (sharedInboxError) {
+      setError(formatError(sharedInboxError, "Failed to delete Shared Triage folder"));
+    } finally {
+      setBusy("");
+    }
+  }, [companyID, sharedInboxes]);
+
+  const submitSharedInbox = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const parentFolderID = activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length) : "";
+    const folder = await createSharedInboxFolder(parentFolderID, newSharedInboxName);
+    if (folder) setNewSharedInboxName("");
   };
   const nodeByID = useMemo(() => new Map(nodes.map((node) => [node.node_id, node])), [nodes]);
   const allNodeRows = useMemo(() => buildCompanyExplorerTreeRows({
@@ -1323,6 +1388,10 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
               onSelectView={selectHomeView}
               onNewSharedInboxNameChange={setNewSharedInboxName}
               onSubmitSharedInbox={submitSharedInbox}
+              onCreateSharedInbox={createSharedInboxFolder}
+              onRenameSharedInbox={renameSharedInboxFolder}
+              onMoveSharedInbox={moveSharedInboxFolder}
+              onDeleteSharedInbox={deleteSharedInboxFolder}
             />
           )}
           {isInboxMatrixView ? (

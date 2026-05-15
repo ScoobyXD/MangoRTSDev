@@ -346,6 +346,38 @@ export async function createCommunicationsSharedInbox(input: {
   return cloneSharedInbox(folder);
 }
 
+export async function updateCommunicationsSharedInbox(input: {
+  companyID: string;
+  folderID: string;
+  name?: string;
+  parentFolderID?: string;
+  position?: number;
+}): Promise<CommunicationsSharedInbox> {
+  const cleanCompanyID = input.companyID.trim();
+  const cleanFolderID = input.folderID.trim();
+  const body: Record<string, unknown> = { company_id: cleanCompanyID };
+  if (input.name !== undefined) body.name = input.name.trim();
+  if (Object.prototype.hasOwnProperty.call(input, "parentFolderID")) {
+    body.parent_folder_id = input.parentFolderID?.trim() ?? "";
+  }
+  if (input.position !== undefined && input.position > 0) body.position = Math.round(input.position);
+  const folder = await apiFetchJSON<CommunicationsSharedInbox>(`/v1/company-explorer/folders/${encodeURIComponent(cleanFolderID)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+  invalidateCacheKey(`shared-inboxes:${cleanCompanyID}`);
+  return cloneSharedInbox(folder);
+}
+
+export async function deleteCommunicationsSharedInbox(companyID: string, folderID: string): Promise<void> {
+  const cleanCompanyID = companyID.trim();
+  const cleanFolderID = folderID.trim();
+  await apiFetchJSON<{ status?: string }>(`/v1/company-explorer/folders/${encodeURIComponent(cleanFolderID)}?company_id=${encodeURIComponent(cleanCompanyID)}`, {
+    method: "DELETE",
+  });
+  invalidateCacheKey(`shared-inboxes:${cleanCompanyID}`);
+}
+
 export async function listCommunicationsTriageItems(): Promise<CommunicationsTriageItem[]> {
   const payload = await apiFetchJSON<{ items?: CommunicationsTriageItem[] }>("/v1/communications/triage");
   return (payload.items ?? []).map(cloneTriageItem);

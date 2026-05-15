@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import FrameRightClickMenu from "../../app/framerightclickmenu";
 import type { CommunicationsSharedInbox, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
@@ -9,8 +10,10 @@ import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/compan
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { ACI_COLUMNS, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeState, HomeViewID, InboxLogicGateNodeGroup } from "./homeTypes";
-import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, formatAddressList, hasExplorerDrag, hasTriageMessageDrag, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusLetter, setLogicGateDragData, setNodeDragData } from "./homeUtils";
-import { allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
+import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusLetter, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
+import { allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
+
+const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 export function NodeEditorPopup({ nodeID, nodeTitle, onClose }: {
   nodeID: string;
   nodeTitle: string;
@@ -76,6 +79,18 @@ export function HomeNavButton({ label, active, depth = 0, onClick }: {
   );
 }
 
+function readSharedTriageFolderDrag(dataTransfer: DataTransfer): string {
+  return dataTransfer.getData(SHARED_TRIAGE_FOLDER_DRAG_MIME).trim();
+}
+
+function getSharedTriageDropPlacement(event: React.DragEvent<HTMLElement>): SharedInboxDropPlacement {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const y = event.clientY - rect.top;
+  if (y < rect.height * 0.25) return "before";
+  if (y > rect.height * 0.75) return "after";
+  return "inside";
+}
+
 export function HomeSidebar({
   activeViewID,
   sharedInboxes,
@@ -85,6 +100,10 @@ export function HomeSidebar({
   onSelectView,
   onNewSharedInboxNameChange,
   onSubmitSharedInbox,
+  onCreateSharedInbox,
+  onRenameSharedInbox,
+  onMoveSharedInbox,
+  onDeleteSharedInbox,
 }: {
   activeViewID: HomeViewID;
   sharedInboxes: CommunicationsSharedInbox[];
@@ -94,31 +113,314 @@ export function HomeSidebar({
   onSelectView: (viewID: HomeViewID, mailbox?: EmailMailbox) => void;
   onNewSharedInboxNameChange: (value: string) => void;
   onSubmitSharedInbox: (event: React.FormEvent<HTMLFormElement>) => void;
+  onCreateSharedInbox: (parentFolderID: string, name?: string) => Promise<CommunicationsSharedInbox | null>;
+  onRenameSharedInbox: (folderID: string, name: string) => Promise<void>;
+  onMoveSharedInbox: (folderID: string, parentFolderID: string, position: number) => Promise<void>;
+  onDeleteSharedInbox: (folderID: string) => Promise<void>;
 }) {
+  const [sharedRootOpen, setSharedRootOpen] = useState(true);
+  const [expandedSharedFolderIDs, setExpandedSharedFolderIDs] = useState<Set<string>>(new Set());
+  const [renamingSharedFolderID, setRenamingSharedFolderID] = useState("");
+  const [renameDraft, setRenameDraft] = useState("");
+  const [draggingSharedFolderID, setDraggingSharedFolderID] = useState("");
+  const [dropTarget, setDropTarget] = useState<{ folderID: string; placement: SharedInboxDropPlacement } | null>(null);
+  const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const skipRenameBlurRef = useRef(false);
+  const sharedRows = useMemo(() => sharedRootOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [], [expandedSharedFolderIDs, sharedInboxes, sharedRootOpen]);
+  const sharedBusy = busy === "shared-inbox";
+
+  useEffect(() => {
+    setExpandedSharedFolderIDs((previous) => {
+      if (previous.size > 0 || sharedInboxes.length === 0) return previous;
+      return new Set(sharedInboxes.filter((folder) => !folder.parent_folder_id).map((folder) => folder.folder_id));
+    });
+  }, [sharedInboxes]);
+
+  useEffect(() => {
+    const activeFolderID = activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length) : "";
+    if (!activeFolderID) return;
+    setSharedRootOpen(true);
+    setExpandedSharedFolderIDs((previous) => {
+      const next = new Set(previous);
+      let current = sharedInboxes.find((folder) => folder.folder_id === activeFolderID);
+      let changed = false;
+      const seen = new Set<string>();
+      while (current?.parent_folder_id && !seen.has(current.parent_folder_id)) {
+        seen.add(current.parent_folder_id);
+        if (!next.has(current.parent_folder_id)) {
+          next.add(current.parent_folder_id);
+          changed = true;
+        }
+        current = sharedInboxes.find((folder) => folder.folder_id === current?.parent_folder_id);
+      }
+      return changed ? next : previous;
+    });
+  }, [activeViewID, sharedInboxes]);
+
+  useEffect(() => {
+    if (!renamingSharedFolderID) return;
+    window.setTimeout(() => {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }, 0);
+  }, [renamingSharedFolderID]);
+
+  const toggleSharedFolder = useCallback((folderID: string) => {
+    setExpandedSharedFolderIDs((previous) => {
+      const next = new Set(previous);
+      if (next.has(folderID)) next.delete(folderID);
+      else next.add(folderID);
+      return next;
+    });
+  }, []);
+
+  const startSharedRename = useCallback((folder: CommunicationsSharedInbox) => {
+    setSharedContextMenu(null);
+    skipRenameBlurRef.current = false;
+    setRenamingSharedFolderID(folder.folder_id);
+    setRenameDraft(folder.name);
+  }, []);
+
+  const commitSharedRename = useCallback(async () => {
+    const folderID = renamingSharedFolderID.trim();
+    const name = renameDraft.trim();
+    if (!folderID) return;
+    const current = sharedInboxes.find((folder) => folder.folder_id === folderID);
+    setRenamingSharedFolderID("");
+    setRenameDraft("");
+    if (!name || name === current?.name) return;
+    await onRenameSharedInbox(folderID, name);
+  }, [onRenameSharedInbox, renameDraft, renamingSharedFolderID, sharedInboxes]);
+
+  const createSharedFolder = useCallback(async (parentFolderID: string) => {
+    setSharedContextMenu(null);
+    const folder = await onCreateSharedInbox(parentFolderID, "New Folder");
+    if (!folder) return;
+    if (parentFolderID) {
+      setExpandedSharedFolderIDs((previous) => new Set(previous).add(parentFolderID));
+    }
+    setSharedRootOpen(true);
+    setRenamingSharedFolderID(folder.folder_id);
+    setRenameDraft(folder.name);
+  }, [onCreateSharedInbox]);
+
+  const requestDeleteSharedFolder = useCallback(async (folder: CommunicationsSharedInbox) => {
+    setSharedContextMenu(null);
+    const count = collectSharedInboxSubtreeIDs(sharedInboxes, folder.folder_id).size || 1;
+    const label = folder.name.trim() || "this folder";
+    const detail = count === 1 ? "this folder" : `this folder and ${count - 1} child folder${count === 2 ? "" : "s"}`;
+    if (!window.confirm(`Delete ${detail}: ${label}?`)) return;
+    await onDeleteSharedInbox(folder.folder_id);
+  }, [onDeleteSharedInbox, sharedInboxes]);
+
+  const openSharedContextMenu = useCallback((event: React.MouseEvent, folder: CommunicationsSharedInbox | null) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSharedContextMenu({ x: event.clientX, y: event.clientY, folder });
+  }, []);
+
+  const canDropSharedFolder = useCallback((sourceFolderID: string, targetFolderID: string) => {
+    if (!sourceFolderID || sourceFolderID === targetFolderID) return false;
+    if (targetFolderID && isSharedInboxFolderDescendant(sharedInboxes, sourceFolderID, targetFolderID)) return false;
+    return sharedInboxes.some((folder) => folder.folder_id === sourceFolderID);
+  }, [sharedInboxes]);
+
+  const moveSharedFolder = useCallback(async (sourceFolderID: string, targetFolderID: string, placement: SharedInboxDropPlacement) => {
+    if (!canDropSharedFolder(sourceFolderID, targetFolderID)) return;
+    let parentFolderID = "";
+    let position = getSharedInboxChildPosition(sharedInboxes, "", sourceFolderID);
+    if (targetFolderID) {
+      const target = sharedInboxes.find((folder) => folder.folder_id === targetFolderID);
+      if (!target) return;
+      if (placement === "inside") {
+        parentFolderID = target.folder_id;
+        position = getSharedInboxChildPosition(sharedInboxes, target.folder_id, sourceFolderID);
+        setExpandedSharedFolderIDs((previous) => new Set(previous).add(target.folder_id));
+      } else {
+        parentFolderID = target.parent_folder_id ?? "";
+        position = getSharedInboxSiblingPosition(sharedInboxes, sourceFolderID, target.folder_id, placement);
+      }
+    }
+    setDropTarget(null);
+    await onMoveSharedInbox(sourceFolderID, parentFolderID, position);
+  }, [canDropSharedFolder, onMoveSharedInbox, sharedInboxes]);
+
+  const handleRootDragOver = useCallback((event: React.DragEvent<HTMLElement>) => {
+    const sourceFolderID = readSharedTriageFolderDrag(event.dataTransfer) || draggingSharedFolderID;
+    if (!canDropSharedFolder(sourceFolderID, "")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropTarget({ folderID: "", placement: "inside" });
+  }, [canDropSharedFolder, draggingSharedFolderID]);
+
+  const handleRootDrop = useCallback((event: React.DragEvent<HTMLElement>) => {
+    const sourceFolderID = readSharedTriageFolderDrag(event.dataTransfer) || draggingSharedFolderID;
+    if (!canDropSharedFolder(sourceFolderID, "")) return;
+    event.preventDefault();
+    void moveSharedFolder(sourceFolderID, "", "inside");
+  }, [canDropSharedFolder, draggingSharedFolderID, moveSharedFolder]);
+
+  const renderSharedRow = (row: SharedInboxTreeRow) => {
+    const folder = row.folder;
+    const isRenaming = renamingSharedFolderID === folder.folder_id;
+    const active = activeViewID === row.treeID;
+    const rowDropPlacement = dropTarget?.folderID === folder.folder_id ? dropTarget.placement : null;
+    return (
+      <div
+        key={folder.folder_id}
+        role="button"
+        tabIndex={0}
+        draggable={!isRenaming && !sharedBusy}
+        style={sharedInboxFolderRowStyle(row.depth, active, rowDropPlacement)}
+        onClick={() => onSelectView(row.treeID, "primary")}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+          event.preventDefault();
+          onSelectView(row.treeID, "primary");
+        }}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          startSharedRename(folder);
+        }}
+        onContextMenu={(event) => openSharedContextMenu(event, folder)}
+        onDragStart={(event) => {
+          if (sharedBusy) {
+            event.preventDefault();
+            return;
+          }
+          setDraggingSharedFolderID(folder.folder_id);
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData(SHARED_TRIAGE_FOLDER_DRAG_MIME, folder.folder_id);
+          event.dataTransfer.setData("text/plain", folder.name);
+        }}
+        onDragOver={(event) => {
+          const sourceFolderID = readSharedTriageFolderDrag(event.dataTransfer) || draggingSharedFolderID;
+          const placement = getSharedTriageDropPlacement(event);
+          if (!canDropSharedFolder(sourceFolderID, folder.folder_id)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setDropTarget({ folderID: folder.folder_id, placement });
+        }}
+        onDragLeave={() => {
+          setDropTarget((current) => current?.folderID === folder.folder_id ? null : current);
+        }}
+        onDrop={(event) => {
+          const sourceFolderID = readSharedTriageFolderDrag(event.dataTransfer) || draggingSharedFolderID;
+          const placement = dropTarget?.folderID === folder.folder_id ? dropTarget.placement : getSharedTriageDropPlacement(event);
+          if (!canDropSharedFolder(sourceFolderID, folder.folder_id)) return;
+          event.preventDefault();
+          void moveSharedFolder(sourceFolderID, folder.folder_id, placement);
+        }}
+        onDragEnd={() => {
+          setDraggingSharedFolderID("");
+          setDropTarget(null);
+        }}
+      >
+        {row.hasChildren ? (
+          <button
+            type="button"
+            title={expandedSharedFolderIDs.has(folder.folder_id) ? "Collapse folder" : "Expand folder"}
+            draggable={false}
+            style={sharedInboxDisclosureButtonStyle}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleSharedFolder(folder.folder_id);
+            }}
+          >
+            <ExplorerDisclosureIcon open={expandedSharedFolderIDs.has(folder.folder_id)} color="rgba(36, 18, 10, 0.62)" />
+          </button>
+        ) : (
+          <span style={{ width: 18, height: 20 }} />
+        )}
+        <ExplorerRowIcon kind="folder" />
+        {isRenaming ? (
+          <input
+            ref={renameInputRef}
+            style={sharedInboxRenameInputStyle}
+            value={renameDraft}
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onChange={(event) => setRenameDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.stopPropagation();
+                void commitSharedRename();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                skipRenameBlurRef.current = true;
+                setRenamingSharedFolderID("");
+                setRenameDraft("");
+              }
+            }}
+            onBlur={() => {
+              if (skipRenameBlurRef.current) {
+                skipRenameBlurRef.current = false;
+                return;
+              }
+              void commitSharedRename();
+            }}
+          />
+        ) : (
+          <span style={navLabelStyle}>{folder.name}</span>
+        )}
+      </div>
+    );
+  };
+
   return (
     <aside style={sidebarStyle}>
       <nav style={sidebarNavStyle} aria-label="Home triage">
         <HomeNavButton label="Pending" active={activeViewID === "my-triage" || activeViewID === "primary"} onClick={() => onSelectView("my-triage", "primary")} />
         <section style={sidebarSectionStyle}>
-          <button
-            type="button"
-            style={navButtonStyle(activeViewID === "shared-root")}
-            onClick={() => onSelectView("shared-root", "primary")}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) 24px",
+              gap: 0,
+              minWidth: 0,
+              borderRadius: 6,
+              boxShadow: dropTarget?.folderID === "" ? "inset 0 0 0 2px rgba(255, 136, 32, 0.35)" : undefined,
+            }}
+            onContextMenu={(event) => openSharedContextMenu(event, null)}
+            onDragOver={handleRootDragOver}
+            onDragLeave={() => setDropTarget((current) => current?.folderID === "" ? null : current)}
+            onDrop={handleRootDrop}
           >
-            <span style={navLabelStyle}>Shared Triage</span>
-            {loadingSharedInboxes && <span style={navMetaStyle}>Loading</span>}
-          </button>
-          <div style={sharedInboxRowsStyle}>
-            {buildSharedInboxRows(sharedInboxes).map((row) => (
-              <HomeNavButton
-                key={row.folder.folder_id}
-                label={row.folder.name}
-                depth={row.depth}
-                active={activeViewID === `shared:${row.folder.folder_id}`}
-                onClick={() => onSelectView(`shared:${row.folder.folder_id}`, "primary")}
-              />
-            ))}
+            <button
+              type="button"
+              style={{
+                ...navButtonStyle(activeViewID === "shared-root" || activeViewID.startsWith("shared:")),
+                minHeight: 30,
+                paddingLeft: 8,
+              }}
+              onClick={() => onSelectView("shared-root", "primary")}
+            >
+              <span style={navLabelStyle}>Shared Triage</span>
+              {loadingSharedInboxes && <span style={navMetaStyle}>Loading</span>}
+            </button>
+            <button
+              type="button"
+              title={sharedRootOpen ? "Collapse Shared Triage folders" : "Expand Shared Triage folders"}
+              aria-label={sharedRootOpen ? "Collapse Shared Triage folders" : "Expand Shared Triage folders"}
+              style={sharedInboxDisclosureButtonStyle}
+              onClick={(event) => {
+                event.stopPropagation();
+                setSharedRootOpen((open) => !open);
+              }}
+            >
+              <ExplorerDisclosureIcon open={sharedRootOpen} color="rgba(36, 18, 10, 0.62)" />
+            </button>
           </div>
+          {sharedRootOpen && (
+            <div style={sharedInboxRowsStyle}>
+              {sharedRows.map(renderSharedRow)}
+            </div>
+          )}
           <form style={sharedInboxCreateStyle} onSubmit={onSubmitSharedInbox}>
             <input
               style={sharedInboxInputStyle}
@@ -134,6 +436,37 @@ export function HomeSidebar({
         <HomeNavButton label="My Nodes" active={activeViewID === "my-nodes"} onClick={() => onSelectView("my-nodes", "all")} />
         <HomeNavButton label="My Logic Gates" active={activeViewID === "my-logic-gates"} onClick={() => onSelectView("my-logic-gates", "all")} />
       </nav>
+      {sharedContextMenu && (
+        <FrameRightClickMenu x={sharedContextMenu.x} y={sharedContextMenu.y} onClose={() => setSharedContextMenu(null)}>
+          <button
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            disabled={sharedBusy}
+            onClick={() => void createSharedFolder(sharedContextMenu.folder?.folder_id ?? "")}
+          >
+            {sharedContextMenu.folder ? "New Child Folder" : "New Folder"}
+          </button>
+          {sharedContextMenu.folder && (
+            <>
+              <button
+                type="button"
+                style={sharedInboxContextMenuButtonStyle}
+                onClick={() => startSharedRename(sharedContextMenu.folder!)}
+              >
+                Rename
+              </button>
+              <button
+                type="button"
+                style={{ ...sharedInboxContextMenuButtonStyle, color: "#8b123f" }}
+                disabled={sharedBusy}
+                onClick={() => void requestDeleteSharedFolder(sharedContextMenu.folder!)}
+              >
+                Delete
+              </button>
+            </>
+          )}
+        </FrameRightClickMenu>
+      )}
     </aside>
   );
 }

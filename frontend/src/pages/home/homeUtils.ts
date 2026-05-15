@@ -527,19 +527,42 @@ export function filterExplorerRowsForSearch(rows: ExplorerTreeNode[], rawQuery: 
   return rows.filter((row) => included.has(row.id));
 }
 
-export function buildSharedInboxRows(folders: CommunicationsSharedInbox[]): Array<{ folder: CommunicationsSharedInbox; depth: number }> {
+export type SharedInboxDropPlacement = "before" | "after" | "inside";
+
+export type SharedInboxTreeRow = {
+  folder: CommunicationsSharedInbox;
+  depth: number;
+  treeID: HomeViewID;
+  hasChildren: boolean;
+};
+
+const SHARED_INBOX_POSITION_STEP = 1000;
+
+export function sharedInboxTreeID(folderID: string): HomeViewID {
+  return `shared:${folderID.trim()}`;
+}
+
+export function buildSharedInboxRows(folders: CommunicationsSharedInbox[], expandedFolderIDs?: Set<string>): SharedInboxTreeRow[] {
   const byParent = new Map<string, CommunicationsSharedInbox[]>();
+  const childCounts = new Map<string, number>();
   for (const folder of sortSharedInboxes(folders)) {
     const key = folder.parent_folder_id ?? "";
     const bucket = byParent.get(key) ?? [];
     bucket.push(folder);
     byParent.set(key, bucket);
+    if (key) childCounts.set(key, (childCounts.get(key) ?? 0) + 1);
   }
-  const rows: Array<{ folder: CommunicationsSharedInbox; depth: number }> = [];
+  const rows: SharedInboxTreeRow[] = [];
   const visit = (parentID: string, depth: number, seen: Set<string>) => {
     for (const folder of byParent.get(parentID) ?? []) {
       if (seen.has(folder.folder_id)) continue;
-      rows.push({ folder, depth });
+      rows.push({
+        folder,
+        depth,
+        treeID: sharedInboxTreeID(folder.folder_id),
+        hasChildren: (childCounts.get(folder.folder_id) ?? 0) > 0,
+      });
+      if (expandedFolderIDs && !expandedFolderIDs.has(folder.folder_id)) continue;
       visit(folder.folder_id, depth + 1, new Set([...seen, folder.folder_id]));
     }
   };
@@ -549,6 +572,61 @@ export function buildSharedInboxRows(folders: CommunicationsSharedInbox[]): Arra
 
 export function sortSharedInboxes(folders: CommunicationsSharedInbox[]): CommunicationsSharedInbox[] {
   return [...folders].sort((a, b) => a.position - b.position || a.name.localeCompare(b.name) || a.folder_id.localeCompare(b.folder_id));
+}
+
+export function collectSharedInboxSubtreeIDs(folders: CommunicationsSharedInbox[], rootFolderID: string): Set<string> {
+  const ids = new Set<string>();
+  const cleanRootID = rootFolderID.trim();
+  if (!cleanRootID || !folders.some((folder) => folder.folder_id === cleanRootID)) return ids;
+  ids.add(cleanRootID);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of folders) {
+      const parentID = folder.parent_folder_id?.trim() ?? "";
+      if (!parentID || !ids.has(parentID) || ids.has(folder.folder_id)) continue;
+      ids.add(folder.folder_id);
+      changed = true;
+    }
+  }
+  return ids;
+}
+
+export function isSharedInboxFolderDescendant(folders: CommunicationsSharedInbox[], sourceFolderID: string, targetFolderID: string): boolean {
+  const cleanSourceID = sourceFolderID.trim();
+  const cleanTargetID = targetFolderID.trim();
+  if (!cleanSourceID || !cleanTargetID) return false;
+  return collectSharedInboxSubtreeIDs(folders, cleanSourceID).has(cleanTargetID);
+}
+
+export function getSharedInboxChildPosition(folders: CommunicationsSharedInbox[], parentFolderID: string, excludeFolderID = ""): number {
+  const cleanParentID = parentFolderID.trim();
+  const cleanExcludeID = excludeFolderID.trim();
+  const children = sortSharedInboxes(folders)
+    .filter((folder) => (folder.parent_folder_id ?? "") === cleanParentID && folder.folder_id !== cleanExcludeID);
+  const lastChild = children[children.length - 1];
+  return (lastChild?.position ?? 0) + SHARED_INBOX_POSITION_STEP;
+}
+
+export function getSharedInboxSiblingPosition(
+  folders: CommunicationsSharedInbox[],
+  sourceFolderID: string,
+  targetFolderID: string,
+  placement: Exclude<SharedInboxDropPlacement, "inside">,
+): number {
+  const target = folders.find((folder) => folder.folder_id === targetFolderID);
+  if (!target) return SHARED_INBOX_POSITION_STEP;
+  const parentFolderID = target.parent_folder_id ?? "";
+  const siblings = sortSharedInboxes(folders)
+    .filter((folder) => (folder.parent_folder_id ?? "") === parentFolderID && folder.folder_id !== sourceFolderID);
+  const targetIndex = siblings.findIndex((folder) => folder.folder_id === targetFolderID);
+  if (targetIndex < 0) return target.position || SHARED_INBOX_POSITION_STEP;
+  const previous = placement === "before" ? siblings[targetIndex - 1] : siblings[targetIndex];
+  const next = placement === "before" ? siblings[targetIndex] : siblings[targetIndex + 1];
+  if (previous && next && next.position - previous.position > 1) return Math.floor((previous.position + next.position) / 2);
+  if (previous) return previous.position + SHARED_INBOX_POSITION_STEP;
+  if (next) return Math.max(1, next.position - SHARED_INBOX_POSITION_STEP);
+  return SHARED_INBOX_POSITION_STEP;
 }
 
 export function getHomeViewLabel(viewID: HomeViewID, sharedInboxes: CommunicationsSharedInbox[]): string {

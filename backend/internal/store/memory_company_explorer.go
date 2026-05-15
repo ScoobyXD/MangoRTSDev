@@ -8,6 +8,7 @@ import (
 )
 
 const companyExplorerDefaultFolderSeedKey = "logic_gates_v1"
+const companyExplorerDefaultCommunicationsFolderSeedKey = "communications_v1"
 const companyExplorerSystemFolderSeedKey = "system_folders_v1"
 const CompanyExplorerSystemKanbanBoardsKey = "kanban_boards"
 const CompanyExplorerSystemActiveNodesKey = "active_nodes"
@@ -19,6 +20,59 @@ var companyExplorerDefaultLogicGateChildFolderNames = []string{
 	"Production",
 	"Supply Chain",
 	"QA",
+}
+
+type companyExplorerDefaultFolderDefinition struct {
+	Name     string
+	Children []companyExplorerDefaultFolderDefinition
+}
+
+var companyExplorerDefaultCommunicationsFolderTree = []companyExplorerDefaultFolderDefinition{
+	{
+		Name: "BM",
+		Children: []companyExplorerDefaultFolderDefinition{
+			{
+				Name: "Product",
+				Children: []companyExplorerDefaultFolderDefinition{
+					{Name: "design"},
+					{Name: "printing"},
+					{Name: "suppliers"},
+				},
+			},
+			{Name: "Account"},
+			{Name: "Commercial"},
+			{Name: "Project"},
+		},
+	},
+	{
+		Name: "Supply Chain",
+		Children: []companyExplorerDefaultFolderDefinition{
+			{Name: "orders"},
+			{Name: "shipping"},
+			{Name: "receiving"},
+		},
+	},
+	{
+		Name: "Production",
+		Children: []companyExplorerDefaultFolderDefinition{
+			{Name: "temps"},
+		},
+	},
+	{
+		Name: "QA",
+		Children: []companyExplorerDefaultFolderDefinition{
+			{Name: "quality"},
+		},
+	},
+	{
+		Name: "Finance",
+		Children: []companyExplorerDefaultFolderDefinition{
+			{Name: "ar"},
+			{Name: "ap"},
+		},
+	},
+	{Name: "Legal"},
+	{Name: "HR"},
 }
 
 type companyExplorerSystemFolderDefinition struct {
@@ -47,6 +101,30 @@ func companyExplorerParentID(folder domain.CompanyExplorerFolder) string {
 		return ""
 	}
 	return *folder.ParentFolderID
+}
+
+func (r *MemoryRepo) createCompanyExplorerDefaultFolderTreeLocked(companyID, folderKind, parentFolderID string, startPosition int, seeds []companyExplorerDefaultFolderDefinition, now time.Time) {
+	for index, seed := range seeds {
+		var parent *string
+		if parentFolderID != "" {
+			parentValue := parentFolderID
+			parent = &parentValue
+		}
+		folderID := newUUIDv7String()
+		r.folders[key(companyID, folderID)] = domain.CompanyExplorerFolder{
+			CompanyID:        companyID,
+			FolderID:         folderID,
+			ParentFolderID:   parent,
+			FolderKind:       folderKind,
+			Name:             seed.Name,
+			Position:         startPosition + index*1000,
+			CreatedTimestamp: now,
+			UpdatedTimestamp: now,
+		}
+		if len(seed.Children) > 0 {
+			r.createCompanyExplorerDefaultFolderTreeLocked(companyID, folderKind, folderID, 1000, seed.Children, now)
+		}
+	}
 }
 
 func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string) {
@@ -81,36 +159,43 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 	}
 
 	seedKey := companyID + ":" + companyExplorerDefaultFolderSeedKey
-	if r.defaultFolderSeed[seedKey] {
-		return
-	}
-	now := time.Now().UTC()
-	rootPosition := nextCompanyExplorerRowPosition(r.folders, r.folderItems, companyID, "logic_gate", "")
-	root := domain.CompanyExplorerFolder{
-		CompanyID:        companyID,
-		FolderID:         newUUIDv7String(),
-		FolderKind:       "logic_gate",
-		Name:             "Logic Gates",
-		Position:         rootPosition,
-		CreatedTimestamp: now,
-		UpdatedTimestamp: now,
-	}
-	r.folders[key(companyID, root.FolderID)] = root
-	for index, name := range companyExplorerDefaultLogicGateChildFolderNames {
-		parentID := root.FolderID
-		child := domain.CompanyExplorerFolder{
+	if !r.defaultFolderSeed[seedKey] {
+		now := time.Now().UTC()
+		rootPosition := nextCompanyExplorerRowPosition(r.folders, r.folderItems, companyID, "logic_gate", "")
+		root := domain.CompanyExplorerFolder{
 			CompanyID:        companyID,
 			FolderID:         newUUIDv7String(),
-			ParentFolderID:   &parentID,
 			FolderKind:       "logic_gate",
-			Name:             name,
-			Position:         (index + 1) * 1000,
+			Name:             "Logic Gates",
+			Position:         rootPosition,
 			CreatedTimestamp: now,
 			UpdatedTimestamp: now,
 		}
-		r.folders[key(companyID, child.FolderID)] = child
+		r.folders[key(companyID, root.FolderID)] = root
+		for index, name := range companyExplorerDefaultLogicGateChildFolderNames {
+			parentID := root.FolderID
+			child := domain.CompanyExplorerFolder{
+				CompanyID:        companyID,
+				FolderID:         newUUIDv7String(),
+				ParentFolderID:   &parentID,
+				FolderKind:       "logic_gate",
+				Name:             name,
+				Position:         (index + 1) * 1000,
+				CreatedTimestamp: now,
+				UpdatedTimestamp: now,
+			}
+			r.folders[key(companyID, child.FolderID)] = child
+		}
+		r.defaultFolderSeed[seedKey] = true
 	}
-	r.defaultFolderSeed[seedKey] = true
+
+	communicationsSeedKey := companyID + ":" + companyExplorerDefaultCommunicationsFolderSeedKey
+	if !r.defaultFolderSeed[communicationsSeedKey] {
+		now := time.Now().UTC()
+		startPosition := nextCompanyExplorerRowPosition(r.folders, r.folderItems, companyID, "communications", "")
+		r.createCompanyExplorerDefaultFolderTreeLocked(companyID, "communications", "", startPosition, companyExplorerDefaultCommunicationsFolderTree, now)
+		r.defaultFolderSeed[communicationsSeedKey] = true
+	}
 }
 
 func (r *MemoryRepo) ensureCompanyExplorerSystemFolderLocked(companyID, systemKey string) (domain.CompanyExplorerFolder, bool) {

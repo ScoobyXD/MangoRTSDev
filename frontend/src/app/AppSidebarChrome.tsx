@@ -1,9 +1,27 @@
-import React, { useEffect } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getActiveCompanyID } from "../auth/currentCompany";
+import FrameRightClickMenu from "./framerightclickmenu";
 import { HeaderLogicGateArenaIcon, HeaderMapIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
 import { COLORWAYS, UI_THEME } from "./frameLayoutTypes";
 import { preloadDefaultDashboardModules, preloadLogicGateArenaSurface } from "./preloadDashboardModules";
-import { ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
+import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
+import {
+  createCommunicationsSharedInbox,
+  deleteCommunicationsSharedInbox,
+  listCommunicationsSharedInboxes,
+  updateCommunicationsSharedInbox,
+  type CommunicationsSharedInbox,
+} from "../modules/communications/communicationsApi";
+import {
+  buildSharedInboxRows,
+  collectSharedInboxSubtreeIDs,
+  getSharedInboxChildPosition,
+  getSharedInboxSiblingPosition,
+  isSharedInboxFolderDescendant,
+  type SharedInboxDropPlacement,
+  type SharedInboxTreeRow,
+} from "../pages/home/homeUtils";
 
 const SidebarCompanyExplorerContent = React.lazy(() => import("../modules/company-explorer/CompanyExplorerContent").then((module) => ({ default: module.CompanyExplorerContent })));
 const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorContent").then((module) => ({
@@ -20,8 +38,9 @@ const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorCo
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
 const PAGE_SURFACE_RADIUS = 16;
 const SIDEBAR_EXPLORER_WIDGET_ID = "app-sidebar-explorer";
+const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 
-export type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox";
+export type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox" | `shared:${string}`;
 export type SidebarPinKind = "node" | "logic_gate";
 export type SidebarPin = {
   id: string;
@@ -31,13 +50,6 @@ export type SidebarPin = {
 };
 
 type AppSidebarPrimaryPage = "map" | "home" | "logic-gate-arena";
-
-const HOME_NAV_ITEMS: Array<{ view: HomeSidebarView; label: string }> = [
-  { view: "my-triage", label: "Pending" },
-  { view: "shared-root", label: "Shared Triage" },
-  { view: "aci-inbox", label: "ACI Inbox" },
-  { view: "r-inbox", label: "R Inbox" },
-];
 
 type AppSidebarProps = {
   accountChrome?: React.ReactNode;
@@ -56,6 +68,18 @@ type AppSidebarProps = {
   onPinDrop: (event: React.DragEvent<HTMLElement>) => void;
 };
 
+function readSharedTriageFolderDrag(dataTransfer: DataTransfer): string {
+  return dataTransfer.getData(SHARED_TRIAGE_FOLDER_DRAG_MIME).trim();
+}
+
+function getSharedTriageDropPlacement(event: React.DragEvent<HTMLElement>): SharedInboxDropPlacement {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const y = event.clientY - rect.top;
+  if (y < rect.height * 0.25) return "before";
+  if (y > rect.height * 0.75) return "after";
+  return "inside";
+}
+
 export function AppSidebar({
   accountChrome,
   activePage,
@@ -73,6 +97,328 @@ export function AppSidebar({
   onPinDrop,
 }: AppSidebarProps): React.ReactElement {
   const homeActive = activePage === "home";
+  const companyID = getActiveCompanyID();
+  const [sharedTriageOpen, setSharedTriageOpen] = useState(true);
+  const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
+  const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
+  const [sharedBusy, setSharedBusy] = useState(false);
+  const [expandedSharedFolderIDs, setExpandedSharedFolderIDs] = useState<Set<string>>(new Set());
+  const [renamingSharedFolderID, setRenamingSharedFolderID] = useState("");
+  const [renameDraft, setRenameDraft] = useState("");
+  const [draggingSharedFolderID, setDraggingSharedFolderID] = useState("");
+  const [dropTarget, setDropTarget] = useState<{ folderID: string; placement: SharedInboxDropPlacement } | null>(null);
+  const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const skipRenameBlurRef = useRef(false);
+  const sharedRows = useMemo(
+    () => sharedTriageOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [],
+    [expandedSharedFolderIDs, sharedInboxes, sharedTriageOpen],
+  );
+  const sharedTriageActive = homeActive && (activeHomeView === "shared-root" || activeHomeView.startsWith("shared:"));
+
+  useEffect(() => {
+    if (!companyID) {
+      setSharedInboxes([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingSharedInboxes(true);
+    listCommunicationsSharedInboxes(companyID)
+      .then((folders) => {
+        if (!cancelled) setSharedInboxes(folders);
+      })
+      .catch((error) => {
+        if (!cancelled) console.error("Failed to load shared triage folders", error);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSharedInboxes(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyID]);
+
+  useEffect(() => {
+    setExpandedSharedFolderIDs((previous) => {
+      if (previous.size > 0 || sharedInboxes.length === 0) return previous;
+      return new Set(sharedInboxes.filter((folder) => !folder.parent_folder_id).map((folder) => folder.folder_id));
+    });
+  }, [sharedInboxes]);
+
+  useEffect(() => {
+    const activeFolderID = activeHomeView.startsWith("shared:") ? activeHomeView.slice("shared:".length) : "";
+    if (!activeFolderID) return;
+    setSharedTriageOpen(true);
+    setExpandedSharedFolderIDs((previous) => {
+      const next = new Set(previous);
+      let current = sharedInboxes.find((folder) => folder.folder_id === activeFolderID);
+      let changed = false;
+      const seen = new Set<string>();
+      while (current?.parent_folder_id && !seen.has(current.parent_folder_id)) {
+        seen.add(current.parent_folder_id);
+        if (!next.has(current.parent_folder_id)) {
+          next.add(current.parent_folder_id);
+          changed = true;
+        }
+        current = sharedInboxes.find((folder) => folder.folder_id === current?.parent_folder_id);
+      }
+      return changed ? next : previous;
+    });
+  }, [activeHomeView, sharedInboxes]);
+
+  useEffect(() => {
+    if (!renamingSharedFolderID) return;
+    window.setTimeout(() => {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }, 0);
+  }, [renamingSharedFolderID]);
+
+  const openSharedContextMenu = useCallback((event: React.MouseEvent, folder: CommunicationsSharedInbox | null) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSharedContextMenu({ x: event.clientX, y: event.clientY, folder });
+  }, []);
+
+  const toggleSharedFolder = useCallback((folderID: string) => {
+    setExpandedSharedFolderIDs((previous) => {
+      const next = new Set(previous);
+      if (next.has(folderID)) next.delete(folderID);
+      else next.add(folderID);
+      return next;
+    });
+  }, []);
+
+  const startSharedRename = useCallback((folder: CommunicationsSharedInbox) => {
+    setSharedContextMenu(null);
+    skipRenameBlurRef.current = false;
+    setRenamingSharedFolderID(folder.folder_id);
+    setRenameDraft(folder.name);
+  }, []);
+
+  const replaceSharedFolder = useCallback((updated: CommunicationsSharedInbox) => {
+    setSharedInboxes((previous) => previous.map((folder) => folder.folder_id === updated.folder_id ? updated : folder));
+  }, []);
+
+  const createSharedFolder = useCallback(async (parentFolderID: string) => {
+    if (!companyID || sharedBusy) return;
+    setSharedContextMenu(null);
+    setSharedBusy(true);
+    try {
+      const folder = await createCommunicationsSharedInbox({ companyID, parentFolderID, name: "New Folder" });
+      setSharedInboxes((previous) => [...previous.filter((item) => item.folder_id !== folder.folder_id), folder]);
+      if (parentFolderID) setExpandedSharedFolderIDs((previous) => new Set(previous).add(parentFolderID));
+      setSharedTriageOpen(true);
+      setRenamingSharedFolderID(folder.folder_id);
+      setRenameDraft(folder.name);
+      onHomeViewSelect(`shared:${folder.folder_id}`);
+    } catch (error) {
+      console.error("Failed to create shared triage folder", error);
+    } finally {
+      setSharedBusy(false);
+    }
+  }, [companyID, onHomeViewSelect, sharedBusy]);
+
+  const commitSharedRename = useCallback(async () => {
+    const folderID = renamingSharedFolderID.trim();
+    const name = renameDraft.trim();
+    if (!folderID) return;
+    const current = sharedInboxes.find((folder) => folder.folder_id === folderID);
+    setRenamingSharedFolderID("");
+    setRenameDraft("");
+    if (!companyID || !name || name === current?.name) return;
+    setSharedBusy(true);
+    try {
+      const updated = await updateCommunicationsSharedInbox({ companyID, folderID, name });
+      replaceSharedFolder(updated);
+    } catch (error) {
+      console.error("Failed to rename shared triage folder", error);
+    } finally {
+      setSharedBusy(false);
+    }
+  }, [companyID, renameDraft, renamingSharedFolderID, replaceSharedFolder, sharedInboxes]);
+
+  const canDropSharedFolder = useCallback((sourceFolderID: string, targetFolderID: string) => {
+    if (!sourceFolderID || sourceFolderID === targetFolderID) return false;
+    if (targetFolderID && isSharedInboxFolderDescendant(sharedInboxes, sourceFolderID, targetFolderID)) return false;
+    return sharedInboxes.some((folder) => folder.folder_id === sourceFolderID);
+  }, [sharedInboxes]);
+
+  const moveSharedFolder = useCallback(async (sourceFolderID: string, targetFolderID: string, placement: SharedInboxDropPlacement) => {
+    if (!companyID || sharedBusy || !canDropSharedFolder(sourceFolderID, targetFolderID)) return;
+    let parentFolderID = "";
+    let position = getSharedInboxChildPosition(sharedInboxes, "", sourceFolderID);
+    if (targetFolderID) {
+      const target = sharedInboxes.find((folder) => folder.folder_id === targetFolderID);
+      if (!target) return;
+      if (placement === "inside") {
+        parentFolderID = target.folder_id;
+        position = getSharedInboxChildPosition(sharedInboxes, target.folder_id, sourceFolderID);
+        setExpandedSharedFolderIDs((previous) => new Set(previous).add(target.folder_id));
+      } else {
+        parentFolderID = target.parent_folder_id ?? "";
+        position = getSharedInboxSiblingPosition(sharedInboxes, sourceFolderID, target.folder_id, placement);
+      }
+    }
+    setDropTarget(null);
+    setSharedBusy(true);
+    try {
+      const updated = await updateCommunicationsSharedInbox({ companyID, folderID: sourceFolderID, parentFolderID, position });
+      replaceSharedFolder(updated);
+    } catch (error) {
+      console.error("Failed to move shared triage folder", error);
+    } finally {
+      setSharedBusy(false);
+    }
+  }, [canDropSharedFolder, companyID, replaceSharedFolder, sharedBusy, sharedInboxes]);
+
+  const requestDeleteSharedFolder = useCallback(async (folder: CommunicationsSharedInbox) => {
+    if (!companyID || sharedBusy) return;
+    setSharedContextMenu(null);
+    const subtreeIDs = collectSharedInboxSubtreeIDs(sharedInboxes, folder.folder_id);
+    const count = subtreeIDs.size || 1;
+    const label = folder.name.trim() || "this folder";
+    const detail = count === 1 ? "this folder" : `this folder and ${count - 1} child folder${count === 2 ? "" : "s"}`;
+    if (!window.confirm(`Delete ${detail}: ${label}?`)) return;
+    setSharedBusy(true);
+    try {
+      await deleteCommunicationsSharedInbox(companyID, folder.folder_id);
+      setSharedInboxes((previous) => previous.filter((item) => !subtreeIDs.has(item.folder_id)));
+      const activeFolderID = activeHomeView.startsWith("shared:") ? activeHomeView.slice("shared:".length) : "";
+      if (activeFolderID && subtreeIDs.has(activeFolderID)) onHomeViewSelect("shared-root");
+    } catch (error) {
+      console.error("Failed to delete shared triage folder", error);
+    } finally {
+      setSharedBusy(false);
+    }
+  }, [activeHomeView, companyID, onHomeViewSelect, sharedBusy, sharedInboxes]);
+
+  const handleSharedRootDragOver = useCallback((event: React.DragEvent<HTMLElement>) => {
+    const sourceFolderID = readSharedTriageFolderDrag(event.dataTransfer) || draggingSharedFolderID;
+    if (!canDropSharedFolder(sourceFolderID, "")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropTarget({ folderID: "", placement: "inside" });
+  }, [canDropSharedFolder, draggingSharedFolderID]);
+
+  const handleSharedRootDrop = useCallback((event: React.DragEvent<HTMLElement>) => {
+    const sourceFolderID = readSharedTriageFolderDrag(event.dataTransfer) || draggingSharedFolderID;
+    if (!canDropSharedFolder(sourceFolderID, "")) return;
+    event.preventDefault();
+    void moveSharedFolder(sourceFolderID, "", "inside");
+  }, [canDropSharedFolder, draggingSharedFolderID, moveSharedFolder]);
+
+  const renderSharedFolderRow = (row: SharedInboxTreeRow) => {
+    const folder = row.folder;
+    const isRenaming = renamingSharedFolderID === folder.folder_id;
+    const rowDropPlacement = dropTarget?.folderID === folder.folder_id ? dropTarget.placement : null;
+    const treeID = row.treeID as HomeSidebarView;
+    return (
+      <div
+        key={folder.folder_id}
+        role="button"
+        tabIndex={0}
+        draggable={!isRenaming && !sharedBusy}
+        style={appSidebarSharedFolderRowStyle(row.depth, homeActive && activeHomeView === treeID, rowDropPlacement)}
+        onClick={() => onHomeViewSelect(treeID)}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+          event.preventDefault();
+          onHomeViewSelect(treeID);
+        }}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          startSharedRename(folder);
+        }}
+        onContextMenu={(event) => openSharedContextMenu(event, folder)}
+        onDragStart={(event) => {
+          if (sharedBusy) {
+            event.preventDefault();
+            return;
+          }
+          setDraggingSharedFolderID(folder.folder_id);
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData(SHARED_TRIAGE_FOLDER_DRAG_MIME, folder.folder_id);
+          event.dataTransfer.setData("text/plain", folder.name);
+        }}
+        onDragOver={(event) => {
+          const sourceFolderID = readSharedTriageFolderDrag(event.dataTransfer) || draggingSharedFolderID;
+          const placement = getSharedTriageDropPlacement(event);
+          if (!canDropSharedFolder(sourceFolderID, folder.folder_id)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setDropTarget({ folderID: folder.folder_id, placement });
+        }}
+        onDragLeave={() => {
+          setDropTarget((current) => current?.folderID === folder.folder_id ? null : current);
+        }}
+        onDrop={(event) => {
+          const sourceFolderID = readSharedTriageFolderDrag(event.dataTransfer) || draggingSharedFolderID;
+          const placement = dropTarget?.folderID === folder.folder_id ? dropTarget.placement : getSharedTriageDropPlacement(event);
+          if (!canDropSharedFolder(sourceFolderID, folder.folder_id)) return;
+          event.preventDefault();
+          void moveSharedFolder(sourceFolderID, folder.folder_id, placement);
+        }}
+        onDragEnd={() => {
+          setDraggingSharedFolderID("");
+          setDropTarget(null);
+        }}
+      >
+        {row.hasChildren ? (
+          <button
+            type="button"
+            title={expandedSharedFolderIDs.has(folder.folder_id) ? "Collapse folder" : "Expand folder"}
+            draggable={false}
+            style={appSidebarSharedDisclosureStyle}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleSharedFolder(folder.folder_id);
+            }}
+          >
+            <ExplorerDisclosureIcon open={expandedSharedFolderIDs.has(folder.folder_id)} color="rgba(36, 18, 10, 0.62)" />
+          </button>
+        ) : (
+          <span style={{ width: 18, height: 20 }} />
+        )}
+        <span style={appSidebarSharedFolderIconStyle}><ExplorerRowIcon kind="folder" /></span>
+        {isRenaming ? (
+          <input
+            ref={renameInputRef}
+            style={appSidebarSharedRenameInputStyle}
+            value={renameDraft}
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onChange={(event) => setRenameDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.stopPropagation();
+                void commitSharedRename();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                skipRenameBlurRef.current = true;
+                setRenamingSharedFolderID("");
+                setRenameDraft("");
+              }
+            }}
+            onBlur={() => {
+              if (skipRenameBlurRef.current) {
+                skipRenameBlurRef.current = false;
+                return;
+              }
+              void commitSharedRename();
+            }}
+          />
+        ) : (
+          <span style={appSidebarTextStyle}>{folder.name}</span>
+        )}
+      </div>
+    );
+  };
+
   return (
     <aside style={appSidebarStyle}>
       <div style={appSidebarBrandStyle} aria-label="MangoRTS">
@@ -81,14 +427,56 @@ export function AppSidebar({
       </div>
 
       <section style={appSidebarSectionStyle} aria-label="Home inboxes">
-        {HOME_NAV_ITEMS.map((item) => (
-          <AppSidebarButton
-            key={item.view}
-            label={item.label}
-            active={homeActive && activeHomeView === item.view}
-            onClick={() => onHomeViewSelect(item.view)}
-          />
-        ))}
+        <AppSidebarButton
+          label="Pending"
+          active={homeActive && activeHomeView === "my-triage"}
+          onClick={() => onHomeViewSelect("my-triage")}
+        />
+        <div style={appSidebarSharedRootBlockStyle}>
+          <div
+            style={appSidebarSharedTriageRowStyle(sharedTriageActive, dropTarget?.folderID === "")}
+            onContextMenu={(event) => openSharedContextMenu(event, null)}
+            onDragOver={handleSharedRootDragOver}
+            onDragLeave={() => setDropTarget((current) => current?.folderID === "" ? null : current)}
+            onDrop={handleSharedRootDrop}
+          >
+            <button
+              type="button"
+              style={appSidebarSharedTriageButtonStyle}
+              onClick={() => onHomeViewSelect("shared-root")}
+            >
+              <span style={appSidebarTextStyle}>Shared Triage</span>
+              {loadingSharedInboxes && <span style={appSidebarSharedMetaStyle}>Loading</span>}
+            </button>
+            <button
+              type="button"
+              title={sharedTriageOpen ? "Collapse Shared Triage folders" : "Expand Shared Triage folders"}
+              aria-label={sharedTriageOpen ? "Collapse Shared Triage folders" : "Expand Shared Triage folders"}
+              style={appSidebarSharedDisclosureStyle}
+              onClick={(event) => {
+                event.stopPropagation();
+                setSharedTriageOpen((open) => !open);
+              }}
+            >
+              <ExplorerDisclosureIcon open={sharedTriageOpen} color="rgba(36, 18, 10, 0.68)" />
+            </button>
+          </div>
+          {sharedTriageOpen && (
+            <div style={appSidebarSharedRowsStyle}>
+              {sharedRows.map(renderSharedFolderRow)}
+            </div>
+          )}
+        </div>
+        <AppSidebarButton
+          label="ACI Inbox"
+          active={homeActive && activeHomeView === "aci-inbox"}
+          onClick={() => onHomeViewSelect("aci-inbox")}
+        />
+        <AppSidebarButton
+          label="R Inbox"
+          active={homeActive && activeHomeView === "r-inbox"}
+          onClick={() => onHomeViewSelect("r-inbox")}
+        />
       </section>
 
       <section
@@ -152,6 +540,37 @@ export function AppSidebar({
           />
         </React.Suspense>
       </section>
+      {sharedContextMenu && (
+        <FrameRightClickMenu x={sharedContextMenu.x} y={sharedContextMenu.y} onClose={() => setSharedContextMenu(null)}>
+          <button
+            type="button"
+            style={appSidebarContextMenuButtonStyle}
+            disabled={sharedBusy}
+            onClick={() => void createSharedFolder(sharedContextMenu.folder?.folder_id ?? "")}
+          >
+            {sharedContextMenu.folder ? "New Child Folder" : "New Folder"}
+          </button>
+          {sharedContextMenu.folder && (
+            <>
+              <button
+                type="button"
+                style={appSidebarContextMenuButtonStyle}
+                onClick={() => startSharedRename(sharedContextMenu.folder!)}
+              >
+                Rename
+              </button>
+              <button
+                type="button"
+                style={{ ...appSidebarContextMenuButtonStyle, color: "#8b123f" }}
+                disabled={sharedBusy}
+                onClick={() => void requestDeleteSharedFolder(sharedContextMenu.folder!)}
+              >
+                Delete
+              </button>
+            </>
+          )}
+        </FrameRightClickMenu>
+      )}
     </aside>
   );
 }
@@ -339,6 +758,140 @@ const appSidebarTextStyle: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
+};
+
+const appSidebarSharedRootBlockStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 3,
+  minWidth: 0,
+};
+
+function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean): React.CSSProperties {
+  return {
+    width: "100%",
+    minHeight: 31,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 22px",
+    alignItems: "center",
+    gap: 0,
+    border: `1px solid ${active ? "rgba(255, 136, 32, 0.68)" : dropActive ? "rgba(255, 136, 32, 0.52)" : "transparent"}`,
+    borderRadius: 6,
+    background: active ? "rgba(255, 136, 32, 0.13)" : dropActive ? "#fff7eb" : "transparent",
+    color: active ? "#ff8820" : "#3f332b",
+    minWidth: 0,
+  };
+}
+
+const appSidebarSharedTriageButtonStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 29,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: 6,
+  border: "none",
+  background: "transparent",
+  color: "inherit",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 700,
+  letterSpacing: 0,
+  padding: "0 0 0 8px",
+  textAlign: "left",
+};
+
+const appSidebarSharedDisclosureStyle: React.CSSProperties = {
+  width: 22,
+  height: 24,
+  display: "grid",
+  placeItems: "center",
+  border: "none",
+  background: "transparent",
+  color: "rgba(36, 18, 10, 0.62)",
+  cursor: "pointer",
+  padding: 0,
+};
+
+const appSidebarSharedMetaStyle: React.CSSProperties = {
+  color: "rgba(36, 18, 10, 0.52)",
+  fontSize: 10,
+  fontWeight: 700,
+};
+
+const appSidebarSharedRowsStyle: React.CSSProperties = {
+  minWidth: 0,
+  maxHeight: 220,
+  overflowY: "auto",
+  overflowX: "hidden",
+  display: "grid",
+  alignContent: "start",
+  gap: 2,
+  padding: "0 0 0 2px",
+};
+
+function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlacement: SharedInboxDropPlacement | null): React.CSSProperties {
+  return {
+    width: "100%",
+    minHeight: 28,
+    display: "grid",
+    gridTemplateColumns: "18px 17px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: 5,
+    border: `1px solid ${active ? "rgba(255, 136, 32, 0.64)" : dropPlacement === "inside" ? "rgba(255, 136, 32, 0.52)" : "transparent"}`,
+    borderRadius: 5,
+    background: active ? "#fff2e0" : dropPlacement === "inside" ? "#fff7eb" : "transparent",
+    color: "#3f332b",
+    cursor: "grab",
+    font: "inherit",
+    fontSize: 11,
+    fontWeight: active ? 700 : 600,
+    padding: `2px 6px 2px ${6 + depth * 14}px`,
+    textAlign: "left",
+    minWidth: 0,
+    boxShadow: dropPlacement === "before"
+      ? "inset 0 2px 0 #ff8820"
+      : dropPlacement === "after"
+        ? "inset 0 -2px 0 #ff8820"
+        : undefined,
+  };
+}
+
+const appSidebarSharedFolderIconStyle: React.CSSProperties = {
+  width: 17,
+  height: 17,
+  display: "grid",
+  placeItems: "center",
+  color: "#ff8820",
+};
+
+const appSidebarSharedRenameInputStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  height: 22,
+  border: "1px solid #ff8820",
+  borderRadius: 4,
+  background: "#ffffff",
+  color: "#24120a",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 700,
+  padding: "0 6px",
+  outline: "none",
+};
+
+const appSidebarContextMenuButtonStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 31,
+  border: "none",
+  background: "transparent",
+  color: "#24120a",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 600,
+  textAlign: "left",
+  padding: "0 12px",
 };
 
 const appSidebarPinListStyle: React.CSSProperties = {

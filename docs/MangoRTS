@@ -73,19 +73,23 @@ Monday go live:
 
 Notes: scrolling past emails on my triage automatically puts into archive.
 
-My triage tab should be pending, then starred, archived, then all.
 
-Archive button on email list should be starred
+
+
 
 Shared triage thoughts notes check that out RACI matrix for shared inbox
 
-Group shared triages into folders
+
+
 
 Pasted images don’t maintain resolution
 
+
 Search on explorer should be like click up where searching literally changes the view of the explorer
 
+
 Can collapse logic gates and nodes into bottom tabs on bottom sidebar like on click up
+
 
 Logic gate arena we only show logic gate folders on the explorer. 
 
@@ -100,7 +104,8 @@ Be able to create node from any piece of text.
 
 ======================
 
-
+there should be by default a "customer support" logic gate, its our embedded customer support logic gate kanban board (non editable) where customers can just put in nodes (tickets) into the kanban board and thats the customer support ticket.
+	a. So, there is a minimum number of clicks required for customers to report to us a bug, something they'd like to change, or some kind of support ticket. 
 
 ACI/R Inbox
 1. Make it possible to increase the cell height.
@@ -114,7 +119,7 @@ Node Editor changes
 5. screenshot copy and paste quality is bad
 6. i cant actually copy the images from the node text boxes.
 7.when i scroll down the + sign and attach email buttons bleed into the text box being scrolled up.
-
+8. Im pretty sure from the ACI Inbox and R Inbox, we want the nodes to be much larger, so make them sizeable and adjustable like we can on the kanban board
 
 
 

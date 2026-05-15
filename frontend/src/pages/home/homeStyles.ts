@@ -128,8 +128,76 @@ export const sidebarSectionStyle: React.CSSProperties = {
 
 export const sharedInboxRowsStyle: React.CSSProperties = {
   display: "grid",
-  gap: 4,
+  gap: 3,
   minWidth: 0,
+};
+
+export function sharedInboxFolderRowStyle(depth: number, active: boolean, dropPlacement: "before" | "after" | "inside" | null): React.CSSProperties {
+  return {
+    width: "100%",
+    minHeight: 30,
+    display: "grid",
+    gridTemplateColumns: "18px 17px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: 5,
+    border: `1px solid ${active ? "rgba(255, 136, 32, 0.72)" : dropPlacement === "inside" ? "rgba(255, 136, 32, 0.52)" : "transparent"}`,
+    borderRadius: 6,
+    background: active ? "#fff2e0" : dropPlacement === "inside" ? "#fff7eb" : "#ffffff",
+    color: "#24120a",
+    cursor: "grab",
+    font: "inherit",
+    fontSize: 12,
+    fontWeight: active ? 700 : 500,
+    padding: `3px 5px 3px ${8 + depth * 14}px`,
+    textAlign: "left",
+    minWidth: 0,
+    boxShadow: dropPlacement === "before"
+      ? "inset 0 2px 0 #ff8820"
+      : dropPlacement === "after"
+        ? "inset 0 -2px 0 #ff8820"
+        : undefined,
+  };
+}
+
+export const sharedInboxDisclosureButtonStyle: React.CSSProperties = {
+  width: 18,
+  height: 20,
+  display: "grid",
+  placeItems: "center",
+  border: "none",
+  background: "transparent",
+  color: "rgba(36, 18, 10, 0.62)",
+  cursor: "pointer",
+  padding: 0,
+};
+
+export const sharedInboxRenameInputStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  height: 23,
+  border: "1px solid #ff8820",
+  borderRadius: 5,
+  background: "#ffffff",
+  color: "#24120a",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 700,
+  padding: "0 6px",
+  outline: "none",
+};
+
+export const sharedInboxContextMenuButtonStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 31,
+  border: "none",
+  background: "transparent",
+  color: "#24120a",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 600,
+  textAlign: "left",
+  padding: "0 12px",
 };
 
 export function navButtonStyle(active: boolean): React.CSSProperties {

@@ -334,13 +334,148 @@ func TestCompanyExplorerDefaultFoldersSeedOnceAndProtectSystemFolders(t *testing
 		t.Fatalf("DELETE default folder status = %d, want %d body=%s", deleteRec.Code, http.StatusOK, deleteRec.Body.String())
 	}
 	foldersAfterDelete := listFolders()
-	if len(foldersAfterDelete) != 3 {
-		t.Fatalf("default folders after delete = %+v, want only protected system folders", foldersAfterDelete)
-	}
+	systemCount := 0
 	for _, folder := range foldersAfterDelete {
-		if folder.SystemKey == nil {
-			t.Fatalf("remaining folder after default delete is not protected: %+v", folder)
+		if folder.FolderKind == "logic_gate" {
+			t.Fatalf("logic gate default folder was recreated after delete: %+v", folder)
 		}
+		if folder.SystemKey != nil {
+			systemCount++
+		}
+	}
+	if systemCount != 3 {
+		t.Fatalf("system folder count after default delete = %d, want 3", systemCount)
+	}
+}
+
+func TestCompanyExplorerCommunicationsDefaultFoldersSeedOnceAndAreMutable(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-communications-folder-seed-test"
+
+	type folderPayload struct {
+		FolderID       string  `json:"folder_id"`
+		ParentFolderID *string `json:"parent_folder_id"`
+		FolderKind     string  `json:"folder_kind"`
+		SystemKey      *string `json:"system_key"`
+		Name           string  `json:"name"`
+	}
+	listCommunicationsFolders := func() []folderPayload {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=communications", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET communications default folders status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var payload struct {
+			Folders []folderPayload `json:"folders"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode communications default folders: %v", err)
+		}
+		return payload.Folders
+	}
+	folderByName := func(folders []folderPayload, name string) folderPayload {
+		t.Helper()
+		for _, folder := range folders {
+			if folder.Name == name {
+				return folder
+			}
+		}
+		t.Fatalf("folder %q not found in %+v", name, folders)
+		return folderPayload{}
+	}
+	assertParent := func(folders []folderPayload, childName, parentName string) {
+		t.Helper()
+		child := folderByName(folders, childName)
+		parent := folderByName(folders, parentName)
+		if child.ParentFolderID == nil || *child.ParentFolderID != parent.FolderID {
+			t.Fatalf("folder %q parent = %v, want %q", childName, child.ParentFolderID, parentName)
+		}
+	}
+
+	folders := listCommunicationsFolders()
+	if len(folders) != 21 {
+		t.Fatalf("communications default folder count = %d, want 21: %+v", len(folders), folders)
+	}
+	for _, name := range []string{"BM", "Supply Chain", "Production", "QA", "Finance", "Legal", "HR"} {
+		folder := folderByName(folders, name)
+		if folder.ParentFolderID != nil {
+			t.Fatalf("root folder %q has parent %v", name, folder.ParentFolderID)
+		}
+		if folder.SystemKey != nil {
+			t.Fatalf("default communications folder %q should be customer-mutable, got system key %q", name, *folder.SystemKey)
+		}
+	}
+	for _, pair := range [][2]string{
+		{"Product", "BM"},
+		{"Account", "BM"},
+		{"Commercial", "BM"},
+		{"Project", "BM"},
+		{"design", "Product"},
+		{"printing", "Product"},
+		{"suppliers", "Product"},
+		{"orders", "Supply Chain"},
+		{"shipping", "Supply Chain"},
+		{"receiving", "Supply Chain"},
+		{"temps", "Production"},
+		{"quality", "QA"},
+		{"ar", "Finance"},
+		{"ap", "Finance"},
+	} {
+		assertParent(folders, pair[0], pair[1])
+	}
+
+	bm := folderByName(folders, "BM")
+	renameBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"name":       "Business Management",
+	})
+	renameReq := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/folders/"+bm.FolderID, bytes.NewReader(renameBody))
+	renameReq.Header.Set("Content-Type", "application/json")
+	renameRec := httptest.NewRecorder()
+	handler.ServeHTTP(renameRec, renameReq)
+	if renameRec.Code != http.StatusOK {
+		t.Fatalf("PUT communications default folder status = %d, want %d body=%s", renameRec.Code, http.StatusOK, renameRec.Body.String())
+	}
+
+	folders = listCommunicationsFolders()
+	supplyChain := folderByName(folders, "Supply Chain")
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/company-explorer/folders/"+supplyChain.FolderID+"?company_id="+companyID, nil)
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("DELETE communications default folder status = %d, want %d body=%s", deleteRec.Code, http.StatusOK, deleteRec.Body.String())
+	}
+	folders = listCommunicationsFolders()
+	for _, deletedName := range []string{"Supply Chain", "orders", "shipping", "receiving"} {
+		for _, folder := range folders {
+			if folder.Name == deletedName {
+				t.Fatalf("deleted communications folder %q was recreated: %+v", deletedName, folder)
+			}
+		}
+	}
+	if folderByName(folders, "Business Management").FolderID != bm.FolderID {
+		t.Fatalf("renamed communications default folder did not persist")
+	}
+
+	for _, folder := range folders {
+		if folder.ParentFolderID != nil {
+			continue
+		}
+		deleteRootReq := httptest.NewRequest(http.MethodDelete, "/v1/company-explorer/folders/"+folder.FolderID+"?company_id="+companyID, nil)
+		deleteRootRec := httptest.NewRecorder()
+		handler.ServeHTTP(deleteRootRec, deleteRootReq)
+		if deleteRootRec.Code != http.StatusOK {
+			t.Fatalf("DELETE communications root %q status = %d, want %d body=%s", folder.Name, deleteRootRec.Code, http.StatusOK, deleteRootRec.Body.String())
+		}
+	}
+	if folders = listCommunicationsFolders(); len(folders) != 0 {
+		t.Fatalf("communications defaults were recreated after deleting all folders: %+v", folders)
 	}
 }
 

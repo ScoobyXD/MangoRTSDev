@@ -30,6 +30,26 @@ func nextCompanyExplorerSQLRowPosition(ctx context.Context, tx *sql.Tx, companyI
 	return position, err
 }
 
+func createCompanyExplorerDefaultFolderTreeSQL(ctx context.Context, tx *sql.Tx, companyID, folderKind string, parent any, startPosition int, seeds []companyExplorerDefaultFolderDefinition) error {
+	for index, seed := range seeds {
+		folderID := newUUIDv7String()
+		if _, err := tx.ExecContext(ctx,
+			`insert into company_explorer_folders
+			 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
+			 values ($1, $2, $3, $4, null, $5, $6, now(), now())`,
+			companyID, folderID, parent, folderKind, seed.Name, startPosition+index*1000,
+		); err != nil {
+			return err
+		}
+		if len(seed.Children) > 0 {
+			if err := createCompanyExplorerDefaultFolderTreeSQL(ctx, tx, companyID, folderKind, folderID, 1000, seed.Children); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func ensureCompanyExplorerDefaultFoldersSQL(ctx context.Context, tx *sql.Tx, companyID string) error {
 	var insertedSystemSeed string
 	err := tx.QueryRowContext(ctx,
@@ -66,36 +86,57 @@ func ensureCompanyExplorerDefaultFoldersSQL(ctx context.Context, tx *sql.Tx, com
 		 returning seed_key`,
 		companyID, companyExplorerDefaultFolderSeedKey,
 	).Scan(&insertedSeed)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-
-	position, err := nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, "logic_gate", nil)
-	if err != nil {
-		return err
-	}
-	rootID := newUUIDv7String()
-	if _, err := tx.ExecContext(ctx,
-		`insert into company_explorer_folders
-		 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
-		 values ($1, $2, null, 'logic_gate', null, 'Logic Gates', $3, now(), now())`,
-		companyID, rootID, position,
-	); err != nil {
-		return err
-	}
-	for index, name := range companyExplorerDefaultLogicGateChildFolderNames {
+	if err == nil {
+		position, err := nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, "logic_gate", nil)
+		if err != nil {
+			return err
+		}
+		rootID := newUUIDv7String()
 		if _, err := tx.ExecContext(ctx,
 			`insert into company_explorer_folders
 			 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
-			 values ($1, $2, $3, 'logic_gate', null, $4, $5, now(), now())`,
-			companyID, newUUIDv7String(), rootID, name, (index+1)*1000,
+			 values ($1, $2, null, 'logic_gate', null, 'Logic Gates', $3, now(), now())`,
+			companyID, rootID, position,
 		); err != nil {
 			return err
 		}
+		for index, name := range companyExplorerDefaultLogicGateChildFolderNames {
+			if _, err := tx.ExecContext(ctx,
+				`insert into company_explorer_folders
+				 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
+				 values ($1, $2, $3, 'logic_gate', null, $4, $5, now(), now())`,
+				companyID, newUUIDv7String(), rootID, name, (index+1)*1000,
+			); err != nil {
+				return err
+			}
+		}
 	}
+
+	var insertedCommunicationsSeed string
+	err = tx.QueryRowContext(ctx,
+		`insert into company_explorer_default_folder_seeds
+		 (company_id, seed_key, created_timestamp)
+		 values ($1, $2, now())
+		 on conflict (company_id, seed_key) do nothing
+		 returning seed_key`,
+		companyID, companyExplorerDefaultCommunicationsFolderSeedKey,
+	).Scan(&insertedCommunicationsSeed)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil {
+		position, err := nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, "communications", nil)
+		if err != nil {
+			return err
+		}
+		if err := createCompanyExplorerDefaultFolderTreeSQL(ctx, tx, companyID, "communications", nil, position, companyExplorerDefaultCommunicationsFolderTree); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
