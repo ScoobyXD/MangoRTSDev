@@ -577,6 +577,7 @@ export function logicGateRaciCellStyle(activeDrop: boolean): React.CSSProperties
 }
 
 export const logicGateInboxGroupStyle: React.CSSProperties = {
+  position: "relative",
   minWidth: 0,
   display: "grid",
   gridTemplateRows: "30px minmax(0, auto)",
@@ -585,6 +586,28 @@ export const logicGateInboxGroupStyle: React.CSSProperties = {
   background: "#fffdf9",
   overflow: "hidden",
   boxShadow: "0 2px 7px rgba(36, 18, 10, 0.05)",
+};
+
+export const logicGateInboxGroupResizeHandleStyle: React.CSSProperties = {
+  position: "absolute",
+  left: 0,
+  right: 0,
+  bottom: 0,
+  height: 9,
+  display: "flex",
+  alignItems: "flex-end",
+  justifyContent: "center",
+  cursor: "row-resize",
+  touchAction: "none",
+  zIndex: 3,
+};
+
+export const logicGateInboxGroupResizeGripStyle: React.CSSProperties = {
+  width: 42,
+  height: 2,
+  marginBottom: 2,
+  borderRadius: 2,
+  background: "rgba(255, 136, 32, 0.34)",
 };
 
 export function logicGateInboxGroupHeaderStyle(interactive: boolean): React.CSSProperties {

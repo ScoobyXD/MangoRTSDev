@@ -20,6 +20,7 @@ export type KanbanColumnResizeState = {
   startHeight: number;
   currentWidth: number;
   currentHeight: number;
+  minHeight?: number;
 };
 
 type KanbanColumnViewProps = {
@@ -51,6 +52,7 @@ type KanbanColumnViewProps = {
   onDropColumn: (event: React.DragEvent<HTMLElement>, columnID: string) => void;
   dataTransferIncludes: (event: React.DragEvent, mime: string) => boolean;
   showCreateNodeButton?: boolean;
+  minimumColumnHeightPx?: number;
 };
 
 export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
@@ -82,9 +84,11 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
   onDropColumn,
   dataTransferIncludes,
   showCreateNodeButton = true,
+  minimumColumnHeightPx,
 }) => {
   const columnWidth = getColumnWidth(column);
-  const columnHeight = getColumnHeight(column);
+  const minimumColumnHeight = Math.max(KANBAN_DEFAULT_COLUMN_HEIGHT_PX / 2, minimumColumnHeightPx ?? 0);
+  const columnHeight = Math.max(getColumnHeight(column), minimumColumnHeight);
   const columnColor = normalizeKanbanColumnItemColor(column.item_color);
   const columnDropActive = dragOverColumnID === column.column_id;
   const insertionShadow = columnDropActive ? `0 0 0 3px ${accent}` : "";
@@ -112,7 +116,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
         flex: `0 0 ${columnWidth}px`,
         width: columnWidth,
         height: columnHeight,
-        minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX / 2,
+        minHeight: minimumColumnHeight,
         background: `linear-gradient(180deg, ${hexToRgba(columnColor, 0.1)}, ${laneBackground} 78px)`,
         border: `1px solid ${columnColor || laneBorder}`,
         boxShadow: columnShadow,
@@ -211,6 +215,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
             startHeight: columnHeight,
             currentWidth: columnWidth,
             currentHeight: columnHeight,
+            minHeight: minimumColumnHeight,
           };
         }}
         style={{ position: "absolute", top: 0, right: -4, bottom: 0, width: 8, cursor: "col-resize", zIndex: 2 }}
@@ -229,6 +234,7 @@ export const KanbanColumnView: React.FC<KanbanColumnViewProps> = ({
             startHeight: columnHeight,
             currentWidth: columnWidth,
             currentHeight: columnHeight,
+            minHeight: minimumColumnHeight,
           };
         }}
         style={{ position: "absolute", left: 0, right: 0, bottom: -4, height: 8, cursor: "row-resize", zIndex: 2 }}

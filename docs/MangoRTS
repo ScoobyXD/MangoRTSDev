@@ -62,7 +62,7 @@ LATER: need to do an audit on how well equiped the app is for multiple people us
 
 ===============
 notes:
-1. There is an argument that there is no need for Done section in R Inbox.
+1. There is an argument that there is no need for Done section in R Inbox. If something is done, do we want it to show up on the ACI inbox or our inbox? Probably not. 
 	a. Because things just get piled up
 	b. So consciously, I'm using the art inbox as a list of things to do, whether it be pending or in progress. If I have something in the done section, subconsciously I still think of it as something that I have to do. 
 	
@@ -81,7 +81,8 @@ Pinned nodes and pinned logic gates.
 Replace logic gate arena with Logic gates by function and logic gates by person should be its own section like logic gate arena.
 Idea where multiple people do group huddle on node with each their own textbox
 Be able to create node from any piece of text.
-
+be able to have a tab where it says relationships and you see the list of other nodes this node is related to and the map relationships
+i should be able to create peer or child nodes or parent nodes from any node.
 
 ======================
 

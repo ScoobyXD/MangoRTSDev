@@ -9,10 +9,10 @@ import type { NodeRecord } from "../../modules/node-map/shared";
 import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
-import { ACI_COLUMNS, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
+import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeState, HomeViewID, InboxLogicGateNodeGroup } from "./homeTypes";
 import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusLetter, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
+import { allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
@@ -20,6 +20,17 @@ const NODE_EDITOR_POPUP_MIN_HEIGHT = 320;
 const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
 const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "home-node-editor-popup-size-v1";
+
+type InboxMatrixViewID = Extract<HomeViewID, "aci-inbox" | "r-inbox">;
+
+type InboxGroupResizeState = {
+  key: string;
+  startY: number;
+  startHeight: number;
+  ownerDocument: Document;
+  previousCursor: string;
+  previousUserSelect: string;
+};
 
 type NodeEditorPopupResizeHandle = {
   key: string;
@@ -39,6 +50,121 @@ const NODE_EDITOR_POPUP_RESIZE_HANDLES: NodeEditorPopupResizeHandle[] = [
   { key: "w", horizontal: -1, vertical: 0, cursor: "ew-resize", style: { left: -5, top: 18, bottom: 18, width: 10 } },
   { key: "e", horizontal: 1, vertical: 0, cursor: "ew-resize", style: { right: -5, top: 18, bottom: 18, width: 10 } },
 ];
+
+function clampInboxGroupHeight(heightPx: number): number {
+  if (!Number.isFinite(heightPx)) return HOME_INBOX_GROUP_MIN_HEIGHT_PX;
+  return Math.max(HOME_INBOX_GROUP_MIN_HEIGHT_PX, Math.min(HOME_INBOX_GROUP_MAX_HEIGHT_PX, Math.round(heightPx)));
+}
+
+function inboxGroupHeightsStorageKey(viewID: InboxMatrixViewID): string {
+  const companyID = getActiveCompanyID().trim() || "global";
+  return `${HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY}:${companyID}:${viewID}`;
+}
+
+function readInboxGroupHeights(viewID: InboxMatrixViewID): Record<string, number> {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const parsed = JSON.parse(localStorage.getItem(inboxGroupHeightsStorageKey(viewID)) ?? "{}") as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const heights: Record<string, number> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value !== "number" || !Number.isFinite(value)) continue;
+      heights[key] = clampInboxGroupHeight(value);
+    }
+    return heights;
+  } catch {
+    return {};
+  }
+}
+
+function storeInboxGroupHeights(viewID: InboxMatrixViewID, heights: Record<string, number>): void {
+  if (typeof localStorage === "undefined") return;
+  const cleanEntries = Object.entries(heights)
+    .filter(([key, value]) => key.trim() && Number.isFinite(value))
+    .map(([key, value]) => [key, clampInboxGroupHeight(value)] as const);
+  const storageKey = inboxGroupHeightsStorageKey(viewID);
+  if (cleanEntries.length === 0) {
+    localStorage.removeItem(storageKey);
+    return;
+  }
+  localStorage.setItem(storageKey, JSON.stringify(Object.fromEntries(cleanEntries)));
+}
+
+function inboxGroupResizeKey(cellKey: string, group: InboxLogicGateNodeGroup): string {
+  return `${cellKey}:${group.logicGateID || group.label}`;
+}
+
+function useInboxGroupCardHeights(viewID: InboxMatrixViewID): {
+  groupHeights: Record<string, number>;
+  startGroupResize: (key: string, event: React.PointerEvent<HTMLDivElement>) => void;
+} {
+  const [groupHeights, setGroupHeights] = useState<Record<string, number>>(() => readInboxGroupHeights(viewID));
+  const groupHeightsRef = useRef(groupHeights);
+  const resizeRef = useRef<InboxGroupResizeState | null>(null);
+
+  useEffect(() => {
+    groupHeightsRef.current = groupHeights;
+  }, [groupHeights]);
+
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      const state = resizeRef.current;
+      if (!state) return;
+      event.preventDefault();
+      const nextHeight = clampInboxGroupHeight(state.startHeight + event.clientY - state.startY);
+      setGroupHeights((previous) => {
+        if (previous[state.key] === nextHeight) return previous;
+        const next = { ...previous, [state.key]: nextHeight };
+        groupHeightsRef.current = next;
+        return next;
+      });
+    };
+    const finishResize = () => {
+      const state = resizeRef.current;
+      if (!state) return;
+      resizeRef.current = null;
+      state.ownerDocument.body.style.cursor = state.previousCursor;
+      state.ownerDocument.body.style.userSelect = state.previousUserSelect;
+      storeInboxGroupHeights(viewID, groupHeightsRef.current);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", finishResize);
+    window.addEventListener("pointercancel", finishResize);
+    return () => {
+      finishResize();
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", finishResize);
+      window.removeEventListener("pointercancel", finishResize);
+    };
+  }, [viewID]);
+
+  const startGroupResize = useCallback((key: string, event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const ownerDocument = event.currentTarget.ownerDocument;
+    const card = event.currentTarget.closest("[data-inbox-logic-gate-group-card='true']") as HTMLElement | null;
+    const startHeight = clampInboxGroupHeight(card?.getBoundingClientRect().height ?? groupHeightsRef.current[key] ?? HOME_INBOX_GROUP_MIN_HEIGHT_PX);
+    resizeRef.current = {
+      key,
+      startY: event.clientY,
+      startHeight,
+      ownerDocument,
+      previousCursor: ownerDocument.body.style.cursor,
+      previousUserSelect: ownerDocument.body.style.userSelect,
+    };
+    ownerDocument.body.style.cursor = "row-resize";
+    ownerDocument.body.style.userSelect = "none";
+    setGroupHeights((previous) => {
+      if (previous[key] === startHeight) return previous;
+      const next = { ...previous, [key]: startHeight };
+      groupHeightsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  return { groupHeights, startGroupResize };
+}
 
 function nodeEditorPopupMaxSize(): { width: number; height: number } {
   if (typeof window === "undefined") return { width: 1180, height: 820 };
@@ -1152,6 +1278,7 @@ export function AciInboxMatrix({
   onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
 }) {
   const cellLogicGateGroups = useMemo(() => buildAciInboxGroupsByCell(nodes, nodeByID, logicGateByID, currentUserID), [currentUserID, logicGateByID, nodeByID, nodes]);
+  const { groupHeights, startGroupResize } = useInboxGroupCardHeights("aci-inbox");
   const orderedRowIDs = useMemo(() => {
     const ids: string[] = [];
     for (const priority of INBOX_PRIORITIES) {
@@ -1190,19 +1317,25 @@ export function AciInboxMatrix({
                 const logicGateGroups = cellLogicGateGroups.get(cellKey) ?? [];
                 return (
                   <div key={cellKey} style={logicGateRaciCellStyle(false)}>
-                    {logicGateGroups.map((group) => (
-                      <LogicGateInboxNodeGroupCard
-                        key={group.logicGateID}
-                        group={group}
-                        selectedRowIDs={selectedRowIDs}
-                        orderedRowIDs={orderedRowIDs}
-                        nodeByID={nodeByID}
-                        getNodeDragIDs={getNodeDragIDs}
-                        onSelectNode={onSelectNode}
-                        onOpenNode={onOpenNode}
-                        onOpenLogicGate={onOpenLogicGate}
-                      />
-                    ))}
+                    {logicGateGroups.map((group) => {
+                      const resizeKey = inboxGroupResizeKey(cellKey, group);
+                      return (
+                        <LogicGateInboxNodeGroupCard
+                          key={group.logicGateID}
+                          group={group}
+                          selectedRowIDs={selectedRowIDs}
+                          orderedRowIDs={orderedRowIDs}
+                          nodeByID={nodeByID}
+                          getNodeDragIDs={getNodeDragIDs}
+                          onSelectNode={onSelectNode}
+                          onOpenNode={onOpenNode}
+                          onOpenLogicGate={onOpenLogicGate}
+                          resizeKey={resizeKey}
+                          heightPx={groupHeights[resizeKey]}
+                          onStartResize={startGroupResize}
+                        />
+                      );
+                    })}
                   </div>
                 );
               })}
@@ -1238,6 +1371,7 @@ export function ResponsibleInboxMatrix({
   onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
 }) {
   const cellLogicGateGroups = useMemo(() => buildResponsibleInboxGroupsByCell(nodes, nodeByID, logicGateByID, currentUserID), [currentUserID, logicGateByID, nodeByID, nodes]);
+  const { groupHeights, startGroupResize } = useInboxGroupCardHeights("r-inbox");
   const orderedRowIDs = useMemo(() => {
     const ids: string[] = [];
     for (const priority of INBOX_PRIORITIES) {
@@ -1276,19 +1410,25 @@ export function ResponsibleInboxMatrix({
                 const logicGateGroups = cellLogicGateGroups.get(cellKey) ?? [];
                 return (
                   <div key={cellKey} style={logicGateRaciCellStyle(false)}>
-                    {logicGateGroups.map((group) => (
-                      <LogicGateInboxNodeGroupCard
-                        key={group.logicGateID}
-                        group={group}
-                        selectedRowIDs={selectedRowIDs}
-                        orderedRowIDs={orderedRowIDs}
-                        nodeByID={nodeByID}
-                        getNodeDragIDs={getNodeDragIDs}
-                        onSelectNode={onSelectNode}
-                        onOpenNode={onOpenNode}
-                        onOpenLogicGate={onOpenLogicGate}
-                      />
-                    ))}
+                    {logicGateGroups.map((group) => {
+                      const resizeKey = inboxGroupResizeKey(cellKey, group);
+                      return (
+                        <LogicGateInboxNodeGroupCard
+                          key={group.logicGateID}
+                          group={group}
+                          selectedRowIDs={selectedRowIDs}
+                          orderedRowIDs={orderedRowIDs}
+                          nodeByID={nodeByID}
+                          getNodeDragIDs={getNodeDragIDs}
+                          onSelectNode={onSelectNode}
+                          onOpenNode={onOpenNode}
+                          onOpenLogicGate={onOpenLogicGate}
+                          resizeKey={resizeKey}
+                          heightPx={groupHeights[resizeKey]}
+                          onStartResize={startGroupResize}
+                        />
+                      );
+                    })}
                   </div>
                 );
               })}
@@ -1311,6 +1451,9 @@ export function LogicGateInboxNodeGroupCard({
   onOpenLogicGate,
   canRemoveNode,
   onRemovePlacement,
+  resizeKey,
+  heightPx,
+  onStartResize,
 }: {
   group: InboxLogicGateNodeGroup;
   selectedRowIDs: Set<string>;
@@ -1322,11 +1465,21 @@ export function LogicGateInboxNodeGroupCard({
   onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
   canRemoveNode?: (nodeID: string) => boolean;
   onRemovePlacement?: (nodeID: string) => void;
+  resizeKey?: string;
+  heightPx?: number;
+  onStartResize?: (key: string, event: React.PointerEvent<HTMLDivElement>) => void;
 }) {
   const canOpenLogicGate = group.logicGateID !== INBOX_NO_LOGIC_GATE_ID;
   const firstNodeID = group.nodeIDs[0] ?? "";
+  const explicitHeight = typeof heightPx === "number" && Number.isFinite(heightPx);
+  const groupStyle = explicitHeight
+    ? { ...logicGateInboxGroupStyle, height: clampInboxGroupHeight(heightPx), gridTemplateRows: "30px minmax(0, 1fr)" }
+    : logicGateInboxGroupStyle;
+  const nodeListStyle = explicitHeight
+    ? { ...logicGateInboxNodeListStyle, maxHeight: "none" }
+    : logicGateInboxNodeListStyle;
   return (
-    <div style={logicGateInboxGroupStyle}>
+    <div data-inbox-logic-gate-group-card="true" style={groupStyle}>
       <button
         type="button"
         disabled={!canOpenLogicGate}
@@ -1345,7 +1498,7 @@ export function LogicGateInboxNodeGroupCard({
         <span style={logicGateInboxGroupTitleStyle}>{group.label}</span>
         <span style={logicGateInboxGroupCountStyle}>{group.nodeIDs.length}</span>
       </button>
-      <div className="kanban-board-scroll" style={logicGateInboxNodeListStyle}>
+      <div className="kanban-board-scroll" style={nodeListStyle}>
         {group.nodeIDs.map((nodeID) => {
           const node = nodeByID.get(nodeID);
           if (!node) return null;
@@ -1364,6 +1517,15 @@ export function LogicGateInboxNodeGroupCard({
           );
         })}
       </div>
+      {resizeKey && onStartResize && (
+        <div
+          title="Resize Logic Gate card"
+          onPointerDown={(event) => onStartResize(resizeKey, event)}
+          style={logicGateInboxGroupResizeHandleStyle}
+        >
+          <span style={logicGateInboxGroupResizeGripStyle} />
+        </div>
+      )}
     </div>
   );
 }

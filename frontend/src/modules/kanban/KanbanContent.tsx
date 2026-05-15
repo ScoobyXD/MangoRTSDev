@@ -41,6 +41,7 @@ import {
   EXPLORER_ENTITY_DRAG_MIME,
   EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
   EVENT_KANBAN_BOARDS_UPDATED,
+  KANBAN_ARENA_DEFAULT_COLUMN_HEIGHT_PX,
   KANBAN_CARD_DRAG_MIME,
   KANBAN_COLUMN_DRAG_MIME,
   KANBAN_DEFAULT_BOARD_TITLE,
@@ -207,6 +208,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const cardBackground = isDark ? "#101418" : "#ffffff";
   const topClearancePx = arenaMode ? 34 : KANBAN_MODULE_TOP_CLEARANCE_PX;
   const boardHeaderLeftPaddingPx = arenaMode ? 0 : 162;
+  const boardMinColumnHeightPx = arenaMode ? KANBAN_ARENA_DEFAULT_COLUMN_HEIGHT_PX : KANBAN_DEFAULT_COLUMN_HEIGHT_PX;
 
   const resolveActiveNodesFolderID = useCallback(async (): Promise<string> => {
     const currentActiveFolder = explorerFolders.find((folder) => folder.folder_kind === "node" && folder.system_key === "active_nodes");
@@ -980,7 +982,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         setColumns((previous) => previous.map((column) => (column.column_id === resize.columnID ? { ...column, width_px: widthPx } : column)));
         return;
       }
-      const heightPx = clampColumnHeight(resize.startHeight + event.clientY - resize.startY);
+      const heightPx = Math.max(resize.minHeight ?? 0, clampColumnHeight(resize.startHeight + event.clientY - resize.startY));
       resize.currentHeight = heightPx;
       setColumns((previous) => previous.map((column) => (column.column_id === resize.columnID ? { ...column, height_px: heightPx } : column)));
     };
@@ -1449,7 +1451,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         {error && <div style={{ marginBottom: 8, color: "#c62828", fontSize: 11, fontWeight: 700 }}>{error}</div>}
         {arenaMode && <KanbanArenaGroupingControls controlsRef={arenaGroupControlsRef} groupingOpen={arenaGroupingOpen} onToggleGroupingOpen={() => setArenaGroupingOpen((open) => !open)} xGroupBy={arenaXGroupBy} yGroupBy={arenaYGroupBy} xSortDirection={arenaXSortDirection} ySortDirection={arenaYSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetXGroupBy={setArenaXGroupBy} onSetYGroupBy={selectArenaYGroupBy} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} />}
         {arenaMode && arenaGroupingOpen ? <KanbanArenaGroupedBoard groupedBoard={arenaGroupedBoard} yGroupBy={arenaYGroupBy} xGroupBy={arenaXGroupBy} ySortDirection={arenaYSortDirection} xSortDirection={arenaXSortDirection} menuOpen={arenaGroupMenuOpen} onSetMenuOpen={setArenaGroupMenuOpen} onSetYGroupBy={selectArenaYGroupBy} onSetXGroupBy={setArenaXGroupBy} onToggleYSortDirection={() => setArenaYSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} onToggleXSortDirection={() => setArenaXSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))} isDark={isDark} line={line} cardBackground={cardBackground} text={text} renderCard={renderCard} /> : (
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: KANBAN_DEFAULT_COLUMN_HEIGHT_PX + 18, paddingBottom: 16, width: arenaMode ? "100%" : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minHeight: boardMinColumnHeightPx + 18, paddingBottom: 16, width: arenaMode ? "100%" : undefined, opacity: loading && columns.length === 0 && cards.length === 0 ? 0.72 : 1 }}>
           {orderedColumns.map((column) => {
             const columnCards = cardsByColumn.get(column.column_id) ?? [];
             return (
@@ -1483,6 +1485,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
                 onDropColumn={onDropColumn}
                 dataTransferIncludes={dataTransferIncludes}
                 showCreateNodeButton={!arenaMode}
+                minimumColumnHeightPx={arenaMode ? KANBAN_ARENA_DEFAULT_COLUMN_HEIGHT_PX : undefined}
               />
             );
           })}

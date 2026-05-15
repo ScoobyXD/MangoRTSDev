@@ -26,6 +26,7 @@ export type ColumnResizeState = {
   startHeight: number;
   currentWidth: number;
   currentHeight: number;
+  minHeight?: number;
 };
 
 export type NodeEditorOverlayState = {
