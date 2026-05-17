@@ -88,6 +88,7 @@ export function HomeMailWorkspace({
   messageListRef,
   messages,
   notice,
+  pendingAutoArchiveMessageIDs,
   searchDraft,
   selectedMessage,
   selectedMessageID,
@@ -139,6 +140,7 @@ export function HomeMailWorkspace({
   messageListRef: React.RefObject<HTMLDivElement>;
   messages: EmailMessage[];
   notice: string;
+  pendingAutoArchiveMessageIDs: Set<string>;
   searchDraft: string;
   selectedMessage: EmailMessage | null;
   selectedMessageID: string;
@@ -279,7 +281,7 @@ export function HomeMailWorkspace({
           style={messageListStyle}
           onScroll={(event) => {
             const target = event.currentTarget;
-            if ((activeViewID === "my-triage" || activeViewID === "primary") && mailbox === "primary") {
+            if (isArchivableListView && mailbox === "primary") {
               const scrolledOutIDs = collectScrolledOutMessageIDs(target);
               if (scrolledOutIDs.length > 0) onAutoArchiveMessages(scrolledOutIDs);
             }
@@ -291,6 +293,7 @@ export function HomeMailWorkspace({
           ) : messages.map((message) => {
             const active = selectedMessageIDs.has(message.id) || selectedMessageID === message.id;
             const draggable = activeViewID === "my-triage" && mailbox === "primary";
+            const pendingAutoArchive = mailbox === "primary" && pendingAutoArchiveMessageIDs.has(message.id);
             return (
               <div
                 key={message.id}
@@ -298,7 +301,7 @@ export function HomeMailWorkspace({
                 role="button"
                 tabIndex={0}
                 style={isArchivableListView
-                  ? triageMessageRowStyle(active, message.unread, draggable)
+                  ? triageMessageRowStyle(active, message.unread, draggable, pendingAutoArchive)
                   : messageRowStyle(active, message.unread)}
                 draggable={draggable}
                 onClick={(event) => onSelectMessage(message, event)}

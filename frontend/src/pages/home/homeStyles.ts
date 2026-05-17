@@ -1087,23 +1087,24 @@ export function messageRowStyle(active: boolean, unread: boolean): React.CSSProp
   };
 }
 
-export function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean): React.CSSProperties {
+export function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean, pendingAutoArchive = false): React.CSSProperties {
   return {
     display: "grid",
     gridTemplateColumns: "20px minmax(0, 1fr) 62px",
     gap: 9,
     alignItems: "start",
     minHeight: 82,
-    border: `1px solid ${active ? "#ff8820" : unread ? "rgba(255, 136, 32, 0.48)" : "rgba(255, 136, 32, 0.16)"}`,
+    border: `1px solid ${pendingAutoArchive ? "rgba(36, 18, 10, 0.26)" : active ? "#ff8820" : unread ? "rgba(255, 136, 32, 0.48)" : "rgba(255, 136, 32, 0.16)"}`,
     borderRadius: 7,
-    background: active ? "#fff2e0" : unread ? "#fff8ef" : "#ffffff",
+    background: pendingAutoArchive ? "#e7e7e7" : active ? "#fff2e0" : unread ? "#fff8ef" : "#ffffff",
     cursor: draggable ? "grab" : "pointer",
-    color: "#24120a",
+    color: pendingAutoArchive ? "rgba(36, 18, 10, 0.72)" : "#24120a",
     font: "inherit",
     fontSize: 12,
     padding: "10px 10px 9px",
     textAlign: "left",
     minWidth: 0,
+    transition: "background 140ms ease, border-color 140ms ease, color 140ms ease",
   };
 }
 
