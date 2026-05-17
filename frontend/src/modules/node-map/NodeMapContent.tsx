@@ -1406,7 +1406,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
           overflow: "hidden",
           height: "100%",
           width: "100%",
-          backgroundColor: "transparent",
+          ...gridBackgroundStyle,
         }}
         {...viewportHandlers}
         onPointerDown={(event) => {
@@ -1423,7 +1423,6 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
             height: WORLD_H,
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: "0 0",
-            ...gridBackgroundStyle,
           }}
         >
           <canvas

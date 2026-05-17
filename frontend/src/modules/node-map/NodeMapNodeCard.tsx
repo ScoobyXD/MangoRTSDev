@@ -158,18 +158,7 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
   const renderReadOnlyTitle = () => (
     <div
       ref={titleElementRef}
-      onPointerDown={(event) => {
-        event.stopPropagation();
-        onSetCanvasActive(true);
-        onSetContextMenu(null);
-        onSetNodeContextMenu(null);
-        onSetRelationshipContextMenu(null);
-        onSetSelectedRelationshipIDs(new Set());
-        onSetSelectedNodeID(node.node_id);
-        onSetSelectedNodeIDs(new Set([node.node_id]));
-      }}
-      onPointerUp={(event) => {
-        event.stopPropagation();
+      onPointerUp={() => {
         window.setTimeout(captureNodeTitleSelection, 0);
       }}
       style={{
@@ -187,8 +176,8 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
         lineHeight: 1.15,
         letterSpacing: 0,
         fontFamily: "var(--mango-font-family)",
-        userSelect: "text",
-        cursor: "text",
+        userSelect: "none",
+        cursor: "inherit",
       }}
     >
       {titleSegments.map((segment) => {
@@ -207,7 +196,7 @@ export const NodeMapNodeCard: React.FC<NodeMapNodeCardProps> = ({
               background: isCommented ? (isActiveComment ? "rgba(255, 202, 40, 0.72)" : "rgba(255, 213, 79, 0.46)") : "transparent",
               borderBottom: isCommented ? `1px solid ${selectionColor}` : "none",
               borderRadius: isCommented ? 3 : 0,
-              cursor: isCommented ? "pointer" : "text",
+              cursor: isCommented ? "pointer" : "inherit",
             }}
           >
             {segment.text}

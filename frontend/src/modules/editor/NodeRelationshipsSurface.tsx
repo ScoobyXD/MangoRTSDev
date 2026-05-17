@@ -25,7 +25,11 @@ type NodeRelationshipsSurfaceProps = {
   scrollbarAccent: string;
   scrollbarTrack: string;
   theme: "mango" | "teal" | "light" | "dark";
+  onOpenNode?: (nodeID: string, title: string) => void;
 };
+
+const MIN_RELATIONSHIP_LIST_WIDTH = 236;
+const MIN_RELATIONSHIP_MAP_WIDTH = 360;
 
 function roleLabel(row: NodeRelationshipTreeRow): string {
   if (row.role === "Current") return "Current";
@@ -41,6 +45,12 @@ function rowAccentColor(row: NodeRelationshipTreeRow, accent: string): string {
   return "rgba(100,116,139,0.72)";
 }
 
+function clampRelationshipListWidth(value: number, totalWidth: number): number {
+  if (!Number.isFinite(totalWidth) || totalWidth <= 0) return Math.max(MIN_RELATIONSHIP_LIST_WIDTH, Math.round(value));
+  const maxWidth = Math.max(MIN_RELATIONSHIP_LIST_WIDTH, totalWidth - MIN_RELATIONSHIP_MAP_WIDTH);
+  return Math.round(Math.min(Math.max(value, MIN_RELATIONSHIP_LIST_WIDTH), maxWidth));
+}
+
 function TreeRow({
   row,
   active,
@@ -48,6 +58,7 @@ function TreeRow({
   surfaceText,
   strokeColor,
   panelBackground,
+  onOpen,
 }: {
   row: NodeRelationshipTreeRow;
   active: boolean;
@@ -55,13 +66,17 @@ function TreeRow({
   surfaceText: string;
   strokeColor: string;
   panelBackground: string;
+  onOpen?: (row: NodeRelationshipTreeRow) => void;
 }) {
   const label = roleLabel(row);
   const roleColor = rowAccentColor(row, accent);
   return (
-    <div
+    <button
+      type="button"
       title={row.title}
+      onClick={() => onOpen?.(row)}
       style={{
+        width: "100%",
         minWidth: 0,
         minHeight: 30,
         display: "grid",
@@ -74,6 +89,9 @@ function TreeRow({
         borderRadius: 6,
         background: active ? "rgba(255,136,32,0.12)" : panelBackground,
         color: surfaceText,
+        cursor: "pointer",
+        font: "inherit",
+        textAlign: "left",
       }}
     >
       <span style={{ minWidth: 0, display: "inline-flex", alignItems: "center", gap: 7 }}>
@@ -111,7 +129,7 @@ function TreeRow({
           {label}
         </span>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -130,9 +148,12 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
   scrollbarAccent,
   scrollbarTrack,
   theme,
+  onOpenNode,
 }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
+  const [listWidth, setListWidth] = useState<number | null>(null);
+  const [splitDrag, setSplitDrag] = useState<{ startX: number; startWidth: number } | null>(null);
   const [graph, setGraph] = useState<{ nodes: NodeRecord[]; relationships: NodeRelationship[] }>(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
     return { nodes: snapshot.nodes ?? [], relationships: snapshot.relationships ?? [] };
@@ -168,8 +189,26 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
     fallbackTitle: nodeTitle,
   }), [graph.nodes, graph.relationships, nodeID, nodeTitle]);
   const compact = width > 0 && width < 760;
+  const listWidthPx = compact ? 0 : clampRelationshipListWidth(listWidth ?? width * 0.32, width);
   const mapWidgetID = `relationships-map:${scope}:${nodeID}`;
   const rowCountLabel = `${rows.length} node${rows.length === 1 ? "" : "s"}`;
+
+  useEffect(() => {
+    if (!splitDrag) return;
+    const onPointerMove = (event: PointerEvent) => {
+      event.preventDefault();
+      setListWidth(clampRelationshipListWidth(splitDrag.startWidth + event.clientX - splitDrag.startX, width));
+    };
+    const onPointerUp = () => setSplitDrag(null);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+  }, [splitDrag, width]);
 
   return (
     <div
@@ -183,11 +222,11 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
         bottom: 0,
         left: 0,
         display: "grid",
-        gridTemplateColumns: compact ? "1fr" : "minmax(236px, 32%) minmax(0, 1fr)",
+        gridTemplateColumns: compact ? "1fr" : `${listWidthPx}px 8px minmax(0, 1fr)`,
         gridTemplateRows: compact ? "minmax(180px, 36%) minmax(260px, 1fr)" : "1fr",
         minHeight: 0,
         overflow: "hidden",
-        cursor: "default",
+        cursor: splitDrag ? "col-resize" : "default",
         ["--editor-document-scroll-accent" as string]: scrollbarAccent,
         ["--editor-document-scroll-track" as string]: scrollbarTrack,
       }}
@@ -198,7 +237,7 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
           minHeight: 0,
           display: "grid",
           gridTemplateRows: "auto minmax(0, 1fr)",
-          borderRight: compact ? "none" : `1px solid ${ruleColor}`,
+          borderRight: "none",
           borderBottom: compact ? `1px solid ${ruleColor}` : "none",
           background: panelBackground,
         }}
@@ -224,10 +263,32 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
               surfaceText={surfaceText}
               strokeColor={strokeColor}
               panelBackground="rgba(255,255,255,0.58)"
+              onOpen={(item) => onOpenNode?.(item.nodeID, item.title)}
             />
           ))}
         </div>
       </aside>
+      {!compact && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          title="Resize relationship list"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setSplitDrag({ startX: event.clientX, startWidth: listWidthPx });
+          }}
+          style={{
+            minWidth: 8,
+            height: "100%",
+            cursor: "col-resize",
+            touchAction: "none",
+            background: splitDrag ? "rgba(255,136,32,0.14)" : "transparent",
+            borderLeft: `1px solid ${ruleColor}`,
+            borderRight: `1px solid ${ruleColor}`,
+          }}
+        />
+      )}
       <section style={{ minWidth: 0, minHeight: 0, position: "relative", background: "transparent" }}>
         <NodeMapContent
           accent={accent}
