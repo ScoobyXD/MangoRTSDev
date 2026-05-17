@@ -70,7 +70,7 @@ import {
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 import { AciInboxMatrix, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
-import { MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
+import { AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { buildMyLogicGateGroups, cleanIDList, collectSharedInboxSubtreeIDs, emailAddressListContains, filterExplorerRowsForSearch, filterSharedInboxesForUser, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeHasLogicGateRaciRole, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortNodesForInbox, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type WorkspaceStreamEnvelope } from "./homeTypes";
@@ -87,6 +87,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const [selectedMessageIDs, setSelectedMessageIDs] = useState<Set<string>>(new Set());
   const [selectionAnchorMessageID, setSelectionAnchorMessageID] = useState("");
   const [selectedMessage, setSelectedMessage] = useState<EmailMessage | null>(null);
+  const [pendingAutoArchiveMessageIDs, setPendingAutoArchiveMessageIDs] = useState<Set<string>>(new Set());
   const [messageContextMenu, setMessageContextMenu] = useState<{ x: number; y: number; messageIDs: string[] } | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ messageIDs: string[] } | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
@@ -137,12 +138,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const loadMessagesRef = useRef<((options?: LoadMessagesOptions) => Promise<void>) | null>(null);
   const selectedMessageIDRef = useRef("");
   const activeViewIDRef = useRef<HomeViewID>(initialViewID);
+  const pendingAutoArchiveMessageIDsRef = useRef<Set<string>>(new Set());
+  const autoArchiveTimerIDsRef = useRef<Map<string, number>>(new Map());
   const folderReloadTimerRef = useRef<number | null>(null);
   const workspacePanelReloadTimerRef = useRef<number | null>(null);
   const messageListRefreshTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<EmailMessage[]>([]);
   const locallyReadMessageIDsRef = useRef<Set<string>>(new Set());
-  const autoArchivingMessageIDsRef = useRef<Set<string>>(new Set());
   const mailboxRef = useRef<EmailMailbox>("primary");
   const nextPageTokenRef = useRef("");
   const searchQueryRef = useRef("");
@@ -176,6 +178,42 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     : activeSharedInboxFolderID
       ? sharedInboxTreeUserCanManageMail(sharedInboxes, activeSharedInboxFolderID, currentUserID, currentUserHasFullSharedInboxAccess)
       : true;
+  const addPendingAutoArchiveMessages = useCallback((messageIDs: string[]) => {
+    const pending = pendingAutoArchiveMessageIDsRef.current;
+    let changed = false;
+    for (const messageID of messageIDs) {
+      if (pending.has(messageID)) continue;
+      pending.add(messageID);
+      changed = true;
+    }
+    if (changed) setPendingAutoArchiveMessageIDs(new Set(pending));
+  }, []);
+  const removePendingAutoArchiveMessages = useCallback((messageIDs: string[]) => {
+    const pending = pendingAutoArchiveMessageIDsRef.current;
+    let changed = false;
+    for (const messageID of messageIDs) {
+      changed = pending.delete(messageID) || changed;
+    }
+    if (changed) setPendingAutoArchiveMessageIDs(new Set(pending));
+  }, []);
+  const cancelPendingAutoArchiveMessages = useCallback((messageIDs: string[]) => {
+    const ids = cleanIDList(messageIDs);
+    if (ids.length === 0) return;
+    for (const id of ids) {
+      const timerID = autoArchiveTimerIDsRef.current.get(id);
+      if (timerID === undefined) continue;
+      window.clearTimeout(timerID);
+      autoArchiveTimerIDsRef.current.delete(id);
+    }
+    removePendingAutoArchiveMessages(ids);
+  }, [removePendingAutoArchiveMessages]);
+  useEffect(() => {
+    return () => {
+      autoArchiveTimerIDsRef.current.forEach((timerID) => window.clearTimeout(timerID));
+      autoArchiveTimerIDsRef.current.clear();
+      pendingAutoArchiveMessageIDsRef.current.clear();
+    };
+  }, []);
   useEffect(() => {
     selectedMessageIDRef.current = selectedMessageID;
   }, [selectedMessageID]);
@@ -313,6 +351,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       const next = await fetchCommunicationsStatus();
       setStatus(next);
       if (!next.connected) {
+        cancelPendingAutoArchiveMessages(Array.from(pendingAutoArchiveMessageIDsRef.current));
         setFolders([]);
         setSharedInboxes([]);
         setCompanyUsers([]);
@@ -330,9 +369,10 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setLoadingStatus(false);
     }
-  }, []);
+  }, [cancelPendingAutoArchiveMessages]);
   const handleEmailAccessExpired = useCallback(async (accessError: unknown) => {
     setNotice("");
+    cancelPendingAutoArchiveMessages(Array.from(pendingAutoArchiveMessageIDsRef.current));
     invalidateCommunicationsCache();
     setFolders([]);
     setMessages([]);
@@ -342,7 +382,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setSelectionAnchorMessageID("");
     await loadStatus();
     setError(formatError(accessError, "Email access expired. Disconnect and reconnect your mailbox."));
-  }, [loadStatus]);
+  }, [cancelPendingAutoArchiveMessages, loadStatus]);
   const loadFolders = useCallback(async (): Promise<boolean> => {
     if (foldersRequestInFlightRef.current) return false;
     foldersRequestInFlightRef.current = true;
@@ -554,6 +594,34 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       }
     };
   }, []);
+  const completePendingAutoArchiveMessage = useCallback((messageID: string) => {
+    autoArchiveTimerIDsRef.current.delete(messageID);
+    removePendingAutoArchiveMessages([messageID]);
+    if (isArchivableHomeViewID(activeViewIDRef.current) && mailboxRef.current === "primary") {
+      setMessages((previous) => previous.filter((message) => message.id !== messageID));
+      setSelectedMessageIDs((previous) => {
+        if (!previous.has(messageID)) return previous;
+        const next = new Set(previous);
+        next.delete(messageID);
+        return next;
+      });
+      setSelectionAnchorMessageID((current) => (current === messageID ? "" : current));
+      if (selectedMessageIDRef.current === messageID) {
+        setSelectedMessageID("");
+        setSelectedMessage(null);
+      }
+      setMessageContextMenu((current) => current && current.messageIDs.includes(messageID) ? null : current);
+    }
+    void archiveEmailMessage(messageID)
+      .catch((archiveError) => {
+        if (isEmailAccessExpiredError(archiveError)) {
+          void handleEmailAccessExpired(archiveError);
+          return;
+        }
+        setError(formatError(archiveError, "Failed to archive scrolled message"));
+        scheduleMessageListRefresh();
+      });
+  }, [handleEmailAccessExpired, removePendingAutoArchiveMessages, scheduleMessageListRefresh]);
   useEffect(() => { void loadStatus(); }, [loadStatus]);
   useEffect(() => { if (status?.connected) void loadFolders(); }, [loadFolders, status?.connected]);
   useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
@@ -880,6 +948,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
+    cancelPendingAutoArchiveMessages(ids);
     setBusy("archive");
     setError("");
     setNotice("");
@@ -900,11 +969,12 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [canMutateCurrentMailView, loadMessages, selectedMessageID]);
+  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, loadMessages, selectedMessageID]);
   const unarchiveMessages = useCallback(async (messageIDs: string[]) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
+    cancelPendingAutoArchiveMessages(ids);
     setBusy("unarchive");
     setError("");
     setNotice("");
@@ -925,37 +995,19 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [canMutateCurrentMailView, loadMessages, selectedMessageID]);
+  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, loadMessages, selectedMessageID]);
   const autoArchiveScrolledMessages = useCallback((messageIDs: string[]) => {
-    if (!canMutateCurrentMailView || !status?.connected || activeViewIDRef.current !== "my-triage" || mailboxRef.current !== "primary") return;
-    const ids = cleanIDList(messageIDs).filter((id) => !autoArchivingMessageIDsRef.current.has(id));
+    if (!canMutateCurrentMailView || !status?.connected || !isArchivableHomeViewID(activeViewIDRef.current) || mailboxRef.current !== "primary") return;
+    const ids = cleanIDList(messageIDs).filter((id) => !pendingAutoArchiveMessageIDsRef.current.has(id) && !autoArchiveTimerIDsRef.current.has(id));
     if (ids.length === 0) return;
-    const idSet = new Set(ids);
-    ids.forEach((id) => autoArchivingMessageIDsRef.current.add(id));
-    setMessages((previous) => previous.filter((message) => !idSet.has(message.id)));
-    setSelectedMessageIDs((previous) => {
-      const next = new Set(Array.from(previous).filter((id) => !idSet.has(id)));
-      return next.size === previous.size ? previous : next;
-    });
-    setSelectionAnchorMessageID((current) => (idSet.has(current) ? "" : current));
-    if (selectedMessageIDRef.current && idSet.has(selectedMessageIDRef.current)) {
-      setSelectedMessageID("");
-      setSelectedMessage(null);
+    addPendingAutoArchiveMessages(ids);
+    for (const id of ids) {
+      const timerID = window.setTimeout(() => {
+        completePendingAutoArchiveMessage(id);
+      }, AUTO_ARCHIVE_SCROLL_DELAY_MS);
+      autoArchiveTimerIDsRef.current.set(id, timerID);
     }
-    setMessageContextMenu((current) => current && current.messageIDs.some((id) => idSet.has(id)) ? null : current);
-    void Promise.allSettled(ids.map(archiveEmailMessage))
-      .then((results) => {
-        ids.forEach((id) => autoArchivingMessageIDsRef.current.delete(id));
-        const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
-        if (!rejected) return;
-        if (isEmailAccessExpiredError(rejected.reason)) {
-          void handleEmailAccessExpired(rejected.reason);
-          return;
-        }
-        setError(formatError(rejected.reason, ids.length === 1 ? "Failed to archive scrolled message" : "Failed to archive scrolled messages"));
-        scheduleMessageListRefresh();
-      });
-  }, [canMutateCurrentMailView, handleEmailAccessExpired, scheduleMessageListRefresh, status?.connected]);
+  }, [addPendingAutoArchiveMessages, canMutateCurrentMailView, completePendingAutoArchiveMessage, status?.connected]);
   const archiveSelected = async () => {
     if (!selectedMessage || !canMutateCurrentMailView) return;
     if (mailboxRef.current === "archive") await unarchiveMessages([selectedMessage.id]);
@@ -1299,6 +1351,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
+    cancelPendingAutoArchiveMessages(ids);
     setBusy("delete");
     setError("");
     try {
@@ -1318,7 +1371,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [canMutateCurrentMailView, loadMessages, selectedMessageID]);
+  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, loadMessages, selectedMessageID]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.key !== "Delete" || deleteConfirmation || busy) return;
@@ -1650,6 +1703,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             messageListRef={messageListRef}
             messages={messages}
             notice={notice}
+            pendingAutoArchiveMessageIDs={pendingAutoArchiveMessageIDs}
             searchDraft={searchDraft}
             selectedMessage={selectedMessage}
             selectedMessageID={selectedMessageID}
