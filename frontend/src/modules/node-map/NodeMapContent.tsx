@@ -4,6 +4,7 @@ import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_NODE_M
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, upsertNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "./NodeRelationshipGraph";
 import { buildExistingNodeRelationshipPayload, buildLinkedNodePayloadFromSourceSide, isLegalRelationshipSidePair, projectRelationshipVisual } from "./relationshipProjection";
+import { filterNodeGraphToStructure } from "./nodeRelationshipStructure";
 import { createMapEntityBatchClientID, createMapEntityBatchCommand, deleteNodeMapRelationshipsCommand, normalizeNodeMapRelationshipIDs } from "./nodeMapCommands";
 import { primeNodeRecordStoreCaches } from "./NodeRecordStore";
 import { NODE_MAP_CLIPBOARD_STORAGE_KEY, beginNodeMapMultiSelectSession, buildNodeMapClipboardPayload, parseNodeMapClipboardPayload, shouldIgnoreMapDeleteKeyTarget, NodeMapDragState, NodeMapMultiSelectBox, NodeMapPanState, useNodeMapDeleteKeyboardControl, useNodeMapDragControls, useNodeMapMultiSelectControls, useNodeMapPanControls, useNodeMapRelationshipDraftControls } from "./NodeMapControls";
@@ -36,8 +37,24 @@ type ExplorerSelectionOrigin = {
   selectedEntityID: string;
 };
 
+type NodeMapContentProps = {
+  accent: string;
+  widgetId?: string;
+  hideTopControls?: boolean;
+  theme?: "mango" | "teal" | "light" | "dark";
+  structureNodeID?: string;
+  initialSelectedNodeID?: string;
+};
+
 // Node Map module: graph canvas, relationship editing, and detail panel workflows.
-export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideTopControls?: boolean; theme?: "mango" | "teal" | "light" | "dark" }> = ({ accent, widgetId, hideTopControls: _hideTopControls, theme = "mango" }) => {
+export const NodeMapContent: React.FC<NodeMapContentProps> = ({
+  accent,
+  widgetId,
+  hideTopControls: _hideTopControls,
+  theme = "mango",
+  structureNodeID = "",
+  initialSelectedNodeID = "",
+}) => {
   const SELECTION_CYAN = "rgb(255, 136, 32)";
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
@@ -45,6 +62,7 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
   const mapStateKey = `node-map-state-v1:${companyID}:${mapScope}`;
   const fallbackMapStateKey = `node-map-state-v1:${companyID}:last-opened-map`;
   const inlineCommentStorageKey = buildNodeInlineCommentsStorageKey(companyID);
+  const structureFocusNodeID = structureNodeID.trim();
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const relationshipCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -301,13 +319,19 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     snapshotFolderItems: CompanyExplorerFolderItem[],
     folderID = activeFolderIDRef.current,
   ) => {
-    const scoped = filterNodeGraphToFolderScope({
-      nodes: snapshotNodes,
-      relationships: snapshotRelationships,
-      folders: snapshotFolders,
-      folderItems: snapshotFolderItems,
-      folderID,
-    });
+    const scoped = structureFocusNodeID
+      ? filterNodeGraphToStructure({
+        nodes: snapshotNodes,
+        relationships: snapshotRelationships,
+        focusNodeID: structureFocusNodeID,
+      })
+      : filterNodeGraphToFolderScope({
+        nodes: snapshotNodes,
+        relationships: snapshotRelationships,
+        folders: snapshotFolders,
+        folderItems: snapshotFolderItems,
+        folderID,
+      });
     setAllNodes(snapshotNodes);
     setFolders(snapshotFolders);
     setFolderItems(snapshotFolderItems);
@@ -425,6 +449,26 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
     setSelectedNodeIDs,
     setRelationships,
   });
+
+  useEffect(() => {
+    if (!structureFocusNodeID) return;
+    const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+    applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? [], "");
+  }, [apiBase, companyID, structureFocusNodeID]);
+
+  useEffect(() => {
+    const focusNodeID = initialSelectedNodeID.trim();
+    if (!focusNodeID) return;
+    if (!allNodes.some((node) => node.node_id === focusNodeID) && !nodes.some((node) => node.node_id === focusNodeID)) return;
+    if (selectedNodeIDRef.current !== focusNodeID) {
+      suppressNextSelectionBroadcastRef.current = true;
+      selectedNodeIDRef.current = focusNodeID;
+      setSelectedNodeID(focusNodeID);
+      setSelectedNodeIDs(new Set([focusNodeID]));
+    }
+    pendingFocusNodeIDRef.current = focusNodeID;
+    centerNodeInViewport(focusNodeID);
+  }, [initialSelectedNodeID, allNodes, nodes]);
 
   useEffect(() => {
     setSelectedRelationshipIDs((previous) => {

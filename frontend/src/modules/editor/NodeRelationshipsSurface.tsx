@@ -1,0 +1,243 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { NodeMapContent } from "../node-map/NodeMapContent";
+import {
+  getNodeRelationshipGraphSnapshot,
+  subscribeNodeRelationshipGraph,
+} from "../node-map/NodeRelationshipGraph";
+import {
+  buildNodeRelationshipTreeRows,
+  type NodeRelationshipTreeRow,
+} from "../node-map/nodeRelationshipStructure";
+import type { NodeRecord, NodeRelationship } from "../node-map/shared";
+
+type NodeRelationshipsSurfaceProps = {
+  apiBase: string;
+  companyID: string;
+  nodeID: string;
+  nodeTitle: string;
+  scope: string;
+  topPx: number;
+  accent: string;
+  surfaceText: string;
+  panelBackground: string;
+  strokeColor: string;
+  ruleColor: string;
+  scrollbarAccent: string;
+  scrollbarTrack: string;
+  theme: "mango" | "teal" | "light" | "dark";
+};
+
+function roleLabel(row: NodeRelationshipTreeRow): string {
+  if (row.role === "Current") return "Current";
+  if (row.direct) return row.role;
+  return "";
+}
+
+function rowAccentColor(row: NodeRelationshipTreeRow, accent: string): string {
+  if (row.role === "Current") return accent;
+  if (row.role === "Parent") return "#ff8a00";
+  if (row.role === "Peer") return "#0095ff";
+  if (row.role === "Child") return "#6f5cff";
+  return "rgba(100,116,139,0.72)";
+}
+
+function TreeRow({
+  row,
+  active,
+  accent,
+  surfaceText,
+  strokeColor,
+  panelBackground,
+}: {
+  row: NodeRelationshipTreeRow;
+  active: boolean;
+  accent: string;
+  surfaceText: string;
+  strokeColor: string;
+  panelBackground: string;
+}) {
+  const label = roleLabel(row);
+  const roleColor = rowAccentColor(row, accent);
+  return (
+    <div
+      title={row.title}
+      style={{
+        minWidth: 0,
+        minHeight: 30,
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) auto",
+        alignItems: "center",
+        gap: 7,
+        padding: "4px 7px 4px 8px",
+        marginLeft: row.depth * 16,
+        border: `1px solid ${active ? accent : "transparent"}`,
+        borderRadius: 6,
+        background: active ? "rgba(255,136,32,0.12)" : panelBackground,
+        color: surfaceText,
+      }}
+    >
+      <span style={{ minWidth: 0, display: "inline-flex", alignItems: "center", gap: 7 }}>
+        <span
+          aria-hidden="true"
+          style={{
+            width: 9,
+            height: 9,
+            borderRadius: row.hasChildren ? 3 : 999,
+            background: roleColor,
+            flex: "0 0 auto",
+          }}
+        />
+        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: active ? 800 : 700 }}>
+          {row.title}
+        </span>
+      </span>
+      {label && (
+        <span
+          style={{
+            flex: "0 0 auto",
+            maxWidth: 74,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            border: `1px solid ${active ? accent : strokeColor}`,
+            borderRadius: 5,
+            padding: "2px 5px",
+            color: roleColor,
+            background: "rgba(255,255,255,0.72)",
+            fontSize: 9,
+            fontWeight: 800,
+          }}
+        >
+          {label}
+        </span>
+      )}
+    </div>
+  );
+}
+
+export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> = ({
+  apiBase,
+  companyID,
+  nodeID,
+  nodeTitle,
+  scope,
+  topPx,
+  accent,
+  surfaceText,
+  panelBackground,
+  strokeColor,
+  ruleColor,
+  scrollbarAccent,
+  scrollbarTrack,
+  theme,
+}) => {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState(0);
+  const [graph, setGraph] = useState<{ nodes: NodeRecord[]; relationships: NodeRelationship[] }>(() => {
+    const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+    return { nodes: snapshot.nodes ?? [], relationships: snapshot.relationships ?? [] };
+  });
+
+  useEffect(() => {
+    const updateGraph = () => {
+      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+      setGraph({ nodes: snapshot.nodes ?? [], relationships: snapshot.relationships ?? [] });
+    };
+    updateGraph();
+    return subscribeNodeRelationshipGraph(apiBase, companyID, updateGraph);
+  }, [apiBase, companyID]);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const updateWidth = () => setWidth(root.getBoundingClientRect().width);
+    updateWidth();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateWidth);
+      return () => window.removeEventListener("resize", updateWidth);
+    }
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
+
+  const rows = useMemo(() => buildNodeRelationshipTreeRows({
+    nodes: graph.nodes,
+    relationships: graph.relationships,
+    focusNodeID: nodeID,
+    fallbackTitle: nodeTitle,
+  }), [graph.nodes, graph.relationships, nodeID, nodeTitle]);
+  const compact = width > 0 && width < 760;
+  const mapWidgetID = `relationships-map:${scope}:${nodeID}`;
+  const rowCountLabel = `${rows.length} node${rows.length === 1 ? "" : "s"}`;
+
+  return (
+    <div
+      ref={rootRef}
+      className="editor-document-scroll"
+      onWheel={(event) => event.stopPropagation()}
+      style={{
+        position: "absolute",
+        top: topPx,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        display: "grid",
+        gridTemplateColumns: compact ? "1fr" : "minmax(236px, 32%) minmax(0, 1fr)",
+        gridTemplateRows: compact ? "minmax(180px, 36%) minmax(260px, 1fr)" : "1fr",
+        minHeight: 0,
+        overflow: "hidden",
+        cursor: "default",
+        ["--editor-document-scroll-accent" as string]: scrollbarAccent,
+        ["--editor-document-scroll-track" as string]: scrollbarTrack,
+      }}
+    >
+      <aside
+        style={{
+          minWidth: 0,
+          minHeight: 0,
+          display: "grid",
+          gridTemplateRows: "auto minmax(0, 1fr)",
+          borderRight: compact ? "none" : `1px solid ${ruleColor}`,
+          borderBottom: compact ? `1px solid ${ruleColor}` : "none",
+          background: panelBackground,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minWidth: 0, padding: "9px 10px", borderBottom: `1px solid ${ruleColor}` }}>
+          <div style={{ minWidth: 0, display: "grid", gap: 2 }}>
+            <div style={{ color: accent, fontSize: 10, fontWeight: 800, letterSpacing: 0 }}>Relationships</div>
+            <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, fontSize: 12, fontWeight: 800 }}>{nodeTitle || "Current node"}</div>
+          </div>
+          <span style={{ flex: "0 0 auto", color: surfaceText, opacity: 0.62, fontSize: 10, fontWeight: 800 }}>{rowCountLabel}</span>
+        </div>
+        <div className="editor-document-scroll" style={{ minHeight: 0, overflowY: "auto", padding: 8, display: "grid", alignContent: "start", gap: 4, ["--editor-document-scroll-accent" as string]: scrollbarAccent, ["--editor-document-scroll-track" as string]: scrollbarTrack }}>
+          {rows.length === 0 ? (
+            <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 6, padding: 10, color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 700 }}>
+              No related nodes
+            </div>
+          ) : rows.map((row) => (
+            <TreeRow
+              key={`${row.nodeID}:${row.depth}`}
+              row={row}
+              active={row.nodeID === nodeID}
+              accent={accent}
+              surfaceText={surfaceText}
+              strokeColor={strokeColor}
+              panelBackground="rgba(255,255,255,0.58)"
+            />
+          ))}
+        </div>
+      </aside>
+      <section style={{ minWidth: 0, minHeight: 0, position: "relative", background: "transparent" }}>
+        <NodeMapContent
+          accent={accent}
+          widgetId={mapWidgetID}
+          hideTopControls
+          theme={theme}
+          structureNodeID={nodeID}
+          initialSelectedNodeID={nodeID}
+        />
+      </section>
+    </div>
+  );
+};

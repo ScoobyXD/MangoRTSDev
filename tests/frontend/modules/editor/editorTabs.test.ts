@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EDITOR_TAB_ITEMS, getEditorDocumentIsolationState } from "../../../../frontend/src/modules/editor/editorTabs.js";
 
-test("editor exposes the document, format, outline style, metadata, and history tabs", () => {
-  assert.deepEqual(EDITOR_TAB_ITEMS.map((tab) => tab.id), ["editor", "format", "outline-styles", "metadata", "history"]);
+test("editor exposes the document, format, outline style, metadata, history, and relationships tabs", () => {
+  assert.deepEqual(EDITOR_TAB_ITEMS.map((tab) => tab.id), ["editor", "format", "outline-styles", "metadata", "history", "relationships"]);
 });
 
 test("editor document is visible and interactive on editing tabs", () => {
@@ -37,4 +37,5 @@ test("metadata and history tabs wall off the editor document surface", () => {
 
   assert.deepEqual(getEditorDocumentIsolationState("metadata"), isolatedState);
   assert.deepEqual(getEditorDocumentIsolationState("history"), isolatedState);
+  assert.deepEqual(getEditorDocumentIsolationState("relationships"), isolatedState);
 });
