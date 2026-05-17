@@ -18,6 +18,7 @@ import { buildLogicGateMapRelationshipRoutingGrid, getLogicGateMapAnchorPoint, r
 import { useLogicGateMapGraphPersistence } from "./useLogicGateMapGraphPersistence";
 import { useLogicGateMapViewportHandlers } from "./useLogicGateMapViewportHandlers";
 import { getActiveCompanyID } from "../../auth/currentCompany";
+import { requestAppSidebarPin } from "../../app/sidebarPins";
 
 type LogicGateMapEntityBatchResponse = {
   entity_mappings?: Array<{ client_id: string; entity_id: string }>;
@@ -1499,6 +1500,15 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           onFindNodeSelection={(nodeID) => {
             const ids = selectedNodeIDs.has(nodeID) ? Array.from(selectedNodeIDs) : [nodeID];
             requestFindLogicGatesOnCompanyExplorer(ids);
+            setNodeContextMenu(null);
+          }}
+          onPinNode={(nodeID) => {
+            const current = nodes.find((node) => node.node_id === nodeID);
+            requestAppSidebarPin({
+              kind: "logic_gate",
+              id: nodeID,
+              label: current ? getNodeTitle(current) : nodeID,
+            });
             setNodeContextMenu(null);
           }}
           onRenameNode={(nodeID) => {

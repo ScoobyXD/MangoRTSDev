@@ -20,6 +20,7 @@ import { filterNodeGraphToFolderScope, resolveScopedMapSelectionFallback, type C
 import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { getActiveCompanyID } from "../../auth/currentCompany";
+import { requestAppSidebarPin } from "../../app/sidebarPins";
 
 type NodeMapEntityBatchResponse = {
   entity_mappings?: Array<{ client_id: string; entity_id: string }>;
@@ -1532,6 +1533,15 @@ export const NodeMapContent: React.FC<{ accent: string; widgetId?: string; hideT
           onFindNodeSelection={(nodeID) => {
             const ids = selectedNodeIDs.has(nodeID) ? Array.from(selectedNodeIDs) : [nodeID];
             requestFindNodesOnCompanyExplorer(ids);
+            setNodeContextMenu(null);
+          }}
+          onPinNode={(nodeID) => {
+            const current = nodes.find((node) => node.node_id === nodeID);
+            requestAppSidebarPin({
+              kind: "node",
+              id: nodeID,
+              label: current ? getNodeTitle(current) : nodeID,
+            });
             setNodeContextMenu(null);
           }}
           onRenameNode={(nodeID) => {

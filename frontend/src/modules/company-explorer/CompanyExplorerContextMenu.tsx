@@ -6,6 +6,7 @@ import type {
   CompanyExplorerShareTarget,
   ExplorerDeleteTargetWithLabel,
   ExplorerFindTarget,
+  ExplorerPinTarget,
   ExplorerRenameTarget,
 } from "./companyExplorerTypes";
 
@@ -17,6 +18,7 @@ type CompanyExplorerContextMenuProps = {
   onCreateNode: (parentFolderID: string, position?: number) => void;
   onCreateLogicGate: (parentFolderID: string, position?: number) => void;
   onFindTarget: (target: ExplorerFindTarget) => void;
+  onPinTarget: (target: ExplorerPinTarget) => void;
   onShareFolder: (target: CompanyExplorerShareTarget) => void;
   onRenameTarget: (treeID: string, target: ExplorerRenameTarget, value: string) => void;
   onDeleteTargets: (targets: ExplorerDeleteTargetWithLabel[]) => void;
@@ -30,6 +32,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   onCreateNode,
   onCreateLogicGate,
   onFindTarget,
+  onPinTarget,
   onShareFolder,
   onRenameTarget,
   onDeleteTargets,
@@ -37,7 +40,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   if (!menu) return null;
   const hasCreateAction = menu.canCreateFolder || menu.canCreateNode || menu.canCreateLogicGate;
   const hasDeleteAction = menu.deleteTargets.length > 0 || Boolean(menu.deleteTarget);
-  if (!hasCreateAction && !menu.findTarget && !menu.shareTarget && !menu.renameTarget && !hasDeleteAction) return null;
+  if (!hasCreateAction && !menu.findTarget && !menu.pinTarget && !menu.shareTarget && !menu.renameTarget && !hasDeleteAction) return null;
 
   return (
     <FrameRightClickMenu x={menu.x} y={menu.y} onClose={onClose}>
@@ -81,6 +84,11 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
       {menu.findTarget && (
         <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onFindTarget(menu.findTarget!)}>
           {menu.findTarget.kind === "logic_gate" ? "Find Logic Gate" : "Find Node"}
+        </button>
+      )}
+      {menu.pinTarget && (
+        <button style={{ ...buttonStyle, color: "#111111" }} onClick={() => onPinTarget(menu.pinTarget!)}>
+          {menu.pinTarget.kind === "logic_gate" ? "Pin Logic Gate" : "Pin Node"}
         </button>
       )}
       {menu.shareTarget && (

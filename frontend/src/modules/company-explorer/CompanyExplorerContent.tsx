@@ -33,6 +33,7 @@ import {
   type ExplorerDeleteTargetWithLabel,
   type ExplorerDragPayload,
   type ExplorerFindTarget,
+  type ExplorerPinTarget,
   type ExplorerRenameDraft,
   type ExplorerRowDropPlacement,
   type ExplorerRowOrderUpdate,
@@ -46,6 +47,7 @@ import { COMPANY_EXPLORER_TREE_ROW_HEIGHT, useCompanyExplorerVirtualTree } from 
 import { buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "./companyExplorerTreeRows";
 import { useCompanyExplorerFolderShares } from "./useCompanyExplorerFolderShares";
 import { getActiveCompanyID } from "../../auth/currentCompany";
+import { requestAppSidebarPin } from "../../app/sidebarPins";
 import {
   buildDeleteConfirmationSummary,
   findProtectedSystemFolderInDeleteTargets,
@@ -1430,6 +1432,11 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const shareTarget = row?.kind === "folder" && row.folderID && !row.systemKey
       ? { folderID: row.folderID, label: row.label }
       : null;
+    const pinTarget: ExplorerPinTarget | null = row?.kind === "node" && row.nodeID
+      ? { kind: "node", id: row.nodeID, label: row.label }
+      : row?.kind === "logic_gate" && row.logicGateID
+        ? { kind: "logic_gate", id: row.logicGateID, label: row.label }
+        : null;
     setExplorerContextMenu({
       x: event.clientX,
       y: event.clientY,
@@ -1438,6 +1445,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       deleteTargets,
       renameTarget: resolveExplorerRenameTarget(row ?? null),
       findTarget: getExplorerFindTarget(row ?? null),
+      pinTarget,
       shareTarget,
       renameTreeID: row?.id ?? "",
       renameLabel: row?.label ?? "",
@@ -1619,6 +1627,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         onFindTarget={(target) => {
           setExplorerContextMenu(null);
           requestMapFind(target);
+        }}
+        onPinTarget={(target) => {
+          setExplorerContextMenu(null);
+          requestAppSidebarPin(target);
         }}
         onShareFolder={(target) => {
           setExplorerContextMenu(null);

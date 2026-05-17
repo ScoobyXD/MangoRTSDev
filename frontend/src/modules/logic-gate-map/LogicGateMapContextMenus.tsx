@@ -32,6 +32,7 @@ type LogicGateMapContextMenusProps = {
   onToggleRelationshipColors: () => void;
   onRelationshipRoleColorChange: (role: LogicGateMapRelationshipRole, color: string) => void;
   onFindNodeSelection: (nodeID: string) => void;
+  onPinNode: (nodeID: string) => void;
   onRenameNode: (nodeID: string) => void;
   onRequestDeleteNodes: (nodeIDs: string[]) => void;
   onDeleteRelationships: (relationshipIDs: string[]) => void;
@@ -65,6 +66,7 @@ export const LogicGateMapContextMenus: React.FC<LogicGateMapContextMenusProps> =
   onToggleRelationshipColors,
   onRelationshipRoleColorChange,
   onFindNodeSelection,
+  onPinNode,
   onRenameNode,
   onRequestDeleteNodes,
   onDeleteRelationships,
@@ -216,6 +218,9 @@ export const LogicGateMapContextMenus: React.FC<LogicGateMapContextMenusProps> =
       >
         <button style={contextMenuButtonStyle} onClick={() => onFindNodeSelection(nodeContextMenu.nodeID)}>
           Find on Explorer
+        </button>
+        <button style={contextMenuButtonStyle} onClick={() => onPinNode(nodeContextMenu.nodeID)}>
+          Pin Logic Gate
         </button>
         <button style={contextMenuButtonStyle} onClick={() => onRenameNode(nodeContextMenu.nodeID)}>
           Rename logic gate

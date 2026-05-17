@@ -6,6 +6,7 @@ import { MangoWordmark } from "./MangoLogo";
 import { COLORWAYS, UI_THEME } from "./frameLayoutTypes";
 import { preloadDefaultDashboardModules } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
+import type { SidebarPin } from "./sidebarPins";
 import {
   createCommunicationsSharedInbox,
   deleteCommunicationsSharedInbox,
@@ -48,13 +49,7 @@ const SIDEBAR_SECTION_OPEN_KEY_PREFIX = "mangorts.app-sidebar-section-open.v1";
 type SidebarSectionID = "shared-triage" | "logic-gates-by-function" | "logic-gates-by-person" | "explorer";
 
 export type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox" | `shared:${string}`;
-export type SidebarPinKind = "node" | "logic_gate";
-export type SidebarPin = {
-  id: string;
-  kind: SidebarPinKind;
-  label: string;
-  addedAt: number;
-};
+export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
 
 type AppSidebarPrimaryPage = "map" | "home" | "logic-gate-arena";
 
@@ -149,6 +144,7 @@ export function AppSidebar({
   const [draggingSharedFolderID, setDraggingSharedFolderID] = useState("");
   const [dropTarget, setDropTarget] = useState<{ folderID: string; placement: SharedInboxDropPlacement } | null>(null);
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
+  const [pinContextMenu, setPinContextMenu] = useState<{ x: number; y: number; pin: SidebarPin } | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
   const sharedRows = useMemo(
@@ -553,7 +549,15 @@ export function AppSidebar({
           {pins.length === 0 ? (
             <div style={appSidebarEmptyStyle}>No pins</div>
           ) : pins.map((pin) => (
-            <div key={`${pin.kind}:${pin.id}`} style={appSidebarPinRowStyle}>
+            <div
+              key={`${pin.kind}:${pin.id}`}
+              style={appSidebarPinRowStyle}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setPinContextMenu({ x: event.clientX, y: event.clientY, pin });
+              }}
+            >
               <button type="button" style={appSidebarPinButtonStyle} onClick={() => onPinOpen(pin)}>
                 <span style={appSidebarPinIconStyle}><ExplorerRowIcon kind={pin.kind} /></span>
                 <span style={appSidebarTextStyle}>{pin.label}</span>
@@ -658,6 +662,20 @@ export function AppSidebar({
               </button>
             </>
           )}
+        </FrameRightClickMenu>
+      )}
+      {pinContextMenu && (
+        <FrameRightClickMenu x={pinContextMenu.x} y={pinContextMenu.y} onClose={() => setPinContextMenu(null)}>
+          <button
+            type="button"
+            style={appSidebarContextMenuButtonStyle}
+            onClick={() => {
+              onPinRemove(pinContextMenu.pin);
+              setPinContextMenu(null);
+            }}
+          >
+            De-pin {pinContextMenu.pin.kind === "logic_gate" ? "Logic Gate" : "Node"}
+          </button>
         </FrameRightClickMenu>
       )}
     </aside>

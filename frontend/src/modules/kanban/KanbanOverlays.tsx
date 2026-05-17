@@ -1,5 +1,6 @@
 import React from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
+import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { EditorContent } from "../editor/EditorContent";
 import { normalizeKanbanColumnItemColor, type KanbanCard, type KanbanColumn } from "./shared";
 import {
@@ -77,6 +78,17 @@ export function KanbanContextMenus({
               {contextCard.is_issue ? "Clear Issue" : "Mark Issue"}
             </button>
           )}
+          <button
+            type="button"
+            style={contextMenuButtonStyle}
+            onClick={() => {
+              requestAppSidebarPin({ kind: "node", id: contextCard.node_id, label: contextCard.node_title });
+              onCloseCardMenu();
+            }}
+            {...contextMenuHoverHandlers}
+          >
+            Pin Node
+          </button>
           <button type="button" style={contextMenuButtonStyle} onClick={() => onRevertCardsToMyTriage(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
             Revert back to Pending
           </button>
