@@ -911,11 +911,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
   }, [apiBase, applyLinkedNode, companyID, linkedEntityKind, linkedMapWidgetID, linkedNodeID, requestJSON, scope]);
 
-  const openRelationshipNode = useCallback((nodeID: string, title: string) => {
-    setActiveTab("editor");
-    applyLinkedNode(nodeID, title, { focusEditor: true });
-  }, [applyLinkedNode]);
-
   const updateNodePresetPatch = useCallback(async (patch: Record<string, unknown>) => {
     if (!linkedNodeID || linkedEntityKind !== "node") return;
     setError("");
@@ -1560,7 +1555,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             scrollbarAccent={scrollbarAccent}
             scrollbarTrack={scrollbarTrack}
             theme={theme}
-            onOpenNode={openRelationshipNode}
           />
         )}
         {hasLinkedDocument && linkedEntityKind === "node" && activeTab !== "relationships" && (

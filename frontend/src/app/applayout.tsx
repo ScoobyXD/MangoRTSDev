@@ -11,7 +11,6 @@ import { readExplorerDragPayload } from "../modules/company-explorer/companyExpl
 import type { FrameDataModel, DragState } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
-import { publishLiveSelection } from "../modules/selectionCoordinator";
 import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, mergeLinkPlan, type FrameLinkEdge } from "./frameLinking";
 import { createDefaultNodeViewFrames, createHomeViewFrames, createLogicGateArenaFrames } from "./DefaultViews";
 import { FrameCard, GridCrosses, PlacementSplash } from "./FrameChrome";
@@ -861,6 +860,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   const openSidebarPin = useCallback((pin: SidebarPin) => {
     const companyID = getActiveCompanyID();
     if (pin.kind === "logic_gate") {
+      setExplorerNodePopup(null);
       writePendingLogicGateArenaSelection({
         companyID,
         logicGateID: pin.id,
@@ -870,35 +870,9 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
       return;
     }
 
-    preloadDefaultDashboardModules();
-    const ensured = ensurePrimaryPageTab(tabs, "map");
-    const targetFrameIDs = ensured.tab.frames
-      .filter((frame) => ["map", "nodes", "nodes-map", "editor"].includes(frame.kind))
-      .map((frame) => frame.id);
-    setTabs(ensured.tabs);
-    setActiveTabId(ensured.tab.id);
-    setEditMode(true);
-    setSelectedFrameId(null);
-    setSelectedFrameIds(new Set());
     closeMenus();
-    if (onNavigate) {
-      saveViews(ensured.tabs, ensured.tab.id);
-      onNavigate(routeForPage("map"));
-    }
-    window.setTimeout(() => {
-      if (targetFrameIDs.length === 0) return;
-      publishLiveSelection({
-        companyID,
-        entityKind: "node",
-        entityID: pin.id,
-        label: pin.label,
-        sourceFrameID: "app-sidebar",
-        sourceModule: "company-explorer",
-        targetFrameIDs,
-        selectionIntent: "activate",
-      });
-    }, 0);
-  }, [closeMenus, onNavigate, tabs]);
+    setExplorerNodePopup({ nodeID: pin.id, nodeTitle: pin.label });
+  }, [closeMenus, selectPrimaryPage]);
 
   const handleSidebarPinDrop = useCallback((event: React.DragEvent<HTMLElement>) => {
     const pins = sidebarPinsFromDrop(event.dataTransfer);
