@@ -42,8 +42,8 @@ import {
 import { useCompanyExplorerKeyboard } from "./useCompanyExplorerKeyboard";
 import { useCompanyExplorerSelectionBridge } from "./useCompanyExplorerSelectionBridge";
 import { useCompanyExplorerTreeModel } from "./useCompanyExplorerTreeModel";
-import { COMPANY_EXPLORER_TREE_ROW_HEIGHT } from "./useCompanyExplorerVirtualTree";
-import { buildCompanyExplorerTreeRows } from "./companyExplorerTreeRows";
+import { COMPANY_EXPLORER_TREE_ROW_HEIGHT, useCompanyExplorerVirtualTree } from "./useCompanyExplorerVirtualTree";
+import { buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "./companyExplorerTreeRows";
 import { useCompanyExplorerFolderShares } from "./useCompanyExplorerFolderShares";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import {
@@ -58,8 +58,18 @@ import {
   type WorkspaceStreamEnvelope,
 } from "./CompanyExplorerContentModel";
 
+const scopedRootCreationKeys = new Set<string>();
+
 // Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
-export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ accent, widgetId, theme = "mango", selectionTargetFrameIDs }) => {
+export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
+  accent,
+  widgetId,
+  hideTopControls = false,
+  theme = "mango",
+  selectionTargetFrameIDs,
+  scopedRootFolderKind,
+  scopedRootFolderName = "",
+}) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -75,6 +85,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
   const [kanbanBoards, setKanbanBoards] = useState<KanbanBoard[]>([]);
   const [folders, setFolders] = useState<CompanyExplorerFolder[]>([]);
   const [folderItems, setFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
+  const [folderSnapshotLoaded, setFolderSnapshotLoaded] = useState(false);
   const [selectedTreeID, setSelectedTreeID] = useState("folder-root");
   const [selectedTreeIDs, setSelectedTreeIDs] = useState<Set<string>>(new Set(["folder-root"]));
   const [selectionAnchorTreeID, setSelectionAnchorTreeID] = useState("folder-root");
@@ -134,6 +145,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
         setNodes(snapshot.nodes ?? []);
         setFolders(snapshot.folders ?? []);
         setFolderItems(snapshot.folder_items ?? []);
+        setFolderSnapshotLoaded(true);
       } catch {
         // ignore initial load failures; subscription updates can still hydrate state later
       }
@@ -147,6 +159,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
       setNodes(snapshot.nodes ?? []);
       setFolders(snapshot.folders ?? []);
       setFolderItems(snapshot.folder_items ?? []);
+      setFolderSnapshotLoaded(true);
     });
   }, [apiBase, companyID]);
 
@@ -164,6 +177,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
           setFolders(snapshot.folders ?? []);
           setFolderItems(snapshot.folder_items ?? []);
         }
+        setFolderSnapshotLoaded(true);
       } catch {
         // Logic Gate Map has its own graph cache; subscription updates can still hydrate later.
       }
@@ -179,6 +193,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
         setFolders(snapshot.folders ?? []);
         setFolderItems(snapshot.folder_items ?? []);
       }
+      setFolderSnapshotLoaded(true);
     });
   }, [apiBase, companyID]);
 
@@ -257,17 +272,30 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
     });
   }, [apiBase, companyID]);
 
+  const scopedRootName = scopedRootFolderName.trim();
+  const scopedKind = scopedRootName ? (scopedRootFolderKind ?? "logic_gate") : undefined;
+  const scopedExplorerActive = Boolean(scopedKind && scopedRootName);
+  const scopedRootFolder = useMemo(() => (
+    scopedKind && scopedRootName
+      ? findCompanyExplorerRootFolderByName(folders, scopedKind, scopedRootName)
+      : null
+  ), [folders, scopedKind, scopedRootName]);
+  const scopedRootTreeID = scopedRootFolder ? `workspace-folder-${scopedRootFolder.folder_id}` : "";
+  const effectiveExpanded = useMemo(() => {
+    if (!scopedRootTreeID || expanded.has(scopedRootTreeID)) return expanded;
+    return new Set(expanded).add(scopedRootTreeID);
+  }, [expanded, scopedRootTreeID]);
+
   const {
-    treeRows,
-    selectedTree,
-    rowByID,
+    treeRows: fullTreeRows,
+    selectedTree: fullSelectedTree,
+    rowByID: fullRowByID,
     selectedFolderKind,
     selectedFolderID,
     selectedFolderLabel,
     selectedKanbanBoardLabel,
-    virtualizedTree,
   } = useCompanyExplorerTreeModel({
-    expanded,
+    expanded: effectiveExpanded,
     nodes,
     logicGates,
     kanbanBoards,
@@ -278,6 +306,16 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
     treeViewportHeight,
     treeScrollTop,
   });
+  const scopedRootRow = scopedRootTreeID ? fullRowByID.get(scopedRootTreeID) : undefined;
+  const treeRows = useMemo(() => (
+    scopedExplorerActive
+      ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(fullTreeRows, scopedRootFolder.folder_id) : [])
+      : fullTreeRows
+  ), [fullTreeRows, scopedExplorerActive, scopedRootFolder]);
+  const rowByID = useMemo(() => new Map(treeRows.map((row) => [row.id, row])), [treeRows]);
+  const selectedTree = rowByID.get(selectedTreeID) ?? (scopedRootFolder ? scopedRootRow : fullSelectedTree);
+  const virtualizedTree = useCompanyExplorerVirtualTree(treeRows, treeViewportHeight, treeScrollTop);
+  const scopedAllowedItemType: CompanyExplorerItemType | "" = scopedKind ?? "";
   const systemFolderTreeIDByKey = useMemo(() => {
     const items = new Map<CompanyExplorerSystemFolderKey, string>();
     for (const folder of folders) {
@@ -300,8 +338,11 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
       folderItems,
       rootRowOrder,
     });
-    return buildExplorerSearchResults({ rows, selectedRowID: selectedTreeID, query: explorerSearchQuery, limit: 16 });
-  }, [explorerSearchQuery, folderItems, folders, kanbanBoards, logicGates, nodes, rootRowOrder, selectedTreeID]);
+    const searchRows = scopedExplorerActive
+      ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(rows, scopedRootFolder.folder_id) : [])
+      : rows;
+    return buildExplorerSearchResults({ rows: searchRows, selectedRowID: selectedTreeID, query: explorerSearchQuery, limit: 16 });
+  }, [explorerSearchQuery, folderItems, folders, kanbanBoards, logicGates, nodes, rootRowOrder, scopedExplorerActive, scopedRootFolder, selectedTreeID]);
   const explorerSearchOpen = explorerSearchFocused && explorerSearchQuery.trim().length > 0;
 
   useEffect(() => {
@@ -369,6 +410,11 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
   }, [expandedStorageKey, folders]);
 
   useEffect(() => {
+    if (!scopedRootTreeID) return;
+    setExpanded((previous) => previous.has(scopedRootTreeID) ? previous : new Set(previous).add(scopedRootTreeID));
+  }, [scopedRootTreeID]);
+
+  useEffect(() => {
     try {
       localStorage.setItem(expandedStorageKey, JSON.stringify([...expanded]));
     } catch {
@@ -425,6 +471,37 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
     submitFolderShare,
     updateFolderShareEmail,
   } = useCompanyExplorerFolderShares(companyID, requestJSON);
+
+  useEffect(() => {
+    if (!companyID || !folderSnapshotLoaded || !scopedKind || !scopedRootName || scopedRootFolder) return;
+    const creationKey = `${companyID}:${scopedKind}:${scopedRootName.toLowerCase()}`;
+    if (scopedRootCreationKeys.has(creationKey)) return;
+    let cancelled = false;
+    scopedRootCreationKeys.add(creationKey);
+    setError("");
+    requestJSON<CompanyExplorerFolder>("/v1/company-explorer/folders", {
+      method: "POST",
+      body: JSON.stringify({
+        company_id: companyID,
+        parent_folder_id: "",
+        folder_kind: scopedKind,
+        name: scopedRootName,
+      }),
+    }).then((folder) => {
+      upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
+      upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
+      if (cancelled) return;
+      setFolders((previous) => previous.some((item) => item.folder_id === folder.folder_id) ? previous : [...previous, folder]);
+      setExpanded((previous) => new Set(previous).add(`workspace-folder-${folder.folder_id}`));
+    }).catch((err) => {
+      if (!cancelled) setError(err instanceof Error ? err.message : "failed_to_create_scoped_folder");
+    }).finally(() => {
+      scopedRootCreationKeys.delete(creationKey);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, companyID, folderSnapshotLoaded, requestJSON, scopedKind, scopedRootFolder, scopedRootName]);
 
   const createFolder = useCallback(async (folderKind: CompanyExplorerFolderKind, parentFolderID: string, position?: number) => {
     setError("");
@@ -1104,6 +1181,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
 
   const canPlaceExplorerItemsAtTarget = useCallback((payload: ExplorerDragPayload | null, target: ExplorerTreeNode): boolean => {
     const itemType = getExplorerDropPayloadItemType(payload);
+    if (scopedAllowedItemType && itemType !== scopedAllowedItemType) return false;
     const targetKind = getExplorerRowOrderKind(target);
     const targetAcceptsItem = Boolean(itemType && targetKind);
     if (!itemType || !targetAcceptsItem) return false;
@@ -1112,7 +1190,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
     const targetContainer = getExplorerRowContainerID(target);
     if (targetContainer == null) return false;
     return targetContainer !== "" || itemRows.every((row) => getExplorerRowContainerID(row) === "");
-  }, [getExplorerItemRowsForPayload]);
+  }, [getExplorerItemRowsForPayload, scopedAllowedItemType]);
 
   const isFolderDescendantOf = useCallback((candidateFolderID: string, ancestorFolderID: string): boolean => {
     if (!candidateFolderID || !ancestorFolderID) return false;
@@ -1282,6 +1360,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
   }, [assignItemsToFolders, canPlaceExplorerItemsAtTarget, getExplorerItemRowsForPayload, moveFolder, treeRows]);
 
   const assignExplorerPayloadItemsToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => {
+    if (scopedAllowedItemType && itemType !== scopedAllowedItemType) return;
     const items = getExplorerDropPayloadItems(payload).filter((item) => item.itemType === itemType);
     if (!targetFolderID || items.length === 0) return;
     const existingRows = treeRows.filter((row) => {
@@ -1296,7 +1375,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
       assignments.push({ folder_id: targetFolderID, item_type: itemType, item_id: item.itemID, position });
     }
     await assignItemsToFolders(assignments, { expandTarget: true });
-  }, [assignItemsToFolders, folders, treeRows]);
+  }, [assignItemsToFolders, scopedAllowedItemType, treeRows]);
 
   const requestMapFind = useCallback((target: ExplorerFindTarget) => {
     if (target.kind === "node") {
@@ -1343,8 +1422,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
       if (selectedTreeIDs.has(row.id)) focusTreeRow(row, { selectionIntent: "navigate" });
       else selectTreeRow(row, undefined, { selectionIntent: "navigate" });
     }
-    const contextKind: CompanyExplorerFolderKind | null = row?.folderKind ?? (row?.kind === "node" ? "node" : row?.kind === "logic_gate" ? "logic_gate" : null);
-    const targets = resolveExplorerCreationTargets(row ?? null);
+    const creationRow = row ?? scopedRootRow;
+    const contextKind: CompanyExplorerFolderKind | null = creationRow?.folderKind ?? (creationRow?.kind === "node" ? "node" : creationRow?.kind === "logic_gate" ? "logic_gate" : null);
+    const targets = resolveExplorerCreationTargets(creationRow ?? null);
     const deleteRows = row ? (selectedTreeIDs.has(row.id) ? treeRows.filter((candidate) => selectedTreeIDs.has(candidate.id)) : [row]) : [];
     const deleteTargets = getDeleteTargetsForRows(deleteRows);
     const shareTarget = row?.kind === "folder" && row.folderID && !row.systemKey
@@ -1363,12 +1443,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
       renameLabel: row?.label ?? "",
       contextKind,
       createPosition: getContextCreatePosition(row, event),
-      canCreateBothFolderTypes: !contextKind,
-      canCreateFolder: true,
-      canCreateNode: true,
-      canCreateLogicGate: true,
+      canCreateBothFolderTypes: !contextKind && !scopedKind,
+      canCreateFolder: !scopedKind || Boolean(scopedRootFolder),
+      canCreateNode: !scopedKind,
+      canCreateLogicGate: scopedKind ? scopedKind === "logic_gate" && Boolean(scopedRootFolder) : true,
     });
-  }, [focusTreeRow, getContextCreatePosition, getDeleteTargetsForRows, selectTreeRow, selectedTreeIDs, treeRows]);
+  }, [focusTreeRow, getContextCreatePosition, getDeleteTargetsForRows, scopedKind, scopedRootFolder, scopedRootRow, selectTreeRow, selectedTreeIDs, treeRows]);
 
   // Kanban accepts node cards only. A mixed Explorer selection is still valid
   // for navigation, but the drag payload intentionally exports node rows only.
@@ -1474,6 +1554,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({ 
         scrollbarAccent={scrollbarAccent}
         scrollbarTrack={scrollbarTrack}
         isDarkTheme={isDarkTheme}
+        hideTopControls={hideTopControls}
         treeViewportRef={treeViewportRef}
         treeKeyboardActiveRef={treeKeyboardActiveRef}
         treeRows={treeRows}

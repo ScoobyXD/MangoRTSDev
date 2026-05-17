@@ -3,6 +3,7 @@ import { type LogicGateRecord as LogicGateApiRecord } from "../logic-gate-map/sh
 import {
   type CompanyExplorerFolder,
   type CompanyExplorerFolderItem,
+  type CompanyExplorerFolderKind,
   type CompanyExplorerItemType,
   type CompanyExplorerSystemFolderKey,
 } from "../folders/companyExplorerFolders";
@@ -88,6 +89,8 @@ export type CompanyExplorerContentProps = {
   hideTopControls?: boolean;
   theme?: "mango" | "teal" | "light" | "dark";
   selectionTargetFrameIDs?: string[];
+  scopedRootFolderKind?: CompanyExplorerFolderKind;
+  scopedRootFolderName?: string;
 };
 
 const SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX: Array<[string, CompanyExplorerSystemFolderKey]> = [

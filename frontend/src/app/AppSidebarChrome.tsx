@@ -40,6 +40,8 @@ const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorCo
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
 const PAGE_SURFACE_RADIUS = 16;
 const SIDEBAR_EXPLORER_WIDGET_ID = "app-sidebar-explorer";
+const SIDEBAR_LOGIC_GATES_BY_FUNCTION_WIDGET_ID = "app-sidebar-logic-gates-by-function";
+const SIDEBAR_LOGIC_GATES_BY_PERSON_WIDGET_ID = "app-sidebar-logic-gates-by-person";
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 
 export type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox" | `shared:${string}`;
@@ -105,6 +107,8 @@ export function AppSidebar({
   const homeActive = activePage === "home";
   const companyID = getActiveCompanyID();
   const [sharedTriageOpen, setSharedTriageOpen] = useState(true);
+  const [logicGatesByFunctionOpen, setLogicGatesByFunctionOpen] = useState(false);
+  const [logicGatesByPersonOpen, setLogicGatesByPersonOpen] = useState(false);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
   const [sharedBusy, setSharedBusy] = useState(false);
@@ -450,7 +454,7 @@ export function AppSidebar({
 
       <section style={appSidebarSectionStyle} aria-label="Home inboxes">
         <AppSidebarButton
-          label="Pending"
+          label="My Triage"
           active={homeActive && activeHomeView === "my-triage"}
           onClick={() => onHomeViewSelect("my-triage")}
         />
@@ -532,6 +536,20 @@ export function AppSidebar({
       </section>
 
       <section style={appSidebarSectionStyle} aria-label="Primary pages">
+        <AppSidebarScopedExplorerSection
+          label="Logic Gates by function"
+          open={logicGatesByFunctionOpen}
+          widgetId={SIDEBAR_LOGIC_GATES_BY_FUNCTION_WIDGET_ID}
+          selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
+          onToggle={() => setLogicGatesByFunctionOpen((open) => !open)}
+        />
+        <AppSidebarScopedExplorerSection
+          label="Logic Gates by person"
+          open={logicGatesByPersonOpen}
+          widgetId={SIDEBAR_LOGIC_GATES_BY_PERSON_WIDGET_ID}
+          selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
+          onToggle={() => setLogicGatesByPersonOpen((open) => !open)}
+        />
         <AppSidebarButton
           label="Logic Gate Arena"
           active={activePage === "logic-gate-arena"}
@@ -626,6 +644,62 @@ function AppSidebarButton({
       {icon && <span style={appSidebarButtonIconStyle}>{icon}</span>}
       <span style={appSidebarTextStyle}>{label}</span>
     </button>
+  );
+}
+
+function AppSidebarScopedExplorerSection({
+  label,
+  open,
+  widgetId,
+  selectionTargetFrameIDs,
+  onToggle,
+}: {
+  label: string;
+  open: boolean;
+  widgetId: string;
+  selectionTargetFrameIDs: string[];
+  onToggle: () => void;
+}): React.ReactElement {
+  return (
+    <div style={appSidebarMiniExplorerBlockStyle}>
+      <div style={appSidebarMiniExplorerRowStyle(open)}>
+        <button
+          type="button"
+          style={appSidebarMiniExplorerLabelButtonStyle}
+          onClick={onToggle}
+        >
+          <span style={appSidebarMiniExplorerIconStyle}><ExplorerRowIcon kind="folder" /></span>
+          <span style={appSidebarTextStyle}>{label}</span>
+        </button>
+        <button
+          type="button"
+          title={open ? `Collapse ${label}` : `Expand ${label}`}
+          aria-label={open ? `Collapse ${label}` : `Expand ${label}`}
+          style={appSidebarSharedDisclosureStyle}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggle();
+          }}
+        >
+          <ExplorerDisclosureIcon open={open} color="rgba(36, 18, 10, 0.68)" />
+        </button>
+      </div>
+      {open && (
+        <div style={appSidebarMiniExplorerFrameStyle}>
+          <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
+            <SidebarCompanyExplorerContent
+              accent={COLORWAYS.light.accent}
+              widgetId={widgetId}
+              theme="light"
+              hideTopControls
+              scopedRootFolderKind="logic_gate"
+              scopedRootFolderName={label}
+              selectionTargetFrameIDs={selectionTargetFrameIDs}
+            />
+          </React.Suspense>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -786,6 +860,63 @@ const appSidebarSharedRootBlockStyle: React.CSSProperties = {
   display: "grid",
   gap: 3,
   minWidth: 0,
+};
+
+const appSidebarMiniExplorerBlockStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 3,
+  minWidth: 0,
+};
+
+function appSidebarMiniExplorerRowStyle(open: boolean): React.CSSProperties {
+  return {
+    width: "100%",
+    minHeight: 31,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 22px",
+    alignItems: "center",
+    border: `1px solid ${open ? "rgba(255, 136, 32, 0.52)" : "transparent"}`,
+    borderRadius: 6,
+    background: open ? "rgba(255, 136, 32, 0.09)" : "transparent",
+    color: open ? "#ff8820" : "#3f332b",
+    minWidth: 0,
+  };
+}
+
+const appSidebarMiniExplorerLabelButtonStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 29,
+  display: "grid",
+  gridTemplateColumns: "18px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 6,
+  border: "none",
+  background: "transparent",
+  color: "inherit",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 700,
+  letterSpacing: 0,
+  padding: "0 0 0 8px",
+  textAlign: "left",
+};
+
+const appSidebarMiniExplorerIconStyle: React.CSSProperties = {
+  width: 18,
+  height: 18,
+  display: "grid",
+  placeItems: "center",
+  color: "#ff8820",
+};
+
+const appSidebarMiniExplorerFrameStyle: React.CSSProperties = {
+  height: 174,
+  minWidth: 0,
+  overflow: "hidden",
+  border: "1px solid rgba(255, 136, 32, 0.14)",
+  borderRadius: 6,
+  background: "#ffffff",
 };
 
 function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean): React.CSSProperties {
