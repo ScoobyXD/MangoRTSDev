@@ -58,6 +58,8 @@ export const workspaceStyle: React.CSSProperties = {
 };
 
 export const columnResizeHandleStyle: React.CSSProperties = {
+  position: "relative",
+  zIndex: 4,
   minHeight: 0,
   width: "100%",
   height: "100%",

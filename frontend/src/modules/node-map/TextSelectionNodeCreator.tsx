@@ -40,6 +40,10 @@ function selectionIsInsideSuppressedElement(range: Range): boolean {
   return Boolean(element.closest('[data-text-selection-node-creator="true"], button, input, textarea, select, option, [role="button"]'));
 }
 
+function eventTargetIsNodeCreator(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest('[data-text-selection-node-creator="true"]'));
+}
+
 function readSelectionSnapshot(root: HTMLElement | null): TextSelectionSnapshot | null {
   const selection = document.getSelection();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
@@ -66,14 +70,16 @@ export const TextSelectionNodeCreator: React.FC<TextSelectionNodeCreatorProps> =
   const [error, setError] = useState("");
   const frameRef = useRef<number | null>(null);
   const errorTimerRef = useRef<number | null>(null);
+  const pointerSelectingRef = useRef(false);
 
   const cleanTargetFrameIDs = useMemo(
     () => Array.from(new Set(targetFrameIDs.map((id) => id.trim()).filter(Boolean))),
     [targetFrameIDs],
   );
 
-  const scheduleRefresh = useCallback(() => {
+  const scheduleRefresh = useCallback((force = false) => {
     if (creating) return;
+    if (pointerSelectingRef.current && !force) return;
     if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current);
     frameRef.current = window.requestAnimationFrame(() => {
       frameRef.current = null;
@@ -84,19 +90,40 @@ export const TextSelectionNodeCreator: React.FC<TextSelectionNodeCreatorProps> =
 
   useEffect(() => {
     scheduleRefresh();
-    document.addEventListener("selectionchange", scheduleRefresh);
-    document.addEventListener("pointerup", scheduleRefresh, true);
-    document.addEventListener("keyup", scheduleRefresh, true);
-    document.addEventListener("scroll", scheduleRefresh, true);
-    window.addEventListener("resize", scheduleRefresh);
+    const refreshAfterSelectionChange = () => scheduleRefresh();
+    const refreshAfterInput = () => scheduleRefresh();
+    const refreshAfterPointerEnd = () => {
+      if (!pointerSelectingRef.current) return;
+      pointerSelectingRef.current = false;
+      scheduleRefresh(true);
+    };
+    const hideDuringPointerSelection = (event: PointerEvent) => {
+      if (eventTargetIsNodeCreator(event.target)) return;
+      pointerSelectingRef.current = true;
+      if (frameRef.current !== null) {
+        window.cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+      setSnapshot(null);
+      setError("");
+    };
+    document.addEventListener("selectionchange", refreshAfterSelectionChange);
+    document.addEventListener("pointerdown", hideDuringPointerSelection, true);
+    document.addEventListener("pointerup", refreshAfterPointerEnd, true);
+    document.addEventListener("pointercancel", refreshAfterPointerEnd, true);
+    document.addEventListener("keyup", refreshAfterInput, true);
+    document.addEventListener("scroll", refreshAfterInput, true);
+    window.addEventListener("resize", refreshAfterInput);
     return () => {
       if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current);
       if (errorTimerRef.current !== null) window.clearTimeout(errorTimerRef.current);
-      document.removeEventListener("selectionchange", scheduleRefresh);
-      document.removeEventListener("pointerup", scheduleRefresh, true);
-      document.removeEventListener("keyup", scheduleRefresh, true);
-      document.removeEventListener("scroll", scheduleRefresh, true);
-      window.removeEventListener("resize", scheduleRefresh);
+      document.removeEventListener("selectionchange", refreshAfterSelectionChange);
+      document.removeEventListener("pointerdown", hideDuringPointerSelection, true);
+      document.removeEventListener("pointerup", refreshAfterPointerEnd, true);
+      document.removeEventListener("pointercancel", refreshAfterPointerEnd, true);
+      document.removeEventListener("keyup", refreshAfterInput, true);
+      document.removeEventListener("scroll", refreshAfterInput, true);
+      window.removeEventListener("resize", refreshAfterInput);
     };
   }, [scheduleRefresh]);
 

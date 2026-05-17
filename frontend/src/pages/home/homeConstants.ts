@@ -23,6 +23,7 @@ export const HOME_INBOX_GROUP_MIN_HEIGHT_PX = 70;
 export const HOME_INBOX_GROUP_MAX_HEIGHT_PX = 10000;
 export const HOME_COLUMN_MIN_WIDTHS: HomeColumnWidths = [170, 280, 220, 280];
 export const HOME_COLUMN_MAX_WIDTHS: HomeColumnWidths = [360, 760, 1600, 1600];
+export const HOME_INBOX_MATRIX_PANEL_MIN_WIDTH = 320;
 export const INBOX_NO_LOGIC_GATE_ID = "__mango_inbox_no_logic_gate__";
 
 export const ACI_COLUMNS: ReadonlyArray<{ role: AciInboxRole; letter: string; label: string }> = [
