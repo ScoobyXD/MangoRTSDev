@@ -25,6 +25,42 @@ const ROOT_ROW_POSITION_OFFSET: Record<CompanyExplorerFolderKind, number> = {
   logic_gate: 100_000_000,
 };
 
+function normalizeFolderName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export function findCompanyExplorerRootFolderByName(
+  folders: CompanyExplorerFolder[],
+  folderKind: CompanyExplorerFolderKind,
+  name: string,
+): CompanyExplorerFolder | null {
+  const normalizedName = normalizeFolderName(name);
+  if (!normalizedName) return null;
+  return [...folders]
+    .filter((folder) =>
+      folder.folder_kind === folderKind
+      && !folder.parent_folder_id
+      && normalizeFolderName(folder.name) === normalizedName
+    )
+    .sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp) || a.folder_id.localeCompare(b.folder_id))[0] ?? null;
+}
+
+export function buildScopedCompanyExplorerTreeRows(rows: ExplorerTreeNode[], rootFolderID: string): ExplorerTreeNode[] {
+  const rootTreeID = `workspace-folder-${rootFolderID.trim()}`;
+  if (rootTreeID === "workspace-folder-") return rows;
+  const rootIndex = rows.findIndex((row) => row.id === rootTreeID);
+  if (rootIndex < 0) return [];
+  const rootDepth = rows[rootIndex].depth;
+  const scopedRows: ExplorerTreeNode[] = [];
+  for (let index = rootIndex + 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row.depth <= rootDepth) break;
+    const depth = Math.max(0, row.depth - rootDepth - 1);
+    scopedRows.push({ ...row, depth, scopeLevel: depth });
+  }
+  return scopedRows;
+}
+
 function getLocalISODate(): string {
   const now = new Date();
   const year = now.getFullYear();

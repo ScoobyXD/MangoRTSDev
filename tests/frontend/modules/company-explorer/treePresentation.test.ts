@@ -20,7 +20,7 @@ import {
   shouldAcceptClearedMapSelectionAfterExplorerSelection,
   shouldAcceptMapSelectionAfterExplorerSelection,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
-import { buildCompanyExplorerTreeRows } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
+import { buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
 
 const systemFolders = [
   { company_id: "c", folder_id: "system-kanban", folder_kind: "node" as const, system_key: "kanban_boards" as const, name: "Kanban Boards", position: 100, created_timestamp: "0", updated_timestamp: "0" },
@@ -126,6 +126,37 @@ run("root folders from different domains can be locally ordered together", () =>
     "workspace-folder-system-history",
     "workspace-folder-logic-root",
     "workspace-folder-node-root",
+  ]);
+});
+
+run("scoped explorer rows render children under a named logic-gate root", () => {
+  const folders = [
+    { company_id: "c", folder_id: "function-root", folder_kind: "logic_gate" as const, name: "Logic Gates by function", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
+    { company_id: "c", folder_id: "person-root", folder_kind: "logic_gate" as const, name: "Logic Gates by person", position: 2000, created_timestamp: "2", updated_timestamp: "2" },
+    { company_id: "c", folder_id: "function-child", parent_folder_id: "function-root", folder_kind: "logic_gate" as const, name: "Billing", position: 1000, created_timestamp: "3", updated_timestamp: "3" },
+  ];
+  const root = findCompanyExplorerRootFolderByName(folders, "logic_gate", "logic gates by function");
+  assert.equal(root?.folder_id, "function-root");
+
+  const rows = buildCompanyExplorerTreeRows({
+    expanded: new Set(["workspace-folder-function-root", "workspace-folder-function-child", "workspace-folder-person-root"]),
+    nodes: [],
+    logicGates: [
+      { company_id: "c", logic_gate_id: "gate-a", node_id: "gate-a", header: "A/R followup", title: "A/R followup", created_timestamp: "4" },
+      { company_id: "c", logic_gate_id: "gate-b", node_id: "gate-b", header: "Exec review", title: "Exec review", created_timestamp: "5" },
+    ],
+    kanbanBoards: [],
+    folders,
+    folderItems: [
+      { company_id: "c", folder_id: "function-child", item_type: "logic_gate", item_id: "gate-a", position: 1000, created_timestamp: "6", updated_timestamp: "6" },
+      { company_id: "c", folder_id: "person-root", item_type: "logic_gate", item_id: "gate-b", position: 1000, created_timestamp: "7", updated_timestamp: "7" },
+    ],
+    rootRowOrder: {},
+  });
+
+  assert.deepEqual(buildScopedCompanyExplorerTreeRows(rows, "function-root").map((row) => [row.id, row.depth]), [
+    ["workspace-folder-function-child", 0],
+    ["logic-gate-gate-a", 1],
   ]);
 });
 
