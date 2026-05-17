@@ -1,16 +1,29 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getNodeTitle, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, type NodeRecord } from "../node-map/shared";
+import {
+  getNodeTitle,
+  MINI_GRID,
+  NODE_H,
+  NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX,
+  NODE_W,
+  persistedMapPositionsToNodePositions,
+  resolveOpenNodeMapPosition,
+  type NodeDirection,
+  type NodeRecord,
+  type NodeRelationship,
+} from "../node-map/shared";
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, toLogicGateCanvasRecord, type LogicGateRaciAssignment, type LogicGateRaciRole, type LogicGateRecord } from "../logic-gate-map/shared";
 import { EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
-import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches, type NodeProjectionItem } from "../node-map/NodeRecordStore";
-import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
+import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../node-map/NodeRecordStore";
+import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeMapPositionsInNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "../node-map/NodeRelationshipGraph";
+import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
+import { buildLinkedNodePayloadFromSourceSide } from "../node-map/relationshipProjection";
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches } from "../logic-gate-map/LogicGateRecordStore";
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { sanitizeAPIErrorMessage } from "../api/requestJSON";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
-import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
-import { getEditorDocumentIsolationState, type EditorTabID } from "./editorTabs";
+import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
+import { getEditorDocumentIsolationState, type EditorRelatedNodeCreationKind, type EditorTabID } from "./editorTabs";
 import { EDITOR_TAB_TEXT } from "./plainTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
 import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
@@ -25,6 +38,7 @@ import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
 import { EditorTabBar } from "./EditorTabBar";
 import { NodeWorkspaceSurface } from "./NodeWorkspaceSurface";
+import { NodeRelationshipsSurface } from "./NodeRelationshipsSurface";
 import {
   deserializeEditorDocumentHTML,
   EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES,
@@ -155,6 +169,12 @@ type CompanyUser = {
   role?: string;
 };
 
+type EditorNodeBatchResponse = {
+  nodes?: NodeRecord[];
+  relationships?: NodeRelationship[];
+  node_map_positions?: Array<{ entity_id?: string; node_id?: string; x: number; y: number; updated_timestamp?: string }>;
+};
+
 type EditorCollaboratorPresence = {
   clientID: string;
   name: string;
@@ -166,6 +186,8 @@ const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f
 const EDITOR_COLLABORATOR_TTL_MS = 30_000;
 const EDITOR_COLLABORATION_SEND_DELAY_MS = 140;
 const EDITOR_REMOTE_APPLY_IDLE_MS = 900;
+const EDITOR_RELATIONSHIP_WORLD_W = 12800;
+const EDITOR_RELATIONSHIP_WORLD_H = 8800;
 
 function companyUserOptionLabel(user: CompanyUser): string {
   const name = (user.display_name ?? "").trim();
@@ -806,6 +828,89 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
   }, [apiBase, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
 
+  const createRelatedNode = useCallback(async (kind: EditorRelatedNodeCreationKind) => {
+    if (!companyID || !linkedNodeID || linkedEntityKind !== "node") return;
+    const directionByKind: Record<EditorRelatedNodeCreationKind, NodeDirection> = {
+      parent: "top",
+      peer: "right",
+      child: "bottom",
+    };
+    const titleByKind: Record<EditorRelatedNodeCreationKind, string> = {
+      parent: "new parent node",
+      peer: "new peer node",
+      child: "new child node",
+    };
+    const direction = directionByKind[kind];
+    const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+    const occupiedPositions = persistedMapPositionsToNodePositions({
+      positions: snapshot.node_map_positions ?? [],
+      worldWidth: EDITOR_RELATIONSHIP_WORLD_W,
+      worldHeight: EDITOR_RELATIONSHIP_WORLD_H,
+      nodeWidth: NODE_W,
+      nodeHeight: NODE_H,
+    });
+    const origin = occupiedPositions[linkedNodeID] ?? { x: 240, y: 240 };
+    const clearance = MINI_GRID * 4;
+    const horizontalGap = NODE_W + clearance;
+    const verticalGap = NODE_H + clearance;
+    const desired = {
+      x: origin.x + (direction === "left" ? -horizontalGap : direction === "right" ? horizontalGap : 0),
+      y: origin.y + (direction === "top" ? -verticalGap : direction === "bottom" ? verticalGap : 0),
+    };
+    const position = resolveOpenNodeMapPosition({
+      desired,
+      occupied: occupiedPositions,
+      worldWidth: EDITOR_RELATIONSHIP_WORLD_W,
+      worldHeight: EDITOR_RELATIONSHIP_WORLD_H,
+      nodeWidth: NODE_W,
+      nodeHeight: NODE_H,
+    });
+    const payload = buildLinkedNodePayloadFromSourceSide(direction);
+    const clientID = createMapEntityBatchClientID(`editor-${kind}-node`);
+    setError("");
+    try {
+      const response = await createMapEntityBatchCommand<EditorNodeBatchResponse>({
+        companyID,
+        entityKind: "node",
+        items: [{
+          client_id: clientID,
+          title: titleByKind[kind],
+          x: position.x,
+          y: position.y,
+        }],
+        relationships: [{
+          entity_id_a: linkedNodeID,
+          client_id_b: clientID,
+          a_position: payload.a_position,
+          b_position: payload.b_position,
+        }],
+        requestJSON,
+      });
+      const node = response.nodes?.[0];
+      if (!node) throw new Error("node_batch_create_missing_node");
+      const relationship = response.relationships?.[0];
+      upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+      if (relationship) upsertNodeRelationshipGraphRelationship(apiBase, companyID, relationship);
+      upsertNodeMapPositionsInNodeRelationshipGraph(apiBase, companyID, response.node_map_positions ?? [{ entity_id: node.node_id, node_id: node.node_id, x: position.x, y: position.y }]);
+      primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships: relationship ? [relationship] : [] }]);
+      invalidateWorkspaceSnapshot(apiBase, companyID);
+      setActiveTab("editor");
+      applyLinkedNode(node.node_id, getNodeTitle(node), { focusEditor: true });
+      publishLiveSelection({
+        companyID,
+        entityKind: "node",
+        entityID: node.node_id,
+        label: getNodeTitle(node),
+        sourceFrameID: scope,
+        sourceModule: "editor",
+        targetFrameIDs: [linkedMapWidgetID].filter(Boolean),
+        selectionIntent: "activate",
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_create_related_node");
+    }
+  }, [apiBase, applyLinkedNode, companyID, linkedEntityKind, linkedMapWidgetID, linkedNodeID, requestJSON, scope]);
+
   const updateNodePresetPatch = useCallback(async (patch: Record<string, unknown>) => {
     if (!linkedNodeID || linkedEntityKind !== "node") return;
     setError("");
@@ -1367,6 +1472,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               setOutlineStyle(nextOutlineStyle);
               setActiveTab("outline-styles");
             }}
+            onCreateRelatedNode={linkedEntityKind === "node" ? createRelatedNode : undefined}
             reserveHeaderOffset={!forcedEntityKind}
           />
           
@@ -1431,7 +1537,25 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           </div>
         )}
 
-        {hasLinkedDocument && linkedEntityKind === "node" && (
+        {hasLinkedDocument && linkedEntityKind === "node" && activeTab === "relationships" && (
+          <NodeRelationshipsSurface
+            apiBase={apiBase}
+            companyID={companyID}
+            nodeID={linkedNodeID}
+            nodeTitle={linkedNodeTitle}
+            scope={scope}
+            topPx={documentTopPx}
+            accent={accent}
+            surfaceText={surfaceText}
+            panelBackground={panelBackground}
+            strokeColor={strokeColor}
+            ruleColor={ruleColor}
+            scrollbarAccent={scrollbarAccent}
+            scrollbarTrack={scrollbarTrack}
+            theme={theme}
+          />
+        )}
+        {hasLinkedDocument && linkedEntityKind === "node" && activeTab !== "relationships" && (
           <NodeWorkspaceSurface
             companyID={companyID}
             nodeID={linkedNodeID}

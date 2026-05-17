@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { EDITOR_TAB_ITEMS, type EditorTabID } from "./editorTabs";
+import { EDITOR_TAB_ITEMS, type EditorRelatedNodeCreationKind, type EditorTabID } from "./editorTabs";
 import type { EditorOutlineStyleID } from "./plainTextEditing";
 import { EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, EDITOR_OUTLINE_STYLE_ITEMS } from "./useEditorPreferences";
 
@@ -51,6 +51,7 @@ type EditorTabBarProps = {
   onSetSelectionFontSize: (fontSize: number) => void;
   onOutlineStyleFocus: () => void;
   onOutlineStyleChange: (outlineStyle: EditorOutlineStyleID) => void;
+  onCreateRelatedNode?: (kind: EditorRelatedNodeCreationKind) => void;
   reserveHeaderOffset?: boolean;
 };
 
@@ -69,12 +70,15 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   onSetSelectionFontSize,
   onOutlineStyleFocus,
   onOutlineStyleChange,
+  onCreateRelatedNode,
   reserveHeaderOffset = true,
 }) => {
   const [outlineMenuOpen, setOutlineMenuOpen] = useState(false);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [hoveredOutlineStyle, setHoveredOutlineStyle] = useState<EditorOutlineStyleID | null>(null);
   const [fontSizeDraft, setFontSizeDraft] = useState(String(documentFontSize));
   const outlineMenuRef = useRef<HTMLDivElement | null>(null);
+  const createMenuRef = useRef<HTMLDivElement | null>(null);
   const outlineHoverBackground = colorWithAlpha(outlineMenuAccent, 0.14);
   const outlineSelectedBackground = colorWithAlpha(outlineMenuAccent, 0.2);
 
@@ -100,6 +104,23 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     window.addEventListener("pointerdown", closeOnPointerDown);
     return () => window.removeEventListener("pointerdown", closeOnPointerDown);
   }, [outlineMenuOpen]);
+
+  useEffect(() => {
+    if (!createMenuOpen) return;
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (createMenuRef.current?.contains(event.target as Node)) return;
+      setCreateMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCreateMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", closeOnPointerDown);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeOnPointerDown);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [createMenuOpen]);
 
   const currentOutlineStyleLabel = EDITOR_OUTLINE_STYLE_ITEMS.find((item) => item.id === outlineStyle)?.label ?? "Outline Styles";
 
@@ -263,6 +284,86 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
           </button>
         );
       })}
+      {onCreateRelatedNode && (
+        <div ref={createMenuRef} style={{ position: "relative", flex: "0 0 auto" }}>
+          <button
+            type="button"
+            aria-label="Create related node"
+            aria-haspopup="menu"
+            aria-expanded={createMenuOpen}
+            title="Create related node"
+            onClick={() => setCreateMenuOpen((open) => !open)}
+            style={{
+              width: 26,
+              height: 24,
+              border: `1px solid ${createMenuOpen ? accent : strokeColor}`,
+              borderRadius: 4,
+              background: createMenuOpen ? tabSelectedBackground : tabBackground,
+              color: accent,
+              cursor: "pointer",
+              fontSize: 17,
+              fontWeight: 500,
+              lineHeight: 1,
+              display: "grid",
+              placeItems: "center",
+              padding: 0,
+            }}
+          >
+            +
+          </button>
+          {createMenuOpen && (
+            <div
+              role="menu"
+              aria-label="Create related node"
+              style={{
+                position: "absolute",
+                top: "calc(100% + 5px)",
+                left: 0,
+                width: 178,
+                padding: 5,
+                border: `1px solid ${strokeColor}`,
+                borderRadius: 6,
+                background: tabSelectedBackground,
+                boxShadow: `0 12px 28px ${colorWithAlpha("#001014", 0.18)}`,
+                display: "grid",
+                gap: 3,
+              }}
+            >
+              {[
+                ["parent", "Create parent node"],
+                ["peer", "Create peer node"],
+                ["child", "Create child node"],
+              ].map(([kind, label]) => (
+                <button
+                  key={kind}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setCreateMenuOpen(false);
+                    onCreateRelatedNode(kind as EditorRelatedNodeCreationKind);
+                  }}
+                  style={{
+                    width: "100%",
+                    minHeight: 28,
+                    border: 0,
+                    borderRadius: 4,
+                    background: "transparent",
+                    color: surfaceText,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    padding: "6px 8px",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: 0,
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

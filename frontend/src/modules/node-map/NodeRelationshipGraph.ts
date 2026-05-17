@@ -79,6 +79,24 @@ export function upsertNodeRelationshipGraphNode(apiBase: string, companyID: stri
   notify(entry);
 }
 
+export function upsertNodeRelationshipGraphRelationship(apiBase: string, companyID: string, relationship: NodeRelationship): void {
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  const currentRelationships = entry.snapshot.relationships ?? [];
+  const exists = currentRelationships.some((item) => item.node_relationship_id === relationship.node_relationship_id);
+  entry.snapshot = {
+    ...entry.snapshot,
+    nodes: entry.snapshot.nodes ?? [],
+    relationships: exists
+      ? currentRelationships.map((item) => (item.node_relationship_id === relationship.node_relationship_id ? relationship : item))
+      : [...currentRelationships, relationship],
+    folders: entry.snapshot.folders ?? [],
+    folder_items: entry.snapshot.folder_items ?? [],
+    generated_at: new Date().toISOString(),
+  };
+  notify(entry);
+}
+
 // Local mutation helper for delete flows so successful node deletes converge immediately without
 // forcing a full snapshot reload on hot paths.
 export function removeNodeRelationshipGraphNode(apiBase: string, companyID: string, nodeID: string): void {
