@@ -772,10 +772,11 @@ function AppSidebarScopedExplorerSection({
   );
 }
 
-export function AppNodeEditorPopup({ nodeID, nodeTitle, onClose }: {
+export function AppNodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab }: {
   nodeID: string;
   nodeTitle: string;
   onClose: () => void;
+  onCollapseToTab?: () => void;
 }): React.ReactElement {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -803,6 +804,17 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, onClose }: {
         onMouseDown={(event) => event.stopPropagation()}
         onTouchStart={(event) => event.stopPropagation()}
       >
+        {onCollapseToTab && (
+          <button
+            type="button"
+            title="Collapse node editor to app tab"
+            aria-label="Collapse node editor to app tab"
+            onClick={onCollapseToTab}
+            style={nodeEditorPopupCollapseButtonStyle}
+          >
+            <CollapseToTabIcon />
+          </button>
+        )}
         <button
           type="button"
           title="Close node editor"
@@ -825,6 +837,13 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, onClose }: {
     </div>
   );
 }
+
+const CollapseToTabIcon: React.FC = () => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
+    <rect x="2.3" y="3" width="11.4" height="7.6" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.35" />
+    <path d="M4.25 13h7.5M8 7.15v5.1M6.15 10.35 8 12.25l1.85-1.9" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 
 const appSidebarStyle: React.CSSProperties = {
   minHeight: 0,
@@ -1280,5 +1299,22 @@ const nodeEditorPopupCloseButtonStyle: React.CSSProperties = {
   fontSize: 16,
   fontWeight: 600,
   lineHeight: "20px",
+  cursor: "pointer",
+};
+
+const nodeEditorPopupCollapseButtonStyle: React.CSSProperties = {
+  position: "absolute",
+  top: 7,
+  right: 38,
+  zIndex: 8,
+  width: 24,
+  height: 24,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(255, 136, 32, 0.56)",
+  borderRadius: 4,
+  background: "#ffffff",
+  color: "#ff8820",
+  padding: 0,
   cursor: "pointer",
 };

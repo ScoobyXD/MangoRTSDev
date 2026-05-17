@@ -44,6 +44,8 @@ import { useFrameDragResize } from "./useFrameDragResize";
 import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeSidebarView, type SidebarPin } from "./AppSidebarChrome";
 import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackLabel, type SidebarPinRequestDetail } from "./sidebarPins";
 import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeCreator";
+import { AppTabBar, APP_TAB_BAR_HEIGHT } from "./AppTabBar";
+import { appDockTabID, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -68,6 +70,12 @@ type ExplorerEntityActivatedDetail = {
 type NodeEditorPopupState = {
   nodeID: string;
   nodeTitle: string;
+};
+type LogicGateArenaTarget = {
+  logicGateID: string;
+  label: string;
+  nodeID?: string;
+  requestID: number;
 };
 
 function createPrimaryPageTab(page: PrimaryPage, id = createTabId()): ViewTab {
@@ -237,7 +245,7 @@ type AppProps = {
 
 function appBodyStyle(sidebarWidth: number): React.CSSProperties {
   return {
-    height: "100vh",
+    height: `calc(100vh - ${APP_TAB_BAR_HEIGHT}px)`,
     minHeight: 0,
     display: "grid",
     gridTemplateColumns: `${sidebarWidth}px ${APP_RESIZE_HANDLE_W}px minmax(0, 1fr)`,
@@ -295,6 +303,9 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   const [sidebarPins, setSidebarPins] = useState<SidebarPin[]>(readSidebarPins);
   const [pinDropActive, setPinDropActive] = useState(false);
   const [explorerNodePopup, setExplorerNodePopup] = useState<NodeEditorPopupState | null>(null);
+  const [dockTabs, setDockTabs] = useState<AppDockTab[]>(readAppDockTabs);
+  const [activeDockTabID, setActiveDockTabID] = useState<string | null>(null);
+  const [logicGateArenaTarget, setLogicGateArenaTarget] = useState<LogicGateArenaTarget | null>(null);
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [frameRightClickMenu, setFrameRightClickMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -303,6 +314,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number; gridX: number; gridY: number } | null>(null);
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number } | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [dockTabMenu, setDockTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
 
   const dragRef = useRef<DragState | null>(null);
   const tabDragRef = useRef<{ id: string; startX: number; startY: number } | null>(null);
@@ -455,6 +467,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   useEffect(() => { saveSettings({ bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor }); }, [bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor]);
   useEffect(() => { saveSidebarWidth(appSidebarWidth); }, [appSidebarWidth]);
   useEffect(() => { saveSidebarPins(sidebarPins); }, [sidebarPins]);
+  useEffect(() => { saveAppDockTabs(dockTabs); }, [dockTabs]);
   useEffect(() => {
     const snapshot = buildSnapshot();
     if (restoringRef.current) {
@@ -474,7 +487,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   }, [buildSnapshot]);
 
   const canvasW = Math.max(1, viewSize.w - appSidebarWidth - APP_RESIZE_HANDLE_W - PAGE_EDGE_GAP * 2);
-  const canvasH = Math.max(1, viewSize.h - PAGE_EDGE_GAP * 2);
+  const canvasH = Math.max(1, viewSize.h - APP_TAB_BAR_HEIGHT - PAGE_EDGE_GAP * 2);
   const gridCols = Math.max(1, Math.round(canvasW / CELL_SIZE));
   const gridRows = Math.max(1, Math.round(canvasH / CELL_SIZE));
   const stepX = canvasW / gridCols;
@@ -536,7 +549,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     });
   }, [gridCols, gridRows, updateActiveFrames]);
 
-  const closeMenus = useCallback(() => { setFrameRightClickMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); }, []);
+  const closeMenus = useCallback(() => { setFrameRightClickMenu(null); setModuleTypeMenu(null); setCanvasMenu(null); setHeaderMenu(null); setTabMenu(null); setDockTabMenu(null); }, []);
 
   const linkPool = useMemo(() => buildLinkPool({
     frames,
@@ -826,6 +839,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     setEditMode(page === "map");
     setSelectedFrameId(null);
     setSelectedFrameIds(new Set());
+    setActiveDockTabID(null);
     closeMenus();
     if (onNavigate) {
       saveViews(ensured.tabs, ensured.tab.id);
@@ -858,9 +872,90 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     setSidebarPins((previous) => previous.filter((item) => item.kind !== pin.kind || item.id !== pin.id));
   }, []);
 
+  const upsertDockTab = useCallback((input: AppDockTabInput): string => {
+    const tabID = appDockTabID(input.kind, input.entityID);
+    setDockTabs((previous) => upsertAppDockTab(previous, input).tabs);
+    return tabID;
+  }, []);
+
+  const openDockTab = useCallback((tab: AppDockTab) => {
+    closeMenus();
+    if (tab.kind === "node") {
+      setActiveDockTabID(tab.id);
+      setExplorerNodePopup({ nodeID: tab.entityID, nodeTitle: tab.label });
+      return;
+    }
+
+    const companyID = getActiveCompanyID();
+    setExplorerNodePopup(null);
+    setLogicGateArenaTarget({
+      logicGateID: tab.entityID,
+      label: tab.label,
+      requestID: Date.now(),
+    });
+    if (tab.entityID.trim()) {
+      writePendingLogicGateArenaSelection({
+        companyID,
+        logicGateID: tab.entityID,
+        label: tab.label,
+      });
+    }
+    selectPrimaryPage("logic-gate-arena");
+    setActiveDockTabID(tab.id);
+  }, [closeMenus, selectPrimaryPage]);
+
+  const reorderDockTab = useCallback((movingTabID: string, targetTabID: string) => {
+    setDockTabs((previous) => {
+      const from = previous.findIndex((tab) => tab.id === movingTabID);
+      const to = previous.findIndex((tab) => tab.id === targetTabID);
+      if (from < 0 || to < 0 || from === to) return previous;
+      const next = [...previous];
+      const [moving] = next.splice(from, 1);
+      next.splice(to, 0, moving);
+      return next;
+    });
+  }, []);
+
+  const deleteDockTab = useCallback((tabID: string) => {
+    const tab = dockTabs.find((item) => item.id === tabID);
+    setDockTabs((previous) => previous.filter((item) => item.id !== tabID));
+    if (activeDockTabID === tabID) setActiveDockTabID(null);
+    if (tab?.kind === "node" && explorerNodePopup?.nodeID === tab.entityID) setExplorerNodePopup(null);
+  }, [activeDockTabID, dockTabs, explorerNodePopup?.nodeID]);
+
+  const toggleDockTabPinned = useCallback((tabID: string) => {
+    setDockTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, pinned: !tab.pinned, updatedAt: Date.now() } : tab)));
+  }, []);
+
+  const collapseExplorerNodePopupToTab = useCallback(() => {
+    if (!explorerNodePopup) return;
+    upsertDockTab({
+      kind: "node",
+      entityID: explorerNodePopup.nodeID,
+      label: explorerNodePopup.nodeTitle,
+    });
+    setExplorerNodePopup(null);
+    setActiveDockTabID(null);
+  }, [explorerNodePopup, upsertDockTab]);
+
+  const collapseLogicGateArenaToTab = useCallback((selection: { logicGateID: string; label: string }) => {
+    upsertDockTab({
+      kind: "logic_gate_arena",
+      entityID: selection.logicGateID,
+      label: selection.label,
+    });
+    setActiveDockTabID(null);
+    selectPrimaryPage("map");
+  }, [selectPrimaryPage, upsertDockTab]);
+
   const openSidebarPin = useCallback((pin: SidebarPin) => {
     const companyID = getActiveCompanyID();
     if (pin.kind === "logic_gate") {
+      setLogicGateArenaTarget({
+        logicGateID: pin.id,
+        label: pin.label,
+        requestID: Date.now(),
+      });
       writePendingLogicGateArenaSelection({
         companyID,
         logicGateID: pin.id,
@@ -937,6 +1032,11 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
 
       if (detail.kind === "logic_gate") {
         setExplorerNodePopup(null);
+        setLogicGateArenaTarget({
+          logicGateID: id,
+          label,
+          requestID: Date.now(),
+        });
         writePendingLogicGateArenaSelection({
           companyID: detail.companyID || companyID,
           logicGateID: id,
@@ -948,6 +1048,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
 
       if (detail.kind === "node") {
         closeMenus();
+        setActiveDockTabID(null);
         setExplorerNodePopup({ nodeID: id, nodeTitle: label });
       }
     };
@@ -987,7 +1088,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   });
 
   return (
-    <div ref={appRootRef} style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "var(--mango-gradient)" }}>
+    <div ref={appRootRef} style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: "var(--mango-gradient)" }}>
       <AppLiveFreshnessBridge />
       <TextSelectionNodeCreator
         companyID={getActiveCompanyID()}
@@ -1168,7 +1269,14 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
         }}
       >
         {isLogicGateArenaView ? (
-          <React.Suspense fallback={fullPageFallback}><LazyLogicGateArenaPage frames={frames} updateFrames={updateActiveFrames} /></React.Suspense>
+          <React.Suspense fallback={fullPageFallback}>
+            <LazyLogicGateArenaPage
+              frames={frames}
+              updateFrames={updateActiveFrames}
+              targetLogicGate={logicGateArenaTarget}
+              onCollapseToTab={collapseLogicGateArenaToTab}
+            />
+          </React.Suspense>
         ) : isHomeView ? (
           <React.Suspense fallback={fullPageFallback}><LazyHomePage embedded hideNavigation initialViewID={homeViewID} me={me} onNavigate={onNavigate} /></React.Suspense>
         ) : (
@@ -1312,6 +1420,34 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
       )}
       </div>
 
+      <AppTabBar
+        tabs={dockTabs}
+        activeTabID={activeDockTabID}
+        onOpenTab={openDockTab}
+        onReorderTab={reorderDockTab}
+        onContextMenu={(event, tab) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setDockTabMenu({ x: event.clientX, y: event.clientY, id: tab.id });
+          setHeaderMenu(null);
+          setTabMenu(null);
+          setCanvasMenu(null);
+          setFrameRightClickMenu(null);
+          setModuleTypeMenu(null);
+        }}
+      />
+
+      {dockTabMenu && (
+        <FrameRightClickMenu x={dockTabMenu.x} y={dockTabMenu.y} onClose={closeMenus}>
+          <button style={menuBtnBase} onClick={() => { toggleDockTabPinned(dockTabMenu.id); closeMenus(); }} {...hoverHandlers}>
+            {dockTabs.find((tab) => tab.id === dockTabMenu.id)?.pinned ? "Unpin tab" : "Pin tab"}
+          </button>
+          <button style={{ ...menuBtnBase, color: "#c62828" }} onClick={() => { deleteDockTab(dockTabMenu.id); closeMenus(); }} {...hoverHandlers}>
+            Delete tab
+          </button>
+        </FrameRightClickMenu>
+      )}
+
       {tabMenu && (
         <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
@@ -1382,7 +1518,14 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
         <AppNodeEditorPopup
           nodeID={explorerNodePopup.nodeID}
           nodeTitle={explorerNodePopup.nodeTitle}
-          onClose={() => setExplorerNodePopup(null)}
+          onClose={() => {
+            setExplorerNodePopup(null);
+            setActiveDockTabID((current) => {
+              const activeTab = dockTabs.find((tab) => tab.id === current);
+              return activeTab?.kind === "node" && activeTab.entityID === explorerNodePopup.nodeID ? null : current;
+            });
+          }}
+          onCollapseToTab={collapseExplorerNodePopupToTab}
         />
       )}
 

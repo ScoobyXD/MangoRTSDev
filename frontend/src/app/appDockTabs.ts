@@ -1,0 +1,111 @@
+export type AppDockTabKind = "node" | "logic_gate_arena";
+
+export type AppDockTab = {
+  id: string;
+  kind: AppDockTabKind;
+  entityID: string;
+  label: string;
+  pinned: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type AppDockTabInput = {
+  kind: AppDockTabKind;
+  entityID: string;
+  label: string;
+};
+
+const APP_DOCK_TABS_KEY = "mangorts.app-dock-tabs.v1";
+const DEFAULT_TAB_LABEL: Record<AppDockTabKind, string> = {
+  node: "Node",
+  logic_gate_arena: "Logic Gate Arena",
+};
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizeLabel(kind: AppDockTabKind, label: string): string {
+  const normalized = label.trim().replace(/\s+/g, " ");
+  return normalized || DEFAULT_TAB_LABEL[kind];
+}
+
+export function appDockTabID(kind: AppDockTabKind, entityID: string): string {
+  return `app-dock-tab:${kind}:${entityID.trim() || "default"}`;
+}
+
+function coerceAppDockTab(value: unknown): AppDockTab | null {
+  if (!isObject(value)) return null;
+  const kind = value.kind === "node" || value.kind === "logic_gate_arena" ? value.kind : null;
+  if (!kind) return null;
+  const entityID = typeof value.entityID === "string" ? value.entityID.trim() : "";
+  const id = typeof value.id === "string" && value.id.trim() ? value.id.trim() : appDockTabID(kind, entityID);
+  return {
+    id,
+    kind,
+    entityID,
+    label: normalizeLabel(kind, typeof value.label === "string" ? value.label : ""),
+    pinned: value.pinned === true,
+    createdAt: typeof value.createdAt === "number" && Number.isFinite(value.createdAt) ? value.createdAt : Date.now(),
+    updatedAt: typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? value.updatedAt : Date.now(),
+  };
+}
+
+export function readAppDockTabs(): AppDockTab[] {
+  try {
+    const raw = localStorage.getItem(APP_DOCK_TABS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const seen = new Set<string>();
+    const tabs: AppDockTab[] = [];
+    for (const item of parsed) {
+      const tab = coerceAppDockTab(item);
+      if (!tab || seen.has(tab.id)) continue;
+      seen.add(tab.id);
+      tabs.push(tab);
+    }
+    return tabs;
+  } catch {
+    return [];
+  }
+}
+
+export function saveAppDockTabs(tabs: AppDockTab[]): void {
+  try {
+    localStorage.setItem(APP_DOCK_TABS_KEY, JSON.stringify(tabs));
+  } catch {
+    // App tabs are convenience UI state; storage failure should not block work.
+  }
+}
+
+export function upsertAppDockTab(tabs: AppDockTab[], input: AppDockTabInput): { tabs: AppDockTab[]; tabID: string } {
+  const entityID = input.entityID.trim();
+  const tabID = appDockTabID(input.kind, entityID);
+  const now = Date.now();
+  const label = normalizeLabel(input.kind, input.label);
+  const existing = tabs.find((tab) => tab.id === tabID);
+  if (existing) {
+    return {
+      tabID,
+      tabs: tabs.map((tab) => (
+        tab.id === tabID
+          ? { ...tab, entityID, label, updatedAt: now }
+          : tab
+      )),
+    };
+  }
+  return {
+    tabID,
+    tabs: [...tabs, {
+      id: tabID,
+      kind: input.kind,
+      entityID,
+      label,
+      pinned: false,
+      createdAt: now,
+      updatedAt: now,
+    }],
+  };
+}

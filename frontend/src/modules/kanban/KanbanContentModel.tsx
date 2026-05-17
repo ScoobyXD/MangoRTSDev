@@ -43,6 +43,7 @@ export type KanbanContentProps = {
   forcedLogicGateID?: string;
   forcedLogicGateLabel?: string;
   forcedHighlightedNodeID?: string;
+  onCollapseArenaToTab?: () => void;
 };
 
 export type OverlayResizeState = {

@@ -41,6 +41,7 @@ type KanbanBoardSidebarProps = {
   onSaveCurrentBoardView: () => void;
   onCreateNewBoardView: () => void;
   onSelectBoard: (boardID: string) => void;
+  onCollapseToTab?: () => void;
 };
 
 export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
@@ -72,6 +73,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
   onSaveCurrentBoardView: _onSaveCurrentBoardView,
   onCreateNewBoardView: _onCreateNewBoardView,
   onSelectBoard,
+  onCollapseToTab,
 }) => {
   const headerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLElement>(null);
@@ -99,7 +101,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
 
   return (
   <>
-    <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 4, left: 12, right: 12, display: "grid", gridTemplateColumns: "minmax(150px, 270px) minmax(140px, 1fr) auto", alignItems: "center", gap: 8, paddingLeft: headerLeftPaddingPx, zIndex: 6, pointerEvents: "auto" }}>
+    <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 4, left: 12, right: 12, display: "grid", gridTemplateColumns: onCollapseToTab ? "minmax(150px, 270px) minmax(140px, 1fr) auto 25px" : "minmax(150px, 270px) minmax(140px, 1fr) auto", alignItems: "center", gap: 8, paddingLeft: headerLeftPaddingPx, zIndex: 6, pointerEvents: "auto" }}>
       {editingBoardTitle ? (
         <input
           value={boardTitleDraft}
@@ -155,6 +157,20 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
         </span>
         All boards
       </button>
+      {onCollapseToTab && (
+        <button
+          type="button"
+          title="Collapse Logic Gate Arena to app tab"
+          aria-label="Collapse Logic Gate Arena to app tab"
+          onClick={onCollapseToTab}
+          style={{ width: 25, height: 25, display: "grid", placeItems: "center", border: `1px solid ${line}`, borderRadius: 4, background: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.9)", color: text, padding: 0, cursor: "pointer" }}
+        >
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
+            <rect x="2.3" y="3" width="11.4" height="7.6" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.35" />
+            <path d="M4.25 13h7.5M8 7.15v5.1M6.15 10.35 8 12.25l1.85-1.9" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
     </div>
     {boardPickerOpen && (
       <section ref={popoverRef} data-frame-interactive="true" style={{ position: "absolute", top: topClearancePx + 2, right: 12, width: "min(360px, calc(100% - 24px))", maxHeight: "min(360px, calc(100% - 52px))", display: "grid", gridTemplateRows: "minmax(0, 1fr)", border: isDark ? "1px solid rgba(255,255,255,0.16)" : "1px solid #e0e0e0", borderRadius: 10, background: isDark ? "rgba(17,22,27,0.98)" : "#ffffff", boxShadow: isDark ? "0 12px 28px rgba(0,0,0,0.42)" : "0 6px 24px rgba(0,0,0,0.12)", padding: "4px 0", zIndex: 8, overflow: "hidden" }}>
