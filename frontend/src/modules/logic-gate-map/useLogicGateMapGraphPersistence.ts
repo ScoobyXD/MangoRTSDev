@@ -45,6 +45,7 @@ type UseLogicGateMapGraphPersistenceInput = {
   setRelationshipRoleColors: React.Dispatch<React.SetStateAction<Record<LogicGateMapRelationshipRole, string>>>;
   layoutPersistenceReadyRef: React.MutableRefObject<boolean>;
   lastPersistedNodePositionsRef: React.MutableRefObject<Record<string, NodePosition>>;
+  layoutInteractionActiveRef: React.MutableRefObject<boolean>;
   requestJSON: <T>(path: string, init?: RequestInit) => Promise<T>;
 };
 
@@ -76,6 +77,7 @@ export function useLogicGateMapGraphPersistence({
   setRelationshipRoleColors,
   layoutPersistenceReadyRef,
   lastPersistedNodePositionsRef,
+  layoutInteractionActiveRef,
   requestJSON,
 }: UseLogicGateMapGraphPersistenceInput) {
   const applyServerMapPositions = useCallback((positions: PersistedMapPosition[]) => {
@@ -86,12 +88,16 @@ export function useLogicGateMapGraphPersistence({
       nodeWidth: NODE_W,
       nodeHeight: NODE_H,
     });
+    if (layoutInteractionActiveRef.current) {
+      layoutPersistenceReadyRef.current = true;
+      return;
+    }
     lastPersistedNodePositionsRef.current = { ...lastPersistedNodePositionsRef.current, ...serverPositions };
     if (Object.keys(serverPositions).length > 0) {
       setNodePositions((previous) => ({ ...previous, ...serverPositions }));
     }
     layoutPersistenceReadyRef.current = true;
-  }, [lastPersistedNodePositionsRef, layoutPersistenceReadyRef, setNodePositions, worldHeight, worldWidth]);
+  }, [lastPersistedNodePositionsRef, layoutInteractionActiveRef, layoutPersistenceReadyRef, setNodePositions, worldHeight, worldWidth]);
 
   useEffect(() => {
     const cached = SESSION_NODE_MAP_STATE.get(mapStateKey) ?? SESSION_NODE_MAP_STATE.get(fallbackMapStateKey);

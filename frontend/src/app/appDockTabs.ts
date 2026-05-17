@@ -16,6 +16,8 @@ export type AppDockTabInput = {
   label: string;
 };
 
+export const EVENT_APP_DOCK_TAB_REQUESTED = "mangorts:app-dock-tab-requested";
+
 const APP_DOCK_TABS_KEY = "mangorts.app-dock-tabs.v1";
 const DEFAULT_TAB_LABEL: Record<AppDockTabKind, string> = {
   node: "Node",
@@ -108,4 +110,16 @@ export function upsertAppDockTab(tabs: AppDockTab[], input: AppDockTabInput): { 
       updatedAt: now,
     }],
   };
+}
+export function requestAppDockTab(input: AppDockTabInput): void {
+  if (typeof window === "undefined") return;
+  const entityID = input.entityID.trim();
+  if (!entityID) return;
+  window.dispatchEvent(new CustomEvent<AppDockTabInput>(EVENT_APP_DOCK_TAB_REQUESTED, {
+    detail: {
+      kind: input.kind,
+      entityID,
+      label: input.label.trim() || DEFAULT_TAB_LABEL[input.kind],
+    },
+  }));
 }

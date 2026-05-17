@@ -1,6 +1,7 @@
 import React from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
+import { MinimizeToLineIcon } from "../../app/nodeEditorPopupControls";
 import { EditorContent } from "../editor/EditorContent";
 import { normalizeKanbanColumnItemColor, type KanbanCard, type KanbanColumn } from "./shared";
 import {
@@ -113,6 +114,7 @@ export function KanbanNodeEditorOverlay({
   accent,
   theme,
   onClose,
+  onCollapseToTab,
 }: {
   overlay: NodeEditorOverlayState;
   ratio: NodeEditorOverlayRatio;
@@ -122,6 +124,7 @@ export function KanbanNodeEditorOverlay({
   accent: string;
   theme: "mango" | "teal" | "light" | "dark";
   onClose: () => void;
+  onCollapseToTab: () => void;
 }) {
   return (
     <div
@@ -148,6 +151,30 @@ export function KanbanNodeEditorOverlay({
         cursor: "default",
       }}
     >
+      <button
+        type="button"
+        title="Collapse node editor to app tab"
+        aria-label="Collapse node editor to app tab"
+        onClick={onCollapseToTab}
+        style={{
+          position: "absolute",
+          top: 7,
+          right: 38,
+          zIndex: 8,
+          width: 24,
+          height: 24,
+          display: "grid",
+          placeItems: "center",
+          border: "1px solid rgba(255, 136, 32, 0.56)",
+          borderRadius: 4,
+          background: "#ffffff",
+          color: "#ff8820",
+          padding: 0,
+          cursor: "pointer",
+        }}
+      >
+        <MinimizeToLineIcon />
+      </button>
       <button
         type="button"
         title="Close node editor"

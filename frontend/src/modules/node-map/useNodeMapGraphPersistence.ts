@@ -45,6 +45,7 @@ type UseNodeMapGraphPersistenceInput = {
   setRelationshipRoleColors: React.Dispatch<React.SetStateAction<Record<NodeMapRelationshipRole, string>>>;
   layoutPersistenceReadyRef: React.MutableRefObject<boolean>;
   lastPersistedNodePositionsRef: React.MutableRefObject<Record<string, NodePosition>>;
+  layoutInteractionActiveRef: React.MutableRefObject<boolean>;
   requestJSON: <T>(path: string, init?: RequestInit) => Promise<T>;
 };
 
@@ -76,6 +77,7 @@ export function useNodeMapGraphPersistence({
   setRelationshipRoleColors,
   layoutPersistenceReadyRef,
   lastPersistedNodePositionsRef,
+  layoutInteractionActiveRef,
   requestJSON,
 }: UseNodeMapGraphPersistenceInput) {
   const applyServerMapPositions = useCallback((positions: PersistedMapPosition[]) => {
@@ -86,12 +88,16 @@ export function useNodeMapGraphPersistence({
       nodeWidth: NODE_W,
       nodeHeight: NODE_H,
     });
+    if (layoutInteractionActiveRef.current) {
+      layoutPersistenceReadyRef.current = true;
+      return;
+    }
     lastPersistedNodePositionsRef.current = { ...lastPersistedNodePositionsRef.current, ...serverPositions };
     if (Object.keys(serverPositions).length > 0) {
       setNodePositions((previous) => ({ ...previous, ...serverPositions }));
     }
     layoutPersistenceReadyRef.current = true;
-  }, [lastPersistedNodePositionsRef, layoutPersistenceReadyRef, setNodePositions, worldHeight, worldWidth]);
+  }, [lastPersistedNodePositionsRef, layoutInteractionActiveRef, layoutPersistenceReadyRef, setNodePositions, worldHeight, worldWidth]);
 
   useEffect(() => {
     const cached = SESSION_NODE_MAP_STATE.get(mapStateKey) ?? SESSION_NODE_MAP_STATE.get(fallbackMapStateKey);

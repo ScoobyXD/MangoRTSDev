@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { requestAppSidebarPin, type SidebarPinKind } from "../../app/sidebarPins";
+import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "../../app/nodeEditorPopupControls";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import type { CommunicationsSharedInbox, CommunicationsSharedInboxRaciRole, CompanyUser, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
@@ -13,7 +14,7 @@ import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDra
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeState, HomeViewID, InboxLogicGateNodeGroup } from "./homeTypes";
 import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusLetter, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
+import { allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
@@ -73,25 +74,6 @@ type InboxGroupResizeState = {
   previousCursor: string;
   previousUserSelect: string;
 };
-
-type NodeEditorPopupResizeHandle = {
-  key: string;
-  horizontal: -1 | 0 | 1;
-  vertical: -1 | 0 | 1;
-  cursor: string;
-  style: React.CSSProperties;
-};
-
-const NODE_EDITOR_POPUP_RESIZE_HANDLES: NodeEditorPopupResizeHandle[] = [
-  { key: "nw", horizontal: -1, vertical: -1, cursor: "nwse-resize", style: { top: -6, left: -6, width: 12, height: 12 } },
-  { key: "ne", horizontal: 1, vertical: -1, cursor: "nesw-resize", style: { top: -6, right: -6, width: 12, height: 12 } },
-  { key: "sw", horizontal: -1, vertical: 1, cursor: "nesw-resize", style: { bottom: -6, left: -6, width: 12, height: 12 } },
-  { key: "se", horizontal: 1, vertical: 1, cursor: "nwse-resize", style: { right: -6, bottom: -6, width: 12, height: 12 } },
-  { key: "n", horizontal: 0, vertical: -1, cursor: "ns-resize", style: { top: -5, left: 18, right: 18, height: 10 } },
-  { key: "s", horizontal: 0, vertical: 1, cursor: "ns-resize", style: { bottom: -5, left: 18, right: 18, height: 10 } },
-  { key: "w", horizontal: -1, vertical: 0, cursor: "ew-resize", style: { left: -5, top: 18, bottom: 18, width: 10 } },
-  { key: "e", horizontal: 1, vertical: 0, cursor: "ew-resize", style: { right: -5, top: 18, bottom: 18, width: 10 } },
-];
 
 function clampInboxGroupHeight(heightPx: number): number {
   if (!Number.isFinite(heightPx)) return HOME_INBOX_GROUP_MIN_HEIGHT_PX;
@@ -251,10 +233,11 @@ function defaultNodeEditorPopupSize(): { width: number; height: number } {
   return readStoredNodeEditorPopupSize() ?? clampNodeEditorPopupSize({ width: 1180, height: 820 });
 }
 
-export function NodeEditorPopup({ nodeID, nodeTitle, onClose }: {
+export function NodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab }: {
   nodeID: string;
   nodeTitle: string;
   onClose: () => void;
+  onCollapseToTab?: () => void;
 }) {
   const [popupSize, setPopupSize] = useState(defaultNodeEditorPopupSize);
   const popupSizeRef = useRef(popupSize);
@@ -343,6 +326,17 @@ export function NodeEditorPopup({ nodeID, nodeTitle, onClose }: {
             }}
           />
         ))}
+        {onCollapseToTab && (
+          <button
+            type="button"
+            title="Collapse node editor to app tab"
+            aria-label="Collapse node editor to app tab"
+            onClick={onCollapseToTab}
+            style={nodeEditorPopupCollapseButtonStyle}
+          >
+            <MinimizeToLineIcon />
+          </button>
+        )}
         <button
           type="button"
           title="Close node editor"

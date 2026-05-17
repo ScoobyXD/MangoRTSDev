@@ -5,18 +5,20 @@ import type { AppDockTab } from "./appDockTabs";
 type AppTabBarProps = {
   tabs: AppDockTab[];
   activeTabID: string | null;
+  leftOffset: number;
   onOpenTab: (tab: AppDockTab) => void;
   onReorderTab: (movingTabID: string, targetTabID: string) => void;
   onContextMenu: (event: React.MouseEvent, tab: AppDockTab) => void;
 };
 
-const TAB_BAR_H = 52;
+const TAB_BAR_H = 58;
 
 export const APP_TAB_BAR_HEIGHT = TAB_BAR_H;
 
 export const AppTabBar: React.FC<AppTabBarProps> = ({
   tabs,
   activeTabID,
+  leftOffset,
   onOpenTab,
   onReorderTab,
   onContextMenu,
@@ -51,7 +53,7 @@ export const AppTabBar: React.FC<AppTabBarProps> = ({
   }, []);
 
   return (
-    <footer style={appTabBarStyle} aria-label="Collapsed app tabs">
+    <footer style={appTabBarStyle(leftOffset)} aria-label="Collapsed app tabs">
       <div style={appTabRailStyle}>
         {tabs.map((tab) => {
           const active = activeTabID === tab.id;
@@ -81,11 +83,10 @@ export const AppTabBar: React.FC<AppTabBarProps> = ({
               onContextMenu={(event) => onContextMenu(event, tab)}
               style={appTabButtonStyle(active, movingTabID === tab.id)}
             >
-              <span style={appTabIconStyle}>
+              <span style={appTabIconStyle(active)}>
                 <ExplorerRowIcon kind={tab.kind === "node" ? "node" : "logic_gate"} />
               </span>
-              <span style={appTabLabelStyle}>{tab.label}</span>
-              {tab.pinned && <PinIndicator />}
+              {tab.pinned && <span style={appTabPinnedStyle}><PinIndicator /></span>}
             </button>
           );
         })}
@@ -100,71 +101,79 @@ const PinIndicator: React.FC = () => (
   </svg>
 );
 
-const appTabBarStyle: React.CSSProperties = {
-  position: "absolute",
-  left: 0,
-  right: 0,
-  bottom: 0,
-  height: TAB_BAR_H,
-  display: "flex",
-  alignItems: "center",
-  minWidth: 0,
-  padding: "7px 10px 9px",
-  boxSizing: "border-box",
-  background: "rgba(255, 255, 255, 0.92)",
-  borderTop: "1px solid rgba(255, 136, 32, 0.22)",
-  boxShadow: "0 -8px 20px rgba(36, 18, 10, 0.12)",
-  zIndex: 70,
-};
-
+function appTabBarStyle(leftOffset: number): React.CSSProperties {
+  return {
+    position: "absolute",
+    left: leftOffset,
+    right: 10,
+    bottom: 0,
+    height: TAB_BAR_H,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 0,
+    padding: "6px 10px 8px",
+    boxSizing: "border-box",
+    background: "transparent",
+    pointerEvents: "none",
+    zIndex: 70,
+  };
+}
 const appTabRailStyle: React.CSSProperties = {
   minWidth: 0,
-  width: "100%",
-  height: 36,
+  maxWidth: "100%",
+  height: 44,
   display: "flex",
   alignItems: "center",
-  gap: 6,
+  gap: 8,
   overflowX: "auto",
   overflowY: "hidden",
   scrollbarWidth: "thin",
+  padding: "4px 12px",
+  boxSizing: "border-box",
+  border: "1px solid rgba(255, 136, 32, 0.24)",
+  borderRadius: 999,
+  background: "rgba(255, 255, 255, 0.96)",
+  boxShadow: "0 10px 22px rgba(36, 18, 10, 0.16), inset 0 0 0 1px rgba(255, 255, 255, 0.72)",
+  pointerEvents: "auto",
 };
-
 function appTabButtonStyle(active: boolean, moving: boolean): React.CSSProperties {
   return {
     flex: "0 0 auto",
-    width: 188,
-    maxWidth: "38vw",
-    height: 32,
+    position: "relative",
+    width: 36,
+    height: 36,
     display: "grid",
-    gridTemplateColumns: "18px minmax(0, 1fr) auto",
-    alignItems: "center",
-    gap: 7,
-    border: `1px solid ${active ? "rgba(255, 136, 32, 0.76)" : "rgba(36, 18, 10, 0.18)"}`,
-    borderRadius: 6,
-    background: active ? "rgba(255, 136, 32, 0.14)" : "#ffffff",
+    placeItems: "center",
+    border: `1px solid ${active ? "rgba(255, 136, 32, 0.78)" : "rgba(36, 18, 10, 0.12)"}`,
+    borderRadius: 9,
+    background: active ? "linear-gradient(180deg, #fff7ee 0%, #ffe0bc 100%)" : "linear-gradient(180deg, #ffffff 0%, #fff8f0 100%)",
     color: active ? "#ff8820" : "#33241a",
     cursor: "pointer",
     font: "inherit",
-    fontSize: 12,
-    fontWeight: active ? 700 : 600,
     letterSpacing: 0,
-    padding: "0 8px",
-    textAlign: "left",
+    padding: 0,
     opacity: moving ? 0.78 : 1,
-    transform: moving ? "translateY(-1px)" : "none",
-    transition: "background 120ms ease, border-color 120ms ease, transform 120ms ease, opacity 120ms ease",
+    boxShadow: active ? "0 5px 12px rgba(255, 136, 32, 0.22)" : "0 4px 10px rgba(36, 18, 10, 0.09)",
+    transform: moving ? "translateY(-2px)" : "none",
+    transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease, opacity 120ms ease",
+  };
+}
+function appTabIconStyle(active: boolean): React.CSSProperties {
+  return {
+    width: 22,
+    height: 22,
+    display: "grid",
+    placeItems: "center",
+    color: active ? "#ff8820" : "rgba(36, 18, 10, 0.72)",
   };
 }
 
-const appTabIconStyle: React.CSSProperties = {
-  width: 18,
+const appTabPinnedStyle: React.CSSProperties = {
+  position: "absolute",
+  right: 3,
+  top: 3,
   display: "grid",
   placeItems: "center",
-};
-
-const appTabLabelStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
+  color: "#ff8820",
 };

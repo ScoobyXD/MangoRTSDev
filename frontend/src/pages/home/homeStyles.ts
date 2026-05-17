@@ -803,6 +803,23 @@ export const nodeEditorPopupCloseButtonStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
+export const nodeEditorPopupCollapseButtonStyle: React.CSSProperties = {
+  position: "absolute",
+  top: 7,
+  right: 38,
+  zIndex: 8,
+  width: 24,
+  height: 24,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(255, 136, 32, 0.56)",
+  borderRadius: 4,
+  background: "#ffffff",
+  color: "#ff8820",
+  padding: 0,
+  cursor: "pointer",
+};
+
 export const deleteModalBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,

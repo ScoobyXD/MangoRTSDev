@@ -61,6 +61,9 @@ LATER: need to do an audit on how well equiped the app is for multiple people us
 2. theres also a bug with the resizing on the my triage page when you first load into dev site. idk its really weird, and then it goes back to normal and works. who knows.
 
 ===============
+
+Notes to tell tim:
+1. We do need to advise users on a system on who gets to drag nodes to different status, should it be done automatically or wait for permission
 notes:
 1. There is an argument that there is no need for Done section in R Inbox. If something is done, do we want it to show up on the ACI inbox or our inbox? Probably not. 
 	a. Because things just get piled up
@@ -73,16 +76,10 @@ Monday go live:
 
 
 
-
-Search on explorer should be like click up where searching literally changes the view of the explorer
+notifications, state change, @ mentions
 Can collapse logic gates and nodes into bottom tabs on bottom sidebar like on click up
-Logic gate arena we only show logic gate folders on the explorer. 
-Pinned nodes and pinned logic gates.
-Replace logic gate arena with Logic gates by function and logic gates by person should be its own section like logic gate arena.
 Idea where multiple people do group huddle on node with each their own textbox
-Be able to create node from any piece of text.
-be able to have a tab where it says relationships and you see the list of other nodes this node is related to and the map relationships
-i should be able to create peer or child nodes or parent nodes from any node.
+
 
 ======================
 

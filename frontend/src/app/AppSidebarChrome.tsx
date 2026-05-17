@@ -7,6 +7,7 @@ import { COLORWAYS, UI_THEME } from "./frameLayoutTypes";
 import { preloadDefaultDashboardModules } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
 import type { SidebarPin } from "./sidebarPins";
+import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
 import {
   createCommunicationsSharedInbox,
   deleteCommunicationsSharedInbox,
@@ -45,6 +46,12 @@ const SIDEBAR_LOGIC_GATES_BY_FUNCTION_WIDGET_ID = "app-sidebar-logic-gates-by-fu
 const SIDEBAR_LOGIC_GATES_BY_PERSON_WIDGET_ID = "app-sidebar-logic-gates-by-person";
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const SIDEBAR_SECTION_OPEN_KEY_PREFIX = "mangorts.app-sidebar-section-open.v1";
+const APP_SIDEBAR_PIN_DRAG_MIME = "application/x-mangorts-sidebar-pin";
+const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
+const NODE_EDITOR_POPUP_MIN_HEIGHT = 320;
+const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
+const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
+const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "app-node-editor-popup-size-v1";
 
 type SidebarSectionID = "shared-triage" | "logic-gates-by-function" | "logic-gates-by-person" | "explorer";
 
@@ -66,6 +73,7 @@ type AppSidebarProps = {
   onPageSelect: (page: AppSidebarPrimaryPage) => void;
   onPinOpen: (pin: SidebarPin) => void;
   onPinRemove: (pin: SidebarPin) => void;
+  onPinReorder: (moving: SidebarPin, target: SidebarPin | null, placement: "before" | "after") => void;
   onPinDragEnter: () => void;
   onPinDragLeave: () => void;
   onPinDragOver: (event: React.DragEvent<HTMLElement>) => void;
@@ -124,6 +132,7 @@ export function AppSidebar({
   onPageSelect,
   onPinOpen,
   onPinRemove,
+  onPinReorder,
   onPinDragEnter,
   onPinDragLeave,
   onPinDragOver,
@@ -145,6 +154,7 @@ export function AppSidebar({
   const [dropTarget, setDropTarget] = useState<{ folderID: string; placement: SharedInboxDropPlacement } | null>(null);
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
   const [pinContextMenu, setPinContextMenu] = useState<{ x: number; y: number; pin: SidebarPin } | null>(null);
+  const [pinDropTarget, setPinDropTarget] = useState<{ key: string; placement: "before" | "after" } | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
   const sharedRows = useMemo(
@@ -152,6 +162,27 @@ export function AppSidebar({
     [currentUserHasFullSharedInboxAccess, currentUserID, expandedSharedFolderIDs, sharedInboxes, sharedTriageOpen],
   );
   const sharedTriageActive = homeActive && (activeHomeView === "shared-root" || activeHomeView.startsWith("shared:"));
+
+  const readDraggedSidebarPin = useCallback((dataTransfer: DataTransfer): SidebarPin | null => {
+    try {
+      const parsed = JSON.parse(dataTransfer.getData(APP_SIDEBAR_PIN_DRAG_MIME)) as Partial<SidebarPin>;
+      const kind = parsed.kind === "node" || parsed.kind === "logic_gate" ? parsed.kind : null;
+      const id = typeof parsed.id === "string" ? parsed.id.trim() : "";
+      if (!kind || !id) return null;
+      return pins.find((pin) => pin.kind === kind && pin.id === id) ?? null;
+    } catch {
+      return null;
+    }
+  }, [pins]);
+
+  const hasSidebarPinDrag = useCallback((dataTransfer: DataTransfer): boolean => (
+    Array.from(dataTransfer.types).includes(APP_SIDEBAR_PIN_DRAG_MIME)
+  ), []);
+
+  const getPinDropPlacement = useCallback((event: React.DragEvent<HTMLElement>): "before" | "after" => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return event.clientY > bounds.top + bounds.height / 2 ? "after" : "before";
+  }, []);
 
   useEffect(() => {
     if (!companyID) {
@@ -533,40 +564,85 @@ export function AppSidebar({
       </section>
 
       <section
-        style={appSidebarPinnedSectionStyle(pinDropActive)}
+        style={appSidebarPinnedSectionStyle(pinDropActive || !!pinDropTarget)}
         aria-label="Pinned"
         onDragEnter={onPinDragEnter}
-        onDragOver={onPinDragOver}
+        onDragOver={(event) => {
+          if (hasSidebarPinDrag(event.dataTransfer)) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            setPinDropTarget({ key: "__end__", placement: "after" });
+            return;
+          }
+          onPinDragOver(event);
+        }}
         onDragLeave={(event) => {
           const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
           if (related && event.currentTarget.contains(related)) return;
+          setPinDropTarget(null);
           onPinDragLeave();
         }}
-        onDrop={onPinDrop}
+        onDrop={(event) => {
+          const movingPin = readDraggedSidebarPin(event.dataTransfer);
+          if (movingPin) {
+            event.preventDefault();
+            onPinReorder(movingPin, null, "after");
+            setPinDropTarget(null);
+            return;
+          }
+          onPinDrop(event);
+        }}
       >
         <div style={appSidebarSectionTitleStyle}>Pinned</div>
         <div style={appSidebarPinListStyle}>
           {pins.length === 0 ? (
             <div style={appSidebarEmptyStyle}>No pins</div>
-          ) : pins.map((pin) => (
-            <div
-              key={`${pin.kind}:${pin.id}`}
-              style={appSidebarPinRowStyle}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                setPinContextMenu({ x: event.clientX, y: event.clientY, pin });
-              }}
-            >
-              <button type="button" style={appSidebarPinButtonStyle} onClick={() => onPinOpen(pin)}>
-                <span style={appSidebarPinIconStyle}><ExplorerRowIcon kind={pin.kind} /></span>
-                <span style={appSidebarTextStyle}>{pin.label}</span>
-              </button>
-              <button type="button" aria-label={`Remove ${pin.label}`} style={appSidebarPinRemoveStyle} onClick={() => onPinRemove(pin)}>
-                X
-              </button>
-            </div>
-          ))}
+          ) : pins.map((pin) => {
+            const pinKey = `${pin.kind}:${pin.id}`;
+            const dropPlacement = pinDropTarget?.key === pinKey ? pinDropTarget.placement : null;
+            return (
+              <div
+                key={pinKey}
+                draggable
+                style={appSidebarPinRowStyle(dropPlacement)}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData(APP_SIDEBAR_PIN_DRAG_MIME, JSON.stringify({ kind: pin.kind, id: pin.id }));
+                  event.dataTransfer.setData("text/plain", pin.label);
+                  setPinDropTarget(null);
+                }}
+                onDragEnd={() => setPinDropTarget(null)}
+                onDragOver={(event) => {
+                  if (!hasSidebarPinDrag(event.dataTransfer)) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.dataTransfer.dropEffect = "move";
+                  setPinDropTarget({ key: pinKey, placement: getPinDropPlacement(event) });
+                }}
+                onDrop={(event) => {
+                  const movingPin = readDraggedSidebarPin(event.dataTransfer);
+                  if (!movingPin) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onPinReorder(movingPin, pin, getPinDropPlacement(event));
+                  setPinDropTarget(null);
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setPinContextMenu({ x: event.clientX, y: event.clientY, pin });
+                }}
+              >
+                <button type="button" style={appSidebarPinButtonStyle} onClick={() => onPinOpen(pin)}>
+                  <span style={appSidebarPinIconStyle}><ExplorerRowIcon kind={pin.kind} /></span>
+                  <span style={appSidebarTextStyle}>{pin.label}</span>
+                </button>
+                <button type="button" aria-label={`Remove ${pin.label}`} style={appSidebarPinRemoveStyle} onClick={() => onPinRemove(pin)}>
+                  X
+                </button>
+              </div>
+            );
+          })}
         </div>
       </section>
 
@@ -772,12 +848,62 @@ function AppSidebarScopedExplorerSection({
   );
 }
 
+function nodeEditorPopupMaxSize(): { width: number; height: number } {
+  if (typeof window === "undefined") return { width: 1180, height: 820 };
+  return {
+    width: Math.max(NODE_EDITOR_POPUP_MIN_WIDTH, window.innerWidth - NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET),
+    height: Math.max(NODE_EDITOR_POPUP_MIN_HEIGHT, window.innerHeight - NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET),
+  };
+}
+
+function clampNodeEditorPopupSize(size: { width: number; height: number }): { width: number; height: number } {
+  const max = nodeEditorPopupMaxSize();
+  return {
+    width: Math.max(NODE_EDITOR_POPUP_MIN_WIDTH, Math.min(Math.round(size.width), max.width)),
+    height: Math.max(NODE_EDITOR_POPUP_MIN_HEIGHT, Math.min(Math.round(size.height), max.height)),
+  };
+}
+
+function nodeEditorPopupSizeStorageKey(): string {
+  const companyID = getActiveCompanyID().trim() || "global";
+  return `${NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX}:${companyID}`;
+}
+
+function readStoredNodeEditorPopupSize(): { width: number; height: number } | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(nodeEditorPopupSizeStorageKey()) ?? "") as Partial<{ width: number; height: number }>;
+    const width = parsed.width;
+    const height = parsed.height;
+    if (typeof width !== "number" || typeof height !== "number") return null;
+    return clampNodeEditorPopupSize({ width, height });
+  } catch {
+    return null;
+  }
+}
+
+function storeNodeEditorPopupSize(size: { width: number; height: number }) {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(nodeEditorPopupSizeStorageKey(), JSON.stringify(clampNodeEditorPopupSize(size)));
+}
+
+function defaultNodeEditorPopupSize(): { width: number; height: number } {
+  return readStoredNodeEditorPopupSize() ?? clampNodeEditorPopupSize({ width: 1180, height: 820 });
+}
+
 export function AppNodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab }: {
   nodeID: string;
   nodeTitle: string;
   onClose: () => void;
   onCollapseToTab?: () => void;
 }): React.ReactElement {
+  const [popupSize, setPopupSize] = useState(defaultNodeEditorPopupSize);
+  const popupSizeRef = useRef(popupSize);
+
+  useEffect(() => {
+    popupSizeRef.current = popupSize;
+  }, [popupSize]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
@@ -787,6 +913,43 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+    const onResize = () => setPopupSize((current) => clampNodeEditorPopupSize(current));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const startPopupResize = useCallback((event: React.PointerEvent<HTMLDivElement>, handle: NodeEditorPopupResizeHandle) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const ownerDocument = event.currentTarget.ownerDocument;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startSize = popupSizeRef.current;
+    const previousCursor = ownerDocument.body.style.cursor;
+    ownerDocument.body.style.cursor = handle.cursor;
+
+    const onPointerMove = (pointerEvent: PointerEvent) => {
+      const nextSize = clampNodeEditorPopupSize({
+        width: startSize.width + (pointerEvent.clientX - startX) * handle.horizontal,
+        height: startSize.height + (pointerEvent.clientY - startY) * handle.vertical,
+      });
+      popupSizeRef.current = nextSize;
+      setPopupSize(nextSize);
+    };
+    const finish = () => {
+      ownerDocument.body.style.cursor = previousCursor;
+      ownerDocument.removeEventListener("pointermove", onPointerMove);
+      ownerDocument.removeEventListener("pointerup", finish);
+      ownerDocument.removeEventListener("pointercancel", finish);
+      storeNodeEditorPopupSize(popupSizeRef.current);
+    };
+
+    ownerDocument.addEventListener("pointermove", onPointerMove);
+    ownerDocument.addEventListener("pointerup", finish);
+    ownerDocument.addEventListener("pointercancel", finish);
+  }, []);
 
   return (
     <div
@@ -800,10 +963,27 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab
         aria-modal="true"
         aria-label={`${nodeTitle} node editor`}
         data-frame-interactive="true"
-        style={nodeEditorPopupStyle}
+        style={{ ...nodeEditorPopupStyle, width: popupSize.width, height: popupSize.height }}
         onMouseDown={(event) => event.stopPropagation()}
         onTouchStart={(event) => event.stopPropagation()}
       >
+        {NODE_EDITOR_POPUP_RESIZE_HANDLES.map((handle) => (
+          <div
+            key={handle.key}
+            role="separator"
+            aria-label={`Resize node editor ${handle.key}`}
+            data-frame-interactive="true"
+            onPointerDown={(event) => startPopupResize(event, handle)}
+            style={{
+              position: "absolute",
+              zIndex: 9,
+              touchAction: "none",
+              cursor: handle.cursor,
+              background: "transparent",
+              ...handle.style,
+            }}
+          />
+        ))}
         {onCollapseToTab && (
           <button
             type="button"
@@ -812,7 +992,7 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab
             onClick={onCollapseToTab}
             style={nodeEditorPopupCollapseButtonStyle}
           >
-            <CollapseToTabIcon />
+            <MinimizeToLineIcon />
           </button>
         )}
         <button
@@ -837,13 +1017,6 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab
     </div>
   );
 }
-
-const CollapseToTabIcon: React.FC = () => (
-  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
-    <rect x="2.3" y="3" width="11.4" height="7.6" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.35" />
-    <path d="M4.25 13h7.5M8 7.15v5.1M6.15 10.35 8 12.25l1.85-1.9" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
 
 const appSidebarStyle: React.CSSProperties = {
   minHeight: 0,
@@ -1156,13 +1329,21 @@ const appSidebarEmptyStyle: React.CSSProperties = {
   fontWeight: 600,
 };
 
-const appSidebarPinRowStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 24px",
-  alignItems: "center",
-  gap: 4,
-};
+function appSidebarPinRowStyle(dropPlacement: "before" | "after" | null): React.CSSProperties {
+  return {
+    minWidth: 0,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 24px",
+    alignItems: "center",
+    gap: 4,
+    cursor: "grab",
+    boxShadow: dropPlacement === "before"
+      ? "inset 0 2px 0 #ff8820"
+      : dropPlacement === "after"
+        ? "inset 0 -2px 0 #ff8820"
+        : undefined,
+  };
+}
 
 const appSidebarPinButtonStyle: React.CSSProperties = {
   minWidth: 0,
@@ -1280,7 +1461,6 @@ const nodeEditorPopupStyle: React.CSSProperties = {
   maxWidth: "calc(100vw - 44px)",
   maxHeight: "calc(100vh - 64px)",
   boxSizing: "border-box",
-  resize: "both",
   border: "1px solid rgba(255, 136, 32, 0.54)",
   borderRadius: 16,
   background: "#ffffff",

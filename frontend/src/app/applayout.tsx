@@ -44,7 +44,7 @@ import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeSi
 import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackLabel, type SidebarPinRequestDetail } from "./sidebarPins";
 import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeCreator";
 import { AppTabBar, APP_TAB_BAR_HEIGHT } from "./AppTabBar";
-import { appDockTabID, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
+import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -855,20 +855,44 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     const cleanPins = pins.filter((pin) => pin.id.trim() && (pin.kind === "node" || pin.kind === "logic_gate"));
     if (cleanPins.length === 0) return;
     setSidebarPins((previous) => {
-      const byKey = new Map(previous.map((pin) => [`${pin.kind}:${pin.id}`, pin]));
+      const next = [...previous];
       for (const pin of cleanPins) {
-        byKey.set(`${pin.kind}:${pin.id}`, {
+        const id = pin.id.trim();
+        const index = next.findIndex((item) => item.kind === pin.kind && item.id === id);
+        const normalized = {
           ...pin,
-          id: pin.id.trim(),
-          label: pin.label.trim() || sidebarPinFallbackLabel(pin.kind, pin.id),
-        });
+          id,
+          label: pin.label.trim() || sidebarPinFallbackLabel(pin.kind, id),
+        };
+        if (index >= 0) next[index] = { ...next[index], ...normalized };
+        else next.push(normalized);
       }
-      return Array.from(byKey.values()).sort((a, b) => a.addedAt - b.addedAt || a.label.localeCompare(b.label));
+      return next;
     });
   }, []);
 
   const removeSidebarPin = useCallback((pin: SidebarPin) => {
     setSidebarPins((previous) => previous.filter((item) => item.kind !== pin.kind || item.id !== pin.id));
+  }, []);
+
+  const reorderSidebarPin = useCallback((moving: SidebarPin, target: SidebarPin | null, placement: "before" | "after") => {
+    setSidebarPins((previous) => {
+      const movingIndex = previous.findIndex((item) => item.kind === moving.kind && item.id === moving.id);
+      if (movingIndex < 0) return previous;
+      const movingPin = previous[movingIndex];
+      const withoutMoving = previous.filter((_, index) => index !== movingIndex);
+      const targetIndex = target
+        ? withoutMoving.findIndex((item) => item.kind === target.kind && item.id === target.id)
+        : withoutMoving.length;
+      const insertIndex = targetIndex < 0
+        ? withoutMoving.length
+        : placement === "after"
+          ? targetIndex + 1
+          : targetIndex;
+      const next = [...withoutMoving];
+      next.splice(Math.max(0, Math.min(insertIndex, next.length)), 0, movingPin);
+      return next;
+    });
   }, []);
 
   const upsertDockTab = useCallback((input: AppDockTabInput): string => {
@@ -994,6 +1018,22 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     window.addEventListener(EVENT_APP_SIDEBAR_PIN_REQUESTED, onSidebarPinRequested);
     return () => window.removeEventListener(EVENT_APP_SIDEBAR_PIN_REQUESTED, onSidebarPinRequested);
   }, [addSidebarPins]);
+
+  useEffect(() => {
+    const onDockTabRequested = (event: Event) => {
+      const detail = (event as CustomEvent<AppDockTabInput>).detail;
+      const entityID = typeof detail?.entityID === "string" ? detail.entityID.trim() : "";
+      if (!entityID || (detail.kind !== "node" && detail.kind !== "logic_gate_arena")) return;
+      upsertDockTab({
+        kind: detail.kind,
+        entityID,
+        label: typeof detail.label === "string" && detail.label.trim() ? detail.label.trim() : entityID,
+      });
+      setActiveDockTabID(null);
+    };
+    window.addEventListener(EVENT_APP_DOCK_TAB_REQUESTED, onDockTabRequested);
+    return () => window.removeEventListener(EVENT_APP_DOCK_TAB_REQUESTED, onDockTabRequested);
+  }, [upsertDockTab]);
 
   useEffect(() => {
     const onExplorerEntityActivated = (event: Event) => {
@@ -1176,6 +1216,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           onPageSelect={selectPrimaryPage}
           onPinOpen={openSidebarPin}
           onPinRemove={removeSidebarPin}
+          onPinReorder={reorderSidebarPin}
           onPinDragEnter={() => setPinDropActive(true)}
           onPinDragLeave={() => setPinDropActive(false)}
           onPinDragOver={(event) => {
@@ -1396,6 +1437,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
 
       <AppTabBar
         tabs={dockTabs}
+        leftOffset={PAGE_EDGE_GAP + appSidebarWidth + APP_RESIZE_HANDLE_W}
         activeTabID={activeDockTabID}
         onOpenTab={openDockTab}
         onReorderTab={reorderDockTab}

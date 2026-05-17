@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readAuthConfig } from "../../auth/cognitoAuth";
 import { getActiveCompanyID } from "../../auth/currentCompany";
+import { requestAppDockTab } from "../../app/appDockTabs";
 import { MangoWordmark } from "../../app/MangoLogo";
 import { preloadLogicGateArenaSurface } from "../../app/preloadDashboardModules";
 import {
@@ -1805,6 +1806,10 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           nodeID={nodeEditorOverlay.nodeID}
           nodeTitle={nodeEditorOverlay.nodeTitle}
           onClose={() => setNodeEditorOverlay(null)}
+          onCollapseToTab={() => {
+            requestAppDockTab({ kind: "node", entityID: nodeEditorOverlay.nodeID, label: nodeEditorOverlay.nodeTitle });
+            setNodeEditorOverlay(null);
+          }}
         />
       )}
     </div>

@@ -78,6 +78,7 @@ import {
   type ExplorerEntityDragItem,
 } from "./shared";
 import { getActiveCompanyID } from "../../auth/currentCompany";
+import { requestAppDockTab } from "../../app/appDockTabs";
 
 import {
   cardDropPlacement,
@@ -261,6 +262,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   useEffect(() => {
     if (!arenaGroupingOpen) setArenaGroupMenuOpen(null);
   }, [arenaGroupingOpen]);
+
+  const collapseNodeEditorOverlayToTab = useCallback(() => {
+    if (!nodeEditorOverlay) return;
+    requestAppDockTab({ kind: "node", entityID: nodeEditorOverlay.nodeID, label: nodeEditorOverlay.nodeTitle });
+    setNodeEditorOverlay(null);
+  }, [nodeEditorOverlay]);
 
   useEffect(() => {
     if (!arenaGroupMenuOpen) return undefined;
@@ -1557,6 +1564,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           accent={accent}
           theme={theme}
           onClose={() => setNodeEditorOverlay(null)}
+          onCollapseToTab={collapseNodeEditorOverlayToTab}
         />
       )}      <KanbanDeleteConfirmations
         deleteNodeConfirmation={deleteNodeConfirmation}

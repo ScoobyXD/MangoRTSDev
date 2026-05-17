@@ -14,6 +14,7 @@ import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection
 import { LogicGateMapContextMenus } from "./LogicGateMapContextMenus";
 import { LogicGateMapNodeCard } from "./LogicGateMapNodeCard";
 import { LogicGateMapRelationshipHitLines } from "./LogicGateMapRelationshipHitLines";
+import { RelationshipColorLegend } from "../node-map/RelationshipColorLegend";
 import { buildLogicGateMapRelationshipRoutingGrid, getLogicGateMapAnchorPoint, routeLogicGateMapDraftPath, routeLogicGateMapOrthogonalPath } from "./logicGateMapRouting";
 import { useLogicGateMapGraphPersistence } from "./useLogicGateMapGraphPersistence";
 import { useLogicGateMapViewportHandlers } from "./useLogicGateMapViewportHandlers";
@@ -112,6 +113,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const pendingFocusNodeIDRef = useRef("");
   const layoutPersistenceReadyRef = useRef(false);
   const lastPersistedNodePositionsRef = useRef<Record<string, NodePosition>>({});
+  const layoutInteractionActiveRef = useRef(false);
   const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(true);
   const [relationshipRoleColors, setRelationshipRoleColors] = useState({ input: "#0095ff", output: "#ff8a00" });
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
@@ -343,6 +345,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     setRelationshipRoleColors,
     layoutPersistenceReadyRef,
     lastPersistedNodePositionsRef,
+    layoutInteractionActiveRef,
     requestJSON,
   });
 
@@ -440,6 +443,10 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     if (nodes.some((node) => node.node_id === relationshipDraft.sourceNodeID)) return;
     setRelationshipDraft(null);
   }, [nodes, relationshipDraft]);
+
+  useEffect(() => {
+    layoutInteractionActiveRef.current = Boolean(dragState || nodeResizeState);
+  }, [dragState, nodeResizeState]);
 
 
   useEffect(() => {
@@ -1467,6 +1474,18 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           />
         )}
 
+        <RelationshipColorLegend
+          title="Relationship colors"
+          items={[
+            { label: "Input", color: relationshipRoleColors.input },
+            { label: "Output", color: relationshipRoleColors.output },
+          ]}
+          panelSurface={panelSurface}
+          panelText={panelText}
+          panelMutedText={panelMutedText}
+          accent={accent}
+          enabled={relationshipColorsEnabled}
+        />
         <LogicGateMapContextMenus
           contextMenu={contextMenu}
           nodeContextMenu={nodeContextMenu}

@@ -12,6 +12,7 @@ import { NodeMapContextMenus, type NodeMapCanvasContextMenuState, type NodeMapDe
 import { NodeInlineCommentPanel } from "./NodeInlineCommentPanel";
 import { NodeMapNodeCard } from "./NodeMapNodeCard";
 import { NodeMapRelationshipHitLines } from "./NodeMapRelationshipHitLines";
+import { RelationshipColorLegend } from "./RelationshipColorLegend";
 import { buildNodeInlineCommentsStorageKey, createNodeInlineCommentMessage, createNodeInlineCommentThread, readNodeInlineCommentThreads, writeNodeInlineCommentThreads, type NodeInlineCommentDraft, type NodeInlineCommentThread } from "./nodeInlineComments";
 import { buildNodeMapRelationshipRoutingGrid, getNodeMapAnchorPoint, routeNodeMapDraftPath, routeNodeMapOrthogonalPath } from "./nodeMapRouting";
 import { useNodeMapGraphPersistence } from "./useNodeMapGraphPersistence";
@@ -135,6 +136,8 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
   const pendingFocusNodeIDRef = useRef("");
   const layoutPersistenceReadyRef = useRef(false);
   const lastPersistedNodePositionsRef = useRef<Record<string, NodePosition>>({});
+  const layoutInteractionActiveRef = useRef(false);
+  const appliedInitialFocusNodeIDRef = useRef("");
   const [relationshipColorsEnabled, setRelationshipColorsEnabled] = useState(true);
   const [relationshipRoleColors, setRelationshipRoleColors] = useState<Record<NodeMapRelationshipRole, string>>({ parent: "#ff8a00", peer: "#0095ff", child: "#6f5cff" });
   const [relationshipDraft, setRelationshipDraft] = useState<{ sourceNodeID: string; sourceSide: NodeDirection; cursor: { x: number; y: number } } | null>(null);
@@ -426,6 +429,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
     setRelationshipRoleColors,
     layoutPersistenceReadyRef,
     lastPersistedNodePositionsRef,
+    layoutInteractionActiveRef,
     requestJSON,
   });
 
@@ -459,7 +463,11 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
 
   useEffect(() => {
     const focusNodeID = initialSelectedNodeID.trim();
-    if (!focusNodeID) return;
+    if (!focusNodeID) {
+      appliedInitialFocusNodeIDRef.current = "";
+      return;
+    }
+    if (appliedInitialFocusNodeIDRef.current === focusNodeID) return;
     if (!allNodes.some((node) => node.node_id === focusNodeID) && !nodes.some((node) => node.node_id === focusNodeID)) return;
     if (selectedNodeIDRef.current !== focusNodeID) {
       suppressNextSelectionBroadcastRef.current = true;
@@ -467,6 +475,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
       setSelectedNodeID(focusNodeID);
       setSelectedNodeIDs(new Set([focusNodeID]));
     }
+    appliedInitialFocusNodeIDRef.current = focusNodeID;
     pendingFocusNodeIDRef.current = focusNodeID;
     centerNodeInViewport(focusNodeID);
   }, [initialSelectedNodeID, allNodes, nodes]);
@@ -502,6 +511,10 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
     if (nodes.some((node) => node.node_id === relationshipDraft.sourceNodeID)) return;
     setRelationshipDraft(null);
   }, [nodes, relationshipDraft]);
+
+  useEffect(() => {
+    layoutInteractionActiveRef.current = Boolean(dragState || nodeResizeState);
+  }, [dragState, nodeResizeState]);
 
 
   useEffect(() => {
@@ -1543,6 +1556,19 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
           />
         )}
 
+        <RelationshipColorLegend
+          title="Relationship colors"
+          items={[
+            { label: "Parent", color: relationshipRoleColors.parent },
+            { label: "Peer", color: relationshipRoleColors.peer },
+            { label: "Child", color: relationshipRoleColors.child },
+          ]}
+          panelSurface={panelSurface}
+          panelText={panelText}
+          panelMutedText={panelMutedText}
+          accent={accent}
+          enabled={relationshipColorsEnabled}
+        />
         <NodeMapContextMenus
           contextMenu={contextMenu}
           nodeContextMenu={nodeContextMenu}

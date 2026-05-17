@@ -278,7 +278,7 @@ export function reconcileNodeMapPositions<T extends { node_id: string }>(input: 
   };
 
   const missingCount = input.nodes.reduce((count, node) => count + (input.previous[node.node_id] ? 0 : 1), 0);
-  const useViewportInsertion = !!input.defaultPosition && missingCount <= 1 && Object.keys(input.previous).length > 0;
+  const useViewportInsertion = !!input.defaultPosition && missingCount === 1;
 
   for (const [index, node] of input.nodes.entries()) {
     const existing = input.previous[node.node_id];
