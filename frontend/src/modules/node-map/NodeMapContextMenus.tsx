@@ -32,6 +32,7 @@ type NodeMapContextMenusProps = {
   onToggleRelationshipColors: () => void;
   onRelationshipRoleColorChange: (role: NodeMapRelationshipRole, color: string) => void;
   onFindNodeSelection: (nodeID: string) => void;
+  onPinNode: (nodeID: string) => void;
   onRenameNode: (nodeID: string) => void;
   onRequestDeleteNodes: (nodeIDs: string[]) => void;
   onDeleteRelationships: (relationshipIDs: string[]) => void;
@@ -65,6 +66,7 @@ export const NodeMapContextMenus: React.FC<NodeMapContextMenusProps> = ({
   onToggleRelationshipColors,
   onRelationshipRoleColorChange,
   onFindNodeSelection,
+  onPinNode,
   onRenameNode,
   onRequestDeleteNodes,
   onDeleteRelationships,
@@ -217,6 +219,9 @@ export const NodeMapContextMenus: React.FC<NodeMapContextMenusProps> = ({
       >
         <button style={contextMenuButtonStyle} onClick={() => onFindNodeSelection(nodeContextMenu.nodeID)}>
           Find on Explorer
+        </button>
+        <button style={contextMenuButtonStyle} onClick={() => onPinNode(nodeContextMenu.nodeID)}>
+          Pin Node
         </button>
         <button style={contextMenuButtonStyle} onClick={() => onRenameNode(nodeContextMenu.nodeID)}>
           Rename node

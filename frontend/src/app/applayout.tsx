@@ -41,7 +41,8 @@ import { userHasFullSharedInboxAccess } from "../pages/home/homeUtils";
 import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
 import { AppLiveFreshnessBridge } from "./AppLiveFreshnessBridge";
 import { useFrameDragResize } from "./useFrameDragResize";
-import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeSidebarView, type SidebarPin, type SidebarPinKind } from "./AppSidebarChrome";
+import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeSidebarView, type SidebarPin } from "./AppSidebarChrome";
+import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackLabel, type SidebarPinRequestDetail } from "./sidebarPins";
 import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeCreator";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
@@ -166,11 +167,6 @@ function saveSidebarWidth(width: number): void {
   try {
     localStorage.setItem(SIDEBAR_WIDTH_KEY, String(clampSidebarWidth(width)));
   } catch {}
-}
-
-function sidebarPinFallbackLabel(kind: SidebarPinKind, id: string): string {
-  const prefix = kind === "logic_gate" ? "Logic Gate" : "Node";
-  return `${prefix} ${id.trim().slice(0, 8) || "pin"}`;
 }
 
 function sidebarPinsFromDrop(dataTransfer: DataTransfer): SidebarPin[] {
@@ -910,6 +906,24 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
     if (pins.length === 0) return;
     event.preventDefault();
     addSidebarPins(pins);
+  }, [addSidebarPins]);
+
+  useEffect(() => {
+    const onSidebarPinRequested = (event: Event) => {
+      const detail = (event as CustomEvent<SidebarPinRequestDetail>).detail;
+      const id = typeof detail?.id === "string" ? detail.id.trim() : "";
+      if (!id || (detail.kind !== "node" && detail.kind !== "logic_gate")) return;
+      addSidebarPins([{
+        id,
+        kind: detail.kind,
+        label: typeof detail.label === "string" && detail.label.trim()
+          ? detail.label.trim()
+          : sidebarPinFallbackLabel(detail.kind, id),
+        addedAt: Date.now(),
+      }]);
+    };
+    window.addEventListener(EVENT_APP_SIDEBAR_PIN_REQUESTED, onSidebarPinRequested);
+    return () => window.removeEventListener(EVENT_APP_SIDEBAR_PIN_REQUESTED, onSidebarPinRequested);
   }, [addSidebarPins]);
 
   useEffect(() => {

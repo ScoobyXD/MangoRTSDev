@@ -33,6 +33,7 @@ export type ExplorerRenameTarget = NonNullable<ReturnType<typeof resolveExplorer
 export type ExplorerRenameDraft = { treeID: string; target: ExplorerRenameTarget; value: string };
 export type ExplorerRowOrderUpdate = { row: ExplorerTreeNode; position: number };
 export type ExplorerFindTarget = { kind: "node"; id: string } | { kind: "logic_gate"; id: string };
+export type ExplorerPinTarget = { kind: "node" | "logic_gate"; id: string; label: string };
 export type CompanyExplorerShareTarget = { folderID: string; label: string };
 export type CompanyExplorerFindRequestDetail = {
   companyID?: string;
@@ -50,6 +51,7 @@ export type CompanyExplorerContextMenuState = {
   deleteTargets: ExplorerDeleteTargetWithLabel[];
   renameTarget: ExplorerRenameTarget | null;
   findTarget: ExplorerFindTarget | null;
+  pinTarget: ExplorerPinTarget | null;
   shareTarget: CompanyExplorerShareTarget | null;
   renameTreeID: string;
   renameLabel: string;
