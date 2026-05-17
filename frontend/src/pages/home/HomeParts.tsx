@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { getActiveCompanyID } from "../../auth/currentCompany";
-import type { CommunicationsSharedInbox, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
+import type { CommunicationsSharedInbox, CommunicationsSharedInboxRaciRole, CompanyUser, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import { EditorContent } from "../../modules/editor/EditorContent";
@@ -726,6 +726,215 @@ export function HomeSidebar({
     </aside>
   );
 }
+
+const SHARED_INBOX_RACI_ROLES: ReadonlyArray<{ role: CommunicationsSharedInboxRaciRole; label: string; help: string }> = [
+  { role: "responsible", label: "Responsible", help: "Can triage and archive" },
+  { role: "accountable", label: "Accountable", help: "Can triage and archive" },
+  { role: "consulted", label: "Consulted", help: "Can view and comment" },
+  { role: "informed", label: "Informed", help: "Can view and comment" },
+];
+
+function companyUserLabel(user: Pick<CompanyUser, "user_id" | "display_name" | "email">): string {
+  return user.display_name?.trim() || user.email?.trim() || user.user_id;
+}
+
+function sharedInboxRaciAssignmentLabel(
+  assignment: { user_id: string; user_display_name?: string; user_email?: string },
+  userByID: Map<string, CompanyUser>,
+): string {
+  const user = userByID.get(assignment.user_id);
+  return assignment.user_display_name?.trim() || assignment.user_email?.trim() || (user ? companyUserLabel(user) : assignment.user_id);
+}
+
+export function SharedInboxRaciSettingsModal({
+  folder,
+  companyUsers,
+  busy,
+  onAddUser,
+  onRemoveUser,
+  onClose,
+}: {
+  folder: CommunicationsSharedInbox;
+  companyUsers: CompanyUser[];
+  busy: boolean;
+  onAddUser: (folderID: string, role: CommunicationsSharedInboxRaciRole, userID: string) => void;
+  onRemoveUser: (folderID: string, role: CommunicationsSharedInboxRaciRole, userID: string) => void;
+  onClose: () => void;
+}) {
+  const [draftByRole, setDraftByRole] = useState<Record<CommunicationsSharedInboxRaciRole, string>>({
+    responsible: "",
+    accountable: "",
+    consulted: "",
+    informed: "",
+  });
+  const userByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id, user])), [companyUsers]);
+  const assignments = folder.raci_assignments ?? [];
+  const updateDraft = (role: CommunicationsSharedInboxRaciRole, value: string) => {
+    setDraftByRole((previous) => ({ ...previous, [role]: value }));
+  };
+
+  return (
+    <div style={sharedRaciBackdropStyle}>
+      <section style={sharedRaciModalStyle} aria-modal="true" role="dialog" aria-label={`${folder.name} RACI settings`}>
+        <div style={panelHeaderStyle}>
+          <div style={{ minWidth: 0 }}>
+            <h2 style={panelTitleStyle}>{folder.name} RACI</h2>
+            <div style={mutedSmallStyle}>Responsible and Accountable can archive. Consulted and Informed are view/comment only.</div>
+          </div>
+          <button type="button" style={smallButtonStyle} disabled={busy} onClick={onClose}>Close</button>
+        </div>
+        <div style={sharedRaciRoleGridStyle}>
+          {SHARED_INBOX_RACI_ROLES.map(({ role, label, help }) => {
+            const roleAssignments = assignments.filter((assignment) => assignment.role === role);
+            const assignedIDs = new Set(roleAssignments.map((assignment) => assignment.user_id));
+            const selectableUsers = companyUsers.filter((user) => !assignedIDs.has(user.user_id));
+            const draft = draftByRole[role];
+            return (
+              <section key={role} style={sharedRaciRoleColumnStyle}>
+                <div style={{ display: "grid", gap: 2 }}>
+                  <strong style={{ fontSize: 12 }}>{label}</strong>
+                  <span style={mutedSmallStyle}>{help}</span>
+                </div>
+                <div style={sharedRaciChipListStyle}>
+                  {roleAssignments.length === 0 ? (
+                    <span style={mutedSmallStyle}>No one assigned</span>
+                  ) : roleAssignments.map((assignment) => (
+                    <span key={`${role}:${assignment.user_id}`} style={sharedRaciChipStyle}>
+                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {sharedInboxRaciAssignmentLabel(assignment, userByID)}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${sharedInboxRaciAssignmentLabel(assignment, userByID)} from ${label}`}
+                        style={shortcutRemoveStyle}
+                        disabled={busy}
+                        onClick={() => onRemoveUser(folder.folder_id, role, assignment.user_id)}
+                      >
+                        X
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <div style={sharedRaciAddRowStyle}>
+                  <select
+                    style={sharedRaciSelectStyle}
+                    value={draft}
+                    disabled={busy || selectableUsers.length === 0}
+                    onChange={(event) => updateDraft(role, event.target.value)}
+                  >
+                    <option value="">{selectableUsers.length === 0 ? "All users added" : "Add user"}</option>
+                    {selectableUsers.map((user) => (
+                      <option key={user.user_id} value={user.user_id}>{companyUserLabel(user)}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    style={smallButtonStyle}
+                    disabled={busy || !draft}
+                    onClick={() => {
+                      onAddUser(folder.folder_id, role, draft);
+                      updateDraft(role, "");
+                    }}
+                  >
+                    Add
+                  </button>
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+const sharedRaciBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 80,
+  display: "grid",
+  placeItems: "center",
+  padding: 20,
+  background: "rgba(20, 10, 4, 0.22)",
+};
+
+const sharedRaciModalStyle: React.CSSProperties = {
+  width: "min(920px, calc(100vw - 40px))",
+  maxHeight: "min(620px, calc(100vh - 40px))",
+  minHeight: 0,
+  display: "grid",
+  gridTemplateRows: "auto minmax(0, 1fr)",
+  gap: 12,
+  padding: 14,
+  border: "1px solid rgba(255, 136, 32, 0.3)",
+  borderRadius: 8,
+  background: "#ffffff",
+  boxShadow: "0 18px 44px rgba(36, 18, 10, 0.22)",
+  overflow: "hidden",
+};
+
+const sharedRaciRoleGridStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+  gap: 10,
+  overflow: "auto",
+};
+
+const sharedRaciRoleColumnStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 240,
+  display: "grid",
+  gridTemplateRows: "auto minmax(0, 1fr) auto",
+  gap: 10,
+  padding: 10,
+  border: "1px solid rgba(255, 136, 32, 0.2)",
+  borderRadius: 8,
+  background: "#fffaf4",
+};
+
+const sharedRaciChipListStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  alignContent: "start",
+  gap: 6,
+  overflow: "auto",
+};
+
+const sharedRaciChipStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 28,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 22px",
+  alignItems: "center",
+  gap: 6,
+  padding: "3px 4px 3px 8px",
+  border: "1px solid rgba(255, 136, 32, 0.2)",
+  borderRadius: 6,
+  background: "#ffffff",
+  fontSize: 11,
+  fontWeight: 600,
+};
+
+const sharedRaciAddRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  gap: 6,
+  minWidth: 0,
+};
+
+const sharedRaciSelectStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  height: 30,
+  border: "1px solid rgba(255, 136, 32, 0.24)",
+  borderRadius: 6,
+  background: "#ffffff",
+  color: "#24120a",
+  font: "inherit",
+  fontSize: 11,
+  padding: "0 6px",
+};
 
 export function MessagePlacementIcon({ message, active }: { message: EmailMessage; active: boolean }) {
   const count = message.logic_gate_count ?? message.logic_gate_ids?.length ?? 0;
@@ -1614,12 +1823,13 @@ export function ComposePanel({ compose, busy, onChange, onCancel, onSubmit }: {
   );
 }
 
-export function MessageDetail({ message, loading, archiveAvailable, archiveLabel, busy, onReply, onArchive, onDelete, onToggleRead, onToggleStar }: {
+export function MessageDetail({ message, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, onReply, onArchive, onDelete, onToggleRead, onToggleStar }: {
   message: EmailMessage;
   loading: boolean;
   archiveAvailable: boolean;
   archiveLabel: string;
   busy: boolean;
+  deleteAvailable: boolean;
   onReply: () => void;
   onArchive: () => void;
   onDelete: () => void;
@@ -1640,7 +1850,7 @@ export function MessageDetail({ message, loading, archiveAvailable, archiveLabel
         <button style={smallButtonStyle} disabled={busy} onClick={onToggleRead}>{message.unread ? "Mark read" : "Mark unread"}</button>
         <button style={smallButtonStyle} disabled={busy} onClick={onToggleStar}>{message.starred ? "Unstar" : "Star"}</button>
         <button style={smallButtonStyle} disabled={busy || !archiveAvailable} onClick={onArchive}>{archiveLabel}</button>
-        <button style={{ ...smallButtonStyle, ...dangerButtonStyle }} disabled={busy} onClick={onDelete}>Delete</button>
+        <button style={{ ...smallButtonStyle, ...dangerButtonStyle }} disabled={busy || !deleteAvailable} onClick={onDelete}>Delete</button>
       </div>
       <iframe title="Email body" sandbox="" srcDoc={messageDocument(message.body || message.snippet || "")} style={iframeStyle} />
     </div>

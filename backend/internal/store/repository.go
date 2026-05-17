@@ -81,6 +81,7 @@ type Repository interface {
 	RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error)
 	DeleteCompanyExplorerFolder(companyID, folderID string) error
 	DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput) (CompanyExplorerDeleteResult, error)
+	SetCommunicationsSharedInboxRaciAssignments(input SharedInboxRaciAssignmentUpdateInput) ([]domain.SharedInboxRaciAssignment, error)
 	ListCompanyExplorerFolderShares(companyID, folderID string) ([]domain.CompanyExplorerFolderShare, error)
 	UpsertCompanyExplorerFolderShare(input CompanyExplorerFolderShareInput) (domain.CompanyExplorerFolderShare, error)
 	DeleteCompanyExplorerFolderShare(companyID, folderID, email string) error
@@ -177,6 +178,17 @@ type CompanyExplorerFolderShareInput struct {
 	Email           string
 	UserID          string
 	InvitedByUserID string
+}
+
+type SharedInboxRaciAssignmentInput struct {
+	Role   string `json:"role"`
+	UserID string `json:"user_id"`
+}
+
+type SharedInboxRaciAssignmentUpdateInput struct {
+	CompanyID   string
+	FolderID    string
+	Assignments []SharedInboxRaciAssignmentInput
 }
 
 type CompanyExplorerDeleteTargetInput struct {

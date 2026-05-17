@@ -574,6 +574,103 @@ export function sortSharedInboxes(folders: CommunicationsSharedInbox[]): Communi
   return [...folders].sort((a, b) => a.position - b.position || a.name.localeCompare(b.name) || a.folder_id.localeCompare(b.folder_id));
 }
 
+export function sharedInboxHasAnyRaciAssignments(folders: CommunicationsSharedInbox[]): boolean {
+  return folders.some((folder) => (folder.raci_assignments ?? []).length > 0);
+}
+
+type SharedInboxAccessUser = {
+  is_dev_admin?: boolean;
+  memberships?: Array<{ company_id?: string; role?: string }>;
+};
+
+export function userHasFullSharedInboxAccess(user: SharedInboxAccessUser | null | undefined, companyID: string): boolean {
+  if (!user) return false;
+  if (user.is_dev_admin) return true;
+  const cleanCompanyID = companyID.trim();
+  return (user.memberships ?? []).some((membership) => {
+    const role = membership.role?.trim();
+    if (role === "dev_admin") return true;
+    return cleanCompanyID !== "" && membership.company_id?.trim() === cleanCompanyID && role === "company_admin";
+  });
+}
+
+export function sharedInboxUserHasRole(folder: CommunicationsSharedInbox | undefined, userID: string): boolean {
+  const cleanUserID = userID.trim();
+  if (!folder || !cleanUserID) return false;
+  return (folder.raci_assignments ?? []).some((assignment) => assignment.user_id?.trim() === cleanUserID);
+}
+
+export function sharedInboxUserCanManageMail(folder: CommunicationsSharedInbox | undefined, userID: string, hasFullAccess = false): boolean {
+  if (hasFullAccess) return true;
+  if (!folder) return true;
+  const assignments = folder.raci_assignments ?? [];
+  const cleanUserID = userID.trim();
+  if (assignments.length === 0) return true;
+  if (!cleanUserID) return false;
+  return assignments.some((assignment) => {
+    if (assignment.user_id?.trim() !== cleanUserID) return false;
+    return assignment.role === "responsible" || assignment.role === "accountable";
+  });
+}
+
+export function sharedInboxTreeUserCanManageMail(folders: CommunicationsSharedInbox[], folderID: string, userID: string, hasFullAccess = false): boolean {
+  if (hasFullAccess) return true;
+  const cleanUserID = userID.trim();
+  if (!sharedInboxHasAnyRaciAssignments(folders)) return true;
+  if (!cleanUserID) return false;
+  const cleanFolderID = folderID.trim();
+  const scopedFolderIDs = cleanFolderID ? collectSharedInboxSubtreeIDs(folders, cleanFolderID) : new Set(folders.map((folder) => folder.folder_id));
+  return folders.some((folder) => {
+    if (!scopedFolderIDs.has(folder.folder_id)) return false;
+    return (folder.raci_assignments ?? []).some((assignment) => {
+      if (assignment.user_id?.trim() !== cleanUserID) return false;
+      return assignment.role === "responsible" || assignment.role === "accountable";
+    });
+  });
+}
+
+export function filterSharedInboxesForUser(folders: CommunicationsSharedInbox[], userID: string, hasFullAccess = false): CommunicationsSharedInbox[] {
+  if (hasFullAccess) return folders;
+  const cleanUserID = userID.trim();
+  if (!sharedInboxHasAnyRaciAssignments(folders)) return folders;
+  if (!cleanUserID) return [];
+
+  const byID = new Map(folders.map((folder) => [folder.folder_id, folder]));
+  const childrenByParent = new Map<string, CommunicationsSharedInbox[]>();
+  for (const folder of folders) {
+    const parentID = folder.parent_folder_id ?? "";
+    const children = childrenByParent.get(parentID) ?? [];
+    children.push(folder);
+    childrenByParent.set(parentID, children);
+  }
+
+  const included = new Set<string>();
+  const includeAncestors = (folderID: string) => {
+    let current = byID.get(folderID);
+    const seen = new Set<string>();
+    while (current && !seen.has(current.folder_id)) {
+      seen.add(current.folder_id);
+      included.add(current.folder_id);
+      const parentID = current.parent_folder_id ?? "";
+      current = parentID ? byID.get(parentID) : undefined;
+    }
+  };
+  const includeDescendants = (folderID: string) => {
+    for (const child of childrenByParent.get(folderID) ?? []) {
+      if (included.has(child.folder_id)) continue;
+      included.add(child.folder_id);
+      includeDescendants(child.folder_id);
+    }
+  };
+
+  for (const folder of folders) {
+    if (!sharedInboxUserHasRole(folder, cleanUserID)) continue;
+    includeAncestors(folder.folder_id);
+    includeDescendants(folder.folder_id);
+  }
+  return folders.filter((folder) => included.has(folder.folder_id));
+}
+
 export function collectSharedInboxSubtreeIDs(folders: CommunicationsSharedInbox[], rootFolderID: string): Set<string> {
   const ids = new Set<string>();
   const cleanRootID = rootFolderID.trim();
@@ -653,6 +750,7 @@ export function workspaceEventTouchesHomePanel(type: string): boolean {
   const cleanType = type.trim();
   if (!cleanType) return false;
   return cleanType === "logic_gate_raci_updated"
+    || cleanType === "communications_shared_inbox_raci_updated"
     || cleanType.startsWith("node_")
     || cleanType.startsWith("logic_gate_")
     || cleanType.startsWith("kanban_")

@@ -71,6 +71,18 @@ export type ListMessagesParams = {
 
 export type EmailMailbox = "primary" | "sent" | "starred" | "all" | "archive";
 
+export type CommunicationsSharedInboxRaciRole = LogicGateRaciRole;
+
+export type CommunicationsSharedInboxRaciAssignment = {
+  company_id: string;
+  folder_id: string;
+  role: CommunicationsSharedInboxRaciRole;
+  user_id: string;
+  user_display_name?: string;
+  user_email?: string;
+  created_timestamp: string;
+};
+
 export type CommunicationsSharedInbox = {
   company_id: string;
   folder_id: string;
@@ -78,6 +90,7 @@ export type CommunicationsSharedInbox = {
   folder_kind: "communications";
   name: string;
   position: number;
+  raci_assignments?: CommunicationsSharedInboxRaciAssignment[];
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -149,6 +162,7 @@ const SHARED_INBOX_CACHE_TTL_MS = 5 * 60_000;
 const WORKSPACE_PANEL_CACHE_TTL_MS = 5 * 60_000;
 const RECENT_ARCHIVED_MESSAGE_TTL_MS = 10 * 60_000;
 const RECENT_PRIMARY_MESSAGE_TTL_MS = 10 * 60_000;
+export const EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED = "mangorts:communications-shared-inboxes-updated";
 
 let statusCache: CacheEntry<CommunicationsStatus> | null = null;
 let foldersCache: CacheEntry<EmailFolder[]> | null = null;
@@ -343,6 +357,7 @@ export async function createCommunicationsSharedInbox(input: {
     }),
   });
   invalidateCacheKey(`shared-inboxes:${input.companyID.trim()}`);
+  dispatchCommunicationsSharedInboxesUpdated(input.companyID);
   return cloneSharedInbox(folder);
 }
 
@@ -366,6 +381,7 @@ export async function updateCommunicationsSharedInbox(input: {
     body: JSON.stringify(body),
   });
   invalidateCacheKey(`shared-inboxes:${cleanCompanyID}`);
+  dispatchCommunicationsSharedInboxesUpdated(cleanCompanyID);
   return cloneSharedInbox(folder);
 }
 
@@ -376,6 +392,26 @@ export async function deleteCommunicationsSharedInbox(companyID: string, folderI
     method: "DELETE",
   });
   invalidateCacheKey(`shared-inboxes:${cleanCompanyID}`);
+  dispatchCommunicationsSharedInboxesUpdated(cleanCompanyID);
+}
+
+export async function updateCommunicationsSharedInboxRaciAssignments(
+  companyID: string,
+  folderID: string,
+  assignments: Array<{ role: CommunicationsSharedInboxRaciRole; user_id: string }>,
+): Promise<CommunicationsSharedInboxRaciAssignment[]> {
+  const cleanCompanyID = companyID.trim();
+  const cleanFolderID = folderID.trim();
+  const payload = await apiFetchJSON<{ raci_assignments?: CommunicationsSharedInboxRaciAssignment[] }>(`/v1/company-explorer/folders/${encodeURIComponent(cleanFolderID)}/raci`, {
+    method: "PUT",
+    body: JSON.stringify({
+      company_id: cleanCompanyID,
+      assignments,
+    }),
+  });
+  invalidateCacheKey(`shared-inboxes:${cleanCompanyID}`);
+  dispatchCommunicationsSharedInboxesUpdated(cleanCompanyID);
+  return cloneSharedInboxRaciAssignments(payload.raci_assignments ?? []);
 }
 
 export async function listCommunicationsTriageItems(): Promise<CommunicationsTriageItem[]> {
@@ -961,7 +997,18 @@ function cloneSharedInboxes(inboxes: CommunicationsSharedInbox[]): Communication
 }
 
 function cloneSharedInbox(inbox: CommunicationsSharedInbox): CommunicationsSharedInbox {
-  return { ...inbox };
+  return {
+    ...inbox,
+    raci_assignments: cloneSharedInboxRaciAssignments(inbox.raci_assignments ?? []),
+  };
+}
+
+function cloneSharedInboxRaciAssignments(assignments: CommunicationsSharedInboxRaciAssignment[]): CommunicationsSharedInboxRaciAssignment[] {
+  return assignments.map((assignment) => ({ ...assignment }));
+}
+
+function dispatchCommunicationsSharedInboxesUpdated(companyID: string): void {
+  window.dispatchEvent(new CustomEvent(EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED, { detail: { companyID: companyID.trim() } }));
 }
 
 function cloneTriageItem(item: CommunicationsTriageItem): CommunicationsTriageItem {

@@ -13,6 +13,7 @@ import {
   deleteEmailMessage,
   disconnectCommunications,
   emailMessageMatchesListFilters,
+  EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED,
   fetchCommunicationsAuthURL,
   fetchCommunicationsWorkspacePanel,
   fetchCommunicationsStatus,
@@ -21,6 +22,7 @@ import {
   invalidateCommunicationsFolderCache,
   invalidateCommunicationsWorkspacePanelCache,
   invalidateEmailMessageCache,
+  listCompanyUsers,
   listEmailFolders,
   listEmailMessages,
   listCommunicationsSharedInboxes,
@@ -34,7 +36,11 @@ import {
   unarchiveEmailMessage,
   updateEmailMessage,
   updateCommunicationsSharedInbox,
+  updateCommunicationsSharedInboxRaciAssignments,
+  type CompanyUser,
   type CommunicationsSharedInbox,
+  type CommunicationsSharedInboxRaciAssignment,
+  type CommunicationsSharedInboxRaciRole,
   type EmailFolder,
   type EmailMailbox,
   type EmailMessage,
@@ -62,10 +68,10 @@ import {
   type KanbanBoardsUpdatedDetail,
 } from "../../modules/kanban/shared";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
-import { AciInboxMatrix, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix } from "./HomeParts";
+import { AciInboxMatrix, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
-import { buildMyLogicGateGroups, cleanIDList, collectSharedInboxSubtreeIDs, emailAddressListContains, filterExplorerRowsForSearch, formatAddressList, formatError, formatErrorCode, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeHasLogicGateRaciRole, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sortLogicGateShortcuts, sortNodesForInbox, sortSharedInboxes, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, cleanIDList, collectSharedInboxSubtreeIDs, emailAddressListContains, filterExplorerRowsForSearch, filterSharedInboxesForUser, formatAddressList, formatError, formatErrorCode, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeHasLogicGateRaciRole, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortNodesForInbox, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type WorkspaceStreamEnvelope } from "./homeTypes";
 export function HomePage({ me, onNavigate, embedded = false, hideNavigation = false, initialViewID = "my-triage" }: HomePageProps) {
@@ -99,6 +105,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const [nodeFolders, setNodeFolders] = useState<CompanyExplorerFolder[]>([]);
   const [nodeFolderItems, setNodeFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [nodes, setNodes] = useState<NodeRecord[]>([]);
+  const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [logicGateFolders, setLogicGateFolders] = useState<CompanyExplorerFolder[]>([]);
   const [logicGateFolderItems, setLogicGateFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [logicGates, setLogicGates] = useState<LogicGateRecord[]>([]);
@@ -112,6 +119,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const [selectedLogicGateRowIDs, setSelectedLogicGateRowIDs] = useState<Set<string>>(new Set());
   const [logicGateSelectionAnchorID, setLogicGateSelectionAnchorID] = useState("");
   const [nodeEditorOverlay, setNodeEditorOverlay] = useState<NodeEditorOverlayState | null>(null);
+  const [sharedInboxRaciFolderID, setSharedInboxRaciFolderID] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -144,12 +152,37 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const messageListFilterKeyRef = useRef("");
   const workspaceRef = useRef<HTMLElement | null>(null);
   const isNarrow = viewportWidth < 980;
+  const currentUserID = me?.user.user_id?.trim() ?? "";
+  const currentUserHasFullSharedInboxAccess = userHasFullSharedInboxAccess(me, companyID);
+  const visibleSharedInboxes = useMemo(
+    () => filterSharedInboxesForUser(sharedInboxes, currentUserID, currentUserHasFullSharedInboxAccess),
+    [currentUserHasFullSharedInboxAccess, currentUserID, sharedInboxes],
+  );
+  const activeSharedInboxFolderID = activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length) : "";
+  const activeSharedInbox = useMemo(
+    () => activeSharedInboxFolderID ? sharedInboxes.find((folder) => folder.folder_id === activeSharedInboxFolderID) ?? null : null,
+    [activeSharedInboxFolderID, sharedInboxes],
+  );
+  const sharedInboxRaciFolder = useMemo(
+    () => sharedInboxRaciFolderID ? sharedInboxes.find((folder) => folder.folder_id === sharedInboxRaciFolderID) ?? null : null,
+    [sharedInboxRaciFolderID, sharedInboxes],
+  );
+  const canMutateCurrentMailView = activeViewID === "shared-root"
+    ? sharedInboxTreeUserCanManageMail(sharedInboxes, "", currentUserID, currentUserHasFullSharedInboxAccess)
+    : activeSharedInboxFolderID
+      ? sharedInboxTreeUserCanManageMail(sharedInboxes, activeSharedInboxFolderID, currentUserID, currentUserHasFullSharedInboxAccess)
+      : true;
   useEffect(() => {
     selectedMessageIDRef.current = selectedMessageID;
   }, [selectedMessageID]);
   useEffect(() => {
     activeViewIDRef.current = activeViewID;
   }, [activeViewID]);
+  useEffect(() => {
+    if (!activeSharedInboxFolderID) return;
+    if (visibleSharedInboxes.some((folder) => folder.folder_id === activeSharedInboxFolderID)) return;
+    setActiveViewID("shared-root");
+  }, [activeSharedInboxFolderID, visibleSharedInboxes]);
   useEffect(() => {
     messagesRef.current = messages;
     setSelectedMessageIDs((previous) => {
@@ -235,6 +268,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       if (!next.connected) {
         setFolders([]);
         setSharedInboxes([]);
+        setCompanyUsers([]);
         setMessages([]);
         setSelectedMessage(null);
         setSelectedMessageID("");
@@ -294,6 +328,18 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       sharedInboxesRequestInFlightRef.current = false;
       setLoadingSharedInboxes(false);
+    }
+  }, [companyID]);
+  const loadCompanyUsers = useCallback(async (): Promise<boolean> => {
+    if (!companyID) return false;
+    try {
+      const users = await listCompanyUsers(companyID);
+      setCompanyUsers(users);
+      return true;
+    } catch (usersError) {
+      setCompanyUsers([]);
+      setError(formatError(usersError, "Failed to load company users"));
+      return false;
     }
   }, [companyID]);
   const loadLogicGatePanel = useCallback(async (): Promise<boolean> => {
@@ -464,6 +510,16 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   useEffect(() => { void loadStatus(); }, [loadStatus]);
   useEffect(() => { if (status?.connected) void loadFolders(); }, [loadFolders, status?.connected]);
   useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
+  useEffect(() => { if (status?.connected) void loadCompanyUsers(); }, [loadCompanyUsers, status?.connected]);
+  useEffect(() => {
+    const onSharedInboxesUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ companyID?: string }>).detail;
+      if (detail?.companyID && detail.companyID !== companyID) return;
+      void loadSharedInboxes();
+    };
+    window.addEventListener(EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED, onSharedInboxesUpdated);
+    return () => window.removeEventListener(EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED, onSharedInboxesUpdated);
+  }, [companyID, loadSharedInboxes]);
   useEffect(() => { void loadLogicGatePanel(); }, [loadLogicGatePanel]);
   useEffect(() => {
     if (!isWorkspacePanelHomeViewID(activeViewID)) return;
@@ -606,6 +662,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         if (envelope.company_id?.trim() && envelope.company_id.trim() !== companyID) return;
         const type = envelope.type?.trim() ?? "";
         if (!workspaceEventTouchesHomePanel(type)) return;
+        if (type === "communications_shared_inbox_raci_updated" || type.startsWith("company_explorer_folder_")) {
+          void loadSharedInboxes();
+        }
         scheduleWorkspacePanelReload();
       },
       onError() {
@@ -619,7 +678,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         workspacePanelReloadTimerRef.current = null;
       }
     };
-  }, [apiBase, companyID, scheduleWorkspacePanelReload]);
+  }, [apiBase, companyID, loadSharedInboxes, scheduleWorkspacePanelReload]);
   useEffect(() => {
     const handleKanbanChange = (event: Event) => {
       const detail = (event as CustomEvent<{ companyID?: string }>).detail;
@@ -771,6 +830,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       });
   }, [applyUpdatedMessageToCurrentView, handleEmailAccessExpired, scheduleMessageListRefresh]);
   const archiveMessages = useCallback(async (messageIDs: string[]) => {
+    if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
     setBusy("archive");
@@ -793,8 +853,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [loadMessages, selectedMessageID]);
+  }, [canMutateCurrentMailView, loadMessages, selectedMessageID]);
   const unarchiveMessages = useCallback(async (messageIDs: string[]) => {
+    if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
     setBusy("unarchive");
@@ -817,9 +878,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [loadMessages, selectedMessageID]);
+  }, [canMutateCurrentMailView, loadMessages, selectedMessageID]);
   const autoArchiveScrolledMessages = useCallback((messageIDs: string[]) => {
-    if (!status?.connected || activeViewIDRef.current !== "my-triage" || mailboxRef.current !== "primary") return;
+    if (!canMutateCurrentMailView || !status?.connected || activeViewIDRef.current !== "my-triage" || mailboxRef.current !== "primary") return;
     const ids = cleanIDList(messageIDs).filter((id) => !autoArchivingMessageIDsRef.current.has(id));
     if (ids.length === 0) return;
     const idSet = new Set(ids);
@@ -847,9 +908,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         setError(formatError(rejected.reason, ids.length === 1 ? "Failed to archive scrolled message" : "Failed to archive scrolled messages"));
         scheduleMessageListRefresh();
       });
-  }, [handleEmailAccessExpired, scheduleMessageListRefresh, status?.connected]);
+  }, [canMutateCurrentMailView, handleEmailAccessExpired, scheduleMessageListRefresh, status?.connected]);
   const archiveSelected = async () => {
-    if (!selectedMessage) return;
+    if (!selectedMessage || !canMutateCurrentMailView) return;
     if (mailboxRef.current === "archive") await unarchiveMessages([selectedMessage.id]);
     else await archiveMessages([selectedMessage.id]);
   };
@@ -997,6 +1058,60 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     }
   }, [companyID, sharedInboxes]);
 
+  const saveSharedInboxRaciAssignments = useCallback(async (folderID: string, assignments: CommunicationsSharedInboxRaciAssignment[]) => {
+    const cleanFolderID = folderID.trim();
+    if (!cleanFolderID) return;
+    setBusy("shared-inbox-raci");
+    setError("");
+    try {
+      const nextAssignments = await updateCommunicationsSharedInboxRaciAssignments(
+        companyID,
+        cleanFolderID,
+        assignments.map((assignment) => ({ role: assignment.role, user_id: assignment.user_id })),
+      );
+      setSharedInboxes((previous) => sortSharedInboxes(previous.map((folder) => (
+        folder.folder_id === cleanFolderID ? { ...folder, raci_assignments: nextAssignments } : folder
+      ))));
+      setNotice("Shared Triage RACI updated.");
+    } catch (raciError) {
+      setError(formatError(raciError, "Failed to update Shared Triage RACI"));
+    } finally {
+      setBusy("");
+    }
+  }, [companyID]);
+
+  const addSharedInboxRaciUser = useCallback((folderID: string, role: CommunicationsSharedInboxRaciRole, userID: string) => {
+    const cleanFolderID = folderID.trim();
+    const cleanUserID = userID.trim();
+    if (!cleanFolderID || !cleanUserID) return;
+    const folder = sharedInboxes.find((item) => item.folder_id === cleanFolderID);
+    if (!folder || (folder.raci_assignments ?? []).some((assignment) => assignment.role === role && assignment.user_id === cleanUserID)) return;
+    const user = companyUsers.find((item) => item.user_id === cleanUserID);
+    void saveSharedInboxRaciAssignments(cleanFolderID, [
+      ...(folder.raci_assignments ?? []),
+      {
+        company_id: companyID,
+        folder_id: cleanFolderID,
+        role,
+        user_id: cleanUserID,
+        user_display_name: user?.display_name,
+        user_email: user?.email,
+        created_timestamp: new Date().toISOString(),
+      },
+    ]);
+  }, [companyID, companyUsers, saveSharedInboxRaciAssignments, sharedInboxes]);
+
+  const removeSharedInboxRaciUser = useCallback((folderID: string, role: CommunicationsSharedInboxRaciRole, userID: string) => {
+    const cleanFolderID = folderID.trim();
+    const cleanUserID = userID.trim();
+    if (!cleanFolderID || !cleanUserID) return;
+    const folder = sharedInboxes.find((item) => item.folder_id === cleanFolderID);
+    if (!folder) return;
+    const nextAssignments = (folder.raci_assignments ?? []).filter((assignment) => !(assignment.role === role && assignment.user_id === cleanUserID));
+    if (nextAssignments.length === (folder.raci_assignments ?? []).length) return;
+    void saveSharedInboxRaciAssignments(cleanFolderID, nextAssignments);
+  }, [saveSharedInboxRaciAssignments, sharedInboxes]);
+
   const submitSharedInbox = async (event: React.FormEvent) => {
     event.preventDefault();
     const parentFolderID = activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length) : "";
@@ -1014,7 +1129,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     rootRowOrder: {},
   }).filter((row) => row.kind === "folder" || row.kind === "node"), [nodeExpandedIDs, nodeFolderItems, nodeFolders, nodes]);
   const visibleNodeRows = useMemo(() => filterExplorerRowsForSearch(allNodeRows, nodeSearch), [allNodeRows, nodeSearch]);
-  const currentUserID = me?.user.user_id?.trim() ?? "";
   const logicGateByID = useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
   const myNodes = useMemo(() => {
     if (!currentUserID) return [];
@@ -1121,11 +1235,12 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     return cleanIDList(ids);
   }, [messages, selectedMessageID, selectedMessageIDs]);
   const requestDeleteMessages = useCallback((messageIDs: string[]) => {
+    if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
     setMessageContextMenu(null);
     setDeleteConfirmation({ messageIDs: ids });
-  }, []);
+  }, [canMutateCurrentMailView]);
   const requestDeleteSelection = useCallback(() => {
     requestDeleteMessages(getSelectedMessageIDsForAction());
   }, [getSelectedMessageIDsForAction, requestDeleteMessages]);
@@ -1134,6 +1249,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     requestDeleteSelection();
   }, [requestDeleteSelection, selectedMessage]);
   const deleteMessages = useCallback(async (messageIDs: string[]) => {
+    if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
     setBusy("delete");
@@ -1155,7 +1271,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [loadMessages, selectedMessageID]);
+  }, [canMutateCurrentMailView, loadMessages, selectedMessageID]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.key !== "Delete" || deleteConfirmation || busy) return;
@@ -1313,7 +1429,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const activeViewLabel = getHomeViewLabel(activeViewID, sharedInboxes);
   const isArchivableListView = isArchivableHomeViewID(activeViewID);
   const isArchiveMailbox = isArchivableListView && mailbox === "archive";
-  const listViewLabel = isArchivableListView ? mailboxLabel(mailbox) : activeViewLabel;
+  const listViewLabel = activeViewID.startsWith("shared:") ? activeViewLabel : isArchivableListView ? mailboxLabel(mailbox) : activeViewLabel;
   const mailboxActionBusy = busy === "archive" || busy === "unarchive";
   const unreadMessageCount = messages.reduce((count, message) => count + (message.unread ? 1 : 0), 0);
   const mailFilterStatus = selectedMessageIDs.size > 1
@@ -1381,7 +1497,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           {!hideNavigation && (
             <HomeSidebar
               activeViewID={activeViewID}
-              sharedInboxes={sharedInboxes}
+              sharedInboxes={visibleSharedInboxes}
               loadingSharedInboxes={loadingSharedInboxes}
               newSharedInboxName={newSharedInboxName}
               busy={busy}
@@ -1453,7 +1569,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           <HomeMailWorkspace
             activeViewID={activeViewID}
             accountEmail={connection?.account_email}
-            archiveAvailable
+            archiveAvailable={canMutateCurrentMailView}
             archiveLabel={isArchiveMailbox ? "Unarchive" : "Archive"}
             busy={busy}
             compose={compose}
@@ -1473,6 +1589,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             selectedMessage={selectedMessage}
             selectedMessageID={selectedMessageID}
             selectedMessageIDs={selectedMessageIDs}
+            sharedInboxSettings={activeSharedInbox ? { onOpen: () => setSharedInboxRaciFolderID(activeSharedInbox.folder_id) } : undefined}
             showDetailResizeHandle={!isNarrow}
             unreadOnly={unreadOnly}
             unreadMessageCount={unreadMessageCount}
@@ -1537,6 +1654,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             busy={busy}
             isArchiveMailbox={isArchiveMailbox}
             mailboxActionBusy={mailboxActionBusy}
+            mailMutationAvailable={canMutateCurrentMailView}
             messageContextMenu={messageContextMenu}
             deleteConfirmation={deleteConfirmation}
             onArchiveMessages={(ids) => { void archiveMessages(ids); }}
@@ -1552,6 +1670,16 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             </>
           )}
         </main>
+      )}
+      {sharedInboxRaciFolder && (
+        <SharedInboxRaciSettingsModal
+          folder={sharedInboxRaciFolder}
+          companyUsers={companyUsers}
+          busy={busy === "shared-inbox-raci"}
+          onAddUser={addSharedInboxRaciUser}
+          onRemoveUser={removeSharedInboxRaciUser}
+          onClose={() => setSharedInboxRaciFolderID("")}
+        />
       )}
       {nodeEditorOverlay && (
         <NodeEditorPopup

@@ -271,15 +271,26 @@ type LogicGateArenaView struct {
 }
 
 type CompanyExplorerFolder struct {
+	CompanyID        string                      `json:"company_id"`
+	FolderID         string                      `json:"folder_id"`
+	ParentFolderID   *string                     `json:"parent_folder_id,omitempty"`
+	FolderKind       string                      `json:"folder_kind"`
+	SystemKey        *string                     `json:"system_key,omitempty"`
+	Name             string                      `json:"name"`
+	Position         int                         `json:"position"`
+	RaciAssignments  []SharedInboxRaciAssignment `json:"raci_assignments,omitempty"`
+	CreatedTimestamp time.Time                   `json:"created_timestamp"`
+	UpdatedTimestamp time.Time                   `json:"updated_timestamp"`
+}
+
+type SharedInboxRaciAssignment struct {
 	CompanyID        string    `json:"company_id"`
 	FolderID         string    `json:"folder_id"`
-	ParentFolderID   *string   `json:"parent_folder_id,omitempty"`
-	FolderKind       string    `json:"folder_kind"`
-	SystemKey        *string   `json:"system_key,omitempty"`
-	Name             string    `json:"name"`
-	Position         int       `json:"position"`
+	Role             string    `json:"role"`
+	UserID           string    `json:"user_id"`
+	UserDisplayName  string    `json:"user_display_name,omitempty"`
+	UserEmail        string    `json:"user_email,omitempty"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
 type CompanyExplorerFolderItem struct {

@@ -27,6 +27,11 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
 		}
+		if folderKind == "communications" {
+			if actor, ok := authenticatedActor(r); ok && !actorCanManageCompany(actor, companyID) {
+				items = filterCommunicationsSharedInboxFoldersForUser(items, actor.User.UserID)
+			}
+		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"folders": items})
 		return
 	}
@@ -76,6 +81,10 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 	}
 	if len(parts) == 2 && parts[1] == "shares" {
 		s.handleCompanyExplorerFolderShares(w, r, folderID)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "raci" {
+		s.handleCommunicationsSharedInboxRaci(w, r, folderID)
 		return
 	}
 	if len(parts) != 1 {
@@ -172,6 +181,172 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 	}
 
 	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+}
+
+func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *http.Request, folderID string) {
+	if r.Method == http.MethodGet {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		folders, err := s.repo.ListCompanyExplorerFolders(companyID, "communications")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox_raci")
+			return
+		}
+		for _, folder := range folders {
+			if folder.FolderID != folderID {
+				continue
+			}
+			writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+				"company_id":       companyID,
+				"folder_id":        folderID,
+				"raci_assignments": folder.RaciAssignments,
+			})
+			return
+		}
+		writeError(w, http.StatusNotFound, "shared_inbox_not_found")
+		return
+	}
+
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		CompanyID   string                                 `json:"company_id"`
+		Assignments []store.SharedInboxRaciAssignmentInput `json:"assignments"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	req.CompanyID = strings.TrimSpace(req.CompanyID)
+	if req.CompanyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	assignments, err := s.repo.SetCommunicationsSharedInboxRaciAssignments(store.SharedInboxRaciAssignmentUpdateInput{
+		CompanyID:   req.CompanyID,
+		FolderID:    folderID,
+		Assignments: req.Assignments,
+	})
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_shared_inbox_raci_assignments")
+		return
+	}
+	if errors.Is(err, store.ErrAssigneeNotInCompany) {
+		writeError(w, http.StatusBadRequest, "shared_inbox_raci_user_not_in_company")
+		return
+	}
+	if errors.Is(err, store.ErrRaciStorageUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "shared_inbox_raci_storage_unavailable")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "shared_inbox_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_update_shared_inbox_raci")
+		return
+	}
+	s.publishWorkspaceEvent(req.CompanyID, "communications_shared_inbox_raci_updated", map[string]any{"folder_id": folderID, "raci_assignments": assignments})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"company_id":       req.CompanyID,
+		"folder_id":        folderID,
+		"raci_assignments": assignments,
+	})
+}
+
+func filterCommunicationsSharedInboxFoldersForUser(folders []domain.CompanyExplorerFolder, userID string) []domain.CompanyExplorerFolder {
+	if !communicationsSharedInboxHasRaciAssignments(folders) {
+		return folders
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return []domain.CompanyExplorerFolder{}
+	}
+
+	byID := make(map[string]domain.CompanyExplorerFolder, len(folders))
+	childrenByParent := make(map[string][]domain.CompanyExplorerFolder)
+	for _, folder := range folders {
+		folderID := strings.TrimSpace(folder.FolderID)
+		if folderID == "" {
+			continue
+		}
+		byID[folderID] = folder
+		parentID := ""
+		if folder.ParentFolderID != nil {
+			parentID = strings.TrimSpace(*folder.ParentFolderID)
+		}
+		childrenByParent[parentID] = append(childrenByParent[parentID], folder)
+	}
+
+	included := make(map[string]bool, len(folders))
+	var includeAncestors func(string)
+	includeAncestors = func(folderID string) {
+		seen := make(map[string]bool)
+		for folderID != "" && !seen[folderID] {
+			seen[folderID] = true
+			folder, ok := byID[folderID]
+			if !ok {
+				return
+			}
+			included[folderID] = true
+			if folder.ParentFolderID == nil {
+				return
+			}
+			folderID = strings.TrimSpace(*folder.ParentFolderID)
+		}
+	}
+	var includeDescendants func(string)
+	includeDescendants = func(folderID string) {
+		for _, child := range childrenByParent[folderID] {
+			childID := strings.TrimSpace(child.FolderID)
+			if childID == "" || included[childID] {
+				continue
+			}
+			included[childID] = true
+			includeDescendants(childID)
+		}
+	}
+
+	for _, folder := range folders {
+		if !sharedInboxFolderHasAssignmentForUser(folder, userID) {
+			continue
+		}
+		folderID := strings.TrimSpace(folder.FolderID)
+		includeAncestors(folderID)
+		includeDescendants(folderID)
+	}
+
+	filtered := make([]domain.CompanyExplorerFolder, 0, len(included))
+	for _, folder := range folders {
+		if included[strings.TrimSpace(folder.FolderID)] {
+			filtered = append(filtered, folder)
+		}
+	}
+	return filtered
+}
+
+func communicationsSharedInboxHasRaciAssignments(folders []domain.CompanyExplorerFolder) bool {
+	for _, folder := range folders {
+		if len(folder.RaciAssignments) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func sharedInboxFolderHasAssignmentForUser(folder domain.CompanyExplorerFolder, userID string) bool {
+	for _, assignment := range folder.RaciAssignments {
+		if strings.TrimSpace(assignment.UserID) == userID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleCompanyExplorerFolderShares(w http.ResponseWriter, r *http.Request, folderID string) {

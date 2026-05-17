@@ -326,7 +326,7 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return items, nil
+	return r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
 }
 
 func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error) {

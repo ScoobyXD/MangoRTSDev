@@ -92,6 +92,7 @@ export function HomeMailWorkspace({
   selectedMessage,
   selectedMessageID,
   selectedMessageIDs,
+  sharedInboxSettings,
   showDetailResizeHandle,
   unreadOnly,
   unreadMessageCount,
@@ -142,6 +143,7 @@ export function HomeMailWorkspace({
   selectedMessage: EmailMessage | null;
   selectedMessageID: string;
   selectedMessageIDs: Set<string>;
+  sharedInboxSettings?: { onOpen: () => void };
   showDetailResizeHandle: boolean;
   unreadOnly: boolean;
   unreadMessageCount: number;
@@ -177,7 +179,10 @@ export function HomeMailWorkspace({
           {isArchivableListView ? (
             <div style={triageMailListHeaderStyle}>
               <div style={mailListTitleStackStyle}>
-                <h2 style={panelTitleStyle}>{listViewLabel}</h2>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <h2 style={{ ...panelTitleStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{listViewLabel}</h2>
+                  {sharedInboxSettings && <button style={{ ...smallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>RACI</button>}
+                </div>
                 <span style={mutedSmallStyle}>{unreadMessageCount} unread</span>
               </div>
               <div style={accountRowStyle}>
@@ -370,6 +375,7 @@ export function HomeMailWorkspace({
             onReply={onOpenReply}
             onArchive={onArchiveSelected}
             onDelete={onDeleteSelected}
+            deleteAvailable={archiveAvailable}
             onToggleRead={onToggleRead}
             onToggleStar={onToggleStar}
           />
@@ -385,6 +391,7 @@ export function HomeMailOverlays({
   busy,
   isArchiveMailbox,
   mailboxActionBusy,
+  mailMutationAvailable,
   messageContextMenu,
   deleteConfirmation,
   onArchiveMessages,
@@ -397,6 +404,7 @@ export function HomeMailOverlays({
   busy: string;
   isArchiveMailbox: boolean;
   mailboxActionBusy: boolean;
+  mailMutationAvailable: boolean;
   messageContextMenu: { x: number; y: number; messageIDs: string[] } | null;
   deleteConfirmation: { messageIDs: string[] } | null;
   onArchiveMessages: (ids: string[]) => void;
@@ -415,8 +423,9 @@ export function HomeMailOverlays({
         >
           <button
             style={contextMenuActionStyle}
-            disabled={mailboxActionBusy}
+            disabled={mailboxActionBusy || !mailMutationAvailable}
             onClick={() => {
+              if (!mailMutationAvailable) return;
               if (isArchiveMailbox) onUnarchiveMessages(messageContextMenu.messageIDs);
               else onArchiveMessages(messageContextMenu.messageIDs);
             }}
@@ -425,7 +434,7 @@ export function HomeMailOverlays({
           </button>
           <button
             style={{ ...contextMenuActionStyle, color: "#8b123f" }}
-            disabled={busy === "delete"}
+            disabled={busy === "delete" || !mailMutationAvailable}
             onClick={() => onRequestDeleteMessages(messageContextMenu.messageIDs)}
           >
             Delete

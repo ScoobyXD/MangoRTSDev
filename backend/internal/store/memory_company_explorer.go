@@ -326,7 +326,7 @@ func (r *MemoryRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([
 		if folderKind != "" && folder.FolderKind != folderKind {
 			continue
 		}
-		items = append(items, folder)
+		items = append(items, r.withSharedInboxRaciLocked(folder))
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Position == items[j].Position {
@@ -576,6 +576,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	}
 	for folderID := range folderIDs {
 		delete(r.folders, key(companyID, folderID))
+		delete(r.sharedInboxRaci, sharedInboxRaciKey(companyID, folderID))
 	}
 	for itemKey, item := range r.folderItems {
 		if item.CompanyID == companyID && folderIDs[item.FolderID] {

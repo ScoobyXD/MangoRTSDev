@@ -9,6 +9,7 @@ import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-expl
 import {
   createCommunicationsSharedInbox,
   deleteCommunicationsSharedInbox,
+  EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED,
   listCommunicationsSharedInboxes,
   updateCommunicationsSharedInbox,
   type CommunicationsSharedInbox,
@@ -16,6 +17,7 @@ import {
 import {
   buildSharedInboxRows,
   collectSharedInboxSubtreeIDs,
+  filterSharedInboxesForUser,
   getSharedInboxChildPosition,
   getSharedInboxSiblingPosition,
   isSharedInboxFolderDescendant,
@@ -55,6 +57,8 @@ type AppSidebarProps = {
   accountChrome?: React.ReactNode;
   activePage: AppSidebarPrimaryPage | null;
   activeHomeView: HomeSidebarView;
+  currentUserHasFullSharedInboxAccess?: boolean;
+  currentUserID?: string;
   pins: SidebarPin[];
   pinDropActive: boolean;
   explorerSelectionTargetFrameIDs: string[];
@@ -84,6 +88,8 @@ export function AppSidebar({
   accountChrome,
   activePage,
   activeHomeView,
+  currentUserHasFullSharedInboxAccess = false,
+  currentUserID = "",
   pins,
   pinDropActive,
   explorerSelectionTargetFrameIDs,
@@ -111,8 +117,8 @@ export function AppSidebar({
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
   const sharedRows = useMemo(
-    () => sharedTriageOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [],
-    [expandedSharedFolderIDs, sharedInboxes, sharedTriageOpen],
+    () => sharedTriageOpen ? buildSharedInboxRows(filterSharedInboxesForUser(sharedInboxes, currentUserID, currentUserHasFullSharedInboxAccess), expandedSharedFolderIDs) : [],
+    [currentUserHasFullSharedInboxAccess, currentUserID, expandedSharedFolderIDs, sharedInboxes, sharedTriageOpen],
   );
   const sharedTriageActive = homeActive && (activeHomeView === "shared-root" || activeHomeView.startsWith("shared:"));
 
@@ -139,11 +145,27 @@ export function AppSidebar({
   }, [companyID]);
 
   useEffect(() => {
+    if (!companyID) return undefined;
+    const onSharedInboxesUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ companyID?: string }>).detail;
+      if (detail?.companyID && detail.companyID !== companyID) return;
+      setLoadingSharedInboxes(true);
+      listCommunicationsSharedInboxes(companyID)
+        .then(setSharedInboxes)
+        .catch((error) => console.error("Failed to refresh shared triage folders", error))
+        .finally(() => setLoadingSharedInboxes(false));
+    };
+    window.addEventListener(EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED, onSharedInboxesUpdated);
+    return () => window.removeEventListener(EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED, onSharedInboxesUpdated);
+  }, [companyID]);
+
+  useEffect(() => {
     setExpandedSharedFolderIDs((previous) => {
-      if (previous.size > 0 || sharedInboxes.length === 0) return previous;
-      return new Set(sharedInboxes.filter((folder) => !folder.parent_folder_id).map((folder) => folder.folder_id));
+      const visibleSharedInboxes = filterSharedInboxesForUser(sharedInboxes, currentUserID, currentUserHasFullSharedInboxAccess);
+      if (previous.size > 0 || visibleSharedInboxes.length === 0) return previous;
+      return new Set(visibleSharedInboxes.filter((folder) => !folder.parent_folder_id).map((folder) => folder.folder_id));
     });
-  }, [sharedInboxes]);
+  }, [currentUserHasFullSharedInboxAccess, currentUserID, sharedInboxes]);
 
   useEffect(() => {
     const activeFolderID = activeHomeView.startsWith("shared:") ? activeHomeView.slice("shared:".length) : "";

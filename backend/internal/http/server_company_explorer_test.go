@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
 
@@ -479,6 +480,96 @@ func TestCompanyExplorerCommunicationsDefaultFoldersSeedOnceAndAreMutable(t *tes
 	}
 }
 
+func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-shared-inbox-raci-test"
+
+	responsible, err := repo.UpsertAuthUser("subject-shared-raci-responsible", "responsible@example.com", "R Person")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser responsible error = %v", err)
+	}
+	accountable, err := repo.UpsertAuthUser("subject-shared-raci-accountable", "accountable@example.com", "A Person")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser accountable error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(responsible.CognitoSubject, companyID, "company_user"); err != nil {
+		t.Fatalf("AddCompanyMembership responsible error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(accountable.CognitoSubject, companyID, "company_user"); err != nil {
+		t.Fatalf("AddCompanyMembership accountable error = %v", err)
+	}
+
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "AR")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder error = %v", err)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"assignments": []map[string]string{
+			{"role": "responsible", "user_id": responsible.UserID},
+			{"role": "accountable", "user_id": accountable.UserID},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/folders/"+folder.FolderID+"/raci", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT shared inbox RACI status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var updatePayload struct {
+		Assignments []struct {
+			FolderID        string `json:"folder_id"`
+			Role            string `json:"role"`
+			UserID          string `json:"user_id"`
+			UserDisplayName string `json:"user_display_name"`
+		} `json:"raci_assignments"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&updatePayload); err != nil {
+		t.Fatalf("decode PUT shared inbox RACI: %v", err)
+	}
+	if len(updatePayload.Assignments) != 2 {
+		t.Fatalf("PUT shared inbox RACI assignment count = %d, want 2", len(updatePayload.Assignments))
+	}
+	if updatePayload.Assignments[0].FolderID != folder.FolderID || updatePayload.Assignments[0].Role != "responsible" || updatePayload.Assignments[0].UserID != responsible.UserID || updatePayload.Assignments[0].UserDisplayName != "R Person" {
+		t.Fatalf("first assignment = %+v", updatePayload.Assignments[0])
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=communications", nil)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET communications folders status = %d, want %d body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	var listPayload struct {
+		Folders []struct {
+			FolderID    string `json:"folder_id"`
+			Assignments []struct {
+				Role   string `json:"role"`
+				UserID string `json:"user_id"`
+			} `json:"raci_assignments"`
+		} `json:"folders"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode communications folders: %v", err)
+	}
+	for _, listed := range listPayload.Folders {
+		if listed.FolderID != folder.FolderID {
+			continue
+		}
+		if len(listed.Assignments) != 2 {
+			t.Fatalf("listed assignment count = %d, want 2", len(listed.Assignments))
+		}
+		return
+	}
+	t.Fatalf("folder %s not found in list payload", folder.FolderID)
+}
+
 func TestCompanyExplorerFolderItemBatchAssignsItemsInOneRequest(t *testing.T) {
 	t.Parallel()
 
@@ -526,6 +617,50 @@ func TestCompanyExplorerFolderItemBatchAssignsItemsInOneRequest(t *testing.T) {
 	if len(payload.FolderItems) != 2 || payload.FolderItems[0].ItemID != nodeA.NodeID || payload.FolderItems[0].Position != 1000 || payload.FolderItems[1].ItemID != nodeB.NodeID || payload.FolderItems[1].Position != 2000 {
 		t.Fatalf("batch payload = %+v, want assigned nodes in request order", payload.FolderItems)
 	}
+}
+
+func TestFilterCommunicationsSharedInboxFoldersForUserIncludesAssignedSubtreeAndAncestors(t *testing.T) {
+	t.Parallel()
+
+	parentID := "shared-root"
+	folders := []domain.CompanyExplorerFolder{
+		{FolderID: parentID, FolderKind: "communications", Name: "Shared Triage"},
+		{
+			FolderID:        "ar",
+			ParentFolderID:  &parentID,
+			FolderKind:      "communications",
+			Name:            "AR",
+			RaciAssignments: []domain.SharedInboxRaciAssignment{{FolderID: "ar", UserID: "user-1", Role: domain.LogicGateRaciRoleResponsible}},
+		},
+		{FolderID: "ar-child", ParentFolderID: stringPtr("ar"), FolderKind: "communications", Name: "AR Child"},
+		{
+			FolderID:        "ap",
+			ParentFolderID:  &parentID,
+			FolderKind:      "communications",
+			Name:            "AP",
+			RaciAssignments: []domain.SharedInboxRaciAssignment{{FolderID: "ap", UserID: "user-2", Role: domain.LogicGateRaciRoleAccountable}},
+		},
+	}
+
+	filtered := filterCommunicationsSharedInboxFoldersForUser(folders, "user-1")
+	ids := make([]string, 0, len(filtered))
+	for _, folder := range filtered {
+		ids = append(ids, folder.FolderID)
+	}
+
+	want := []string{"shared-root", "ar", "ar-child"}
+	if len(ids) != len(want) {
+		t.Fatalf("filtered IDs = %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("filtered IDs = %v, want %v", ids, want)
+		}
+	}
+}
+
+func stringPtr(value string) *string {
+	return &value
 }
 
 func TestCompanyExplorerDeleteBatchDeletesSelectedTargetsInOneRequest(t *testing.T) {

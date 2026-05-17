@@ -16,6 +16,7 @@ type MemoryRepo struct {
 	logicGateText      map[string]map[string]domain.LogicGateProjection
 	logicGateRels      map[string][]domain.LogicGateRelationship
 	logicGateRaci      map[string][]domain.LogicGateRaciAssignment
+	sharedInboxRaci    map[string][]domain.SharedInboxRaciAssignment
 	folders            map[string]domain.CompanyExplorerFolder
 	folderItems        map[string]domain.CompanyExplorerFolderItem
 	folderShares       map[string]domain.CompanyExplorerFolderShare
@@ -46,6 +47,7 @@ func NewMemoryRepo() *MemoryRepo {
 		logicGateText:      map[string]map[string]domain.LogicGateProjection{},
 		logicGateRels:      map[string][]domain.LogicGateRelationship{},
 		logicGateRaci:      map[string][]domain.LogicGateRaciAssignment{},
+		sharedInboxRaci:    map[string][]domain.SharedInboxRaciAssignment{},
 		folders:            map[string]domain.CompanyExplorerFolder{},
 		folderItems:        map[string]domain.CompanyExplorerFolderItem{},
 		folderShares:       map[string]domain.CompanyExplorerFolderShare{},
@@ -96,4 +98,8 @@ func emailNodeLinkKey(companyID, boardID, cardID string) string {
 
 func logicGateShortcutKey(userID, companyID, logicGateID string) string {
 	return userID + ":" + companyID + ":" + logicGateID
+}
+
+func sharedInboxRaciKey(companyID, folderID string) string {
+	return companyID + ":" + folderID
 }
