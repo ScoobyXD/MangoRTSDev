@@ -43,6 +43,9 @@ export const SIDEBAR_EXPLORER_WIDGET_ID = "app-sidebar-explorer";
 const SIDEBAR_LOGIC_GATES_BY_FUNCTION_WIDGET_ID = "app-sidebar-logic-gates-by-function";
 const SIDEBAR_LOGIC_GATES_BY_PERSON_WIDGET_ID = "app-sidebar-logic-gates-by-person";
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
+const SIDEBAR_SECTION_OPEN_KEY_PREFIX = "mangorts.app-sidebar-section-open.v1";
+
+type SidebarSectionID = "shared-triage" | "logic-gates-by-function" | "logic-gates-by-person" | "explorer";
 
 export type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox" | `shared:${string}`;
 export type SidebarPinKind = "node" | "logic_gate";
@@ -86,6 +89,33 @@ function getSharedTriageDropPlacement(event: React.DragEvent<HTMLElement>): Shar
   return "inside";
 }
 
+function sidebarSectionOpenStorageKey(sectionID: SidebarSectionID): string {
+  return `${SIDEBAR_SECTION_OPEN_KEY_PREFIX}:${sectionID}`;
+}
+
+function readSidebarSectionOpen(sectionID: SidebarSectionID, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(sidebarSectionOpenStorageKey(sectionID));
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+  } catch {}
+  return fallback;
+}
+
+function saveSidebarSectionOpen(sectionID: SidebarSectionID, open: boolean): void {
+  try {
+    localStorage.setItem(sidebarSectionOpenStorageKey(sectionID), open ? "true" : "false");
+  } catch {}
+}
+
+function usePersistedSidebarSectionOpen(sectionID: SidebarSectionID, fallback: boolean): [boolean, React.Dispatch<React.SetStateAction<boolean>>] {
+  const [open, setOpen] = useState(() => readSidebarSectionOpen(sectionID, fallback));
+  useEffect(() => {
+    saveSidebarSectionOpen(sectionID, open);
+  }, [open, sectionID]);
+  return [open, setOpen];
+}
+
 export function AppSidebar({
   accountChrome,
   activePage,
@@ -106,9 +136,10 @@ export function AppSidebar({
 }: AppSidebarProps): React.ReactElement {
   const homeActive = activePage === "home";
   const companyID = getActiveCompanyID();
-  const [sharedTriageOpen, setSharedTriageOpen] = useState(true);
-  const [logicGatesByFunctionOpen, setLogicGatesByFunctionOpen] = useState(false);
-  const [logicGatesByPersonOpen, setLogicGatesByPersonOpen] = useState(false);
+  const [sharedTriageOpen, setSharedTriageOpen] = usePersistedSidebarSectionOpen("shared-triage", true);
+  const [logicGatesByFunctionOpen, setLogicGatesByFunctionOpen] = usePersistedSidebarSectionOpen("logic-gates-by-function", false);
+  const [logicGatesByPersonOpen, setLogicGatesByPersonOpen] = usePersistedSidebarSectionOpen("logic-gates-by-person", false);
+  const [explorerOpen, setExplorerOpen] = usePersistedSidebarSectionOpen("explorer", true);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
   const [sharedBusy, setSharedBusy] = useState(false);
@@ -537,14 +568,14 @@ export function AppSidebar({
 
       <section style={appSidebarSectionStyle} aria-label="Primary pages">
         <AppSidebarScopedExplorerSection
-          label="Logic Gates by function"
+          label="Logic Gates by Function"
           open={logicGatesByFunctionOpen}
           widgetId={SIDEBAR_LOGIC_GATES_BY_FUNCTION_WIDGET_ID}
           selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
           onToggle={() => setLogicGatesByFunctionOpen((open) => !open)}
         />
         <AppSidebarScopedExplorerSection
-          label="Logic Gates by person"
+          label="Logic Gates by Person"
           open={logicGatesByPersonOpen}
           widgetId={SIDEBAR_LOGIC_GATES_BY_PERSON_WIDGET_ID}
           selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
@@ -570,15 +601,40 @@ export function AppSidebar({
         />
       </section>
 
-      <section style={appSidebarExplorerSectionStyle} aria-label="Explorer tree">
-        <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
-          <SidebarCompanyExplorerContent
-            accent={COLORWAYS.light.accent}
-            widgetId={SIDEBAR_EXPLORER_WIDGET_ID}
-            theme="light"
-            selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
-          />
-        </React.Suspense>
+      <section style={appSidebarExplorerSectionStyle(explorerOpen)} aria-label="Explorer tree">
+        <div style={appSidebarExplorerHeaderStyle(explorerOpen)}>
+          <button
+            type="button"
+            style={appSidebarExplorerHeaderButtonStyle}
+            onClick={() => setExplorerOpen((open) => !open)}
+          >
+            <span style={appSidebarTextStyle}>Explorer</span>
+          </button>
+          <button
+            type="button"
+            title={explorerOpen ? "Collapse Explorer" : "Expand Explorer"}
+            aria-label={explorerOpen ? "Collapse Explorer" : "Expand Explorer"}
+            style={appSidebarSharedDisclosureStyle}
+            onClick={(event) => {
+              event.stopPropagation();
+              setExplorerOpen((open) => !open);
+            }}
+          >
+            <ExplorerDisclosureIcon open={explorerOpen} color="rgba(36, 18, 10, 0.68)" />
+          </button>
+        </div>
+        {explorerOpen && (
+          <div style={appSidebarExplorerFrameStyle}>
+            <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
+              <SidebarCompanyExplorerContent
+                accent={COLORWAYS.light.accent}
+                widgetId={SIDEBAR_EXPLORER_WIDGET_ID}
+                theme="light"
+                selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
+              />
+            </React.Suspense>
+          </div>
+        )}
       </section>
       {sharedContextMenu && (
         <FrameRightClickMenu x={sharedContextMenu.x} y={sharedContextMenu.y} onClose={() => setSharedContextMenu(null)}>
@@ -1118,13 +1174,53 @@ const appSidebarPinRemoveStyle: React.CSSProperties = {
   lineHeight: 1,
 };
 
-const appSidebarExplorerSectionStyle: React.CSSProperties = {
+function appSidebarExplorerSectionStyle(open: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    minHeight: 0,
+    display: "grid",
+    gridTemplateRows: open ? "31px minmax(0, 1fr)" : "31px",
+    alignContent: "start",
+    overflow: "hidden",
+    borderRadius: 6,
+    border: "1px solid rgba(255, 136, 32, 0.16)",
+    background: "#ffffff",
+  };
+}
+
+function appSidebarExplorerHeaderStyle(open: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 22px",
+    alignItems: "center",
+    borderBottom: open ? "1px solid rgba(255, 136, 32, 0.14)" : "none",
+    background: open ? "rgba(255, 136, 32, 0.06)" : "#ffffff",
+    color: open ? "#ff8820" : "#3f332b",
+  };
+}
+
+const appSidebarExplorerHeaderButtonStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 30,
+  display: "grid",
+  alignItems: "center",
+  border: "none",
+  background: "transparent",
+  color: "inherit",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 700,
+  letterSpacing: 0,
+  padding: "0 0 0 8px",
+  textAlign: "left",
+};
+
+const appSidebarExplorerFrameStyle: React.CSSProperties = {
   minWidth: 0,
   minHeight: 0,
   overflow: "hidden",
-  borderRadius: 6,
-  border: "1px solid rgba(255, 136, 32, 0.16)",
-  background: "#ffffff",
 };
 
 const appSidebarExplorerFallbackStyle: React.CSSProperties = {
