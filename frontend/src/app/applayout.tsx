@@ -41,7 +41,8 @@ import { userHasFullSharedInboxAccess } from "../pages/home/homeUtils";
 import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
 import { AppLiveFreshnessBridge } from "./AppLiveFreshnessBridge";
 import { useFrameDragResize } from "./useFrameDragResize";
-import { AppNodeEditorPopup, AppSidebar, type HomeSidebarView, type SidebarPin, type SidebarPinKind } from "./AppSidebarChrome";
+import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeSidebarView, type SidebarPin, type SidebarPinKind } from "./AppSidebarChrome";
+import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeCreator";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -87,6 +88,14 @@ function isExplorerSelectionTargetFrame(frame: FrameDataModel): boolean {
     || frame.kind === "nodes-map"
     || frame.kind === "logic-map"
     || frame.kind === "editor"
+    || frame.kind === "kanban";
+}
+
+function isTextSelectionNodeCreateTargetFrame(frame: FrameDataModel): boolean {
+  return frame.kind === "map"
+    || frame.kind === "nodes"
+    || frame.kind === "nodes-map"
+    || frame.kind === "company-explorer"
     || frame.kind === "kanban";
 }
 
@@ -302,6 +311,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   const dragRef = useRef<DragState | null>(null);
   const tabDragRef = useRef<{ id: string; startX: number; startY: number } | null>(null);
   const appSidebarResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const appRootRef = useRef<HTMLDivElement | null>(null);
   const copiedFrameRef = useRef<FrameDataModel | null>(null);
   const undoStackRef = useRef<DashboardSnapshot[]>([]);
   const redoStackRef = useRef<DashboardSnapshot[]>([]);
@@ -316,6 +326,12 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   const frames = activeTab?.frames ?? [];
   const activePrimaryPage = activeTab ? pageForTab(activeTab) : null;
   const sidebarExplorerSelectionTargetFrameIDs = useMemo(() => getSidebarExplorerSelectionTargetFrameIDs(activeTab), [activeTab]);
+  const textSelectionNodeCreateTargetFrameIDs = useMemo(() => (
+    Array.from(new Set([
+      SIDEBAR_EXPLORER_WIDGET_ID,
+      ...frames.filter(isTextSelectionNodeCreateTargetFrame).map((frame) => frame.id),
+    ]))
+  ), [frames]);
   const isLogicGateArenaView = activeTab?.page === "logic-gate-arena";
   const isHomeView = activePrimaryPage === "home";
   const currentUserHasFullSharedInboxAccess = userHasFullSharedInboxAccess(me, getActiveCompanyID());
@@ -957,8 +973,14 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   });
 
   return (
-    <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "var(--mango-gradient)" }}>
+    <div ref={appRootRef} style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "var(--mango-gradient)" }}>
       <AppLiveFreshnessBridge />
+      <TextSelectionNodeCreator
+        companyID={getActiveCompanyID()}
+        accent={UI_THEME.panel}
+        targetFrameIDs={textSelectionNodeCreateTargetFrameIDs}
+        rootRef={appRootRef}
+      />
       <style>{`
         @keyframes frame-edge-bump-x {
           0% { opacity: 0.75; transform: scaleX(1); }
