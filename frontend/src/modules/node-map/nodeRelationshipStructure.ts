@@ -87,6 +87,23 @@ function indexHierarchy(relationships: NodeRelationship[], allowedIDs: Set<strin
   return { childrenByParent, parentsByChild };
 }
 
+function indexPeers(relationships: NodeRelationship[], allowedIDs: Set<string>): Map<string, Set<string>> {
+  const peersByNode = new Map<string, Set<string>>();
+  const addPeerEdge = (leftID: string, rightID: string) => {
+    if (!allowedIDs.has(leftID) || !allowedIDs.has(rightID)) return;
+    if (!peersByNode.has(leftID)) peersByNode.set(leftID, new Set());
+    peersByNode.get(leftID)?.add(rightID);
+  };
+
+  for (const relationship of relationships) {
+    if (relationship.a_position !== "Peer" || relationship.b_position !== "Peer") continue;
+    addPeerEdge(relationship.node_id_a, relationship.node_id_b);
+    addPeerEdge(relationship.node_id_b, relationship.node_id_a);
+  }
+
+  return peersByNode;
+}
+
 export function filterNodeGraphToStructure(input: {
   nodes: NodeRecord[];
   relationships: NodeRelationship[];
@@ -123,6 +140,7 @@ export function buildNodeRelationshipTreeRows(input: {
   const nodeByID = new Map(nodes.map((node) => [node.node_id, node]));
   const allowedIDs = new Set(nodes.map((node) => node.node_id));
   const { childrenByParent, parentsByChild } = indexHierarchy(structure.relationships, allowedIDs);
+  const peersByNode = indexPeers(structure.relationships, allowedIDs);
   const directRoleByNodeID = new Map<string, RelationshipRole>();
   for (const relationship of structure.relationships) {
     const roleForA = getRelationshipRoleForNode(relationship, focusNodeID);
@@ -131,39 +149,53 @@ export function buildNodeRelationshipTreeRows(input: {
     directRoleByNodeID.set(relatedID, roleForA);
   }
 
+  const canReachNodeThroughPeer = (nodeID: string): boolean => {
+    if (nodeID === focusNodeID) return false;
+    for (const peerID of peersByNode.get(nodeID) ?? []) {
+      if (peerID === focusNodeID) return true;
+      if ((parentsByChild.get(peerID)?.size ?? 0) > 0) return true;
+      if ((childrenByParent.get(peerID)?.size ?? 0) > 0) return true;
+    }
+    return false;
+  };
+
   const roots = sortedNodeIDs(
     nodes
       .map((node) => node.node_id)
-      .filter((nodeID) => (parentsByChild.get(nodeID)?.size ?? 0) === 0),
+      .filter((nodeID) => (parentsByChild.get(nodeID)?.size ?? 0) === 0)
+      .filter((nodeID) => !canReachNodeThroughPeer(nodeID)),
     nodeByID,
     focusNodeID,
   );
   const rows: NodeRelationshipTreeRow[] = [];
   const visited = new Set<string>();
 
-  const rowForNode = (nodeID: string, depth: number): NodeRelationshipTreeRow => {
+  const rowForNode = (nodeID: string, depth: number, traversalRole?: RelationshipRole): NodeRelationshipTreeRow => {
     const node = nodeByID.get(nodeID);
     const directRole = directRoleByNodeID.get(nodeID);
     return {
       nodeID,
       title: getNodeTitle(node ?? { title: nodeID }) || nodeID,
       depth,
-      role: nodeID === focusNodeID ? "Current" : directRole ?? (directRoleByNodeID.has(nodeID) ? "Related" : "Related"),
+      role: nodeID === focusNodeID ? "Current" : directRole ?? traversalRole ?? "Related",
       direct: nodeID === focusNodeID || directRoleByNodeID.has(nodeID),
       hasChildren: (childrenByParent.get(nodeID)?.size ?? 0) > 0,
     };
   };
 
-  const walk = (nodeID: string, depth: number, stack: Set<string>) => {
+  const walk = (nodeID: string, depth: number, stack: Set<string>, traversalRole?: RelationshipRole) => {
     if (!allowedIDs.has(nodeID)) return;
     if (visited.has(nodeID)) return;
     visited.add(nodeID);
-    rows.push(rowForNode(nodeID, depth));
+    rows.push(rowForNode(nodeID, depth, traversalRole));
     if (stack.has(nodeID)) return;
     const nextStack = new Set(stack);
     nextStack.add(nodeID);
+    for (const peerID of sortedNodeIDs(peersByNode.get(nodeID) ?? [], nodeByID, focusNodeID)) {
+      walk(peerID, depth, nextStack, "Peer");
+    }
     for (const childID of sortedNodeIDs(childrenByParent.get(nodeID) ?? [], nodeByID, focusNodeID)) {
-      walk(childID, depth + 1, nextStack);
+      walk(childID, depth + 1, nextStack, "Child");
     }
   };
 

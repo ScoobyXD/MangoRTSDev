@@ -172,8 +172,8 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
     color: panelDangerText,
   };
   const gridBackgroundStyle = useMemo(
-    () => buildPlusGridBackgroundStyle({ zoom, accent, theme: isDarkTheme ? "dark" : "light" }),
-    [accent, isDarkTheme, zoom],
+    () => buildPlusGridBackgroundStyle({ zoom, accent, theme: isDarkTheme ? "dark" : "light", pan }),
+    [accent, isDarkTheme, pan.x, pan.y, zoom],
   );
   const visibleInsertionPosition = useMemo(() => ({
     x: clamp(snapToGrid((canvasSize.width / 2 - pan.x) / zoom - NODE_W / 2), 0, WORLD_W - NODE_W),
