@@ -39,7 +39,7 @@ const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorCo
 
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
 const PAGE_SURFACE_RADIUS = 16;
-const SIDEBAR_EXPLORER_WIDGET_ID = "app-sidebar-explorer";
+export const SIDEBAR_EXPLORER_WIDGET_ID = "app-sidebar-explorer";
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 
 export type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox" | `shared:${string}`;

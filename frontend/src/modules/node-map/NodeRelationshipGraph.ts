@@ -132,6 +132,30 @@ export function upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase: 
   notify(entry);
 }
 
+export function upsertNodeMapPositionsInNodeRelationshipGraph(apiBase: string, companyID: string, positions: PersistedMapPosition[]): void {
+  if (positions.length === 0) return;
+  const key = `${apiBase}:${companyID}`;
+  const entry = getEntry(key);
+  const nextByID = new Map((entry.snapshot.node_map_positions ?? []).map((position) => [position.node_id || position.entity_id || "", position]));
+  for (const position of positions) {
+    const id = position.node_id || position.entity_id || "";
+    if (!id || !Number.isFinite(position.x) || !Number.isFinite(position.y)) continue;
+    nextByID.set(id, {
+      entity_id: id,
+      node_id: id,
+      x: position.x,
+      y: position.y,
+      updated_timestamp: position.updated_timestamp ?? new Date().toISOString(),
+    });
+  }
+  entry.snapshot = {
+    ...entry.snapshot,
+    node_map_positions: Array.from(nextByID.values()).filter((position) => position.node_id || position.entity_id),
+    generated_at: new Date().toISOString(),
+  };
+  notify(entry);
+}
+
 export function upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase: string, companyID: string, folder: CompanyExplorerFolder): void {
   const key = `${apiBase}:${companyID}`;
   const entry = getEntry(key);
