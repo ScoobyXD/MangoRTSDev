@@ -10,6 +10,13 @@ import { consumePendingLogicGateArenaSelection } from "./logicGateArenaLaunch";
 type LogicGateArenaPageProps = {
   frames: FrameDataModel[];
   updateFrames: (updater: (previous: FrameDataModel[]) => FrameDataModel[]) => void;
+  targetLogicGate?: {
+    logicGateID: string;
+    label: string;
+    nodeID?: string;
+    requestID?: number;
+  } | null;
+  onCollapseToTab?: (selection: { logicGateID: string; label: string; nodeID?: string }) => void;
 };
 
 type ArenaResizeState = {
@@ -42,7 +49,7 @@ function getArenaFrames(frames: FrameDataModel[]) {
   };
 }
 
-export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, updateFrames }) => {
+export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, updateFrames, targetLogicGate, onCollapseToTab }) => {
   const companyID = getActiveCompanyID();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizeRef = useRef<ArenaResizeState | null>(null);
@@ -61,6 +68,18 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
     lastArenaSelectionChangedAtRef.current = pending.createdAt;
     setSelectedLogicGate({ id: pending.logicGateID, label: pending.label, emptyMessage: "", nodeID: pending.nodeID });
   }, [companyID]);
+
+  useEffect(() => {
+    if (!targetLogicGate) return;
+    const logicGateID = targetLogicGate.logicGateID.trim();
+    lastArenaSelectionChangedAtRef.current = Date.now();
+    setSelectedLogicGate({
+      id: logicGateID,
+      label: logicGateID ? targetLogicGate.label.trim() : "",
+      emptyMessage: "",
+      nodeID: targetLogicGate.nodeID,
+    });
+  }, [targetLogicGate?.logicGateID, targetLogicGate?.label, targetLogicGate?.nodeID, targetLogicGate?.requestID]);
 
   const applySelection = useCallback((selection: LiveSelectionChange | null) => {
     if (!selection || selection.companyID !== companyID) return;
@@ -147,6 +166,14 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
     document.body.style.userSelect = "none";
   }, [editorFrame, editorUnits, kanbanFrame, kanbanUnits]);
 
+  const collapseArenaToTab = useCallback(() => {
+    onCollapseToTab?.({
+      logicGateID: selectedLogicGate.id,
+      label: selectedLogicGate.label || "Logic Gate Arena",
+      nodeID: selectedLogicGate.nodeID,
+    });
+  }, [onCollapseToTab, selectedLogicGate.id, selectedLogicGate.label, selectedLogicGate.nodeID]);
+
   if (!editorFrame || !kanbanFrame) {
     return (
       <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", background: "#ffffff", color: "#111111", fontFamily: "var(--mango-font-family)", fontSize: 12 }}>
@@ -195,6 +222,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
           forcedLogicGateID={selectedLogicGate.id}
           forcedLogicGateLabel={selectedLogicGate.label}
           forcedHighlightedNodeID={selectedLogicGate.nodeID}
+          onCollapseArenaToTab={onCollapseToTab ? collapseArenaToTab : undefined}
         />
       </section>
     </div>

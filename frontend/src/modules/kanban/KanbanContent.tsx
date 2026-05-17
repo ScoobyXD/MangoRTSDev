@@ -113,6 +113,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   forcedLogicGateID = "",
   forcedLogicGateLabel = "",
   forcedHighlightedNodeID = "",
+  onCollapseArenaToTab,
 }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
@@ -1429,6 +1430,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         onRefreshBoards={() => void refreshBoards()}
         onSaveCurrentBoardView={() => void saveCurrentBoardView()}
         onCreateNewBoardView={() => void createNewBoardView()}
+        onCollapseToTab={arenaMode ? onCollapseArenaToTab : undefined}
         onSelectBoard={(nextBoardID) => {
           setSelectedCardIDs(new Set());
           setSelectionAnchorCardID("");
