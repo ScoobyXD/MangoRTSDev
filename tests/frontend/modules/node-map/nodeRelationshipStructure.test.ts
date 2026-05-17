@@ -90,3 +90,37 @@ test("builds parent-child hierarchy with the current node nested under parents",
     { id: "child", depth: 2, role: "Current" },
   ]);
 });
+
+test("places peers created from nested nodes at the source node depth", () => {
+  const rows = buildNodeRelationshipTreeRows({
+    focusNodeID: "root",
+    nodes: [node("root", "Root"), node("child", "Child"), node("peer", "Peer")],
+    relationships: [
+      relationship("r1", "root", "child", "Parent", "Child"),
+      relationship("r2", "child", "peer", "Peer", "Peer"),
+    ],
+  });
+
+  assert.deepEqual(rows.map((row) => ({ id: row.nodeID, depth: row.depth, role: row.role })), [
+    { id: "root", depth: 0, role: "Current" },
+    { id: "child", depth: 1, role: "Child" },
+    { id: "peer", depth: 1, role: "Peer" },
+  ]);
+});
+
+test("places children created from nested nodes one level below the source node", () => {
+  const rows = buildNodeRelationshipTreeRows({
+    focusNodeID: "root",
+    nodes: [node("root", "Root"), node("child", "Child"), node("grandchild", "Grandchild")],
+    relationships: [
+      relationship("r1", "root", "child", "Parent", "Child"),
+      relationship("r2", "child", "grandchild", "Parent", "Child"),
+    ],
+  });
+
+  assert.deepEqual(rows.map((row) => ({ id: row.nodeID, depth: row.depth, role: row.role })), [
+    { id: "root", depth: 0, role: "Current" },
+    { id: "child", depth: 1, role: "Child" },
+    { id: "grandchild", depth: 2, role: "Child" },
+  ]);
+});

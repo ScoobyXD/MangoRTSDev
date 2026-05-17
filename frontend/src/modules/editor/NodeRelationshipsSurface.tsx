@@ -42,9 +42,9 @@ type NodeRelationshipsSurfaceProps = {
 };
 
 const MIN_RELATIONSHIP_LIST_WIDTH = 236;
-const MIN_RELATIONSHIP_MAP_WIDTH = 360;
+const MIN_RELATIONSHIP_VIEWER_WIDTH = 360;
 const MIN_RELATIONSHIP_TREE_HEIGHT = 104;
-const MIN_RELATIONSHIP_PREVIEW_HEIGHT = 180;
+const MIN_RELATIONSHIP_MAP_HEIGHT = 180;
 const RELATIONSHIP_LAYOUT_KEY_PREFIX = "node-relationships-layout-v1";
 
 type RelationshipPaneLayout = {
@@ -99,14 +99,14 @@ function rowAccentColor(row: NodeRelationshipTreeRow, accent: string): string {
 
 function clampRelationshipListWidth(value: number, totalWidth: number): number {
   if (!Number.isFinite(totalWidth) || totalWidth <= 0) return Math.max(MIN_RELATIONSHIP_LIST_WIDTH, Math.round(value));
-  const maxWidth = Math.max(MIN_RELATIONSHIP_LIST_WIDTH, totalWidth - MIN_RELATIONSHIP_MAP_WIDTH);
+  const maxWidth = Math.max(MIN_RELATIONSHIP_LIST_WIDTH, totalWidth - MIN_RELATIONSHIP_VIEWER_WIDTH);
   return Math.round(Math.min(Math.max(value, MIN_RELATIONSHIP_LIST_WIDTH), maxWidth));
 }
 
-function clampRelationshipPreviewHeight(value: number, totalHeight: number): number {
-  if (!Number.isFinite(totalHeight) || totalHeight <= 0) return Math.max(MIN_RELATIONSHIP_PREVIEW_HEIGHT, Math.round(value));
-  const available = Math.max(MIN_RELATIONSHIP_PREVIEW_HEIGHT, totalHeight - MIN_RELATIONSHIP_TREE_HEIGHT - 8);
-  return Math.round(Math.min(Math.max(value, MIN_RELATIONSHIP_PREVIEW_HEIGHT), available));
+function clampRelationshipMapHeight(value: number, totalHeight: number): number {
+  if (!Number.isFinite(totalHeight) || totalHeight <= 0) return Math.max(MIN_RELATIONSHIP_MAP_HEIGHT, Math.round(value));
+  const available = Math.max(MIN_RELATIONSHIP_MAP_HEIGHT, totalHeight - MIN_RELATIONSHIP_TREE_HEIGHT - 8);
+  return Math.round(Math.min(Math.max(value, MIN_RELATIONSHIP_MAP_HEIGHT), available));
 }
 
 function TreeRow({
@@ -212,10 +212,10 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
   const [width, setWidth] = useState(0);
   const [leftBodyHeight, setLeftBodyHeight] = useState(0);
   const [listWidth, setListWidth] = useState<number | null>(() => readRelationshipPaneLayout(companyID, scope).listWidth);
-  const [previewHeight, setPreviewHeight] = useState<number | null>(() => readRelationshipPaneLayout(companyID, scope).previewHeight);
+  const [mapHeight, setMapHeight] = useState<number | null>(() => readRelationshipPaneLayout(companyID, scope).previewHeight);
   const [previewNodeID, setPreviewNodeID] = useState(nodeID);
   const [splitDrag, setSplitDrag] = useState<{ startX: number; startWidth: number } | null>(null);
-  const [previewSplitDrag, setPreviewSplitDrag] = useState<{ startY: number; startHeight: number } | null>(null);
+  const [mapSplitDrag, setMapSplitDrag] = useState<{ startY: number; startHeight: number } | null>(null);
   const [graph, setGraph] = useState<{ nodes: NodeRecord[]; relationships: NodeRelationship[] }>(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
     return { nodes: snapshot.nodes ?? [], relationships: snapshot.relationships ?? [] };
@@ -234,12 +234,12 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
   useEffect(() => {
     const layout = readRelationshipPaneLayout(companyID, scope);
     setListWidth(layout.listWidth);
-    setPreviewHeight(layout.previewHeight);
+    setMapHeight(layout.previewHeight);
   }, [companyID, scope]);
 
   useEffect(() => {
-    saveRelationshipPaneLayout(companyID, scope, { listWidth, previewHeight });
-  }, [companyID, scope, listWidth, previewHeight]);
+    saveRelationshipPaneLayout(companyID, scope, { listWidth, previewHeight: mapHeight });
+  }, [companyID, scope, listWidth, mapHeight]);
 
   useEffect(() => {
     setPreviewNodeID(nodeID);
@@ -281,7 +281,7 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
   }), [graph.nodes, graph.relationships, nodeID, nodeTitle]);
   const compact = width > 0 && width < 760;
   const listWidthPx = compact ? 0 : clampRelationshipListWidth(listWidth ?? width * 0.32, width);
-  const previewHeightPx = clampRelationshipPreviewHeight(previewHeight ?? leftBodyHeight * 0.44, leftBodyHeight);
+  const mapHeightPx = clampRelationshipMapHeight(mapHeight ?? leftBodyHeight * 0.38, leftBodyHeight);
   const titleByNodeID = useMemo(() => {
     const titles = new Map<string, string>();
     for (const node of graph.nodes) titles.set(node.node_id, getNodeTitle(node));
@@ -337,13 +337,13 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
   }, [splitDrag, width]);
 
   useEffect(() => {
-    if (!previewSplitDrag) return;
+    if (!mapSplitDrag) return;
     const onPointerMove = (event: PointerEvent) => {
       event.preventDefault();
-      const deltaY = event.clientY - previewSplitDrag.startY;
-      setPreviewHeight(clampRelationshipPreviewHeight(previewSplitDrag.startHeight - deltaY, leftBodyHeight));
+      const deltaY = event.clientY - mapSplitDrag.startY;
+      setMapHeight(clampRelationshipMapHeight(mapSplitDrag.startHeight - deltaY, leftBodyHeight));
     };
-    const onPointerUp = () => setPreviewSplitDrag(null);
+    const onPointerUp = () => setMapSplitDrag(null);
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("pointercancel", onPointerUp);
@@ -352,7 +352,7 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointercancel", onPointerUp);
     };
-  }, [leftBodyHeight, previewSplitDrag]);
+  }, [leftBodyHeight, mapSplitDrag]);
 
   return (
     <div
@@ -370,7 +370,7 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
         gridTemplateRows: compact ? "minmax(320px, 45%) minmax(260px, 1fr)" : "1fr",
         minHeight: 0,
         overflow: "hidden",
-        cursor: splitDrag ? "col-resize" : previewSplitDrag ? "row-resize" : "default",
+        cursor: splitDrag ? "col-resize" : mapSplitDrag ? "row-resize" : "default",
         ["--editor-document-scroll-accent" as string]: scrollbarAccent,
         ["--editor-document-scroll-track" as string]: scrollbarTrack,
       }}
@@ -398,7 +398,7 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
           style={{
             minHeight: 0,
             display: "grid",
-            gridTemplateRows: `minmax(${MIN_RELATIONSHIP_TREE_HEIGHT}px, 1fr) 8px ${previewHeightPx}px`,
+            gridTemplateRows: `minmax(${MIN_RELATIONSHIP_TREE_HEIGHT}px, 1fr) 8px ${mapHeightPx}px`,
             overflow: "hidden",
           }}
         >
@@ -423,40 +423,30 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
           <div
             role="separator"
             aria-orientation="horizontal"
-            title="Resize node viewer"
+            title="Resize relationship map"
             onPointerDown={(event) => {
               event.preventDefault();
               event.currentTarget.setPointerCapture(event.pointerId);
-              setPreviewSplitDrag({ startY: event.clientY, startHeight: previewHeightPx });
+              setMapSplitDrag({ startY: event.clientY, startHeight: mapHeightPx });
             }}
             style={{
               minHeight: 8,
               cursor: "row-resize",
               touchAction: "none",
-              background: previewSplitDrag ? "rgba(255,136,32,0.14)" : "transparent",
+              background: mapSplitDrag ? "rgba(255,136,32,0.14)" : "transparent",
               borderTop: `1px solid ${ruleColor}`,
               borderBottom: `1px solid ${ruleColor}`,
             }}
           />
-          <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden", background: "#ffffff", position: "relative" }}>
-            {previewNodeID ? (
-              <React.Suspense fallback={<div style={{ padding: 10, color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 700 }}>Loading node</div>}>
-                <InlineNodeEditorContent
-                  key={previewNodeID}
-                  accent={accent}
-                  widgetId={`relationships-node-viewer:${scope}`}
-                  theme={theme}
-                  forcedEntityKind="node"
-                  forcedEntityID={previewNodeID}
-                  forcedLabel={previewNodeTitle}
-                  forcedEmptyMessage="Select a related node"
-                />
-              </React.Suspense>
-            ) : (
-              <div style={{ padding: 10, color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 700 }}>
-                Select a related node
-              </div>
-            )}
+          <section style={{ minWidth: 0, minHeight: 0, position: "relative", background: "transparent", overflow: "hidden" }}>
+            <NodeMapContent
+              accent={accent}
+              widgetId={mapWidgetID}
+              hideTopControls
+              theme={theme}
+              structureNodeID={nodeID}
+              initialSelectedNodeID={nodeID}
+            />
           </section>
         </div>
       </aside>
@@ -481,15 +471,25 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
           }}
         />
       )}
-      <section style={{ minWidth: 0, minHeight: 0, position: "relative", background: "transparent" }}>
-        <NodeMapContent
-          accent={accent}
-          widgetId={mapWidgetID}
-          hideTopControls
-          theme={theme}
-          structureNodeID={nodeID}
-          initialSelectedNodeID={nodeID}
-        />
+      <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden", background: "#ffffff", position: "relative" }}>
+        {previewNodeID ? (
+          <React.Suspense fallback={<div style={{ padding: 10, color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 700 }}>Loading node</div>}>
+            <InlineNodeEditorContent
+              key={previewNodeID}
+              accent={accent}
+              widgetId={`relationships-node-viewer:${scope}`}
+              theme={theme}
+              forcedEntityKind="node"
+              forcedEntityID={previewNodeID}
+              forcedLabel={previewNodeTitle}
+              forcedEmptyMessage="Select a related node"
+            />
+          </React.Suspense>
+        ) : (
+          <div style={{ padding: 10, color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 700 }}>
+            Select a related node
+          </div>
+        )}
       </section>
     </div>
   );

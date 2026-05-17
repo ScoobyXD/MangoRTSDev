@@ -185,6 +185,12 @@ function formatGridNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
+function gridOffset(value: number, size: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(size) || size <= 0) return 0;
+  const offset = value % size;
+  return Math.abs(offset) < 0.01 ? 0 : offset;
+}
+
 function plusGridSvgDataURL(input: {
   size: number;
   color: string;
@@ -219,16 +225,25 @@ export function buildPlusGridBackgroundStyle(input: {
   zoom: number;
   accent: string;
   theme: "light" | "dark";
+  pan?: { x: number; y: number };
 }): React.CSSProperties {
   const zoom = Number.isFinite(input.zoom) && input.zoom > 0 ? input.zoom : 1;
   const minorStep = adaptivePlusGridWorldStep(zoom);
-  const majorStep = minorStep * 4;
+  const majorStep = minorStep * 5;
   const strokeWidth = clamp(1 / zoom, 0.45, 1.4);
   const minorArm = clamp(3.5 / zoom, 1.8, 5.5);
   const majorArm = clamp(5.5 / zoom, 2.6, 7.5);
   const minorColor = input.theme === "dark" ? "#bcecf2" : "#425961";
   const majorColor = input.accent || (input.theme === "dark" ? "#72f1ff" : "#007b88");
-  const majorLayerOffset = formatGridNumber((minorStep - majorStep) / 2);
+  const minorPanX = gridOffset(input.pan?.x ?? 0, minorStep);
+  const minorPanY = gridOffset(input.pan?.y ?? 0, minorStep);
+  const majorPanX = gridOffset(input.pan?.x ?? 0, majorStep);
+  const majorPanY = gridOffset(input.pan?.y ?? 0, majorStep);
+  const majorLayerBaseOffset = (minorStep - majorStep) / 2;
+  const minorLayerPosition = minorPanX === 0 && minorPanY === 0
+    ? "0 0"
+    : `${formatGridNumber(minorPanX)}px ${formatGridNumber(minorPanY)}px`;
+  const majorLayerPosition = `${formatGridNumber(majorLayerBaseOffset + majorPanX)}px ${formatGridNumber(majorLayerBaseOffset + majorPanY)}px`;
 
   // The browser repeats two tiny SVG tiles instead of creating thousands of
   // grid DOM nodes. Both plus layers stay visually distinct from relationship lines.
@@ -238,7 +253,7 @@ export function buildPlusGridBackgroundStyle(input: {
       plusGridSvgDataURL({ size: minorStep, color: minorColor, opacity: input.theme === "dark" ? 0.28 : 0.24, arm: minorArm, strokeWidth }),
       plusGridSvgDataURL({ size: majorStep, color: majorColor, opacity: input.theme === "dark" ? 0.42 : 0.30, arm: majorArm, strokeWidth }),
     ].join(", "),
-    backgroundPosition: `0 0, ${majorLayerOffset}px ${majorLayerOffset}px`,
+    backgroundPosition: `${minorLayerPosition}, ${majorLayerPosition}`,
     backgroundRepeat: "repeat, repeat",
     backgroundSize: `${minorStep}px ${minorStep}px, ${majorStep}px ${majorStep}px`,
   };
