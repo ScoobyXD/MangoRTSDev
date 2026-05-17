@@ -7,6 +7,7 @@ import {
   buildExplorerRowBatchReorderPlan,
   buildExplorerRowReorderPlan,
   buildExplorerSearchResults,
+  buildExplorerSearchViewRows,
   formatExplorerFolderLabel,
   getExplorerScrollTopForRow,
   resolveExplorerClickSelection,
@@ -483,6 +484,30 @@ run("search falls back to the whole company when selected folder has no matches"
   assert.deepEqual(
     buildExplorerSearchResults({ rows, selectedRowID: "workspace-folder-a", query: "alpha" }).map((row) => row.id),
     ["node-alpha"],
+  );
+});
+
+run("search view filters rows inline and keeps ancestor folders for context", () => {
+  const rows = [
+    { id: "workspace-folder-a", label: "Operations", depth: 0, kind: "folder" as const, folderID: "a", folderKind: "node" as const },
+    { id: "node-alpha", label: "Alpha", depth: 1, kind: "node" as const, nodeID: "alpha", folderID: "a", folderKind: "node" as const },
+    { id: "workspace-folder-b", label: "Finance", depth: 0, kind: "folder" as const, folderID: "b", folderKind: "node" as const },
+    { id: "node-forecast", label: "Forecast", depth: 1, kind: "node" as const, nodeID: "forecast", folderID: "b", folderKind: "node" as const },
+  ];
+  assert.deepEqual(
+    buildExplorerSearchViewRows({ rows, query: "for" }).map((row) => row.id),
+    ["workspace-folder-b", "node-forecast"],
+  );
+});
+
+run("search does not match every folder by row kind", () => {
+  const rows = [
+    { id: "workspace-folder-ops", label: "Operations", depth: 0, kind: "folder" as const, folderID: "ops", folderKind: "node" as const },
+    { id: "node-forecast", label: "Forecast", depth: 0, kind: "node" as const, nodeID: "forecast", folderID: "", folderKind: "node" as const },
+  ];
+  assert.deepEqual(
+    buildExplorerSearchResults({ rows, selectedRowID: "", query: "f" }).map((row) => row.id),
+    ["node-forecast"],
   );
 });
 

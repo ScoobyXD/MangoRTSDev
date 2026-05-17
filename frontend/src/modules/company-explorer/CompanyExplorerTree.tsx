@@ -1,7 +1,6 @@
 import type React from "react";
 import type { CompanyExplorerItemType } from "../folders/companyExplorerFolders";
 import type { ExplorerEntityDragItem } from "../kanban/shared";
-import { ExplorerRowIcon } from "./CompanyExplorerIcons";
 import { CompanyExplorerTreeRow } from "./CompanyExplorerTreeRow";
 import type {
   ExplorerDragPayload,
@@ -34,8 +33,8 @@ type CompanyExplorerTreeProps = {
   selectedTreeID: string;
   selectedTreeIDs: Set<string>;
   explorerSearchQuery: string;
-  explorerSearchResults: ExplorerTreeNode[];
-  explorerSearchOpen: boolean;
+  explorerSearchActive: boolean;
+  explorerSearchResult: ExplorerTreeNode | null;
   draggingTreeID: string;
   dragOverTreeID: string;
   dragOverPlacement: ExplorerRowDropPlacement | null;
@@ -48,7 +47,6 @@ type CompanyExplorerTreeProps = {
   onCloseContextMenu: () => void;
   onOpenContextMenu: (event: React.MouseEvent, row?: ExplorerTreeNode | null) => void;
   onSetExplorerSearchQuery: React.Dispatch<React.SetStateAction<string>>;
-  onSetExplorerSearchFocused: React.Dispatch<React.SetStateAction<boolean>>;
   onSelectExplorerSearchResult: (row: ExplorerTreeNode) => void;
   onSelectTreeRow: (row: ExplorerTreeNode, event?: React.MouseEvent, options?: { selectionIntent?: "activate" | "navigate" }) => void;
   onStartRenamingRow: (row: ExplorerTreeNode) => void;
@@ -94,8 +92,8 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   selectedTreeID,
   selectedTreeIDs,
   explorerSearchQuery,
-  explorerSearchResults,
-  explorerSearchOpen,
+  explorerSearchActive,
+  explorerSearchResult,
   draggingTreeID,
   dragOverTreeID,
   dragOverPlacement,
@@ -108,7 +106,6 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   onCloseContextMenu,
   onOpenContextMenu,
   onSetExplorerSearchQuery,
-  onSetExplorerSearchFocused,
   onSelectExplorerSearchResult,
   onSelectTreeRow,
   onStartRenamingRow,
@@ -129,151 +126,136 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   placeExplorerItemsAtTarget,
   moveFolder,
   assignExplorerPayloadItemsToFolder,
-}) => (
-  <div
-    className="company-explorer-scroll"
-    ref={treeViewportRef}
-    tabIndex={0}
-    onKeyDown={onTreeKeyDown}
-    onScroll={(event) => onScrollTopChange((event.currentTarget as HTMLDivElement).scrollTop)}
-    onDragOver={(event) => {
-      if (!dragPayload) return;
-      const viewport = event.currentTarget as HTMLDivElement;
-      const bounds = viewport.getBoundingClientRect();
-      const edgeSize = 42;
-      const step = 18;
-      const y = event.clientY - bounds.top;
-      if (y < edgeSize) {
-        const next = Math.max(0, viewport.scrollTop - step);
-        if (next !== viewport.scrollTop) {
-          viewport.scrollTop = next;
-          onScrollTopChange(next);
+}) => {
+  const handleRowSelection = (row: ExplorerTreeNode, event?: React.MouseEvent, options?: { selectionIntent?: "activate" | "navigate" }) => {
+    if (explorerSearchActive) {
+      onSelectExplorerSearchResult(row);
+      return;
+    }
+    onSelectTreeRow(row, event, options);
+  };
+
+  return (
+    <div
+      className="company-explorer-scroll"
+      ref={treeViewportRef}
+      tabIndex={0}
+      onKeyDown={onTreeKeyDown}
+      onScroll={(event) => onScrollTopChange((event.currentTarget as HTMLDivElement).scrollTop)}
+      onDragOver={(event) => {
+        if (!dragPayload) return;
+        const viewport = event.currentTarget as HTMLDivElement;
+        const bounds = viewport.getBoundingClientRect();
+        const edgeSize = 42;
+        const step = 18;
+        const y = event.clientY - bounds.top;
+        if (y < edgeSize) {
+          const next = Math.max(0, viewport.scrollTop - step);
+          if (next !== viewport.scrollTop) {
+            viewport.scrollTop = next;
+            onScrollTopChange(next);
+          }
+        } else if (y > bounds.height - edgeSize) {
+          const next = Math.min(viewport.scrollHeight - bounds.height, viewport.scrollTop + step);
+          if (next !== viewport.scrollTop) {
+            viewport.scrollTop = next;
+            onScrollTopChange(next);
+          }
         }
-      } else if (y > bounds.height - edgeSize) {
-        const next = Math.min(viewport.scrollHeight - bounds.height, viewport.scrollTop + step);
-        if (next !== viewport.scrollTop) {
-          viewport.scrollTop = next;
-          onScrollTopChange(next);
-        }
-      }
-    }}
-    onMouseEnter={() => {
-      treeKeyboardActiveRef.current = true;
-    }}
-    onMouseDownCapture={(event) => {
-      treeKeyboardActiveRef.current = true;
-      treeViewportRef.current?.focus({ preventScroll: true });
-      if (event.button === 0) onCloseContextMenu();
-    }}
-    onContextMenu={(event) => onOpenContextMenu(event)}
-    style={{ overflowY: "auto", overflowX: "hidden", minWidth: 0, outline: "none", scrollbarGutter: "stable", ["--company-explorer-scroll-accent" as string]: scrollbarAccent, ["--company-explorer-scroll-track" as string]: scrollbarTrack }}
-  >
-    {!hideTopControls && (
-      <div style={{ position: "sticky", top: 0, zIndex: 5, padding: "13px 10px 8px", borderBottom: `1px solid ${ruleColor}`, background: surfaceBackground, display: "grid", gap: 7 }}>
-        <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: 0, color: accent }}>Explorer</div>
-        <div data-frame-interactive="true" style={{ position: "relative", display: "block", minWidth: 0, height: 25 }}>
-          <input
-            aria-label="Search Explorer"
-            value={explorerSearchQuery}
-            onFocus={() => onSetExplorerSearchFocused(true)}
-            onBlur={() => window.setTimeout(() => onSetExplorerSearchFocused(false), 120)}
-            onChange={(event) => onSetExplorerSearchQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                onSetExplorerSearchQuery("");
-                onSetExplorerSearchFocused(false);
-                event.currentTarget.blur();
-              }
-              if (event.key === "Enter" && explorerSearchResults[0]) {
-                event.preventDefault();
-                onSelectExplorerSearchResult(explorerSearchResults[0]);
-              }
-            }}
-            placeholder="Search Explorer"
-            style={{ width: "100%", height: "100%", boxSizing: "border-box", border: `1px solid ${ruleColor}`, background: isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.94)", color: surfaceText, fontSize: 11, fontWeight: 500, padding: "0 28px 0 8px", outline: "none" }}
-          />
-          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ position: "absolute", right: 8, top: 5, color: folderToggleColor, pointerEvents: "none" }}>
-            <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
-            <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-          {explorerSearchOpen && (
-            <section style={{ position: "absolute", top: 29, left: 0, right: 0, maxHeight: 260, overflowY: "auto", border: `1px solid ${ruleColor}`, borderRadius: 8, background: surfaceBackground, boxShadow: isDarkTheme ? "0 12px 28px rgba(0,0,0,0.42)" : "0 6px 20px rgba(0,0,0,0.14)", padding: "4px 0", zIndex: 8 }}>
-              {explorerSearchResults.length === 0 ? (
-                <div style={{ padding: "8px 10px", color: folderToggleColor, fontSize: 11, fontWeight: 700 }}>No matches</div>
-              ) : explorerSearchResults.map((row) => (
-                <button
-                  key={row.id}
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => onSelectExplorerSearchResult(row)}
-                  style={{ width: "100%", minHeight: 30, display: "grid", gridTemplateColumns: "22px minmax(0, 1fr) auto", alignItems: "center", gap: 7, border: "none", background: row.id === selectedTreeID ? selectedRowBackground : "transparent", color: surfaceText, cursor: "pointer", padding: "5px 9px", textAlign: "left" }}
-                >
-                  <ExplorerRowIcon kind={row.kind} systemKey={row.systemKey} />
-                  <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: row.systemKey ? 600 : 500, color: row.systemKey ? "rgb(255, 136, 32)" : undefined }}>{row.label}</span>
-                    {row.folderLabel && (
-                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: folderToggleColor, fontSize: 9, fontWeight: 500 }}>
-                        {row.folderLabel}
-                      </span>
-                    )}
-                  </span>
-                  <span style={{ color: folderToggleColor, fontSize: 9, fontWeight: 500, letterSpacing: 0 }}>{row.kind === "logic_gate" ? "Logic" : row.kind}</span>
-                </button>
-              ))}
-            </section>
-          )}
+      }}
+      onMouseEnter={() => {
+        treeKeyboardActiveRef.current = true;
+      }}
+      onMouseDownCapture={(event) => {
+        treeKeyboardActiveRef.current = true;
+        treeViewportRef.current?.focus({ preventScroll: true });
+        if (event.button === 0) onCloseContextMenu();
+      }}
+      onContextMenu={(event) => onOpenContextMenu(event)}
+      style={{ overflowY: "auto", overflowX: "hidden", minWidth: 0, outline: "none", scrollbarGutter: "stable", ["--company-explorer-scroll-accent" as string]: scrollbarAccent, ["--company-explorer-scroll-track" as string]: scrollbarTrack }}
+    >
+      {!hideTopControls && (
+        <div style={{ position: "sticky", top: 0, zIndex: 5, padding: "13px 10px 8px", borderBottom: `1px solid ${ruleColor}`, background: surfaceBackground, display: "grid", gap: 7 }}>
+          <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: 0, color: accent }}>Explorer</div>
+          <div data-frame-interactive="true" style={{ position: "relative", display: "block", minWidth: 0, height: 25 }}>
+            <input
+              aria-label="Search Explorer"
+              value={explorerSearchQuery}
+              onChange={(event) => onSetExplorerSearchQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  onSetExplorerSearchQuery("");
+                  event.currentTarget.blur();
+                }
+                if (event.key === "Enter" && explorerSearchResult) {
+                  event.preventDefault();
+                  onSelectExplorerSearchResult(explorerSearchResult);
+                }
+              }}
+              placeholder="Search Explorer"
+              style={{ width: "100%", height: "100%", boxSizing: "border-box", border: `1px solid ${ruleColor}`, background: isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.94)", color: surfaceText, fontSize: 11, fontWeight: 500, padding: "0 28px 0 8px", outline: "none" }}
+            />
+            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ position: "absolute", right: 8, top: 5, color: folderToggleColor, pointerEvents: "none" }}>
+              <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </div>
         </div>
-      </div>
-    )}
-    {error && <div style={{ padding: "7px 10px", borderBottom: `1px solid ${ruleColor}`, color: "#b00020", fontSize: 11, fontWeight: 700 }}>Error: {error}</div>}
-    <div data-company-explorer-tree-rows-start="true" style={{ height: virtualizedTree.topSpacer }} />
-    {virtualizedTree.rows.map((row) => (
-      <CompanyExplorerTreeRow
-        key={row.id}
-        row={row}
-        treeRows={treeRows}
-        expanded={expanded}
-        selectedTreeID={selectedTreeID}
-        selectedTreeIDs={selectedTreeIDs}
-        draggingTreeID={draggingTreeID}
-        dragOverTreeID={dragOverTreeID}
-        dragOverPlacement={dragOverPlacement}
-        dragPayload={dragPayload}
-        renaming={renaming}
-        renameInputRef={renameInputRef}
-        cancelRenameOnBlurRef={cancelRenameOnBlurRef}
-        accent={accent}
-        surfaceBackground={surfaceBackground}
-        surfaceText={surfaceText}
-        rowIconColor={rowIconColor}
-        dropRowBackground={dropRowBackground}
-        selectedRowBackground={selectedRowBackground}
-        rowRuleColor={rowRuleColor}
-        folderToggleColor={folderToggleColor}
-        isDarkTheme={isDarkTheme}
-        onSelectTreeRow={onSelectTreeRow}
-        onOpenContextMenu={onOpenContextMenu}
-        onStartRenamingRow={onStartRenamingRow}
-        onCommitRename={onCommitRename}
-        onSetRenaming={onSetRenaming}
-        onSetExpanded={onSetExpanded}
-        onSetDraggingTreeID={onSetDraggingTreeID}
-        onSetDragOverTreeID={onSetDragOverTreeID}
-        onSetDragOverPlacement={onSetDragOverPlacement}
-        onSetDragPayload={onSetDragPayload}
-        getKanbanDragItemsForRow={getKanbanDragItemsForRow}
-        getExplorerItemRowsForPayload={getExplorerItemRowsForPayload}
-        getReorderRowsForTarget={getReorderRowsForTarget}
-        canPlaceExplorerFolderAtTarget={canPlaceExplorerFolderAtTarget}
-        canPlaceExplorerItemsAtTarget={canPlaceExplorerItemsAtTarget}
-        reorderExplorerRows={reorderExplorerRows}
-        placeExplorerFolderAtTarget={placeExplorerFolderAtTarget}
-        placeExplorerItemsAtTarget={placeExplorerItemsAtTarget}
-        moveFolder={moveFolder}
-        assignExplorerPayloadItemsToFolder={assignExplorerPayloadItemsToFolder}
-      />
-    ))}
-    <div style={{ height: virtualizedTree.bottomSpacer }} />
-  </div>
-);
+      )}
+      {error && <div style={{ padding: "7px 10px", borderBottom: `1px solid ${ruleColor}`, color: "#b00020", fontSize: 11, fontWeight: 700 }}>Error: {error}</div>}
+      {explorerSearchActive && treeRows.length === 0 && (
+        <div style={{ padding: "10px", borderBottom: `1px solid ${rowRuleColor}`, color: folderToggleColor, fontSize: 11, fontWeight: 700 }}>No matches</div>
+      )}
+      <div data-company-explorer-tree-rows-start="true" style={{ height: virtualizedTree.topSpacer }} />
+      {virtualizedTree.rows.map((row) => (
+        <CompanyExplorerTreeRow
+          key={row.id}
+          row={row}
+          treeRows={treeRows}
+          expanded={expanded}
+          selectedTreeID={selectedTreeID}
+          selectedTreeIDs={selectedTreeIDs}
+          draggingTreeID={draggingTreeID}
+          dragOverTreeID={dragOverTreeID}
+          dragOverPlacement={dragOverPlacement}
+          dragPayload={dragPayload}
+          renaming={renaming}
+          renameInputRef={renameInputRef}
+          cancelRenameOnBlurRef={cancelRenameOnBlurRef}
+          accent={accent}
+          surfaceBackground={surfaceBackground}
+          surfaceText={surfaceText}
+          rowIconColor={rowIconColor}
+          dropRowBackground={dropRowBackground}
+          selectedRowBackground={selectedRowBackground}
+          rowRuleColor={rowRuleColor}
+          folderToggleColor={folderToggleColor}
+          isDarkTheme={isDarkTheme}
+          isSearchActive={explorerSearchActive}
+          onSelectTreeRow={handleRowSelection}
+          onOpenContextMenu={onOpenContextMenu}
+          onStartRenamingRow={onStartRenamingRow}
+          onCommitRename={onCommitRename}
+          onSetRenaming={onSetRenaming}
+          onSetExpanded={onSetExpanded}
+          onSetDraggingTreeID={onSetDraggingTreeID}
+          onSetDragOverTreeID={onSetDragOverTreeID}
+          onSetDragOverPlacement={onSetDragOverPlacement}
+          onSetDragPayload={onSetDragPayload}
+          getKanbanDragItemsForRow={getKanbanDragItemsForRow}
+          getExplorerItemRowsForPayload={getExplorerItemRowsForPayload}
+          getReorderRowsForTarget={getReorderRowsForTarget}
+          canPlaceExplorerFolderAtTarget={canPlaceExplorerFolderAtTarget}
+          canPlaceExplorerItemsAtTarget={canPlaceExplorerItemsAtTarget}
+          reorderExplorerRows={reorderExplorerRows}
+          placeExplorerFolderAtTarget={placeExplorerFolderAtTarget}
+          placeExplorerItemsAtTarget={placeExplorerItemsAtTarget}
+          moveFolder={moveFolder}
+          assignExplorerPayloadItemsToFolder={assignExplorerPayloadItemsToFolder}
+        />
+      ))}
+      <div style={{ height: virtualizedTree.bottomSpacer }} />
+    </div>
+  );
+};

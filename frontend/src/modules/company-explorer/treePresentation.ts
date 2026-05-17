@@ -266,17 +266,27 @@ function getExplorerSearchRowsForSelection<T extends ExplorerSearchRow>(rows: T[
   return scopedRows;
 }
 
+function normalizeExplorerSearchValue(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function explorerSearchFieldMatches(field: string, query: string): boolean {
+  const value = normalizeExplorerSearchValue(field);
+  if (!value) return false;
+  if (value.startsWith(query)) return true;
+  if (value.split(/[\s/_-]+/).some((part) => part.startsWith(query))) return true;
+  return query.length >= 2 && value.includes(query);
+}
+
 function explorerSearchRowMatches(row: ExplorerSearchRow, query: string): boolean {
-  const identity = [
-    row.label,
-    row.kind,
+  if (explorerSearchFieldMatches(row.label, query)) return true;
+  if (query.length < 3) return false;
+  return [
     row.nodeID ?? "",
     row.logicGateID ?? "",
     row.kanbanBoardID ?? "",
     row.folderID ?? "",
-    row.folderLabel ?? "",
-  ].join(" ").toLowerCase();
-  return identity.includes(query);
+  ].some((field) => normalizeExplorerSearchValue(field).includes(query));
 }
 
 export function buildExplorerSearchResults<T extends ExplorerSearchRow>(input: {
@@ -301,6 +311,28 @@ export function buildExplorerSearchResults<T extends ExplorerSearchRow>(input: {
   const scopedRows = getExplorerSearchRowsForSelection(input.rows, input.selectedRowID);
   const scopedMatches = scopedRows.length === input.rows.length ? [] : collect(scopedRows);
   return scopedMatches.length > 0 ? scopedMatches : collect(input.rows);
+}
+
+export function buildExplorerSearchViewRows<T extends ExplorerSearchRow & { id: string }>(input: {
+  rows: T[];
+  query: string;
+}): T[] {
+  const query = input.query.trim().toLowerCase();
+  if (!query) return input.rows;
+
+  const includedIDs = new Set<string>();
+  const rowStack: T[] = [];
+  for (const row of input.rows) {
+    const depth = Math.max(0, row.depth);
+    rowStack.length = depth;
+    rowStack[depth] = row;
+    if (!explorerSearchRowMatches(row, query)) continue;
+    for (const ancestor of rowStack) {
+      if (ancestor?.id) includedIDs.add(ancestor.id);
+    }
+  }
+
+  return input.rows.filter((row) => includedIDs.has(row.id));
 }
 
 export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | null):

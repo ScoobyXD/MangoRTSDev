@@ -11,7 +11,7 @@ import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntit
 import { type SelectionIntent } from "../selectionCoordinator";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
 import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
-import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchResults, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
+import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchResults, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
 import { CompanyExplorerDeleteBlockedDialog, CompanyExplorerDeleteConfirmationDialog, CompanyExplorerFolderShareDialogView } from "./CompanyExplorerDialogs";
 import { CompanyExplorerTree } from "./CompanyExplorerTree";
@@ -106,6 +106,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const treeViewportRef = useRef<HTMLDivElement | null>(null);
   const treeKeyboardActiveRef = useRef(false);
   const [treeScrollTop, setTreeScrollTop] = useState(() => readScrollTopFromStorage(scrollStorageKey));
+  const previousExplorerSearchTextRef = useRef("");
+  const preSearchScrollTopRef = useRef(treeScrollTop);
   const [treeViewportHeight, setTreeViewportHeight] = useState(480);
   const [rootRowOrder, setRootRowOrder] = useState<Record<string, number>>(() => readRootRowOrderFromStorage(rootOrderStorageKey));
   const [draggingTreeID, setDraggingTreeID] = useState("");
@@ -117,7 +119,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const [deleteBlockedMessage, setDeleteBlockedMessage] = useState("");
   const [deleteFolderAcknowledged, setDeleteFolderAcknowledged] = useState(false);
   const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
-  const [explorerSearchFocused, setExplorerSearchFocused] = useState(false);
   const [linkRevision, setLinkRevision] = useState(0);
   const [linkedMapFrameID, setLinkedMapFrameID] = useState("");
   const [linkedLogicMapFrameID, setLinkedLogicMapFrameID] = useState("");
@@ -307,13 +308,39 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     treeScrollTop,
   });
   const scopedRootRow = scopedRootTreeID ? fullRowByID.get(scopedRootTreeID) : undefined;
-  const treeRows = useMemo(() => (
+  const baseTreeRows = useMemo(() => (
     scopedExplorerActive
       ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(fullTreeRows, scopedRootFolder.folder_id) : [])
       : fullTreeRows
   ), [fullTreeRows, scopedExplorerActive, scopedRootFolder]);
+  const explorerSearchText = explorerSearchQuery.trim();
+  const explorerSearchActive = explorerSearchText.length > 0;
+  const allExpandedSearchTreeRows = useMemo(() => {
+    const expandedForSearch = new Set<string>(["folder-root"]);
+    for (const folder of folders) expandedForSearch.add(`workspace-folder-${folder.folder_id}`);
+    const rows = buildCompanyExplorerTreeRows({
+      expanded: expandedForSearch,
+      nodes,
+      logicGates,
+      kanbanBoards,
+      folders,
+      folderItems,
+      rootRowOrder,
+    });
+    return scopedExplorerActive
+      ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(rows, scopedRootFolder.folder_id) : [])
+      : rows;
+  }, [folderItems, folders, kanbanBoards, logicGates, nodes, rootRowOrder, scopedExplorerActive, scopedRootFolder]);
+  const explorerSearchViewRows = useMemo(() => (
+    buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: explorerSearchQuery })
+  ), [allExpandedSearchTreeRows, explorerSearchQuery]);
+  const explorerSearchResults = useMemo(() => (
+    buildExplorerSearchResults({ rows: allExpandedSearchTreeRows, selectedRowID: "", query: explorerSearchQuery, limit: 1 })
+  ), [allExpandedSearchTreeRows, explorerSearchQuery]);
+  const treeRows = explorerSearchActive ? explorerSearchViewRows : baseTreeRows;
   const rowByID = useMemo(() => new Map(treeRows.map((row) => [row.id, row])), [treeRows]);
-  const selectedTree = rowByID.get(selectedTreeID) ?? (scopedRootFolder ? scopedRootRow : fullSelectedTree);
+  const baseRowByID = useMemo(() => new Map(baseTreeRows.map((row) => [row.id, row])), [baseTreeRows]);
+  const selectedTree = rowByID.get(selectedTreeID) ?? baseRowByID.get(selectedTreeID) ?? (scopedRootFolder ? scopedRootRow : fullSelectedTree);
   const virtualizedTree = useCompanyExplorerVirtualTree(treeRows, treeViewportHeight, treeScrollTop);
   const scopedAllowedItemType: CompanyExplorerItemType | "" = scopedKind ?? "";
   const systemFolderTreeIDByKey = useMemo(() => {
@@ -326,24 +353,22 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     return items;
   }, [folders]);
 
-  const explorerSearchResults = useMemo(() => {
-    const expandedForSearch = new Set<string>(["folder-root"]);
-    for (const folder of folders) expandedForSearch.add(`workspace-folder-${folder.folder_id}`);
-    const rows = buildCompanyExplorerTreeRows({
-      expanded: expandedForSearch,
-      nodes,
-      logicGates,
-      kanbanBoards,
-      folders,
-      folderItems,
-      rootRowOrder,
-    });
-    const searchRows = scopedExplorerActive
-      ? (scopedRootFolder ? buildScopedCompanyExplorerTreeRows(rows, scopedRootFolder.folder_id) : [])
-      : rows;
-    return buildExplorerSearchResults({ rows: searchRows, selectedRowID: selectedTreeID, query: explorerSearchQuery, limit: 16 });
-  }, [explorerSearchQuery, folderItems, folders, kanbanBoards, logicGates, nodes, rootRowOrder, scopedExplorerActive, scopedRootFolder, selectedTreeID]);
-  const explorerSearchOpen = explorerSearchFocused && explorerSearchQuery.trim().length > 0;
+  useEffect(() => {
+    const previousSearchText = previousExplorerSearchTextRef.current;
+    const viewport = treeViewportRef.current;
+    if (explorerSearchActive) {
+      if (!previousSearchText) preSearchScrollTopRef.current = treeScrollTop;
+      if (explorerSearchText !== previousSearchText) {
+        setTreeScrollTop(0);
+        if (viewport) viewport.scrollTop = 0;
+      }
+    } else if (previousSearchText) {
+      const restoredScrollTop = preSearchScrollTopRef.current;
+      setTreeScrollTop(restoredScrollTop);
+      if (viewport) viewport.scrollTop = restoredScrollTop;
+    }
+    previousExplorerSearchTextRef.current = explorerSearchText;
+  }, [explorerSearchActive, explorerSearchText]);
 
   useEffect(() => {
     selectedTreeIDRef.current = selectedTreeID;
@@ -1119,8 +1144,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [folderItems, folders, logicGates, nodes]);
 
   const selectExplorerSearchResult = useCallback((row: ExplorerTreeNode) => {
-    setExplorerSearchQuery("");
-    setExplorerSearchFocused(false);
     treeKeyboardActiveRef.current = true;
     treeViewportRef.current?.focus({ preventScroll: true });
     expandTreeIDs([row.id]);
@@ -1163,12 +1186,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       if (item.treeID) sourceTreeIDs.add(item.treeID);
     }
     if (sourceTreeIDs.size > 0) {
-      return treeRows.filter((row) => sourceTreeIDs.has(row.id));
+      return baseTreeRows.filter((row) => sourceTreeIDs.has(row.id));
     }
     const keys = new Set(payloadItems.map((item) => `${item.itemType}:${item.itemID}`));
     const seen = new Set<string>();
     const rows: ExplorerTreeNode[] = [];
-    for (const row of treeRows) {
+    for (const row of baseTreeRows) {
       const item = getExplorerItemPayload(row);
       if (!item) continue;
       const key = `${item.itemType}:${item.itemID}`;
@@ -1177,7 +1200,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       rows.push(row);
     }
     return rows;
-  }, [treeRows]);
+  }, [baseTreeRows]);
 
   const canPlaceExplorerItemsAtTarget = useCallback((payload: ExplorerDragPayload | null, target: ExplorerTreeNode): boolean => {
     const itemType = getExplorerDropPayloadItemType(payload);
@@ -1221,10 +1244,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const targetKind = getExplorerRowOrderKind(target);
     if (sourceContainer == null || targetContainer == null || sourceContainer !== targetContainer || !sourceKind || !targetKind) return [];
     if (sourceContainer === "" && targetContainer === "") {
-      return treeRows.filter((row) => getExplorerRowContainerID(row) === "" && Boolean(getExplorerRowOrderKind(row)));
+      return baseTreeRows.filter((row) => getExplorerRowContainerID(row) === "" && Boolean(getExplorerRowOrderKind(row)));
     }
-    return treeRows.filter((row) => getExplorerRowContainerID(row) === sourceContainer && Boolean(getExplorerRowOrderKind(row)));
-  }, [treeRows]);
+    return baseTreeRows.filter((row) => getExplorerRowContainerID(row) === sourceContainer && Boolean(getExplorerRowOrderKind(row)));
+  }, [baseTreeRows]);
 
   const reorderExplorerRows = useCallback(async (source: ExplorerTreeNode, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => {
     const siblings = getReorderRowsForTarget(source, target);
@@ -1269,7 +1292,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const targetContainer = getExplorerRowContainerID(target);
     if (targetContainer == null) return false;
 
-    const targetRows = treeRows.filter((row) => getExplorerRowContainerID(row) === targetContainer && getExplorerRowOrderKind(row) === source.folderKind);
+    const targetRows = baseTreeRows.filter((row) => getExplorerRowContainerID(row) === targetContainer && getExplorerRowOrderKind(row) === source.folderKind);
     const targetRowIDs = new Set(targetRows.map((row) => row.id));
     const rowsForPlan = targetRowIDs.has(source.id) ? targetRows : [...targetRows, source];
     const plan = buildExplorerRowBatchReorderPlan(rowsForPlan.map(explorerRowOrder), [source.id], target.id, placement);
@@ -1306,7 +1329,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     await Promise.all(folderMoves);
     if (itemAssignments.length > 0) await assignItemsToFolders(itemAssignments);
     return true;
-  }, [assignItemsToFolders, canPlaceExplorerFolderAtTarget, moveFolder, treeRows]);
+  }, [assignItemsToFolders, baseTreeRows, canPlaceExplorerFolderAtTarget, moveFolder]);
 
   const placeExplorerItemsAtTarget = useCallback(async (payload: ExplorerDragPayload | null, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => {
     const itemType = getExplorerDropPayloadItemType(payload);
@@ -1314,7 +1337,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     if (!itemType || targetContainer == null || !canPlaceExplorerItemsAtTarget(payload, target)) return false;
 
     const itemRows = getExplorerItemRowsForPayload(payload);
-    const targetRows = treeRows.filter((row) => {
+    const targetRows = baseTreeRows.filter((row) => {
       if (getExplorerRowContainerID(row) !== targetContainer) return false;
       const rowKind = getExplorerRowOrderKind(row);
       return Boolean(rowKind);
@@ -1357,13 +1380,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     await Promise.all(folderMoves);
     if (itemAssignments.length > 0) await assignItemsToFolders(itemAssignments);
     return true;
-  }, [assignItemsToFolders, canPlaceExplorerItemsAtTarget, getExplorerItemRowsForPayload, moveFolder, treeRows]);
+  }, [assignItemsToFolders, baseTreeRows, canPlaceExplorerItemsAtTarget, getExplorerItemRowsForPayload, moveFolder]);
 
   const assignExplorerPayloadItemsToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => {
     if (scopedAllowedItemType && itemType !== scopedAllowedItemType) return;
     const items = getExplorerDropPayloadItems(payload).filter((item) => item.itemType === itemType);
     if (!targetFolderID || items.length === 0) return;
-    const existingRows = treeRows.filter((row) => {
+    const existingRows = baseTreeRows.filter((row) => {
       if (getExplorerRowContainerID(row) !== targetFolderID) return false;
       const rowKind = getExplorerRowOrderKind(row);
       return Boolean(rowKind);
@@ -1375,7 +1398,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       assignments.push({ folder_id: targetFolderID, item_type: itemType, item_id: item.itemID, position });
     }
     await assignItemsToFolders(assignments, { expandTarget: true });
-  }, [assignItemsToFolders, scopedAllowedItemType, treeRows]);
+  }, [assignItemsToFolders, baseTreeRows, scopedAllowedItemType]);
 
   const requestMapFind = useCallback((target: ExplorerFindTarget) => {
     if (target.kind === "node") {
@@ -1398,7 +1421,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     if (row.kind === "folder") return 0;
     const targetContainer = getExplorerRowContainerID(row);
     if (targetContainer == null) return 0;
-    const siblingRows = treeRows.filter((candidate) => {
+    const siblingRows = baseTreeRows.filter((candidate) => {
       if (getExplorerRowContainerID(candidate) !== targetContainer) return false;
       const rowKind = getExplorerRowOrderKind(candidate);
       return Boolean(rowKind);
@@ -1413,7 +1436,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     if (previousRow) return previousRow.position + TREE_ROW_POSITION_STEP;
     if (nextRow) return Math.max(1, nextRow.position - TREE_ROW_POSITION_STEP);
     return 0;
-  }, [treeRows]);
+  }, [baseTreeRows]);
 
   const openExplorerContextMenu = useCallback((event: React.MouseEvent, row?: ExplorerTreeNode | null) => {
     event.preventDefault();
@@ -1563,8 +1586,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         selectedTreeID={selectedTreeID}
         selectedTreeIDs={selectedTreeIDs}
         explorerSearchQuery={explorerSearchQuery}
-        explorerSearchResults={explorerSearchResults}
-        explorerSearchOpen={explorerSearchOpen}
+        explorerSearchActive={explorerSearchActive}
+        explorerSearchResult={explorerSearchResults[0] ?? null}
         draggingTreeID={draggingTreeID}
         dragOverTreeID={dragOverTreeID}
         dragOverPlacement={dragOverPlacement}
@@ -1577,7 +1600,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         onCloseContextMenu={() => setExplorerContextMenu(null)}
         onOpenContextMenu={openExplorerContextMenu}
         onSetExplorerSearchQuery={setExplorerSearchQuery}
-        onSetExplorerSearchFocused={setExplorerSearchFocused}
         onSelectExplorerSearchResult={selectExplorerSearchResult}
         onSelectTreeRow={selectTreeRow}
         onStartRenamingRow={startRenamingRow}

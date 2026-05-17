@@ -54,6 +54,7 @@ type CompanyExplorerTreeRowProps = {
   rowRuleColor: string;
   folderToggleColor: string;
   isDarkTheme: boolean;
+  isSearchActive: boolean;
   onSelectTreeRow: (row: ExplorerTreeNode, event?: React.MouseEvent, options?: { selectionIntent?: SelectionIntent }) => void;
   onOpenContextMenu: (event: React.MouseEvent, row?: ExplorerTreeNode | null) => void;
   onStartRenamingRow: (row: ExplorerTreeNode) => void;
@@ -98,6 +99,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   rowRuleColor,
   folderToggleColor,
   isDarkTheme,
+  isSearchActive,
   onSelectTreeRow,
   onOpenContextMenu,
   onStartRenamingRow,
@@ -122,14 +124,14 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   const isFolder = row.kind === "folder";
   const isOpen = expanded.has(row.id);
   const isSelected = selectedTreeID === row.id || selectedTreeIDs.has(row.id);
-  const rowDragPayload = getExplorerDragPayloadForSelection(row, selectedTreeIDs, treeRows);
+  const rowDragPayload = isSearchActive ? null : getExplorerDragPayloadForSelection(row, selectedTreeIDs, treeRows);
   const isDragging = draggingTreeID === row.id;
   const isDropTarget = dragOverTreeID === row.id;
 
   return (
     <div
       className="company-explorer-row"
-      draggable={!!rowDragPayload && renaming?.treeID !== row.id}
+      draggable={!isSearchActive && !!rowDragPayload && renaming?.treeID !== row.id}
       onClick={(event) => onSelectTreeRow(row, event)}
       onContextMenu={(event) => onOpenContextMenu(event, row)}
       onDragStart={(event) => {
@@ -261,7 +263,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
           : undefined,
       }}
     >
-      {isFolder ? (
+      {isFolder && !isSearchActive ? (
         <button
           draggable={false}
           onMouseDown={(event) => event.stopPropagation()}
