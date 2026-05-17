@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getActiveCompanyID } from "../auth/currentCompany";
 import FrameRightClickMenu from "./framerightclickmenu";
-import { HeaderLogicGateArenaIcon, HeaderMapIcon } from "./HeaderIcons";
+import { HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderPersonIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
 import { COLORWAYS, UI_THEME } from "./frameLayoutTypes";
-import { preloadDefaultDashboardModules, preloadLogicGateArenaSurface } from "./preloadDashboardModules";
+import { preloadDefaultDashboardModules } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
 import {
   createCommunicationsSharedInbox,
@@ -570,6 +570,7 @@ export function AppSidebar({
         <AppSidebarScopedExplorerSection
           label="Logic Gates by Function"
           open={logicGatesByFunctionOpen}
+          icon={<HeaderLogicGateArenaIcon />}
           widgetId={SIDEBAR_LOGIC_GATES_BY_FUNCTION_WIDGET_ID}
           selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
           onToggle={() => setLogicGatesByFunctionOpen((open) => !open)}
@@ -577,18 +578,10 @@ export function AppSidebar({
         <AppSidebarScopedExplorerSection
           label="Logic Gates by Person"
           open={logicGatesByPersonOpen}
+          icon={<HeaderPersonIcon />}
           widgetId={SIDEBAR_LOGIC_GATES_BY_PERSON_WIDGET_ID}
           selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
           onToggle={() => setLogicGatesByPersonOpen((open) => !open)}
-        />
-        <AppSidebarButton
-          label="Logic Gate Arena"
-          active={activePage === "logic-gate-arena"}
-          icon={<HeaderLogicGateArenaIcon />}
-          onPointerEnter={preloadLogicGateArenaSurface}
-          onFocus={preloadLogicGateArenaSurface}
-          onPointerDown={preloadLogicGateArenaSurface}
-          onClick={() => onPageSelect("logic-gate-arena")}
         />
         <AppSidebarButton
           label="Map"
@@ -706,12 +699,14 @@ function AppSidebarButton({
 function AppSidebarScopedExplorerSection({
   label,
   open,
+  icon,
   widgetId,
   selectionTargetFrameIDs,
   onToggle,
 }: {
   label: string;
   open: boolean;
+  icon: React.ReactNode;
   widgetId: string;
   selectionTargetFrameIDs: string[];
   onToggle: () => void;
@@ -724,7 +719,7 @@ function AppSidebarScopedExplorerSection({
           style={appSidebarMiniExplorerLabelButtonStyle}
           onClick={onToggle}
         >
-          <span style={appSidebarMiniExplorerIconStyle}><ExplorerRowIcon kind="folder" /></span>
+          <span style={appSidebarMiniExplorerIconStyle}>{icon}</span>
           <span style={appSidebarTextStyle}>{label}</span>
         </button>
         <button

@@ -6,7 +6,7 @@ import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/compan
 import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 import { getNodeTitle, type NodeRecord } from "../../modules/node-map/shared.js";
 import { attachStackedDragPreview, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR } from "../../modules/kanban/shared.js";
-import { ACI_COLUMNS, HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, MAILBOX_OPTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants.js";
+import { ACI_COLUMNS, HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, MAILBOX_OPTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants.js";
 import type { AciInboxRole, HomeColumnWidths, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyLogicGateGroup, ResponsibleInboxStatus } from "./homeTypes.js";
 export function readHomeColumnWidths(): HomeColumnWidths {
   try {
@@ -140,10 +140,10 @@ export function resizeHomeInboxMatrixColumnsWithoutSidebar(startWidths: HomeColu
 
   const maxRail = Math.min(
     HOME_COLUMN_MAX_WIDTHS[3],
-    Math.max(HOME_COLUMN_MIN_WIDTHS[3], availableWidth - HOME_COLUMN_RESIZER_WIDTH - 760),
+    Math.max(HOME_COLUMN_MIN_WIDTHS[3], availableWidth - HOME_COLUMN_RESIZER_WIDTH - HOME_INBOX_MATRIX_PANEL_MIN_WIDTH),
   );
   next[3] = clampNumber(startWidths[3] - delta, HOME_COLUMN_MIN_WIDTHS[3], maxRail);
-  next[2] = Math.max(760, availableWidth - next[3] - HOME_COLUMN_RESIZER_WIDTH);
+  next[2] = Math.max(HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, availableWidth - next[3] - HOME_COLUMN_RESIZER_WIDTH);
   return normalizeHomeColumnWidths(next);
 }
 
@@ -180,14 +180,14 @@ export function getHomeWorkspaceTrackWidth(element: HTMLElement | null): number 
 export function getInboxMatrixGridTemplateColumns(widths: HomeColumnWidths): string {
   return [
     `${widths[0]}px`,
-    "minmax(760px, 1fr)",
+    `minmax(${HOME_INBOX_MATRIX_PANEL_MIN_WIDTH}px, 1fr)`,
     `${widths[3]}px`,
   ].join(" ");
 }
 
 export function getInboxMatrixGridTemplateColumnsWithoutSidebar(widths: HomeColumnWidths): string {
   return [
-    "minmax(760px, 1fr)",
+    `minmax(${HOME_INBOX_MATRIX_PANEL_MIN_WIDTH}px, 1fr)`,
     `${HOME_COLUMN_RESIZER_WIDTH}px`,
     `${widths[3]}px`,
   ].join(" ");

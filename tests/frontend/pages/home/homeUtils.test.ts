@@ -12,8 +12,10 @@ import {
   getHomeGridTemplateColumns,
   getHomeViewLabel,
   getInboxMatrixGridTemplateColumns,
+  getInboxMatrixGridTemplateColumnsWithoutSidebar,
   mailboxForHomeView,
   resizeHomeColumns,
+  resizeHomeInboxMatrixColumnsWithoutSidebar,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
 
 function sharedInbox(id: string, name: string, position: number, parentID?: string): CommunicationsSharedInbox {
@@ -94,7 +96,9 @@ test("home column sizing keeps generated grid tracks stable", () => {
 
   assert.deepEqual(widths, [200, 400, 390, 380]);
   assert.equal(getHomeGridTemplateColumns(widths), "200px 10px 400px 10px minmax(390px, 1fr) 10px 380px");
-  assert.equal(getInboxMatrixGridTemplateColumns(widths), "200px minmax(760px, 1fr) 380px");
+  assert.equal(getInboxMatrixGridTemplateColumns(widths), "200px minmax(320px, 1fr) 380px");
+  assert.equal(getInboxMatrixGridTemplateColumnsWithoutSidebar(widths), "minmax(320px, 1fr) 10px 380px");
+  assert.deepEqual(resizeHomeInboxMatrixColumnsWithoutSidebar(widths, 2, -160, 780), [200, 400, 320, 450]);
 });
 
 test("home column sizing fits first-load widths into the available My Triage workspace", () => {
