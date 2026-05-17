@@ -911,6 +911,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
   }, [apiBase, applyLinkedNode, companyID, linkedEntityKind, linkedMapWidgetID, linkedNodeID, requestJSON, scope]);
 
+  const openRelationshipNode = useCallback((nodeID: string, title: string) => {
+    setActiveTab("editor");
+    applyLinkedNode(nodeID, title, { focusEditor: true });
+  }, [applyLinkedNode]);
+
   const updateNodePresetPatch = useCallback(async (patch: Record<string, unknown>) => {
     if (!linkedNodeID || linkedEntityKind !== "node") return;
     setError("");
@@ -1415,7 +1420,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
   const emptyMessage = forcedEntityKind && !hasLinkedDocument ? forcedEmptyMessage : "";
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
-  const fallbackDocumentTopPx = linkedEntityKind === "node" ? 150 : linkedEntityKind === "logic_gate" ? 188 : EDITOR_DOCUMENT_TOP_PX;
+  const fallbackDocumentTopPx = activeTab === "relationships" ? 46 : linkedEntityKind === "node" ? 150 : linkedEntityKind === "logic_gate" ? 188 : EDITOR_DOCUMENT_TOP_PX;
   const documentTopPx = hasLinkedDocument ? Math.max(fallbackDocumentTopPx, editorHeaderHeightPx + 16) : fallbackDocumentTopPx;
   const documentLineHeightPx = documentFontSize * EDITOR_DOCUMENT_LINE_HEIGHT;
   const documentBottomBufferPx = Math.round(documentLineHeightPx * EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES);
@@ -1447,6 +1452,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     <div
       ref={editorRootRef}
       data-frame-interactive="true"
+      data-mango-linked-entity-kind={linkedEntityKind || undefined}
+      data-mango-linked-entity-id={linkedNodeID || undefined}
       onMouseDown={(event) => event.stopPropagation()}
       onTouchStart={(event) => event.stopPropagation()}
       style={{ width: "100%", height: "100%", position: "relative", background: surfaceBackground, color: surfaceText, overflow: "hidden", userSelect: "text", cursor: "text" }}
@@ -1553,6 +1560,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             scrollbarAccent={scrollbarAccent}
             scrollbarTrack={scrollbarTrack}
             theme={theme}
+            onOpenNode={openRelationshipNode}
           />
         )}
         {hasLinkedDocument && linkedEntityKind === "node" && activeTab !== "relationships" && (
