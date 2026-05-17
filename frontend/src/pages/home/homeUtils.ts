@@ -12,7 +12,7 @@ export function readHomeColumnWidths(): HomeColumnWidths {
   try {
     const parsed = JSON.parse(localStorage.getItem(HOME_COLUMN_WIDTHS_STORAGE_KEY) ?? "null") as unknown;
     if (isHomeColumnWidths(parsed)) {
-      return normalizeHomeColumnWidths(parsed as HomeColumnWidths);
+      return fitHomeColumnWidthsToAvailableWidth(parsed as HomeColumnWidths, getHomeWindowTrackWidth(), true);
     }
   } catch {
     // Stored UI preferences are optional; fall back to viewport-aware defaults.
@@ -31,12 +31,12 @@ export function isHomeColumnWidths(value: unknown): value is HomeColumnWidths {
 }
 
 export function defaultHomeColumnWidths(): HomeColumnWidths {
-  const availableWidth = Math.max(1120, window.innerWidth - 52 - HOME_COLUMN_RESIZER_WIDTH * 3);
+  const availableWidth = Math.max(getHomeColumnMinimumTrackWidth(true), getHomeWindowTrackWidth());
   const sidebarWidth = 220;
   const listWidth = 350;
   const logicGateWidth = 340;
-  const detailWidth = clampNumber(availableWidth - sidebarWidth - listWidth - logicGateWidth, 360, 820);
-  return normalizeHomeColumnWidths([sidebarWidth, listWidth, detailWidth, logicGateWidth]);
+  const detailWidth = clampNumber(availableWidth - sidebarWidth - listWidth - logicGateWidth - HOME_COLUMN_RESIZER_WIDTH * 3, 360, 820);
+  return fitHomeColumnWidthsToAvailableWidth([sidebarWidth, listWidth, detailWidth, logicGateWidth], availableWidth, true);
 }
 
 export function normalizeHomeColumnWidths(widths: HomeColumnWidths): HomeColumnWidths {
@@ -48,23 +48,63 @@ export function normalizeHomeColumnWidths(widths: HomeColumnWidths): HomeColumnW
   ];
 }
 
+export function getHomeColumnMinimumTrackWidth(includeSidebar: boolean): number {
+  const resizerCount = includeSidebar ? 3 : 2;
+  const fixedMin = includeSidebar
+    ? HOME_COLUMN_MIN_WIDTHS[0] + HOME_COLUMN_MIN_WIDTHS[1] + HOME_COLUMN_MIN_WIDTHS[3]
+    : HOME_COLUMN_MIN_WIDTHS[1] + HOME_COLUMN_MIN_WIDTHS[3];
+  return fixedMin + HOME_COLUMN_MIN_WIDTHS[2] + HOME_COLUMN_RESIZER_WIDTH * resizerCount;
+}
+
+export function getHomeWindowTrackWidth(): number {
+  if (typeof window === "undefined") return getHomeColumnMinimumTrackWidth(true);
+  return Math.max(1, window.innerWidth - 20);
+}
+
+export function fitHomeColumnWidthsToAvailableWidth(widths: HomeColumnWidths, availableWidth: number, includeSidebar: boolean): HomeColumnWidths {
+  const next = normalizeHomeColumnWidths(widths);
+  const cleanAvailableWidth = Number.isFinite(availableWidth)
+    ? Math.max(1, Math.round(availableWidth))
+    : getHomeColumnMinimumTrackWidth(includeSidebar);
+  const fixedIndices: Array<0 | 1 | 3> = includeSidebar ? [0, 1, 3] : [1, 3];
+  const resizerTotal = HOME_COLUMN_RESIZER_WIDTH * (includeSidebar ? 3 : 2);
+  const minFixedTotal = fixedIndices.reduce<number>((sum, index) => sum + HOME_COLUMN_MIN_WIDTHS[index], 0);
+  const targetFixedTotal = Math.max(
+    minFixedTotal,
+    cleanAvailableWidth - resizerTotal - HOME_COLUMN_MIN_WIDTHS[2],
+  );
+  let overflow = fixedIndices.reduce<number>((sum, index) => sum + next[index], 0) - targetFixedTotal;
+
+  for (const index of includeSidebar ? [1, 3, 0] as const : [1, 3] as const) {
+    if (overflow <= 0) break;
+    const shrink = Math.min(overflow, next[index] - HOME_COLUMN_MIN_WIDTHS[index]);
+    next[index] -= shrink;
+    overflow -= shrink;
+  }
+
+  const fixedTotal = fixedIndices.reduce<number>((sum, index) => sum + next[index], 0);
+  next[2] = Math.max(HOME_COLUMN_MIN_WIDTHS[2], cleanAvailableWidth - fixedTotal - resizerTotal);
+  return normalizeHomeColumnWidths(next);
+}
+
 export function resizeHomeColumns(startWidths: HomeColumnWidths, dividerIndex: 0 | 1 | 2, delta: number, availableWidth: number): HomeColumnWidths {
-  const next: HomeColumnWidths = [startWidths[0], startWidths[1], startWidths[2], startWidths[3]];
+  const fittedStart = fitHomeColumnWidthsToAvailableWidth(startWidths, availableWidth, true);
+  const next: HomeColumnWidths = [fittedStart[0], fittedStart[1], fittedStart[2], fittedStart[3]];
   const resizerTotal = HOME_COLUMN_RESIZER_WIDTH * 3;
 
   if (dividerIndex === 0) {
-    const pairTotal = startWidths[0] + startWidths[1];
+    const pairTotal = fittedStart[0] + fittedStart[1];
     const maxLeft = Math.min(HOME_COLUMN_MAX_WIDTHS[0], pairTotal - HOME_COLUMN_MIN_WIDTHS[1]);
-    next[0] = clampNumber(startWidths[0] + delta, HOME_COLUMN_MIN_WIDTHS[0], maxLeft);
+    next[0] = clampNumber(fittedStart[0] + delta, HOME_COLUMN_MIN_WIDTHS[0], maxLeft);
     next[1] = pairTotal - next[0];
   } else if (dividerIndex === 1) {
     const maxListFromViewport = availableWidth - next[0] - next[3] - resizerTotal - HOME_COLUMN_MIN_WIDTHS[2];
     const maxList = Math.min(HOME_COLUMN_MAX_WIDTHS[1], Math.max(HOME_COLUMN_MIN_WIDTHS[1], maxListFromViewport));
-    next[1] = clampNumber(startWidths[1] + delta, HOME_COLUMN_MIN_WIDTHS[1], maxList);
+    next[1] = clampNumber(fittedStart[1] + delta, HOME_COLUMN_MIN_WIDTHS[1], maxList);
   } else {
     const maxRailFromViewport = availableWidth - next[0] - next[1] - resizerTotal - HOME_COLUMN_MIN_WIDTHS[2];
     const maxRail = Math.min(HOME_COLUMN_MAX_WIDTHS[3], Math.max(HOME_COLUMN_MIN_WIDTHS[3], maxRailFromViewport));
-    next[3] = clampNumber(startWidths[3] - delta, HOME_COLUMN_MIN_WIDTHS[3], maxRail);
+    next[3] = clampNumber(fittedStart[3] - delta, HOME_COLUMN_MIN_WIDTHS[3], maxRail);
   }
 
   next[2] = Math.max(HOME_COLUMN_MIN_WIDTHS[2], availableWidth - next[0] - next[1] - next[3] - resizerTotal);
@@ -72,7 +112,8 @@ export function resizeHomeColumns(startWidths: HomeColumnWidths, dividerIndex: 0
 }
 
 export function resizeHomeColumnsWithoutSidebar(startWidths: HomeColumnWidths, dividerIndex: 0 | 1 | 2, delta: number, availableWidth: number): HomeColumnWidths {
-  const next: HomeColumnWidths = [startWidths[0], startWidths[1], startWidths[2], startWidths[3]];
+  const fittedStart = fitHomeColumnWidthsToAvailableWidth(startWidths, availableWidth, false);
+  const next: HomeColumnWidths = [fittedStart[0], fittedStart[1], fittedStart[2], fittedStart[3]];
   const resizerTotal = HOME_COLUMN_RESIZER_WIDTH * 2;
 
   if (dividerIndex === 1) {
@@ -80,13 +121,13 @@ export function resizeHomeColumnsWithoutSidebar(startWidths: HomeColumnWidths, d
       HOME_COLUMN_MAX_WIDTHS[1],
       Math.max(HOME_COLUMN_MIN_WIDTHS[1], availableWidth - next[3] - resizerTotal - HOME_COLUMN_MIN_WIDTHS[2]),
     );
-    next[1] = clampNumber(startWidths[1] + delta, HOME_COLUMN_MIN_WIDTHS[1], maxList);
+    next[1] = clampNumber(fittedStart[1] + delta, HOME_COLUMN_MIN_WIDTHS[1], maxList);
   } else if (dividerIndex === 2) {
     const maxRail = Math.min(
       HOME_COLUMN_MAX_WIDTHS[3],
       Math.max(HOME_COLUMN_MIN_WIDTHS[3], availableWidth - next[1] - resizerTotal - HOME_COLUMN_MIN_WIDTHS[2]),
     );
-    next[3] = clampNumber(startWidths[3] - delta, HOME_COLUMN_MIN_WIDTHS[3], maxRail);
+    next[3] = clampNumber(fittedStart[3] - delta, HOME_COLUMN_MIN_WIDTHS[3], maxRail);
   }
 
   next[2] = Math.max(HOME_COLUMN_MIN_WIDTHS[2], availableWidth - next[1] - next[3] - resizerTotal);
@@ -112,7 +153,7 @@ export function getHomeGridTemplateColumns(widths: HomeColumnWidths): string {
     `${HOME_COLUMN_RESIZER_WIDTH}px`,
     `${widths[1]}px`,
     `${HOME_COLUMN_RESIZER_WIDTH}px`,
-    `minmax(${HOME_COLUMN_MIN_WIDTHS[2]}px, 1fr)`,
+    `minmax(${widths[2]}px, 1fr)`,
     `${HOME_COLUMN_RESIZER_WIDTH}px`,
     `${widths[3]}px`,
   ].join(" ");
@@ -122,7 +163,7 @@ export function getHomeGridTemplateColumnsWithoutSidebar(widths: HomeColumnWidth
   return [
     `${widths[1]}px`,
     `${HOME_COLUMN_RESIZER_WIDTH}px`,
-    `minmax(${HOME_COLUMN_MIN_WIDTHS[2]}px, 1fr)`,
+    `minmax(${widths[2]}px, 1fr)`,
     `${HOME_COLUMN_RESIZER_WIDTH}px`,
     `${widths[3]}px`,
   ].join(" ");

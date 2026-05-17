@@ -7,6 +7,9 @@ import {
   buildAciInboxGroupsByCell,
   buildResponsibleInboxGroupsByCell,
   buildSharedInboxRows,
+  fitHomeColumnWidthsToAvailableWidth,
+  getHomeColumnMinimumTrackWidth,
+  getHomeGridTemplateColumns,
   getHomeViewLabel,
   getInboxMatrixGridTemplateColumns,
   mailboxForHomeView,
@@ -90,5 +93,15 @@ test("home column sizing keeps generated grid tracks stable", () => {
   const widths = resizeHomeColumns([200, 320, 360, 380], 1, 80, 1400);
 
   assert.deepEqual(widths, [200, 400, 390, 380]);
+  assert.equal(getHomeGridTemplateColumns(widths), "200px 10px 400px 10px minmax(390px, 1fr) 10px 380px");
   assert.equal(getInboxMatrixGridTemplateColumns(widths), "200px minmax(760px, 1fr) 380px");
+});
+
+test("home column sizing fits first-load widths into the available My Triage workspace", () => {
+  const fitted = fitHomeColumnWidthsToAvailableWidth([220, 350, 360, 340], 1120, true);
+
+  assert.deepEqual(fitted, [220, 310, 220, 340]);
+  assert.equal(fitted.reduce((sum, width) => sum + width, 0) + 30, 1120);
+  assert.equal(getHomeColumnMinimumTrackWidth(true), 980);
+  assert.equal(getHomeColumnMinimumTrackWidth(false), 800);
 });

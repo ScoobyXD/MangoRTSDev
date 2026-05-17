@@ -71,7 +71,7 @@ import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGa
 import { AciInboxMatrix, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
-import { buildMyLogicGateGroups, cleanIDList, collectSharedInboxSubtreeIDs, emailAddressListContains, filterExplorerRowsForSearch, filterSharedInboxesForUser, formatAddressList, formatError, formatErrorCode, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeHasLogicGateRaciRole, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortNodesForInbox, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, cleanIDList, collectSharedInboxSubtreeIDs, emailAddressListContains, filterExplorerRowsForSearch, filterSharedInboxesForUser, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeHasLogicGateRaciRole, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortNodesForInbox, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type WorkspaceStreamEnvelope } from "./homeTypes";
 export function HomePage({ me, onNavigate, embedded = false, hideNavigation = false, initialViewID = "my-triage" }: HomePageProps) {
@@ -124,8 +124,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const [workspaceTrackWidth, setWorkspaceTrackWidth] = useState(() => Math.max(1, window.innerWidth - 20));
   const [columnWidths, setColumnWidths] = useState<HomeColumnWidths>(() => readHomeColumnWidths());
-  const [columnResizeDrag, setColumnResizeDrag] = useState<HomeColumnResizeDrag | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const foldersRequestInFlightRef = useRef(false);
   const sharedInboxesRequestInFlightRef = useRef(false);
@@ -151,7 +151,11 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const loadingMoreMessagesRef = useRef(false);
   const messageListFilterKeyRef = useRef("");
   const workspaceRef = useRef<HTMLElement | null>(null);
-  const isNarrow = viewportWidth < 980;
+  const columnWidthsRef = useRef<HomeColumnWidths>(columnWidths);
+  const columnResizeDragRef = useRef<HomeColumnResizeDrag | null>(null);
+  const hideNavigationRef = useRef(hideNavigation);
+  const isInboxMatrixView = isInboxMatrixViewID(activeViewID);
+  const isNarrow = isInboxMatrixView ? viewportWidth < 980 : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!hideNavigation);
   const currentUserID = me?.user.user_id?.trim() ?? "";
   const currentUserHasFullSharedInboxAccess = userHasFullSharedInboxAccess(me, companyID);
   const visibleSharedInboxes = useMemo(
@@ -210,38 +214,81 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     loadingMoreMessagesRef.current = loadingMoreMessages;
   }, [loadingMoreMessages]);
   useEffect(() => {
+    columnWidthsRef.current = columnWidths;
+  }, [columnWidths]);
+  useEffect(() => {
+    hideNavigationRef.current = hideNavigation;
+  }, [hideNavigation]);
+  useEffect(() => {
     const onResize = () => setViewportWidth(window.innerWidth);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
   useEffect(() => {
-    if (!columnResizeDrag) return undefined;
-    const onPointerMove = (event: PointerEvent) => {
-      event.preventDefault();
-      const delta = event.clientX - columnResizeDrag.startX;
-      const nextWidths = hideNavigation
-        ? isInboxMatrixViewID(activeViewIDRef.current)
-          ? resizeHomeInboxMatrixColumnsWithoutSidebar(columnResizeDrag.startWidths, columnResizeDrag.dividerIndex, delta, columnResizeDrag.availableWidth)
-          : resizeHomeColumnsWithoutSidebar(columnResizeDrag.startWidths, columnResizeDrag.dividerIndex, delta, columnResizeDrag.availableWidth)
-        : resizeHomeColumns(columnResizeDrag.startWidths, columnResizeDrag.dividerIndex, delta, columnResizeDrag.availableWidth);
-      setColumnWidths(nextWidths);
-    };
-    const onPointerUp = () => setColumnResizeDrag(null);
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
+    const updateWorkspaceTrackWidth = () => setWorkspaceTrackWidth(getHomeWorkspaceTrackWidth(workspaceRef.current));
+    updateWorkspaceTrackWidth();
+    const element = workspaceRef.current;
+    if (!element || typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateWorkspaceTrackWidth);
+      return () => window.removeEventListener("resize", updateWorkspaceTrackWidth);
+    }
+    const observer = new ResizeObserver(updateWorkspaceTrackWidth);
+    observer.observe(element);
+    window.addEventListener("resize", updateWorkspaceTrackWidth);
     return () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
+      observer.disconnect();
+      window.removeEventListener("resize", updateWorkspaceTrackWidth);
     };
-  }, [columnResizeDrag, hideNavigation]);
+  }, [status?.connected]);
+  useEffect(() => {
+    const finishColumnResize = () => {
+      const drag = columnResizeDragRef.current;
+      if (!drag) return;
+      columnResizeDragRef.current = null;
+      drag.ownerDocument.body.style.cursor = drag.previousCursor;
+      drag.ownerDocument.body.style.userSelect = drag.previousUserSelect;
+      try {
+        drag.captureTarget.releasePointerCapture?.(drag.pointerID);
+      } catch {}
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      const drag = columnResizeDragRef.current;
+      if (!drag) return;
+      event.preventDefault();
+      const delta = event.clientX - drag.startX;
+      const activeIsInboxMatrixView = isInboxMatrixViewID(activeViewIDRef.current);
+      const nextWidths = hideNavigationRef.current
+        ? activeIsInboxMatrixView
+          ? resizeHomeInboxMatrixColumnsWithoutSidebar(drag.startWidths, drag.dividerIndex, delta, drag.availableWidth)
+          : resizeHomeColumnsWithoutSidebar(drag.startWidths, drag.dividerIndex, delta, drag.availableWidth)
+        : resizeHomeColumns(drag.startWidths, drag.dividerIndex, delta, drag.availableWidth);
+      const fittedWidths = activeIsInboxMatrixView
+        ? nextWidths
+        : fitHomeColumnWidthsToAvailableWidth(nextWidths, drag.availableWidth, !hideNavigationRef.current);
+      columnWidthsRef.current = fittedWidths;
+      setColumnWidths(fittedWidths);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", finishColumnResize);
+    window.addEventListener("pointercancel", finishColumnResize);
+    window.addEventListener("blur", finishColumnResize);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", finishColumnResize);
+      window.removeEventListener("pointercancel", finishColumnResize);
+      window.removeEventListener("blur", finishColumnResize);
+      finishColumnResize();
+    };
+  }, []);
+  useEffect(() => {
+    if (isNarrow || isInboxMatrixView) return;
+    setColumnWidths((current) => {
+      const fitted = fitHomeColumnWidthsToAvailableWidth(current, workspaceTrackWidth, !hideNavigation);
+      if (fitted.every((width, index) => width === current[index])) return current;
+      columnWidthsRef.current = fitted;
+      return fitted;
+    });
+  }, [hideNavigation, isInboxMatrixView, isNarrow, workspaceTrackWidth]);
   useEffect(() => {
     if (isNarrow) return;
     saveHomeColumnWidths(columnWidths);
@@ -871,7 +918,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setSelectedMessageIDs(new Set());
       setSelectionAnchorMessageID("");
       setMessageContextMenu(null);
-      setNotice(ids.length === 1 ? "Message moved to Pending." : `${ids.length} messages moved to Pending.`);
+      setNotice(ids.length === 1 ? "Message moved to My Triage." : `${ids.length} messages moved to My Triage.`);
       await loadMessages();
     } catch (unarchiveError) {
       setError(formatError(unarchiveError, ids.length === 1 ? "Failed to unarchive message" : "Failed to unarchive messages"));
@@ -1419,13 +1466,30 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const startColumnResize = useCallback((dividerIndex: 0 | 1 | 2, event: React.PointerEvent<HTMLButtonElement>) => {
     if (isNarrow) return;
     event.preventDefault();
-    setColumnResizeDrag({
+    event.stopPropagation();
+    const availableWidth = getHomeWorkspaceTrackWidth(workspaceRef.current);
+    const activeIsInboxMatrixView = isInboxMatrixViewID(activeViewIDRef.current);
+    const startWidths = activeIsInboxMatrixView
+      ? columnWidthsRef.current
+      : fitHomeColumnWidthsToAvailableWidth(columnWidthsRef.current, availableWidth, !hideNavigationRef.current);
+    const ownerDocument = event.currentTarget.ownerDocument;
+    columnResizeDragRef.current = {
       dividerIndex,
       startX: event.clientX,
-      startWidths: columnWidths,
-      availableWidth: getHomeWorkspaceTrackWidth(workspaceRef.current),
-    });
-  }, [columnWidths, isNarrow]);
+      startWidths,
+      availableWidth,
+      ownerDocument,
+      previousCursor: ownerDocument.body.style.cursor,
+      previousUserSelect: ownerDocument.body.style.userSelect,
+      pointerID: event.pointerId,
+      captureTarget: event.currentTarget,
+    };
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {}
+    ownerDocument.body.style.cursor = "col-resize";
+    ownerDocument.body.style.userSelect = "none";
+  }, [isNarrow]);
   const activeViewLabel = getHomeViewLabel(activeViewID, sharedInboxes);
   const isArchivableListView = isArchivableHomeViewID(activeViewID);
   const isArchiveMailbox = isArchivableListView && mailbox === "archive";
@@ -1436,17 +1500,18 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     ? `${selectedMessageIDs.size} selected`
     : (loadingMessages || loadingMoreMessages) ? "Loading" : "";
   const isAciInboxView = activeViewID === "aci-inbox";
-  const isResponsibleInboxView = activeViewID === "r-inbox";
-  const isInboxMatrixView = isAciInboxView || isResponsibleInboxView;
+  const layoutColumnWidths = isNarrow || isInboxMatrixView
+    ? columnWidths
+    : fitHomeColumnWidthsToAvailableWidth(columnWidths, workspaceTrackWidth, !hideNavigation);
   const workspaceGridTemplateColumns = isNarrow
     ? "1fr"
     : hideNavigation
       ? isInboxMatrixView
-        ? getInboxMatrixGridTemplateColumnsWithoutSidebar(columnWidths)
-        : getHomeGridTemplateColumnsWithoutSidebar(columnWidths)
+        ? getInboxMatrixGridTemplateColumnsWithoutSidebar(layoutColumnWidths)
+        : getHomeGridTemplateColumnsWithoutSidebar(layoutColumnWidths)
       : isInboxMatrixView
-        ? getInboxMatrixGridTemplateColumns(columnWidths)
-        : getHomeGridTemplateColumns(columnWidths);
+        ? getInboxMatrixGridTemplateColumns(layoutColumnWidths)
+        : getHomeGridTemplateColumns(layoutColumnWidths);
   return (
     <div style={embedded ? { ...pageStyle, height: "100%" } : pageStyle}>
       {!embedded && (

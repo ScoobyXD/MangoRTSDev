@@ -209,7 +209,7 @@ export function HomeMailWorkspace({
                   if (mailbox !== "primary") onOpenPendingMailbox();
                 }}
               >
-                Pending
+                My Triage
               </button>
               <button
                 type="button"
