@@ -77,6 +77,11 @@ export type HomeColumnResizeDrag = {
   startX: number;
   startWidths: HomeColumnWidths;
   availableWidth: number;
+  ownerDocument: Document;
+  previousCursor: string;
+  previousUserSelect: string;
+  pointerID: number;
+  captureTarget: HTMLButtonElement;
 };
 
 export type AciInboxRole = Extract<LogicGateRaciRole, "accountable" | "consulted" | "informed">;

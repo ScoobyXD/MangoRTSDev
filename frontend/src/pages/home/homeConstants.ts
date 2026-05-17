@@ -2,7 +2,7 @@ import type { EmailMailbox } from "../../modules/communications/communicationsAp
 import type { MailboxOption, AciInboxRole, ResponsibleInboxStatus, InboxPriority, HomeColumnWidths } from "./homeTypes.js";
 
 export const MAILBOX_OPTIONS: MailboxOption[] = [
-  { value: "primary", label: "Pending" },
+  { value: "primary", label: "My Triage" },
   { value: "starred", label: "Starred" },
   { value: "sent", label: "Sent mail" },
   { value: "archive", label: "Archived" },

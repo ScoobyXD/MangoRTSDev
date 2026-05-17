@@ -631,7 +631,7 @@ export function HomeSidebar({
   return (
     <aside style={sidebarStyle}>
       <nav style={sidebarNavStyle} aria-label="Home triage">
-        <HomeNavButton label="Pending" active={activeViewID === "my-triage" || activeViewID === "primary"} onClick={() => onSelectView("my-triage", "primary")} />
+        <HomeNavButton label="My Triage" active={activeViewID === "my-triage" || activeViewID === "primary"} onClick={() => onSelectView("my-triage", "primary")} />
         <section style={sidebarSectionStyle}>
           <div
             style={{
