@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { publishLiveSelection } from "../selectionCoordinator";
+import { EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { NodeMapContent } from "../node-map/NodeMapContent";
 import {
   getNodeRelationshipGraphSnapshot,
@@ -8,7 +10,19 @@ import {
   buildNodeRelationshipTreeRows,
   type NodeRelationshipTreeRow,
 } from "../node-map/nodeRelationshipStructure";
-import type { NodeRecord, NodeRelationship } from "../node-map/shared";
+import { getNodeTitle, type NodeRecord, type NodeRelationship } from "../node-map/shared";
+
+const InlineNodeEditorContent = React.lazy(() => import("./EditorContent").then((module) => ({
+  default: module.EditorContent as React.FC<{
+    accent: string;
+    widgetId?: string;
+    theme?: "mango" | "teal" | "light" | "dark";
+    forcedEntityKind?: "node" | "logic_gate";
+    forcedEntityID?: string;
+    forcedLabel?: string;
+    forcedEmptyMessage?: string;
+  }>,
+})));
 
 type NodeRelationshipsSurfaceProps = {
   apiBase: string;
@@ -25,11 +39,49 @@ type NodeRelationshipsSurfaceProps = {
   scrollbarAccent: string;
   scrollbarTrack: string;
   theme: "mango" | "teal" | "light" | "dark";
-  onOpenNode?: (nodeID: string, title: string) => void;
 };
 
 const MIN_RELATIONSHIP_LIST_WIDTH = 236;
 const MIN_RELATIONSHIP_MAP_WIDTH = 360;
+const MIN_RELATIONSHIP_TREE_HEIGHT = 104;
+const MIN_RELATIONSHIP_PREVIEW_HEIGHT = 180;
+const RELATIONSHIP_LAYOUT_KEY_PREFIX = "node-relationships-layout-v1";
+
+type RelationshipPaneLayout = {
+  listWidth: number | null;
+  previewHeight: number | null;
+};
+
+function relationshipLayoutStorageKey(companyID: string, scope: string): string {
+  return `${RELATIONSHIP_LAYOUT_KEY_PREFIX}:${companyID}:${scope}`;
+}
+
+function finitePositiveNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : null;
+}
+
+function readRelationshipPaneLayout(companyID: string, scope: string): RelationshipPaneLayout {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(relationshipLayoutStorageKey(companyID, scope)) ?? "{}") as Partial<RelationshipPaneLayout>;
+    return {
+      listWidth: finitePositiveNumber(parsed.listWidth),
+      previewHeight: finitePositiveNumber(parsed.previewHeight),
+    };
+  } catch {
+    return { listWidth: null, previewHeight: null };
+  }
+}
+
+function saveRelationshipPaneLayout(companyID: string, scope: string, layout: RelationshipPaneLayout): void {
+  try {
+    localStorage.setItem(relationshipLayoutStorageKey(companyID, scope), JSON.stringify({
+      listWidth: finitePositiveNumber(layout.listWidth),
+      previewHeight: finitePositiveNumber(layout.previewHeight),
+    }));
+  } catch {
+    // Relationship split sizes are convenience state; storage failure should not block the editor.
+  }
+}
 
 function roleLabel(row: NodeRelationshipTreeRow): string {
   if (row.role === "Current") return "Current";
@@ -49,6 +101,12 @@ function clampRelationshipListWidth(value: number, totalWidth: number): number {
   if (!Number.isFinite(totalWidth) || totalWidth <= 0) return Math.max(MIN_RELATIONSHIP_LIST_WIDTH, Math.round(value));
   const maxWidth = Math.max(MIN_RELATIONSHIP_LIST_WIDTH, totalWidth - MIN_RELATIONSHIP_MAP_WIDTH);
   return Math.round(Math.min(Math.max(value, MIN_RELATIONSHIP_LIST_WIDTH), maxWidth));
+}
+
+function clampRelationshipPreviewHeight(value: number, totalHeight: number): number {
+  if (!Number.isFinite(totalHeight) || totalHeight <= 0) return Math.max(MIN_RELATIONSHIP_PREVIEW_HEIGHT, Math.round(value));
+  const available = Math.max(MIN_RELATIONSHIP_PREVIEW_HEIGHT, totalHeight - MIN_RELATIONSHIP_TREE_HEIGHT - 8);
+  return Math.round(Math.min(Math.max(value, MIN_RELATIONSHIP_PREVIEW_HEIGHT), available));
 }
 
 function TreeRow({
@@ -79,12 +137,12 @@ function TreeRow({
         width: "100%",
         minWidth: 0,
         minHeight: 30,
+        boxSizing: "border-box",
         display: "grid",
         gridTemplateColumns: "minmax(0, 1fr) auto",
         alignItems: "center",
         gap: 7,
-        padding: "4px 7px 4px 8px",
-        marginLeft: row.depth * 16,
+        padding: `4px 7px 4px ${8 + row.depth * 16}px`,
         border: `1px solid ${active ? accent : "transparent"}`,
         borderRadius: 6,
         background: active ? "rgba(255,136,32,0.12)" : panelBackground,
@@ -148,16 +206,21 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
   scrollbarAccent,
   scrollbarTrack,
   theme,
-  onOpenNode,
 }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const leftBodyRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
-  const [listWidth, setListWidth] = useState<number | null>(null);
+  const [leftBodyHeight, setLeftBodyHeight] = useState(0);
+  const [listWidth, setListWidth] = useState<number | null>(() => readRelationshipPaneLayout(companyID, scope).listWidth);
+  const [previewHeight, setPreviewHeight] = useState<number | null>(() => readRelationshipPaneLayout(companyID, scope).previewHeight);
+  const [previewNodeID, setPreviewNodeID] = useState(nodeID);
   const [splitDrag, setSplitDrag] = useState<{ startX: number; startWidth: number } | null>(null);
+  const [previewSplitDrag, setPreviewSplitDrag] = useState<{ startY: number; startHeight: number } | null>(null);
   const [graph, setGraph] = useState<{ nodes: NodeRecord[]; relationships: NodeRelationship[] }>(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
     return { nodes: snapshot.nodes ?? [], relationships: snapshot.relationships ?? [] };
   });
+  const mapWidgetID = `relationships-map:${scope}:${nodeID}`;
 
   useEffect(() => {
     const updateGraph = () => {
@@ -167,6 +230,20 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
     updateGraph();
     return subscribeNodeRelationshipGraph(apiBase, companyID, updateGraph);
   }, [apiBase, companyID]);
+
+  useEffect(() => {
+    const layout = readRelationshipPaneLayout(companyID, scope);
+    setListWidth(layout.listWidth);
+    setPreviewHeight(layout.previewHeight);
+  }, [companyID, scope]);
+
+  useEffect(() => {
+    saveRelationshipPaneLayout(companyID, scope, { listWidth, previewHeight });
+  }, [companyID, scope, listWidth, previewHeight]);
+
+  useEffect(() => {
+    setPreviewNodeID(nodeID);
+  }, [nodeID]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -182,6 +259,20 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const body = leftBodyRef.current;
+    if (!body) return;
+    const updateHeight = () => setLeftBodyHeight(body.getBoundingClientRect().height);
+    updateHeight();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateHeight);
+      return () => window.removeEventListener("resize", updateHeight);
+    }
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, []);
+
   const rows = useMemo(() => buildNodeRelationshipTreeRows({
     nodes: graph.nodes,
     relationships: graph.relationships,
@@ -190,8 +281,43 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
   }), [graph.nodes, graph.relationships, nodeID, nodeTitle]);
   const compact = width > 0 && width < 760;
   const listWidthPx = compact ? 0 : clampRelationshipListWidth(listWidth ?? width * 0.32, width);
-  const mapWidgetID = `relationships-map:${scope}:${nodeID}`;
+  const previewHeightPx = clampRelationshipPreviewHeight(previewHeight ?? leftBodyHeight * 0.44, leftBodyHeight);
+  const titleByNodeID = useMemo(() => {
+    const titles = new Map<string, string>();
+    for (const node of graph.nodes) titles.set(node.node_id, getNodeTitle(node));
+    for (const row of rows) titles.set(row.nodeID, row.title);
+    if (nodeID) titles.set(nodeID, nodeTitle || titles.get(nodeID) || nodeID);
+    return titles;
+  }, [graph.nodes, nodeID, nodeTitle, rows]);
+  const previewNodeTitle = previewNodeID ? (titleByNodeID.get(previewNodeID) || previewNodeID) : "";
   const rowCountLabel = `${rows.length} node${rows.length === 1 ? "" : "s"}`;
+
+  const selectPreviewNode = useCallback((selectedNodeID: string, selectedTitle: string, broadcastToMap: boolean) => {
+    const nextNodeID = selectedNodeID.trim();
+    if (!nextNodeID) return;
+    setPreviewNodeID(nextNodeID);
+    if (!broadcastToMap) return;
+    publishLiveSelection({
+      companyID,
+      entityKind: "node",
+      entityID: nextNodeID,
+      label: selectedTitle || titleByNodeID.get(nextNodeID) || nextNodeID,
+      sourceFrameID: `${scope}:relationships-list`,
+      sourceModule: "editor",
+      targetFrameIDs: [mapWidgetID],
+      selectionIntent: "navigate",
+    });
+  }, [companyID, mapWidgetID, scope, titleByNodeID]);
+
+  useEffect(() => {
+    const onMapSelectionUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ mapWidgetID?: string; selectedNodeID?: string }>).detail;
+      if (!detail || detail.mapWidgetID !== mapWidgetID || typeof detail.selectedNodeID !== "string") return;
+      selectPreviewNode(detail.selectedNodeID, titleByNodeID.get(detail.selectedNodeID) || detail.selectedNodeID, false);
+    };
+    window.addEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapSelectionUpdated);
+    return () => window.removeEventListener(EVENT_NODE_MAP_SELECTION_UPDATED, onMapSelectionUpdated);
+  }, [mapWidgetID, selectPreviewNode, titleByNodeID]);
 
   useEffect(() => {
     if (!splitDrag) return;
@@ -210,6 +336,24 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
     };
   }, [splitDrag, width]);
 
+  useEffect(() => {
+    if (!previewSplitDrag) return;
+    const onPointerMove = (event: PointerEvent) => {
+      event.preventDefault();
+      const deltaY = event.clientY - previewSplitDrag.startY;
+      setPreviewHeight(clampRelationshipPreviewHeight(previewSplitDrag.startHeight - deltaY, leftBodyHeight));
+    };
+    const onPointerUp = () => setPreviewSplitDrag(null);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+  }, [leftBodyHeight, previewSplitDrag]);
+
   return (
     <div
       ref={rootRef}
@@ -223,10 +367,10 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
         left: 0,
         display: "grid",
         gridTemplateColumns: compact ? "1fr" : `${listWidthPx}px 8px minmax(0, 1fr)`,
-        gridTemplateRows: compact ? "minmax(180px, 36%) minmax(260px, 1fr)" : "1fr",
+        gridTemplateRows: compact ? "minmax(320px, 45%) minmax(260px, 1fr)" : "1fr",
         minHeight: 0,
         overflow: "hidden",
-        cursor: splitDrag ? "col-resize" : "default",
+        cursor: splitDrag ? "col-resize" : previewSplitDrag ? "row-resize" : "default",
         ["--editor-document-scroll-accent" as string]: scrollbarAccent,
         ["--editor-document-scroll-track" as string]: scrollbarTrack,
       }}
@@ -249,23 +393,71 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
           </div>
           <span style={{ flex: "0 0 auto", color: surfaceText, opacity: 0.62, fontSize: 10, fontWeight: 800 }}>{rowCountLabel}</span>
         </div>
-        <div className="editor-document-scroll" style={{ minHeight: 0, overflowY: "auto", padding: 8, display: "grid", alignContent: "start", gap: 4, ["--editor-document-scroll-accent" as string]: scrollbarAccent, ["--editor-document-scroll-track" as string]: scrollbarTrack }}>
-          {rows.length === 0 ? (
-            <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 6, padding: 10, color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 700 }}>
-              No related nodes
-            </div>
-          ) : rows.map((row) => (
-            <TreeRow
-              key={`${row.nodeID}:${row.depth}`}
-              row={row}
-              active={row.nodeID === nodeID}
-              accent={accent}
-              surfaceText={surfaceText}
-              strokeColor={strokeColor}
-              panelBackground="rgba(255,255,255,0.58)"
-              onOpen={(item) => onOpenNode?.(item.nodeID, item.title)}
-            />
-          ))}
+        <div
+          ref={leftBodyRef}
+          style={{
+            minHeight: 0,
+            display: "grid",
+            gridTemplateRows: `minmax(${MIN_RELATIONSHIP_TREE_HEIGHT}px, 1fr) 8px ${previewHeightPx}px`,
+            overflow: "hidden",
+          }}
+        >
+          <div className="editor-document-scroll" style={{ minHeight: 0, overflowY: "auto", padding: 8, display: "grid", alignContent: "start", gap: 4, ["--editor-document-scroll-accent" as string]: scrollbarAccent, ["--editor-document-scroll-track" as string]: scrollbarTrack }}>
+            {rows.length === 0 ? (
+              <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 6, padding: 10, color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 700 }}>
+                No related nodes
+              </div>
+            ) : rows.map((row) => (
+              <TreeRow
+                key={`${row.nodeID}:${row.depth}`}
+                row={row}
+                active={row.nodeID === previewNodeID}
+                accent={accent}
+                surfaceText={surfaceText}
+                strokeColor={strokeColor}
+                panelBackground="rgba(255,255,255,0.58)"
+                onOpen={(item) => selectPreviewNode(item.nodeID, item.title, true)}
+              />
+            ))}
+          </div>
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            title="Resize node viewer"
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setPreviewSplitDrag({ startY: event.clientY, startHeight: previewHeightPx });
+            }}
+            style={{
+              minHeight: 8,
+              cursor: "row-resize",
+              touchAction: "none",
+              background: previewSplitDrag ? "rgba(255,136,32,0.14)" : "transparent",
+              borderTop: `1px solid ${ruleColor}`,
+              borderBottom: `1px solid ${ruleColor}`,
+            }}
+          />
+          <section style={{ minWidth: 0, minHeight: 0, overflow: "hidden", background: "#ffffff", position: "relative" }}>
+            {previewNodeID ? (
+              <React.Suspense fallback={<div style={{ padding: 10, color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 700 }}>Loading node</div>}>
+                <InlineNodeEditorContent
+                  key={previewNodeID}
+                  accent={accent}
+                  widgetId={`relationships-node-viewer:${scope}`}
+                  theme={theme}
+                  forcedEntityKind="node"
+                  forcedEntityID={previewNodeID}
+                  forcedLabel={previewNodeTitle}
+                  forcedEmptyMessage="Select a related node"
+                />
+              </React.Suspense>
+            ) : (
+              <div style={{ padding: 10, color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 700 }}>
+                Select a related node
+              </div>
+            )}
+          </section>
         </div>
       </aside>
       {!compact && (
