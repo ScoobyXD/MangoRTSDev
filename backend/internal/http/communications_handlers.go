@@ -77,9 +77,17 @@ func (s *Server) handleCommunicationsAuthURL(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "invalid_email_provider")
 		return
 	}
+	accountEmail := normalizeEmailForCompare(r.URL.Query().Get("account_email"))
+	if accountEmail == "" {
+		accountEmail = normalizeEmailForCompare(actor.User.Email)
+	}
+	if !strings.Contains(accountEmail, "@") {
+		writeError(w, http.StatusBadRequest, "invalid_account_email")
+		return
+	}
 	state, err := signNylasOAuthState(s.nylasConfig.StateSecret, nylasOAuthStatePayload{
 		UserID:   actor.User.UserID,
-		Email:    actor.User.Email,
+		Email:    accountEmail,
 		Provider: provider,
 	}, time.Now())
 	if err != nil {
@@ -148,17 +156,22 @@ func (s *Server) handleCommunicationsFolders(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Request) {
-	connection, ok := s.requireConnectedEmail(w, r)
-	if !ok {
-		return
-	}
 	switch r.Method {
 	case http.MethodGet:
+		actor, ok := authenticatedActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
 		query, valid := parseNylasMessageQuery(w, r)
 		if !valid {
 			return
 		}
 		if strings.TrimSpace(query.CompanyID) != "" && !requireCompanyAccess(w, r, query.CompanyID) {
+			return
+		}
+		connection, ok := s.requireCommunicationsConnection(w, r, actor, query.CompanyID, query.SharedInboxID)
+		if !ok {
 			return
 		}
 		query, err := s.applyCommunicationsMailboxQuery(r.Context(), connection, query)
@@ -184,6 +197,10 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, page)
 	case http.MethodPost:
+		connection, ok := s.requireConnectedEmail(w, r)
+		if !ok {
+			return
+		}
 		s.sendCommunicationsMessage(w, r, connection)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -205,10 +222,6 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	connection, ok := s.requireConnectedEmail(w, r)
-	if !ok {
-		return
-	}
 	if messageID == "send" {
 		if action != "" {
 			writeError(w, http.StatusNotFound, "not_found")
@@ -218,7 +231,25 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
 		}
+		connection, ok := s.requireConnectedEmail(w, r)
+		if !ok {
+			return
+		}
 		s.sendCommunicationsMessage(w, r, connection)
+		return
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	sharedInboxID := strings.TrimSpace(r.URL.Query().Get("shared_inbox_id"))
+	if companyID != "" && !requireCompanyAccess(w, r, companyID) {
+		return
+	}
+	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID)
+	if !ok {
 		return
 	}
 	if action == "archive" {
@@ -245,11 +276,7 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
-		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		if companyID != "" {
-			if !requireCompanyAccess(w, r, companyID) {
-				return
-			}
 			message = s.enrichCommunicationsMessagePlacements(connection.UserID, companyID, message)
 		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"message": message})
@@ -503,6 +530,83 @@ func (s *Server) requireConnectedEmail(w http.ResponseWriter, r *http.Request) (
 	return connection, true
 }
 
+func (s *Server) requireCommunicationsConnection(w http.ResponseWriter, r *http.Request, actor ActorContext, companyID, sharedInboxID string) (domain.UserEmailConnection, bool) {
+	if !s.nylasConfig.IsConfigured() || s.nylasClient == nil {
+		writeError(w, http.StatusServiceUnavailable, "nylas_not_configured")
+		return domain.UserEmailConnection{}, false
+	}
+	companyID = strings.TrimSpace(companyID)
+	sharedInboxID = strings.TrimSpace(sharedInboxID)
+	if sharedInboxID == "" {
+		connection, err := s.repo.GetUserEmailConnection(actor.User.UserID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusConflict, "nylas_not_connected")
+			return domain.UserEmailConnection{}, false
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_email_connection")
+			return domain.UserEmailConnection{}, false
+		}
+		return requireConnectedEmailStatus(w, connection)
+	}
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return domain.UserEmailConnection{}, false
+	}
+	folder, ok := s.findVisibleSharedInboxFolder(w, actor, companyID, sharedInboxID)
+	if !ok {
+		return domain.UserEmailConnection{}, false
+	}
+	if folder.AccountEmail == nil || strings.TrimSpace(*folder.AccountEmail) == "" {
+		writeError(w, http.StatusConflict, "shared_inbox_email_not_assigned")
+		return domain.UserEmailConnection{}, false
+	}
+	connection, err := s.repo.GetCompanyEmailConnectionByAccountEmail(companyID, *folder.AccountEmail)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusConflict, "shared_inbox_email_account_not_connected")
+		return domain.UserEmailConnection{}, false
+	}
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_shared_inbox_account_email")
+		return domain.UserEmailConnection{}, false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox_email_connection")
+		return domain.UserEmailConnection{}, false
+	}
+	return requireConnectedEmailStatus(w, connection)
+}
+
+func requireConnectedEmailStatus(w http.ResponseWriter, connection domain.UserEmailConnection) (domain.UserEmailConnection, bool) {
+	if connection.Status == "reauth_required" {
+		writeError(w, http.StatusUnauthorized, "nylas_reauth_required")
+		return domain.UserEmailConnection{}, false
+	}
+	if connection.Status != "connected" || strings.TrimSpace(connection.GrantID) == "" {
+		writeError(w, http.StatusConflict, "nylas_not_connected")
+		return domain.UserEmailConnection{}, false
+	}
+	return connection, true
+}
+
+func (s *Server) findVisibleSharedInboxFolder(w http.ResponseWriter, actor ActorContext, companyID, folderID string) (domain.CompanyExplorerFolder, bool) {
+	folders, err := s.repo.ListCompanyExplorerFolders(companyID, "communications")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox")
+		return domain.CompanyExplorerFolder{}, false
+	}
+	if !actorCanManageCompany(actor, companyID) {
+		folders = filterCommunicationsSharedInboxFoldersForUser(folders, actor.User.UserID)
+	}
+	for _, folder := range folders {
+		if folder.FolderID == folderID {
+			return folder, true
+		}
+	}
+	writeError(w, http.StatusNotFound, "shared_inbox_not_found")
+	return domain.CompanyExplorerFolder{}, false
+}
+
 func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, err error) {
 	var apiErr NylasAPIError
 	if errors.As(err, &apiErr) {
@@ -692,7 +796,7 @@ func (s *Server) enrichCommunicationsMessagesPlacements(userID, companyID string
 
 func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessageQuery, bool) {
 	for key := range r.URL.Query() {
-		if key != "limit" && key != "page_token" && key != "folder_id" && key != "q" && key != "mailbox" && key != "unread" && key != "company_id" && key != "refresh" {
+		if key != "limit" && key != "page_token" && key != "folder_id" && key != "q" && key != "mailbox" && key != "unread" && key != "company_id" && key != "shared_inbox_id" && key != "refresh" {
 			writeError(w, http.StatusBadRequest, "unsupported_email_query_param")
 			return NylasMessageQuery{}, false
 		}
@@ -710,12 +814,13 @@ func parseNylasMessageQuery(w http.ResponseWriter, r *http.Request) (NylasMessag
 		limit = communicationsNylasMaxMessageLimit
 	}
 	query := NylasMessageQuery{
-		Limit:     limit,
-		PageToken: strings.TrimSpace(r.URL.Query().Get("page_token")),
-		FolderID:  strings.TrimSpace(r.URL.Query().Get("folder_id")),
-		Query:     strings.TrimSpace(r.URL.Query().Get("q")),
-		Mailbox:   normalizeCommunicationsMailbox(r.URL.Query().Get("mailbox")),
-		CompanyID: strings.TrimSpace(r.URL.Query().Get("company_id")),
+		Limit:         limit,
+		PageToken:     strings.TrimSpace(r.URL.Query().Get("page_token")),
+		FolderID:      strings.TrimSpace(r.URL.Query().Get("folder_id")),
+		Query:         strings.TrimSpace(r.URL.Query().Get("q")),
+		Mailbox:       normalizeCommunicationsMailbox(r.URL.Query().Get("mailbox")),
+		CompanyID:     strings.TrimSpace(r.URL.Query().Get("company_id")),
+		SharedInboxID: strings.TrimSpace(r.URL.Query().Get("shared_inbox_id")),
 	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("mailbox")); raw != "" && query.Mailbox == "" {
 		writeError(w, http.StatusBadRequest, "invalid_email_mailbox")

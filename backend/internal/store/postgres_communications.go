@@ -34,6 +34,42 @@ func (r *PostgresRepo) GetUserEmailConnection(userID string) (domain.UserEmailCo
 	return connection, err
 }
 
+func (r *PostgresRepo) GetCompanyEmailConnectionByAccountEmail(companyID, accountEmail string) (domain.UserEmailConnection, error) {
+	companyID = strings.TrimSpace(companyID)
+	accountEmail = normalizeEmail(accountEmail)
+	if companyID == "" || accountEmail == "" {
+		return domain.UserEmailConnection{}, ErrInvalid
+	}
+
+	var connection domain.UserEmailConnection
+	err := r.db.QueryRow(
+		`select connection.user_id, connection.provider, connection.account_email, connection.grant_id, connection.status,
+		        connection.created_timestamp, connection.updated_timestamp
+		 from user_email_connections connection
+		 join company_memberships membership
+		   on membership.user_id = connection.user_id
+		 where membership.company_id = $1
+		   and connection.account_email = $2
+		   and connection.status = 'connected'
+		 order by connection.updated_timestamp desc
+		 limit 1`,
+		companyID,
+		accountEmail,
+	).Scan(
+		&connection.UserID,
+		&connection.Provider,
+		&connection.AccountEmail,
+		&connection.GrantID,
+		&connection.Status,
+		&connection.CreatedTimestamp,
+		&connection.UpdatedTimestamp,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.UserEmailConnection{}, ErrNotFound
+	}
+	return connection, err
+}
+
 func (r *PostgresRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error) {
 	grantID = strings.TrimSpace(grantID)
 	if grantID == "" {

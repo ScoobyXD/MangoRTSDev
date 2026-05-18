@@ -12,13 +12,16 @@ import {
   createCommunicationsSharedInbox,
   deleteCommunicationsSharedInbox,
   EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED,
+  fetchCommunicationsAuthURL,
   fetchCommunicationsStatus,
   listCommunicationsSharedInboxes,
   updateCommunicationsSharedInbox,
   type CommunicationsSharedInbox,
+  type EmailProvider,
 } from "../modules/communications/communicationsApi";
 import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
-import type { NotificationRaciRole, NotificationSummary, NotificationSurface } from "../modules/notifications/notificationsApi";
+import { fetchNotifications, markNotificationRead, type NotificationItem, type NotificationRaciRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../modules/node-map/eventbus";
 import {
   buildSharedInboxRows,
   collectSharedInboxSubtreeIDs,
@@ -83,6 +86,20 @@ type AppSidebarProps = {
   onPinDrop: (event: React.DragEvent<HTMLElement>) => void;
 };
 
+type SidebarNotificationMenuFilter = {
+  title: string;
+  surface?: NotificationSurface;
+  role?: NotificationRaciRole;
+};
+
+type SidebarNotificationMenuState = SidebarNotificationMenuFilter & {
+  x: number;
+  y: number;
+  loading: boolean;
+  error: string;
+  items: NotificationItem[];
+};
+
 function readSharedTriageFolderDrag(dataTransfer: DataTransfer): string {
   return dataTransfer.getData(SHARED_TRIAGE_FOLDER_DRAG_MIME).trim();
 }
@@ -112,6 +129,40 @@ function saveSidebarSectionOpen(sectionID: SidebarSectionID, open: boolean): voi
   try {
     localStorage.setItem(sidebarSectionOpenStorageKey(sectionID), open ? "true" : "false");
   } catch {}
+}
+
+function promptSharedInboxEmail(defaultEmail = ""): string {
+  const raw = window.prompt("Email for shared inbox", defaultEmail.trim().toLowerCase());
+  const email = raw?.trim().toLowerCase() ?? "";
+  if (!email) return "";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    window.alert("Enter a valid email address.");
+    return "";
+  }
+  return email;
+}
+
+function promptEmailProviderForConnection(): EmailProvider | "" {
+  const raw = window.prompt("Connect with provider: google or microsoft", "google")?.trim().toLowerCase() ?? "";
+  if (raw === "google" || raw === "gmail") return "google";
+  if (raw === "microsoft" || raw === "outlook" || raw === "office365") return "microsoft";
+  if (raw) window.alert("Enter google or microsoft.");
+  return "";
+}
+
+function isSharedInboxEmailConnectionError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("shared_inbox_email_account_not_connected");
+}
+
+async function offerNylasConnectionForSharedInboxEmail(error: unknown, accountEmail: string): Promise<boolean> {
+  const cleanAccountEmail = accountEmail.trim().toLowerCase();
+  if (!cleanAccountEmail || !isSharedInboxEmailConnectionError(error)) return false;
+  if (!window.confirm(`${cleanAccountEmail} is not connected yet. Connect it through Nylas now?`)) return true;
+  const provider = promptEmailProviderForConnection();
+  if (!provider) return true;
+  const authURL = await fetchCommunicationsAuthURL(provider, cleanAccountEmail);
+  window.location.assign(authURL);
+  return true;
 }
 
 function usePersistedSidebarSectionOpen(sectionID: SidebarSectionID, fallback: boolean): [boolean, React.Dispatch<React.SetStateAction<boolean>>] {
@@ -158,6 +209,7 @@ export function AppSidebar({
   const [dropTarget, setDropTarget] = useState<{ folderID: string; placement: SharedInboxDropPlacement } | null>(null);
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
   const [pinContextMenu, setPinContextMenu] = useState<{ x: number; y: number; pin: SidebarPin } | null>(null);
+  const [notificationMenu, setNotificationMenu] = useState<SidebarNotificationMenuState | null>(null);
   const [pinDropTarget, setPinDropTarget] = useState<{ key: string; placement: "before" | "after" } | null>(null);
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const renameInputRef = useRef<HTMLInputElement | null>(null);
@@ -203,6 +255,83 @@ export function AppSidebar({
     window.addEventListener("mangorts:home-unread-counts-updated", onHomeUnreadCountsUpdated);
     return () => window.removeEventListener("mangorts:home-unread-counts-updated", onHomeUnreadCountsUpdated);
   }, [companyID]);
+
+  const openMailBadgeView = useCallback((view: HomeSidebarView) => {
+    setNotificationMenu(null);
+    onPageSelect("home");
+    onHomeViewSelect(view);
+  }, [onHomeViewSelect, onPageSelect]);
+
+  const openNotificationMenu = useCallback((event: React.MouseEvent, filter: SidebarNotificationMenuFilter) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const nextMenu: SidebarNotificationMenuState = {
+      ...filter,
+      x: event.clientX,
+      y: event.clientY,
+      loading: true,
+      error: "",
+      items: [],
+    };
+    setNotificationMenu(nextMenu);
+    fetchNotifications({ companyID, unreadOnly: true, limit: 100 })
+      .then((items) => {
+        const filtered = items.filter((item) => sidebarNotificationMatchesFilter(item, filter));
+        setNotificationMenu((current) => (
+          current?.x === nextMenu.x && current?.y === nextMenu.y
+            ? { ...current, loading: false, items: filtered }
+            : current
+        ));
+      })
+      .catch((error) => {
+        setNotificationMenu((current) => (
+          current?.x === nextMenu.x && current?.y === nextMenu.y
+            ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load notifications" }
+            : current
+        ));
+      });
+  }, [companyID]);
+
+  const openNotificationTarget = useCallback((notification: NotificationItem) => {
+    const notificationID = notification.notification_id.trim();
+    if (notificationID) {
+      setNotificationMenu((current) => current ? { ...current, items: current.items.filter((item) => item.notification_id !== notificationID) } : current);
+      void markNotificationRead(notificationID, true).catch((error) => console.error("Failed to clear notification", error));
+    }
+    setNotificationMenu(null);
+
+    const nodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
+    const logicGateID = notification.logic_gate_id?.trim() || (notification.entity_type === "logic_gate" ? notification.entity_id.trim() : "");
+    if (nodeID) {
+      emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
+        companyID: notification.company_id || companyID,
+        sourceFrameID: "app-sidebar-notifications",
+        kind: "node",
+        id: nodeID,
+        label: notification.title || nodeID,
+        selectedTreeID: `node-${nodeID}`,
+        changedAt: Date.now(),
+      });
+      return;
+    }
+    if (logicGateID) {
+      emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
+        companyID: notification.company_id || companyID,
+        sourceFrameID: "app-sidebar-notifications",
+        kind: "logic_gate",
+        id: logicGateID,
+        label: notification.title || logicGateID,
+        selectedTreeID: `logic-gate-${logicGateID}`,
+        changedAt: Date.now(),
+      });
+      return;
+    }
+    if (notification.surface === "aci_inbox") openMailBadgeView("aci-inbox");
+    else if (notification.surface === "r_inbox") openMailBadgeView("r-inbox");
+    else if (notification.surface === "shared_triage") openMailBadgeView("shared-root");
+    else openMailBadgeView("my-triage");
+  }, [companyID, openMailBadgeView]);
+
   const readDraggedSidebarPin = useCallback((dataTransfer: DataTransfer): SidebarPin | null => {
     try {
       const parsed = JSON.parse(dataTransfer.getData(APP_SIDEBAR_PIN_DRAG_MIME)) as Partial<SidebarPin>;
@@ -356,11 +485,18 @@ export function AppSidebar({
       }
       onHomeViewSelect(`shared:${folder.folder_id}`);
     } catch (error) {
+      if (await offerNylasConnectionForSharedInboxEmail(error, accountEmail)) return;
       console.error("Failed to create shared triage folder", error);
     } finally {
       setSharedBusy(false);
     }
   }, [companyID, onHomeViewSelect, sharedBusy]);
+
+  const createSharedInboxWithAssignedEmail = useCallback((parentFolderID: string) => {
+    const accountEmail = promptSharedInboxEmail(cleanConnectedAccountEmail);
+    if (!accountEmail) return;
+    void createSharedFolder(parentFolderID, accountEmail);
+  }, [cleanConnectedAccountEmail, createSharedFolder]);
 
   const setSharedFolderAccountEmail = useCallback(async (folderID: string, accountEmail: string) => {
     if (!companyID || sharedBusy) return;
@@ -370,11 +506,18 @@ export function AppSidebar({
       const updated = await updateCommunicationsSharedInbox({ companyID, folderID, accountEmail });
       replaceSharedFolder(updated);
     } catch (error) {
+      if (await offerNylasConnectionForSharedInboxEmail(error, accountEmail)) return;
       console.error("Failed to update shared triage email account", error);
     } finally {
       setSharedBusy(false);
     }
   }, [companyID, replaceSharedFolder, sharedBusy]);
+
+  const promptAndSetSharedFolderAccountEmail = useCallback((folder: CommunicationsSharedInbox) => {
+    const accountEmail = promptSharedInboxEmail(folder.account_email ?? cleanConnectedAccountEmail);
+    if (!accountEmail) return;
+    void setSharedFolderAccountEmail(folder.folder_id, accountEmail);
+  }, [cleanConnectedAccountEmail, setSharedFolderAccountEmail]);
 
   const commitSharedRename = useCallback(async () => {
     const folderID = renamingSharedFolderID.trim();
@@ -590,7 +733,13 @@ export function AppSidebar({
         <AppSidebarButton
           label="My Triage"
           active={homeActive && activeHomeView === "my-triage"}
-          trailing={<SidebarNotificationBadges badges={[{ key: "my-triage", count: myTriageNotificationCount, tone: "mail", title: "My Triage unread updates" }]} />}
+          trailing={<SidebarNotificationBadges badges={[{
+            key: "my-triage",
+            count: myTriageNotificationCount,
+            tone: "mail",
+            title: "Open My Triage unread mail",
+            onClick: () => openMailBadgeView("my-triage"),
+          }]} />}
           onClick={() => onHomeViewSelect("my-triage")}
         />
         <div style={appSidebarSharedRootBlockStyle}>
@@ -609,7 +758,13 @@ export function AppSidebar({
               <span style={appSidebarTextStyle}>Shared Triage</span>
               <span style={appSidebarTrailingStyle}>
                 {loadingSharedInboxes && <span style={appSidebarSharedMetaStyle}>Loading</span>}
-                <SidebarNotificationBadges badges={[{ key: "shared-triage", count: sharedTriageNotificationCount, tone: "mail", title: "Shared Triage unread updates" }]} />
+                <SidebarNotificationBadges badges={[{
+                  key: "shared-triage",
+                  count: sharedTriageNotificationCount,
+                  tone: "mail",
+                  title: "Open Shared Triage unread mail",
+                  onClick: () => openMailBadgeView("shared-root"),
+                }]} />
               </span>
             </button>
             <button
@@ -635,16 +790,22 @@ export function AppSidebar({
           label="ACI Inbox"
           active={homeActive && activeHomeView === "aci-inbox"}
           trailing={<SidebarNotificationBadges badges={[
-            { key: "accountable", count: aciNotificationCounts.accountable, tone: "accountable", title: "Accountable notifications" },
-            { key: "consulted", count: aciNotificationCounts.consulted, tone: "consulted", title: "Consulted notifications" },
-            { key: "informed", count: aciNotificationCounts.informed, tone: "informed", title: "Informed notifications" },
+            { key: "accountable", count: aciNotificationCounts.accountable, tone: "accountable", title: "Accountable notifications", onClick: (event) => openNotificationMenu(event, { title: "Accountable notifications", surface: "aci_inbox", role: "accountable" }) },
+            { key: "consulted", count: aciNotificationCounts.consulted, tone: "consulted", title: "Consulted notifications", onClick: (event) => openNotificationMenu(event, { title: "Consulted notifications", surface: "aci_inbox", role: "consulted" }) },
+            { key: "informed", count: aciNotificationCounts.informed, tone: "informed", title: "Informed notifications", onClick: (event) => openNotificationMenu(event, { title: "Informed notifications", surface: "aci_inbox", role: "informed" }) },
           ]} />}
           onClick={() => onHomeViewSelect("aci-inbox")}
         />
         <AppSidebarButton
           label="R Inbox"
           active={homeActive && activeHomeView === "r-inbox"}
-          trailing={<SidebarNotificationBadges badges={[{ key: "responsible", count: responsibleNotificationCount, tone: "responsible", title: "Responsible notifications" }]} />}
+          trailing={<SidebarNotificationBadges badges={[{
+            key: "responsible",
+            count: responsibleNotificationCount,
+            tone: "responsible",
+            title: "Responsible notifications",
+            onClick: (event) => openNotificationMenu(event, { title: "Responsible notifications", surface: "r_inbox", role: "responsible" }),
+          }]} />}
           onClick={() => onHomeViewSelect("r-inbox")}
         />
       </section>
@@ -780,28 +941,24 @@ export function AppSidebar({
           >
             {sharedContextMenu.folder ? "New Child Folder" : "New Folder"}
           </button>
-          {cleanConnectedAccountEmail && (
-            <button
-              type="button"
-              style={appSidebarContextMenuButtonStyle}
-              disabled={sharedBusy}
-              onClick={() => void createSharedFolder(sharedContextMenu.folder?.folder_id ?? "", cleanConnectedAccountEmail)}
-            >
-              New Inbox from {cleanConnectedAccountEmail}
-            </button>
-          )}
+          <button
+            type="button"
+            style={appSidebarContextMenuButtonStyle}
+            disabled={sharedBusy}
+            onClick={() => createSharedInboxWithAssignedEmail(sharedContextMenu.folder?.folder_id ?? "")}
+          >
+            Assign email and create inbox
+          </button>
           {sharedContextMenu.folder && (
             <>
-              {cleanConnectedAccountEmail && sharedContextMenu.folder.account_email !== cleanConnectedAccountEmail && (
-                <button
-                  type="button"
-                  style={appSidebarContextMenuButtonStyle}
-                  disabled={sharedBusy}
-                  onClick={() => void setSharedFolderAccountEmail(sharedContextMenu.folder!.folder_id, cleanConnectedAccountEmail)}
-                >
-                  Attach {cleanConnectedAccountEmail}
-                </button>
-              )}
+              <button
+                type="button"
+                style={appSidebarContextMenuButtonStyle}
+                disabled={sharedBusy}
+                onClick={() => promptAndSetSharedFolderAccountEmail(sharedContextMenu.folder!)}
+              >
+                Assign email to inbox
+              </button>
               {sharedContextMenu.folder.account_email && (
                 <button
                   type="button"
@@ -831,6 +988,31 @@ export function AppSidebar({
           )}
         </FrameRightClickMenu>
       )}
+      {notificationMenu && (
+        <FrameRightClickMenu x={notificationMenu.x} y={notificationMenu.y} onClose={() => setNotificationMenu(null)}>
+          <div style={appSidebarNotificationMenuStyle}>
+            <div style={appSidebarNotificationMenuHeaderStyle}>{notificationMenu.title}</div>
+            {notificationMenu.loading ? (
+              <div style={appSidebarNotificationMenuEmptyStyle}>Loading</div>
+            ) : notificationMenu.error ? (
+              <div style={appSidebarNotificationMenuErrorStyle}>{notificationMenu.error}</div>
+            ) : notificationMenu.items.length === 0 ? (
+              <div style={appSidebarNotificationMenuEmptyStyle}>No unread notifications</div>
+            ) : notificationMenu.items.map((notification) => (
+              <button
+                key={notification.notification_id}
+                type="button"
+                style={appSidebarNotificationMenuItemStyle}
+                onClick={() => openNotificationTarget(notification)}
+              >
+                <span style={appSidebarNotificationMenuTitleStyle}>{notification.title}</span>
+                {notification.body_preview && <span style={appSidebarNotificationMenuBodyStyle}>{notification.body_preview}</span>}
+                <span style={appSidebarNotificationMenuMetaStyle}>{formatSidebarNotificationTimestamp(notification.created_timestamp)}</span>
+              </button>
+            ))}
+          </div>
+        </FrameRightClickMenu>
+      )}
       {pinContextMenu && (
         <FrameRightClickMenu x={pinContextMenu.x} y={pinContextMenu.y} onClose={() => setPinContextMenu(null)}>
           <button
@@ -856,12 +1038,19 @@ type SidebarNotificationBadge = {
   count: number;
   tone: SidebarNotificationBadgeTone;
   title: string;
+  onClick?: (event: React.MouseEvent) => void;
 };
 
 function notificationSummaryRoleCount(summary: NotificationSummary, surface: NotificationSurface, role: NotificationRaciRole): number {
   return (summary.role_counts ?? []).reduce((count, item) => (
     item.surface === surface && item.role === role ? count + normalizeSidebarNotificationCount(item.count) : count
   ), 0);
+}
+
+function sidebarNotificationMatchesFilter(item: NotificationItem, filter: SidebarNotificationMenuFilter): boolean {
+  if (filter.surface && item.surface !== filter.surface) return false;
+  if (filter.role && item.role !== filter.role) return false;
+  return true;
 }
 
 function normalizeSidebarNotificationCount(value: unknown): number {
@@ -874,7 +1063,17 @@ function SidebarNotificationBadges({ badges }: { badges: SidebarNotificationBadg
   return (
     <span style={appSidebarBadgeStripStyle} aria-label="Notification counts">
       {visible.map((badge) => (
-        <span key={badge.key} title={badge.title} style={appSidebarNotificationBadgeStyle(badge.tone)}>
+        <span
+          key={badge.key}
+          title={badge.title}
+          aria-label={badge.title}
+          style={appSidebarNotificationBadgeStyle(badge.tone)}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            badge.onClick?.(event);
+          }}
+        >
           {formatSidebarNotificationCount(badge.count)}
         </span>
       ))}
@@ -885,6 +1084,16 @@ function SidebarNotificationBadges({ badges }: { badges: SidebarNotificationBadg
 function formatSidebarNotificationCount(count: number): string {
   const normalized = normalizeSidebarNotificationCount(count);
   return normalized > 99 ? "99+" : String(normalized);
+}
+
+function formatSidebarNotificationTimestamp(value: string): string {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "";
+  const deltaMs = Date.now() - timestamp;
+  if (deltaMs < 60_000) return "Now";
+  if (deltaMs < 60 * 60_000) return `${Math.max(1, Math.floor(deltaMs / 60_000))}m`;
+  if (deltaMs < 24 * 60 * 60_000) return `${Math.max(1, Math.floor(deltaMs / (60 * 60_000)))}h`;
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(timestamp));
 }
 
 function AppSidebarButton({
@@ -1288,6 +1497,8 @@ function appSidebarNotificationBadgeStyle(tone: SidebarNotificationBadgeTone): R
     borderRadius: 4,
     background: colors.background,
     color: colors.color,
+    cursor: "pointer",
+    fontFamily: "inherit",
     fontSize: 9.5,
     fontWeight: 800,
     lineHeight: 1,
@@ -1507,6 +1718,74 @@ const appSidebarContextMenuButtonStyle: React.CSSProperties = {
   fontWeight: 600,
   textAlign: "left",
   padding: "0 12px",
+};
+
+const appSidebarNotificationMenuStyle: React.CSSProperties = {
+  width: 280,
+  maxHeight: 360,
+  display: "grid",
+  alignContent: "start",
+  overflowY: "auto",
+  padding: "6px 0",
+};
+
+const appSidebarNotificationMenuHeaderStyle: React.CSSProperties = {
+  padding: "5px 12px 8px",
+  color: "rgba(36, 18, 10, 0.68)",
+  fontSize: 11,
+  fontWeight: 800,
+  textTransform: "uppercase",
+  letterSpacing: 0,
+};
+
+const appSidebarNotificationMenuItemStyle: React.CSSProperties = {
+  width: "100%",
+  display: "grid",
+  gap: 3,
+  border: "none",
+  background: "transparent",
+  color: "#24120a",
+  cursor: "pointer",
+  font: "inherit",
+  textAlign: "left",
+  padding: "8px 12px",
+};
+
+const appSidebarNotificationMenuTitleStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 12,
+  fontWeight: 750,
+};
+
+const appSidebarNotificationMenuBodyStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "rgba(36, 18, 10, 0.62)",
+  fontSize: 11,
+  fontWeight: 500,
+};
+
+const appSidebarNotificationMenuMetaStyle: React.CSSProperties = {
+  color: "rgba(36, 18, 10, 0.45)",
+  fontSize: 10,
+  fontWeight: 700,
+};
+
+const appSidebarNotificationMenuEmptyStyle: React.CSSProperties = {
+  padding: "10px 12px",
+  color: "rgba(36, 18, 10, 0.55)",
+  fontSize: 12,
+  fontWeight: 600,
+};
+
+const appSidebarNotificationMenuErrorStyle: React.CSSProperties = {
+  ...appSidebarNotificationMenuEmptyStyle,
+  color: "#8b123f",
 };
 
 const appSidebarPinListStyle: React.CSSProperties = {
