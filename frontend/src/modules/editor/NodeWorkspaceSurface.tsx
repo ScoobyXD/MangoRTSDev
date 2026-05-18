@@ -79,6 +79,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   companyID,
   nodeID,
   projections,
+  companyUsers,
   topPx,
   accent,
   surfaceText,
@@ -936,6 +937,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     messages={messages}
                     selectionAnchor={selectionAnchor}
                     draft={chatDrafts[block.id] ?? ""}
+                    companyUsers={companyUsers}
                     active={chatIsActive}
                     currentUserID={author.userID}
                     activeMessageID={activeChatMessageID}
@@ -968,6 +970,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     messages={messages}
                     selectionAnchor={selectionAnchor}
                     draft={chatDrafts[block.id] ?? ""}
+                    companyUsers={companyUsers}
                     active={chatIsActive}
                     currentUserID={author.userID}
                     activeMessageID={activeChatMessageID}

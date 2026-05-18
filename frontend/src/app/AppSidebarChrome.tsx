@@ -180,12 +180,12 @@ export function AppSidebar({
     [notificationSummary],
   );
   const myTriageNotificationCount = useMemo(
-    () => mailUnreadCounts.myTriage + notificationSummarySurfaceCount(notificationSummary, "my_triage"),
-    [mailUnreadCounts.myTriage, notificationSummary],
+    () => mailUnreadCounts.myTriage,
+    [mailUnreadCounts.myTriage],
   );
   const sharedTriageNotificationCount = useMemo(
-    () => mailUnreadCounts.sharedTriage + notificationSummarySurfaceCount(notificationSummary, "shared_triage"),
-    [mailUnreadCounts.sharedTriage, notificationSummary],
+    () => mailUnreadCounts.sharedTriage,
+    [mailUnreadCounts.sharedTriage],
   );
   useEffect(() => {
     const onHomeUnreadCountsUpdated = (event: Event) => {
@@ -817,12 +817,6 @@ type SidebarNotificationBadge = {
 function notificationSummaryRoleCount(summary: NotificationSummary, surface: NotificationSurface, role: NotificationRaciRole): number {
   return (summary.role_counts ?? []).reduce((count, item) => (
     item.surface === surface && item.role === role ? count + normalizeSidebarNotificationCount(item.count) : count
-  ), 0);
-}
-
-function notificationSummarySurfaceCount(summary: NotificationSummary, surface: NotificationSurface): number {
-  return (summary.role_counts ?? []).reduce((count, item) => (
-    item.surface === surface ? count + normalizeSidebarNotificationCount(item.count) : count
   ), 0);
 }
 

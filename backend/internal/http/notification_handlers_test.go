@@ -228,3 +228,153 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 		t.Fatalf("notification title = %q, want author label", payload.Notifications[0].Title)
 	}
 }
+
+func TestNodeChatWithoutMentionDoesNotNotifyAssignee(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "33333333-3333-4333-8333-333333333333"
+
+	author, err := repo.UpsertAuthUser("plain-author-subject", "plain-author@example.com", "Plain Author")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("plain-author-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	assignee, err := repo.UpsertAuthUser("plain-assignee-subject", "plain-assignee@example.com", "Plain Assignee")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("plain-assignee-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "Quiet packet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpdateNode(store.UpdateNodeInput{
+		CompanyID:         companyID,
+		NodeID:            node.NodeID,
+		AssigneeUserID:    &assignee.UserID,
+		AssigneeUserIDSet: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	commentBody, _ := json.Marshal(map[string]any{
+		"company_id":  companyID,
+		"type":        "Text block chat",
+		"information": "Plain discussion without a mention.",
+	})
+	commentReq := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+node.NodeID+"/information", bytes.NewReader(commentBody))
+	commentReq = requestWithActorForNotifications(commentReq, author, companyID)
+	commentReq.Header.Set("Content-Type", "application/json")
+	commentRec := httptest.NewRecorder()
+	handler.ServeHTTP(commentRec, commentReq)
+	if commentRec.Code != http.StatusCreated {
+		t.Fatalf("POST node information status = %d body=%s", commentRec.Code, commentRec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
+	listReq = requestWithActorForNotifications(listReq, assignee, companyID)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET notifications status = %d body=%s", listRec.Code, listRec.Body.String())
+	}
+	var payload struct {
+		Notifications []domain.Notification `json:"notifications"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode notifications: %v", err)
+	}
+	if len(payload.Notifications) != 0 {
+		t.Fatalf("notification count = %d, want 0: %+v", len(payload.Notifications), payload.Notifications)
+	}
+}
+
+func TestNodeAssignmentAndAssignedFieldChangesNotifyAssignee(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "44444444-4444-4444-8444-444444444444"
+
+	assignee, err := repo.UpsertAuthUser("node-assignee-notify-subject", "node-assignee-notify@example.com", "Node Assignee")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("node-assignee-notify-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	editor, err := repo.UpsertAuthUser("node-editor-notify-subject", "node-editor-notify@example.com", "Node Editor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("node-editor-notify-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "Assigned node")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assignBody, _ := json.Marshal(map[string]any{
+		"company_id":       companyID,
+		"assignee_user_id": assignee.UserID,
+	})
+	assignReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(assignBody))
+	assignReq = requestWithActorForNotifications(assignReq, editor, companyID)
+	assignReq.Header.Set("Content-Type", "application/json")
+	assignRec := httptest.NewRecorder()
+	handler.ServeHTTP(assignRec, assignReq)
+	if assignRec.Code != http.StatusOK {
+		t.Fatalf("PUT node assignment status = %d body=%s", assignRec.Code, assignRec.Body.String())
+	}
+
+	updateBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"status":     "In Progress",
+		"due_date":   "2026-06-01",
+		"priority":   2,
+	})
+	updateReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(updateBody))
+	updateReq = requestWithActorForNotifications(updateReq, editor, companyID)
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRec := httptest.NewRecorder()
+	handler.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("PUT node fields status = %d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
+	listReq = requestWithActorForNotifications(listReq, assignee, companyID)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET notifications status = %d body=%s", listRec.Code, listRec.Body.String())
+	}
+	var payload struct {
+		Notifications []domain.Notification `json:"notifications"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode notifications: %v", err)
+	}
+	if len(payload.Notifications) != 2 {
+		t.Fatalf("notification count = %d, want 2: %+v", len(payload.Notifications), payload.Notifications)
+	}
+	types := map[string]bool{}
+	for _, item := range payload.Notifications {
+		types[item.Type] = true
+		if item.Surface != domain.NotificationSurfaceRInbox || item.Role != domain.LogicGateRaciRoleResponsible || item.NodeID != node.NodeID {
+			t.Fatalf("notification metadata = %+v, want responsible R inbox for node", item)
+		}
+	}
+	if !types[domain.NotificationEventNodeAssigned] || !types[domain.NotificationEventNodeFieldsChanged] {
+		t.Fatalf("notification types = %+v, want node assigned and node fields changed", types)
+	}
+}

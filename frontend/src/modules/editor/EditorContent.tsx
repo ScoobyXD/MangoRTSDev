@@ -1562,6 +1562,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             companyID={companyID}
             nodeID={linkedNodeID}
             projections={nodeWorkspaceProjections}
+            companyUsers={companyUsers}
             topPx={documentTopPx}
             accent={accent}
             surfaceText={surfaceText}

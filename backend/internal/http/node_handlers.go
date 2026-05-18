@@ -192,6 +192,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "node_update_required")
 				return
 			}
+			beforeNode, beforeNodeErr := s.repo.GetNode(input.CompanyID, nodeID)
 			item, err := s.repo.UpdateNode(input)
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "node_not_found")
@@ -210,6 +211,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.publishWorkspaceEvent(input.CompanyID, "node_updated", map[string]any{"node_id": nodeID, "node": item})
+			if beforeNodeErr == nil {
+				s.recordNodeUpdateNotifications(r, input, beforeNode, item)
+			}
 			writeJSON(w, http.StatusOK, item)
 			return
 		}
@@ -347,7 +351,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(req.Type) == "Text block chat" {
 			actorUserID, actorLabel := notificationActorPayload(r)
 			mentionedUserIDs, err := s.notifications.ResolveMentionedUserIDs(req.CompanyID, req.Information)
-			if err == nil {
+			if err == nil && len(mentionedUserIDs) > 0 {
 				payload := map[string]any{
 					"comment":            item.Information,
 					"information_id":     item.InformationID,
@@ -357,23 +361,12 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				s.recordNotificationEvent(store.NotificationEventInput{
 					CompanyID:      req.CompanyID,
 					ActorUserID:    actorUserID,
-					Type:           domain.NotificationEventNodeCommentCreated,
+					Type:           domain.NotificationEventMentionCreated,
 					EntityType:     "node",
 					EntityID:       nodeID,
-					IdempotencyKey: "node-comment:" + item.InformationID,
+					IdempotencyKey: "mention:node:" + item.InformationID,
 					Payload:        payload,
 				})
-				if len(mentionedUserIDs) > 0 {
-					s.recordNotificationEvent(store.NotificationEventInput{
-						CompanyID:      req.CompanyID,
-						ActorUserID:    actorUserID,
-						Type:           domain.NotificationEventMentionCreated,
-						EntityType:     "node",
-						EntityID:       nodeID,
-						IdempotencyKey: "mention:node:" + item.InformationID,
-						Payload:        payload,
-					})
-				}
 			}
 		}
 		writeJSON(w, http.StatusCreated, item)

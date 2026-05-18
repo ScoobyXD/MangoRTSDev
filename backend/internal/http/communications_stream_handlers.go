@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -159,17 +158,6 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 		if s.emailHub.hasSubscribers(userID) {
 			s.publishCommunicationsEvent(userID, "mailbox_changed", change.Trigger, change.MessageID)
 		}
-		s.recordNotificationEvent(store.NotificationEventInput{
-			Type:           domain.NotificationEventACIInboxChanged,
-			EntityType:     "aci_inbox",
-			EntityID:       userID,
-			IdempotencyKey: "aci-webhook:" + nylasWebhookChangeKey(grantID, change),
-			Payload: map[string]any{
-				"recipient_user_ids": []string{userID},
-				"message_id":         change.MessageID,
-				"change_summary":     "Mailbox event: " + normalizedNylasMailboxTrigger(change.Trigger),
-			},
-		})
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

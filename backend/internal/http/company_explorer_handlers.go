@@ -253,29 +253,6 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 		return
 	}
 	s.publishWorkspaceEvent(req.CompanyID, "communications_shared_inbox_raci_updated", map[string]any{"folder_id": folderID, "raci_assignments": assignments})
-	actorUserID, actorLabel := notificationActorPayload(r)
-	folderName := ""
-	if folders, err := s.repo.ListCompanyExplorerFolders(req.CompanyID, "communications"); err == nil {
-		for _, folder := range folders {
-			if folder.FolderID == folderID {
-				folderName = folder.Name
-				break
-			}
-		}
-	}
-	s.recordNotificationEvent(store.NotificationEventInput{
-		CompanyID:      req.CompanyID,
-		ActorUserID:    actorUserID,
-		Type:           domain.NotificationEventACIInboxRaciUpdated,
-		EntityType:     "aci_inbox",
-		EntityID:       folderID,
-		IdempotencyKey: "aci-inbox-raci:" + req.CompanyID + ":" + folderID + ":" + sharedInboxRaciFingerprint(assignments),
-		Payload: map[string]any{
-			"assignment_user_ids": sharedInboxRaciAssignmentUserIDs(assignments),
-			"actor_display_name":  actorLabel,
-			"folder_name":         folderName,
-		},
-	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"company_id":       req.CompanyID,
 		"folder_id":        folderID,
