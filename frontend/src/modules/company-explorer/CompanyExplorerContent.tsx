@@ -62,11 +62,27 @@ import {
 
 const scopedRootCreationKeys = new Set<string>();
 
+function findParentScrollContainer(element: HTMLElement): HTMLElement {
+  let current = element.parentElement;
+  while (current) {
+    const style = window.getComputedStyle(current);
+    if ((style.overflowY === "auto" || style.overflowY === "scroll") && current.scrollHeight > current.clientHeight) return current;
+    current = current.parentElement;
+  }
+  return element;
+}
+
+function getRowsTopOffsetInScrollContainer(viewport: HTMLElement, scrollContainer: HTMLElement): number {
+  const rowsStart = viewport.querySelector<HTMLElement>('[data-company-explorer-tree-rows-start="true"]') ?? viewport;
+  return rowsStart.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top + scrollContainer.scrollTop;
+}
+
 // Company Explorer module: tree navigation + node context handoff into Node Map and Editor.
 export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   accent,
   widgetId,
   hideTopControls = false,
+  useParentScroll = false,
   theme = "mango",
   selectionTargetFrameIDs,
   scopedRootFolderKind,
@@ -107,7 +123,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const renameCommitInFlightRef = useRef(false);
   const treeViewportRef = useRef<HTMLDivElement | null>(null);
   const treeKeyboardActiveRef = useRef(false);
-  const [treeScrollTop, setTreeScrollTop] = useState(() => readScrollTopFromStorage(scrollStorageKey));
+  const [treeScrollTop, setTreeScrollTop] = useState(() => useParentScroll ? 0 : readScrollTopFromStorage(scrollStorageKey));
   const previousExplorerSearchTextRef = useRef("");
   const preSearchScrollTopRef = useRef(treeScrollTop);
   const [treeViewportHeight, setTreeViewportHeight] = useState(480);
@@ -362,15 +378,22 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       if (!previousSearchText) preSearchScrollTopRef.current = treeScrollTop;
       if (explorerSearchText !== previousSearchText) {
         setTreeScrollTop(0);
-        if (viewport) viewport.scrollTop = 0;
+        if (viewport) {
+          if (useParentScroll) {
+            const scrollContainer = findParentScrollContainer(viewport);
+            scrollContainer.scrollTop = Math.max(0, getRowsTopOffsetInScrollContainer(viewport, scrollContainer));
+          } else {
+            viewport.scrollTop = 0;
+          }
+        }
       }
     } else if (previousSearchText) {
       const restoredScrollTop = preSearchScrollTopRef.current;
       setTreeScrollTop(restoredScrollTop);
-      if (viewport) viewport.scrollTop = restoredScrollTop;
+      if (viewport && !useParentScroll) viewport.scrollTop = restoredScrollTop;
     }
     previousExplorerSearchTextRef.current = explorerSearchText;
-  }, [explorerSearchActive, explorerSearchText]);
+  }, [explorerSearchActive, explorerSearchText, treeScrollTop, useParentScroll]);
 
   useEffect(() => {
     selectedTreeIDRef.current = selectedTreeID;
@@ -403,14 +426,41 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
 
   useEffect(() => {
     if (!treeViewportRef.current) return;
+    const viewport = treeViewportRef.current;
+    const scrollContainer = useParentScroll ? findParentScrollContainer(viewport) : viewport;
+    let animationFrame = 0;
+
     const measure = () => {
-      const height = treeViewportRef.current?.clientHeight ?? 0;
+      if (useParentScroll) {
+        const rowsTopOffset = getRowsTopOffsetInScrollContainer(viewport, scrollContainer);
+        setTreeViewportHeight(Math.max(1, scrollContainer.clientHeight));
+        setTreeScrollTop(Math.max(0, scrollContainer.scrollTop - rowsTopOffset));
+        return;
+      }
+      const height = viewport.clientHeight;
       if (height > 0) setTreeViewportHeight(height);
     };
+
+    const scheduleMeasure = () => {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(measure);
+    };
+
     measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, []);
+    if (useParentScroll) scrollContainer.addEventListener("scroll", scheduleMeasure, { passive: true });
+    window.addEventListener("resize", scheduleMeasure);
+
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleMeasure);
+    resizeObserver?.observe(viewport);
+    if (scrollContainer !== viewport) resizeObserver?.observe(scrollContainer);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      if (useParentScroll) scrollContainer.removeEventListener("scroll", scheduleMeasure);
+      window.removeEventListener("resize", scheduleMeasure);
+      resizeObserver?.disconnect();
+    };
+  }, [explorerSearchActive, hideTopControls, treeRows.length, useParentScroll]);
 
   useEffect(() => {
     if (defaultExpansionAppliedRef.current) return;
@@ -467,10 +517,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
 
   useEffect(() => {
     const viewport = treeViewportRef.current;
-    if (!viewport) return;
+    if (!viewport || useParentScroll) return;
     const nextScrollTop = Math.max(0, Math.round(treeScrollTop));
     if (Math.abs(viewport.scrollTop - nextScrollTop) > 1) viewport.scrollTop = nextScrollTop;
-  }, [treeRows.length, treeScrollTop]);
+  }, [treeRows.length, treeScrollTop, useParentScroll]);
 
   const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
     const headers = new Headers(init?.headers);
@@ -1099,23 +1149,27 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const index = treeRows.findIndex((row) => row.id === rowID);
     const viewport = treeViewportRef.current;
     if (index < 0 || !viewport) return;
+    const scrollContainer = useParentScroll ? findParentScrollContainer(viewport) : viewport;
     const rowsStart = viewport.querySelector<HTMLElement>('[data-company-explorer-tree-rows-start="true"]');
-    const currentTop = viewport.scrollTop;
-    const viewportHeight = viewport.clientHeight || treeViewportHeight;
+    const rowsTopOffset = useParentScroll
+      ? getRowsTopOffsetInScrollContainer(viewport, scrollContainer)
+      : (rowsStart?.offsetTop ?? 0);
+    const currentTop = scrollContainer.scrollTop;
+    const viewportHeight = scrollContainer.clientHeight || treeViewportHeight;
     const nextScrollTop = getExplorerScrollTopForRow({
       rowIndex: index,
       rowHeight: COMPANY_EXPLORER_TREE_ROW_HEIGHT,
-      rowsTopOffset: rowsStart?.offsetTop ?? 0,
+      rowsTopOffset,
       currentScrollTop: currentTop,
       viewportHeight,
-      maxScrollTop: Math.max(0, viewport.scrollHeight - viewportHeight),
+      maxScrollTop: Math.max(0, scrollContainer.scrollHeight - viewportHeight),
       bottomPadding: COMPANY_EXPLORER_TREE_ROW_HEIGHT * 2,
       align: options.align,
     });
     if (nextScrollTop === currentTop) return;
-    viewport.scrollTop = nextScrollTop;
-    setTreeScrollTop(nextScrollTop);
-  }, [treeRows, treeViewportHeight]);
+    scrollContainer.scrollTop = nextScrollTop;
+    setTreeScrollTop(useParentScroll ? Math.max(0, nextScrollTop - rowsTopOffset) : nextScrollTop);
+  }, [treeRows, treeViewportHeight, useParentScroll]);
 
   const applyExplorerFindSelection = useCallback((entities: ExplorerFindEntity[]) => {
     const plan = buildExplorerFindSelection({
@@ -1577,7 +1631,19 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   };
 
   return (
-    <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", background: surfaceBackground, color: surfaceText, overflow: "hidden", minWidth: 0 }}>
+    <div
+      style={{
+        width: "100%",
+        height: useParentScroll ? "auto" : "100%",
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr)",
+        alignContent: useParentScroll ? "start" : undefined,
+        background: surfaceBackground,
+        color: surfaceText,
+        overflow: useParentScroll ? "visible" : "hidden",
+        minWidth: 0,
+      }}
+    >
       <CompanyExplorerTree
         error={error}
         accent={accent}
@@ -1593,6 +1659,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         scrollbarTrack={scrollbarTrack}
         isDarkTheme={isDarkTheme}
         hideTopControls={hideTopControls}
+        useParentScroll={useParentScroll}
         treeViewportRef={treeViewportRef}
         treeKeyboardActiveRef={treeKeyboardActiveRef}
         treeRows={treeRows}

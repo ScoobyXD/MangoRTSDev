@@ -131,6 +131,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   return (
     <div
       className="company-explorer-row"
+      data-company-explorer-row-id={row.id}
       draggable={!isSearchActive && !!rowDragPayload && renaming?.treeID !== row.id}
       onClick={(event) => onSelectTreeRow(row, event)}
       onContextMenu={(event) => onOpenContextMenu(event, row)}

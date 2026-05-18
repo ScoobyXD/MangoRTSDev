@@ -87,6 +87,7 @@ export type CompanyExplorerContentProps = {
   accent: string;
   widgetId?: string;
   hideTopControls?: boolean;
+  useParentScroll?: boolean;
   theme?: "mango" | "teal" | "light" | "dark";
   selectionTargetFrameIDs?: string[];
   scopedRootFolderKind?: CompanyExplorerFolderKind;
