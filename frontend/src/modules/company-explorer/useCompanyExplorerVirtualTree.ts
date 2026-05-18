@@ -9,6 +9,7 @@ export function useCompanyExplorerVirtualTree(
   treeRows: ExplorerTreeNode[],
   treeViewportHeight: number,
   treeScrollTop: number,
+  bottomBufferRows = COMPANY_EXPLORER_BOTTOM_BUFFER_ROWS,
 ): ExplorerVirtualizedTree {
   return useMemo(() => {
     const total = treeRows.length;
@@ -23,7 +24,7 @@ export function useCompanyExplorerVirtualTree(
     return {
       rows,
       topSpacer: start * COMPANY_EXPLORER_TREE_ROW_HEIGHT,
-      bottomSpacer: Math.max(0, (total - end + COMPANY_EXPLORER_BOTTOM_BUFFER_ROWS) * COMPANY_EXPLORER_TREE_ROW_HEIGHT),
+      bottomSpacer: Math.max(0, (total - end + bottomBufferRows) * COMPANY_EXPLORER_TREE_ROW_HEIGHT),
     };
-  }, [treeRows, treeViewportHeight, treeScrollTop]);
+  }, [bottomBufferRows, treeRows, treeViewportHeight, treeScrollTop]);
 }

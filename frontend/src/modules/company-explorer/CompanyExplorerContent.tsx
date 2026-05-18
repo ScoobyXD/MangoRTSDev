@@ -359,7 +359,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const rowByID = useMemo(() => new Map(treeRows.map((row) => [row.id, row])), [treeRows]);
   const baseRowByID = useMemo(() => new Map(baseTreeRows.map((row) => [row.id, row])), [baseTreeRows]);
   const selectedTree = rowByID.get(selectedTreeID) ?? baseRowByID.get(selectedTreeID) ?? (scopedRootFolder ? scopedRootRow : fullSelectedTree);
-  const virtualizedTree = useCompanyExplorerVirtualTree(treeRows, treeViewportHeight, treeScrollTop);
+  const virtualizedTree = useCompanyExplorerVirtualTree(treeRows, treeViewportHeight, treeScrollTop, useParentScroll ? 0 : undefined);
   const scopedAllowedItemType: CompanyExplorerItemType | "" = scopedKind ?? "";
   const systemFolderTreeIDByKey = useMemo(() => {
     const items = new Map<CompanyExplorerSystemFolderKey, string>();
