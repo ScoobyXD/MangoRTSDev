@@ -198,6 +198,7 @@ func (r *MemoryRepo) CreateNotifications(input CreateNotificationsInput) ([]doma
 func (r *MemoryRepo) ListNotifications(input NotificationListInput) ([]domain.Notification, error) {
 	input.UserID = strings.TrimSpace(input.UserID)
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.NotificationType = strings.TrimSpace(input.NotificationType)
 	if input.UserID == "" {
 		return nil, ErrInvalid
 	}
@@ -212,6 +213,9 @@ func (r *MemoryRepo) ListNotifications(input NotificationListInput) ([]domain.No
 			continue
 		}
 		if input.CompanyID != "" && item.CompanyID != input.CompanyID {
+			continue
+		}
+		if input.NotificationType != "" && item.Type != input.NotificationType {
 			continue
 		}
 		if input.UnreadOnly && item.ReadTimestamp != nil {
@@ -247,10 +251,12 @@ func (r *MemoryRepo) GetNotificationSummary(input NotificationSummaryInput) (dom
 	summary := domain.NotificationSummary{
 		CompanyID:        input.CompanyID,
 		RoleCounts:       []domain.NotificationRoleCount{},
+		TypeCounts:       []domain.NotificationTypeCount{},
 		LogicGateCounts:  []domain.NotificationLogicGateCount{},
 		UpdatedTimestamp: time.Now().UTC(),
 	}
 	roleCounts := map[string]domain.NotificationRoleCount{}
+	typeCounts := map[string]domain.NotificationTypeCount{}
 	logicGateCounts := map[string]domain.NotificationLogicGateCount{}
 	for _, item := range r.notifications {
 		if item.RecipientUserID != input.UserID || item.ReadTimestamp != nil {
@@ -260,6 +266,14 @@ func (r *MemoryRepo) GetNotificationSummary(input NotificationSummaryInput) (dom
 			continue
 		}
 		summary.TotalUnread++
+		if item.Type != "" {
+			count := typeCounts[item.Type]
+			if count.Count == 0 {
+				count.Type = item.Type
+			}
+			count.Count++
+			typeCounts[item.Type] = count
+		}
 		if item.Surface != "" || item.Role != "" {
 			key := item.Surface + "\x00" + item.Role
 			count := roleCounts[key]
@@ -285,6 +299,9 @@ func (r *MemoryRepo) GetNotificationSummary(input NotificationSummaryInput) (dom
 	for _, count := range roleCounts {
 		summary.RoleCounts = append(summary.RoleCounts, count)
 	}
+	for _, count := range typeCounts {
+		summary.TypeCounts = append(summary.TypeCounts, count)
+	}
 	for _, count := range logicGateCounts {
 		summary.LogicGateCounts = append(summary.LogicGateCounts, count)
 	}
@@ -293,6 +310,9 @@ func (r *MemoryRepo) GetNotificationSummary(input NotificationSummaryInput) (dom
 			return cmp
 		}
 		return strings.Compare(a.Role, b.Role)
+	})
+	slices.SortFunc(summary.TypeCounts, func(a, b domain.NotificationTypeCount) int {
+		return strings.Compare(a.Type, b.Type)
 	})
 	slices.SortFunc(summary.LogicGateCounts, func(a, b domain.NotificationLogicGateCount) int {
 		if cmp := strings.Compare(a.LogicGateID, b.LogicGateID); cmp != 0 {

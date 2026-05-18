@@ -205,7 +205,7 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 		t.Fatalf("POST node information status = %d body=%s", commentRec.Code, commentRec.Body.String())
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
 	listReq = requestWithActorForNotifications(listReq, mentioned, companyID)
 	listRec := httptest.NewRecorder()
 	handler.ServeHTTP(listRec, listReq)
@@ -226,6 +226,21 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	}
 	if !strings.Contains(payload.Notifications[0].Title, "Author User") {
 		t.Fatalf("notification title = %q, want author label", payload.Notifications[0].Title)
+	}
+
+	summaryReq := httptest.NewRequest(http.MethodGet, "/v1/notifications/summary?company_id="+companyID, nil)
+	summaryReq = requestWithActorForNotifications(summaryReq, mentioned, companyID)
+	summaryRec := httptest.NewRecorder()
+	handler.ServeHTTP(summaryRec, summaryReq)
+	if summaryRec.Code != http.StatusOK {
+		t.Fatalf("GET notification summary status = %d body=%s", summaryRec.Code, summaryRec.Body.String())
+	}
+	var summary domain.NotificationSummary
+	if err := json.NewDecoder(summaryRec.Body).Decode(&summary); err != nil {
+		t.Fatalf("decode notification summary: %v", err)
+	}
+	if len(summary.TypeCounts) != 1 || summary.TypeCounts[0].Type != domain.NotificationEventMentionCreated || summary.TypeCounts[0].Count != 1 {
+		t.Fatalf("summary type counts = %+v, want one mention", summary.TypeCounts)
 	}
 }
 

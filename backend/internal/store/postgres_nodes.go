@@ -142,6 +142,9 @@ func (r *PostgresRepo) CreateNode(companyID, title string) (domain.Node, error) 
 
 func (r *PostgresRepo) CreateNodeWithAssignee(companyID, title, assigneeUserID string) (domain.Node, error) {
 	ctx := context.Background()
+	if err := r.ensureCompanyExplorerSharedInboxSchema(ctx); err != nil {
+		return domain.Node{}, err
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Node{}, err

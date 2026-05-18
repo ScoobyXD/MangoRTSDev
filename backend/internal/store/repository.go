@@ -353,10 +353,11 @@ type CreateNotificationsInput struct {
 }
 
 type NotificationListInput struct {
-	UserID     string
-	CompanyID  string
-	UnreadOnly bool
-	Limit      int
+	UserID           string
+	CompanyID        string
+	NotificationType string
+	UnreadOnly       bool
+	Limit            int
 }
 
 type NotificationSummaryInput struct {

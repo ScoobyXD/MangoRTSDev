@@ -597,15 +597,17 @@ export function NodeEditorPopup({ nodeID, nodeTitle, onClose, onCollapseToTab }:
   );
 }
 
-export function HomeNavButton({ label, active, depth = 0, onClick }: {
+export function HomeNavButton({ label, active, depth = 0, meta, onClick }: {
   label: string;
   active: boolean;
   depth?: number;
-  onClick: () => void;
+  meta?: React.ReactNode;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <button type="button" style={{ ...navButtonStyle(active), paddingLeft: 10 + depth * 14 }} onClick={onClick}>
       <span style={navLabelStyle}>{label}</span>
+      {meta}
     </button>
   );
 }
@@ -629,7 +631,9 @@ export function HomeSidebar({
   loadingSharedInboxes,
   newSharedInboxName,
   busy,
+  notificationSummary,
   onSelectView,
+  onOpenMentionNotification,
   onNewSharedInboxNameChange,
   onSubmitSharedInbox,
   onCreateSharedInbox,
@@ -644,7 +648,9 @@ export function HomeSidebar({
   loadingSharedInboxes: boolean;
   newSharedInboxName: string;
   busy: string;
+  notificationSummary: NotificationSummary;
   onSelectView: (viewID: HomeViewID, mailbox?: EmailMailbox) => void;
+  onOpenMentionNotification: (notification: NotificationItem) => void;
   onNewSharedInboxNameChange: (value: string) => void;
   onSubmitSharedInbox: (event: React.FormEvent<HTMLFormElement>) => void;
   onCreateSharedInbox: (parentFolderID: string, name?: string, accountEmail?: string) => Promise<CommunicationsSharedInbox | null>;
@@ -660,11 +666,13 @@ export function HomeSidebar({
   const [draggingSharedFolderID, setDraggingSharedFolderID] = useState("");
   const [dropTarget, setDropTarget] = useState<{ folderID: string; placement: SharedInboxDropPlacement } | null>(null);
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
+  const [mentionNotificationMenu, setMentionNotificationMenu] = useState<InboxNotificationMenuState | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
   const cleanConnectedAccountEmail = connectedAccountEmail?.trim().toLowerCase() ?? "";
   const sharedRows = useMemo(() => sharedRootOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [], [expandedSharedFolderIDs, sharedInboxes, sharedRootOpen]);
   const sharedBusy = busy === "shared-inbox";
+  const mentionUnreadCount = notificationCountForType(notificationSummary, "mention.created");
 
   useEffect(() => {
     setExpandedSharedFolderIDs((previous) => {
@@ -819,6 +827,45 @@ export function HomeSidebar({
     event.preventDefault();
     void moveSharedFolder(sourceFolderID, "", "inside");
   }, [canDropSharedFolder, draggingSharedFolderID, moveSharedFolder]);
+
+  const openMentionNotifications = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const nextMenu: InboxNotificationMenuState = {
+      x: event.clientX,
+      y: event.clientY,
+      title: "@ Mentions",
+      loading: true,
+      error: "",
+      items: [],
+    };
+    setMentionNotificationMenu(nextMenu);
+    fetchNotifications({ companyID: getActiveCompanyID(), type: "mention.created", unreadOnly: true, limit: 100 })
+      .then((items) => {
+        setMentionNotificationMenu((current) => (
+          current?.x === nextMenu.x && current?.y === nextMenu.y
+            ? { ...current, loading: false, items }
+            : current
+        ));
+      })
+      .catch((error) => {
+        setMentionNotificationMenu((current) => (
+          current?.x === nextMenu.x && current?.y === nextMenu.y
+            ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load @ mentions" }
+            : current
+        ));
+      });
+  }, []);
+
+  const openMentionNotificationTarget = useCallback((notification: NotificationItem) => {
+    const notificationID = notification.notification_id.trim();
+    if (notificationID) {
+      setMentionNotificationMenu((current) => current ? { ...current, items: current.items.filter((item) => item.notification_id !== notificationID) } : current);
+      void markNotificationRead(notificationID, true).catch((error) => console.error("Failed to clear @ mention notification", error));
+    }
+    setMentionNotificationMenu(null);
+    onOpenMentionNotification(notification);
+  }, [onOpenMentionNotification]);
 
   const renderSharedRow = (row: SharedInboxTreeRow) => {
     const folder = row.folder;
@@ -995,6 +1042,12 @@ export function HomeSidebar({
         </section>
         <HomeNavButton label="ACI Inbox" active={activeViewID === "aci-inbox"} onClick={() => onSelectView("aci-inbox", "all")} />
         <HomeNavButton label="R Inbox" active={activeViewID === "r-inbox"} onClick={() => onSelectView("r-inbox", "all")} />
+        <HomeNavButton
+          label="@ Mentions"
+          active={mentionNotificationMenu !== null}
+          meta={<span style={mentionNotificationBadgeStyle}>{formatInboxNotificationCount(mentionUnreadCount)}</span>}
+          onClick={openMentionNotifications}
+        />
         <HomeNavButton label="My Nodes" active={activeViewID === "my-nodes"} onClick={() => onSelectView("my-nodes", "all")} />
         <HomeNavButton label="My Logic Gates" active={activeViewID === "my-logic-gates"} onClick={() => onSelectView("my-logic-gates", "all")} />
       </nav>
@@ -1055,6 +1108,7 @@ export function HomeSidebar({
           )}
         </FrameRightClickMenu>
       )}
+      <InboxNotificationMenu menu={mentionNotificationMenu} onClose={() => setMentionNotificationMenu(null)} onOpen={openMentionNotificationTarget} />
     </aside>
   );
 }
@@ -1869,6 +1923,15 @@ function notificationCountForInboxGroup(summary: NotificationSummary, role: Noti
   }, 0);
 }
 
+function notificationCountForType(summary: NotificationSummary, type: string): number {
+  const cleanType = type.trim();
+  if (!cleanType) return 0;
+  return (summary.type_counts ?? []).reduce((count, item) => {
+    if (item.type !== cleanType) return count;
+    return count + (typeof item.count === "number" && Number.isFinite(item.count) ? Math.max(0, Math.floor(item.count)) : 0);
+  }, 0);
+}
+
 function formatInboxNotificationCount(count: number): string {
   const normalized = typeof count === "number" && Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
   return normalized > 99 ? "99+" : String(normalized);
@@ -2012,6 +2075,20 @@ const inboxNotificationMenuEmptyStyle: React.CSSProperties = {
 const inboxNotificationMenuErrorStyle: React.CSSProperties = {
   ...inboxNotificationMenuEmptyStyle,
   color: "#8b123f",
+};
+
+const mentionNotificationBadgeStyle: React.CSSProperties = {
+  minWidth: 22,
+  height: 18,
+  display: "inline-grid",
+  placeItems: "center",
+  border: "1px solid rgba(255, 136, 32, 0.28)",
+  borderRadius: 999,
+  background: "#fff7eb",
+  color: "#7c2d12",
+  fontSize: 10,
+  fontWeight: 800,
+  padding: "0 6px",
 };
 
 export function AciInboxMatrix({

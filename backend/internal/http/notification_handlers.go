@@ -39,10 +39,11 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 		limit = parsed
 	}
 	items, err := s.repo.ListNotifications(store.NotificationListInput{
-		UserID:     actor.User.UserID,
-		CompanyID:  strings.TrimSpace(r.URL.Query().Get("company_id")),
-		UnreadOnly: parseBoolQuery(r.URL.Query().Get("unread_only")),
-		Limit:      limit,
+		UserID:           actor.User.UserID,
+		CompanyID:        strings.TrimSpace(r.URL.Query().Get("company_id")),
+		NotificationType: strings.TrimSpace(r.URL.Query().Get("type")),
+		UnreadOnly:       parseBoolQuery(r.URL.Query().Get("unread_only")),
+		Limit:            limit,
 	})
 	if errorsIsInvalid(err) {
 		writeError(w, http.StatusBadRequest, "invalid_notifications_request")
