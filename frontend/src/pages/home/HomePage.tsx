@@ -38,6 +38,8 @@ import {
   updateEmailMessage,
   updateCommunicationsSharedInbox,
   updateCommunicationsSharedInboxRaciAssignments,
+  updateLogicGateRaciAssignments,
+  updateNode,
   type CompanyUser,
   type CommunicationsSharedInbox,
   type CommunicationsSharedInboxRaciAssignment,
@@ -59,7 +61,7 @@ import { invalidateNodeRecordStoreCaches } from "../../modules/node-map/NodeReco
 import { upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
 import { upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
-import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache } from "../../modules/kanban/kanbanApi";
+import { getLogicGateArenaView, invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, upsertKanbanCard } from "../../modules/kanban/kanbanApi";
 import { subscribeWorkspaceStream } from "../../modules/workspace/workspaceStream";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
 import {
@@ -69,13 +71,24 @@ import {
   type KanbanBoardContentsUpdatedDetail,
   type KanbanBoardsUpdatedDetail,
 } from "../../modules/kanban/shared";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
-import { AciInboxMatrix, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
+import { AciInboxMatrix, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
-import { buildMyLogicGateGroups, cleanIDList, collectSharedInboxSubtreeIDs, emailAddressListContains, filterExplorerRowsForSearch, filterSharedInboxesForUser, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeHasLogicGateRaciRole, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortNodesForInbox, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, collectSharedInboxSubtreeIDs, emailAddressListContains, filterExplorerRowsForSearch, filterSharedInboxesForUser, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, normalizeResponsibleInboxStatus, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
-import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type WorkspaceStreamEnvelope } from "./homeTypes";
+import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
+
+function responsibleInboxStatusTitle(status: ResponsibleInboxStatus): string {
+  if (status === "in_progress") return "In Progress";
+  if (status === "done") return "Done";
+  return "Pending";
+}
+
+function firstResponsibleUserID(logicGate: LogicGateRecord | undefined): string {
+  return (logicGate?.raci_assignments ?? []).find((assignment) => assignment.role === "responsible")?.user_id?.trim() ?? "";
+}
 export function HomePage({ me, onNavigate, embedded = false, hideNavigation = false, initialViewID = "my-triage" }: HomePageProps) {
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
@@ -92,6 +105,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const [selectedMessage, setSelectedMessage] = useState<EmailMessage | null>(null);
   const [pendingAutoArchiveMessageIDs, setPendingAutoArchiveMessageIDs] = useState<Set<string>>(new Set());
   const [messageContextMenu, setMessageContextMenu] = useState<{ x: number; y: number; messageIDs: string[] } | null>(null);
+  const [bulkEditMenu, setBulkEditMenu] = useState<{ x: number; y: number; kind: "node" | "logic_gate"; ids: string[] } | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ messageIDs: string[] } | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -1234,8 +1248,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const logicGateByID = useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
   const myNodes = useMemo(() => {
     if (!currentUserID) return [];
-    return sortNodesForInbox(nodes.filter((node) => nodeHasLogicGateRaciRole(node, logicGateByID, "responsible", currentUserID)));
-  }, [currentUserID, logicGateByID, nodes]);
+    return nodes.filter((node) => node.assignee_user_id?.trim() === currentUserID);
+  }, [currentUserID, nodes]);
+  const myNodeGroups = useMemo(() => buildMyNodeGroups({
+    nodes: myNodes,
+    logicGateFolders,
+    logicGateFolderItems,
+  }), [logicGateFolderItems, logicGateFolders, myNodes]);
   const logicGateCanvasRecords = useMemo(() => logicGates.map((logicGate) => ({
     ...logicGate,
     node_id: logicGate.logic_gate_id,
@@ -1507,6 +1526,15 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       label,
       nodeID,
     });
+    emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
+      companyID,
+      sourceFrameID: "home",
+      kind: "logic_gate",
+      id: cleanLogicGateID,
+      label,
+      selectedTreeID: logicGateTreeID(cleanLogicGateID),
+      changedAt: Date.now(),
+    });
     preloadLogicGateArenaSurface();
     if (onNavigate) onNavigate("/logic-gate-arena");
     else window.location.assign("/logic-gate-arena");
@@ -1519,6 +1547,176 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       .filter((id) => logicGateByID.has(id));
     return selectedLogicGateIDs.length > 0 ? selectedLogicGateIDs : [cleanLogicGateID];
   }, [logicGateByID, selectedLogicGateRowIDs]);
+  const mergeUpdatedNode = useCallback((node: NodeRecord) => {
+    setNodes((previous) => previous.map((item) => item.node_id === node.node_id ? node : item));
+    invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
+    upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+  }, [apiBase, companyID]);
+  const openNodeBulkEditMenu = useCallback((nodeID: string, event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const cleanNodeID = nodeID.trim();
+    if (!cleanNodeID || !nodeByID.has(cleanNodeID)) return;
+    const treeID = nodeTreeID(cleanNodeID);
+    const ids = selectedNodeRowIDs.has(treeID)
+      ? cleanIDList(Array.from(selectedNodeRowIDs).map(nodeIDFromTreeID)).filter((id) => nodeByID.has(id))
+      : [cleanNodeID];
+    if (!selectedNodeRowIDs.has(treeID)) {
+      setSelectedNodeRowIDs(new Set([treeID]));
+      setNodeSelectionAnchorID(treeID);
+    }
+    setBulkEditMenu({ x: event.clientX, y: event.clientY, kind: "node", ids });
+  }, [nodeByID, selectedNodeRowIDs]);
+  const openLogicGateBulkEditMenu = useCallback((logicGateID: string, event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const cleanLogicGateID = logicGateID.trim();
+    if (!cleanLogicGateID || !logicGateByID.has(cleanLogicGateID)) return;
+    const treeID = logicGateTreeID(cleanLogicGateID);
+    const ids = selectedLogicGateRowIDs.has(treeID)
+      ? cleanIDList(Array.from(selectedLogicGateRowIDs).map(logicGateIDFromTreeID)).filter((id) => logicGateByID.has(id))
+      : [cleanLogicGateID];
+    if (!selectedLogicGateRowIDs.has(treeID)) {
+      setSelectedLogicGateRowIDs(new Set([treeID]));
+      setLogicGateSelectionAnchorID(treeID);
+    }
+    setBulkEditMenu({ x: event.clientX, y: event.clientY, kind: "logic_gate", ids });
+  }, [logicGateByID, selectedLogicGateRowIDs]);
+  const findLogicGateColumnID = useCallback(async (logicGateID: string, status: ResponsibleInboxStatus): Promise<{ boardID: string; columnID: string } | null> => {
+    const view = await getLogicGateArenaView(apiBase, companyID, logicGateID);
+    const sortedColumns = [...(view.columns ?? [])].sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp) || a.column_id.localeCompare(b.column_id));
+    const wantedTitle = responsibleInboxStatusTitle(status).toLowerCase();
+    const column = sortedColumns.find((item) => item.title.trim().toLowerCase() === wantedTitle) ?? sortedColumns[0];
+    if (!column) return null;
+    return { boardID: view.board.board_id, columnID: column.column_id };
+  }, [apiBase, companyID]);
+  const dropNodesIntoInboxLogicGate = useCallback(async (input: { logicGateID: string; nodeIDs: string[]; priority: InboxPriority; status?: ResponsibleInboxStatus }) => {
+    const logicGateID = input.logicGateID.trim();
+    const nodeIDs = cleanIDList(input.nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
+    if (!logicGateID || nodeIDs.length === 0) return;
+    setBusy("inbox-node-drop");
+    setError("");
+    try {
+      const responsibleUserID = firstResponsibleUserID(logicGateByID.get(logicGateID));
+      const columnCache = new Map<ResponsibleInboxStatus, Promise<{ boardID: string; columnID: string } | null>>();
+      const columnForStatus = (status: ResponsibleInboxStatus) => {
+        const existing = columnCache.get(status);
+        if (existing) return existing;
+        const next = findLogicGateColumnID(logicGateID, status);
+        columnCache.set(status, next);
+        return next;
+      };
+      const updatedNodes = await Promise.all(nodeIDs.map(async (nodeID) => {
+        const node = nodeByID.get(nodeID);
+        if (!node) return null;
+        const status = input.status ?? normalizeResponsibleInboxStatus(node.status) ?? "pending";
+        const placement = await columnForStatus(status);
+        if (placement) {
+          await upsertKanbanCard({
+            apiBase,
+            companyID,
+            boardID: placement.boardID,
+            columnID: placement.columnID,
+            nodeID,
+            nodeTitle: nodeTitle(node),
+            position: 0,
+          });
+          invalidateKanbanBoardContentsCache(apiBase, companyID, placement.boardID);
+          invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
+        }
+        const priority = input.priority === 0 ? null : input.priority;
+        const updated = await updateNode(companyID, nodeID, {
+          priority,
+          ...(responsibleUserID ? { assignee_user_id: responsibleUserID } : {}),
+        });
+        return updated;
+      }));
+      for (const node of updatedNodes) {
+        if (node) mergeUpdatedNode(node);
+      }
+      setNotice(nodeIDs.length === 1 ? "Node added to Logic Gate." : `${nodeIDs.length} nodes added to Logic Gate.`);
+    } catch (dropError) {
+      setError(formatError(dropError, "Failed to add nodes to Logic Gate"));
+    } finally {
+      setBusy("");
+    }
+  }, [apiBase, companyID, findLogicGateColumnID, logicGateByID, mergeUpdatedNode, nodeByID]);
+  const applyBulkNodePatch = useCallback(async (nodeIDs: string[], patch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">>) => {
+    const ids = cleanIDList(nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
+    if (ids.length === 0) return;
+    setBusy("bulk-node-edit");
+    setError("");
+    try {
+      const status = normalizeResponsibleInboxStatus(patch.status);
+      const updatedNodes = await Promise.all(ids.map(async (nodeID) => {
+        const node = nodeByID.get(nodeID);
+        if (!node) return null;
+        if (status) {
+          const logicGateID = cleanIDList(node.logic_gate_ids ?? [])[0] ?? "";
+          if (logicGateID) {
+            const placement = await findLogicGateColumnID(logicGateID, status);
+            if (placement) {
+              await upsertKanbanCard({
+                apiBase,
+                companyID,
+                boardID: placement.boardID,
+                columnID: placement.columnID,
+                nodeID,
+                nodeTitle: nodeTitle(node),
+                position: 0,
+              });
+              invalidateKanbanBoardContentsCache(apiBase, companyID, placement.boardID);
+              invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
+            }
+          }
+        }
+        const updated = await updateNode(companyID, nodeID, patch);
+        return updated;
+      }));
+      for (const node of updatedNodes) {
+        if (node) mergeUpdatedNode(node);
+      }
+      setNotice(ids.length === 1 ? "Node updated." : `${ids.length} nodes updated.`);
+    } catch (bulkError) {
+      setError(formatError(bulkError, "Failed to update selected nodes"));
+    } finally {
+      setBusy("");
+      setBulkEditMenu(null);
+    }
+  }, [apiBase, companyID, findLogicGateColumnID, mergeUpdatedNode, nodeByID]);
+  const applyBulkLogicGateRaci = useCallback(async (logicGateIDs: string[], role: CommunicationsSharedInboxRaciRole, userID: string, action: "add" | "remove") => {
+    const ids = cleanIDList(logicGateIDs).filter((logicGateID) => logicGateByID.has(logicGateID));
+    const cleanUserID = userID.trim();
+    if (ids.length === 0 || !cleanUserID) return;
+    setBusy("bulk-logic-gate-edit");
+    setError("");
+    try {
+      const updates = await Promise.all(ids.map(async (logicGateID) => {
+        const current = logicGateByID.get(logicGateID);
+        const existing = current?.raci_assignments ?? [];
+        const nextAssignments = action === "add"
+          ? [
+              ...existing.map((assignment) => ({ role: assignment.role, user_id: assignment.user_id })),
+              { role, user_id: cleanUserID },
+            ]
+          : existing
+              .filter((assignment) => !(assignment.role === role && assignment.user_id === cleanUserID))
+              .map((assignment) => ({ role: assignment.role, user_id: assignment.user_id }));
+        const assignments = await updateLogicGateRaciAssignments(companyID, logicGateID, nextAssignments);
+        return { logicGateID, assignments };
+      }));
+      setLogicGates((previous) => previous.map((logicGate) => {
+        const update = updates.find((item) => item.logicGateID === logicGate.logic_gate_id);
+        return update ? { ...logicGate, raci_assignments: update.assignments } : logicGate;
+      }));
+      setNotice(ids.length === 1 ? "Logic Gate assignments updated." : `${ids.length} Logic Gate assignments updated.`);
+    } catch (bulkError) {
+      setError(formatError(bulkError, "Failed to update selected Logic Gates"));
+    } finally {
+      setBusy("");
+      setBulkEditMenu(null);
+    }
+  }, [companyID, logicGateByID]);
   const startColumnResize = useCallback((dividerIndex: 0 | 1 | 2, event: React.PointerEvent<HTMLButtonElement>) => {
     if (isNarrow) return;
     event.preventDefault();
@@ -1645,13 +1843,20 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                   nodes={nodes}
                   nodeByID={nodeByID}
                   logicGateByID={logicGateByID}
+                  nodeFolders={nodeFolders}
+                  nodeFolderItems={nodeFolderItems}
                   currentUserID={currentUserID}
                   notificationSummary={notificationSummary}
                   selectedRowIDs={selectedNodeRowIDs}
+                  selectedLogicGateRowIDs={selectedLogicGateRowIDs}
                   getNodeDragIDs={getNodeDragIDs}
                   onSelectNode={selectNodeMatrixCard}
+                  onSelectLogicGate={selectLogicGateTreeID}
                   onOpenNode={openNodeEditorOverlay}
                   onOpenLogicGate={openLogicGateArena}
+                  onOpenNodeBulkMenu={openNodeBulkEditMenu}
+                  onOpenLogicGateBulkMenu={openLogicGateBulkEditMenu}
+                  onDropNodes={(input) => { void dropNodesIntoInboxLogicGate(input); }}
                 />
               ) : (
                 <ResponsibleInboxMatrix
@@ -1659,13 +1864,20 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                   nodes={nodes}
                   nodeByID={nodeByID}
                   logicGateByID={logicGateByID}
+                  nodeFolders={nodeFolders}
+                  nodeFolderItems={nodeFolderItems}
                   currentUserID={currentUserID}
                   notificationSummary={notificationSummary}
                   selectedRowIDs={selectedNodeRowIDs}
+                  selectedLogicGateRowIDs={selectedLogicGateRowIDs}
                   getNodeDragIDs={getNodeDragIDs}
                   onSelectNode={selectNodeMatrixCard}
+                  onSelectLogicGate={selectLogicGateTreeID}
                   onOpenNode={openNodeEditorOverlay}
                   onOpenLogicGate={openLogicGateArena}
+                  onOpenNodeBulkMenu={openNodeBulkEditMenu}
+                  onOpenLogicGateBulkMenu={openLogicGateBulkEditMenu}
+                  onDropNodes={(input) => { void dropNodesIntoInboxLogicGate(input); }}
                 />
               )}
               {hideNavigation && !isNarrow && <HomeColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
@@ -1673,7 +1885,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                 loading={loadingNodes}
                 nodeByID={nodeByID}
                 allRows={visibleNodeRows}
-                myNodes={myNodes}
+                myNodeGroups={myNodeGroups}
                 selectedRowIDs={selectedNodeRowIDs}
                 expandedRowIDs={nodeExpandedIDs}
                 search={nodeSearch}
@@ -1690,6 +1902,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                 onSelectRow={selectNodeRow}
                 onSelectNode={selectNodeMatrixCard}
                 onOpenNode={openNodeEditorOverlay}
+                onOpenNodeBulkMenu={openNodeBulkEditMenu}
               />
             </>
           ) : (
@@ -1811,6 +2024,14 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           onClose={() => setSharedInboxRaciFolderID("")}
         />
       )}
+      <HomeBulkEditMenu
+        menu={bulkEditMenu}
+        companyUsers={companyUsers}
+        busy={busy === "bulk-node-edit" || busy === "bulk-logic-gate-edit"}
+        onClose={() => setBulkEditMenu(null)}
+        onApplyNodePatch={(nodeIDs, patch) => { void applyBulkNodePatch(nodeIDs, patch); }}
+        onApplyLogicGateRaci={(logicGateIDs, role, userID, action) => { void applyBulkLogicGateRaci(logicGateIDs, role, userID, action); }}
+      />
       {nodeEditorOverlay && (
         <NodeEditorPopup
           nodeID={nodeEditorOverlay.nodeID}

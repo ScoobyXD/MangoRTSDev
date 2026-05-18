@@ -401,6 +401,29 @@ where company_id=$1 and node_id=$4`,
 	return err
 }
 
+func assignNodeToLogicGateResponsibleSQL(ctx context.Context, exec kanbanBoardEnsurer, companyID, logicGateID, nodeID string) error {
+	_, err := exec.ExecContext(ctx, `
+update nodes
+set assignee_user_id = responsible.user_id
+from (
+  select user_id
+  from logic_gate_raci_assignments
+  where company_id=$1
+    and logic_gate_id=$2::uuid
+    and role=$4
+  order by created_timestamp asc, user_id asc
+  limit 1
+) responsible
+where nodes.company_id=$1
+  and nodes.node_id=$3`,
+		companyID, logicGateID, nodeID, domain.LogicGateRaciRoleResponsible,
+	)
+	if isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {
+		return nil
+	}
+	return err
+}
+
 func (r *PostgresRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
 	ctx := context.Background()
 	rows, err := r.db.QueryContext(ctx, `
@@ -635,6 +658,11 @@ returning `+kanbanCardSelectColumns,
 	}
 	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, item); err != nil {
 		return domain.KanbanCard{}, err
+	}
+	if item.LogicGateID != nil {
+		if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, item.CompanyID, *item.LogicGateID, item.NodeID); err != nil {
+			return domain.KanbanCard{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.KanbanCard{}, err

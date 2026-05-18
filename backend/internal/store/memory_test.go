@@ -366,6 +366,7 @@ func TestMemoryRepo_CreateLogicGateCreatesAttachedKanbanBoard(t *testing.T) {
 func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"
+	repo.EnsureCompany(companyID, "Placement Company")
 
 	firstGate, err := repo.CreateLogicGate(companyID, "First Gate")
 	if err != nil {
@@ -378,6 +379,23 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 	node, err := repo.CreateNode(companyID, "Tracked node")
 	if err != nil {
 		t.Fatalf("CreateNode failed: %v", err)
+	}
+	responsibleUser, err := repo.UpsertAuthUser("placement-responsible-subject", "responsible@example.com", "Responsible User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser responsible failed: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("placement-responsible-subject", companyID, "company_user"); err != nil {
+		t.Fatalf("AddCompanyMembership responsible failed: %v", err)
+	}
+	if _, err := repo.SetLogicGateRaciAssignments(LogicGateRaciAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: firstGate.LogicGateID,
+		Assignments: []LogicGateRaciAssignmentInput{{
+			Role:   domain.LogicGateRaciRoleResponsible,
+			UserID: responsibleUser.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetLogicGateRaciAssignments failed: %v", err)
 	}
 
 	firstBoardID := LogicGateKanbanBoardID(firstGate.LogicGateID)
@@ -405,6 +423,9 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 	}
 	if len(loadedNode.LogicGateIDs) != 1 || loadedNode.LogicGateIDs[0] != firstGate.LogicGateID {
 		t.Fatalf("logic_gate_ids = %+v, want first gate", loadedNode.LogicGateIDs)
+	}
+	if loadedNode.AssigneeUserID == nil || *loadedNode.AssigneeUserID != responsibleUser.UserID {
+		t.Fatalf("assignee_user_id = %+v, want responsible user", loadedNode.AssigneeUserID)
 	}
 
 	issue := true

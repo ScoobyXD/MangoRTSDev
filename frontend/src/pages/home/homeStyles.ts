@@ -617,7 +617,7 @@ export function logicGateInboxGroupHeaderStyle(interactive: boolean): React.CSSP
     width: "100%",
     height: 30,
     display: "grid",
-    gridTemplateColumns: "18px minmax(0, 1fr) auto auto",
+    gridTemplateColumns: "18px minmax(0, 1fr) auto auto auto",
     alignItems: "center",
     gap: 6,
     border: "none",

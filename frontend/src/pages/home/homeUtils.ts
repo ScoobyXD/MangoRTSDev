@@ -7,7 +7,7 @@ import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gat
 import { getNodeTitle, type NodeRecord } from "../../modules/node-map/shared.js";
 import { attachStackedDragPreview, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR } from "../../modules/kanban/shared.js";
 import { ACI_COLUMNS, HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, MAILBOX_OPTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants.js";
-import type { AciInboxRole, HomeColumnWidths, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyLogicGateGroup, ResponsibleInboxStatus } from "./homeTypes.js";
+import type { AciInboxRole, HomeColumnWidths, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyLogicGateGroup, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes.js";
 export function readHomeColumnWidths(): HomeColumnWidths {
   try {
     const parsed = JSON.parse(localStorage.getItem(HOME_COLUMN_WIDTHS_STORAGE_KEY) ?? "null") as unknown;
@@ -488,6 +488,23 @@ export function logicGateIDsFromExplorerPayload(payload: ExplorerDragPayload | n
   return [];
 }
 
+export function nodeIDsFromExplorerPayload(payload: ExplorerDragPayload | null, folders: CompanyExplorerFolder[], folderItems: CompanyExplorerFolderItem[]): string[] {
+  if (!payload) return [];
+  if (payload.kind === "node" && payload.itemID) return [payload.itemID];
+  if (payload.kind === "batch") {
+    return cleanIDList(getExplorerDropPayloadItems(payload)
+      .filter((item) => item.itemType === "node")
+      .map((item) => item.itemID));
+  }
+  if (payload.kind === "folder" && payload.folderKind === "node" && payload.folderID) {
+    const subtree = collectFolderSubtreeIDs(folders, payload.folderID);
+    return cleanIDList(folderItems
+      .filter((item) => item.item_type === "node" && subtree.has(item.folder_id))
+      .map((item) => item.item_id));
+  }
+  return [];
+}
+
 export function sortLogicGateShortcuts(shortcuts: UserLogicGateShortcut[]): UserLogicGateShortcut[] {
   return [...shortcuts].sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp) || a.logic_gate_id.localeCompare(b.logic_gate_id));
 }
@@ -518,6 +535,32 @@ export function buildMyLogicGateGroups(input: {
       logicGates: [],
     };
     group.logicGates.push(logicGate);
+    groupByKey.set(key, group);
+  }
+  return Array.from(groupByKey.values()).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+export function buildMyNodeGroups(input: {
+  nodes: NodeRecord[];
+  logicGateFolders: CompanyExplorerFolder[];
+  logicGateFolderItems: CompanyExplorerFolderItem[];
+}): MyNodeGroup[] {
+  const folderByID = new Map(input.logicGateFolders.map((folder) => [folder.folder_id, folder]));
+  const folderIDByLogicGateID = new Map(input.logicGateFolderItems.filter((item) => item.item_type === "logic_gate").map((item) => [item.item_id, item.folder_id]));
+  const groupByKey = new Map<string, MyNodeGroup>();
+  for (const node of sortNodesForInbox(input.nodes)) {
+    let folderID = "";
+    for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
+      folderID = folderIDByLogicGateID.get(logicGateID) ?? "";
+      if (folderID) break;
+    }
+    const key = folderID || "unfiled";
+    const group = groupByKey.get(key) ?? {
+      key,
+      label: folderID ? folderPathLabel(folderByID, folderID) : "Unfiled Nodes",
+      nodes: [],
+    };
+    group.nodes.push(node);
     groupByKey.set(key, group);
   }
   return Array.from(groupByKey.values()).sort((a, b) => a.label.localeCompare(b.label));

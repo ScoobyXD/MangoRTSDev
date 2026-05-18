@@ -1,5 +1,6 @@
 import type { CurrentUserResponse } from "../../auth/cognitoAuth.js";
 import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
+import type { NodeRecord } from "../../modules/node-map/shared.js";
 
 export type HomePageProps = {
   me?: CurrentUserResponse;
@@ -98,4 +99,10 @@ export type MyLogicGateGroup = {
   key: string;
   label: string;
   logicGates: LogicGateRecord[];
+};
+
+export type MyNodeGroup = {
+  key: string;
+  label: string;
+  nodes: NodeRecord[];
 };

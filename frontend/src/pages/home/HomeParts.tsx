@@ -13,8 +13,8 @@ import type { NotificationRaciRole, NotificationSummary } from "../../modules/no
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
-import type { ComposeState, HomeViewID, InboxLogicGateNodeGroup } from "./homeTypes";
-import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusLetter, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
+import type { ComposeState, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes";
+import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusLetter, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
 import { allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
@@ -23,6 +23,7 @@ const NODE_EDITOR_POPUP_MIN_HEIGHT = 320;
 const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
 const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "home-node-editor-popup-size-v1";
+const HOME_INBOX_GROUP_COLLAPSED_STORAGE_KEY_PREFIX = "mangorts.communications.inboxLogicGateGroupCollapsed.v1";
 
 type HomePinContextMenuState = {
   x: number;
@@ -65,7 +66,181 @@ function HomePinContextMenu({ menu, onClose }: {
   );
 }
 
+export function HomeBulkEditMenu({ menu, companyUsers, busy, onClose, onApplyNodePatch, onApplyLogicGateRaci }: {
+  menu: { x: number; y: number; kind: "node" | "logic_gate"; ids: string[] } | null;
+  companyUsers: CompanyUser[];
+  busy: boolean;
+  onClose: () => void;
+  onApplyNodePatch: (nodeIDs: string[], patch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">>) => void;
+  onApplyLogicGateRaci: (logicGateIDs: string[], role: CommunicationsSharedInboxRaciRole, userID: string, action: "add" | "remove") => void;
+}) {
+  const [assignee, setAssignee] = useState("__no_change__");
+  const [priority, setPriority] = useState("__no_change__");
+  const [status, setStatus] = useState("__no_change__");
+  const [dueDateMode, setDueDateMode] = useState<"no_change" | "set" | "clear">("no_change");
+  const [dueDate, setDueDate] = useState("");
+  const [raciRole, setRaciRole] = useState<CommunicationsSharedInboxRaciRole>("responsible");
+  const [raciUserID, setRaciUserID] = useState("");
+  const [raciAction, setRaciAction] = useState<"add" | "remove">("add");
+
+  useEffect(() => {
+    setAssignee("__no_change__");
+    setPriority("__no_change__");
+    setStatus("__no_change__");
+    setDueDateMode("no_change");
+    setDueDate("");
+    setRaciRole("responsible");
+    setRaciUserID(companyUsers[0]?.user_id ?? "");
+    setRaciAction("add");
+  }, [companyUsers, menu?.kind, menu?.ids.join("\u001f")]);
+
+  if (!menu) return null;
+  const title = menu.kind === "node"
+    ? `${menu.ids.length} node${menu.ids.length === 1 ? "" : "s"}`
+    : `${menu.ids.length} Logic Gate${menu.ids.length === 1 ? "" : "s"}`;
+  const fieldStyle: React.CSSProperties = {
+    width: "100%",
+    minHeight: 30,
+    border: "1px solid rgba(255, 136, 32, 0.24)",
+    borderRadius: 6,
+    background: "#ffffff",
+    color: "#24120a",
+    font: "inherit",
+    fontSize: 12,
+    padding: "0 8px",
+  };
+  const labelStyle: React.CSSProperties = {
+    display: "grid",
+    gap: 4,
+    minWidth: 0,
+    color: "#24120a",
+    fontSize: 11,
+    fontWeight: 700,
+  };
+  const actionButtonStyle: React.CSSProperties = {
+    minHeight: 31,
+    border: "1px solid rgba(255, 136, 32, 0.38)",
+    borderRadius: 6,
+    background: "#fff2e0",
+    color: "#24120a",
+    cursor: busy ? "not-allowed" : "pointer",
+    font: "inherit",
+    fontSize: 12,
+    fontWeight: 800,
+  };
+
+  return (
+    <FrameRightClickMenu x={menu.x} y={menu.y} onClose={onClose}>
+      <form
+        style={{ width: 280, display: "grid", gap: 9, padding: "8px 10px 10px" }}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (busy) return;
+          if (menu.kind === "node") {
+            const patch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">> = {};
+            if (assignee !== "__no_change__") patch.assignee_user_id = assignee === "__clear__" ? null : assignee;
+            if (priority !== "__no_change__") patch.priority = priority === "0" ? null : Number(priority);
+            if (status !== "__no_change__") patch.status = status;
+            if (dueDateMode === "clear") patch.due_date = null;
+            if (dueDateMode === "set") patch.due_date = dueDate;
+            if (Object.keys(patch).length > 0) onApplyNodePatch(menu.ids, patch);
+            else onClose();
+            return;
+          }
+          onApplyLogicGateRaci(menu.ids, raciRole, raciUserID, raciAction);
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+          <strong style={{ fontSize: 12, color: "#24120a" }}>{title}</strong>
+          <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#7c2d12", font: "inherit", fontWeight: 800 }}>x</button>
+        </div>
+        {menu.kind === "node" ? (
+          <>
+            <label style={labelStyle}>
+              Assignment
+              <select value={assignee} onChange={(event) => setAssignee(event.target.value)} style={fieldStyle}>
+                <option value="__no_change__">No change</option>
+                <option value="__clear__">Unassigned</option>
+                {companyUsers.map((user) => (
+                  <option key={user.user_id} value={user.user_id}>{user.display_name || user.email || user.user_id}</option>
+                ))}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Priority
+              <select value={priority} onChange={(event) => setPriority(event.target.value)} style={fieldStyle}>
+                <option value="__no_change__">No change</option>
+                <option value="0">Unassigned</option>
+                <option value="1">1 Urgent</option>
+                <option value="2">2 End of day</option>
+                <option value="3">3 Few days</option>
+                <option value="4">4 This week</option>
+                <option value="5">5 Later</option>
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Status
+              <select value={status} onChange={(event) => setStatus(event.target.value)} style={fieldStyle}>
+                <option value="__no_change__">No change</option>
+                <option value="Pending">Pending</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Done">Done</option>
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Due Date
+              <select value={dueDateMode} onChange={(event) => setDueDateMode(event.target.value as "no_change" | "set" | "clear")} style={fieldStyle}>
+                <option value="no_change">No change</option>
+                <option value="set">Set date</option>
+                <option value="clear">Clear date</option>
+              </select>
+              {dueDateMode === "set" && <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} style={fieldStyle} />}
+            </label>
+          </>
+        ) : (
+          <>
+            <label style={labelStyle}>
+              Assignment Action
+              <select value={raciAction} onChange={(event) => setRaciAction(event.target.value as "add" | "remove")} style={fieldStyle}>
+                <option value="add">Add person</option>
+                <option value="remove">Remove person</option>
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Role
+              <select value={raciRole} onChange={(event) => setRaciRole(event.target.value as CommunicationsSharedInboxRaciRole)} style={fieldStyle}>
+                <option value="responsible">Responsible</option>
+                <option value="accountable">Accountable</option>
+                <option value="consulted">Consulted</option>
+                <option value="informed">Informed</option>
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Person
+              <select value={raciUserID} onChange={(event) => setRaciUserID(event.target.value)} style={fieldStyle}>
+                {companyUsers.map((user) => (
+                  <option key={user.user_id} value={user.user_id}>{user.display_name || user.email || user.user_id}</option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
+        <button type="submit" disabled={busy || (menu.kind === "logic_gate" && !raciUserID)} style={actionButtonStyle}>
+          {busy ? "Applying" : "Apply"}
+        </button>
+      </form>
+    </FrameRightClickMenu>
+  );
+}
+
 type InboxMatrixViewID = Extract<HomeViewID, "aci-inbox" | "r-inbox">;
+
+type InboxNodeDropInput = {
+  logicGateID: string;
+  nodeIDs: string[];
+  priority: InboxPriority;
+  status?: ResponsibleInboxStatus;
+};
 
 type InboxGroupResizeState = {
   key: string;
@@ -189,6 +364,58 @@ function useInboxGroupCardHeights(viewID: InboxMatrixViewID): {
   }, []);
 
   return { groupHeights, startGroupResize };
+}
+
+function inboxCollapsedGroupsStorageKey(viewID: InboxMatrixViewID): string {
+  const companyID = getActiveCompanyID().trim() || "global";
+  return `${HOME_INBOX_GROUP_COLLAPSED_STORAGE_KEY_PREFIX}:${companyID}:${viewID}`;
+}
+
+function readInboxCollapsedGroups(viewID: InboxMatrixViewID): Set<string> {
+  if (typeof localStorage === "undefined") return new Set();
+  try {
+    const parsed = JSON.parse(localStorage.getItem(inboxCollapsedGroupsStorageKey(viewID)) ?? "[]") as unknown;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0));
+  } catch {
+    return new Set();
+  }
+}
+
+function storeInboxCollapsedGroups(viewID: InboxMatrixViewID, collapsed: Set<string>): void {
+  if (typeof localStorage === "undefined") return;
+  const storageKey = inboxCollapsedGroupsStorageKey(viewID);
+  const values = Array.from(collapsed).filter((item) => item.trim());
+  if (values.length === 0) {
+    localStorage.removeItem(storageKey);
+    return;
+  }
+  localStorage.setItem(storageKey, JSON.stringify(values));
+}
+
+function useInboxGroupCollapsedState(viewID: InboxMatrixViewID): {
+  collapsedGroupKeys: Set<string>;
+  toggleCollapsedGroup: (key: string) => void;
+} {
+  const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(() => readInboxCollapsedGroups(viewID));
+
+  useEffect(() => {
+    setCollapsedGroupKeys(readInboxCollapsedGroups(viewID));
+  }, [viewID]);
+
+  const toggleCollapsedGroup = useCallback((key: string) => {
+    const cleanKey = key.trim();
+    if (!cleanKey) return;
+    setCollapsedGroupKeys((previous) => {
+      const next = new Set(previous);
+      if (next.has(cleanKey)) next.delete(cleanKey);
+      else next.add(cleanKey);
+      storeInboxCollapsedGroups(viewID, next);
+      return next;
+    });
+  }, [viewID]);
+
+  return { collapsedGroupKeys, toggleCollapsedGroup };
 }
 
 function nodeEditorPopupMaxSize(): { width: number; height: number } {
@@ -1356,7 +1583,7 @@ export function NodeInboxRail({
   loading,
   nodeByID,
   allRows,
-  myNodes,
+  myNodeGroups,
   selectedRowIDs,
   expandedRowIDs,
   search,
@@ -1366,11 +1593,12 @@ export function NodeInboxRail({
   onSelectRow,
   onSelectNode,
   onOpenNode,
+  onOpenNodeBulkMenu,
 }: {
   loading: boolean;
   nodeByID: Map<string, NodeRecord>;
   allRows: ExplorerTreeNode[];
-  myNodes: NodeRecord[];
+  myNodeGroups: MyNodeGroup[];
   selectedRowIDs: Set<string>;
   expandedRowIDs: Set<string>;
   search: string;
@@ -1380,8 +1608,9 @@ export function NodeInboxRail({
   onSelectRow: (row: ExplorerTreeNode, event: React.MouseEvent) => void;
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord) => void;
+  onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
 }) {
-  const myNodeOrderedRowIDs = useMemo(() => myNodes.map((node) => nodeTreeID(node.node_id)), [myNodes]);
+  const myNodeOrderedRowIDs = useMemo(() => myNodeGroups.flatMap((group) => group.nodes.map((node) => nodeTreeID(node.node_id))), [myNodeGroups]);
   const railSplit = useRailTopResize(HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, 220);
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
 
@@ -1390,28 +1619,37 @@ export function NodeInboxRail({
     <aside ref={railSplit.railRef} style={logicGateRailStyle(railSplit.topHeight)}>
       <section style={logicGateRailSectionStyle}>
         <div style={logicGateRailHeaderStyle}>
-          <h2 style={panelTitleStyle}>My Nodes</h2>
+          <h2 style={panelTitleStyle}>My Nodes (nodes assigned to me)</h2>
           {loading && <span style={mutedSmallStyle}>Loading</span>}
         </div>
         <div style={myLogicGatesListStyle}>
-          {myNodes.length === 0 && !loading ? (
-            <div style={emptySmallStyle}>No responsible nodes</div>
+          {myNodeGroups.length === 0 && !loading ? (
+            <div style={emptySmallStyle}>No assigned nodes</div>
           ) : (
-            <div style={myLogicGateGridStyle}>
-              {myNodes.map((node) => (
-                <MyNodeTile
-                  key={node.node_id}
-                  node={node}
-                  selected={selectedRowIDs.has(nodeTreeID(node.node_id))}
-                  orderedRowIDs={myNodeOrderedRowIDs}
-                  nodeByID={nodeByID}
-                  getNodeDragIDs={getNodeDragIDs}
-                  onSelectNode={onSelectNode}
-                  onOpenNode={onOpenNode}
-                  onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
-                />
-              ))}
-            </div>
+            myNodeGroups.map((group) => (
+              <div key={group.key} style={myLogicGateGroupStyle}>
+                <div style={myLogicGateFolderLabelStyle}>
+                  <span>{group.label}</span>
+                  <span>{group.nodes.length}</span>
+                </div>
+                <div style={myLogicGateGridStyle}>
+                  {group.nodes.map((node) => (
+                    <MyNodeTile
+                      key={node.node_id}
+                      node={node}
+                      selected={selectedRowIDs.has(nodeTreeID(node.node_id))}
+                      orderedRowIDs={myNodeOrderedRowIDs}
+                      nodeByID={nodeByID}
+                      getNodeDragIDs={getNodeDragIDs}
+                      onSelectNode={onSelectNode}
+                      onOpenNode={onOpenNode}
+                      onOpenNodeBulkMenu={onOpenNodeBulkMenu}
+                      onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))
           )}
         </div>
       </section>
@@ -1451,11 +1689,7 @@ export function NodeInboxRail({
                 }}
                 onContextMenu={(event) => {
                   if (row.kind !== "node" || !node) return;
-                  openHomePinContextMenu(event, {
-                    kind: "node",
-                    id: node.node_id,
-                    label: nodeTitle(node),
-                  }, setPinContextMenu);
+                  onOpenNodeBulkMenu(node.node_id, event);
                 }}
                 onDragStart={(event) => {
                   const payload = getExplorerDragPayloadForSelection(row, selectedRowIDs, allRows);
@@ -1501,6 +1735,7 @@ export function MyNodeTile({
   getNodeDragIDs,
   onSelectNode,
   onOpenNode,
+  onOpenNodeBulkMenu,
   onOpenPinContextMenu,
 }: {
   node: NodeRecord;
@@ -1510,6 +1745,7 @@ export function MyNodeTile({
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord) => void;
+  onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenPinContextMenu: (event: React.MouseEvent, target: Omit<HomePinContextMenuState, "x" | "y">) => void;
 }) {
   const nodeID = node.node_id;
@@ -1524,11 +1760,17 @@ export function MyNodeTile({
         event.stopPropagation();
         onOpenNode(node);
       }}
-      onContextMenu={(event) => onOpenPinContextMenu(event, {
-        kind: "node",
-        id: nodeID,
-        label: nodeTitle(node),
-      })}
+      onContextMenu={(event) => {
+        if (onOpenNodeBulkMenu) {
+          onOpenNodeBulkMenu(nodeID, event);
+          return;
+        }
+        onOpenPinContextMenu(event, {
+          kind: "node",
+          id: nodeID,
+          label: nodeTitle(node),
+        });
+      }}
       onDragStart={(event) => {
         const dragIDs = getNodeDragIDs(nodeID);
         setNodeDragData(event.dataTransfer, dragIDs, nodeByID);
@@ -1560,28 +1802,44 @@ export function AciInboxMatrix({
   nodes,
   nodeByID,
   logicGateByID,
+  nodeFolders,
+  nodeFolderItems,
   currentUserID,
   notificationSummary,
   selectedRowIDs,
+  selectedLogicGateRowIDs,
   getNodeDragIDs,
   onSelectNode,
+  onSelectLogicGate,
   onOpenNode,
   onOpenLogicGate,
+  onOpenNodeBulkMenu,
+  onOpenLogicGateBulkMenu,
+  onDropNodes,
 }: {
   loading: boolean;
   nodes: NodeRecord[];
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
+  nodeFolders: CompanyExplorerFolder[];
+  nodeFolderItems: CompanyExplorerFolderItem[];
   currentUserID: string;
   notificationSummary: NotificationSummary;
   selectedRowIDs: Set<string>;
+  selectedLogicGateRowIDs: Set<string>;
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onSelectLogicGate: (logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
+  onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
+  onOpenLogicGateBulkMenu: (logicGateID: string, event: React.MouseEvent) => void;
+  onDropNodes: (input: InboxNodeDropInput) => void;
 }) {
   const cellLogicGateGroups = useMemo(() => buildAciInboxGroupsByCell(nodes, nodeByID, logicGateByID, currentUserID), [currentUserID, logicGateByID, nodeByID, nodes]);
   const { groupHeights, startGroupResize } = useInboxGroupCardHeights("aci-inbox");
+  const { collapsedGroupKeys, toggleCollapsedGroup } = useInboxGroupCollapsedState("aci-inbox");
+  const [activeDropKey, setActiveDropKey] = useState("");
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
   const orderedRowIDs = useMemo(() => {
     const ids: string[] = [];
@@ -1593,13 +1851,23 @@ export function AciInboxMatrix({
     }
     return cleanIDList(ids).map(nodeTreeID);
   }, [cellLogicGateGroups]);
+  const orderedLogicGateRowIDs = useMemo(() => {
+    const ids: string[] = [];
+    for (const priority of INBOX_PRIORITIES) {
+      for (const column of ACI_COLUMNS) {
+        const groups = cellLogicGateGroups.get(aciCellKey(column.role, priority.value)) ?? [];
+        for (const group of groups) ids.push(group.logicGateID);
+      }
+    }
+    return cleanIDList(ids).filter((id) => id !== INBOX_NO_LOGIC_GATE_ID).map(logicGateTreeID);
+  }, [cellLogicGateGroups]);
   const placedCount = orderedRowIDs.length;
 
   return (
     <>
     <section style={logicGateRaciPanelStyle}>
       <div style={logicGateRaciHeaderStyle}>
-        <h2 style={panelTitleStyle}>ACI Inbox</h2>
+        <h2 style={panelTitleStyle}>ACI Inbox (Logic gates assigned to me)</h2>
         <div style={logicGateRaciMetaStyle}>
           {placedCount > 0 && <span>{placedCount} active</span>}
           {loading && <span>Loading</span>}
@@ -1629,17 +1897,29 @@ export function AciInboxMatrix({
                           key={group.logicGateID}
                           group={group}
                           selectedRowIDs={selectedRowIDs}
+                          selectedLogicGate={selectedLogicGateRowIDs.has(logicGateTreeID(group.logicGateID))}
+                          orderedLogicGateRowIDs={orderedLogicGateRowIDs}
                           orderedRowIDs={orderedRowIDs}
                           nodeByID={nodeByID}
+                          nodeFolders={nodeFolders}
+                          nodeFolderItems={nodeFolderItems}
                           getNodeDragIDs={getNodeDragIDs}
                           onSelectNode={onSelectNode}
+                          onSelectLogicGate={onSelectLogicGate}
                           onOpenNode={onOpenNode}
                           onOpenLogicGate={onOpenLogicGate}
+                          onOpenNodeBulkMenu={onOpenNodeBulkMenu}
+                          onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
+                          onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value })}
+                          dropActive={activeDropKey === resizeKey}
+                          onDropActiveChange={(active) => setActiveDropKey(active ? resizeKey : "")}
                           notificationCount={notificationCountForInboxGroup(notificationSummary, column.role, group)}
                           notificationRole={column.role}
                           resizeKey={resizeKey}
                           heightPx={groupHeights[resizeKey]}
                           onStartResize={startGroupResize}
+                          collapsed={collapsedGroupKeys.has(resizeKey)}
+                          onToggleCollapsed={() => toggleCollapsedGroup(resizeKey)}
                           onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
                         />
                       );
@@ -1662,28 +1942,44 @@ export function ResponsibleInboxMatrix({
   nodes,
   nodeByID,
   logicGateByID,
+  nodeFolders,
+  nodeFolderItems,
   currentUserID,
   notificationSummary,
   selectedRowIDs,
+  selectedLogicGateRowIDs,
   getNodeDragIDs,
   onSelectNode,
+  onSelectLogicGate,
   onOpenNode,
   onOpenLogicGate,
+  onOpenNodeBulkMenu,
+  onOpenLogicGateBulkMenu,
+  onDropNodes,
 }: {
   loading: boolean;
   nodes: NodeRecord[];
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
+  nodeFolders: CompanyExplorerFolder[];
+  nodeFolderItems: CompanyExplorerFolderItem[];
   currentUserID: string;
   notificationSummary: NotificationSummary;
   selectedRowIDs: Set<string>;
+  selectedLogicGateRowIDs: Set<string>;
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onSelectLogicGate: (logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
+  onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
+  onOpenLogicGateBulkMenu: (logicGateID: string, event: React.MouseEvent) => void;
+  onDropNodes: (input: InboxNodeDropInput) => void;
 }) {
   const cellLogicGateGroups = useMemo(() => buildResponsibleInboxGroupsByCell(nodes, nodeByID, logicGateByID, currentUserID), [currentUserID, logicGateByID, nodeByID, nodes]);
   const { groupHeights, startGroupResize } = useInboxGroupCardHeights("r-inbox");
+  const { collapsedGroupKeys, toggleCollapsedGroup } = useInboxGroupCollapsedState("r-inbox");
+  const [activeDropKey, setActiveDropKey] = useState("");
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
   const orderedRowIDs = useMemo(() => {
     const ids: string[] = [];
@@ -1695,13 +1991,23 @@ export function ResponsibleInboxMatrix({
     }
     return cleanIDList(ids).map(nodeTreeID);
   }, [cellLogicGateGroups]);
+  const orderedLogicGateRowIDs = useMemo(() => {
+    const ids: string[] = [];
+    for (const priority of INBOX_PRIORITIES) {
+      for (const column of RESPONSIBLE_STATUS_COLUMNS) {
+        const groups = cellLogicGateGroups.get(responsibleCellKey(column.status, priority.value)) ?? [];
+        for (const group of groups) ids.push(group.logicGateID);
+      }
+    }
+    return cleanIDList(ids).filter((id) => id !== INBOX_NO_LOGIC_GATE_ID).map(logicGateTreeID);
+  }, [cellLogicGateGroups]);
   const placedCount = orderedRowIDs.length;
 
   return (
     <>
     <section style={logicGateRaciPanelStyle}>
       <div style={logicGateRaciHeaderStyle}>
-        <h2 style={panelTitleStyle}>R Inbox</h2>
+        <h2 style={panelTitleStyle}>R Inbox (Logic gates assigned to me)</h2>
         <div style={logicGateRaciMetaStyle}>
           {placedCount > 0 && <span>{placedCount} active</span>}
           {loading && <span>Loading</span>}
@@ -1731,17 +2037,29 @@ export function ResponsibleInboxMatrix({
                           key={group.logicGateID}
                           group={group}
                           selectedRowIDs={selectedRowIDs}
+                          selectedLogicGate={selectedLogicGateRowIDs.has(logicGateTreeID(group.logicGateID))}
+                          orderedLogicGateRowIDs={orderedLogicGateRowIDs}
                           orderedRowIDs={orderedRowIDs}
                           nodeByID={nodeByID}
+                          nodeFolders={nodeFolders}
+                          nodeFolderItems={nodeFolderItems}
                           getNodeDragIDs={getNodeDragIDs}
                           onSelectNode={onSelectNode}
+                          onSelectLogicGate={onSelectLogicGate}
                           onOpenNode={onOpenNode}
                           onOpenLogicGate={onOpenLogicGate}
+                          onOpenNodeBulkMenu={onOpenNodeBulkMenu}
+                          onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
+                          onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value, status: column.status })}
+                          dropActive={activeDropKey === resizeKey}
+                          onDropActiveChange={(active) => setActiveDropKey(active ? resizeKey : "")}
                           notificationCount={notificationCountForInboxGroup(notificationSummary, "responsible", group)}
                           notificationRole="responsible"
                           resizeKey={resizeKey}
                           heightPx={groupHeights[resizeKey]}
                           onStartResize={startGroupResize}
+                          collapsed={collapsedGroupKeys.has(resizeKey)}
+                          onToggleCollapsed={() => toggleCollapsedGroup(resizeKey)}
                           onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
                         />
                       );
@@ -1762,12 +2080,22 @@ export function ResponsibleInboxMatrix({
 export function LogicGateInboxNodeGroupCard({
   group,
   selectedRowIDs,
+  selectedLogicGate = false,
+  orderedLogicGateRowIDs = [],
   orderedRowIDs,
   nodeByID,
+  nodeFolders = [],
+  nodeFolderItems = [],
   getNodeDragIDs,
   onSelectNode,
+  onSelectLogicGate,
   onOpenNode,
   onOpenLogicGate,
+  onOpenNodeBulkMenu,
+  onOpenLogicGateBulkMenu,
+  onDropNodes,
+  dropActive = false,
+  onDropActiveChange,
   notificationCount = 0,
   notificationRole,
   canRemoveNode,
@@ -1775,16 +2103,28 @@ export function LogicGateInboxNodeGroupCard({
   resizeKey,
   heightPx,
   onStartResize,
+  collapsed = false,
+  onToggleCollapsed,
   onOpenPinContextMenu,
 }: {
   group: InboxLogicGateNodeGroup;
   selectedRowIDs: Set<string>;
+  selectedLogicGate?: boolean;
+  orderedLogicGateRowIDs?: string[];
   orderedRowIDs: string[];
   nodeByID: Map<string, NodeRecord>;
+  nodeFolders?: CompanyExplorerFolder[];
+  nodeFolderItems?: CompanyExplorerFolderItem[];
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
+  onSelectLogicGate?: (logicGateID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
+  onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
+  onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
+  onDropNodes?: (nodeIDs: string[]) => void;
+  dropActive?: boolean;
+  onDropActiveChange?: (active: boolean) => void;
   notificationCount?: number;
   notificationRole?: NotificationRaciRole;
   canRemoveNode?: (nodeID: string) => boolean;
@@ -1792,33 +2132,80 @@ export function LogicGateInboxNodeGroupCard({
   resizeKey?: string;
   heightPx?: number;
   onStartResize?: (key: string, event: React.PointerEvent<HTMLDivElement>) => void;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
   onOpenPinContextMenu?: (event: React.MouseEvent, target: Omit<HomePinContextMenuState, "x" | "y">) => void;
 }) {
   const canOpenLogicGate = group.logicGateID !== INBOX_NO_LOGIC_GATE_ID;
   const firstNodeID = group.nodeIDs[0] ?? "";
-  const explicitHeight = typeof heightPx === "number" && Number.isFinite(heightPx);
-  const groupStyle = explicitHeight
+  const explicitHeight = !collapsed && typeof heightPx === "number" && Number.isFinite(heightPx);
+  const groupStyleBase = explicitHeight
     ? { ...logicGateInboxGroupStyle, height: clampInboxGroupHeight(heightPx), gridTemplateRows: "30px minmax(0, 1fr)" }
-    : logicGateInboxGroupStyle;
+    : collapsed
+      ? { ...logicGateInboxGroupStyle, gridTemplateRows: "30px" }
+      : logicGateInboxGroupStyle;
+  const groupStyle = {
+    ...groupStyleBase,
+    border: selectedLogicGate ? "1px solid rgba(255, 136, 32, 0.78)" : dropActive ? "1px solid rgba(255, 136, 32, 0.64)" : groupStyleBase.border,
+    boxShadow: selectedLogicGate
+      ? "0 0 0 2px rgba(255, 136, 32, 0.14) inset"
+      : dropActive
+        ? "0 0 0 2px rgba(255, 136, 32, 0.18) inset"
+        : groupStyleBase.boxShadow,
+  };
   const nodeListStyle = explicitHeight
     ? { ...logicGateInboxNodeListStyle, maxHeight: "none" }
     : logicGateInboxNodeListStyle;
+  const readDroppedNodeIDs = (dataTransfer: DataTransfer): string[] => {
+    if (!hasExplorerDrag(dataTransfer)) return [];
+    return nodeIDsFromExplorerPayload(readExplorerDragPayload(dataTransfer), nodeFolders, nodeFolderItems)
+      .filter((nodeID) => nodeByID.has(nodeID));
+  };
   return (
-    <div data-inbox-logic-gate-group-card="true" style={groupStyle}>
-      <button
-        type="button"
-        disabled={!canOpenLogicGate}
+    <div
+      data-inbox-logic-gate-group-card="true"
+      style={groupStyle}
+      onDragOver={(event) => {
+        if (!canOpenLogicGate || !onDropNodes || readDroppedNodeIDs(event.dataTransfer).length === 0) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        onDropActiveChange?.(true);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onDropActiveChange?.(false);
+      }}
+      onDrop={(event) => {
+        const nodeIDs = readDroppedNodeIDs(event.dataTransfer);
+        onDropActiveChange?.(false);
+        if (!canOpenLogicGate || !onDropNodes || nodeIDs.length === 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onDropNodes(nodeIDs);
+      }}
+    >
+      <div
+        role="button"
+        tabIndex={canOpenLogicGate ? 0 : -1}
         title={canOpenLogicGate ? `Open ${group.label} in Logic Gate Arena` : group.label}
         aria-label={canOpenLogicGate ? `Open ${group.label} in Logic Gate Arena` : group.label}
         style={logicGateInboxGroupHeaderStyle(canOpenLogicGate)}
-        onClick={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (canOpenLogicGate) onSelectLogicGate?.(group.logicGateID, orderedLogicGateRowIDs, event);
+        }}
         onContextMenu={(event) => {
-          if (!canOpenLogicGate || !onOpenPinContextMenu) return;
-          onOpenPinContextMenu(event, {
-            kind: "logic_gate",
-            id: group.logicGateID,
-            label: group.label,
-          });
+          if (!canOpenLogicGate) return;
+          if (onOpenLogicGateBulkMenu) {
+            onOpenLogicGateBulkMenu(group.logicGateID, event);
+            return;
+          }
+          if (onOpenPinContextMenu) {
+            onOpenPinContextMenu(event, {
+              kind: "logic_gate",
+              id: group.logicGateID,
+              label: group.label,
+            });
+          }
         }}
         onDoubleClick={(event) => {
           if (!canOpenLogicGate) return;
@@ -1830,9 +2217,25 @@ export function LogicGateInboxNodeGroupCard({
         <ExplorerRowIcon kind="logic_gate" />
         <span style={logicGateInboxGroupTitleStyle}>{group.label}</span>
         {notificationCount > 0 && notificationRole && <span style={logicGateInboxGroupNotificationStyle(notificationRole)}>{formatInboxNotificationCount(notificationCount)}</span>}
+        {onToggleCollapsed && (
+          <button
+            type="button"
+            title={collapsed ? "Expand node list" : "Collapse node list"}
+            aria-label={collapsed ? "Expand node list" : "Collapse node list"}
+            style={{ ...logicGateInboxGroupCountStyle, minWidth: 18, cursor: "pointer" }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onToggleCollapsed();
+            }}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
+            {collapsed ? "+" : "-"}
+          </button>
+        )}
         <span style={logicGateInboxGroupCountStyle}>{group.nodeIDs.length}</span>
-      </button>
-      <div className="kanban-board-scroll" style={nodeListStyle}>
+      </div>
+      {!collapsed && <div className="kanban-board-scroll" style={nodeListStyle}>
         {group.nodeIDs.map((nodeID) => {
           const node = nodeByID.get(nodeID);
           if (!node) return null;
@@ -1846,13 +2249,14 @@ export function LogicGateInboxNodeGroupCard({
               getNodeDragIDs={getNodeDragIDs}
               onSelectNode={onSelectNode}
               onOpenNode={onOpenNode}
+              onOpenNodeBulkMenu={onOpenNodeBulkMenu}
               onOpenPinContextMenu={onOpenPinContextMenu}
               onRemovePlacement={canRemoveNode?.(nodeID) ? onRemovePlacement : undefined}
             />
           );
         })}
-      </div>
-      {resizeKey && onStartResize && (
+      </div>}
+      {!collapsed && resizeKey && onStartResize && (
         <div
           title="Resize Logic Gate card"
           onPointerDown={(event) => onStartResize(resizeKey, event)}
@@ -1873,6 +2277,7 @@ export function LogicGateInboxNodeRow({
   getNodeDragIDs,
   onSelectNode,
   onOpenNode,
+  onOpenNodeBulkMenu,
   onOpenPinContextMenu,
   onRemovePlacement,
 }: {
@@ -1883,6 +2288,7 @@ export function LogicGateInboxNodeRow({
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord) => void;
+  onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenPinContextMenu?: (event: React.MouseEvent, target: Omit<HomePinContextMenuState, "x" | "y">) => void;
   onRemovePlacement?: (nodeID: string) => void;
 }) {
@@ -1899,11 +2305,17 @@ export function LogicGateInboxNodeRow({
         event.stopPropagation();
         onOpenNode(node);
       }}
-      onContextMenu={(event) => onOpenPinContextMenu?.(event, {
-        kind: "node",
-        id: nodeID,
-        label: nodeTitle(node),
-      })}
+      onContextMenu={(event) => {
+        if (onOpenNodeBulkMenu) {
+          onOpenNodeBulkMenu(nodeID, event);
+          return;
+        }
+        onOpenPinContextMenu?.(event, {
+          kind: "node",
+          id: nodeID,
+          label: nodeTitle(node),
+        });
+      }}
       onDragStart={(event) => {
         const dragIDs = getNodeDragIDs(nodeID);
         setNodeDragData(event.dataTransfer, dragIDs, nodeByID);

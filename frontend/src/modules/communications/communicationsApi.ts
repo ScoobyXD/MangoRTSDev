@@ -473,7 +473,7 @@ export async function listNodes(companyID: string): Promise<NodeRecord[]> {
   }, cloneNodes);
 }
 
-export async function updateNode(companyID: string, nodeID: string, update: Partial<Pick<NodeRecord, "status" | "status_color" | "priority" | "assignee_user_id">>): Promise<NodeRecord> {
+export async function updateNode(companyID: string, nodeID: string, update: Partial<Pick<NodeRecord, "status" | "status_color" | "due_date" | "priority" | "assignee_user_id">>): Promise<NodeRecord> {
   const node = await apiFetchJSON<NodeRecord>(`/v1/nodes/${encodeURIComponent(nodeID)}`, {
     method: "PUT",
     body: JSON.stringify({
