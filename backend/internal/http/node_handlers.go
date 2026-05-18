@@ -41,7 +41,15 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		item, err := s.repo.CreateNode(req.CompanyID, strings.TrimSpace(req.Title))
+		assigneeUserID := ""
+		if actor, ok := authenticatedActor(r); ok && strings.TrimSpace(actor.User.UserID) != "" {
+			assigneeUserID = strings.TrimSpace(actor.User.UserID)
+		}
+		item, err := s.repo.CreateNodeWithAssignee(req.CompanyID, strings.TrimSpace(req.Title), assigneeUserID)
+		if errors.Is(err, store.ErrAssigneeNotInCompany) {
+			writeError(w, http.StatusBadRequest, "assignee_user_not_in_company")
+			return
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_create_node")
 			return

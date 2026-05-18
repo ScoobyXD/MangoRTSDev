@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,20 @@ func readWorkspaceEventForTest(t *testing.T, ch chan []byte) workspaceEventEnvel
 		t.Fatal("timed out waiting for workspace event")
 		return workspaceEventEnvelope{}
 	}
+}
+
+func requestWithActorForTest(req *http.Request, user domain.User, companyID string) *http.Request {
+	actor := ActorContext{
+		User: user,
+		Memberships: []domain.CompanyMembership{{
+			CompanyID: companyID,
+			UserID:    user.UserID,
+			Role:      domain.RoleCompanyUser,
+		}},
+		CompanyID:   companyID,
+		CompanyRole: domain.RoleCompanyUser,
+	}
+	return req.WithContext(context.WithValue(req.Context(), actorContextKey{}, actor))
 }
 
 func TestIsLegalNodeRelationshipPositionPair(t *testing.T) {
@@ -608,6 +623,51 @@ func TestUpdateNodeTitleViaPut(t *testing.T) {
 	}
 }
 
+func TestCreateNodeAssignsCreator(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-create-node-creator-test"
+	repo.EnsureCompany(companyID, "Creator Assignment Company")
+	creator, err := repo.UpsertAuthUser("creator-node-subject", "creator@example.com", "Creator User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser creator error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("creator-node-subject", companyID, "company_user"); err != nil {
+		t.Fatalf("AddCompanyMembership creator error = %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"company_id": companyID,
+		"title":      "Creator assigned node",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/nodes", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = requestWithActorForTest(req, creator, companyID)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST node status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+
+	var created domain.Node
+	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created node: %v", err)
+	}
+	if created.AssigneeUserID == nil || *created.AssigneeUserID != creator.UserID || created.AssigneeName == nil || *created.AssigneeName != "Creator User" {
+		t.Fatalf("created node assignee = %+v, want creator", created)
+	}
+	details, err := repo.GetNodeDetails(companyID, created.NodeID)
+	if err != nil {
+		t.Fatalf("GetNodeDetails() error = %v", err)
+	}
+	if details.Node.AssigneeUserID == nil || *details.Node.AssigneeUserID != creator.UserID {
+		t.Fatalf("details node assignee = %+v, want creator", details.Node)
+	}
+}
+
 func TestUpdateNodeAssigneeRequiresCompanyMembership(t *testing.T) {
 	t.Parallel()
 
@@ -1074,6 +1134,79 @@ func TestMapEntityBatchCreatesNodesRelationshipsAndPositions(t *testing.T) {
 		if item.FolderID == "" || item.ItemType != "node" || item.ItemID == "" {
 			t.Fatalf("node batch folder item = %+v, want active-node placement", item)
 		}
+	}
+}
+
+func TestMapEntityBatchAssignsCreatedNodesToCreator(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	companyID := "company-map-batch-creator-test"
+	repo.EnsureCompany(companyID, "Map Batch Creator Company")
+	creator, err := repo.UpsertAuthUser("map-batch-creator-subject", "batch-creator@example.com", "Batch Creator")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser creator error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("map-batch-creator-subject", companyID, "company_user"); err != nil {
+		t.Fatalf("AddCompanyMembership creator error = %v", err)
+	}
+	source, err := repo.CreateNode(companyID, "Existing parent")
+	if err != nil {
+		t.Fatalf("CreateNode source error = %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"company_id":  companyID,
+		"entity_kind": "node",
+		"items": []map[string]any{{
+			"client_id": "created-child",
+			"title":     "Created child",
+			"x":         120,
+			"y":         240,
+		}},
+		"relationships": []map[string]any{{
+			"entity_id_a": source.NodeID,
+			"client_id_b": "created-child",
+			"a_position":  "Parent",
+			"b_position":  "Child",
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/map-entity-batches", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = requestWithActorForTest(req, creator, companyID)
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST map-entity-batches status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+
+	var payload struct {
+		Nodes         []domain.Node `json:"nodes"`
+		Relationships []struct {
+			NodeIDA string `json:"node_id_a"`
+			NodeIDB string `json:"node_id_b"`
+		} `json:"relationships"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode map entity batch response: %v", err)
+	}
+	if len(payload.Nodes) != 1 || len(payload.Relationships) != 1 {
+		t.Fatalf("batch response counts: nodes=%d relationships=%d, want 1 each", len(payload.Nodes), len(payload.Relationships))
+	}
+	created := payload.Nodes[0]
+	if created.AssigneeUserID == nil || *created.AssigneeUserID != creator.UserID || created.AssigneeName == nil || *created.AssigneeName != "Batch Creator" {
+		t.Fatalf("created batch node assignee = %+v, want creator", created)
+	}
+	if payload.Relationships[0].NodeIDA != source.NodeID || payload.Relationships[0].NodeIDB != created.NodeID {
+		t.Fatalf("batch relationship = %+v, want source parent to created child %s", payload.Relationships[0], created.NodeID)
+	}
+	details, err := repo.GetNodeDetails(companyID, created.NodeID)
+	if err != nil {
+		t.Fatalf("GetNodeDetails() error = %v", err)
+	}
+	if details.Node.AssigneeUserID == nil || *details.Node.AssigneeUserID != creator.UserID {
+		t.Fatalf("details node assignee = %+v, want creator", details.Node)
 	}
 }
 

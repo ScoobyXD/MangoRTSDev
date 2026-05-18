@@ -2,6 +2,7 @@ package store
 
 import (
 	"miraeopus/backend/internal/domain"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,12 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 	targetFolderID := input.FolderID
 	targetFolderKind := input.EntityKind
 	if input.EntityKind == "node" {
+		input.CreatorUserID = strings.TrimSpace(input.CreatorUserID)
+		if input.CreatorUserID != "" {
+			if _, ok := r.memberships[membershipKey(input.CompanyID, input.CreatorUserID)]; !ok {
+				return MapEntityBatchResult{}, ErrAssigneeNotInCompany
+			}
+		}
 		activeFolder, ok := r.ensureCompanyExplorerSystemFolderLocked(input.CompanyID, CompanyExplorerSystemActiveNodesKey)
 		if !ok {
 			return MapEntityBatchResult{}, ErrNotFound
@@ -77,8 +84,11 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 				Title:            item.Title,
 				CreatedTimestamp: now,
 			}
+			if input.CreatorUserID != "" {
+				created.AssigneeUserID = &input.CreatorUserID
+			}
 			r.nodes[key(input.CompanyID, created.NodeID)] = created
-			result.Nodes = append(result.Nodes, created)
+			result.Nodes = append(result.Nodes, r.withNodeReadModelLocked(created))
 			clientToEntityID[item.ClientID] = created.NodeID
 			result.EntityMappings = append(result.EntityMappings, MapEntityBatchEntityMapping{ClientID: item.ClientID, EntityID: created.NodeID})
 

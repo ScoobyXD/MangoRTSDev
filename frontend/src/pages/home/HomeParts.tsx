@@ -1690,6 +1690,7 @@ export function NodeInboxRail({
             myNodeGroups.map((group) => (
               <div key={group.key} style={myLogicGateGroupStyle}>
                 <div style={myLogicGateFolderLabelStyle}>
+                  <ExplorerRowIcon kind="folder" />
                   <span>{group.label}</span>
                   <span>{group.nodes.length}</span>
                 </div>

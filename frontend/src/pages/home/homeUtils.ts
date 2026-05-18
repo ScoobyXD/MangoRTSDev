@@ -371,6 +371,7 @@ export function buildResponsibleInboxGroupsByCell(
     const priority = normalizeInboxPriority(node.priority);
     const status = normalizeResponsibleInboxStatus(node.status);
     if (priority === null || !status) continue;
+    if (status === "done") continue;
     for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
       const logicGate = logicGateByID.get(logicGateID);
       const assignedToCurrentUser = node.assignee_user_id?.trim() === currentUserID.trim();

@@ -8,21 +8,34 @@ import (
 )
 
 func (r *MemoryRepo) CreateNode(companyID, title string) (domain.Node, error) {
+	return r.CreateNodeWithAssignee(companyID, title, "")
+}
+
+func (r *MemoryRepo) CreateNodeWithAssignee(companyID, title, assigneeUserID string) (domain.Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	assigneeUserID = strings.TrimSpace(assigneeUserID)
+	if assigneeUserID != "" {
+		if _, ok := r.memberships[membershipKey(companyID, assigneeUserID)]; !ok {
+			return domain.Node{}, ErrAssigneeNotInCompany
+		}
+	}
 	n := domain.Node{
 		CompanyID:        companyID,
 		NodeID:           newUUIDv7String(),
 		Title:            title,
 		CreatedTimestamp: time.Now().UTC(),
 	}
+	if assigneeUserID != "" {
+		n.AssigneeUserID = &assigneeUserID
+	}
 	r.nodes[key(companyID, n.NodeID)] = n
 	if _, err := r.assignNodeToActiveNodesFolderLocked(companyID, n.NodeID, 0); err != nil {
 		delete(r.nodes, key(companyID, n.NodeID))
 		return domain.Node{}, err
 	}
-	return n, nil
+	return r.withNodeReadModelLocked(n), nil
 }
 
 func (r *MemoryRepo) deriveNodeStatusLocked(companyID, nodeID string) (*string, *string) {

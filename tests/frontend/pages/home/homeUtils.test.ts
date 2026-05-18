@@ -20,6 +20,7 @@ import {
   resizeHomeColumns,
   resizeHomeInboxMatrixColumnsWithoutSidebar,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
+import { RESPONSIBLE_STATUS_COLUMNS } from "../../../../frontend/src/pages/home/homeConstants.js";
 
 function sharedInbox(id: string, name: string, position: number, parentID?: string): CommunicationsSharedInbox {
   return {
@@ -112,11 +113,15 @@ test("inbox group builders classify ACI and responsible work by role, status, an
   const nodes = [
     node("node-a", "ACI node", { logic_gate_ids: ["gate-a"], priority: 1 }),
     node("node-r", "Responsible node", { logic_gate_ids: ["gate-r"], status: "in_progress", priority: 2 }),
+    node("node-done", "Done node", { logic_gate_ids: ["gate-r"], status: "Done", priority: 1 }),
   ];
   const nodeByID = new Map(nodes.map((item) => [item.node_id, item]));
 
   assert.deepEqual(buildAciInboxGroupsByCell(nodes, nodeByID, gates, currentUserID).get("accountable:1")?.[0]?.nodeIDs, ["node-a"]);
-  assert.deepEqual(buildResponsibleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID).get("in_progress:2")?.[0]?.nodeIDs, ["node-r"]);
+  const responsibleGroups = buildResponsibleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID);
+  assert.deepEqual(responsibleGroups.get("in_progress:2")?.[0]?.nodeIDs, ["node-r"]);
+  assert.equal(responsibleGroups.has("done:1"), false);
+  assert.deepEqual(RESPONSIBLE_STATUS_COLUMNS.map((column) => column.status), ["pending", "in_progress"]);
 });
 
 test("my node groups follow logic gate folders and node drag payloads resolve folder drops", () => {

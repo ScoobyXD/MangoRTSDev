@@ -36,7 +36,6 @@ export const ACI_COLUMNS: ReadonlyArray<{ role: AciInboxRole; letter: string; la
 export const RESPONSIBLE_STATUS_COLUMNS: ReadonlyArray<{ status: ResponsibleInboxStatus; letter: string; label: string }> = [
   { status: "pending", letter: "P", label: "Pending" },
   { status: "in_progress", letter: "IP", label: "In Progress" },
-  { status: "done", letter: "D", label: "Done" },
 ];
 
 export const INBOX_PRIORITIES: ReadonlyArray<{ value: InboxPriority; label: string }> = [

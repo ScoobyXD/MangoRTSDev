@@ -50,10 +50,17 @@ func (s *Server) handleMapEntityBatches(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "invalid_map_entity_batch")
 		return
 	}
+	if actor, ok := authenticatedActor(r); ok {
+		input.CreatorUserID = strings.TrimSpace(actor.User.UserID)
+	}
 
 	result, err := s.repo.CreateMapEntityBatch(input)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_map_entity_batch")
+		return
+	}
+	if errors.Is(err, store.ErrAssigneeNotInCompany) {
+		writeError(w, http.StatusBadRequest, "assignee_user_not_in_company")
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {

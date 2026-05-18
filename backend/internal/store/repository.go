@@ -51,6 +51,7 @@ type Repository interface {
 	UpsertUserLogicGateShortcuts(userID, companyID string, logicGateIDs []string) ([]domain.UserLogicGateShortcut, error)
 	DeleteUserLogicGateShortcut(userID, companyID, logicGateID string) error
 	CreateNode(companyID, title string) (domain.Node, error)
+	CreateNodeWithAssignee(companyID, title, assigneeUserID string) (domain.Node, error)
 	UpdateNode(input UpdateNodeInput) (domain.Node, error)
 	UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error)
 	ListNodes(companyID string) ([]domain.Node, error)
@@ -166,6 +167,7 @@ type MapEntityBatchInput struct {
 	CompanyID     string
 	EntityKind    string
 	FolderID      string
+	CreatorUserID string
 	Items         []MapEntityBatchItemInput
 	Relationships []MapEntityBatchRelationshipInput
 }
