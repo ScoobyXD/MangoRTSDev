@@ -9,6 +9,56 @@ import (
 	"strings"
 )
 
+type companyExplorerFolderScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanCompanyExplorerFolder(row companyExplorerFolderScanner) (domain.CompanyExplorerFolder, error) {
+	var item domain.CompanyExplorerFolder
+	var parent sql.NullString
+	var systemKey sql.NullString
+	var accountEmail sql.NullString
+	err := row.Scan(
+		&item.CompanyID,
+		&item.FolderID,
+		&parent,
+		&item.FolderKind,
+		&systemKey,
+		&item.Name,
+		&accountEmail,
+		&item.Position,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	)
+	if err != nil {
+		return item, err
+	}
+	if parent.Valid {
+		item.ParentFolderID = &parent.String
+	}
+	if systemKey.Valid {
+		item.SystemKey = &systemKey.String
+	}
+	if accountEmail.Valid {
+		item.AccountEmail = &accountEmail.String
+	}
+	return item, err
+}
+
+func (r *PostgresRepo) attachCompanyExplorerFolderMetadata(ctx context.Context, companyID string, item domain.CompanyExplorerFolder) (domain.CompanyExplorerFolder, error) {
+	if item.FolderKind != "communications" {
+		return item, nil
+	}
+	items, err := r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, []domain.CompanyExplorerFolder{item})
+	if err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+	if len(items) == 0 {
+		return item, nil
+	}
+	return items[0], nil
+}
+
 func nextCompanyExplorerSQLRowPosition(ctx context.Context, tx *sql.Tx, companyID, folderKind string, parent any) (int, error) {
 	var position int
 	err := tx.QueryRowContext(ctx,
@@ -158,35 +208,17 @@ func ensureCompanyExplorerSystemFolderSQL(ctx context.Context, tx *sql.Tx, compa
 		return domain.CompanyExplorerFolder{}, err
 	}
 
-	var item domain.CompanyExplorerFolder
-	var parent sql.NullString
-	var systemOut sql.NullString
-	if err := tx.QueryRowContext(ctx,
-		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp
+	item, err := scanCompanyExplorerFolder(tx.QueryRowContext(ctx,
+		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp
 		 from company_explorer_folders
 		 where company_id=$1 and system_key=$2`,
 		companyID, systemKey,
-	).Scan(
-		&item.CompanyID,
-		&item.FolderID,
-		&parent,
-		&item.FolderKind,
-		&systemOut,
-		&item.Name,
-		&item.Position,
-		&item.CreatedTimestamp,
-		&item.UpdatedTimestamp,
-	); err != nil {
+	))
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		return domain.CompanyExplorerFolder{}, err
-	}
-	if parent.Valid {
-		item.ParentFolderID = &parent.String
-	}
-	if systemOut.Valid {
-		item.SystemKey = &systemOut.String
 	}
 	return item, nil
 }
@@ -231,37 +263,20 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 		Name:       name,
 		Position:   position,
 	}
-	var parentOut sql.NullString
-	var systemOut sql.NullString
-	if err := tx.QueryRowContext(ctx,
+	item, err = scanCompanyExplorerFolder(tx.QueryRowContext(ctx,
 		`insert into company_explorer_folders
 		 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
 		 values ($1, $2, $3, $4, null, $5, $6, now(), now())
-		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp`,
+		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp`,
 		item.CompanyID, item.FolderID, parent, item.FolderKind, item.Name, item.Position,
-	).Scan(
-		&item.CompanyID,
-		&item.FolderID,
-		&parentOut,
-		&item.FolderKind,
-		&systemOut,
-		&item.Name,
-		&item.Position,
-		&item.CreatedTimestamp,
-		&item.UpdatedTimestamp,
-	); err != nil {
+	))
+	if err != nil {
 		return domain.CompanyExplorerFolder{}, err
-	}
-	if parentOut.Valid {
-		item.ParentFolderID = &parentOut.String
-	}
-	if systemOut.Valid {
-		item.SystemKey = &systemOut.String
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
-	return item, nil
+	return r.attachCompanyExplorerFolderMetadata(ctx, companyID, item)
 }
 
 func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
@@ -281,7 +296,7 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 		kindParam = folderKind
 	}
 	rows, err := tx.QueryContext(ctx,
-		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp
+		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp
 		 from company_explorer_folders
 		 where company_id=$1 and ($2::text is null or folder_kind=$2)
 		 order by position asc, created_timestamp asc`,
@@ -293,27 +308,9 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 
 	items := make([]domain.CompanyExplorerFolder, 0)
 	for rows.Next() {
-		var item domain.CompanyExplorerFolder
-		var parent sql.NullString
-		var systemKey sql.NullString
-		if err := rows.Scan(
-			&item.CompanyID,
-			&item.FolderID,
-			&parent,
-			&item.FolderKind,
-			&systemKey,
-			&item.Name,
-			&item.Position,
-			&item.CreatedTimestamp,
-			&item.UpdatedTimestamp,
-		); err != nil {
+		item, err := scanCompanyExplorerFolder(rows)
+		if err != nil {
 			return nil, err
-		}
-		if parent.Valid {
-			item.ParentFolderID = &parent.String
-		}
-		if systemKey.Valid {
-			item.SystemKey = &systemKey.String
 		}
 		items = append(items, item)
 	}
@@ -419,41 +416,23 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 		}
 	}
 
-	var item domain.CompanyExplorerFolder
-	var parentOut sql.NullString
-	var systemOut sql.NullString
-	if err := tx.QueryRowContext(ctx,
+	item, err := scanCompanyExplorerFolder(tx.QueryRowContext(ctx,
 		`update company_explorer_folders
 		 set parent_folder_id=$3, position=$4, updated_timestamp=now()
 		 where company_id=$1 and folder_id=$2
-		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp`,
+		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp`,
 		companyID, folderID, parent, position,
-	).Scan(
-		&item.CompanyID,
-		&item.FolderID,
-		&parentOut,
-		&item.FolderKind,
-		&systemOut,
-		&item.Name,
-		&item.Position,
-		&item.CreatedTimestamp,
-		&item.UpdatedTimestamp,
-	); err != nil {
+	))
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		return domain.CompanyExplorerFolder{}, err
 	}
-	if parentOut.Valid {
-		item.ParentFolderID = &parentOut.String
-	}
-	if systemOut.Valid {
-		item.SystemKey = &systemOut.String
-	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
-	return item, nil
+	return r.attachCompanyExplorerFolderMetadata(ctx, companyID, item)
 }
 
 func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error) {
@@ -474,38 +453,100 @@ func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name str
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
 
-	var item domain.CompanyExplorerFolder
-	var parent sql.NullString
-	var systemOut sql.NullString
-	if err := r.db.QueryRowContext(ctx,
+	item, err := scanCompanyExplorerFolder(r.db.QueryRowContext(ctx,
 		`update company_explorer_folders
 		 set name=$3, updated_timestamp=now()
 		 where company_id=$1 and folder_id=$2
-		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp`,
+		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp`,
 		companyID, folderID, name,
-	).Scan(
-		&item.CompanyID,
-		&item.FolderID,
-		&parent,
-		&item.FolderKind,
-		&systemOut,
-		&item.Name,
-		&item.Position,
-		&item.CreatedTimestamp,
-		&item.UpdatedTimestamp,
-	); err != nil {
+	))
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		return domain.CompanyExplorerFolder{}, err
 	}
-	if parent.Valid {
-		item.ParentFolderID = &parent.String
+	return r.attachCompanyExplorerFolderMetadata(ctx, companyID, item)
+}
+
+func (r *PostgresRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folderID, accountEmail string) (domain.CompanyExplorerFolder, error) {
+	companyID = strings.TrimSpace(companyID)
+	folderID = strings.TrimSpace(folderID)
+	accountEmail = normalizeEmail(accountEmail)
+	if companyID == "" || folderID == "" {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
-	if systemOut.Valid {
-		item.SystemKey = &systemOut.String
+
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.CompanyExplorerFolder{}, err
 	}
-	return item, nil
+	defer tx.Rollback()
+
+	var folderKind string
+	if err := tx.QueryRowContext(ctx,
+		`select folder_kind
+		 from company_explorer_folders
+		 where company_id=$1 and folder_id=$2
+		 for update`,
+		companyID, folderID,
+	).Scan(&folderKind); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.CompanyExplorerFolder{}, ErrNotFound
+		}
+		return domain.CompanyExplorerFolder{}, err
+	}
+	if folderKind != "communications" {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
+	}
+
+	var accountParam any
+	if accountEmail != "" {
+		available, err := postgresCompanyHasConnectedEmailAccount(ctx, tx, companyID, accountEmail)
+		if err != nil {
+			return domain.CompanyExplorerFolder{}, err
+		}
+		if !available {
+			return domain.CompanyExplorerFolder{}, ErrEmailAccountUnavailable
+		}
+		accountParam = accountEmail
+	}
+
+	item, err := scanCompanyExplorerFolder(tx.QueryRowContext(ctx,
+		`update company_explorer_folders
+		 set account_email=$3, updated_timestamp=now()
+		 where company_id=$1 and folder_id=$2
+		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp`,
+		companyID, folderID, accountParam,
+	))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.CompanyExplorerFolder{}, ErrNotFound
+		}
+		return domain.CompanyExplorerFolder{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+	return r.attachCompanyExplorerFolderMetadata(ctx, companyID, item)
+}
+
+func postgresCompanyHasConnectedEmailAccount(ctx context.Context, tx *sql.Tx, companyID, accountEmail string) (bool, error) {
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `
+select exists(
+  select 1
+  from user_email_connections connection
+  join company_memberships membership
+    on membership.user_id = connection.user_id
+  where membership.company_id = $1
+    and connection.account_email = $2
+    and connection.status = 'connected'
+)`, companyID, accountEmail).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 func (r *PostgresRepo) DeleteCompanyExplorerFolder(companyID, folderID string) error {

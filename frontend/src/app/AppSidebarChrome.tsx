@@ -12,6 +12,7 @@ import {
   createCommunicationsSharedInbox,
   deleteCommunicationsSharedInbox,
   EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED,
+  fetchCommunicationsStatus,
   listCommunicationsSharedInboxes,
   updateCommunicationsSharedInbox,
   type CommunicationsSharedInbox,
@@ -148,6 +149,7 @@ export function AppSidebar({
   const [logicGatesByPersonOpen, setLogicGatesByPersonOpen] = usePersistedSidebarSectionOpen("logic-gates-by-person", false);
   const [explorerOpen, setExplorerOpen] = usePersistedSidebarSectionOpen("explorer", true);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
+  const [connectedAccountEmail, setConnectedAccountEmail] = useState("");
   const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
   const [sharedBusy, setSharedBusy] = useState(false);
   const [expandedSharedFolderIDs, setExpandedSharedFolderIDs] = useState<Set<string>>(new Set());
@@ -165,6 +167,7 @@ export function AppSidebar({
     () => filterSharedInboxesForUser(sharedInboxes, currentUserID, currentUserHasFullSharedInboxAccess),
     [currentUserHasFullSharedInboxAccess, currentUserID, sharedInboxes],
   );
+  const cleanConnectedAccountEmail = connectedAccountEmail.trim().toLowerCase();
   const sharedRows = useMemo(
     () => sharedTriageOpen ? buildSharedInboxRows(visibleSharedInboxes, expandedSharedFolderIDs) : [],
     [expandedSharedFolderIDs, sharedTriageOpen, visibleSharedInboxes],
@@ -245,6 +248,20 @@ export function AppSidebar({
   }, [companyID]);
 
   useEffect(() => {
+    let cancelled = false;
+    fetchCommunicationsStatus()
+      .then((status) => {
+        if (!cancelled) setConnectedAccountEmail(status.connected ? status.connection?.account_email ?? "" : "");
+      })
+      .catch(() => {
+        if (!cancelled) setConnectedAccountEmail("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!companyID) return undefined;
     const onSharedInboxesUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ companyID?: string }>).detail;
@@ -298,6 +315,9 @@ export function AppSidebar({
   const openSharedContextMenu = useCallback((event: React.MouseEvent, folder: CommunicationsSharedInbox | null) => {
     event.preventDefault();
     event.stopPropagation();
+    void fetchCommunicationsStatus()
+      .then((status) => setConnectedAccountEmail(status.connected ? status.connection?.account_email ?? "" : ""))
+      .catch(() => setConnectedAccountEmail(""));
     setSharedContextMenu({ x: event.clientX, y: event.clientY, folder });
   }, []);
 
@@ -321,17 +341,20 @@ export function AppSidebar({
     setSharedInboxes((previous) => previous.map((folder) => folder.folder_id === updated.folder_id ? updated : folder));
   }, []);
 
-  const createSharedFolder = useCallback(async (parentFolderID: string) => {
+  const createSharedFolder = useCallback(async (parentFolderID: string, accountEmail = "") => {
     if (!companyID || sharedBusy) return;
     setSharedContextMenu(null);
     setSharedBusy(true);
     try {
-      const folder = await createCommunicationsSharedInbox({ companyID, parentFolderID, name: "New Folder" });
+      const name = accountEmail.trim() || "New Folder";
+      const folder = await createCommunicationsSharedInbox({ companyID, parentFolderID, name, accountEmail });
       setSharedInboxes((previous) => [...previous.filter((item) => item.folder_id !== folder.folder_id), folder]);
       if (parentFolderID) setExpandedSharedFolderIDs((previous) => new Set(previous).add(parentFolderID));
       setSharedTriageOpen(true);
-      setRenamingSharedFolderID(folder.folder_id);
-      setRenameDraft(folder.name);
+      if (!accountEmail.trim()) {
+        setRenamingSharedFolderID(folder.folder_id);
+        setRenameDraft(folder.name);
+      }
       onHomeViewSelect(`shared:${folder.folder_id}`);
     } catch (error) {
       console.error("Failed to create shared triage folder", error);
@@ -339,6 +362,20 @@ export function AppSidebar({
       setSharedBusy(false);
     }
   }, [companyID, onHomeViewSelect, sharedBusy]);
+
+  const setSharedFolderAccountEmail = useCallback(async (folderID: string, accountEmail: string) => {
+    if (!companyID || sharedBusy) return;
+    setSharedContextMenu(null);
+    setSharedBusy(true);
+    try {
+      const updated = await updateCommunicationsSharedInbox({ companyID, folderID, accountEmail });
+      replaceSharedFolder(updated);
+    } catch (error) {
+      console.error("Failed to update shared triage email account", error);
+    } finally {
+      setSharedBusy(false);
+    }
+  }, [companyID, replaceSharedFolder, sharedBusy]);
 
   const commitSharedRename = useCallback(async () => {
     const folderID = renamingSharedFolderID.trim();
@@ -534,7 +571,10 @@ export function AppSidebar({
             }}
           />
         ) : (
-          <span style={appSidebarTextStyle}>{folder.name}</span>
+          <span style={appSidebarSharedLabelStackStyle}>
+            <span style={appSidebarTextStyle}>{folder.name}</span>
+            {folder.account_email && <span style={appSidebarSharedMetaStyle}>{folder.account_email}</span>}
+          </span>
         )}
       </div>
     );
@@ -766,8 +806,38 @@ export function AppSidebar({
           >
             {sharedContextMenu.folder ? "New Child Folder" : "New Folder"}
           </button>
+          {cleanConnectedAccountEmail && (
+            <button
+              type="button"
+              style={appSidebarContextMenuButtonStyle}
+              disabled={sharedBusy}
+              onClick={() => void createSharedFolder(sharedContextMenu.folder?.folder_id ?? "", cleanConnectedAccountEmail)}
+            >
+              New Inbox from {cleanConnectedAccountEmail}
+            </button>
+          )}
           {sharedContextMenu.folder && (
             <>
+              {cleanConnectedAccountEmail && sharedContextMenu.folder.account_email !== cleanConnectedAccountEmail && (
+                <button
+                  type="button"
+                  style={appSidebarContextMenuButtonStyle}
+                  disabled={sharedBusy}
+                  onClick={() => void setSharedFolderAccountEmail(sharedContextMenu.folder!.folder_id, cleanConnectedAccountEmail)}
+                >
+                  Attach {cleanConnectedAccountEmail}
+                </button>
+              )}
+              {sharedContextMenu.folder.account_email && (
+                <button
+                  type="button"
+                  style={appSidebarContextMenuButtonStyle}
+                  disabled={sharedBusy}
+                  onClick={() => void setSharedFolderAccountEmail(sharedContextMenu.folder!.folder_id, "")}
+                >
+                  Detach Email
+                </button>
+              )}
               <button
                 type="button"
                 style={appSidebarContextMenuButtonStyle}
@@ -1377,6 +1447,12 @@ const appSidebarSharedMetaStyle: React.CSSProperties = {
   color: "rgba(36, 18, 10, 0.52)",
   fontSize: 10,
   fontWeight: 700,
+};
+
+const appSidebarSharedLabelStackStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 1,
 };
 
 const appSidebarSharedRowsStyle: React.CSSProperties = {

@@ -309,7 +309,7 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 		UpdatedTimestamp: now,
 	}
 	r.folders[key(companyID, item.FolderID)] = item
-	return item, nil
+	return r.withSharedInboxRaciLocked(item), nil
 }
 
 func (r *MemoryRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
@@ -398,7 +398,7 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 	item.Position = position
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
-	return item, nil
+	return r.withSharedInboxRaciLocked(item), nil
 }
 
 func (r *MemoryRepo) RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error) {
@@ -415,7 +415,50 @@ func (r *MemoryRepo) RenameCompanyExplorerFolder(companyID, folderID, name strin
 	item.Name = name
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
-	return item, nil
+	return r.withSharedInboxRaciLocked(item), nil
+}
+
+func (r *MemoryRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folderID, accountEmail string) (domain.CompanyExplorerFolder, error) {
+	companyID = strings.TrimSpace(companyID)
+	folderID = strings.TrimSpace(folderID)
+	accountEmail = normalizeEmail(accountEmail)
+	if companyID == "" || folderID == "" {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	item, ok := r.folders[key(companyID, folderID)]
+	if !ok {
+		return domain.CompanyExplorerFolder{}, ErrNotFound
+	}
+	if item.FolderKind != "communications" {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
+	}
+	if accountEmail != "" && !r.companyHasConnectedEmailAccountLocked(companyID, accountEmail) {
+		return domain.CompanyExplorerFolder{}, ErrEmailAccountUnavailable
+	}
+	if accountEmail == "" {
+		item.AccountEmail = nil
+	} else {
+		item.AccountEmail = &accountEmail
+	}
+	item.UpdatedTimestamp = time.Now().UTC()
+	r.folders[key(companyID, item.FolderID)] = item
+	return r.withSharedInboxRaciLocked(item), nil
+}
+
+func (r *MemoryRepo) companyHasConnectedEmailAccountLocked(companyID, accountEmail string) bool {
+	for _, connection := range r.emailConnections {
+		if connection.Status != "connected" || normalizeEmail(connection.AccountEmail) != accountEmail {
+			continue
+		}
+		if _, ok := r.memberships[membershipKey(companyID, connection.UserID)]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *MemoryRepo) DeleteCompanyExplorerFolder(companyID, folderID string) error {

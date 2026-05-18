@@ -18,6 +18,7 @@ var (
 	ErrInvitationEmailMismatch   = errors.New("invitation email mismatch")
 	ErrAssigneeNotInCompany      = errors.New("assignee not in company")
 	ErrRaciStorageUnavailable    = errors.New("raci storage unavailable")
+	ErrEmailAccountUnavailable   = errors.New("email account unavailable")
 )
 
 type Repository interface {
@@ -81,6 +82,7 @@ type Repository interface {
 	RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error)
 	DeleteCompanyExplorerFolder(companyID, folderID string) error
 	DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput) (CompanyExplorerDeleteResult, error)
+	SetCommunicationsSharedInboxAccountEmail(companyID, folderID, accountEmail string) (domain.CompanyExplorerFolder, error)
 	SetCommunicationsSharedInboxRaciAssignments(input SharedInboxRaciAssignmentUpdateInput) ([]domain.SharedInboxRaciAssignment, error)
 	ListCompanyExplorerFolderShares(companyID, folderID string) ([]domain.CompanyExplorerFolderShare, error)
 	UpsertCompanyExplorerFolderShare(input CompanyExplorerFolderShareInput) (domain.CompanyExplorerFolderShare, error)

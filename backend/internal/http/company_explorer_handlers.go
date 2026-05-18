@@ -45,6 +45,7 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 		ParentFolderID string `json:"parent_folder_id"`
 		FolderKind     string `json:"folder_kind"`
 		Name           string `json:"name"`
+		AccountEmail   string `json:"account_email"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
@@ -54,6 +55,7 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 	req.ParentFolderID = strings.TrimSpace(req.ParentFolderID)
 	req.FolderKind = strings.TrimSpace(req.FolderKind)
 	req.Name = strings.TrimSpace(req.Name)
+	req.AccountEmail = strings.ToLower(strings.TrimSpace(req.AccountEmail))
 	if req.CompanyID == "" || req.Name == "" || !isValidCompanyExplorerFolderKind(req.FolderKind) {
 		writeError(w, http.StatusBadRequest, "company_id_folder_kind_name_required")
 		return
@@ -66,6 +68,26 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_company_explorer_folder")
 		return
+	}
+	if req.AccountEmail != "" {
+		item, err = s.repo.SetCommunicationsSharedInboxAccountEmail(req.CompanyID, item.FolderID, req.AccountEmail)
+		if err != nil {
+			_ = s.repo.DeleteCompanyExplorerFolder(req.CompanyID, item.FolderID)
+			if errors.Is(err, store.ErrEmailAccountUnavailable) {
+				writeError(w, http.StatusBadRequest, "shared_inbox_email_account_not_connected")
+				return
+			}
+			if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusBadRequest, "invalid_shared_inbox_account_email")
+				return
+			}
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "shared_inbox_not_found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed_to_assign_shared_inbox_account_email")
+			return
+		}
 	}
 	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_created", map[string]any{"folder_id": item.FolderID, "folder": item})
 	writeJSON(w, http.StatusCreated, item)
@@ -97,6 +119,7 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 			CompanyID      string  `json:"company_id"`
 			ParentFolderID *string `json:"parent_folder_id"`
 			Name           string  `json:"name"`
+			AccountEmail   *string `json:"account_email"`
 			Position       int     `json:"position"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -145,6 +168,27 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_rename_company_explorer_folder")
+				return
+			}
+			changed = true
+		}
+		if req.AccountEmail != nil {
+			accountEmail := strings.ToLower(strings.TrimSpace(*req.AccountEmail))
+			item, err = s.repo.SetCommunicationsSharedInboxAccountEmail(req.CompanyID, folderID, accountEmail)
+			if errors.Is(err, store.ErrEmailAccountUnavailable) {
+				writeError(w, http.StatusBadRequest, "shared_inbox_email_account_not_connected")
+				return
+			}
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "shared_inbox_not_found")
+				return
+			}
+			if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusBadRequest, "invalid_shared_inbox_account_email")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_update_shared_inbox_account_email")
 				return
 			}
 			changed = true

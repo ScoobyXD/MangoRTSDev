@@ -89,6 +89,7 @@ export type CommunicationsSharedInbox = {
   parent_folder_id?: string;
   folder_kind: "communications";
   name: string;
+  account_email?: string;
   position: number;
   raci_assignments?: CommunicationsSharedInboxRaciAssignment[];
   created_timestamp: string;
@@ -346,6 +347,7 @@ export async function createCommunicationsSharedInbox(input: {
   companyID: string;
   name: string;
   parentFolderID?: string;
+  accountEmail?: string;
 }): Promise<CommunicationsSharedInbox> {
   const folder = await apiFetchJSON<CommunicationsSharedInbox>("/v1/company-explorer/folders", {
     method: "POST",
@@ -354,6 +356,7 @@ export async function createCommunicationsSharedInbox(input: {
       folder_kind: "communications",
       parent_folder_id: input.parentFolderID?.trim() || undefined,
       name: input.name.trim(),
+      account_email: input.accountEmail?.trim() || undefined,
     }),
   });
   invalidateCacheKey(`shared-inboxes:${input.companyID.trim()}`);
@@ -366,6 +369,7 @@ export async function updateCommunicationsSharedInbox(input: {
   folderID: string;
   name?: string;
   parentFolderID?: string;
+  accountEmail?: string;
   position?: number;
 }): Promise<CommunicationsSharedInbox> {
   const cleanCompanyID = input.companyID.trim();
@@ -374,6 +378,9 @@ export async function updateCommunicationsSharedInbox(input: {
   if (input.name !== undefined) body.name = input.name.trim();
   if (Object.prototype.hasOwnProperty.call(input, "parentFolderID")) {
     body.parent_folder_id = input.parentFolderID?.trim() ?? "";
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "accountEmail")) {
+    body.account_email = input.accountEmail?.trim() ?? "";
   }
   if (input.position !== undefined && input.position > 0) body.position = Math.round(input.position);
   const folder = await apiFetchJSON<CommunicationsSharedInbox>(`/v1/company-explorer/folders/${encodeURIComponent(cleanFolderID)}`, {

@@ -231,6 +231,22 @@ export const navLabelStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+export const sharedInboxLabelStackStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 1,
+};
+
+export const sharedInboxAccountMetaStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "rgba(36, 18, 10, 0.54)",
+  fontSize: 10,
+  fontWeight: 600,
+};
+
 export const navMetaStyle: React.CSSProperties = {
   fontSize: 10,
   color: "rgba(36, 18, 10, 0.54)",
