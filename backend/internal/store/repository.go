@@ -112,6 +112,7 @@ type Repository interface {
 	MarkNotificationEventProcessed(eventID string) error
 	CreateNotifications(input CreateNotificationsInput) ([]domain.Notification, error)
 	ListNotifications(input NotificationListInput) ([]domain.Notification, error)
+	GetNotificationSummary(input NotificationSummaryInput) (domain.NotificationSummary, error)
 	CountUnreadNotifications(userID, companyID string) (int, error)
 	MarkNotificationRead(userID, notificationID string, read bool) (domain.Notification, error)
 	MarkAllNotificationsRead(userID, companyID string) (int, error)
@@ -324,6 +325,10 @@ type NotificationCreateInput struct {
 	EntityID        string
 	Title           string
 	BodyPreview     string
+	Surface         string
+	Role            string
+	LogicGateID     string
+	NodeID          string
 }
 
 type CreateNotificationsInput struct {
@@ -335,6 +340,11 @@ type NotificationListInput struct {
 	CompanyID  string
 	UnreadOnly bool
 	Limit      int
+}
+
+type NotificationSummaryInput struct {
+	UserID    string
+	CompanyID string
 }
 
 func NormalizeNotificationListLimit(limit int) int {

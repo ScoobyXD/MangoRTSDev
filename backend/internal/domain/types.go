@@ -377,6 +377,13 @@ const (
 	NotificationEventACIInboxRaciUpdated   = "aci_inbox.raci_updated"
 )
 
+const (
+	NotificationSurfaceRInbox       = "r_inbox"
+	NotificationSurfaceACIInbox     = "aci_inbox"
+	NotificationSurfaceMyTriage     = "my_triage"
+	NotificationSurfaceSharedTriage = "shared_triage"
+)
+
 type NotificationEvent struct {
 	EventID            string         `json:"event_id"`
 	CompanyID          string         `json:"company_id,omitempty"`
@@ -401,6 +408,31 @@ type Notification struct {
 	EntityID         string     `json:"entity_id"`
 	Title            string     `json:"title"`
 	BodyPreview      string     `json:"body_preview,omitempty"`
+	Surface          string     `json:"surface,omitempty"`
+	Role             string     `json:"role,omitempty"`
+	LogicGateID      string     `json:"logic_gate_id,omitempty"`
+	NodeID           string     `json:"node_id,omitempty"`
 	ReadTimestamp    *time.Time `json:"read_timestamp,omitempty"`
 	CreatedTimestamp time.Time  `json:"created_timestamp"`
+}
+
+type NotificationRoleCount struct {
+	Surface string `json:"surface,omitempty"`
+	Role    string `json:"role,omitempty"`
+	Count   int    `json:"count"`
+}
+
+type NotificationLogicGateCount struct {
+	LogicGateID string `json:"logic_gate_id"`
+	NodeID      string `json:"node_id,omitempty"`
+	Role        string `json:"role"`
+	Count       int    `json:"count"`
+}
+
+type NotificationSummary struct {
+	CompanyID        string                       `json:"company_id,omitempty"`
+	TotalUnread      int                          `json:"total_unread"`
+	RoleCounts       []NotificationRoleCount      `json:"role_counts"`
+	LogicGateCounts  []NotificationLogicGateCount `json:"logic_gate_counts"`
+	UpdatedTimestamp time.Time                    `json:"updated_timestamp"`
 }

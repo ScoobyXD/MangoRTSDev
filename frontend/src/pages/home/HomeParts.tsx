@@ -9,12 +9,13 @@ import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-e
 import { EditorContent } from "../../modules/editor/EditorContent";
 import type { NodeRecord } from "../../modules/node-map/shared";
 import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
+import type { NotificationRaciRole, NotificationSummary } from "../../modules/notifications/notificationsApi";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeState, HomeViewID, InboxLogicGateNodeGroup } from "./homeTypes";
 import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusLetter, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
+import { allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
@@ -1539,12 +1540,28 @@ export function MyNodeTile({
   );
 }
 
+function notificationCountForInboxGroup(summary: NotificationSummary, role: NotificationRaciRole, group: InboxLogicGateNodeGroup): number {
+  if (!group.logicGateID || group.logicGateID === INBOX_NO_LOGIC_GATE_ID) return 0;
+  const groupNodeIDs = new Set(group.nodeIDs);
+  return (summary.logic_gate_counts ?? []).reduce((count, item) => {
+    if (item.logic_gate_id !== group.logicGateID || item.role !== role) return count;
+    const nodeID = item.node_id?.trim() ?? "";
+    if (nodeID && !groupNodeIDs.has(nodeID)) return count;
+    return count + (typeof item.count === "number" && Number.isFinite(item.count) ? Math.max(0, Math.floor(item.count)) : 0);
+  }, 0);
+}
+
+function formatInboxNotificationCount(count: number): string {
+  const normalized = typeof count === "number" && Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  return normalized > 99 ? "99+" : String(normalized);
+}
 export function AciInboxMatrix({
   loading,
   nodes,
   nodeByID,
   logicGateByID,
   currentUserID,
+  notificationSummary,
   selectedRowIDs,
   getNodeDragIDs,
   onSelectNode,
@@ -1556,6 +1573,7 @@ export function AciInboxMatrix({
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
   currentUserID: string;
+  notificationSummary: NotificationSummary;
   selectedRowIDs: Set<string>;
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
@@ -1617,6 +1635,8 @@ export function AciInboxMatrix({
                           onSelectNode={onSelectNode}
                           onOpenNode={onOpenNode}
                           onOpenLogicGate={onOpenLogicGate}
+                          notificationCount={notificationCountForInboxGroup(notificationSummary, column.role, group)}
+                          notificationRole={column.role}
                           resizeKey={resizeKey}
                           heightPx={groupHeights[resizeKey]}
                           onStartResize={startGroupResize}
@@ -1643,6 +1663,7 @@ export function ResponsibleInboxMatrix({
   nodeByID,
   logicGateByID,
   currentUserID,
+  notificationSummary,
   selectedRowIDs,
   getNodeDragIDs,
   onSelectNode,
@@ -1654,6 +1675,7 @@ export function ResponsibleInboxMatrix({
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
   currentUserID: string;
+  notificationSummary: NotificationSummary;
   selectedRowIDs: Set<string>;
   getNodeDragIDs: (nodeID: string) => string[];
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
@@ -1715,6 +1737,8 @@ export function ResponsibleInboxMatrix({
                           onSelectNode={onSelectNode}
                           onOpenNode={onOpenNode}
                           onOpenLogicGate={onOpenLogicGate}
+                          notificationCount={notificationCountForInboxGroup(notificationSummary, "responsible", group)}
+                          notificationRole="responsible"
                           resizeKey={resizeKey}
                           heightPx={groupHeights[resizeKey]}
                           onStartResize={startGroupResize}
@@ -1744,6 +1768,8 @@ export function LogicGateInboxNodeGroupCard({
   onSelectNode,
   onOpenNode,
   onOpenLogicGate,
+  notificationCount = 0,
+  notificationRole,
   canRemoveNode,
   onRemovePlacement,
   resizeKey,
@@ -1759,6 +1785,8 @@ export function LogicGateInboxNodeGroupCard({
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
+  notificationCount?: number;
+  notificationRole?: NotificationRaciRole;
   canRemoveNode?: (nodeID: string) => boolean;
   onRemovePlacement?: (nodeID: string) => void;
   resizeKey?: string;
@@ -1801,6 +1829,7 @@ export function LogicGateInboxNodeGroupCard({
       >
         <ExplorerRowIcon kind="logic_gate" />
         <span style={logicGateInboxGroupTitleStyle}>{group.label}</span>
+        {notificationCount > 0 && notificationRole && <span style={logicGateInboxGroupNotificationStyle(notificationRole)}>{formatInboxNotificationCount(notificationCount)}</span>}
         <span style={logicGateInboxGroupCountStyle}>{group.nodeIDs.length}</span>
       </button>
       <div className="kanban-board-scroll" style={nodeListStyle}>

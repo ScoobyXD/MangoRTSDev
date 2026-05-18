@@ -617,7 +617,7 @@ export function logicGateInboxGroupHeaderStyle(interactive: boolean): React.CSSP
     width: "100%",
     height: 30,
     display: "grid",
-    gridTemplateColumns: "18px minmax(0, 1fr) auto",
+    gridTemplateColumns: "18px minmax(0, 1fr) auto auto",
     alignItems: "center",
     gap: 6,
     border: "none",
@@ -641,6 +641,39 @@ export const logicGateInboxGroupTitleStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
+export function logicGateInboxGroupNotificationStyle(role: string): React.CSSProperties {
+  const colors = inboxNotificationRoleColors(role);
+  return {
+    minWidth: 21,
+    height: 18,
+    display: "grid",
+    placeItems: "center",
+    border: `1px solid ${colors.border}`,
+    borderRadius: 4,
+    background: colors.background,
+    color: colors.color,
+    fontSize: 10,
+    fontWeight: 900,
+    lineHeight: 1,
+    padding: "0 5px",
+    boxSizing: "border-box",
+  };
+}
+
+function inboxNotificationRoleColors(role: string): { background: string; border: string; color: string } {
+  switch (role) {
+    case "responsible":
+      return { background: "#fee2e2", border: "rgba(220, 38, 38, 0.36)", color: "#b91c1c" };
+    case "accountable":
+      return { background: "#fef3c7", border: "rgba(217, 119, 6, 0.38)", color: "#b45309" };
+    case "consulted":
+      return { background: "#dcfce7", border: "rgba(22, 163, 74, 0.34)", color: "#15803d" };
+    case "informed":
+      return { background: "#e0f2fe", border: "rgba(2, 132, 199, 0.32)", color: "#0369a1" };
+    default:
+      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
+  }
+}
 export const logicGateInboxGroupCountStyle: React.CSSProperties = {
   minWidth: 21,
   height: 18,

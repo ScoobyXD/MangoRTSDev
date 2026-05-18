@@ -135,6 +135,33 @@ func TestLogicGateStateMoveCreatesNotificationForResponsibleUser(t *testing.T) {
 	if !strings.Contains(payload.Notifications[0].Title, "In Progress") {
 		t.Fatalf("notification title = %q, want In Progress", payload.Notifications[0].Title)
 	}
+	if payload.Notifications[0].Surface != domain.NotificationSurfaceRInbox || payload.Notifications[0].Role != domain.LogicGateRaciRoleResponsible {
+		t.Fatalf("notification metadata = surface %q role %q, want responsible R inbox", payload.Notifications[0].Surface, payload.Notifications[0].Role)
+	}
+	if payload.Notifications[0].LogicGateID != logicGate.LogicGateID || payload.Notifications[0].NodeID != node.NodeID {
+		t.Fatalf("notification target = logic gate %q node %q, want %q %q", payload.Notifications[0].LogicGateID, payload.Notifications[0].NodeID, logicGate.LogicGateID, node.NodeID)
+	}
+
+	summaryReq := httptest.NewRequest(http.MethodGet, "/v1/notifications/summary?company_id="+companyID, nil)
+	summaryReq = requestWithActorForNotifications(summaryReq, responsible, companyID)
+	summaryRec := httptest.NewRecorder()
+	handler.ServeHTTP(summaryRec, summaryReq)
+	if summaryRec.Code != http.StatusOK {
+		t.Fatalf("GET notification summary status = %d body=%s", summaryRec.Code, summaryRec.Body.String())
+	}
+	var summary domain.NotificationSummary
+	if err := json.NewDecoder(summaryRec.Body).Decode(&summary); err != nil {
+		t.Fatalf("decode notification summary: %v", err)
+	}
+	if summary.TotalUnread != 1 {
+		t.Fatalf("summary total unread = %d, want 1", summary.TotalUnread)
+	}
+	if len(summary.RoleCounts) != 1 || summary.RoleCounts[0].Surface != domain.NotificationSurfaceRInbox || summary.RoleCounts[0].Role != domain.LogicGateRaciRoleResponsible || summary.RoleCounts[0].Count != 1 {
+		t.Fatalf("summary role counts = %+v, want one responsible R inbox count", summary.RoleCounts)
+	}
+	if len(summary.LogicGateCounts) != 1 || summary.LogicGateCounts[0].LogicGateID != logicGate.LogicGateID || summary.LogicGateCounts[0].NodeID != node.NodeID || summary.LogicGateCounts[0].Role != domain.LogicGateRaciRoleResponsible || summary.LogicGateCounts[0].Count != 1 {
+		t.Fatalf("summary logic gate counts = %+v, want one responsible logic gate/node count", summary.LogicGateCounts)
+	}
 }
 
 func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {

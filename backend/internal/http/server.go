@@ -91,6 +91,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/communications/my-logic-gates/", s.handleCommunicationsMyLogicGateByID)
 	mux.HandleFunc("/v1/communications/stream", s.handleCommunicationsStream)
 	mux.HandleFunc("/v1/notifications", s.handleNotifications)
+	mux.HandleFunc("/v1/notifications/summary", s.handleNotificationSummary)
 	mux.HandleFunc("/v1/notifications/unread-count", s.handleNotificationUnreadCount)
 	mux.HandleFunc("/v1/notifications/read-all", s.handleNotificationReadAll)
 	mux.HandleFunc("/v1/notifications/stream", s.handleNotificationStream)

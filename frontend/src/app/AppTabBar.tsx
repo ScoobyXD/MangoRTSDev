@@ -5,7 +5,6 @@ import type { AppDockTab } from "./appDockTabs";
 type AppTabBarProps = {
   tabs: AppDockTab[];
   activeTabID: string | null;
-  leftOffset: number;
   onOpenTab: (tab: AppDockTab) => void;
   onReorderTab: (movingTabID: string, targetTabID: string) => void;
   onContextMenu: (event: React.MouseEvent, tab: AppDockTab) => void;
@@ -18,7 +17,6 @@ export const APP_TAB_BAR_HEIGHT = TAB_BAR_H;
 export const AppTabBar: React.FC<AppTabBarProps> = ({
   tabs,
   activeTabID,
-  leftOffset,
   onOpenTab,
   onReorderTab,
   onContextMenu,
@@ -53,7 +51,7 @@ export const AppTabBar: React.FC<AppTabBarProps> = ({
   }, []);
 
   return (
-    <footer style={appTabBarStyle(leftOffset)} aria-label="Collapsed app tabs">
+    <footer style={appTabBarStyle} aria-label="Collapsed app tabs">
       <div style={appTabRailStyle}>
         {tabs.map((tab) => {
           const active = activeTabID === tab.id;
@@ -101,24 +99,24 @@ const PinIndicator: React.FC = () => (
   </svg>
 );
 
-function appTabBarStyle(leftOffset: number): React.CSSProperties {
-  return {
-    position: "absolute",
-    left: leftOffset,
-    right: 10,
-    bottom: 0,
-    height: TAB_BAR_H,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 0,
-    padding: "6px 10px 8px",
-    boxSizing: "border-box",
-    background: "transparent",
-    pointerEvents: "none",
-    zIndex: 70,
-  };
-}
+const appTabBarStyle: React.CSSProperties = {
+  position: "fixed",
+  left: "50%",
+  bottom: 16,
+  transform: "translateX(-50%)",
+  height: TAB_BAR_H,
+  width: "max-content",
+  maxWidth: "calc(100vw - 32px)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: 0,
+  padding: "6px 0 8px",
+  boxSizing: "border-box",
+  background: "transparent",
+  pointerEvents: "none",
+  zIndex: 120,
+};
 const appTabRailStyle: React.CSSProperties = {
   minWidth: 0,
   maxWidth: "100%",

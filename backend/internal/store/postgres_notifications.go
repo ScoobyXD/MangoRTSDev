@@ -7,6 +7,7 @@ import (
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"strings"
+	"time"
 )
 
 func scanNotificationEvent(row interface{ Scan(dest ...any) error }) (domain.NotificationEvent, error) {
@@ -151,6 +152,10 @@ func scanNotification(row interface{ Scan(dest ...any) error }) (domain.Notifica
 		&item.EntityID,
 		&item.Title,
 		&item.BodyPreview,
+		&item.Surface,
+		&item.Role,
+		&item.LogicGateID,
+		&item.NodeID,
 		&item.ReadTimestamp,
 		&item.CreatedTimestamp,
 	)
@@ -169,7 +174,7 @@ func scanNotification(row interface{ Scan(dest ...any) error }) (domain.Notifica
 const notificationSelectColumns = `
 notification_id::text, company_id::text, recipient_user_id::text, actor_user_id::text,
 notification_type, source_event_id::text, entity_type, entity_id, title, body_preview,
-read_timestamp, created_timestamp`
+surface, role, logic_gate_id, node_id, read_timestamp, created_timestamp`
 
 func (r *PostgresRepo) CreateNotifications(input CreateNotificationsInput) ([]domain.Notification, error) {
 	ctx := context.Background()
@@ -190,20 +195,28 @@ func (r *PostgresRepo) CreateNotifications(input CreateNotificationsInput) ([]do
 		candidate.EntityID = strings.TrimSpace(candidate.EntityID)
 		candidate.Title = strings.TrimSpace(candidate.Title)
 		candidate.BodyPreview = strings.TrimSpace(candidate.BodyPreview)
+		candidate.Surface = strings.TrimSpace(candidate.Surface)
+		candidate.Role = strings.TrimSpace(candidate.Role)
+		candidate.LogicGateID = strings.TrimSpace(candidate.LogicGateID)
+		candidate.NodeID = strings.TrimSpace(candidate.NodeID)
 		if candidate.RecipientUserID == "" || candidate.Type == "" || candidate.SourceEventID == "" || candidate.EntityType == "" || candidate.EntityID == "" || candidate.Title == "" {
 			return nil, ErrInvalid
 		}
 		item, err := scanNotification(tx.QueryRowContext(ctx, `
 insert into notifications (
   notification_id, company_id, recipient_user_id, actor_user_id, notification_type,
-  source_event_id, entity_type, entity_id, title, body_preview, created_timestamp
-) values ($1, nullif($2, '')::uuid, $3::uuid, nullif($4, '')::uuid, $5, $6::uuid, $7, $8, $9, $10, now())
+  source_event_id, entity_type, entity_id, title, body_preview, surface, role, logic_gate_id, node_id, created_timestamp
+) values ($1, nullif($2, '')::uuid, $3::uuid, nullif($4, '')::uuid, $5, $6::uuid, $7, $8, $9, $10, $11, $12, $13, $14, now())
 on conflict (recipient_user_id, source_event_id, notification_type, entity_type, entity_id)
-do update set notification_id=notifications.notification_id
+do update set
+  surface=excluded.surface,
+  role=excluded.role,
+  logic_gate_id=excluded.logic_gate_id,
+  node_id=excluded.node_id
 returning `+notificationSelectColumns,
 			newUUIDv7String(), candidate.CompanyID, candidate.RecipientUserID, candidate.ActorUserID,
 			candidate.Type, candidate.SourceEventID, candidate.EntityType, candidate.EntityID,
-			candidate.Title, candidate.BodyPreview,
+			candidate.Title, candidate.BodyPreview, candidate.Surface, candidate.Role, candidate.LogicGateID, candidate.NodeID,
 		))
 		if err != nil {
 			return nil, err
@@ -248,6 +261,77 @@ limit $4`, input.UserID, input.CompanyID, input.UnreadOnly, limit)
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) GetNotificationSummary(input NotificationSummaryInput) (domain.NotificationSummary, error) {
+	input.UserID = strings.TrimSpace(input.UserID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	if input.UserID == "" {
+		return domain.NotificationSummary{}, ErrInvalid
+	}
+	summary := domain.NotificationSummary{
+		CompanyID:        input.CompanyID,
+		RoleCounts:       []domain.NotificationRoleCount{},
+		LogicGateCounts:  []domain.NotificationLogicGateCount{},
+		UpdatedTimestamp: time.Now().UTC(),
+	}
+	if err := r.db.QueryRow(`
+select count(*)
+from notifications
+where recipient_user_id=$1::uuid
+  and read_timestamp is null
+  and ($2 = '' or company_id = nullif($2, '')::uuid)`, input.UserID, input.CompanyID).Scan(&summary.TotalUnread); err != nil {
+		return domain.NotificationSummary{}, err
+	}
+
+	roleRows, err := r.db.Query(`
+select surface, role, count(*)
+from notifications
+where recipient_user_id=$1::uuid
+  and read_timestamp is null
+  and ($2 = '' or company_id = nullif($2, '')::uuid)
+  and (btrim(surface) <> '' or btrim(role) <> '')
+group by surface, role
+order by surface asc, role asc`, input.UserID, input.CompanyID)
+	if err != nil {
+		return domain.NotificationSummary{}, err
+	}
+	defer roleRows.Close()
+	for roleRows.Next() {
+		var item domain.NotificationRoleCount
+		if err := roleRows.Scan(&item.Surface, &item.Role, &item.Count); err != nil {
+			return domain.NotificationSummary{}, err
+		}
+		summary.RoleCounts = append(summary.RoleCounts, item)
+	}
+	if err := roleRows.Err(); err != nil {
+		return domain.NotificationSummary{}, err
+	}
+
+	gateRows, err := r.db.Query(`
+select logic_gate_id, node_id, role, count(*)
+from notifications
+where recipient_user_id=$1::uuid
+  and read_timestamp is null
+  and ($2 = '' or company_id = nullif($2, '')::uuid)
+  and btrim(logic_gate_id) <> ''
+  and btrim(role) <> ''
+group by logic_gate_id, node_id, role
+order by logic_gate_id asc, node_id asc, role asc`, input.UserID, input.CompanyID)
+	if err != nil {
+		return domain.NotificationSummary{}, err
+	}
+	defer gateRows.Close()
+	for gateRows.Next() {
+		var item domain.NotificationLogicGateCount
+		if err := gateRows.Scan(&item.LogicGateID, &item.NodeID, &item.Role, &item.Count); err != nil {
+			return domain.NotificationSummary{}, err
+		}
+		summary.LogicGateCounts = append(summary.LogicGateCounts, item)
+	}
+	if err := gateRows.Err(); err != nil {
+		return domain.NotificationSummary{}, err
+	}
+	return summary, nil
+}
 func (r *PostgresRepo) CountUnreadNotifications(userID, companyID string) (int, error) {
 	userID = strings.TrimSpace(userID)
 	companyID = strings.TrimSpace(companyID)

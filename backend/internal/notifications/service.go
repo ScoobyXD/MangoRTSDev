@@ -12,6 +12,13 @@ type Service struct {
 	Repo store.Repository
 }
 
+type notificationRecipientMeta struct {
+	Surface     string
+	Role        string
+	LogicGateID string
+	NodeID      string
+}
+
 func NewService(repo store.Repository) *Service {
 	return &Service{Repo: repo}
 }
@@ -71,18 +78,28 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 		payload = map[string]any{}
 	}
 
-	recipients := map[string]struct{}{}
-	addRecipient := func(userID string) {
+	recipients := map[string]notificationRecipientMeta{}
+	addRecipient := func(userID string, meta notificationRecipientMeta) {
 		userID = strings.TrimSpace(userID)
 		if userID == "" || userID == actorID {
 			return
 		}
-		recipients[userID] = struct{}{}
+		recipients[userID] = mergeNotificationRecipientMeta(recipients[userID], meta)
 	}
-	addRecipients := func(userIDs []string) {
+	addRecipients := func(userIDs []string, meta notificationRecipientMeta) {
 		for _, userID := range userIDs {
-			addRecipient(userID)
+			addRecipient(userID, meta)
 		}
+	}
+	addLogicGateRecipients := func(logicGateID, nodeID string) error {
+		roles, err := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
+		if err != nil {
+			return err
+		}
+		for userID, role := range roles {
+			addRecipient(userID, notificationMetaForLogicGateRole(role, logicGateID, nodeID))
+		}
+		return nil
 	}
 
 	title := "Mango notification"
@@ -95,11 +112,9 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 		if logicGateID == "" {
 			logicGateID = event.EntityID
 		}
-		userIDs, err := s.logicGateRaciRecipientIDs(event.CompanyID, logicGateID)
-		if err != nil {
+		if err := addLogicGateRecipients(logicGateID, payloadString(payload, "node_id")); err != nil {
 			return nil, err
 		}
-		addRecipients(userIDs)
 		toColumn := payloadString(payload, "column_title")
 		fromColumn := payloadString(payload, "previous_column_title")
 		nodeTitle := payloadString(payload, "node_title")
@@ -113,7 +128,18 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 			body = fmt.Sprintf("%s moved to %s.", nodeTitle, toColumn)
 		}
 	case domain.NotificationEventLogicGateRaciUpdated:
-		addRecipients(payloadStringSlice(payload, "assignment_user_ids"))
+		logicGateID := payloadString(payload, "logic_gate_id")
+		if logicGateID == "" {
+			logicGateID = event.EntityID
+		}
+		roles, err := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
+		if err == nil && len(roles) > 0 {
+			for userID, role := range roles {
+				addRecipient(userID, notificationMetaForLogicGateRole(role, logicGateID, ""))
+			}
+		} else {
+			addRecipients(payloadStringSlice(payload, "assignment_user_ids"), notificationRecipientMeta{LogicGateID: logicGateID})
+		}
 		gateTitle := payloadString(payload, "logic_gate_title")
 		if gateTitle == "" {
 			gateTitle = "a Logic Gate"
@@ -125,15 +151,14 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 		if err != nil {
 			return nil, err
 		}
+		firstLogicGateID := firstCleanString(node.LogicGateIDs)
 		if node.AssigneeUserID != nil {
-			addRecipient(*node.AssigneeUserID)
+			addRecipient(*node.AssigneeUserID, notificationRecipientMeta{Surface: domain.NotificationSurfaceRInbox, Role: domain.LogicGateRaciRoleResponsible, LogicGateID: firstLogicGateID, NodeID: node.NodeID})
 		}
-		for _, logicGateID := range node.LogicGateIDs {
-			userIDs, err := s.logicGateRaciRecipientIDs(event.CompanyID, logicGateID)
-			if err != nil {
+		for _, logicGateID := range cleanStrings(node.LogicGateIDs) {
+			if err := addLogicGateRecipients(logicGateID, node.NodeID); err != nil {
 				return nil, err
 			}
-			addRecipients(userIDs)
 		}
 		for _, mentionedUserID := range payloadStringSlice(payload, "mentioned_user_ids") {
 			delete(recipients, mentionedUserID)
@@ -145,7 +170,40 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 		title = "New comment on " + nodeTitle
 		body = compactPreview(payloadString(payload, "comment"), 180)
 	case domain.NotificationEventMentionCreated:
-		addRecipients(payloadStringSlice(payload, "mentioned_user_ids"))
+		mentionedUserIDs := payloadStringSlice(payload, "mentioned_user_ids")
+		switch event.EntityType {
+		case "logic_gate":
+			roles, _ := s.logicGateRaciRecipientRoles(event.CompanyID, event.EntityID)
+			for _, userID := range mentionedUserIDs {
+				addRecipient(userID, notificationMetaForLogicGateRole(roles[strings.TrimSpace(userID)], event.EntityID, ""))
+			}
+		case "node":
+			node, err := s.Repo.GetNode(event.CompanyID, event.EntityID)
+			if err != nil {
+				addRecipients(mentionedUserIDs, notificationRecipientMeta{})
+				break
+			}
+			metas := map[string]notificationRecipientMeta{}
+			firstLogicGateID := firstCleanString(node.LogicGateIDs)
+			if node.AssigneeUserID != nil {
+				userID := strings.TrimSpace(*node.AssigneeUserID)
+				metas[userID] = mergeNotificationRecipientMeta(metas[userID], notificationRecipientMeta{Surface: domain.NotificationSurfaceRInbox, Role: domain.LogicGateRaciRoleResponsible, LogicGateID: firstLogicGateID, NodeID: node.NodeID})
+			}
+			for _, logicGateID := range cleanStrings(node.LogicGateIDs) {
+				roles, roleErr := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
+				if roleErr != nil {
+					continue
+				}
+				for userID, role := range roles {
+					metas[userID] = mergeNotificationRecipientMeta(metas[userID], notificationMetaForLogicGateRole(role, logicGateID, node.NodeID))
+				}
+			}
+			for _, userID := range mentionedUserIDs {
+				addRecipient(userID, metas[strings.TrimSpace(userID)])
+			}
+		default:
+			addRecipients(mentionedUserIDs, notificationRecipientMeta{})
+		}
 		actorLabel := payloadString(payload, "actor_display_name")
 		if actorLabel == "" {
 			actorLabel = "Someone"
@@ -153,20 +211,30 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 		title = actorLabel + " mentioned you"
 		body = compactPreview(payloadString(payload, "comment"), 180)
 	case domain.NotificationEventACIInboxChanged:
-		addRecipients(payloadStringSlice(payload, "recipient_user_ids"))
+		addRecipients(payloadStringSlice(payload, "recipient_user_ids"), notificationRecipientMeta{Surface: domain.NotificationSurfaceMyTriage})
 		if folderID := payloadString(payload, "folder_id"); folderID != "" {
-			userIDs, err := s.sharedInboxRaciRecipientIDs(event.CompanyID, folderID)
+			roles, err := s.sharedInboxRaciRecipientRoles(event.CompanyID, folderID)
 			if err != nil {
 				return nil, err
 			}
-			addRecipients(userIDs)
+			for userID, role := range roles {
+				addRecipient(userID, notificationRecipientMeta{Surface: domain.NotificationSurfaceSharedTriage, Role: normalizeRaciRole(role)})
+			}
 		}
 		title = "ACI inbox changed"
 		if body == "" {
 			body = payloadString(payload, "change_summary")
 		}
 	case domain.NotificationEventACIInboxRaciUpdated:
-		addRecipients(payloadStringSlice(payload, "assignment_user_ids"))
+		folderID := event.EntityID
+		roles, err := s.sharedInboxRaciRecipientRoles(event.CompanyID, folderID)
+		if err == nil && len(roles) > 0 {
+			for userID, role := range roles {
+				addRecipient(userID, notificationRecipientMeta{Surface: domain.NotificationSurfaceSharedTriage, Role: normalizeRaciRole(role)})
+			}
+		} else {
+			addRecipients(payloadStringSlice(payload, "assignment_user_ids"), notificationRecipientMeta{Surface: domain.NotificationSurfaceSharedTriage})
+		}
 		folderName := payloadString(payload, "folder_name")
 		if folderName == "" {
 			folderName = "a shared inbox"
@@ -178,7 +246,7 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 	}
 
 	items := make([]store.NotificationCreateInput, 0, len(recipients))
-	for userID := range recipients {
+	for userID, meta := range recipients {
 		items = append(items, store.NotificationCreateInput{
 			CompanyID:       event.CompanyID,
 			RecipientUserID: userID,
@@ -189,11 +257,14 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 			EntityID:        event.EntityID,
 			Title:           title,
 			BodyPreview:     compactPreview(body, 240),
+			Surface:         meta.Surface,
+			Role:            meta.Role,
+			LogicGateID:     meta.LogicGateID,
+			NodeID:          meta.NodeID,
 		})
 	}
 	return items, nil
 }
-
 func (s *Service) ResolveMentionedUserIDs(companyID, text string) ([]string, error) {
 	companyID = strings.TrimSpace(companyID)
 	text = strings.TrimSpace(text)
@@ -292,6 +363,147 @@ func (s *Service) sharedInboxRaciRecipientIDs(companyID, folderID string) ([]str
 	return []string{}, nil
 }
 
+func (s *Service) logicGateRaciRecipientRoles(companyID, logicGateID string) (map[string]string, error) {
+	companyID = strings.TrimSpace(companyID)
+	logicGateID = strings.TrimSpace(logicGateID)
+	if companyID == "" || logicGateID == "" {
+		return map[string]string{}, nil
+	}
+	gate, err := s.Repo.GetLogicGate(companyID, logicGateID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(gate.RaciAssignments))
+	for _, assignment := range gate.RaciAssignments {
+		userID := strings.TrimSpace(assignment.UserID)
+		if userID == "" {
+			continue
+		}
+		out[userID] = mergeRaciRole(out[userID], assignment.Role)
+	}
+	return out, nil
+}
+
+func (s *Service) sharedInboxRaciRecipientRoles(companyID, folderID string) (map[string]string, error) {
+	companyID = strings.TrimSpace(companyID)
+	folderID = strings.TrimSpace(folderID)
+	if companyID == "" || folderID == "" {
+		return map[string]string{}, nil
+	}
+	folders, err := s.Repo.ListCompanyExplorerFolders(companyID, "communications")
+	if err != nil {
+		return nil, err
+	}
+	for _, folder := range folders {
+		if folder.FolderID != folderID {
+			continue
+		}
+		out := make(map[string]string, len(folder.RaciAssignments))
+		for _, assignment := range folder.RaciAssignments {
+			userID := strings.TrimSpace(assignment.UserID)
+			if userID == "" {
+				continue
+			}
+			out[userID] = mergeRaciRole(out[userID], assignment.Role)
+		}
+		return out, nil
+	}
+	return map[string]string{}, nil
+}
+
+func notificationMetaForLogicGateRole(role, logicGateID, nodeID string) notificationRecipientMeta {
+	role = normalizeRaciRole(role)
+	meta := notificationRecipientMeta{
+		Role:        role,
+		LogicGateID: strings.TrimSpace(logicGateID),
+		NodeID:      strings.TrimSpace(nodeID),
+	}
+	switch role {
+	case domain.LogicGateRaciRoleResponsible:
+		meta.Surface = domain.NotificationSurfaceRInbox
+	case domain.LogicGateRaciRoleAccountable, domain.LogicGateRaciRoleConsulted, domain.LogicGateRaciRoleInformed:
+		meta.Surface = domain.NotificationSurfaceACIInbox
+	}
+	return meta
+}
+
+func mergeNotificationRecipientMeta(current, next notificationRecipientMeta) notificationRecipientMeta {
+	current.Surface = strings.TrimSpace(current.Surface)
+	current.Role = normalizeRaciRole(current.Role)
+	current.LogicGateID = strings.TrimSpace(current.LogicGateID)
+	current.NodeID = strings.TrimSpace(current.NodeID)
+	next.Surface = strings.TrimSpace(next.Surface)
+	next.Role = normalizeRaciRole(next.Role)
+	next.LogicGateID = strings.TrimSpace(next.LogicGateID)
+	next.NodeID = strings.TrimSpace(next.NodeID)
+	if current.Surface == "" && current.Role == "" && current.LogicGateID == "" && current.NodeID == "" {
+		return next
+	}
+	roleChanged := false
+	if raciRoleRank(next.Role) > raciRoleRank(current.Role) {
+		current.Role = next.Role
+		roleChanged = true
+	}
+	if current.Surface == "" || roleChanged {
+		current.Surface = next.Surface
+	}
+	if current.LogicGateID == "" || (roleChanged && next.LogicGateID != "") {
+		current.LogicGateID = next.LogicGateID
+	}
+	if current.NodeID == "" || (roleChanged && next.NodeID != "") {
+		current.NodeID = next.NodeID
+	}
+	return current
+}
+
+func mergeRaciRole(current, next string) string {
+	current = normalizeRaciRole(current)
+	next = normalizeRaciRole(next)
+	if raciRoleRank(next) > raciRoleRank(current) {
+		return next
+	}
+	return current
+}
+
+func normalizeRaciRole(role string) string {
+	switch strings.TrimSpace(role) {
+	case domain.LogicGateRaciRoleResponsible:
+		return domain.LogicGateRaciRoleResponsible
+	case domain.LogicGateRaciRoleAccountable:
+		return domain.LogicGateRaciRoleAccountable
+	case domain.LogicGateRaciRoleConsulted:
+		return domain.LogicGateRaciRoleConsulted
+	case domain.LogicGateRaciRoleInformed:
+		return domain.LogicGateRaciRoleInformed
+	default:
+		return ""
+	}
+}
+
+func raciRoleRank(role string) int {
+	switch normalizeRaciRole(role) {
+	case domain.LogicGateRaciRoleResponsible:
+		return 4
+	case domain.LogicGateRaciRoleAccountable:
+		return 3
+	case domain.LogicGateRaciRoleConsulted:
+		return 2
+	case domain.LogicGateRaciRoleInformed:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func firstCleanString(values []string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
 func payloadString(payload map[string]any, key string) string {
 	value, ok := payload[key]
 	if !ok || value == nil {

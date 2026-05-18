@@ -198,11 +198,10 @@ if ($LASTEXITCODE -ne 0) {
   throw "psql failed with exit code $LASTEXITCODE"
 }
 if (($alreadyApplied | Select-Object -First 1) -eq "1") {
-  Write-Host "$migrationName already applied."
-  exit 0
+  Write-Host "$migrationName already recorded; running idempotent schema sync."
+} else {
+  Write-Host "Pending migration: $migrationName"
 }
-
-Write-Host "Pending migration: $migrationName"
 
 Invoke-Psql -Arguments @("-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", $migrationPath)
 Invoke-Psql -Arguments @(

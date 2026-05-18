@@ -43,7 +43,7 @@ import { useFrameDragResize } from "./useFrameDragResize";
 import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeSidebarView, type SidebarPin } from "./AppSidebarChrome";
 import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackLabel, type SidebarPinRequestDetail } from "./sidebarPins";
 import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeCreator";
-import { AppTabBar, APP_TAB_BAR_HEIGHT } from "./AppTabBar";
+import { AppTabBar } from "./AppTabBar";
 import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
@@ -244,7 +244,7 @@ type AppProps = {
 
 function appBodyStyle(sidebarWidth: number): React.CSSProperties {
   return {
-    height: `calc(100vh - ${APP_TAB_BAR_HEIGHT}px)`,
+    height: "100vh",
     minHeight: 0,
     display: "grid",
     gridTemplateColumns: `${sidebarWidth}px ${APP_RESIZE_HANDLE_W}px minmax(0, 1fr)`,
@@ -486,7 +486,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   }, [buildSnapshot]);
 
   const canvasW = Math.max(1, viewSize.w - appSidebarWidth - APP_RESIZE_HANDLE_W - PAGE_EDGE_GAP * 2);
-  const canvasH = Math.max(1, viewSize.h - APP_TAB_BAR_HEIGHT - PAGE_EDGE_GAP * 2);
+  const canvasH = Math.max(1, viewSize.h - PAGE_EDGE_GAP * 2);
   const gridCols = Math.max(1, Math.round(canvasW / CELL_SIZE));
   const gridRows = Math.max(1, Math.round(canvasH / CELL_SIZE));
   const stepX = canvasW / gridCols;
@@ -1437,7 +1437,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
 
       <AppTabBar
         tabs={dockTabs}
-        leftOffset={PAGE_EDGE_GAP + appSidebarWidth + APP_RESIZE_HANDLE_W}
         activeTabID={activeDockTabID}
         onOpenTab={openDockTab}
         onReorderTab={reorderDockTab}

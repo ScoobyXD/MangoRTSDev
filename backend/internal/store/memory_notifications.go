@@ -153,6 +153,10 @@ func (r *MemoryRepo) CreateNotifications(input CreateNotificationsInput) ([]doma
 		candidate.EntityID = strings.TrimSpace(candidate.EntityID)
 		candidate.Title = strings.TrimSpace(candidate.Title)
 		candidate.BodyPreview = strings.TrimSpace(candidate.BodyPreview)
+		candidate.Surface = strings.TrimSpace(candidate.Surface)
+		candidate.Role = strings.TrimSpace(candidate.Role)
+		candidate.LogicGateID = strings.TrimSpace(candidate.LogicGateID)
+		candidate.NodeID = strings.TrimSpace(candidate.NodeID)
 		if candidate.RecipientUserID == "" || candidate.Type == "" || candidate.SourceEventID == "" || candidate.EntityType == "" || candidate.EntityID == "" || candidate.Title == "" {
 			return nil, ErrInvalid
 		}
@@ -179,6 +183,10 @@ func (r *MemoryRepo) CreateNotifications(input CreateNotificationsInput) ([]doma
 			EntityID:         candidate.EntityID,
 			Title:            candidate.Title,
 			BodyPreview:      candidate.BodyPreview,
+			Surface:          candidate.Surface,
+			Role:             candidate.Role,
+			LogicGateID:      candidate.LogicGateID,
+			NodeID:           candidate.NodeID,
 			CreatedTimestamp: now,
 		}
 		r.notifications[item.NotificationID] = item
@@ -226,6 +234,77 @@ func (r *MemoryRepo) ListNotifications(input NotificationListInput) ([]domain.No
 	return items, nil
 }
 
+func (r *MemoryRepo) GetNotificationSummary(input NotificationSummaryInput) (domain.NotificationSummary, error) {
+	input.UserID = strings.TrimSpace(input.UserID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	if input.UserID == "" {
+		return domain.NotificationSummary{}, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	summary := domain.NotificationSummary{
+		CompanyID:        input.CompanyID,
+		RoleCounts:       []domain.NotificationRoleCount{},
+		LogicGateCounts:  []domain.NotificationLogicGateCount{},
+		UpdatedTimestamp: time.Now().UTC(),
+	}
+	roleCounts := map[string]domain.NotificationRoleCount{}
+	logicGateCounts := map[string]domain.NotificationLogicGateCount{}
+	for _, item := range r.notifications {
+		if item.RecipientUserID != input.UserID || item.ReadTimestamp != nil {
+			continue
+		}
+		if input.CompanyID != "" && item.CompanyID != input.CompanyID {
+			continue
+		}
+		summary.TotalUnread++
+		if item.Surface != "" || item.Role != "" {
+			key := item.Surface + "\x00" + item.Role
+			count := roleCounts[key]
+			if count.Count == 0 {
+				count.Surface = item.Surface
+				count.Role = item.Role
+			}
+			count.Count++
+			roleCounts[key] = count
+		}
+		if item.LogicGateID != "" && item.Role != "" {
+			key := item.LogicGateID + "\x00" + item.NodeID + "\x00" + item.Role
+			count := logicGateCounts[key]
+			if count.Count == 0 {
+				count.LogicGateID = item.LogicGateID
+				count.NodeID = item.NodeID
+				count.Role = item.Role
+			}
+			count.Count++
+			logicGateCounts[key] = count
+		}
+	}
+	for _, count := range roleCounts {
+		summary.RoleCounts = append(summary.RoleCounts, count)
+	}
+	for _, count := range logicGateCounts {
+		summary.LogicGateCounts = append(summary.LogicGateCounts, count)
+	}
+	slices.SortFunc(summary.RoleCounts, func(a, b domain.NotificationRoleCount) int {
+		if cmp := strings.Compare(a.Surface, b.Surface); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.Role, b.Role)
+	})
+	slices.SortFunc(summary.LogicGateCounts, func(a, b domain.NotificationLogicGateCount) int {
+		if cmp := strings.Compare(a.LogicGateID, b.LogicGateID); cmp != 0 {
+			return cmp
+		}
+		if cmp := strings.Compare(a.NodeID, b.NodeID); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.Role, b.Role)
+	})
+	return summary, nil
+}
 func (r *MemoryRepo) CountUnreadNotifications(userID, companyID string) (int, error) {
 	userID = strings.TrimSpace(userID)
 	companyID = strings.TrimSpace(companyID)

@@ -60,8 +60,26 @@ LATER: need to do an audit on how well equiped the app is for multiple people us
 1. This thing is getting really, really slow, especially the part when I drag an email into a Logic Gate. That takes like almost a second! It should be literally 90% faster. 
 2. theres also a bug with the resizing on the my triage page when you first load into dev site. idk its really weird, and then it goes back to normal and works. who knows.
 
-===============
 
+1. no way for a newly created node from the node page to be assigned to a logic gate, and also its spamming the explorer.
+2. Left hand bar 1 scroll bar
+3. shared email should be able to have assigned emails lol
+4. ui refresh (less orange!)
+5. By default when you open a node a text box is already open for you.
+remember the original vision: as few clicks as possible, 3 axis notification management (i really think this is where agents shine)
+6. on my nodes in aci inbox, have it strucutred by logic gate folder.
+7. when a node goes into a logic gate, it should automatically be assigned to whoever is responsible for that logic gate?
+8. I really really get the feeling that users will want to edit and change stuff with the logic gate and node from the ACI and R Inbox.
+	like you multiselect a buunch of nodes or logic gates, right click, and give them all assignments, change priority, status, change due date, etc.
+9. There is a problem in the ACI inbox where when i select a logic gate it doesn't display that logic gate in the logic gate arena view.
+10. each color in raci matrix should be color coded.
+11. Might be able to delete My Nodes on the ACI Inbox and R inbox section
+12. On the all nodes folder structure, i should be able to click drag nodes into a logic gate in a cell and it automatically inherits those features.
+13. On nodes i should be able to select a picture and make a node or a chat comment out of that lol.
+14. also on the logic gate list of nodes, need a way collapse it and minimize it on ACI and R inbox.
+15. On ACI and R inbox titles put (Logic gates assigned to me) and on my nodes write (nodes assigned to me)
+16. My nodes view on ACI and R should only be nodes assigned to me, not the nodes that are in these logic gates.
+===============
 Notes to tell tim:
 1. We do need to advise users on a system on who gets to drag nodes to different status, should it be done automatically or wait for permission
 notes:
@@ -86,8 +104,6 @@ there should be by default a "customer support" logic gate, its our embedded cus
 	a. So, there is a minimum number of clicks required for customers to report to us a bug, something they'd like to change, or some kind of support ticket. 
 
 ACI/R Inbox
-1. Make it possible to increase the cell height.
-2. On R Inbox in my nodes section, organize the nodes by logic gate. 
 
 Node Editor changes
 1. Outbound email when node is done.
@@ -96,25 +112,14 @@ Node Editor changes
 
 
 4. RACI inboxes should be public view.
-
-6. when there is a state change, live show difference on the R and ACI inbox
 7. @ mentions, only if part of raci matrix.
-
-
 1. We need to capture history of what email from primary moved to what triage and then to what logic gate so we can fine tune hermes agent
 3. I think we put wayyyyy too much code in the communications page alone and needs to be broken apart. also for nodes.
 	a. for example nodeworkspacesurface keeps getting a merge conflict.
-
 	a. and call logic gate inbox into logic gate triage.
 6. archive feature. ususally business guys press archive to remove emails from the email list
-
-
-
-
-2. Try to create a shared inbox feature with other users in the same company like how Front (the tech company) has it.
-	a. same goes for read receipts
-	b. team comments.
-	c. shared drafts
+7. shared inbox read receipts internal and external.
+8. Some of the original visions didnt make it to the final product, like the birds eye manager view when they wake up in the morning and the email being triaged into urgency, informative, action axis.
 	
 1. When you have successfuly accepted invite and you are now a user, you should get some kind of confirmation email saying you have successfully signed up with <name of company>
 

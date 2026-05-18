@@ -16,6 +16,8 @@ import {
   updateCommunicationsSharedInbox,
   type CommunicationsSharedInbox,
 } from "../modules/communications/communicationsApi";
+import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
+import type { NotificationRaciRole, NotificationSummary, NotificationSurface } from "../modules/notifications/notificationsApi";
 import {
   buildSharedInboxRows,
   collectSharedInboxSubtreeIDs,
@@ -140,6 +142,7 @@ export function AppSidebar({
 }: AppSidebarProps): React.ReactElement {
   const homeActive = activePage === "home";
   const companyID = getActiveCompanyID();
+  const notificationSummary = useNotificationSummary(companyID);
   const [sharedTriageOpen, setSharedTriageOpen] = usePersistedSidebarSectionOpen("shared-triage", true);
   const [logicGatesByFunctionOpen, setLogicGatesByFunctionOpen] = usePersistedSidebarSectionOpen("logic-gates-by-function", false);
   const [logicGatesByPersonOpen, setLogicGatesByPersonOpen] = usePersistedSidebarSectionOpen("logic-gates-by-person", false);
@@ -155,14 +158,49 @@ export function AppSidebar({
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
   const [pinContextMenu, setPinContextMenu] = useState<{ x: number; y: number; pin: SidebarPin } | null>(null);
   const [pinDropTarget, setPinDropTarget] = useState<{ key: string; placement: "before" | "after" } | null>(null);
+  const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
+  const visibleSharedInboxes = useMemo(
+    () => filterSharedInboxesForUser(sharedInboxes, currentUserID, currentUserHasFullSharedInboxAccess),
+    [currentUserHasFullSharedInboxAccess, currentUserID, sharedInboxes],
+  );
   const sharedRows = useMemo(
-    () => sharedTriageOpen ? buildSharedInboxRows(filterSharedInboxesForUser(sharedInboxes, currentUserID, currentUserHasFullSharedInboxAccess), expandedSharedFolderIDs) : [],
-    [currentUserHasFullSharedInboxAccess, currentUserID, expandedSharedFolderIDs, sharedInboxes, sharedTriageOpen],
+    () => sharedTriageOpen ? buildSharedInboxRows(visibleSharedInboxes, expandedSharedFolderIDs) : [],
+    [expandedSharedFolderIDs, sharedTriageOpen, visibleSharedInboxes],
   );
   const sharedTriageActive = homeActive && (activeHomeView === "shared-root" || activeHomeView.startsWith("shared:"));
-
+  const aciNotificationCounts = useMemo(() => ({
+    accountable: notificationSummaryRoleCount(notificationSummary, "aci_inbox", "accountable"),
+    consulted: notificationSummaryRoleCount(notificationSummary, "aci_inbox", "consulted"),
+    informed: notificationSummaryRoleCount(notificationSummary, "aci_inbox", "informed"),
+  }), [notificationSummary]);
+  const responsibleNotificationCount = useMemo(
+    () => notificationSummaryRoleCount(notificationSummary, "r_inbox", "responsible"),
+    [notificationSummary],
+  );
+  const myTriageNotificationCount = useMemo(
+    () => mailUnreadCounts.myTriage + notificationSummarySurfaceCount(notificationSummary, "my_triage"),
+    [mailUnreadCounts.myTriage, notificationSummary],
+  );
+  const sharedTriageNotificationCount = useMemo(
+    () => mailUnreadCounts.sharedTriage + notificationSummarySurfaceCount(notificationSummary, "shared_triage"),
+    [mailUnreadCounts.sharedTriage, notificationSummary],
+  );
+  useEffect(() => {
+    const onHomeUnreadCountsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ companyID?: string; viewID?: HomeSidebarView; unreadCount?: number }>).detail;
+      if (detail?.companyID && detail.companyID !== companyID) return;
+      const count = normalizeSidebarNotificationCount(detail?.unreadCount);
+      if (detail?.viewID === "my-triage") {
+        setMailUnreadCounts((current) => ({ ...current, myTriage: count }));
+      } else if (detail?.viewID === "shared-root" || detail?.viewID?.startsWith("shared:")) {
+        setMailUnreadCounts((current) => ({ ...current, sharedTriage: count }));
+      }
+    };
+    window.addEventListener("mangorts:home-unread-counts-updated", onHomeUnreadCountsUpdated);
+    return () => window.removeEventListener("mangorts:home-unread-counts-updated", onHomeUnreadCountsUpdated);
+  }, [companyID]);
   const readDraggedSidebarPin = useCallback((dataTransfer: DataTransfer): SidebarPin | null => {
     try {
       const parsed = JSON.parse(dataTransfer.getData(APP_SIDEBAR_PIN_DRAG_MIME)) as Partial<SidebarPin>;
@@ -223,11 +261,10 @@ export function AppSidebar({
 
   useEffect(() => {
     setExpandedSharedFolderIDs((previous) => {
-      const visibleSharedInboxes = filterSharedInboxesForUser(sharedInboxes, currentUserID, currentUserHasFullSharedInboxAccess);
       if (previous.size > 0 || visibleSharedInboxes.length === 0) return previous;
       return new Set(visibleSharedInboxes.filter((folder) => !folder.parent_folder_id).map((folder) => folder.folder_id));
     });
-  }, [currentUserHasFullSharedInboxAccess, currentUserID, sharedInboxes]);
+  }, [visibleSharedInboxes]);
 
   useEffect(() => {
     const activeFolderID = activeHomeView.startsWith("shared:") ? activeHomeView.slice("shared:".length) : "";
@@ -514,6 +551,7 @@ export function AppSidebar({
         <AppSidebarButton
           label="My Triage"
           active={homeActive && activeHomeView === "my-triage"}
+          trailing={<SidebarNotificationBadges badges={[{ key: "my-triage", count: myTriageNotificationCount, tone: "mail", title: "My Triage unread updates" }]} />}
           onClick={() => onHomeViewSelect("my-triage")}
         />
         <div style={appSidebarSharedRootBlockStyle}>
@@ -530,7 +568,10 @@ export function AppSidebar({
               onClick={() => onHomeViewSelect("shared-root")}
             >
               <span style={appSidebarTextStyle}>Shared Triage</span>
-              {loadingSharedInboxes && <span style={appSidebarSharedMetaStyle}>Loading</span>}
+              <span style={appSidebarTrailingStyle}>
+                {loadingSharedInboxes && <span style={appSidebarSharedMetaStyle}>Loading</span>}
+                <SidebarNotificationBadges badges={[{ key: "shared-triage", count: sharedTriageNotificationCount, tone: "mail", title: "Shared Triage unread updates" }]} />
+              </span>
             </button>
             <button
               type="button"
@@ -554,11 +595,17 @@ export function AppSidebar({
         <AppSidebarButton
           label="ACI Inbox"
           active={homeActive && activeHomeView === "aci-inbox"}
+          trailing={<SidebarNotificationBadges badges={[
+            { key: "accountable", count: aciNotificationCounts.accountable, tone: "accountable", title: "Accountable notifications" },
+            { key: "consulted", count: aciNotificationCounts.consulted, tone: "consulted", title: "Consulted notifications" },
+            { key: "informed", count: aciNotificationCounts.informed, tone: "informed", title: "Informed notifications" },
+          ]} />}
           onClick={() => onHomeViewSelect("aci-inbox")}
         />
         <AppSidebarButton
           label="R Inbox"
           active={homeActive && activeHomeView === "r-inbox"}
+          trailing={<SidebarNotificationBadges badges={[{ key: "responsible", count: responsibleNotificationCount, tone: "responsible", title: "Responsible notifications" }]} />}
           onClick={() => onHomeViewSelect("r-inbox")}
         />
       </section>
@@ -758,10 +805,55 @@ export function AppSidebar({
   );
 }
 
+type SidebarNotificationBadgeTone = NotificationRaciRole | "mail";
+
+type SidebarNotificationBadge = {
+  key: string;
+  count: number;
+  tone: SidebarNotificationBadgeTone;
+  title: string;
+};
+
+function notificationSummaryRoleCount(summary: NotificationSummary, surface: NotificationSurface, role: NotificationRaciRole): number {
+  return (summary.role_counts ?? []).reduce((count, item) => (
+    item.surface === surface && item.role === role ? count + normalizeSidebarNotificationCount(item.count) : count
+  ), 0);
+}
+
+function notificationSummarySurfaceCount(summary: NotificationSummary, surface: NotificationSurface): number {
+  return (summary.role_counts ?? []).reduce((count, item) => (
+    item.surface === surface ? count + normalizeSidebarNotificationCount(item.count) : count
+  ), 0);
+}
+
+function normalizeSidebarNotificationCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function SidebarNotificationBadges({ badges }: { badges: SidebarNotificationBadge[] }): React.ReactElement | null {
+  const visible = badges.filter((badge) => normalizeSidebarNotificationCount(badge.count) > 0);
+  if (visible.length === 0) return null;
+  return (
+    <span style={appSidebarBadgeStripStyle} aria-label="Notification counts">
+      {visible.map((badge) => (
+        <span key={badge.key} title={badge.title} style={appSidebarNotificationBadgeStyle(badge.tone)}>
+          {formatSidebarNotificationCount(badge.count)}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function formatSidebarNotificationCount(count: number): string {
+  const normalized = normalizeSidebarNotificationCount(count);
+  return normalized > 99 ? "99+" : String(normalized);
+}
+
 function AppSidebarButton({
   label,
   active,
   icon,
+  trailing,
   onClick,
   onPointerEnter,
   onFocus,
@@ -770,6 +862,7 @@ function AppSidebarButton({
   label: string;
   active: boolean;
   icon?: React.ReactNode;
+  trailing?: React.ReactNode;
   onClick: () => void;
   onPointerEnter?: () => void;
   onFocus?: () => void;
@@ -778,7 +871,7 @@ function AppSidebarButton({
   return (
     <button
       type="button"
-      style={appSidebarButtonStyle(active, !!icon)}
+      style={appSidebarButtonStyle(active, !!icon, !!trailing)}
       onPointerEnter={onPointerEnter}
       onFocus={onFocus}
       onPointerDown={onPointerDown}
@@ -786,10 +879,10 @@ function AppSidebarButton({
     >
       {icon && <span style={appSidebarButtonIconStyle}>{icon}</span>}
       <span style={appSidebarTextStyle}>{label}</span>
+      {trailing && <span style={appSidebarTrailingStyle}>{trailing}</span>}
     </button>
   );
 }
-
 function AppSidebarScopedExplorerSection({
   label,
   open,
@@ -1081,12 +1174,12 @@ const appSidebarSectionTitleStyle: React.CSSProperties = {
   letterSpacing: 0,
 };
 
-function appSidebarButtonStyle(active: boolean, hasIcon: boolean): React.CSSProperties {
+function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: boolean): React.CSSProperties {
   return {
     width: "100%",
     minHeight: 31,
     display: "grid",
-    gridTemplateColumns: hasIcon ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)",
+    gridTemplateColumns: appSidebarButtonGridColumns(hasIcon, hasTrailing),
     alignItems: "center",
     gap: 7,
     border: `1px solid ${active ? "rgba(255, 136, 32, 0.68)" : "transparent"}`,
@@ -1117,6 +1210,65 @@ const appSidebarTextStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+function appSidebarButtonGridColumns(hasIcon: boolean, hasTrailing: boolean): string {
+  if (hasIcon && hasTrailing) return "auto minmax(0, 1fr) auto";
+  if (hasIcon) return "auto minmax(0, 1fr)";
+  if (hasTrailing) return "minmax(0, 1fr) auto";
+  return "minmax(0, 1fr)";
+}
+
+const appSidebarTrailingStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 4,
+};
+
+const appSidebarBadgeStripStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 3,
+  overflow: "hidden",
+};
+
+function appSidebarNotificationBadgeStyle(tone: SidebarNotificationBadgeTone): React.CSSProperties {
+  const colors = sidebarNotificationBadgeColors(tone);
+  return {
+    minWidth: 17,
+    height: 17,
+    display: "grid",
+    placeItems: "center",
+    border: `1px solid ${colors.border}`,
+    borderRadius: 4,
+    background: colors.background,
+    color: colors.color,
+    fontSize: 9.5,
+    fontWeight: 800,
+    lineHeight: 1,
+    padding: "0 4px",
+    boxSizing: "border-box",
+    flex: "0 0 auto",
+  };
+}
+
+function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone): { background: string; border: string; color: string } {
+  switch (tone) {
+    case "responsible":
+      return { background: "#fee2e2", border: "rgba(220, 38, 38, 0.36)", color: "#b91c1c" };
+    case "accountable":
+      return { background: "#fef3c7", border: "rgba(217, 119, 6, 0.38)", color: "#b45309" };
+    case "consulted":
+      return { background: "#dcfce7", border: "rgba(22, 163, 74, 0.34)", color: "#15803d" };
+    case "informed":
+      return { background: "#e0f2fe", border: "rgba(2, 132, 199, 0.32)", color: "#0369a1" };
+    case "mail":
+    default:
+      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
+  }
+}
 const appSidebarSharedRootBlockStyle: React.CSSProperties = {
   display: "grid",
   gap: 3,

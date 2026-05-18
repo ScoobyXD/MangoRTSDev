@@ -55,6 +55,30 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"notifications": items})
 }
 
+func (s *Server) handleNotificationSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	summary, err := s.repo.GetNotificationSummary(store.NotificationSummaryInput{
+		UserID:    actor.User.UserID,
+		CompanyID: strings.TrimSpace(r.URL.Query().Get("company_id")),
+	})
+	if errorsIsInvalid(err) {
+		writeError(w, http.StatusBadRequest, "invalid_notifications_request")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_get_notification_summary")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, summary)
+}
 func (s *Server) handleNotificationUnreadCount(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

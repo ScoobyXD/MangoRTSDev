@@ -61,6 +61,7 @@ import { upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "../
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache } from "../../modules/kanban/kanbanApi";
 import { subscribeWorkspaceStream } from "../../modules/workspace/workspaceStream";
+import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
 import {
   EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
   EVENT_KANBAN_BOARDS_UPDATED,
@@ -78,6 +79,7 @@ import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, typ
 export function HomePage({ me, onNavigate, embedded = false, hideNavigation = false, initialViewID = "my-triage" }: HomePageProps) {
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
+  const notificationSummary = useNotificationSummary(companyID);
   const [status, setStatus] = useState<CommunicationsStatus | null>(null);
   const [, setFolders] = useState<EmailFolder[]>([]);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
@@ -1550,6 +1552,12 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const listViewLabel = activeViewID.startsWith("shared:") ? activeViewLabel : isArchivableListView ? mailboxLabel(mailbox) : activeViewLabel;
   const mailboxActionBusy = busy === "archive" || busy === "unarchive";
   const unreadMessageCount = messages.reduce((count, message) => count + (message.unread ? 1 : 0), 0);
+  useEffect(() => {
+    if (!status?.connected || isInboxMatrixView) return;
+    window.dispatchEvent(new CustomEvent("mangorts:home-unread-counts-updated", {
+      detail: { companyID, viewID: activeViewID, unreadCount: unreadMessageCount },
+    }));
+  }, [activeViewID, companyID, isInboxMatrixView, status?.connected, unreadMessageCount]);
   const mailFilterStatus = selectedMessageIDs.size > 1
     ? `${selectedMessageIDs.size} selected`
     : (loadingMessages || loadingMoreMessages) ? "Loading" : "";
@@ -1638,6 +1646,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                   nodeByID={nodeByID}
                   logicGateByID={logicGateByID}
                   currentUserID={currentUserID}
+                  notificationSummary={notificationSummary}
                   selectedRowIDs={selectedNodeRowIDs}
                   getNodeDragIDs={getNodeDragIDs}
                   onSelectNode={selectNodeMatrixCard}
@@ -1651,6 +1660,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
                   nodeByID={nodeByID}
                   logicGateByID={logicGateByID}
                   currentUserID={currentUserID}
+                  notificationSummary={notificationSummary}
                   selectedRowIDs={selectedNodeRowIDs}
                   getNodeDragIDs={getNodeDragIDs}
                   onSelectNode={selectNodeMatrixCard}
