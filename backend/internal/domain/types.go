@@ -425,6 +425,11 @@ type NotificationRoleCount struct {
 	Count   int    `json:"count"`
 }
 
+type NotificationTypeCount struct {
+	Type  string `json:"type"`
+	Count int    `json:"count"`
+}
+
 type NotificationLogicGateCount struct {
 	LogicGateID string `json:"logic_gate_id"`
 	NodeID      string `json:"node_id,omitempty"`
@@ -436,6 +441,7 @@ type NotificationSummary struct {
 	CompanyID        string                       `json:"company_id,omitempty"`
 	TotalUnread      int                          `json:"total_unread"`
 	RoleCounts       []NotificationRoleCount      `json:"role_counts"`
+	TypeCounts       []NotificationTypeCount      `json:"type_counts"`
 	LogicGateCounts  []NotificationLogicGateCount `json:"logic_gate_counts"`
 	UpdatedTimestamp time.Time                    `json:"updated_timestamp"`
 }

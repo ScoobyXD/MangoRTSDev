@@ -159,10 +159,6 @@ func createCompanyExplorerDefaultFolderTreeSQL(ctx context.Context, tx *sql.Tx, 
 }
 
 func ensureCompanyExplorerDefaultFoldersSQL(ctx context.Context, tx *sql.Tx, companyID string) error {
-	if err := ensureCompanyExplorerSharedInboxSchemaSQL(ctx, tx); err != nil {
-		return err
-	}
-
 	var insertedSystemSeed string
 	err := tx.QueryRowContext(ctx,
 		`insert into company_explorer_default_folder_seeds
@@ -287,15 +283,14 @@ func ensureCompanyExplorerSystemFolderSQL(ctx context.Context, tx *sql.Tx, compa
 
 func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error) {
 	ctx := context.Background()
+	if err := r.ensureCompanyExplorerSharedInboxSchema(ctx); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
 	defer tx.Rollback()
-
-	if err := ensureCompanyExplorerSharedInboxSchemaSQL(ctx, tx); err != nil {
-		return domain.CompanyExplorerFolder{}, err
-	}
 
 	var parent any
 	if parentFolderID != "" {
@@ -347,6 +342,9 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 
 func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
 	ctx := context.Background()
+	if err := r.ensureCompanyExplorerSharedInboxSchema(ctx); err != nil {
+		return nil, err
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -396,15 +394,14 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 
 func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error) {
 	ctx := context.Background()
+	if err := r.ensureCompanyExplorerSharedInboxSchema(ctx); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
 	defer tx.Rollback()
-
-	if err := ensureCompanyExplorerSharedInboxSchemaSQL(ctx, tx); err != nil {
-		return domain.CompanyExplorerFolder{}, err
-	}
 
 	var folderKind string
 	var currentParent sql.NullString
@@ -509,7 +506,7 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 
 func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error) {
 	ctx := context.Background()
-	if err := ensureCompanyExplorerSharedInboxSchemaSQL(ctx, r.db); err != nil {
+	if err := r.ensureCompanyExplorerSharedInboxSchema(ctx); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
 
@@ -554,15 +551,14 @@ func (r *PostgresRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folde
 	}
 
 	ctx := context.Background()
+	if err := r.ensureCompanyExplorerSharedInboxSchema(ctx); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
 	defer tx.Rollback()
-
-	if err := ensureCompanyExplorerSharedInboxSchemaSQL(ctx, tx); err != nil {
-		return domain.CompanyExplorerFolder{}, err
-	}
 
 	var folderKind string
 	if err := tx.QueryRowContext(ctx,

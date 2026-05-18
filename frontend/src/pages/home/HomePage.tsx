@@ -65,6 +65,7 @@ import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanB
 import { getLogicGateArenaView, invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, upsertKanbanCard } from "../../modules/kanban/kanbanApi";
 import { subscribeWorkspaceStream } from "../../modules/workspace/workspaceStream";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
+import type { NotificationItem } from "../../modules/notifications/notificationsApi";
 import {
   EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
   EVENT_KANBAN_BOARDS_UPDATED,
@@ -1598,6 +1599,22 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     if (onNavigate) onNavigate("/logic-gate-arena");
     else window.location.assign("/logic-gate-arena");
   }, [companyID, onNavigate]);
+  const openMentionNotificationTarget = useCallback((notification: NotificationItem) => {
+    const rawNodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
+    const node = rawNodeID ? nodeByID.get(rawNodeID) : undefined;
+    const rawLogicGateID = notification.logic_gate_id?.trim()
+      || (notification.entity_type === "logic_gate" ? notification.entity_id.trim() : "")
+      || cleanIDList(node?.logic_gate_ids ?? [])[0]
+      || "";
+    if (rawLogicGateID) {
+      const gate = logicGateByID.get(rawLogicGateID);
+      openLogicGateArena(rawLogicGateID, gate?.header?.trim() || notification.title || rawLogicGateID, rawNodeID);
+      return;
+    }
+    if (rawNodeID) {
+      setNodeEditorOverlay({ nodeID: rawNodeID, nodeTitle: node ? nodeTitle(node) : notification.title || rawNodeID });
+    }
+  }, [logicGateByID, nodeByID, openLogicGateArena]);
   const getLogicGateDragIDs = useCallback((logicGateID: string): string[] => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return [];
@@ -1886,7 +1903,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
               loadingSharedInboxes={loadingSharedInboxes}
               newSharedInboxName={newSharedInboxName}
               busy={busy}
+              notificationSummary={notificationSummary}
               onSelectView={selectHomeView}
+              onOpenMentionNotification={openMentionNotificationTarget}
               onNewSharedInboxNameChange={setNewSharedInboxName}
               onSubmitSharedInbox={submitSharedInbox}
               onCreateSharedInbox={createSharedInboxFolder}

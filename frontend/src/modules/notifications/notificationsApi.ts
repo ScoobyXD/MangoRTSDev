@@ -30,6 +30,11 @@ export type NotificationRoleCount = {
   count: number;
 };
 
+export type NotificationTypeCount = {
+  type: string;
+  count: number;
+};
+
 export type NotificationLogicGateCount = {
   logic_gate_id: string;
   node_id?: string;
@@ -41,6 +46,7 @@ export type NotificationSummary = {
   company_id?: string;
   total_unread: number;
   role_counts: NotificationRoleCount[];
+  type_counts: NotificationTypeCount[];
   logic_gate_counts: NotificationLogicGateCount[];
   updated_timestamp?: string;
 };
@@ -50,6 +56,7 @@ export function emptyNotificationSummary(companyID = ""): NotificationSummary {
     company_id: companyID,
     total_unread: 0,
     role_counts: [],
+    type_counts: [],
     logic_gate_counts: [],
   };
 }
@@ -63,12 +70,15 @@ export async function fetchNotificationSummary(companyID: string): Promise<Notif
 
 export async function fetchNotifications(input: {
   companyID?: string;
+  type?: string;
   unreadOnly?: boolean;
   limit?: number;
 } = {}): Promise<NotificationItem[]> {
   const query = new URLSearchParams();
   const cleanCompanyID = input.companyID?.trim() ?? "";
   if (cleanCompanyID) query.set("company_id", cleanCompanyID);
+  const cleanType = input.type?.trim() ?? "";
+  if (cleanType) query.set("type", cleanType);
   if (input.unreadOnly) query.set("unread_only", "true");
   if (input.limit && input.limit > 0) query.set("limit", String(Math.floor(input.limit)));
   const suffix = query.toString();
@@ -100,6 +110,12 @@ function normalizeNotificationSummary(summary: NotificationSummary, companyID: s
           role: normalizeRole(item.role),
           count: normalizeCount(item.count),
         })).filter((item) => item.count > 0)
+      : [],
+    type_counts: Array.isArray(summary.type_counts)
+      ? summary.type_counts.map((item) => ({
+          type: item.type?.trim() ?? "",
+          count: normalizeCount(item.count),
+        })).filter((item) => item.type && item.count > 0)
       : [],
     logic_gate_counts: Array.isArray(summary.logic_gate_counts)
       ? summary.logic_gate_counts.map((item) => ({

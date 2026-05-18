@@ -233,6 +233,7 @@ func (r *PostgresRepo) ListNotifications(input NotificationListInput) ([]domain.
 	ctx := context.Background()
 	input.UserID = strings.TrimSpace(input.UserID)
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.NotificationType = strings.TrimSpace(input.NotificationType)
 	if input.UserID == "" {
 		return nil, ErrInvalid
 	}
@@ -242,9 +243,10 @@ select `+notificationSelectColumns+`
 from notifications
 where recipient_user_id=$1::uuid
   and ($2 = '' or company_id = nullif($2, '')::uuid)
-  and (not $3::boolean or read_timestamp is null)
+  and ($3 = '' or notification_type = $3)
+  and (not $4::boolean or read_timestamp is null)
 order by created_timestamp desc, notification_id desc
-limit $4`, input.UserID, input.CompanyID, input.UnreadOnly, limit)
+limit $5`, input.UserID, input.CompanyID, input.NotificationType, input.UnreadOnly, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -270,6 +272,7 @@ func (r *PostgresRepo) GetNotificationSummary(input NotificationSummaryInput) (d
 	summary := domain.NotificationSummary{
 		CompanyID:        input.CompanyID,
 		RoleCounts:       []domain.NotificationRoleCount{},
+		TypeCounts:       []domain.NotificationTypeCount{},
 		LogicGateCounts:  []domain.NotificationLogicGateCount{},
 		UpdatedTimestamp: time.Now().UTC(),
 	}
@@ -303,6 +306,29 @@ order by surface asc, role asc`, input.UserID, input.CompanyID)
 		summary.RoleCounts = append(summary.RoleCounts, item)
 	}
 	if err := roleRows.Err(); err != nil {
+		return domain.NotificationSummary{}, err
+	}
+
+	typeRows, err := r.db.Query(`
+select notification_type, count(*)
+from notifications
+where recipient_user_id=$1::uuid
+  and read_timestamp is null
+  and ($2 = '' or company_id = nullif($2, '')::uuid)
+group by notification_type
+order by notification_type asc`, input.UserID, input.CompanyID)
+	if err != nil {
+		return domain.NotificationSummary{}, err
+	}
+	defer typeRows.Close()
+	for typeRows.Next() {
+		var item domain.NotificationTypeCount
+		if err := typeRows.Scan(&item.Type, &item.Count); err != nil {
+			return domain.NotificationSummary{}, err
+		}
+		summary.TypeCounts = append(summary.TypeCounts, item)
+	}
+	if err := typeRows.Err(); err != nil {
 		return domain.NotificationSummary{}, err
 	}
 

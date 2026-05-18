@@ -785,6 +785,10 @@ create index if not exists idx_notifications_recipient_summary_unread
   on notifications(recipient_user_id, company_id, surface, role, created_timestamp desc)
   where read_timestamp is null;
 
+create index if not exists idx_notifications_recipient_type_unread
+  on notifications(recipient_user_id, company_id, notification_type, created_timestamp desc, notification_id desc)
+  where read_timestamp is null;
+
 create index if not exists idx_notifications_recipient_logic_gate_unread
   on notifications(recipient_user_id, company_id, logic_gate_id, node_id, role, created_timestamp desc)
   where read_timestamp is null and btrim(logic_gate_id) <> '';
