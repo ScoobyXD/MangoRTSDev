@@ -14,7 +14,10 @@ export function useCompanyExplorerVirtualTree(
     const total = treeRows.length;
     if (total === 0) return { rows: [], topSpacer: 0, bottomSpacer: 0 };
     const visibleCount = Math.max(1, Math.ceil(treeViewportHeight / COMPANY_EXPLORER_TREE_ROW_HEIGHT));
-    const start = Math.max(0, Math.floor(treeScrollTop / COMPANY_EXPLORER_TREE_ROW_HEIGHT) - TREE_OVERSCAN);
+    const start = Math.min(
+      Math.max(0, total - 1),
+      Math.max(0, Math.floor(treeScrollTop / COMPANY_EXPLORER_TREE_ROW_HEIGHT) - TREE_OVERSCAN),
+    );
     const end = Math.min(total, start + visibleCount + TREE_OVERSCAN * 2);
     const rows = treeRows.slice(start, end);
     return {

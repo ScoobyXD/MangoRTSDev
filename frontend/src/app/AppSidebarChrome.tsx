@@ -927,6 +927,7 @@ export function AppSidebar({
             accent={COLORWAYS.light.accent}
             widgetId={SIDEBAR_EXPLORER_WIDGET_ID}
             theme="light"
+            useParentScroll
             selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
           />
         </React.Suspense>
@@ -1177,6 +1178,7 @@ function AppSidebarScopedExplorerSection({
               widgetId={widgetId}
               theme="light"
               hideTopControls
+              useParentScroll
               scopedRootFolderKind="logic_gate"
               scopedRootFolderName={label}
               selectionTargetFrameIDs={selectionTargetFrameIDs}
@@ -1578,9 +1580,8 @@ const appSidebarMiniExplorerIconStyle: React.CSSProperties = {
 };
 
 const appSidebarMiniExplorerFrameStyle: React.CSSProperties = {
-  height: 174,
   minWidth: 0,
-  overflow: "hidden",
+  overflow: "visible",
   border: "1px solid rgba(255, 136, 32, 0.14)",
   borderRadius: 6,
   background: "#ffffff",
@@ -1647,9 +1648,6 @@ const appSidebarSharedLabelStackStyle: React.CSSProperties = {
 
 const appSidebarSharedRowsStyle: React.CSSProperties = {
   minWidth: 0,
-  maxHeight: 220,
-  overflowY: "auto",
-  overflowX: "hidden",
   display: "grid",
   alignContent: "start",
   gap: 2,
@@ -1793,9 +1791,6 @@ const appSidebarPinListStyle: React.CSSProperties = {
   display: "grid",
   alignContent: "start",
   gap: 4,
-  maxHeight: 180,
-  overflowY: "auto",
-  overflowX: "hidden",
   padding: "0 2px",
 };
 
@@ -1869,10 +1864,8 @@ const appSidebarPinRemoveStyle: React.CSSProperties = {
 
 const appSidebarExplorerSectionStyle: React.CSSProperties = {
   minWidth: 0,
-  height: "clamp(320px, 48vh, 560px)",
   display: "grid",
-  minHeight: 320,
-  overflow: "hidden",
+  overflow: "visible",
   borderRadius: 6,
   border: "1px solid rgba(255, 136, 32, 0.16)",
   background: "#ffffff",

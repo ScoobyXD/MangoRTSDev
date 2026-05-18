@@ -25,6 +25,7 @@ type CompanyExplorerTreeProps = {
   scrollbarTrack: string;
   isDarkTheme: boolean;
   hideTopControls: boolean;
+  useParentScroll: boolean;
   treeViewportRef: React.RefObject<HTMLDivElement>;
   treeKeyboardActiveRef: React.MutableRefObject<boolean>;
   treeRows: ExplorerTreeNode[];
@@ -69,6 +70,16 @@ type CompanyExplorerTreeProps = {
   assignExplorerPayloadItemsToFolder: (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => Promise<void>;
 };
 
+function findScrollableAncestor(element: HTMLElement): HTMLElement {
+  let current = element.parentElement;
+  while (current) {
+    const style = window.getComputedStyle(current);
+    if ((style.overflowY === "auto" || style.overflowY === "scroll") && current.scrollHeight > current.clientHeight) return current;
+    current = current.parentElement;
+  }
+  return element;
+}
+
 export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   error,
   accent,
@@ -84,6 +95,7 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   scrollbarTrack,
   isDarkTheme,
   hideTopControls,
+  useParentScroll,
   treeViewportRef,
   treeKeyboardActiveRef,
   treeRows,
@@ -141,24 +153,27 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
       ref={treeViewportRef}
       tabIndex={0}
       onKeyDown={onTreeKeyDown}
-      onScroll={(event) => onScrollTopChange((event.currentTarget as HTMLDivElement).scrollTop)}
+      onScroll={(event) => {
+        if (!useParentScroll) onScrollTopChange((event.currentTarget as HTMLDivElement).scrollTop);
+      }}
       onDragOver={(event) => {
         if (!dragPayload) return;
         const viewport = event.currentTarget as HTMLDivElement;
-        const bounds = viewport.getBoundingClientRect();
+        const scrollTarget = useParentScroll ? findScrollableAncestor(viewport) : viewport;
+        const bounds = scrollTarget.getBoundingClientRect();
         const edgeSize = 42;
         const step = 18;
         const y = event.clientY - bounds.top;
         if (y < edgeSize) {
-          const next = Math.max(0, viewport.scrollTop - step);
-          if (next !== viewport.scrollTop) {
-            viewport.scrollTop = next;
+          const next = Math.max(0, scrollTarget.scrollTop - step);
+          if (next !== scrollTarget.scrollTop) {
+            scrollTarget.scrollTop = next;
             onScrollTopChange(next);
           }
         } else if (y > bounds.height - edgeSize) {
-          const next = Math.min(viewport.scrollHeight - bounds.height, viewport.scrollTop + step);
-          if (next !== viewport.scrollTop) {
-            viewport.scrollTop = next;
+          const next = Math.min(scrollTarget.scrollHeight - bounds.height, scrollTarget.scrollTop + step);
+          if (next !== scrollTarget.scrollTop) {
+            scrollTarget.scrollTop = next;
             onScrollTopChange(next);
           }
         }
@@ -172,7 +187,15 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
         if (event.button === 0) onCloseContextMenu();
       }}
       onContextMenu={(event) => onOpenContextMenu(event)}
-      style={{ overflowY: "auto", overflowX: "hidden", minWidth: 0, outline: "none", scrollbarGutter: "stable", ["--company-explorer-scroll-accent" as string]: scrollbarAccent, ["--company-explorer-scroll-track" as string]: scrollbarTrack }}
+      style={{
+        overflowY: useParentScroll ? "visible" : "auto",
+        overflowX: useParentScroll ? "visible" : "hidden",
+        minWidth: 0,
+        outline: "none",
+        scrollbarGutter: useParentScroll ? undefined : "stable",
+        ["--company-explorer-scroll-accent" as string]: scrollbarAccent,
+        ["--company-explorer-scroll-track" as string]: scrollbarTrack,
+      }}
     >
       {!hideTopControls && (
         <div style={{ position: "sticky", top: 0, zIndex: 5, padding: "13px 10px 8px", borderBottom: `1px solid ${ruleColor}`, background: surfaceBackground, display: "grid", gap: 7 }}>
