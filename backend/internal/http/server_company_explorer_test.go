@@ -242,8 +242,8 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	if err := json.NewDecoder(snapshotRec.Body).Decode(&snapshot); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
-	if len(snapshot.Folders) != 13 || len(snapshot.FolderItems) != 3 {
-		t.Fatalf("snapshot folder counts = folders:%d items:%d, want 13/3", len(snapshot.Folders), len(snapshot.FolderItems))
+	if len(snapshot.Folders) != 12 || len(snapshot.FolderItems) != 3 {
+		t.Fatalf("snapshot folder counts = folders:%d items:%d, want 12/3", len(snapshot.Folders), len(snapshot.FolderItems))
 	}
 	foundChild := false
 	for _, folder := range snapshot.Folders {
@@ -317,7 +317,7 @@ func TestCompanyExplorerDefaultFoldersSeedOnceAndProtectSystemFolders(t *testing
 	if logicRootID == "" || len(childNames) != 5 || !childNames["Product"] || !childNames["Design"] || !childNames["Production"] || !childNames["Supply Chain"] || !childNames["QA"] {
 		t.Fatalf("default logic gate folders = root:%q children:%v", logicRootID, childNames)
 	}
-	if len(systemNames) != 3 || !systemNames["Kanban Boards"] || !systemNames["Active Nodes"] || !systemNames["History"] || systemFolderID == "" {
+	if len(systemNames) != 2 || !systemNames["Active Nodes"] || !systemNames["History"] || systemFolderID == "" {
 		t.Fatalf("system folders = id:%q names:%v", systemFolderID, systemNames)
 	}
 
@@ -344,8 +344,8 @@ func TestCompanyExplorerDefaultFoldersSeedOnceAndProtectSystemFolders(t *testing
 			systemCount++
 		}
 	}
-	if systemCount != 3 {
-		t.Fatalf("system folder count after default delete = %d, want 3", systemCount)
+	if systemCount != 2 {
+		t.Fatalf("system folder count after default delete = %d, want 2", systemCount)
 	}
 }
 
@@ -927,15 +927,8 @@ func TestCompanyExplorerDeleteBatchDeletesSelectedTargetsInOneRequest(t *testing
 	if err != nil {
 		t.Fatalf("CreateNode(folderNode) error = %v", err)
 	}
-	folderBoard, err := repo.CreateKanbanBoard(companyID, "", "Board inside folder", 0)
-	if err != nil {
-		t.Fatalf("CreateKanbanBoard(folderBoard) error = %v", err)
-	}
 	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, childFolder.FolderID, "node", folderNode.NodeID, 1000); err != nil {
 		t.Fatalf("AssignCompanyExplorerFolderItem(node) error = %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, childFolder.FolderID, "kanban", folderBoard.BoardID, 2000); err != nil {
-		t.Fatalf("AssignCompanyExplorerFolderItem(kanban) error = %v", err)
 	}
 
 	body, _ := json.Marshal(map[string]any{
@@ -957,15 +950,6 @@ func TestCompanyExplorerDeleteBatchDeletesSelectedTargetsInOneRequest(t *testing
 	}
 	if _, err := repo.GetNode(companyID, folderNode.NodeID); err != store.ErrNotFound {
 		t.Fatalf("GetNode for folder child after batch delete error = %v, want ErrNotFound", err)
-	}
-	boards, err := repo.ListKanbanBoards(companyID, store.KanbanBoardQuery{})
-	if err != nil {
-		t.Fatalf("ListKanbanBoards() error = %v", err)
-	}
-	for _, board := range boards {
-		if board.BoardID == folderBoard.BoardID {
-			t.Fatalf("kanban board %s still exists after folder batch delete", folderBoard.BoardID)
-		}
 	}
 	folders, err := repo.ListCompanyExplorerFolders(companyID, "node")
 	if err != nil {

@@ -94,7 +94,6 @@ export type CompanyExplorerContentProps = {
 };
 
 const SYSTEM_FOLDER_CHILD_BY_ROW_PREFIX: Array<[string, CompanyExplorerSystemFolderKey]> = [
-  ["system-kanban-", "kanban_boards"],
   ["system-active-node-", "active_nodes"],
   ["system-history-node-", "history"],
 ];

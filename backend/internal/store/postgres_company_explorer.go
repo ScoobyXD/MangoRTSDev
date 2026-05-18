@@ -298,7 +298,9 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 	rows, err := tx.QueryContext(ctx,
 		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp
 		 from company_explorer_folders
-		 where company_id=$1 and ($2::text is null or folder_kind=$2)
+		 where company_id=$1
+		   and ($2::text is null or folder_kind=$2)
+		   and (system_key is null or system_key <> 'kanban_boards')
 		 order by position asc, created_timestamp asc`,
 		companyID, kindParam,
 	)
@@ -687,8 +689,6 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 				nodeIDs[itemID] = true
 			case "logic_gate":
 				logicGateIDs[itemID] = true
-			case "kanban":
-				kanbanBoardIDs[itemID] = true
 			}
 		}
 		if err := rows.Err(); err != nil {
@@ -1070,8 +1070,6 @@ func assignCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, company
 		existsQuery = `select exists(select 1 from nodes where company_id=$1 and node_id=$2)`
 	} else if itemType == "logic_gate" {
 		existsQuery = `select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`
-	} else if itemType == "kanban" {
-		existsQuery = `select exists(select 1 from kanban_boards where company_id=$1 and board_id=$2)`
 	} else {
 		return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
 	}
@@ -1226,6 +1224,9 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItems(companyID string, assign
 
 func (r *PostgresRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error) {
 	ctx := context.Background()
+	if itemType == "kanban" {
+		return []domain.CompanyExplorerFolderItem{}, nil
+	}
 	var folderParam any
 	if folderID != "" {
 		folderParam = folderID
@@ -1240,6 +1241,7 @@ func (r *PostgresRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemT
 		 where company_id=$1
 		   and ($2::uuid is null or folder_id=$2::uuid)
 		   and ($3::text is null or item_type=$3)
+		   and item_type <> 'kanban'
 		 order by position asc, created_timestamp asc`,
 		companyID, folderParam, itemTypeParam,
 	)

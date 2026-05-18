@@ -571,7 +571,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [apiBase, companyID, requestJSON]);
 
   const assignItemsToFolders = useCallback(async (assignments: CompanyExplorerFolderItemAssignment[], options: { expandTarget?: boolean } = {}) => {
-    const normalizedAssignments = assignments.filter((assignment) => assignment.folder_id && assignment.item_id && assignment.item_type);
+    const normalizedAssignments = assignments.filter((assignment) => (
+      assignment.folder_id
+      && assignment.item_id
+      && assignment.item_type
+      && assignment.item_type !== "kanban"
+    ));
     if (normalizedAssignments.length === 0) return true;
     const previousFolderIDByKey = new Map(folderItems.map((row) => [`${row.item_type}:${row.item_id}`, row.folder_id]));
     setError("");
@@ -757,8 +762,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       } else if (item.item_type === "logic_gate") {
         deletedLogicGateIDs.add(item.item_id);
         deletedKanbanBoardIDs.add(logicGateKanbanBoardID(item.item_id));
-      } else if (item.item_type === "kanban") {
-        deletedKanbanBoardIDs.add(item.item_id);
       }
     }
     for (const board of kanbanBoards) {
@@ -1207,6 +1210,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
 
   const canPlaceExplorerItemsAtTarget = useCallback((payload: ExplorerDragPayload | null, target: ExplorerTreeNode): boolean => {
     const itemType = getExplorerDropPayloadItemType(payload);
+    if (itemType === "kanban") return false;
     if (scopedAllowedItemType && itemType !== scopedAllowedItemType) return false;
     const targetKind = getExplorerRowOrderKind(target);
     const targetAcceptsItem = Boolean(itemType && targetKind);
@@ -1281,8 +1285,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         folderMoves.push(moveFolder(row.folderID, row.parentFolderID ?? "", { position, parentProvided: false }));
         continue;
       }
-      const itemType: CompanyExplorerItemType | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "kanban" ? "kanban" : null;
-      const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : row.kanbanBoardID;
+      const itemType: CompanyExplorerItemType | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : null;
+      const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : "";
       if (row.folderID && itemType && itemID) itemAssignments.push({ folder_id: row.folderID, item_type: itemType, item_id: itemID, position });
     }
     await Promise.all(folderMoves);
@@ -1336,6 +1340,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
 
   const placeExplorerItemsAtTarget = useCallback(async (payload: ExplorerDragPayload | null, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => {
     const itemType = getExplorerDropPayloadItemType(payload);
+    if (itemType === "kanban") return false;
     const targetContainer = getExplorerRowContainerID(target);
     if (!itemType || targetContainer == null || !canPlaceExplorerItemsAtTarget(payload, target)) return false;
 
@@ -1376,8 +1381,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         folderMoves.push(moveFolder(row.folderID, row.parentFolderID ?? "", { position, parentProvided: false }));
         continue;
       }
-      const rowItemType: CompanyExplorerItemType | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "kanban" ? "kanban" : null;
-      const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : row.kanbanBoardID;
+      const rowItemType: CompanyExplorerItemType | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : null;
+      const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : "";
       if (targetContainer && rowItemType && itemID) itemAssignments.push({ folder_id: targetContainer, item_type: rowItemType, item_id: itemID, position });
     }
     await Promise.all(folderMoves);
@@ -1386,6 +1391,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [assignItemsToFolders, baseTreeRows, canPlaceExplorerItemsAtTarget, getExplorerItemRowsForPayload, moveFolder]);
 
   const assignExplorerPayloadItemsToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => {
+    if (itemType === "kanban") return;
     if (scopedAllowedItemType && itemType !== scopedAllowedItemType) return;
     const items = getExplorerDropPayloadItems(payload).filter((item) => item.itemType === itemType);
     if (!targetFolderID || items.length === 0) return;
