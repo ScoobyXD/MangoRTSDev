@@ -24,7 +24,6 @@ import {
 import { buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
 
 const systemFolders = [
-  { company_id: "c", folder_id: "system-kanban", folder_kind: "node" as const, system_key: "kanban_boards" as const, name: "Kanban Boards", position: 100, created_timestamp: "0", updated_timestamp: "0" },
   { company_id: "c", folder_id: "system-active", folder_kind: "node" as const, system_key: "active_nodes" as const, name: "Active Nodes", position: 200, created_timestamp: "0", updated_timestamp: "0" },
   { company_id: "c", folder_id: "system-history", folder_kind: "node" as const, system_key: "history" as const, name: "History", position: 300, created_timestamp: "0", updated_timestamp: "0" },
 ];
@@ -62,7 +61,7 @@ run("tree rows render a blank root when the workspace is empty", () => {
     folderItems: [],
     rootRowOrder: {},
   });
-  assert.deepEqual(rows.map((row) => row.id), ["workspace-folder-system-kanban", "workspace-folder-system-active", "workspace-folder-system-history"]);
+  assert.deepEqual(rows.map((row) => row.id), ["workspace-folder-system-active", "workspace-folder-system-history"]);
 });
 
 run("tree rows render root content without a synthetic Company folder", () => {
@@ -75,13 +74,13 @@ run("tree rows render root content without a synthetic Company folder", () => {
     folderItems: [],
     rootRowOrder: {},
   });
-  assert.deepEqual(rows.map((row) => row.id), ["workspace-folder-system-kanban", "workspace-folder-system-active", "workspace-folder-system-history", "node-node-a"]);
+  assert.deepEqual(rows.map((row) => row.id), ["workspace-folder-system-active", "workspace-folder-system-history", "node-node-a"]);
   assert.equal(rows[rows.length - 1]?.depth, 0);
 });
 
-run("automatic folders hold kanban boards, active node placements, and due-date history", () => {
+run("automatic folders hold active node placements and due-date history", () => {
   const rows = buildCompanyExplorerTreeRows({
-    expanded: new Set(["workspace-folder-system-kanban", "workspace-folder-system-active", "workspace-folder-system-history"]),
+    expanded: new Set(["workspace-folder-system-active", "workspace-folder-system-history"]),
     nodes: [
       { company_id: "c", node_id: "future", title: "Future", due_date: "2026-05-08", created_timestamp: "1" },
       { company_id: "c", node_id: "past", title: "Past", due_date: "2026-05-06", created_timestamp: "2" },
@@ -95,8 +94,6 @@ run("automatic folders hold kanban boards, active node placements, and due-date 
     todayISODate: "2026-05-07",
   });
   assert.deepEqual(rows.map((row) => row.id), [
-    "workspace-folder-system-kanban",
-    "system-kanban-board-1",
     "workspace-folder-system-active",
     "node-future",
     "workspace-folder-system-history",
@@ -121,7 +118,6 @@ run("root folders from different domains can be locally ordered together", () =>
     rootRowOrder: { "workspace-folder-logic-root": 500 },
   });
   assert.deepEqual(rows.map((row) => row.id), [
-    "workspace-folder-system-kanban",
     "workspace-folder-system-active",
     "workspace-folder-system-history",
     "workspace-folder-logic-root",
@@ -243,20 +239,20 @@ run("drop targets resolve item rows to their containing folder", () => {
     { folderID: "gate-folder", folderKind: "logic_gate", treeID: "workspace-folder-gate-folder" },
   );
 
-  assert.deepEqual(
+  assert.equal(
     resolveExplorerDropTarget(
       { kind: "node", folderKind: "node", folderID: "node-folder", nodeID: "node-1" },
       { kind: "kanban", itemType: "kanban", itemID: "board-1" },
     ),
-    { folderID: "node-folder", folderKind: "node", treeID: "workspace-folder-node-folder" },
+    null,
   );
 
-  assert.deepEqual(
+  assert.equal(
     resolveExplorerDropTarget(
       { kind: "logic_gate", folderKind: "logic_gate", folderID: "gate-folder", logicGateID: "gate-1" },
       { kind: "kanban", itemType: "kanban", itemID: "board-1" },
     ),
-    { folderID: "gate-folder", folderKind: "logic_gate", treeID: "workspace-folder-gate-folder" },
+    null,
   );
 });
 

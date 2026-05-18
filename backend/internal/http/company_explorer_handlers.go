@@ -854,5 +854,5 @@ func isValidCompanyExplorerFolderKind(value string) bool {
 }
 
 func isValidCompanyExplorerItemType(value string) bool {
-	return value == "node" || value == "logic_gate" || value == "kanban"
+	return value == "node" || value == "logic_gate"
 }

@@ -10,7 +10,6 @@ import (
 const companyExplorerDefaultFolderSeedKey = "logic_gates_v1"
 const companyExplorerDefaultCommunicationsFolderSeedKey = "communications_v1"
 const companyExplorerSystemFolderSeedKey = "system_folders_v1"
-const CompanyExplorerSystemKanbanBoardsKey = "kanban_boards"
 const CompanyExplorerSystemActiveNodesKey = "active_nodes"
 const CompanyExplorerSystemHistoryKey = "history"
 
@@ -82,7 +81,6 @@ type companyExplorerSystemFolderDefinition struct {
 }
 
 var companyExplorerSystemFolderSeeds = []companyExplorerSystemFolderDefinition{
-	{Key: CompanyExplorerSystemKanbanBoardsKey, Name: "Kanban Boards", Position: 100},
 	{Key: CompanyExplorerSystemActiveNodesKey, Name: "Active Nodes", Position: 200},
 	{Key: CompanyExplorerSystemHistoryKey, Name: "History", Position: 300},
 }
@@ -335,6 +333,9 @@ func (r *MemoryRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([
 		if folderKind != "" && folder.FolderKind != folderKind {
 			continue
 		}
+		if folder.SystemKey != nil && *folder.SystemKey == "kanban_boards" {
+			continue
+		}
 		items = append(items, r.withSharedInboxRaciLocked(folder))
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -560,10 +561,6 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 			if _, ok := r.logicGates[key(companyID, item.ItemID)]; ok {
 				logicGateIDs[item.ItemID] = true
 			}
-		case "kanban":
-			if _, ok := r.kanbanBoards[boardKey(companyID, item.ItemID)]; ok {
-				kanbanBoardIDs[item.ItemID] = true
-			}
 		}
 	}
 
@@ -694,10 +691,6 @@ func (r *MemoryRepo) validateCompanyExplorerFolderItemAssignmentLocked(companyID
 		if _, ok := r.logicGates[key(companyID, itemID)]; !ok {
 			return ErrNotFound
 		}
-	} else if itemType == "kanban" {
-		if _, ok := r.kanbanBoards[boardKey(companyID, itemID)]; !ok {
-			return ErrNotFound
-		}
 	} else {
 		return ErrNotFound
 	}
@@ -769,8 +762,14 @@ func (r *MemoryRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemTyp
 	defer r.mu.RUnlock()
 
 	items := make([]domain.CompanyExplorerFolderItem, 0)
+	if itemType == "kanban" {
+		return items, nil
+	}
 	for _, item := range r.folderItems {
 		if item.CompanyID != companyID {
+			continue
+		}
+		if item.ItemType == "kanban" {
 			continue
 		}
 		if folderID != "" && item.FolderID != folderID {

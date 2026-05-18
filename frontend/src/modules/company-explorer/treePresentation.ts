@@ -109,7 +109,7 @@ export const EXPLORER_ROOT_ROW_ORDER = [] as const;
 export const EXPLORER_ROOT_ROW_LABELS = {} as const;
 
 export function isExplorerSystemFolderKey(value: unknown): value is CompanyExplorerSystemFolderKey {
-  return value === "kanban_boards" || value === "active_nodes" || value === "history";
+  return value === "active_nodes" || value === "history";
 }
 
 export function formatExplorerFolderLabel(name: string): string {
@@ -153,9 +153,7 @@ export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | nul
   }
 
   const itemType = getExplorerDropPayloadItemType(payload);
-  // Explorer folders are mixed workspaces now: nodes, logic gates, and Kanban
-  // boards can share a folder while map projections filter by item type.
-  if (!itemType) return null;
+  if (!itemType || itemType === "kanban") return null;
   return { folderID: row.folderID, folderKind: row.folderKind, treeID: `workspace-folder-${row.folderID}` };
 }
 

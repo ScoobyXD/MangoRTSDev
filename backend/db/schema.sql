@@ -667,7 +667,7 @@ create table if not exists company_explorer_folder_items (
   position integer not null default 1000,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
-  constraint company_explorer_folder_items_type_chk check (item_type in ('node', 'logic_gate', 'kanban')),
+  constraint company_explorer_folder_items_type_chk check (item_type in ('node', 'logic_gate')),
   primary key (company_id, item_type, item_id),
   foreign key (company_id, folder_id) references company_explorer_folders (company_id, folder_id) on delete cascade
 );

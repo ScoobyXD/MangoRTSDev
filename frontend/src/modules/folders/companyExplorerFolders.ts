@@ -32,11 +32,11 @@ export function isCompanyExplorerFolderKind(value: unknown): value is CompanyExp
 }
 
 export function isCompanyExplorerItemType(value: unknown): value is CompanyExplorerItemType {
-  return isCompanyExplorerFolderKind(value) || value === "kanban";
+  return isCompanyExplorerFolderKind(value);
 }
 
 export function isCompanyExplorerSystemFolderKey(value: unknown): value is CompanyExplorerSystemFolderKey {
-  return value === "kanban_boards" || value === "active_nodes" || value === "history";
+  return value === "active_nodes" || value === "history";
 }
 
 export function getFolderSubtreeIDs(folders: CompanyExplorerFolder[], rootFolderID: string): Set<string> {

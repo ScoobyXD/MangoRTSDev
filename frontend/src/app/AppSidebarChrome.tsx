@@ -147,7 +147,6 @@ export function AppSidebar({
   const [sharedTriageOpen, setSharedTriageOpen] = usePersistedSidebarSectionOpen("shared-triage", true);
   const [logicGatesByFunctionOpen, setLogicGatesByFunctionOpen] = usePersistedSidebarSectionOpen("logic-gates-by-function", false);
   const [logicGatesByPersonOpen, setLogicGatesByPersonOpen] = usePersistedSidebarSectionOpen("logic-gates-by-person", false);
-  const [explorerOpen, setExplorerOpen] = usePersistedSidebarSectionOpen("explorer", true);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [connectedAccountEmail, setConnectedAccountEmail] = useState("");
   const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
@@ -581,7 +580,7 @@ export function AppSidebar({
   };
 
   return (
-    <aside style={appSidebarStyle}>
+    <aside className="company-explorer-scroll" style={appSidebarStyle}>
       <div style={appSidebarBrandStyle} aria-label="MangoRTS">
         <MangoWordmark size={22} weight={600} />
         {accountChrome && <div style={appSidebarAccountChromeStyle}>{accountChrome}</div>}
@@ -761,40 +760,15 @@ export function AppSidebar({
         />
       </section>
 
-      <section style={appSidebarExplorerSectionStyle(explorerOpen)} aria-label="Explorer tree">
-        <div style={appSidebarExplorerHeaderStyle(explorerOpen)}>
-          <button
-            type="button"
-            style={appSidebarExplorerHeaderButtonStyle}
-            onClick={() => setExplorerOpen((open) => !open)}
-          >
-            <span style={appSidebarTextStyle}>Explorer</span>
-          </button>
-          <button
-            type="button"
-            title={explorerOpen ? "Collapse Explorer" : "Expand Explorer"}
-            aria-label={explorerOpen ? "Collapse Explorer" : "Expand Explorer"}
-            style={appSidebarSharedDisclosureStyle}
-            onClick={(event) => {
-              event.stopPropagation();
-              setExplorerOpen((open) => !open);
-            }}
-          >
-            <ExplorerDisclosureIcon open={explorerOpen} color="rgba(36, 18, 10, 0.68)" />
-          </button>
-        </div>
-        {explorerOpen && (
-          <div style={appSidebarExplorerFrameStyle}>
-            <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
-              <SidebarCompanyExplorerContent
-                accent={COLORWAYS.light.accent}
-                widgetId={SIDEBAR_EXPLORER_WIDGET_ID}
-                theme="light"
-                selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
-              />
-            </React.Suspense>
-          </div>
-        )}
+      <section style={appSidebarExplorerSectionStyle} aria-label="Explorer tree">
+        <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
+          <SidebarCompanyExplorerContent
+            accent={COLORWAYS.light.accent}
+            widgetId={SIDEBAR_EXPLORER_WIDGET_ID}
+            theme="light"
+            selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
+          />
+        </React.Suspense>
       </section>
       {sharedContextMenu && (
         <FrameRightClickMenu x={sharedContextMenu.x} y={sharedContextMenu.y} onClose={() => setSharedContextMenu(null)}>
@@ -1179,14 +1153,19 @@ const appSidebarStyle: React.CSSProperties = {
   minHeight: 0,
   height: "100%",
   display: "grid",
-  gridTemplateRows: "auto auto minmax(88px, auto) auto minmax(0, 1fr)",
+  gridTemplateRows: "auto auto auto auto auto",
+  alignContent: "start",
   gap: 10,
   padding: 10,
   borderRadius: PAGE_SURFACE_RADIUS,
   background: "#ffffff",
   color: UI_THEME.text,
   boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(132, 51, 0, 0.18)",
-  overflow: "hidden",
+  overflowY: "auto",
+  overflowX: "hidden",
+  scrollbarGutter: "stable",
+  ["--company-explorer-scroll-accent" as string]: "rgb(255, 136, 32)",
+  ["--company-explorer-scroll-track" as string]: "rgba(255, 136, 32, 0.08)",
 };
 
 const appSidebarBrandStyle: React.CSSProperties = {
@@ -1609,53 +1588,15 @@ const appSidebarPinRemoveStyle: React.CSSProperties = {
   lineHeight: 1,
 };
 
-function appSidebarExplorerSectionStyle(open: boolean): React.CSSProperties {
-  return {
-    minWidth: 0,
-    minHeight: 0,
-    display: "grid",
-    gridTemplateRows: open ? "31px minmax(0, 1fr)" : "31px",
-    alignContent: "start",
-    overflow: "hidden",
-    borderRadius: 6,
-    border: "1px solid rgba(255, 136, 32, 0.16)",
-    background: "#ffffff",
-  };
-}
-
-function appSidebarExplorerHeaderStyle(open: boolean): React.CSSProperties {
-  return {
-    minWidth: 0,
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 22px",
-    alignItems: "center",
-    borderBottom: open ? "1px solid rgba(255, 136, 32, 0.14)" : "none",
-    background: open ? "rgba(255, 136, 32, 0.06)" : "#ffffff",
-    color: open ? "#ff8820" : "#3f332b",
-  };
-}
-
-const appSidebarExplorerHeaderButtonStyle: React.CSSProperties = {
+const appSidebarExplorerSectionStyle: React.CSSProperties = {
   minWidth: 0,
-  minHeight: 30,
+  height: "clamp(320px, 48vh, 560px)",
   display: "grid",
-  alignItems: "center",
-  border: "none",
-  background: "transparent",
-  color: "inherit",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 12,
-  fontWeight: 700,
-  letterSpacing: 0,
-  padding: "0 0 0 8px",
-  textAlign: "left",
-};
-
-const appSidebarExplorerFrameStyle: React.CSSProperties = {
-  minWidth: 0,
-  minHeight: 0,
+  minHeight: 320,
   overflow: "hidden",
+  borderRadius: 6,
+  border: "1px solid rgba(255, 136, 32, 0.16)",
+  background: "#ffffff",
 };
 
 const appSidebarExplorerFallbackStyle: React.CSSProperties = {

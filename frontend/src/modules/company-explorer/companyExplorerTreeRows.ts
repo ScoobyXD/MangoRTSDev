@@ -1,7 +1,7 @@
 import { getNodeTitle, type NodeRecord } from "../node-map/shared.js";
 import { getNodeTitle as getLogicGateTitle, type NodeRecord as LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind } from "../folders/companyExplorerFolders.js";
-import { getKanbanBoardDisplayTitle, type KanbanBoard } from "../kanban/shared.js";
+import type { KanbanBoard } from "../kanban/shared.js";
 import {
   formatExplorerFolderLabel,
   isExplorerSystemFolderKey,
@@ -84,11 +84,11 @@ export function buildCompanyExplorerTreeRows({
   rootRowOrder,
   todayISODate,
 }: BuildCompanyExplorerTreeRowsInput): ExplorerTreeNode[] {
+  void kanbanBoards;
   const rows: ExplorerTreeNode[] = [];
   const currentDate = normalizeISODate(todayISODate) || getLocalISODate();
   const nodeByID = new Map(nodes.map((node) => [node.node_id, node]));
   const logicGateByID = new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
-  const kanbanBoardByID = new Map(kanbanBoards.map((board) => [board.board_id, board]));
   const folderByID = new Map(folders.map((folder) => [folder.folder_id, folder]));
   const folderPathLabelByID = new Map<string, string>();
   const getFolderPathLabel = (folderID: string): string => {
@@ -207,28 +207,12 @@ export function buildCompanyExplorerTreeRows({
             createdTimestamp: item.created_timestamp,
           });
         }
-      } else {
-        const board = kanbanBoardByID.get(item.item_id);
-        if (board) {
-          branchRows.push({
-            id: `kanban-${board.board_id}`,
-            label: getKanbanBoardDisplayTitle(board),
-            depth,
-            kind: "kanban",
-            kanbanBoardID: board.board_id,
-            folderID: parentFolderID,
-            folderKind,
-            folderLabel: getFolderPathLabel(parentFolderID),
-            scopeLevel: depth,
-            position: parentFolderID === "" ? getRootAwarePosition(folderKind, `kanban-${board.board_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
-            createdTimestamp: board.created_timestamp,
-          });
-        }
       }
     }
 
     const childFolders = foldersByParent.get(`${folderKind}:${parentFolderID}`) ?? [];
     for (const folder of childFolders) {
+      if (folder.system_key === "kanban_boards") continue;
       const rowID = `workspace-folder-${folder.folder_id}`;
       branchRows.push({
         id: rowID,
@@ -251,22 +235,6 @@ export function buildCompanyExplorerTreeRows({
 
   const buildSystemFolderContentRows = (systemKey: string | undefined, depth: number): ExplorerTreeNode[] => {
     const contentRows: ExplorerTreeNode[] = [];
-    if (systemKey === "kanban_boards") {
-      let boardPosition = 0;
-      for (const board of kanbanBoards) {
-        boardPosition += TREE_ROW_POSITION_STEP;
-        contentRows.push({
-          id: `system-kanban-${board.board_id}`,
-          label: getKanbanBoardDisplayTitle(board),
-          depth,
-          kind: "kanban",
-          kanbanBoardID: board.board_id,
-          scopeLevel: depth,
-          position: boardPosition,
-          createdTimestamp: board.created_timestamp,
-        });
-      }
-    }
     if (systemKey === "history") {
       let historyPosition = 0;
       for (const node of nodes) {
