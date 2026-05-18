@@ -1085,14 +1085,14 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setBusy("");
     }
   };
-  const createSharedInboxFolder = useCallback(async (parentFolderID: string, rawName = "New Folder"): Promise<CommunicationsSharedInbox | null> => {
+  const createSharedInboxFolder = useCallback(async (parentFolderID: string, rawName = "New Folder", accountEmail = ""): Promise<CommunicationsSharedInbox | null> => {
     const name = rawName.trim();
     if (!name) return null;
     setBusy("shared-inbox");
     setError("");
     setNotice("");
     try {
-      const folder = await createCommunicationsSharedInbox({ companyID, name, parentFolderID });
+      const folder = await createCommunicationsSharedInbox({ companyID, name, parentFolderID, accountEmail });
       setSharedInboxes((previous) => sortSharedInboxes([
         ...previous.filter((item) => item.folder_id !== folder.folder_id),
         folder,
@@ -1107,6 +1107,23 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setBusy("");
     }
   }, [companyID, selectMailbox]);
+
+  const setSharedInboxAccountEmail = useCallback(async (folderID: string, accountEmail: string): Promise<void> => {
+    const cleanFolderID = folderID.trim();
+    if (!cleanFolderID) return;
+    setBusy("shared-inbox");
+    setError("");
+    setNotice("");
+    try {
+      const folder = await updateCommunicationsSharedInbox({ companyID, folderID: cleanFolderID, accountEmail });
+      setSharedInboxes((previous) => sortSharedInboxes(previous.map((item) => item.folder_id === folder.folder_id ? folder : item)));
+      setNotice(folder.account_email ? `Attached ${folder.account_email}.` : "Email detached.");
+    } catch (sharedInboxError) {
+      setError(formatError(sharedInboxError, "Failed to update Shared Triage email"));
+    } finally {
+      setBusy("");
+    }
+  }, [companyID]);
 
   const renameSharedInboxFolder = useCallback(async (folderID: string, name: string): Promise<void> => {
     const cleanName = name.trim();
@@ -1163,24 +1180,26 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const saveSharedInboxRaciAssignments = useCallback(async (folderID: string, assignments: CommunicationsSharedInboxRaciAssignment[]) => {
     const cleanFolderID = folderID.trim();
     if (!cleanFolderID) return;
+    const directAssignments = assignments.filter((assignment) => assignment.folder_id === cleanFolderID);
     setBusy("shared-inbox-raci");
     setError("");
     try {
       const nextAssignments = await updateCommunicationsSharedInboxRaciAssignments(
         companyID,
         cleanFolderID,
-        assignments.map((assignment) => ({ role: assignment.role, user_id: assignment.user_id })),
+        directAssignments.map((assignment) => ({ role: assignment.role, user_id: assignment.user_id })),
       );
       setSharedInboxes((previous) => sortSharedInboxes(previous.map((folder) => (
         folder.folder_id === cleanFolderID ? { ...folder, raci_assignments: nextAssignments } : folder
       ))));
+      void loadSharedInboxes();
       setNotice("Shared Triage RACI updated.");
     } catch (raciError) {
       setError(formatError(raciError, "Failed to update Shared Triage RACI"));
     } finally {
       setBusy("");
     }
-  }, [companyID]);
+  }, [companyID, loadSharedInboxes]);
 
   const addSharedInboxRaciUser = useCallback((folderID: string, role: CommunicationsSharedInboxRaciRole, userID: string) => {
     const cleanFolderID = folderID.trim();
@@ -1209,8 +1228,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     if (!cleanFolderID || !cleanUserID) return;
     const folder = sharedInboxes.find((item) => item.folder_id === cleanFolderID);
     if (!folder) return;
-    const nextAssignments = (folder.raci_assignments ?? []).filter((assignment) => !(assignment.role === role && assignment.user_id === cleanUserID));
-    if (nextAssignments.length === (folder.raci_assignments ?? []).length) return;
+    const directAssignments = (folder.raci_assignments ?? []).filter((assignment) => assignment.folder_id === cleanFolderID);
+    const nextAssignments = directAssignments.filter((assignment) => !(assignment.role === role && assignment.user_id === cleanUserID));
+    if (nextAssignments.length === directAssignments.length) return;
     void saveSharedInboxRaciAssignments(cleanFolderID, nextAssignments);
   }, [saveSharedInboxRaciAssignments, sharedInboxes]);
 
@@ -1624,6 +1644,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           {!hideNavigation && (
             <HomeSidebar
               activeViewID={activeViewID}
+              connectedAccountEmail={connection?.account_email}
               sharedInboxes={visibleSharedInboxes}
               loadingSharedInboxes={loadingSharedInboxes}
               newSharedInboxName={newSharedInboxName}
@@ -1633,6 +1654,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
               onSubmitSharedInbox={submitSharedInbox}
               onCreateSharedInbox={createSharedInboxFolder}
               onRenameSharedInbox={renameSharedInboxFolder}
+              onSetSharedInboxAccountEmail={setSharedInboxAccountEmail}
               onMoveSharedInbox={moveSharedInboxFolder}
               onDeleteSharedInbox={deleteSharedInboxFolder}
             />

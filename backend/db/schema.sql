@@ -603,11 +603,19 @@ create table if not exists company_explorer_folders (
   folder_kind text not null,
   system_key text,
   name text not null,
+  account_email text,
   position integer not null default 1000,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
   constraint company_explorer_folders_kind_chk check (folder_kind in ('node', 'logic_gate', 'communications')),
   constraint company_explorer_folders_system_key_nonblank_chk check (system_key is null or btrim(system_key) <> ''),
+  constraint company_explorer_folders_account_email_chk check (
+    account_email is null or (
+      folder_kind = 'communications'
+      and btrim(account_email) <> ''
+      and account_email = lower(btrim(account_email))
+    )
+  ),
   constraint company_explorer_folders_name_nonblank_chk check (btrim(name) <> ''),
   constraint company_explorer_folders_parent_not_self_chk check (parent_folder_id is null or parent_folder_id <> folder_id),
   primary key (company_id, folder_id),
@@ -620,6 +628,10 @@ create unique index if not exists idx_company_explorer_folders_system_key
 
 create index if not exists idx_company_explorer_folders_parent_kind
   on company_explorer_folders(company_id, folder_kind, parent_folder_id, position, created_timestamp);
+
+create index if not exists idx_company_explorer_folders_account_email
+  on company_explorer_folders(company_id, account_email)
+  where account_email is not null;
 
 create table if not exists communications_shared_inbox_raci_assignments (
   company_id uuid not null,

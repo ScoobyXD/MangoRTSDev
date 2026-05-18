@@ -83,6 +83,83 @@ order by assignment.folder_id::text asc,
 	return assignmentsByFolder, rows.Err()
 }
 
+func (r *PostgresRepo) listCommunicationsSharedInboxRaciAncestry(ctx context.Context, companyID string, folderIDs []string) (map[string]string, []string, error) {
+	parentByFolder := map[string]string{}
+	if len(folderIDs) == 0 {
+		return parentByFolder, nil, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+with recursive ancestry as (
+  select folder_id::text as folder_id,
+         parent_folder_id::text as parent_folder_id
+  from company_explorer_folders
+  where company_id = $1
+    and folder_kind = 'communications'
+    and folder_id = any(string_to_array($2, ',')::uuid[])
+  union
+  select parent.folder_id::text as folder_id,
+         parent.parent_folder_id::text as parent_folder_id
+  from company_explorer_folders parent
+  join ancestry child
+    on child.parent_folder_id = parent.folder_id
+  where parent.company_id = $1
+    and parent.folder_kind = 'communications'
+)
+select folder_id, parent_folder_id
+from ancestry`,
+		companyID, strings.Join(folderIDs, ","),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	ids := make([]string, 0, len(folderIDs))
+	seen := map[string]bool{}
+	for rows.Next() {
+		var folderID string
+		var parentID sql.NullString
+		if err := rows.Scan(&folderID, &parentID); err != nil {
+			return nil, nil, err
+		}
+		if !seen[folderID] {
+			ids = append(ids, folderID)
+			seen[folderID] = true
+		}
+		if parentID.Valid {
+			parentByFolder[folderID] = parentID.String
+		} else {
+			parentByFolder[folderID] = ""
+		}
+	}
+	return parentByFolder, ids, rows.Err()
+}
+
+func sharedInboxRaciAssignmentsForFolder(folderID string, parentByFolder map[string]string, assignmentsByFolder map[string][]domain.SharedInboxRaciAssignment) []domain.SharedInboxRaciAssignment {
+	assignments := make([]domain.SharedInboxRaciAssignment, 0)
+	seenAssignments := map[string]bool{}
+	seenFolders := map[string]bool{}
+	for currentID := strings.TrimSpace(folderID); currentID != ""; currentID = strings.TrimSpace(parentByFolder[currentID]) {
+		if seenFolders[currentID] {
+			break
+		}
+		seenFolders[currentID] = true
+		for _, assignment := range assignmentsByFolder[currentID] {
+			seenKey := assignment.Role + ":" + assignment.UserID
+			if seenAssignments[seenKey] {
+				continue
+			}
+			seenAssignments[seenKey] = true
+			assignments = append(assignments, assignment)
+		}
+		if _, ok := parentByFolder[currentID]; !ok {
+			break
+		}
+	}
+	sortSharedInboxRaciAssignments(assignments)
+	return assignments
+}
+
 func (r *PostgresRepo) attachCommunicationsSharedInboxRaciAssignments(ctx context.Context, companyID string, folders []domain.CompanyExplorerFolder) ([]domain.CompanyExplorerFolder, error) {
 	ids := make([]string, 0, len(folders))
 	for _, folder := range folders {
@@ -90,7 +167,11 @@ func (r *PostgresRepo) attachCommunicationsSharedInboxRaciAssignments(ctx contex
 			ids = append(ids, folder.FolderID)
 		}
 	}
-	assignments, err := r.listCommunicationsSharedInboxRaciAssignments(ctx, companyID, ids)
+	parentByFolder, assignmentFolderIDs, err := r.listCommunicationsSharedInboxRaciAncestry(ctx, companyID, ids)
+	if err != nil {
+		return nil, err
+	}
+	assignments, err := r.listCommunicationsSharedInboxRaciAssignments(ctx, companyID, assignmentFolderIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -98,10 +179,7 @@ func (r *PostgresRepo) attachCommunicationsSharedInboxRaciAssignments(ctx contex
 		if folders[index].FolderKind != "communications" {
 			continue
 		}
-		folders[index].RaciAssignments = assignments[folders[index].FolderID]
-		if folders[index].RaciAssignments == nil {
-			folders[index].RaciAssignments = []domain.SharedInboxRaciAssignment{}
-		}
+		folders[index].RaciAssignments = sharedInboxRaciAssignmentsForFolder(folders[index].FolderID, parentByFolder, assignments)
 	}
 	return folders, nil
 }
@@ -196,16 +274,14 @@ on conflict (company_id, folder_id, role, user_id) do nothing`,
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	assignmentsByFolder, err := r.listCommunicationsSharedInboxRaciAssignments(ctx, companyID, []string{folderID})
+	folders, err := r.ListCompanyExplorerFolders(companyID, "communications")
 	if err != nil {
-		if isPostgresUndefinedTable(err, "communications_shared_inbox_raci_assignments") {
-			return nil, ErrRaciStorageUnavailable
-		}
 		return nil, err
 	}
-	assignments := assignmentsByFolder[folderID]
-	if assignments == nil {
-		assignments = []domain.SharedInboxRaciAssignment{}
+	for _, folder := range folders {
+		if folder.FolderID == folderID {
+			return folder.RaciAssignments, nil
+		}
 	}
-	return assignments, nil
+	return []domain.SharedInboxRaciAssignment{}, nil
 }

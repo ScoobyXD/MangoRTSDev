@@ -570,6 +570,246 @@ func TestCommunicationsSharedInboxRaciAPI(t *testing.T) {
 	t.Fatalf("folder %s not found in list payload", folder.FolderID)
 }
 
+func TestCommunicationsSharedInboxRaciInheritsToChildFolders(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-shared-inbox-raci-inheritance-test"
+
+	parentUser, err := repo.UpsertAuthUser("subject-shared-raci-parent", "parent-raci@example.com", "Parent RACI")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser parent error = %v", err)
+	}
+	childUser, err := repo.UpsertAuthUser("subject-shared-raci-child", "child-raci@example.com", "Child RACI")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser child error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(parentUser.CognitoSubject, companyID, "company_user"); err != nil {
+		t.Fatalf("AddCompanyMembership parent error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(childUser.CognitoSubject, companyID, "company_user"); err != nil {
+		t.Fatalf("AddCompanyMembership child error = %v", err)
+	}
+
+	parent, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Parent")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder parent error = %v", err)
+	}
+	child, err := repo.CreateCompanyExplorerFolder(companyID, parent.FolderID, "communications", "Child")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder child error = %v", err)
+	}
+
+	parentBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"assignments": []map[string]string{
+			{"role": "responsible", "user_id": parentUser.UserID},
+		},
+	})
+	parentReq := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/folders/"+parent.FolderID+"/raci", bytes.NewReader(parentBody))
+	parentReq.Header.Set("Content-Type", "application/json")
+	parentRec := httptest.NewRecorder()
+	handler.ServeHTTP(parentRec, parentReq)
+	if parentRec.Code != http.StatusOK {
+		t.Fatalf("PUT parent RACI status = %d, want %d body=%s", parentRec.Code, http.StatusOK, parentRec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=communications", nil)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET communications folders status = %d, want %d body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	var listPayload struct {
+		Folders []struct {
+			FolderID    string `json:"folder_id"`
+			Assignments []struct {
+				FolderID        string `json:"folder_id"`
+				Role            string `json:"role"`
+				UserID          string `json:"user_id"`
+				UserDisplayName string `json:"user_display_name"`
+			} `json:"raci_assignments"`
+		} `json:"folders"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode communications folders: %v", err)
+	}
+	var childAssignments []struct {
+		FolderID        string `json:"folder_id"`
+		Role            string `json:"role"`
+		UserID          string `json:"user_id"`
+		UserDisplayName string `json:"user_display_name"`
+	}
+	for _, listed := range listPayload.Folders {
+		if listed.FolderID == child.FolderID {
+			childAssignments = listed.Assignments
+			break
+		}
+	}
+	if len(childAssignments) != 1 {
+		t.Fatalf("child inherited assignment count = %d, want 1", len(childAssignments))
+	}
+	if childAssignments[0].FolderID != parent.FolderID || childAssignments[0].Role != "responsible" || childAssignments[0].UserID != parentUser.UserID || childAssignments[0].UserDisplayName != "Parent RACI" {
+		t.Fatalf("child inherited assignment = %+v", childAssignments[0])
+	}
+
+	childBody, _ := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"assignments": []map[string]string{
+			{"role": "accountable", "user_id": childUser.UserID},
+		},
+	})
+	childReq := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/folders/"+child.FolderID+"/raci", bytes.NewReader(childBody))
+	childReq.Header.Set("Content-Type", "application/json")
+	childRec := httptest.NewRecorder()
+	handler.ServeHTTP(childRec, childReq)
+	if childRec.Code != http.StatusOK {
+		t.Fatalf("PUT child RACI status = %d, want %d body=%s", childRec.Code, http.StatusOK, childRec.Body.String())
+	}
+	var childPayload struct {
+		Assignments []struct {
+			FolderID string `json:"folder_id"`
+			Role     string `json:"role"`
+			UserID   string `json:"user_id"`
+		} `json:"raci_assignments"`
+	}
+	if err := json.NewDecoder(childRec.Body).Decode(&childPayload); err != nil {
+		t.Fatalf("decode PUT child RACI: %v", err)
+	}
+	if len(childPayload.Assignments) != 2 {
+		t.Fatalf("child PUT assignment count = %d, want inherited parent plus direct child", len(childPayload.Assignments))
+	}
+	seenParent := false
+	seenChild := false
+	for _, assignment := range childPayload.Assignments {
+		if assignment.FolderID == parent.FolderID && assignment.Role == "responsible" && assignment.UserID == parentUser.UserID {
+			seenParent = true
+		}
+		if assignment.FolderID == child.FolderID && assignment.Role == "accountable" && assignment.UserID == childUser.UserID {
+			seenChild = true
+		}
+	}
+	if !seenParent || !seenChild {
+		t.Fatalf("child assignments = %+v, want inherited parent and direct child assignments", childPayload.Assignments)
+	}
+}
+
+func TestCommunicationsSharedInboxAccountEmailAPI(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-shared-inbox-account-test"
+
+	user, err := repo.UpsertAuthUser("subject-shared-account", "triage@example.com", "Triage User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, "company_user"); err != nil {
+		t.Fatalf("AddCompanyMembership error = %v", err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: "triage@example.com",
+		GrantID:      "grant-shared-account",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatalf("UpsertUserEmailConnection error = %v", err)
+	}
+
+	createBody, _ := json.Marshal(map[string]string{
+		"company_id":    companyID,
+		"folder_kind":   "communications",
+		"name":          "AR Inbox",
+		"account_email": "TRIAGE@example.com",
+	})
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("POST shared inbox account status = %d, want %d body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
+	}
+	var created struct {
+		FolderID     string `json:"folder_id"`
+		AccountEmail string `json:"account_email"`
+	}
+	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created shared inbox: %v", err)
+	}
+	if created.FolderID == "" || created.AccountEmail != "triage@example.com" {
+		t.Fatalf("created shared inbox = %+v, want normalized account email", created)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=communications", nil)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET communications folders status = %d, want %d body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	var listPayload struct {
+		Folders []struct {
+			FolderID     string `json:"folder_id"`
+			AccountEmail string `json:"account_email"`
+		} `json:"folders"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode communications folder list: %v", err)
+	}
+	found := false
+	for _, folder := range listPayload.Folders {
+		if folder.FolderID != created.FolderID {
+			continue
+		}
+		found = true
+		if folder.AccountEmail != "triage@example.com" {
+			t.Fatalf("listed account_email = %q, want triage@example.com", folder.AccountEmail)
+		}
+	}
+	if !found {
+		t.Fatalf("created shared inbox %s not found in list payload", created.FolderID)
+	}
+
+	clearBody, _ := json.Marshal(map[string]string{
+		"company_id":    companyID,
+		"account_email": "",
+	})
+	clearReq := httptest.NewRequest(http.MethodPut, "/v1/company-explorer/folders/"+created.FolderID, bytes.NewReader(clearBody))
+	clearReq.Header.Set("Content-Type", "application/json")
+	clearRec := httptest.NewRecorder()
+	handler.ServeHTTP(clearRec, clearReq)
+	if clearRec.Code != http.StatusOK {
+		t.Fatalf("PUT clear shared inbox account status = %d, want %d body=%s", clearRec.Code, http.StatusOK, clearRec.Body.String())
+	}
+	var cleared struct {
+		AccountEmail *string `json:"account_email"`
+	}
+	if err := json.NewDecoder(clearRec.Body).Decode(&cleared); err != nil {
+		t.Fatalf("decode cleared shared inbox: %v", err)
+	}
+	if cleared.AccountEmail != nil {
+		t.Fatalf("cleared account_email = %v, want nil", *cleared.AccountEmail)
+	}
+
+	missingBody, _ := json.Marshal(map[string]string{
+		"company_id":    companyID,
+		"folder_kind":   "communications",
+		"name":          "Missing Account",
+		"account_email": "missing@example.com",
+	})
+	missingReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(missingBody))
+	missingReq.Header.Set("Content-Type", "application/json")
+	missingRec := httptest.NewRecorder()
+	handler.ServeHTTP(missingRec, missingReq)
+	if missingRec.Code != http.StatusBadRequest {
+		t.Fatalf("POST missing shared inbox account status = %d, want %d body=%s", missingRec.Code, http.StatusBadRequest, missingRec.Body.String())
+	}
+}
+
 func TestCompanyExplorerFolderItemBatchAssignsItemsInOneRequest(t *testing.T) {
 	t.Parallel()
 

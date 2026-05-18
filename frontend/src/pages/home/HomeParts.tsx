@@ -15,7 +15,7 @@ import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDra
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeState, HomeViewID, InboxLogicGateNodeGroup } from "./homeTypes";
 import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusLetter, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
+import { allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
@@ -386,6 +386,7 @@ function getSharedTriageDropPlacement(event: React.DragEvent<HTMLElement>): Shar
 
 export function HomeSidebar({
   activeViewID,
+  connectedAccountEmail,
   sharedInboxes,
   loadingSharedInboxes,
   newSharedInboxName,
@@ -395,10 +396,12 @@ export function HomeSidebar({
   onSubmitSharedInbox,
   onCreateSharedInbox,
   onRenameSharedInbox,
+  onSetSharedInboxAccountEmail,
   onMoveSharedInbox,
   onDeleteSharedInbox,
 }: {
   activeViewID: HomeViewID;
+  connectedAccountEmail?: string;
   sharedInboxes: CommunicationsSharedInbox[];
   loadingSharedInboxes: boolean;
   newSharedInboxName: string;
@@ -406,8 +409,9 @@ export function HomeSidebar({
   onSelectView: (viewID: HomeViewID, mailbox?: EmailMailbox) => void;
   onNewSharedInboxNameChange: (value: string) => void;
   onSubmitSharedInbox: (event: React.FormEvent<HTMLFormElement>) => void;
-  onCreateSharedInbox: (parentFolderID: string, name?: string) => Promise<CommunicationsSharedInbox | null>;
+  onCreateSharedInbox: (parentFolderID: string, name?: string, accountEmail?: string) => Promise<CommunicationsSharedInbox | null>;
   onRenameSharedInbox: (folderID: string, name: string) => Promise<void>;
+  onSetSharedInboxAccountEmail: (folderID: string, accountEmail: string) => Promise<void>;
   onMoveSharedInbox: (folderID: string, parentFolderID: string, position: number) => Promise<void>;
   onDeleteSharedInbox: (folderID: string) => Promise<void>;
 }) {
@@ -420,6 +424,7 @@ export function HomeSidebar({
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
+  const cleanConnectedAccountEmail = connectedAccountEmail?.trim().toLowerCase() ?? "";
   const sharedRows = useMemo(() => sharedRootOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [], [expandedSharedFolderIDs, sharedInboxes, sharedRootOpen]);
   const sharedBusy = busy === "shared-inbox";
 
@@ -497,6 +502,22 @@ export function HomeSidebar({
     setRenamingSharedFolderID(folder.folder_id);
     setRenameDraft(folder.name);
   }, [onCreateSharedInbox]);
+
+  const createSharedInboxForConnectedAccount = useCallback(async (parentFolderID: string) => {
+    if (!cleanConnectedAccountEmail) return;
+    setSharedContextMenu(null);
+    const folder = await onCreateSharedInbox(parentFolderID, cleanConnectedAccountEmail, cleanConnectedAccountEmail);
+    if (!folder) return;
+    if (parentFolderID) {
+      setExpandedSharedFolderIDs((previous) => new Set(previous).add(parentFolderID));
+    }
+    setSharedRootOpen(true);
+  }, [cleanConnectedAccountEmail, onCreateSharedInbox]);
+
+  const setSharedFolderAccountEmail = useCallback(async (folderID: string, accountEmail: string) => {
+    setSharedContextMenu(null);
+    await onSetSharedInboxAccountEmail(folderID, accountEmail);
+  }, [onSetSharedInboxAccountEmail]);
 
   const requestDeleteSharedFolder = useCallback(async (folder: CommunicationsSharedInbox) => {
     setSharedContextMenu(null);
@@ -659,7 +680,10 @@ export function HomeSidebar({
             }}
           />
         ) : (
-          <span style={navLabelStyle}>{folder.name}</span>
+          <span style={sharedInboxLabelStackStyle}>
+            <span style={navLabelStyle}>{folder.name}</span>
+            {folder.account_email && <span style={sharedInboxAccountMetaStyle}>{folder.account_email}</span>}
+          </span>
         )}
       </div>
     );
@@ -739,8 +763,38 @@ export function HomeSidebar({
           >
             {sharedContextMenu.folder ? "New Child Folder" : "New Folder"}
           </button>
+          {cleanConnectedAccountEmail && (
+            <button
+              type="button"
+              style={sharedInboxContextMenuButtonStyle}
+              disabled={sharedBusy}
+              onClick={() => void createSharedInboxForConnectedAccount(sharedContextMenu.folder?.folder_id ?? "")}
+            >
+              New Inbox from {cleanConnectedAccountEmail}
+            </button>
+          )}
           {sharedContextMenu.folder && (
             <>
+              {cleanConnectedAccountEmail && sharedContextMenu.folder.account_email !== cleanConnectedAccountEmail && (
+                <button
+                  type="button"
+                  style={sharedInboxContextMenuButtonStyle}
+                  disabled={sharedBusy}
+                  onClick={() => void setSharedFolderAccountEmail(sharedContextMenu.folder!.folder_id, cleanConnectedAccountEmail)}
+                >
+                  Attach {cleanConnectedAccountEmail}
+                </button>
+              )}
+              {sharedContextMenu.folder.account_email && (
+                <button
+                  type="button"
+                  style={sharedInboxContextMenuButtonStyle}
+                  disabled={sharedBusy}
+                  onClick={() => void setSharedFolderAccountEmail(sharedContextMenu.folder!.folder_id, "")}
+                >
+                  Detach Email
+                </button>
+              )}
               <button
                 type="button"
                 style={sharedInboxContextMenuButtonStyle}
@@ -835,22 +889,29 @@ export function SharedInboxRaciSettingsModal({
                 <div style={sharedRaciChipListStyle}>
                   {roleAssignments.length === 0 ? (
                     <span style={mutedSmallStyle}>No one assigned</span>
-                  ) : roleAssignments.map((assignment) => (
-                    <span key={`${role}:${assignment.user_id}`} style={sharedRaciChipStyle}>
-                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {sharedInboxRaciAssignmentLabel(assignment, userByID)}
+                  ) : roleAssignments.map((assignment) => {
+                    const inherited = assignment.folder_id !== folder.folder_id;
+                    return (
+                      <span key={`${role}:${assignment.folder_id}:${assignment.user_id}`} style={sharedRaciChipStyle}>
+                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {sharedInboxRaciAssignmentLabel(assignment, userByID)}
+                        </span>
+                        {inherited ? (
+                          <span style={mutedSmallStyle}>Inherited</span>
+                        ) : (
+                          <button
+                            type="button"
+                            aria-label={`Remove ${sharedInboxRaciAssignmentLabel(assignment, userByID)} from ${label}`}
+                            style={shortcutRemoveStyle}
+                            disabled={busy}
+                            onClick={() => onRemoveUser(folder.folder_id, role, assignment.user_id)}
+                          >
+                            X
+                          </button>
+                        )}
                       </span>
-                      <button
-                        type="button"
-                        aria-label={`Remove ${sharedInboxRaciAssignmentLabel(assignment, userByID)} from ${label}`}
-                        style={shortcutRemoveStyle}
-                        disabled={busy}
-                        onClick={() => onRemoveUser(folder.folder_id, role, assignment.user_id)}
-                      >
-                        X
-                      </button>
-                    </span>
-                  ))}
+                    );
+                  })}
                 </div>
                 <div style={sharedRaciAddRowStyle}>
                   <select
@@ -942,7 +1003,7 @@ const sharedRaciChipStyle: React.CSSProperties = {
   minWidth: 0,
   minHeight: 28,
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 22px",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
   alignItems: "center",
   gap: 6,
   padding: "3px 4px 3px 8px",

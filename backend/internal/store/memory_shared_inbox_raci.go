@@ -9,9 +9,6 @@ import (
 
 func sortSharedInboxRaciAssignments(items []domain.SharedInboxRaciAssignment) {
 	sort.Slice(items, func(i, j int) bool {
-		if items[i].FolderID != items[j].FolderID {
-			return items[i].FolderID < items[j].FolderID
-		}
 		if raciRoleSortValue(items[i].Role) != raciRoleSortValue(items[j].Role) {
 			return raciRoleSortValue(items[i].Role) < raciRoleSortValue(items[j].Role)
 		}
@@ -32,7 +29,10 @@ func sortSharedInboxRaciAssignments(items []domain.SharedInboxRaciAssignment) {
 		if iLabel != jLabel {
 			return iLabel < jLabel
 		}
-		return items[i].UserID < items[j].UserID
+		if items[i].UserID != items[j].UserID {
+			return items[i].UserID < items[j].UserID
+		}
+		return items[i].FolderID < items[j].FolderID
 	})
 }
 
@@ -40,7 +40,32 @@ func (r *MemoryRepo) withSharedInboxRaciLocked(folder domain.CompanyExplorerFold
 	if folder.FolderKind != "communications" {
 		return folder
 	}
-	assignments := append([]domain.SharedInboxRaciAssignment{}, r.sharedInboxRaci[sharedInboxRaciKey(folder.CompanyID, folder.FolderID)]...)
+	assignments := make([]domain.SharedInboxRaciAssignment, 0)
+	seenAssignments := map[string]bool{}
+	seenFolders := map[string]bool{}
+	for current := folder; strings.TrimSpace(current.FolderID) != ""; {
+		currentID := strings.TrimSpace(current.FolderID)
+		if seenFolders[currentID] {
+			break
+		}
+		seenFolders[currentID] = true
+		for _, assignment := range r.sharedInboxRaci[sharedInboxRaciKey(folder.CompanyID, currentID)] {
+			seenKey := assignment.Role + ":" + assignment.UserID
+			if seenAssignments[seenKey] {
+				continue
+			}
+			seenAssignments[seenKey] = true
+			assignments = append(assignments, assignment)
+		}
+		if current.ParentFolderID == nil || strings.TrimSpace(*current.ParentFolderID) == "" {
+			break
+		}
+		parent, ok := r.folders[key(folder.CompanyID, strings.TrimSpace(*current.ParentFolderID))]
+		if !ok || parent.FolderKind != "communications" {
+			break
+		}
+		current = parent
+	}
 	sortSharedInboxRaciAssignments(assignments)
 	folder.RaciAssignments = assignments
 	return folder
@@ -94,5 +119,6 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxRaciAssignments(input SharedInb
 	}
 	sortSharedInboxRaciAssignments(assignments)
 	r.sharedInboxRaci[sharedInboxRaciKey(companyID, folderID)] = assignments
-	return append([]domain.SharedInboxRaciAssignment{}, assignments...), nil
+	next := r.withSharedInboxRaciLocked(folder).RaciAssignments
+	return append([]domain.SharedInboxRaciAssignment{}, next...), nil
 }
