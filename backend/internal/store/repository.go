@@ -66,6 +66,7 @@ type Repository interface {
 	CreateLogicGate(companyID, header string) (domain.LogicGate, error)
 	UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error)
 	ListLogicGates(companyID string) ([]domain.LogicGate, error)
+	QueryLogicGates(companyID string, query LogicGateQuery) ([]domain.LogicGate, error)
 	SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUpdateInput) ([]domain.LogicGateRaciAssignment, error)
 	ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error)
 	DeleteLogicGateRelationship(companyID, relationshipID string) error
@@ -130,6 +131,17 @@ const MapEntityBatchMaxItems = 200
 const MapEntityBatchMaxRelationships = 500
 
 const CompanyExplorerFolderItemBatchMaxItems = 200
+
+const LogicGateSearchDefaultLimit = 12
+
+const LogicGateSearchMaxLimit = 50
+
+type LogicGateQuery struct {
+	Search         string
+	AssignedUserID string
+	Limit          int
+}
+
 const CommunicationsTriageBatchMaxItems = 50
 const UserLogicGateShortcutBatchMaxItems = 200
 

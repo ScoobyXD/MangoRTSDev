@@ -9,6 +9,7 @@ import { deserializeEditorDocumentHTML, readEditorDocumentText, serializeEditorD
 import { resolveEditorTextBlockChatAnchorRanges } from "./editorTextBlockChatHighlights";
 import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHandlers";
 import { getEditorDocumentFontFamily } from "./useEditorPreferences";
+import { findEditorImageFrame, readEditorImageData } from "./editorImages";
 import {
   ArrowRightIcon,
   avatarBackgroundForName,
@@ -39,6 +40,7 @@ import {
   TEXT_BLOCK_PADDING_RIGHT,
   TEXT_BLOCK_PADDING_TOP,
   type MentionableCompanyUser,
+  type TextBlockImageDraft,
   type TextBlockSelectionAnchor,
   type TextBlockSelectionDraft,
   useCloseFloatingMenu,
@@ -222,6 +224,8 @@ type NodeTextBlockEditorProps = {
   onDocumentChange: (document: string) => void;
   onDocumentFlush: (document: string) => void;
   onSelectionChatRequest: (selection: TextBlockSelectionDraft) => void;
+  onImageChatRequest: (image: TextBlockImageDraft) => void;
+  onImageNodeRequest: (image: TextBlockImageDraft) => void;
 };
 
 function readStoredTextBlockHeight(storageKey: string): number {
@@ -351,6 +355,38 @@ function buildTextHighlightRects(root: HTMLElement, wrapper: HTMLElement, active
   return rects;
 }
 
+function imageDataURLMimeType(dataURL: string): string {
+  const match = /^data:([^;,]+);base64,/i.exec(dataURL.trim());
+  return match?.[1] ?? "image/png";
+}
+
+function imageDataURLByteSize(dataURL: string): number {
+  const commaIndex = dataURL.indexOf(",");
+  if (commaIndex < 0) return dataURL.length;
+  const base64 = dataURL.slice(commaIndex + 1).replace(/\s+/g, "");
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
+function readImageDraftFromFrame(blockID: string, frame: HTMLElement, wrapper: HTMLElement): TextBlockImageDraft | null {
+  const imageData = readEditorImageData(frame);
+  if (!imageData?.src) return null;
+  const frameRect = frame.getBoundingClientRect();
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const x = Math.max(8, Math.min(frameRect.right - wrapperRect.left + 8, wrapperRect.width - 66));
+  const y = Math.max(6, Math.min(frameRect.top - wrapperRect.top + 4, wrapperRect.height - 34));
+  return {
+    blockID,
+    dataURL: imageData.src,
+    mimeType: imageDataURLMimeType(imageData.src),
+    size: imageDataURLByteSize(imageData.src),
+    width: imageData.width,
+    height: imageData.height,
+    x,
+    y,
+  };
+}
+
 export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   blockID,
   nodeID,
@@ -370,6 +406,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   onDocumentChange,
   onDocumentFlush,
   onSelectionChatRequest,
+  onImageChatRequest,
+  onImageNodeRequest,
 }) => {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -389,6 +427,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const [selectionDraft, setSelectionDraft] = useState<TextBlockSelectionDraft | null>(null);
+  const [imageDraft, setImageDraft] = useState<TextBlockImageDraft | null>(null);
   const [textHighlightRects, setTextHighlightRects] = useState<TextHighlightRect[]>([]);
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
   const documentLineHeightPx = TEXT_BLOCK_FONT_SIZE * TEXT_BLOCK_LINE_HEIGHT;
@@ -569,7 +608,9 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const captureSelectionDraft = useCallback(() => {
     window.setTimeout(() => {
       if (selectionPointerDownRef.current) return;
-      setSelectionDraft(readSelectionDraft());
+      const nextDraft = readSelectionDraft();
+      setSelectionDraft(nextDraft);
+      if (nextDraft) setImageDraft(null);
     }, 0);
   }, [readSelectionDraft]);
 
@@ -706,7 +747,10 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         onClick={handlers.onClick}
         onPointerDown={(event) => {
           setSelectionDraft(null);
-          if (event.button === 0) selectionPointerDownRef.current = true;
+          const frame = findEditorImageFrame(event.currentTarget, event.target);
+          const wrapper = wrapperRef.current;
+          setImageDraft(frame && wrapper ? readImageDraftFromFrame(blockID, frame, wrapper) : null);
+          if (event.button === 0 && !frame) selectionPointerDownRef.current = true;
           handlers.onPointerDown(event);
         }}
         onPointerMove={handlers.onPointerMove}
@@ -783,6 +827,57 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         >
           <ChatIcon color={accent} />
         </button>
+      )}
+      {imageDraft && (
+        <div
+          role="toolbar"
+          aria-label="Image actions"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          style={{
+            position: "absolute",
+            left: imageDraft.x,
+            top: imageDraft.y,
+            zIndex: 5,
+            display: "grid",
+            gridTemplateColumns: "28px 28px",
+            gap: 5,
+            padding: 4,
+            border: `1px solid ${accent}`,
+            borderRadius: 8,
+            background: "#ffffff",
+            boxShadow: "0 8px 20px rgba(0,0,0,0.18)",
+          }}
+        >
+          <button
+            type="button"
+            title="Comment on image"
+            aria-label="Comment on image"
+            onClick={(event) => {
+              event.stopPropagation();
+              onImageChatRequest(imageDraft);
+              setImageDraft(null);
+            }}
+            style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${accent}`, background: "#ffffff", color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer" }}
+          >
+            <ChatIcon color={accent} />
+          </button>
+          <button
+            type="button"
+            title="Create node from image"
+            aria-label="Create node from image"
+            onClick={(event) => {
+              event.stopPropagation();
+              onImageNodeRequest(imageDraft);
+              setImageDraft(null);
+            }}
+            style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${accent}`, background: "#ffffff", color: accent, display: "grid", placeItems: "center", padding: 0, cursor: "pointer" }}
+          >
+            <PlusIcon color={accent} />
+          </button>
+        </div>
       )}
     </div>
   );

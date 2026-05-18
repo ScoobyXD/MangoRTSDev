@@ -25,6 +25,34 @@ func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
+		query := store.LogicGateQuery{
+			Search: strings.TrimSpace(firstNonEmptyQueryValue(r, "q", "query")),
+		}
+		if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" || query.Search != "" {
+			limit, ok := parsePositiveLimit(rawLimit, store.LogicGateSearchDefaultLimit, store.LogicGateSearchMaxLimit)
+			if !ok {
+				writeError(w, http.StatusBadRequest, "invalid_limit")
+				return
+			}
+			query.Limit = limit
+		}
+		if isTruthyQueryValue(firstNonEmptyQueryValue(r, "assigned_to_me", "mine")) {
+			actor, ok := authenticatedActor(r)
+			if !ok {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			query.AssignedUserID = actor.User.UserID
+		}
+		if query.Search != "" || query.AssignedUserID != "" || query.Limit > 0 {
+			items, err := s.repo.QueryLogicGates(companyID, query)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_query_logic_gates")
+				return
+			}
+			writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"logic_gates": items})
+			return
+		}
 		items, err := s.repo.ListLogicGates(companyID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
@@ -57,6 +85,24 @@ func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 	}
 	s.publishWorkspaceEvent(req.CompanyID, "logic_gate_created", map[string]any{"logic_gate_id": item.LogicGateID, "logic_gate": item})
 	writeJSON(w, http.StatusCreated, item)
+}
+
+func firstNonEmptyQueryValue(r *http.Request, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(r.URL.Query().Get(key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func isTruthyQueryValue(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Request) {

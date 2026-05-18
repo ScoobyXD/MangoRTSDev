@@ -225,6 +225,15 @@ func (r *MemoryRepo) ensureCompanyExplorerSystemFolderLocked(companyID, systemKe
 	return folder, true
 }
 
+func (r *MemoryRepo) assignNodeToActiveNodesFolderLocked(companyID, nodeID string, position int) (domain.CompanyExplorerFolderItem, error) {
+	activeFolder, ok := r.ensureCompanyExplorerSystemFolderLocked(companyID, CompanyExplorerSystemActiveNodesKey)
+	if !ok {
+		return domain.CompanyExplorerFolderItem{}, ErrNotFound
+	}
+	item, _, err := r.assignCompanyExplorerFolderItemLocked(companyID, activeFolder.FolderID, "node", nodeID, position)
+	return item, err
+}
+
 func nextCompanyExplorerFolderPosition(folders map[string]domain.CompanyExplorerFolder, companyID, folderKind, parentFolderID string) int {
 	next := 1000
 	for _, folder := range folders {

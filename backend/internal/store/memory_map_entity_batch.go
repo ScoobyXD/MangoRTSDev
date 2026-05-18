@@ -16,8 +16,16 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 		EntityMappings: make([]MapEntityBatchEntityMapping, 0, len(input.Items)),
 	}
 
+	targetFolderID := input.FolderID
 	targetFolderKind := input.EntityKind
-	if input.FolderID != "" {
+	if input.EntityKind == "node" {
+		activeFolder, ok := r.ensureCompanyExplorerSystemFolderLocked(input.CompanyID, CompanyExplorerSystemActiveNodesKey)
+		if !ok {
+			return MapEntityBatchResult{}, ErrNotFound
+		}
+		targetFolderID = activeFolder.FolderID
+		targetFolderKind = activeFolder.FolderKind
+	} else if input.FolderID != "" {
 		folder, ok := r.folders[key(input.CompanyID, input.FolderID)]
 		if !ok {
 			return MapEntityBatchResult{}, ErrNotFound
@@ -109,16 +117,16 @@ func (r *MemoryRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityB
 		result.LogicGateMapPositions = append(result.LogicGateMapPositions, position)
 	}
 
-	if input.FolderID != "" {
-		position := nextCompanyExplorerFolderChildPosition(r.folders, r.folderItems, input.CompanyID, input.FolderID, targetFolderKind)
+	if targetFolderID != "" {
+		position := nextCompanyExplorerFolderChildPosition(r.folders, r.folderItems, input.CompanyID, targetFolderID, targetFolderKind)
 		for index, mapping := range result.EntityMappings {
 			itemPosition := position
-			if index < len(input.Items) && input.Items[index].Position > 0 {
+			if input.EntityKind != "node" && index < len(input.Items) && input.Items[index].Position > 0 {
 				itemPosition = input.Items[index].Position
 			}
 			item := domain.CompanyExplorerFolderItem{
 				CompanyID:        input.CompanyID,
-				FolderID:         input.FolderID,
+				FolderID:         targetFolderID,
 				ItemType:         input.EntityKind,
 				ItemID:           mapping.EntityID,
 				Position:         itemPosition,

@@ -135,6 +135,61 @@ func (r *MemoryRepo) ListLogicGates(companyID string) ([]domain.LogicGate, error
 	return items, nil
 }
 
+func logicGateMatchesQuery(gate domain.LogicGate, query string) bool {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(gate.Header), query) ||
+		strings.Contains(strings.ToLower(gate.LogicGateID), query)
+}
+
+func logicGateAssignedToUser(assignments []domain.LogicGateRaciAssignment, userID string) bool {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return true
+	}
+	for _, assignment := range assignments {
+		if strings.TrimSpace(assignment.UserID) == userID {
+			return true
+		}
+	}
+	return false
+}
+
+func sortLogicGateQueryResults(items []domain.LogicGate) {
+	sort.Slice(items, func(i, j int) bool {
+		left := strings.ToLower(strings.TrimSpace(items[i].Header))
+		right := strings.ToLower(strings.TrimSpace(items[j].Header))
+		if left != right {
+			return left < right
+		}
+		return items[i].LogicGateID < items[j].LogicGateID
+	})
+}
+
+func (r *MemoryRepo) QueryLogicGates(companyID string, query LogicGateQuery) ([]domain.LogicGate, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.LogicGate, 0)
+	for _, gate := range r.logicGates {
+		if gate.CompanyID != companyID || !logicGateMatchesQuery(gate, query.Search) {
+			continue
+		}
+		assignments := r.logicGateRaci[key(gate.CompanyID, gate.LogicGateID)]
+		if !logicGateAssignedToUser(assignments, query.AssignedUserID) {
+			continue
+		}
+		items = append(items, r.withLogicGateRaciLocked(gate))
+	}
+	sortLogicGateQueryResults(items)
+	if query.Limit > 0 && len(items) > query.Limit {
+		items = items[:query.Limit]
+	}
+	return items, nil
+}
+
 func (r *MemoryRepo) GetLogicGate(companyID, logicGateID string) (domain.LogicGate, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

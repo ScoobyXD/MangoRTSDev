@@ -267,24 +267,6 @@ export function buildCompanyExplorerTreeRows({
         });
       }
     }
-    if (systemKey === "active_nodes") {
-      let activePosition = 0;
-      for (const node of nodes) {
-        const dueDate = normalizeISODate(node.due_date);
-        if (!dueDate || dueDate <= currentDate) continue;
-        activePosition += TREE_ROW_POSITION_STEP;
-        contentRows.push({
-          id: `system-active-node-${node.node_id}`,
-          label: getNodeTitle(node) || node.node_id,
-          depth,
-          kind: "node",
-          nodeID: node.node_id,
-          scopeLevel: depth,
-          position: activePosition,
-          createdTimestamp: node.created_timestamp,
-        });
-      }
-    }
     if (systemKey === "history") {
       let historyPosition = 0;
       for (const node of nodes) {

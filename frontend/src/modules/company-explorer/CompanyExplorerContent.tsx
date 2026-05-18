@@ -656,12 +656,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       const node = response.nodes?.[0];
       if (!node) throw new Error("node_batch_create_missing_node");
       for (const item of response.folder_items ?? []) upsertOptimisticFolderItem(item);
+      const createdFolderID = response.folder_items?.find((item) => item.item_type === "node" && item.item_id === node.node_id)?.folder_id ?? parentFolderID;
       setNodes((previous) => previous.some((item) => item.node_id === node.node_id) ? previous : [...previous, node]);
       upsertNodeRelationshipGraphNode(apiBase, companyID, node);
-      if (!parentFolderID && position && position > 0) {
+      if (!createdFolderID && position && position > 0) {
         setRootRowOrder((previous) => ({ ...previous, [`node-${node.node_id}`]: position }));
       }
-      expandCreatedItemTarget(parentFolderID);
+      expandCreatedItemTarget(createdFolderID);
       lastLocalExplorerSelectionRef.current = { domain: "node", changedAt: Date.now() };
       pendingExplorerSelectionIntentRef.current = "activate";
       setSelectedTreeID(`node-${node.node_id}`);

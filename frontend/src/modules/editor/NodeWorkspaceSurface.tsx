@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
+import { getNodeTitle as getLogicGateTitle, type LogicGateRecord } from "../logic-gate-map/shared";
 import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockContentPayload,
@@ -19,6 +20,8 @@ import {
 } from "./editorProjection";
 import { EDITOR_AUTOSAVE_DELAY_MS, generateStableInformationID } from "./editorTypes";
 import { resolveEditorTextBlockChatAnchorMessageID } from "./editorTextBlockChatHighlights";
+import { createEditorImageFrame } from "./editorImages";
+import { serializeEditorDocumentHTML } from "./richTextEditing";
 
 import {
   AttachedEmailsPanel,
@@ -45,6 +48,7 @@ import {
   projectionsKey,
   readChatAttachment,
   type NodeWorkspaceSurfaceProps,
+  type TextBlockImageDraft,
   type TextBlockSelectionAnchor,
   type TextBlockSelectionDraft,
   type TextBlockState,
@@ -75,11 +79,23 @@ function storeTextChatSplitRatio(companyID: string, nodeID: string, ratio: numbe
   localStorage.setItem(textChatSplitStorageKey(companyID, nodeID), String(clampTextChatSplitRatio(ratio)));
 }
 
+function logicGateOptionLabel(logicGate: LogicGateRecord): string {
+  return getLogicGateTitle({ header: logicGate.header, title: logicGate.header }).trim() || logicGate.logic_gate_id;
+}
+
+function sortLogicGateOptions(items: LogicGateRecord[]): LogicGateRecord[] {
+  return [...items].sort((a, b) => (
+    logicGateOptionLabel(a).localeCompare(logicGateOptionLabel(b), undefined, { numeric: true, sensitivity: "base" })
+    || a.logic_gate_id.localeCompare(b.logic_gate_id)
+  ));
+}
+
 export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   companyID,
   nodeID,
   projections,
   companyUsers,
+  projectionsLoaded,
   topPx,
   accent,
   surfaceText,
@@ -91,6 +107,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   outlineStyle,
   requestJSON,
   onProjectionMutation,
+  onCreateNodeFromImage,
+  onAssignToLogicGate,
   onError,
 }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -113,17 +131,31 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
   const [emailPickerOpen, setEmailPickerOpen] = useState(false);
   const [selectedEmailID, setSelectedEmailID] = useState("");
+  const [logicGateAssignerOpen, setLogicGateAssignerOpen] = useState(false);
+  const [logicGateSearch, setLogicGateSearch] = useState("");
+  const [logicGateOptions, setLogicGateOptions] = useState<LogicGateRecord[]>([]);
+  const [logicGateOptionsLoading, setLogicGateOptionsLoading] = useState(false);
+  const [logicGateSearchResults, setLogicGateSearchResults] = useState<LogicGateRecord[]>([]);
+  const [logicGateSearchLoading, setLogicGateSearchLoading] = useState(false);
+  const [assigningLogicGateID, setAssigningLogicGateID] = useState("");
+  const [logicGateAssignStatus, setLogicGateAssignStatus] = useState("");
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
   const [deleteTextBlockConfirmation, setDeleteTextBlockConfirmation] = useState<{ blockID: string; title: string; chatCount: number } | null>(null);
   const [textChatSplitRatio, setTextChatSplitRatio] = useState(() => readStoredTextChatSplitRatio(companyID, nodeID));
   const textChatSplitRatioRef = useRef(textChatSplitRatio);
+  const autoCreatedTextBlockNodeIDsRef = useRef(new Set<string>());
 
   const projectionIdentity = useMemo(() => projectionsKey(projections), [projections]);
   const compact = width > 0 && width < 720;
   const editorGridTemplateColumns = compact
     ? "58px minmax(0, 1fr)"
     : `62px minmax(0, ${textChatSplitRatio}fr) 8px minmax(0, ${1 - textChatSplitRatio}fr)`;
+  const myLogicGates = useMemo(
+    () => sortLogicGateOptions(logicGateOptions),
+    [logicGateOptions],
+  );
+  const searchedLogicGates = useMemo(() => sortLogicGateOptions(logicGateSearchResults), [logicGateSearchResults]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -208,6 +240,52 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    if (!logicGateAssignerOpen || !companyID) return;
+    let cancelled = false;
+    setLogicGateOptionsLoading(true);
+    const params = new URLSearchParams({ company_id: companyID, assigned_to_me: "1" });
+    void requestJSON<{ logic_gates?: LogicGateRecord[] }>(`/v1/logic-gates?${params.toString()}`)
+      .then((payload) => {
+        if (!cancelled) setLogicGateOptions(payload.logic_gates ?? []);
+      })
+      .catch((cause) => {
+        if (!cancelled) onError(cause instanceof Error ? cause.message : "failed_to_load_logic_gates");
+      })
+      .finally(() => {
+        if (!cancelled) setLogicGateOptionsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [companyID, logicGateAssignerOpen, onError, requestJSON]);
+
+  useEffect(() => {
+    const query = logicGateSearch.trim();
+    if (!logicGateAssignerOpen || !companyID || !query) {
+      setLogicGateSearchResults([]);
+      setLogicGateSearchLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLogicGateSearchLoading(true);
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ company_id: companyID, q: query, limit: "12" });
+      void requestJSON<{ logic_gates?: LogicGateRecord[] }>(`/v1/logic-gates?${params.toString()}`)
+        .then((payload) => {
+          if (!cancelled) setLogicGateSearchResults(payload.logic_gates ?? []);
+        })
+        .catch((cause) => {
+          if (!cancelled) onError(cause instanceof Error ? cause.message : "failed_to_search_logic_gates");
+        })
+        .finally(() => {
+          if (!cancelled) setLogicGateSearchLoading(false);
+        });
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [companyID, logicGateAssignerOpen, logicGateSearch, onError, requestJSON]);
+
   useEffect(() => () => {
     for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
     saveTimersRef.current.clear();
@@ -288,6 +366,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     ]);
     void persistTextBlock(blockID, initialContent);
   }, [persistTextBlock]);
+
+  useEffect(() => {
+    if (!projectionsLoaded || !nodeID || blocks.length > 0 || autoCreatedTextBlockNodeIDsRef.current.has(nodeID)) return;
+    autoCreatedTextBlockNodeIDsRef.current.add(nodeID);
+    createTextBlock();
+  }, [blocks.length, createTextBlock, nodeID, projectionsLoaded]);
 
   const updateTextBlockContent = useCallback((blockID: string, patch: Partial<EditorTextBlockContent>) => {
     const existing = contentByBlockRef.current.get(blockID) ?? { title: "", document: "" };
@@ -576,6 +660,69 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, []);
 
+  const addImageChatComment = useCallback((image: TextBlockImageDraft) => {
+    const attachment: EditorChatAttachment = {
+      id: generateStableInformationID(),
+      name: "selected-image.png",
+      type: image.mimeType || "image/png",
+      size: image.size,
+      dataURL: image.dataURL,
+    };
+    setFocusedTextBlockID("");
+    setClosedChatBlockIDs((current) => {
+      if (!current.has(image.blockID)) return current;
+      const next = new Set(current);
+      next.delete(image.blockID);
+      return next;
+    });
+    setActiveChatBlockID(image.blockID);
+    setChatReplyTargets((current) => {
+      if (!current[image.blockID]) return current;
+      const next = { ...current };
+      delete next[image.blockID];
+      return next;
+    });
+    setChatSelectionAnchors((current) => {
+      if (!(image.blockID in current)) return current;
+      const next = { ...current };
+      delete next[image.blockID];
+      return next;
+    });
+    setChatDraftAttachments((current) => ({
+      ...current,
+      [image.blockID]: [...(current[image.blockID] ?? []), attachment],
+    }));
+  }, []);
+
+  const createNodeFromImage = useCallback(async (image: TextBlockImageDraft) => {
+    if (typeof document === "undefined") return;
+    const sourceBlock = blocks.find((block) => block.id === image.blockID);
+    const sourceTitle = sourceBlock?.title.trim() || "Image";
+    const container = document.createElement("div");
+    const maxWidth = 520;
+    const width = Math.max(48, Math.min(image.width || 320, maxWidth));
+    const ratio = image.width > 0 && image.height > 0 ? image.height / image.width : 0.75;
+    const height = Math.max(36, Math.min(Math.round(width * ratio), 900));
+    container.appendChild(createEditorImageFrame(document, {
+      src: image.dataURL,
+      width,
+      height,
+      floatSide: "left",
+      marginLeft: 0,
+      marginTop: 4,
+    }));
+    const imageDocument = serializeEditorDocumentHTML(container);
+    if (!imageDocument) return;
+    try {
+      await onCreateNodeFromImage({
+        title: sourceTitle === "Image" ? "Image" : `Image - ${sourceTitle}`,
+        document: imageDocument,
+      });
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_create_image_node");
+    }
+  }, [blocks, onCreateNodeFromImage, onError]);
+
   const attachEmail = useCallback(async (email: ReturnType<typeof messageAttachmentPayload>) => {
     if (attachedEmails.some((item) => item.messageID === email.messageID)) {
       setEmailPickerOpen(false);
@@ -609,6 +756,23 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       onError(cause instanceof Error ? cause.message : "failed_to_attach_email");
     }
   }, [attachedEmails, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
+
+  const assignToLogicGate = useCallback(async (logicGateID: string) => {
+    const cleanLogicGateID = logicGateID.trim();
+    if (!cleanLogicGateID || assigningLogicGateID) return;
+    setAssigningLogicGateID(cleanLogicGateID);
+    setLogicGateAssignStatus("");
+    try {
+      await onAssignToLogicGate(cleanLogicGateID);
+      setLogicGateAssignStatus("Assigned to Pending.");
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "failed_to_assign_logic_gate";
+      setLogicGateAssignStatus(message);
+      onError(message);
+    } finally {
+      setAssigningLogicGateID("");
+    }
+  }, [assigningLogicGateID, onAssignToLogicGate, onError]);
 
   const onDropEmail = useCallback((event: React.DragEvent) => {
     const email = parseDraggedEmail(event.dataTransfer);
@@ -765,11 +929,87 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             <MailIcon color={accent} />
             Attach email
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setLogicGateAssignerOpen((open) => !open);
+              setLogicGateAssignStatus("");
+            }}
+            style={{
+              minHeight: 30,
+              borderRadius: 6,
+              border: `1px solid ${logicGateAssignerOpen ? accent : strokeColor}`,
+              background: logicGateAssignerOpen ? "rgba(255,136,32,0.12)" : panelBackground,
+              color: surfaceText,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 7,
+              padding: "0 10px",
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 800,
+              letterSpacing: 0,
+            }}
+          >
+            Assign to logic gate
+          </button>
         </div>
 
         {!compact && <div aria-hidden="true" />}
         {!compact && (
           <div style={{ minHeight: 32, borderBottom: `1px solid ${ruleColor}`, background: "inherit" }} />
+        )}
+
+        {logicGateAssignerOpen && (
+          <>
+            <div aria-hidden="true" />
+            <div style={{ minWidth: 0, display: "grid", gap: 8, border: `1px solid ${strokeColor}`, borderRadius: 8, background: panelBackground, padding: 9 }}>
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontSize: 11, fontWeight: 900, color: surfaceText }}>My Logic Gates</div>
+                <div style={{ display: "grid", gap: 5, maxHeight: 132, overflowY: "auto", paddingRight: 2 }}>
+                  {logicGateOptionsLoading && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64 }}>Loading...</div>}
+                  {!logicGateOptionsLoading && myLogicGates.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64 }}>No assigned logic gates</div>}
+                  {myLogicGates.map((logicGate) => (
+                    <button
+                      key={`mine-${logicGate.logic_gate_id}`}
+                      type="button"
+                      disabled={Boolean(assigningLogicGateID)}
+                      onClick={() => { void assignToLogicGate(logicGate.logic_gate_id); }}
+                      style={{ minHeight: 30, border: `1px solid ${strokeColor}`, borderRadius: 6, background: assigningLogicGateID === logicGate.logic_gate_id ? "rgba(255,136,32,0.16)" : "#ffffff", color: surfaceText, cursor: assigningLogicGateID ? "default" : "pointer", padding: "6px 8px", textAlign: "left", fontSize: 11, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    >
+                      {logicGateOptionLabel(logicGate)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <input
+                value={logicGateSearch}
+                onChange={(event) => setLogicGateSearch(event.currentTarget.value)}
+                placeholder="Search logic gates"
+                style={{ width: "100%", minHeight: 30, border: `1px solid ${strokeColor}`, borderRadius: 6, outline: "none", background: "#ffffff", color: surfaceText, padding: "0 9px", boxSizing: "border-box", fontSize: 12, fontWeight: 700, letterSpacing: 0 }}
+              />
+              {logicGateSearch.trim() && (
+                <div style={{ display: "grid", gap: 5, maxHeight: 160, overflowY: "auto", paddingRight: 2 }}>
+                  {logicGateSearchLoading && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64 }}>Searching...</div>}
+                  {!logicGateSearchLoading && searchedLogicGates.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64 }}>No matches</div>}
+                  {searchedLogicGates.map((logicGate) => (
+                    <button
+                      key={`search-${logicGate.logic_gate_id}`}
+                      type="button"
+                      disabled={Boolean(assigningLogicGateID)}
+                      onClick={() => { void assignToLogicGate(logicGate.logic_gate_id); }}
+                      style={{ minHeight: 30, border: `1px solid ${strokeColor}`, borderRadius: 6, background: assigningLogicGateID === logicGate.logic_gate_id ? "rgba(255,136,32,0.16)" : "#ffffff", color: surfaceText, cursor: assigningLogicGateID ? "default" : "pointer", padding: "6px 8px", textAlign: "left", fontSize: 11, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    >
+                      {logicGateOptionLabel(logicGate)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {logicGateAssignStatus && <div style={{ fontSize: 11, fontWeight: 800, color: logicGateAssignStatus === "Assigned to Pending." ? accent : "#b42318" }}>{logicGateAssignStatus}</div>}
+            </div>
+            {!compact && <div aria-hidden="true" />}
+            {!compact && <div aria-hidden="true" />}
+          </>
         )}
 
         {blocks.length === 0 && (
@@ -929,6 +1169,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       flushTextBlockSave(block.id);
                     }}
                     onSelectionChatRequest={openSelectionChat}
+                    onImageChatRequest={addImageChatComment}
+                    onImageNodeRequest={(image) => { void createNodeFromImage(image); }}
                   />
                 </div>
                 {compact && chatIsVisible && (

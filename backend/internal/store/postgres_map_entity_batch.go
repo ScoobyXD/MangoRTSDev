@@ -21,8 +21,16 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 		EntityMappings: make([]MapEntityBatchEntityMapping, 0, len(input.Items)),
 	}
 
+	targetFolderID := input.FolderID
 	targetFolderKind := input.EntityKind
-	if input.FolderID != "" {
+	if input.EntityKind == "node" {
+		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
+		if err != nil {
+			return MapEntityBatchResult{}, err
+		}
+		targetFolderID = activeFolder.FolderID
+		targetFolderKind = activeFolder.FolderKind
+	} else if input.FolderID != "" {
 		if err := tx.QueryRowContext(ctx,
 			`select folder_kind
 			 from company_explorer_folders
@@ -101,14 +109,14 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 		result.LogicGateMapPositions = append(result.LogicGateMapPositions, position)
 	}
 
-	if input.FolderID != "" {
-		position, err := nextCompanyExplorerSQLRowPosition(ctx, tx, input.CompanyID, targetFolderKind, input.FolderID)
+	if targetFolderID != "" {
+		position, err := nextCompanyExplorerSQLRowPosition(ctx, tx, input.CompanyID, targetFolderKind, targetFolderID)
 		if err != nil {
 			return MapEntityBatchResult{}, err
 		}
 		for index, mapping := range result.EntityMappings {
 			itemPosition := position
-			if index < len(input.Items) && input.Items[index].Position > 0 {
+			if input.EntityKind != "node" && index < len(input.Items) && input.Items[index].Position > 0 {
 				itemPosition = input.Items[index].Position
 			}
 			var item domain.CompanyExplorerFolderItem
@@ -117,7 +125,7 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 				 (company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp)
 				 values ($1, $2, $3, $4, $5, now(), now())
 				 returning company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp`,
-				input.CompanyID, input.FolderID, input.EntityKind, mapping.EntityID, itemPosition,
+				input.CompanyID, targetFolderID, input.EntityKind, mapping.EntityID, itemPosition,
 			).Scan(
 				&item.CompanyID,
 				&item.FolderID,
