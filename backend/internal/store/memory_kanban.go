@@ -467,11 +467,24 @@ func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.Kan
 		input.Position = nextKanbanCardPosition(r.kanbanCards[k], input.ColumnID)
 	}
 	now := time.Now().UTC()
-	nodeTitle := r.nodes[key(input.CompanyID, input.NodeID)].Title
+	nodeKey := key(input.CompanyID, input.NodeID)
+	node := r.nodes[nodeKey]
+	nodeTitle := node.Title
 	if strings.TrimSpace(nodeTitle) == "" {
 		nodeTitle = normalizeKanbanBoardTitle(input.NodeID, input.NodeTitle)
 	}
 	description := strings.TrimSpace(input.DescriptionSnapshot)
+	assignResponsible := func() {
+		if board.LogicGateID == nil {
+			return
+		}
+		responsibleUserID := r.responsibleUserIDForLogicGateLocked(input.CompanyID, *board.LogicGateID)
+		if responsibleUserID == "" {
+			return
+		}
+		node.AssigneeUserID = &responsibleUserID
+		r.nodes[nodeKey] = node
+	}
 	for index, card := range r.kanbanCards[k] {
 		if card.NodeID != input.NodeID {
 			continue
@@ -490,6 +503,7 @@ func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.Kan
 		}
 		card.UpdatedTimestamp = now
 		r.kanbanCards[k][index] = card
+		assignResponsible()
 		r.syncNodeStatusFromKanbanCardLocked(card)
 		return card, nil
 	}
@@ -512,8 +526,20 @@ func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.Kan
 		card.LogicGateID = &value
 	}
 	r.kanbanCards[k] = append(r.kanbanCards[k], card)
+	assignResponsible()
 	r.syncNodeStatusFromKanbanCardLocked(card)
 	return card, nil
+}
+
+func (r *MemoryRepo) responsibleUserIDForLogicGateLocked(companyID, logicGateID string) string {
+	assignments := append([]domain.LogicGateRaciAssignment{}, r.logicGateRaci[key(companyID, logicGateID)]...)
+	sortLogicGateRaciAssignments(assignments)
+	for _, assignment := range assignments {
+		if assignment.Role == domain.LogicGateRaciRoleResponsible && strings.TrimSpace(assignment.UserID) != "" {
+			return strings.TrimSpace(assignment.UserID)
+		}
+	}
+	return ""
 }
 
 func (r *MemoryRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error) {

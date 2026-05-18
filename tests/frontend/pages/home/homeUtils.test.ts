@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { CommunicationsSharedInbox } from "../../../../frontend/src/modules/communications/communicationsApi.js";
+import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
 import type { LogicGateRecord } from "../../../../frontend/src/modules/logic-gate-map/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
 import {
   buildAciInboxGroupsByCell,
+  buildMyNodeGroups,
   buildResponsibleInboxGroupsByCell,
   buildSharedInboxRows,
   fitHomeColumnWidthsToAvailableWidth,
@@ -14,6 +16,7 @@ import {
   getInboxMatrixGridTemplateColumns,
   getInboxMatrixGridTemplateColumnsWithoutSidebar,
   mailboxForHomeView,
+  nodeIDsFromExplorerPayload,
   resizeHomeColumns,
   resizeHomeInboxMatrixColumnsWithoutSidebar,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
@@ -48,6 +51,31 @@ function logicGate(id: string, roles: LogicGateRecord["raci_assignments"]): Logi
     header: id,
     raci_assignments: roles,
     created_timestamp: "2026-01-01T00:00:00Z",
+  };
+}
+
+function explorerFolder(id: string, name: string, parentFolderID?: string): CompanyExplorerFolder {
+  return {
+    company_id: "company-1",
+    folder_id: id,
+    parent_folder_id: parentFolderID,
+    folder_kind: "logic_gate",
+    name,
+    position: 1000,
+    created_timestamp: "2026-01-01T00:00:00Z",
+    updated_timestamp: "2026-01-01T00:00:00Z",
+  };
+}
+
+function explorerFolderItem(folderID: string, itemID: string, itemType: "node" | "logic_gate"): CompanyExplorerFolderItem {
+  return {
+    company_id: "company-1",
+    folder_id: folderID,
+    item_type: itemType,
+    item_id: itemID,
+    position: 1000,
+    created_timestamp: "2026-01-01T00:00:00Z",
+    updated_timestamp: "2026-01-01T00:00:00Z",
   };
 }
 
@@ -89,6 +117,39 @@ test("inbox group builders classify ACI and responsible work by role, status, an
 
   assert.deepEqual(buildAciInboxGroupsByCell(nodes, nodeByID, gates, currentUserID).get("accountable:1")?.[0]?.nodeIDs, ["node-a"]);
   assert.deepEqual(buildResponsibleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID).get("in_progress:2")?.[0]?.nodeIDs, ["node-r"]);
+});
+
+test("my node groups follow logic gate folders and node drag payloads resolve folder drops", () => {
+  const folders = [
+    explorerFolder("folder-product", "Product"),
+    explorerFolder("folder-growth", "Growth", "folder-product"),
+  ];
+  const logicGateFolderItems = [
+    explorerFolderItem("folder-growth", "gate-growth", "logic_gate"),
+  ];
+  const nodes = [
+    node("node-unfiled", "Unfiled", { assignee_user_id: "user-1", priority: 1 }),
+    node("node-growth", "Growth Node", { assignee_user_id: "user-1", logic_gate_ids: ["gate-growth"], priority: 2 }),
+  ];
+
+  const groups = buildMyNodeGroups({ nodes, logicGateFolders: folders, logicGateFolderItems });
+
+  assert.deepEqual(groups.map((group) => [group.label, group.nodes.map((item) => item.node_id)]), [
+    ["Product / Growth", ["node-growth"]],
+    ["Unfiled Nodes", ["node-unfiled"]],
+  ]);
+  assert.deepEqual(nodeIDsFromExplorerPayload(
+    { kind: "folder", folderID: "folder-product", folderKind: "node" },
+    [
+      { ...folders[0], folder_kind: "node" },
+      { ...folders[1], folder_kind: "node" },
+    ],
+    [
+      explorerFolderItem("folder-product", "node-root", "node"),
+      explorerFolderItem("folder-growth", "node-child", "node"),
+      explorerFolderItem("folder-growth", "gate-growth", "logic_gate"),
+    ],
+  ), ["node-root", "node-child"]);
 });
 
 test("home column sizing keeps generated grid tracks stable", () => {
