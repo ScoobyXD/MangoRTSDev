@@ -138,14 +138,29 @@ func cleanStringList(values []string) []string {
 
 func (r *PostgresRepo) CreateNode(companyID, title string) (domain.Node, error) {
 	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Node{}, err
+	}
+	defer tx.Rollback()
+
 	item := domain.Node{CompanyID: companyID, NodeID: newUUIDv7String(), Title: title}
-	_, err := r.db.ExecContext(ctx,
+	if _, err := tx.ExecContext(ctx,
 		`insert into nodes (company_id, node_id, title, created_timestamp)
 		 values ($1, $2, $3, now())
 		`,
 		item.CompanyID, item.NodeID, item.Title,
-	)
+	); err != nil {
+		return domain.Node{}, err
+	}
+	activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, companyID, CompanyExplorerSystemActiveNodesKey)
 	if err != nil {
+		return domain.Node{}, err
+	}
+	if _, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, activeFolder.FolderID, "node", item.NodeID, 0); err != nil {
+		return domain.Node{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return domain.Node{}, err
 	}
 	return r.GetNode(companyID, item.NodeID)

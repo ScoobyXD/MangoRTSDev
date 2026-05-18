@@ -28,6 +28,7 @@ import { EDITOR_TAB_TEXT } from "./plainTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
 import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import {
+  buildEditorTextBlockContentPayload,
   EDITOR_ATTACHED_EMAIL_TYPE,
   EDITOR_TEXT_BLOCK_CHAT_TYPE,
   EDITOR_TEXT_BLOCK_TYPE,
@@ -47,6 +48,7 @@ import {
 } from "./richTextEditing";
 import {
   documentTargetKey,
+  generateStableInformationID,
   shouldReadStoredSelectionForEvent,
   type DocumentSaveRequest,
   type DocumentSaveTarget,
@@ -68,6 +70,8 @@ import { createEditorDocumentUndoHistory, recordEditorDocumentUndoChange, resetE
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
+import { getLogicGateArenaView, upsertKanbanCard } from "../kanban/kanbanApi";
+import { nextCardPosition } from "../kanban/shared";
 import {
   createEditorCollaborationClientID,
   editorCollaborationLabel,
@@ -229,6 +233,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [linkedNodeMetadataRows, setLinkedNodeMetadataRows] = useState<Array<{ label: string; value: string }>>([]);
   const [linkedNodeHistoryRows, setLinkedNodeHistoryRows] = useState<string[]>([]);
   const [nodeWorkspaceProjections, setNodeWorkspaceProjections] = useState<NodeProjectionItem[]>([]);
+  const [nodeWorkspaceLoadedNodeID, setNodeWorkspaceLoadedNodeID] = useState("");
   const [nodeStatus, setNodeStatus] = useState("");
   const [nodeStatusColor, setNodeStatusColor] = useState("");
   const [nodePriorityDraft, setNodePriorityDraft] = useState("");
@@ -911,6 +916,86 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
   }, [apiBase, applyLinkedNode, companyID, linkedEntityKind, linkedMapWidgetID, linkedNodeID, requestJSON, scope]);
 
+  const createNodeFromImageDocument = useCallback(async (input: { title: string; document: string }) => {
+    if (!companyID || linkedEntityKind !== "node") return;
+    const title = input.title.trim() || "Image";
+    const document = input.document.trim();
+    if (!document) return;
+
+    const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+    const occupiedPositions = persistedMapPositionsToNodePositions({
+      positions: snapshot.node_map_positions ?? [],
+      worldWidth: EDITOR_RELATIONSHIP_WORLD_W,
+      worldHeight: EDITOR_RELATIONSHIP_WORLD_H,
+      nodeWidth: NODE_W,
+      nodeHeight: NODE_H,
+    });
+    const origin = linkedNodeID ? occupiedPositions[linkedNodeID] ?? { x: 240, y: 240 } : { x: 240, y: 240 };
+    const position = resolveOpenNodeMapPosition({
+      desired: { x: origin.x + NODE_W + MINI_GRID * 4, y: origin.y },
+      occupied: occupiedPositions,
+      worldWidth: EDITOR_RELATIONSHIP_WORLD_W,
+      worldHeight: EDITOR_RELATIONSHIP_WORLD_H,
+      nodeWidth: NODE_W,
+      nodeHeight: NODE_H,
+    });
+    const clientID = createMapEntityBatchClientID("editor-image-node");
+    const response = await createMapEntityBatchCommand<EditorNodeBatchResponse>({
+      companyID,
+      entityKind: "node",
+      items: [{
+        client_id: clientID,
+        title,
+        x: position.x,
+        y: position.y,
+      }],
+      requestJSON,
+    });
+    const node = response.nodes?.[0];
+    if (!node) throw new Error("image_node_batch_create_missing_node");
+    const informationID = generateStableInformationID();
+    await requestJSON<unknown>(`/v1/nodes/${node.node_id}/information`, {
+      method: "POST",
+      body: JSON.stringify({
+        company_id: companyID,
+        type: EDITOR_TEXT_BLOCK_TYPE,
+        information: buildEditorTextBlockContentPayload({ title: "Image", document }),
+        information_id: informationID,
+      }),
+    });
+    upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+    upsertNodeMapPositionsInNodeRelationshipGraph(apiBase, companyID, response.node_map_positions ?? [{ entity_id: node.node_id, node_id: node.node_id, x: position.x, y: position.y }]);
+    primeNodeRecordStoreCaches(apiBase, companyID, [{ node, relationships: [] }]);
+    invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
+    invalidateWorkspaceSnapshot(apiBase, companyID);
+    applyLinkedNode(node.node_id, getNodeTitle(node), { focusEditor: true });
+  }, [apiBase, applyLinkedNode, companyID, linkedEntityKind, linkedNodeID, requestJSON]);
+
+  const assignLinkedNodeToLogicGate = useCallback(async (logicGateID: string) => {
+    const cleanLogicGateID = logicGateID.trim();
+    if (!companyID || !linkedNodeID || linkedEntityKind !== "node" || !cleanLogicGateID) return;
+    const view = await getLogicGateArenaView(apiBase, companyID, cleanLogicGateID);
+    const pendingColumn = (view.columns ?? []).find((column) => column.title.trim().toLowerCase() === "pending") ?? view.columns?.[0];
+    if (!pendingColumn) throw new Error("logic_gate_pending_column_not_found");
+    await upsertKanbanCard({
+      apiBase,
+      companyID,
+      boardID: view.board.board_id,
+      columnID: pendingColumn.column_id,
+      nodeID: linkedNodeID,
+      nodeTitle: linkedNodeTitle || linkedNodeID,
+      position: nextCardPosition(view.cards ?? [], pendingColumn.column_id),
+    });
+    invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
+    const details = await getNodeRecordSingleFlight(apiBase, companyID, linkedNodeID);
+    setNodeStatus(details.node.status ?? "");
+    setNodeStatusColor(details.node.status_color ?? "");
+    setNodePriorityDraft(details.node.priority == null ? "" : String(details.node.priority));
+    setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
+    syncNodeAssignee(details.node.assignee_user_id);
+    upsertNodeRelationshipGraphNode(apiBase, companyID, details.node);
+  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, linkedNodeTitle, syncNodeAssignee]);
+
   const updateNodePresetPatch = useCallback(async (patch: Record<string, unknown>) => {
     if (!linkedNodeID || linkedEntityKind !== "node") return;
     setError("");
@@ -1304,6 +1389,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setLinkedNodeMetadataRows([]);
       setLinkedNodeHistoryRows([]);
       setNodeWorkspaceProjections([]);
+      setNodeWorkspaceLoadedNodeID("");
       setNodeStatus("");
       setNodeStatusColor("");
       setNodePriorityDraft("");
@@ -1328,6 +1414,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       scheduleIndentGuideUpdate("");
       return;
     }
+    setNodeWorkspaceLoadedNodeID("");
     (async () => {
       try {
         setError("");
@@ -1345,6 +1432,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           syncNodeAssignee("");
           setLogicGateRaciAssignments(details.logic_gate.raci_assignments ?? []);
           setNodeWorkspaceProjections([]);
+          setNodeWorkspaceLoadedNodeID("");
           const nonText = details.information.filter((item) => item.type !== EDITOR_TEXT_BLOCK_TYPE);
           const textBoxes = projections.filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE);
           setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
@@ -1378,6 +1466,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         syncNodeAssignee(details.node.assignee_user_id);
         setLogicGateRaciAssignments([]);
         setNodeWorkspaceProjections(projections);
+        setNodeWorkspaceLoadedNodeID(linkedNodeID);
         const visibleNodeInformation = details.information.filter((item) => !isNodeWorkspaceHeaderInformationType(item.type));
         const textBoxes = projections.filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE);
         setLinkedNodeInfoPreview(visibleNodeInformation.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
@@ -1562,6 +1651,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             companyID={companyID}
             nodeID={linkedNodeID}
             projections={nodeWorkspaceProjections}
+            projectionsLoaded={nodeWorkspaceLoadedNodeID === linkedNodeID}
             topPx={documentTopPx}
             accent={accent}
             surfaceText={surfaceText}
@@ -1573,6 +1663,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             outlineStyle={outlineStyle}
             requestJSON={requestJSON}
             onProjectionMutation={handleNodeWorkspaceProjectionMutation}
+            onCreateNodeFromImage={createNodeFromImageDocument}
+            onAssignToLogicGate={assignLinkedNodeToLogicGate}
             onError={setError}
           />
         )}

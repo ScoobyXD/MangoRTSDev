@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"miraeopus/backend/internal/domain"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -196,6 +197,60 @@ func (r *PostgresRepo) ListLogicGates(companyID string) ([]domain.LogicGate, err
 		companyID,
 	)
 	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.LogicGate, 0)
+	for rows.Next() {
+		var item domain.LogicGate
+		if err := rows.Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return r.attachLogicGateRaciAssignments(ctx, companyID, items)
+}
+
+func (r *PostgresRepo) QueryLogicGates(companyID string, query LogicGateQuery) ([]domain.LogicGate, error) {
+	ctx := context.Background()
+	companyID = strings.TrimSpace(companyID)
+	args := []any{companyID}
+	conditions := []string{"logic_gate.company_id = $1"}
+	search := strings.ToLower(strings.TrimSpace(query.Search))
+	if search != "" {
+		args = append(args, "%"+search+"%")
+		placeholder := len(args)
+		conditions = append(conditions, "(lower(logic_gate.header) like $"+strconv.Itoa(placeholder)+" or logic_gate.logic_gate_id::text like $"+strconv.Itoa(placeholder)+")")
+	}
+	assignedUserID := strings.TrimSpace(query.AssignedUserID)
+	if assignedUserID != "" {
+		args = append(args, assignedUserID)
+		placeholder := len(args)
+		conditions = append(conditions, `exists (
+			select 1
+			from logic_gate_raci_assignments assignment
+			where assignment.company_id = logic_gate.company_id
+			  and assignment.logic_gate_id = logic_gate.logic_gate_id
+			  and assignment.user_id = $`+strconv.Itoa(placeholder)+`
+		)`)
+	}
+	sqlText := `select logic_gate.company_id, logic_gate.logic_gate_id, logic_gate.header, logic_gate.created_timestamp
+from logic_gates logic_gate
+where ` + strings.Join(conditions, " and ") + `
+order by lower(logic_gate.header) asc, logic_gate.logic_gate_id::text asc`
+	if query.Limit > 0 {
+		args = append(args, query.Limit)
+		sqlText += "\nlimit $" + strconv.Itoa(len(args))
+	}
+	rows, err := r.db.QueryContext(ctx, sqlText, args...)
+	if err != nil {
+		if assignedUserID != "" && isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {
+			return []domain.LogicGate{}, nil
+		}
 		return nil, err
 	}
 	defer rows.Close()

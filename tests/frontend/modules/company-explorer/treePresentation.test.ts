@@ -79,7 +79,7 @@ run("tree rows render root content without a synthetic Company folder", () => {
   assert.equal(rows[rows.length - 1]?.depth, 0);
 });
 
-run("automatic folders hold kanban boards and nodes by due date", () => {
+run("automatic folders hold kanban boards, active node placements, and due-date history", () => {
   const rows = buildCompanyExplorerTreeRows({
     expanded: new Set(["workspace-folder-system-kanban", "workspace-folder-system-active", "workspace-folder-system-history"]),
     nodes: [
@@ -90,7 +90,7 @@ run("automatic folders hold kanban boards and nodes by due date", () => {
     logicGates: [],
     kanbanBoards: [{ company_id: "c", board_id: "board-1", title: "Launch", position: 1000, created_timestamp: "4", updated_timestamp: "4" }],
     folders: systemFolders,
-    folderItems: [],
+    folderItems: [{ company_id: "c", folder_id: "system-active", item_type: "node", item_id: "future", position: 1000, created_timestamp: "5", updated_timestamp: "5" }],
     rootRowOrder: {},
     todayISODate: "2026-05-07",
   });
@@ -98,10 +98,9 @@ run("automatic folders hold kanban boards and nodes by due date", () => {
     "workspace-folder-system-kanban",
     "system-kanban-board-1",
     "workspace-folder-system-active",
-    "system-active-node-future",
+    "node-future",
     "workspace-folder-system-history",
     "system-history-node-past",
-    "node-future",
     "node-past",
     "node-today",
   ]);

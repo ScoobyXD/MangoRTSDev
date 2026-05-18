@@ -260,6 +260,28 @@ func TestLogicGateRaciAssignmentsAPIAndReadModel(t *testing.T) {
 	if len(logicGates) != 1 || len(logicGates[0].RaciAssignments) != 2 {
 		t.Fatalf("listed logic gates = %+v, want raci read model", logicGates)
 	}
+	assigned, err := repo.QueryLogicGates(companyID, store.LogicGateQuery{AssignedUserID: accountable.UserID})
+	if err != nil {
+		t.Fatalf("QueryLogicGates assigned error = %v", err)
+	}
+	if len(assigned) != 1 || assigned[0].LogicGateID != logicGate.LogicGateID || len(assigned[0].RaciAssignments) != 2 {
+		t.Fatalf("assigned logic gates = %+v, want gate with raci read model", assigned)
+	}
+	searchReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates?company_id="+companyID+"&q=approval&limit=5", nil)
+	searchRec := httptest.NewRecorder()
+	handler.ServeHTTP(searchRec, searchReq)
+	if searchRec.Code != http.StatusOK {
+		t.Fatalf("GET logic gate search status = %d body=%s", searchRec.Code, searchRec.Body.String())
+	}
+	var searchPayload struct {
+		LogicGates []domain.LogicGate `json:"logic_gates"`
+	}
+	if err := json.NewDecoder(searchRec.Body).Decode(&searchPayload); err != nil {
+		t.Fatalf("decode logic gate search: %v", err)
+	}
+	if len(searchPayload.LogicGates) != 1 || searchPayload.LogicGates[0].LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("search logic gates = %+v, want approval gate only", searchPayload.LogicGates)
+	}
 
 	outsiderBody, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
@@ -1033,15 +1055,25 @@ func TestMapEntityBatchCreatesNodesRelationshipsAndPositions(t *testing.T) {
 			X      float64 `json:"x"`
 			Y      float64 `json:"y"`
 		} `json:"node_map_positions"`
+		FolderItems []struct {
+			FolderID string `json:"folder_id"`
+			ItemType string `json:"item_type"`
+			ItemID   string `json:"item_id"`
+		} `json:"folder_items"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode map entity batch response: %v", err)
 	}
-	if len(payload.EntityMappings) != 2 || len(payload.Nodes) != 2 || len(payload.Relationships) != 1 || len(payload.NodeMapPositions) != 2 {
-		t.Fatalf("unexpected batch response counts: mappings=%d nodes=%d relationships=%d positions=%d", len(payload.EntityMappings), len(payload.Nodes), len(payload.Relationships), len(payload.NodeMapPositions))
+	if len(payload.EntityMappings) != 2 || len(payload.Nodes) != 2 || len(payload.Relationships) != 1 || len(payload.NodeMapPositions) != 2 || len(payload.FolderItems) != 2 {
+		t.Fatalf("unexpected batch response counts: mappings=%d nodes=%d relationships=%d positions=%d folder_items=%d", len(payload.EntityMappings), len(payload.Nodes), len(payload.Relationships), len(payload.NodeMapPositions), len(payload.FolderItems))
 	}
 	if payload.Relationships[0].NodeIDA == "" || payload.Relationships[0].NodeIDB == "" || payload.Relationships[0].NodeIDA == payload.Relationships[0].NodeIDB {
 		t.Fatalf("relationship did not resolve client ids: %+v", payload.Relationships[0])
+	}
+	for _, item := range payload.FolderItems {
+		if item.FolderID == "" || item.ItemType != "node" || item.ItemID == "" {
+			t.Fatalf("node batch folder item = %+v, want active-node placement", item)
+		}
 	}
 }
 

@@ -10,6 +10,7 @@ export type NodeWorkspaceSurfaceProps = {
   companyID: string;
   nodeID: string;
   projections: NodeProjectionItem[];
+  projectionsLoaded: boolean;
   topPx: number;
   accent: string;
   surfaceText: string;
@@ -21,7 +22,14 @@ export type NodeWorkspaceSurfaceProps = {
   outlineStyle: EditorOutlineStyleID;
   requestJSON: RequestJSON;
   onProjectionMutation: () => void;
+  onCreateNodeFromImage: (request: NodeImageNodeRequest) => Promise<void>;
+  onAssignToLogicGate: (logicGateID: string) => Promise<void>;
   onError: (message: string) => void;
+};
+
+export type NodeImageNodeRequest = {
+  title: string;
+  document: string;
 };
 
 export type TextBlockState = {
@@ -41,6 +49,17 @@ export type TextBlockSelectionAnchor = {
 };
 
 export type TextBlockSelectionDraft = TextBlockSelectionAnchor & {
+  x: number;
+  y: number;
+};
+
+export type TextBlockImageDraft = {
+  blockID: string;
+  dataURL: string;
+  mimeType: string;
+  size: number;
+  width: number;
+  height: number;
   x: number;
   y: number;
 };

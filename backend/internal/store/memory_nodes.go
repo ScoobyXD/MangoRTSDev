@@ -18,6 +18,10 @@ func (r *MemoryRepo) CreateNode(companyID, title string) (domain.Node, error) {
 		CreatedTimestamp: time.Now().UTC(),
 	}
 	r.nodes[key(companyID, n.NodeID)] = n
+	if _, err := r.assignNodeToActiveNodesFolderLocked(companyID, n.NodeID, 0); err != nil {
+		delete(r.nodes, key(companyID, n.NodeID))
+		return domain.Node{}, err
+	}
 	return n, nil
 }
 
