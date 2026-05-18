@@ -3,6 +3,27 @@ import { apiFetchJSON, readAuthConfig } from "../../auth/cognitoAuth.js";
 export type NotificationRaciRole = "responsible" | "accountable" | "consulted" | "informed";
 export type NotificationSurface = "r_inbox" | "aci_inbox" | "my_triage" | "shared_triage" | "";
 
+export const EVENT_NOTIFICATIONS_UPDATED = "mangorts:notifications-updated";
+
+export type NotificationItem = {
+  notification_id: string;
+  company_id?: string;
+  recipient_user_id: string;
+  actor_user_id?: string;
+  type: string;
+  source_event_id: string;
+  entity_type: string;
+  entity_id: string;
+  title: string;
+  body_preview?: string;
+  surface?: NotificationSurface;
+  role?: NotificationRaciRole | "";
+  logic_gate_id?: string;
+  node_id?: string;
+  read_timestamp?: string;
+  created_timestamp: string;
+};
+
 export type NotificationRoleCount = {
   surface?: NotificationSurface;
   role?: NotificationRaciRole | "";
@@ -38,6 +59,31 @@ export async function fetchNotificationSummary(companyID: string): Promise<Notif
   const query = cleanCompanyID ? `?company_id=${encodeURIComponent(cleanCompanyID)}` : "";
   const summary = await apiFetchJSON<NotificationSummary>(`/v1/notifications/summary${query}`);
   return normalizeNotificationSummary(summary, cleanCompanyID);
+}
+
+export async function fetchNotifications(input: {
+  companyID?: string;
+  unreadOnly?: boolean;
+  limit?: number;
+} = {}): Promise<NotificationItem[]> {
+  const query = new URLSearchParams();
+  const cleanCompanyID = input.companyID?.trim() ?? "";
+  if (cleanCompanyID) query.set("company_id", cleanCompanyID);
+  if (input.unreadOnly) query.set("unread_only", "true");
+  if (input.limit && input.limit > 0) query.set("limit", String(Math.floor(input.limit)));
+  const suffix = query.toString();
+  const payload = await apiFetchJSON<{ notifications?: NotificationItem[] }>(`/v1/notifications${suffix ? `?${suffix}` : ""}`);
+  return normalizeNotifications(payload.notifications ?? []);
+}
+
+export async function markNotificationRead(notificationID: string, read = true): Promise<NotificationItem> {
+  const cleanNotificationID = notificationID.trim();
+  const action = read ? "read" : "unread";
+  const item = await apiFetchJSON<NotificationItem>(`/v1/notifications/${encodeURIComponent(cleanNotificationID)}/${action}`, {
+    method: "POST",
+  });
+  dispatchNotificationsUpdated(item.company_id);
+  return normalizeNotification(item);
 }
 
 export function notificationStreamURL(): string {
@@ -96,4 +142,35 @@ export function normalizeRole(value: unknown): NotificationRaciRole | "" {
     default:
       return "";
   }
+}
+
+function normalizeNotifications(items: NotificationItem[]): NotificationItem[] {
+  return items.map(normalizeNotification);
+}
+
+function normalizeNotification(item: NotificationItem): NotificationItem {
+  return {
+    ...item,
+    notification_id: item.notification_id?.trim() ?? "",
+    company_id: item.company_id?.trim() || undefined,
+    recipient_user_id: item.recipient_user_id?.trim() ?? "",
+    actor_user_id: item.actor_user_id?.trim() || undefined,
+    type: item.type?.trim() ?? "",
+    source_event_id: item.source_event_id?.trim() ?? "",
+    entity_type: item.entity_type?.trim() ?? "",
+    entity_id: item.entity_id?.trim() ?? "",
+    title: item.title?.trim() ?? "Notification",
+    body_preview: item.body_preview?.trim() || undefined,
+    surface: normalizeSurface(item.surface),
+    role: normalizeRole(item.role),
+    logic_gate_id: item.logic_gate_id?.trim() || undefined,
+    node_id: item.node_id?.trim() || undefined,
+    read_timestamp: item.read_timestamp,
+    created_timestamp: item.created_timestamp,
+  };
+}
+
+function dispatchNotificationsUpdated(companyID?: string): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: { companyID: companyID?.trim() ?? "" } }));
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { connectAuthenticatedSse, type SseEvent } from "../../auth/authenticatedSse.js";
-import { emptyNotificationSummary, fetchNotificationSummary, notificationStreamURL, type NotificationSummary } from "./notificationsApi.js";
+import { emptyNotificationSummary, EVENT_NOTIFICATIONS_UPDATED, fetchNotificationSummary, notificationStreamURL, type NotificationSummary } from "./notificationsApi.js";
 
 const NOTIFICATION_SUMMARY_REFRESH_MS = 30_000;
 const NOTIFICATION_SUMMARY_RELOAD_DEBOUNCE_MS = 350;
@@ -45,6 +45,12 @@ export function useNotificationSummary(companyID: string): NotificationSummary {
         console.error("Notification stream failed", error);
       },
     });
+    const onNotificationsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ companyID?: string }>).detail;
+      if (detail?.companyID && detail.companyID !== cleanCompanyID) return;
+      scheduleLoad();
+    };
+    window.addEventListener(EVENT_NOTIFICATIONS_UPDATED, onNotificationsUpdated);
     return () => {
       mountedRef.current = false;
       window.clearInterval(intervalID);
@@ -53,6 +59,7 @@ export function useNotificationSummary(companyID: string): NotificationSummary {
         refreshTimerRef.current = null;
       }
       stream.close();
+      window.removeEventListener(EVENT_NOTIFICATIONS_UPDATED, onNotificationsUpdated);
     };
   }, [cleanCompanyID, loadSummary, scheduleLoad]);
 

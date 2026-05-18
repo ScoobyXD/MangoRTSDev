@@ -245,6 +245,7 @@ type NylasMessageQuery struct {
 	SearchQueryNative string
 	Mailbox           string
 	CompanyID         string
+	SharedInboxID     string
 	Unread            *bool
 	Starred           *bool
 	Refresh           bool

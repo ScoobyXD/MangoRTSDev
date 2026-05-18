@@ -64,6 +64,7 @@ export type ListMessagesParams = {
   mailbox?: EmailMailbox;
   folderID?: string;
   companyID?: string;
+  sharedInboxID?: string;
   q?: string;
   unread?: boolean;
   refresh?: boolean;
@@ -194,8 +195,11 @@ export async function fetchCommunicationsStatus(): Promise<CommunicationsStatus>
   return cloneStatus(await statusInflight);
 }
 
-export async function fetchCommunicationsAuthURL(provider: EmailProvider): Promise<string> {
-  const payload = await apiFetchJSON<{ auth_url: string }>(`/v1/communications/auth-url?provider=${encodeURIComponent(provider)}`);
+export async function fetchCommunicationsAuthURL(provider: EmailProvider, accountEmail?: string): Promise<string> {
+  const query = new URLSearchParams({ provider });
+  const cleanAccountEmail = accountEmail?.trim().toLowerCase() ?? "";
+  if (cleanAccountEmail) query.set("account_email", cleanAccountEmail);
+  const payload = await apiFetchJSON<{ auth_url: string }>(`/v1/communications/auth-url?${query.toString()}`);
   return payload.auth_url;
 }
 
@@ -255,14 +259,17 @@ export function sortEmailMessagesByDateDescending(messages: EmailMessage[]): Ema
     .map((item) => item.message);
 }
 
-export async function getEmailMessage(messageID: string, companyID?: string): Promise<EmailMessage> {
-  const cacheKey = messageDetailCacheKey(messageID, companyID);
+export async function getEmailMessage(messageID: string, companyID?: string, sharedInboxID?: string): Promise<EmailMessage> {
+  const cacheKey = messageDetailCacheKey(messageID, companyID, sharedInboxID);
   const cached = readCache(messageDetailCache.get(cacheKey) ?? null, MESSAGE_DETAIL_CACHE_TTL_MS, cloneMessage);
   if (cached && isEmailMessageDetailed(cached)) return cached;
   const existingInflight = messageDetailInflight.get(cacheKey);
   if (existingInflight) return cloneMessage(await existingInflight);
-  const query = companyID?.trim() ? `?company_id=${encodeURIComponent(companyID.trim())}` : "";
-  const request = apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}${query}`)
+  const queryParams = new URLSearchParams();
+  if (companyID?.trim()) queryParams.set("company_id", companyID.trim());
+  if (sharedInboxID?.trim()) queryParams.set("shared_inbox_id", sharedInboxID.trim());
+  const query = queryParams.toString();
+  const request = apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}${query ? `?${query}` : ""}`)
     .then((payload) => {
       const message = cloneMessage(payload.message);
       messageDetailCache.set(cacheKey, { value: message, fetchedAt: Date.now() });
@@ -275,8 +282,9 @@ export async function getEmailMessage(messageID: string, companyID?: string): Pr
   return cloneMessage(await request);
 }
 
-export async function updateEmailMessage(messageID: string, update: { unread?: boolean; starred?: boolean; folders?: string[] }): Promise<EmailMessage> {
-  const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}`, {
+export async function updateEmailMessage(messageID: string, update: { unread?: boolean; starred?: boolean; folders?: string[] }, sharedInboxID?: string, companyID?: string): Promise<EmailMessage> {
+  const query = createSharedInboxMessageMutationQuery(sharedInboxID, companyID);
+  const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}${query}`, {
     method: "PUT",
     body: JSON.stringify(update),
   });
@@ -286,8 +294,9 @@ export async function updateEmailMessage(messageID: string, update: { unread?: b
   return payload.message;
 }
 
-export async function archiveEmailMessage(messageID: string): Promise<EmailMessage> {
-  const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}/archive`, {
+export async function archiveEmailMessage(messageID: string, sharedInboxID?: string, companyID?: string): Promise<EmailMessage> {
+  const query = createSharedInboxMessageMutationQuery(sharedInboxID, companyID);
+  const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}/archive${query}`, {
     method: "POST",
   });
   const message = archivedEmailMessageForLocalLists(payload.message);
@@ -299,8 +308,9 @@ export async function archiveEmailMessage(messageID: string): Promise<EmailMessa
   return message;
 }
 
-export async function unarchiveEmailMessage(messageID: string): Promise<EmailMessage> {
-  const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}/unarchive`, {
+export async function unarchiveEmailMessage(messageID: string, sharedInboxID?: string, companyID?: string): Promise<EmailMessage> {
+  const query = createSharedInboxMessageMutationQuery(sharedInboxID, companyID);
+  const payload = await apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}/unarchive${query}`, {
     method: "POST",
   });
   recentArchivedMessages.delete(messageID.trim());
@@ -311,8 +321,9 @@ export async function unarchiveEmailMessage(messageID: string): Promise<EmailMes
   return payload.message;
 }
 
-export async function deleteEmailMessage(messageID: string): Promise<void> {
-  await apiFetchJSON<{ status: string }>(`/v1/communications/messages/${encodeURIComponent(messageID)}`, { method: "DELETE" });
+export async function deleteEmailMessage(messageID: string, sharedInboxID?: string, companyID?: string): Promise<void> {
+  const query = createSharedInboxMessageMutationQuery(sharedInboxID, companyID);
+  await apiFetchJSON<{ status: string }>(`/v1/communications/messages/${encodeURIComponent(messageID)}${query}`, { method: "DELETE" });
   recentArchivedMessages.delete(messageID.trim());
   recentPrimaryMessages.delete(messageID.trim());
   invalidateEmailMessageCache(messageID);
@@ -849,6 +860,7 @@ export function createMessageQuery(params: ListMessagesParams): string {
   if (params.mailbox) query.set("mailbox", params.mailbox);
   if (params.folderID) query.set("folder_id", params.folderID);
   if (params.companyID?.trim()) query.set("company_id", params.companyID.trim());
+  if (params.sharedInboxID?.trim()) query.set("shared_inbox_id", params.sharedInboxID.trim());
   if (params.q?.trim()) query.set("q", params.q.trim());
   if (params.unread !== undefined) query.set("unread", String(params.unread));
   if (params.refresh === true) query.set("refresh", "true");
@@ -949,10 +961,21 @@ function primeMessageCaches(message: EmailMessage): void {
   messageDetailCache.set(message.id, { value: cloneMessage(message), fetchedAt: Date.now() });
 }
 
-function messageDetailCacheKey(messageID: string, companyID?: string): string {
+function messageDetailCacheKey(messageID: string, companyID?: string, sharedInboxID?: string): string {
   const cleanCompanyID = companyID?.trim() ?? "";
+  const cleanSharedInboxID = sharedInboxID?.trim() ?? "";
   const cleanMessageID = messageID.trim();
-  return cleanCompanyID ? `${cleanCompanyID}\x1f${cleanMessageID}` : cleanMessageID;
+  return cleanCompanyID || cleanSharedInboxID ? `${cleanCompanyID}\x1f${cleanSharedInboxID}\x1f${cleanMessageID}` : cleanMessageID;
+}
+
+function createSharedInboxMessageMutationQuery(sharedInboxID?: string, companyID?: string): string {
+  const query = new URLSearchParams();
+  const cleanSharedInboxID = sharedInboxID?.trim() ?? "";
+  const cleanCompanyID = companyID?.trim() ?? "";
+  if (cleanCompanyID) query.set("company_id", cleanCompanyID);
+  if (cleanSharedInboxID) query.set("shared_inbox_id", cleanSharedInboxID);
+  const raw = query.toString();
+  return raw ? `?${raw}` : "";
 }
 
 function isEmailMessageDetailed(message: EmailMessage): boolean {
@@ -1082,6 +1105,7 @@ function listMessageParamsFromCacheKey(path: string): ListMessagesParams {
     mailbox: normalizeMailbox(query.get("mailbox") ?? undefined),
     folderID: query.get("folder_id") ?? undefined,
     companyID: query.get("company_id") ?? undefined,
+    sharedInboxID: query.get("shared_inbox_id") ?? undefined,
     q: query.get("q") ?? undefined,
     unread: unread === "true" ? true : unread === "false" ? false : undefined,
   };

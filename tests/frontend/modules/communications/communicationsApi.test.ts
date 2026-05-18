@@ -21,6 +21,7 @@ test("communications message query omits empty values and encodes filters", () =
   assert.equal(createMessageQuery({ mailbox: "archive", limit: 10 }), "?limit=10&mailbox=archive");
   assert.equal(createMessageQuery({ mailbox: "starred", limit: 10 }), "?limit=10&mailbox=starred");
   assert.equal(createMessageQuery({ mailbox: "primary", refresh: true }), "?mailbox=primary&refresh=true");
+  assert.equal(createMessageQuery({ mailbox: "primary", companyID: " company-1 ", sharedInboxID: " shared-1 " }), "?mailbox=primary&company_id=company-1&shared_inbox_id=shared-1");
   assert.equal(createMessageQuery({ q: "   " }), "");
 });
 
@@ -119,9 +120,11 @@ test("archive helpers call mailbox action endpoints", async () => {
   try {
     await archiveEmailMessage("msg 1");
     await unarchiveEmailMessage("msg 1");
+    await archiveEmailMessage("msg 2", "shared-1", "company-1");
     assert.deepEqual(calls, [
       { path: "/v1/communications/messages/msg%201/archive", method: "POST" },
       { path: "/v1/communications/messages/msg%201/unarchive", method: "POST" },
+      { path: "/v1/communications/messages/msg%202/archive?company_id=company-1&shared_inbox_id=shared-1", method: "POST" },
     ]);
   } finally {
     globalThis.fetch = originalFetch;

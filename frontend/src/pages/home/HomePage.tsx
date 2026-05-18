@@ -48,6 +48,7 @@ import {
   type EmailMailbox,
   type EmailMessage,
   type CommunicationsStatus,
+  type EmailProvider,
   type UserLogicGateShortcut,
 } from "../../modules/communications/communicationsApi";
 import { subscribeCommunicationsStream } from "../../modules/communications/communicationsStream";
@@ -89,6 +90,34 @@ function responsibleInboxStatusTitle(status: ResponsibleInboxStatus): string {
 function firstResponsibleUserID(logicGate: LogicGateRecord | undefined): string {
   return (logicGate?.raci_assignments ?? []).find((assignment) => assignment.role === "responsible")?.user_id?.trim() ?? "";
 }
+
+function sharedInboxIDForHomeView(viewID: HomeViewID): string {
+  return viewID.startsWith("shared:") ? viewID.slice("shared:".length).trim() : "";
+}
+
+function promptEmailProviderForConnection(): EmailProvider | "" {
+  const raw = window.prompt("Connect with provider: google or microsoft", "google")?.trim().toLowerCase() ?? "";
+  if (raw === "google" || raw === "gmail") return "google";
+  if (raw === "microsoft" || raw === "outlook" || raw === "office365") return "microsoft";
+  if (raw) window.alert("Enter google or microsoft.");
+  return "";
+}
+
+function isSharedInboxEmailConnectionError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("shared_inbox_email_account_not_connected");
+}
+
+async function offerNylasConnectionForSharedInboxEmail(error: unknown, accountEmail: string): Promise<boolean> {
+  const cleanAccountEmail = accountEmail.trim().toLowerCase();
+  if (!cleanAccountEmail || !isSharedInboxEmailConnectionError(error)) return false;
+  if (!window.confirm(`${cleanAccountEmail} is not connected yet. Connect it through Nylas now?`)) return true;
+  const provider = promptEmailProviderForConnection();
+  if (!provider) return true;
+  const authURL = await fetchCommunicationsAuthURL(provider, cleanAccountEmail);
+  window.location.assign(authURL);
+  return true;
+}
+
 export function HomePage({ me, onNavigate, embedded = false, hideNavigation = false, initialViewID = "my-triage" }: HomePageProps) {
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
@@ -181,7 +210,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     () => filterSharedInboxesForUser(sharedInboxes, currentUserID, currentUserHasFullSharedInboxAccess),
     [currentUserHasFullSharedInboxAccess, currentUserID, sharedInboxes],
   );
-  const activeSharedInboxFolderID = activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length) : "";
+  const activeSharedInboxFolderID = sharedInboxIDForHomeView(activeViewID);
   const activeSharedInbox = useMemo(
     () => activeSharedInboxFolderID ? sharedInboxes.find((folder) => folder.folder_id === activeSharedInboxFolderID) ?? null : null,
     [activeSharedInboxFolderID, sharedInboxes],
@@ -520,6 +549,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         limit: MESSAGE_BATCH_SIZE,
         mailbox,
         companyID,
+        sharedInboxID: sharedInboxIDForHomeView(activeViewID),
         q: searchQuery,
         unread: unreadOnly ? true : undefined,
         refresh: options.refresh,
@@ -566,6 +596,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         pageToken,
         mailbox: mailboxRef.current,
         companyID,
+        sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current),
         q: searchQueryRef.current,
         unread: unreadOnlyRef.current ? true : undefined,
       });
@@ -629,7 +660,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       }
       setMessageContextMenu((current) => current && current.messageIDs.includes(messageID) ? null : current);
     }
-    void archiveEmailMessage(messageID)
+    void archiveEmailMessage(messageID, sharedInboxIDForHomeView(activeViewIDRef.current), companyID)
       .catch((archiveError) => {
         if (isEmailAccessExpiredError(archiveError)) {
           void handleEmailAccessExpired(archiveError);
@@ -638,7 +669,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         setError(formatError(archiveError, "Failed to archive scrolled message"));
         scheduleMessageListRefresh();
       });
-  }, [handleEmailAccessExpired, removePendingAutoArchiveMessages, scheduleMessageListRefresh]);
+  }, [companyID, handleEmailAccessExpired, removePendingAutoArchiveMessages, scheduleMessageListRefresh]);
   useEffect(() => { void loadStatus(); }, [loadStatus]);
   useEffect(() => { if (status?.connected) void loadFolders(); }, [loadFolders, status?.connected]);
   useEffect(() => { if (status?.connected) void loadSharedInboxes(); }, [loadSharedInboxes, status?.connected]);
@@ -673,6 +704,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       limit: MESSAGE_BATCH_SIZE,
       mailbox: mailboxRef.current,
       companyID,
+      sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current),
       q: searchQueryRef.current,
       unread: unreadOnlyRef.current ? true : undefined,
     });
@@ -745,7 +777,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
           starred: false,
         }, params);
         if (!visible && !selected && !shouldFetchCreated) return;
-        void getEmailMessage(messageID, companyID)
+        void getEmailMessage(messageID, companyID, sharedInboxIDForHomeView(activeViewIDRef.current))
           .then((message) => {
             primeEmailMessageCache(message);
             const matchesCurrentView = emailMessageMatchesListFilters(message, params);
@@ -829,7 +861,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     let cancelled = false;
     setLoadingDetail(true);
     setError("");
-    getEmailMessage(selectedMessageID, companyID)
+    getEmailMessage(selectedMessageID, companyID, sharedInboxIDForHomeView(activeViewID))
       .then((message) => {
         if (!cancelled) {
           setSelectedMessage(locallyReadMessageIDsRef.current.has(message.id) ? { ...message, unread: false } : message);
@@ -848,7 +880,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         if (!cancelled) setLoadingDetail(false);
     });
     return () => { cancelled = true; };
-  }, [companyID, handleEmailAccessExpired, selectedMessageID]);
+  }, [activeViewID, companyID, handleEmailAccessExpired, selectedMessageID]);
   const connection = status?.connection;
   const startConnection = async (provider: "google" | "microsoft") => {
     setBusy(provider);
@@ -900,6 +932,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     limit: MESSAGE_BATCH_SIZE,
     mailbox: mailboxRef.current,
     companyID,
+    sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current),
     q: searchQueryRef.current,
     unread: unreadOnlyRef.current ? true : undefined,
   }), [companyID]);
@@ -929,7 +962,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setBusy("message");
     setError("");
     try {
-      const updated = await updateEmailMessage(selectedMessage.id, update);
+      const updated = await updateEmailMessage(selectedMessage.id, update, sharedInboxIDForHomeView(activeViewIDRef.current), companyID);
       if (update.unread === false) locallyReadMessageIDsRef.current.add(updated.id);
       if (update.unread === true) locallyReadMessageIDsRef.current.delete(updated.id);
       const normalized = update.unread === undefined ? updated : { ...updated, unread: update.unread };
@@ -947,7 +980,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     const nextStarred = !message.starred;
     const optimistic = { ...message, starred: nextStarred };
     applyUpdatedMessageToCurrentView(optimistic);
-    void updateEmailMessage(messageID, { starred: nextStarred })
+    void updateEmailMessage(messageID, { starred: nextStarred }, sharedInboxIDForHomeView(activeViewIDRef.current), companyID)
       .then((updated) => {
         applyUpdatedMessageToCurrentView({ ...updated, starred: nextStarred });
       })
@@ -960,17 +993,18 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         setError(formatError(starError, "Failed to update message star"));
         scheduleMessageListRefresh();
       });
-  }, [applyUpdatedMessageToCurrentView, handleEmailAccessExpired, scheduleMessageListRefresh]);
+  }, [applyUpdatedMessageToCurrentView, companyID, handleEmailAccessExpired, scheduleMessageListRefresh]);
   const archiveMessages = useCallback(async (messageIDs: string[]) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
+    const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
     if (ids.length === 0) return;
     cancelPendingAutoArchiveMessages(ids);
     setBusy("archive");
     setError("");
     setNotice("");
     try {
-      await Promise.all(ids.map(archiveEmailMessage));
+      await Promise.all(ids.map((id) => archiveEmailMessage(id, sharedInboxID, companyID)));
       setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
       if (selectedMessageID && ids.includes(selectedMessageID)) {
         setSelectedMessageID("");
@@ -986,17 +1020,18 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, loadMessages, selectedMessageID]);
+  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadMessages, selectedMessageID]);
   const unarchiveMessages = useCallback(async (messageIDs: string[]) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
+    const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
     if (ids.length === 0) return;
     cancelPendingAutoArchiveMessages(ids);
     setBusy("unarchive");
     setError("");
     setNotice("");
     try {
-      await Promise.all(ids.map(unarchiveEmailMessage));
+      await Promise.all(ids.map((id) => unarchiveEmailMessage(id, sharedInboxID, companyID)));
       setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
       if (selectedMessageID && ids.includes(selectedMessageID)) {
         setSelectedMessageID("");
@@ -1012,7 +1047,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, loadMessages, selectedMessageID]);
+  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadMessages, selectedMessageID]);
   const autoArchiveScrolledMessages = useCallback((messageIDs: string[]) => {
     if (!canMutateCurrentMailView || !status?.connected || !isArchivableHomeViewID(activeViewIDRef.current) || mailboxRef.current !== "primary") return;
     const ids = cleanIDList(messageIDs).filter((id) => !pendingAutoArchiveMessageIDsRef.current.has(id) && !autoArchiveTimerIDsRef.current.has(id));
@@ -1115,6 +1150,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       selectMailbox("primary");
       return folder;
     } catch (sharedInboxError) {
+      if (await offerNylasConnectionForSharedInboxEmail(sharedInboxError, accountEmail)) return null;
       setError(formatError(sharedInboxError, "Failed to create Shared Triage"));
       return null;
     } finally {
@@ -1133,6 +1169,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setSharedInboxes((previous) => sortSharedInboxes(previous.map((item) => item.folder_id === folder.folder_id ? folder : item)));
       setNotice(folder.account_email ? `Attached ${folder.account_email}.` : "Email detached.");
     } catch (sharedInboxError) {
+      if (await offerNylasConnectionForSharedInboxEmail(sharedInboxError, accountEmail)) return;
       setError(formatError(sharedInboxError, "Failed to update Shared Triage email"));
     } finally {
       setBusy("");
@@ -1308,12 +1345,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       limit: MESSAGE_BATCH_SIZE,
       mailbox: mailboxRef.current,
       companyID,
+      sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current),
       q: searchQueryRef.current,
       unread: unreadOnlyRef.current ? true : undefined,
     });
     setMessages((previous) => mergeEmailMessageIntoMessageList(previous, optimistic, listParams()));
     setSelectedMessage((current) => (current?.id === messageID ? { ...current, unread: false } : current));
-    void updateEmailMessage(messageID, { unread: false })
+    void updateEmailMessage(messageID, { unread: false }, sharedInboxIDForHomeView(activeViewIDRef.current), companyID)
       .then((updated) => {
         const readUpdated = { ...updated, unread: false };
         setMessages((previous) => mergeEmailMessageIntoMessageList(previous, readUpdated, listParams()));
@@ -1397,7 +1435,8 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setBusy("delete");
     setError("");
     try {
-      await Promise.all(ids.map(deleteEmailMessage));
+      const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
+      await Promise.all(ids.map((id) => deleteEmailMessage(id, sharedInboxID, companyID)));
       setMessages((previous) => previous.filter((message) => !ids.includes(message.id)));
       if (selectedMessageID && ids.includes(selectedMessageID)) {
         setSelectedMessageID("");
@@ -1413,7 +1452,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, loadMessages, selectedMessageID]);
+  }, [canMutateCurrentMailView, cancelPendingAutoArchiveMessages, companyID, loadMessages, selectedMessageID]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.key !== "Delete" || deleteConfirmation || busy) return;

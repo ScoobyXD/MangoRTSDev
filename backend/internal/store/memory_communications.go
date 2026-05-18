@@ -22,6 +22,36 @@ func (r *MemoryRepo) GetUserEmailConnection(userID string) (domain.UserEmailConn
 	return connection, nil
 }
 
+func (r *MemoryRepo) GetCompanyEmailConnectionByAccountEmail(companyID, accountEmail string) (domain.UserEmailConnection, error) {
+	companyID = strings.TrimSpace(companyID)
+	accountEmail = normalizeEmail(accountEmail)
+	if companyID == "" || accountEmail == "" {
+		return domain.UserEmailConnection{}, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var found domain.UserEmailConnection
+	hasFound := false
+	for _, connection := range r.emailConnections {
+		if connection.Status != "connected" || normalizeEmail(connection.AccountEmail) != accountEmail {
+			continue
+		}
+		if _, ok := r.memberships[membershipKey(companyID, connection.UserID)]; !ok {
+			continue
+		}
+		if !hasFound || connection.UpdatedTimestamp.After(found.UpdatedTimestamp) {
+			found = connection
+			hasFound = true
+		}
+	}
+	if !hasFound {
+		return domain.UserEmailConnection{}, ErrNotFound
+	}
+	return found, nil
+}
+
 func (r *MemoryRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error) {
 	grantID = strings.TrimSpace(grantID)
 	if grantID == "" {
