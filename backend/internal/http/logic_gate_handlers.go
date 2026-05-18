@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -198,6 +199,24 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		s.publishWorkspaceEvent(req.CompanyID, "logic_gate_raci_updated", map[string]any{"logic_gate_id": logicGateID, "raci_assignments": assignments})
+		actorUserID, actorLabel := notificationActorPayload(r)
+		logicGateTitle := ""
+		if logicGate, err := s.repo.GetLogicGate(req.CompanyID, logicGateID); err == nil {
+			logicGateTitle = logicGate.Header
+		}
+		s.recordNotificationEvent(store.NotificationEventInput{
+			CompanyID:      req.CompanyID,
+			ActorUserID:    actorUserID,
+			Type:           domain.NotificationEventLogicGateRaciUpdated,
+			EntityType:     "logic_gate",
+			EntityID:       logicGateID,
+			IdempotencyKey: "logic-gate-raci:" + req.CompanyID + ":" + logicGateID + ":" + logicGateRaciFingerprint(assignments),
+			Payload: map[string]any{
+				"assignment_user_ids": logicGateRaciAssignmentUserIDs(assignments),
+				"actor_display_name":  actorLabel,
+				"logic_gate_title":    logicGateTitle,
+			},
+		})
 		writeJSON(w, http.StatusOK, map[string]any{
 			"company_id":       req.CompanyID,
 			"logic_gate_id":    logicGateID,
@@ -301,6 +320,24 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		s.publishWorkspaceEvent(req.CompanyID, "logic_gate_information_created", map[string]any{"logic_gate_id": logicGateID, "information_id": item.InformationID})
+		actorUserID, actorLabel := notificationActorPayload(r)
+		mentionedUserIDs, err := s.notifications.ResolveMentionedUserIDs(req.CompanyID, req.Information)
+		if err == nil && len(mentionedUserIDs) > 0 {
+			s.recordNotificationEvent(store.NotificationEventInput{
+				CompanyID:      req.CompanyID,
+				ActorUserID:    actorUserID,
+				Type:           domain.NotificationEventMentionCreated,
+				EntityType:     "logic_gate",
+				EntityID:       logicGateID,
+				IdempotencyKey: "mention:logic-gate:" + item.InformationID,
+				Payload: map[string]any{
+					"comment":            item.Information,
+					"information_id":     item.InformationID,
+					"mentioned_user_ids": mentionedUserIDs,
+					"actor_display_name": actorLabel,
+				},
+			})
+		}
 		writeJSON(w, http.StatusCreated, item)
 		return
 	}

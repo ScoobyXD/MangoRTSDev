@@ -69,6 +69,19 @@ func (s *Server) handleCommunicationsTriage(w http.ResponseWriter, r *http.Reque
 			items = append(items, item)
 		}
 		s.publishCommunicationsEvent(connection.UserID, "triage_changed", "triage.upserted", strings.Join(messageIDs, ","))
+		actorUserID, actorLabel := notificationActorPayload(r)
+		s.recordNotificationEvent(store.NotificationEventInput{
+			ActorUserID:    actorUserID,
+			Type:           domain.NotificationEventACIInboxChanged,
+			EntityType:     "aci_inbox",
+			EntityID:       connection.UserID,
+			IdempotencyKey: "aci-triage-upsert:" + connection.UserID + ":" + strings.Join(messageIDs, ","),
+			Payload: map[string]any{
+				"recipient_user_ids": []string{connection.UserID},
+				"actor_display_name": actorLabel,
+				"change_summary":     "Triage items were added.",
+			},
+		})
 		writeJSON(w, http.StatusCreated, map[string]any{"items": items})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -100,6 +113,19 @@ func (s *Server) handleCommunicationsTriageByID(w http.ResponseWriter, r *http.R
 		return
 	}
 	s.publishCommunicationsEvent(connection.UserID, "triage_changed", "triage.deleted", messageID)
+	actorUserID, actorLabel := notificationActorPayload(r)
+	s.recordNotificationEvent(store.NotificationEventInput{
+		ActorUserID:    actorUserID,
+		Type:           domain.NotificationEventACIInboxChanged,
+		EntityType:     "aci_inbox",
+		EntityID:       connection.UserID,
+		IdempotencyKey: "aci-triage-delete:" + connection.UserID + ":" + messageID,
+		Payload: map[string]any{
+			"recipient_user_ids": []string{connection.UserID},
+			"actor_display_name": actorLabel,
+			"change_summary":     "A triage item was removed.",
+		},
+	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
@@ -184,6 +210,19 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		})
 	}
 	s.publishCommunicationsEvent(connection.UserID, "triage_changed", "triage.converted", strings.Join(result.DeletedMessageIDs, ","))
+	actorUserID, actorLabel := notificationActorPayload(r)
+	s.recordNotificationEvent(store.NotificationEventInput{
+		ActorUserID:    actorUserID,
+		Type:           domain.NotificationEventACIInboxChanged,
+		EntityType:     "aci_inbox",
+		EntityID:       connection.UserID,
+		IdempotencyKey: "aci-triage-convert:" + connection.UserID + ":" + strings.Join(result.DeletedMessageIDs, ","),
+		Payload: map[string]any{
+			"recipient_user_ids": []string{connection.UserID},
+			"actor_display_name": actorLabel,
+			"change_summary":     "Triage items were converted into Logic Gate work.",
+		},
+	})
 	writeJSON(w, http.StatusCreated, result)
 }
 
@@ -239,6 +278,19 @@ func (s *Server) handleCommunicationsTriageRevert(w http.ResponseWriter, r *http
 	})
 	s.publishWorkspaceEvent(req.CompanyID, "node_deleted", map[string]any{"node_id": result.DeletedNodeID})
 	s.publishCommunicationsEvent(connection.UserID, "triage_changed", "triage.reverted", result.TriageItem.MessageID)
+	actorUserID, actorLabel := notificationActorPayload(r)
+	s.recordNotificationEvent(store.NotificationEventInput{
+		ActorUserID:    actorUserID,
+		Type:           domain.NotificationEventACIInboxChanged,
+		EntityType:     "aci_inbox",
+		EntityID:       connection.UserID,
+		IdempotencyKey: "aci-triage-revert:" + connection.UserID + ":" + result.TriageItem.MessageID,
+		Payload: map[string]any{
+			"recipient_user_ids": []string{connection.UserID},
+			"actor_display_name": actorLabel,
+			"change_summary":     "A Logic Gate email card was returned to triage.",
+		},
+	})
 	writeJSON(w, http.StatusOK, result)
 }
 

@@ -367,3 +367,40 @@ type KanbanCard struct {
 	CreatedTimestamp    time.Time `json:"created_timestamp"`
 	UpdatedTimestamp    time.Time `json:"updated_timestamp"`
 }
+
+const (
+	NotificationEventLogicGateStateChanged = "logic_gate.state_changed"
+	NotificationEventLogicGateRaciUpdated  = "logic_gate.raci_updated"
+	NotificationEventNodeCommentCreated    = "node.comment_created"
+	NotificationEventMentionCreated        = "mention.created"
+	NotificationEventACIInboxChanged       = "aci_inbox.changed"
+	NotificationEventACIInboxRaciUpdated   = "aci_inbox.raci_updated"
+)
+
+type NotificationEvent struct {
+	EventID            string         `json:"event_id"`
+	CompanyID          string         `json:"company_id,omitempty"`
+	ActorUserID        *string        `json:"actor_user_id,omitempty"`
+	Type               string         `json:"type"`
+	EntityType         string         `json:"entity_type"`
+	EntityID           string         `json:"entity_id"`
+	IdempotencyKey     string         `json:"idempotency_key,omitempty"`
+	Payload            map[string]any `json:"payload,omitempty"`
+	ProcessedTimestamp *time.Time     `json:"processed_timestamp,omitempty"`
+	CreatedTimestamp   time.Time      `json:"created_timestamp"`
+}
+
+type Notification struct {
+	NotificationID   string     `json:"notification_id"`
+	CompanyID        string     `json:"company_id,omitempty"`
+	RecipientUserID  string     `json:"recipient_user_id"`
+	ActorUserID      *string    `json:"actor_user_id,omitempty"`
+	Type             string     `json:"type"`
+	SourceEventID    string     `json:"source_event_id"`
+	EntityType       string     `json:"entity_type"`
+	EntityID         string     `json:"entity_id"`
+	Title            string     `json:"title"`
+	BodyPreview      string     `json:"body_preview,omitempty"`
+	ReadTimestamp    *time.Time `json:"read_timestamp,omitempty"`
+	CreatedTimestamp time.Time  `json:"created_timestamp"`
+}

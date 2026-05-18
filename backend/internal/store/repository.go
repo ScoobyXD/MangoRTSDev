@@ -107,6 +107,14 @@ type Repository interface {
 	UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error)
 	MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error)
 	DeleteKanbanCard(companyID, boardID, cardID string) error
+	CreateNotificationEvent(input NotificationEventInput) (domain.NotificationEvent, error)
+	ListPendingNotificationEvents(limit int) ([]domain.NotificationEvent, error)
+	MarkNotificationEventProcessed(eventID string) error
+	CreateNotifications(input CreateNotificationsInput) ([]domain.Notification, error)
+	ListNotifications(input NotificationListInput) ([]domain.Notification, error)
+	CountUnreadNotifications(userID, companyID string) (int, error)
+	MarkNotificationRead(userID, notificationID string, read bool) (domain.Notification, error)
+	MarkAllNotificationsRead(userID, companyID string) (int, error)
 }
 
 type DeleteCompanyUserResult struct {
@@ -292,6 +300,48 @@ type KanbanCardMoveInput struct {
 	ColumnID  string
 	Position  int
 	IsIssue   *bool
+}
+
+const NotificationListMaxLimit = 100
+
+type NotificationEventInput struct {
+	CompanyID      string
+	ActorUserID    string
+	Type           string
+	EntityType     string
+	EntityID       string
+	IdempotencyKey string
+	Payload        map[string]any
+}
+
+type NotificationCreateInput struct {
+	CompanyID       string
+	RecipientUserID string
+	ActorUserID     string
+	Type            string
+	SourceEventID   string
+	EntityType      string
+	EntityID        string
+	Title           string
+	BodyPreview     string
+}
+
+type CreateNotificationsInput struct {
+	Notifications []NotificationCreateInput
+}
+
+type NotificationListInput struct {
+	UserID     string
+	CompanyID  string
+	UnreadOnly bool
+	Limit      int
+}
+
+func NormalizeNotificationListLimit(limit int) int {
+	if limit <= 0 || limit > NotificationListMaxLimit {
+		return 50
+	}
+	return limit
 }
 
 type UpdateNodeInput struct {

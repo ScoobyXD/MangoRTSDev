@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"miraeopus/backend/internal/auth"
+	"miraeopus/backend/internal/notifications"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"os"
@@ -18,18 +19,20 @@ type AuthEmailSender interface {
 }
 
 type Server struct {
-	repo          store.Repository
-	hub           *workspaceEventHub
-	emailHub      *workspaceEventHub
-	commCache     *communicationsCache
-	nylasGate     *nylasRequestGate
-	nylasWebhooks *nylasWebhookReceiptCache
-	authValidator *auth.Validator
-	cognitoAdmin  CognitoAdminClient
-	emailSender   AuthEmailSender
-	nylasClient   NylasClient
-	nylasConfig   NylasConfig
-	maxBodyBytes  int64
+	repo            store.Repository
+	hub             *workspaceEventHub
+	emailHub        *workspaceEventHub
+	notificationHub *workspaceEventHub
+	notifications   *notifications.Service
+	commCache       *communicationsCache
+	nylasGate       *nylasRequestGate
+	nylasWebhooks   *nylasWebhookReceiptCache
+	authValidator   *auth.Validator
+	cognitoAdmin    CognitoAdminClient
+	emailSender     AuthEmailSender
+	nylasClient     NylasClient
+	nylasConfig     NylasConfig
+	maxBodyBytes    int64
 }
 
 type ServerOptions struct {
@@ -47,18 +50,20 @@ func NewServer(repo store.Repository) *Server {
 
 func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server {
 	return &Server{
-		repo:          repo,
-		hub:           newWorkspaceEventHub(),
-		emailHub:      newWorkspaceEventHub(),
-		commCache:     newCommunicationsCache(),
-		nylasGate:     newNylasRequestGate(communicationsNylasMinRequestInterval),
-		nylasWebhooks: newNylasWebhookReceiptCache(),
-		authValidator: options.AuthValidator,
-		cognitoAdmin:  options.CognitoAdmin,
-		emailSender:   options.EmailSender,
-		nylasClient:   options.NylasClient,
-		nylasConfig:   options.NylasConfig,
-		maxBodyBytes:  options.MaxRequestBodyBytes,
+		repo:            repo,
+		hub:             newWorkspaceEventHub(),
+		emailHub:        newWorkspaceEventHub(),
+		notificationHub: newWorkspaceEventHub(),
+		notifications:   notifications.NewService(repo),
+		commCache:       newCommunicationsCache(),
+		nylasGate:       newNylasRequestGate(communicationsNylasMinRequestInterval),
+		nylasWebhooks:   newNylasWebhookReceiptCache(),
+		authValidator:   options.AuthValidator,
+		cognitoAdmin:    options.CognitoAdmin,
+		emailSender:     options.EmailSender,
+		nylasClient:     options.NylasClient,
+		nylasConfig:     options.NylasConfig,
+		maxBodyBytes:    options.MaxRequestBodyBytes,
 	}
 }
 
@@ -85,6 +90,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/communications/my-logic-gates", s.handleCommunicationsMyLogicGates)
 	mux.HandleFunc("/v1/communications/my-logic-gates/", s.handleCommunicationsMyLogicGateByID)
 	mux.HandleFunc("/v1/communications/stream", s.handleCommunicationsStream)
+	mux.HandleFunc("/v1/notifications", s.handleNotifications)
+	mux.HandleFunc("/v1/notifications/unread-count", s.handleNotificationUnreadCount)
+	mux.HandleFunc("/v1/notifications/read-all", s.handleNotificationReadAll)
+	mux.HandleFunc("/v1/notifications/stream", s.handleNotificationStream)
+	mux.HandleFunc("/v1/notifications/", s.handleNotificationByID)
 	mux.HandleFunc("/nylas/oauth/callback", s.handleNylasOAuthCallback)
 	mux.HandleFunc("/nylas/webhook", s.handleNylasWebhook)
 	mux.HandleFunc("/v1/nodes", s.handleNodes)

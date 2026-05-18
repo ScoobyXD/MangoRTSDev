@@ -66,7 +66,6 @@ create table if not exists company_memberships (
   updated_timestamp timestamptz not null default now(),
   constraint company_memberships_role_chk check (role in ('dev_admin', 'company_admin', 'company_user')),
   primary key (company_id, user_id),
-  foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (user_id) references users (user_id) on delete cascade
 );
 
@@ -93,7 +92,6 @@ create table if not exists invitations (
   constraint invitations_status_chk check (status in ('pending', 'accepted', 'revoked')),
   primary key (invitation_id),
   unique (token_hash),
-  foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (invited_by_user_id) references users (user_id),
   foreign key (accepted_by_user_id) references users (user_id)
 );
@@ -693,3 +691,74 @@ create index if not exists idx_company_explorer_folder_shares_user
 
 create index if not exists idx_company_explorer_folder_shares_email_status
   on company_explorer_folder_shares(company_id, email, status);
+
+-- Notification outbox and recipient feed.
+create table if not exists notification_events (
+  event_id uuid not null,
+  company_id uuid,
+  actor_user_id uuid,
+  event_type text not null,
+  entity_type text not null,
+  entity_id text not null,
+  idempotency_key text not null default '',
+  payload jsonb not null default '{}'::jsonb,
+  processed_timestamp timestamptz,
+  created_timestamp timestamptz not null default now(),
+  constraint notification_events_type_nonblank_chk check (btrim(event_type) <> ''),
+  constraint notification_events_entity_type_nonblank_chk check (btrim(entity_type) <> ''),
+  constraint notification_events_entity_id_nonblank_chk check (btrim(entity_id) <> ''),
+  constraint notification_events_payload_object_chk check (jsonb_typeof(payload) = 'object'),
+  primary key (event_id),
+  foreign key (actor_user_id) references users (user_id) on delete set null
+);
+
+create unique index if not exists idx_notification_events_idempotency_key
+  on notification_events(idempotency_key)
+  where btrim(idempotency_key) <> '';
+
+create index if not exists idx_notification_events_pending
+  on notification_events(created_timestamp asc, event_id asc)
+  where processed_timestamp is null;
+
+create index if not exists idx_notification_events_company_created
+  on notification_events(company_id, created_timestamp desc, event_id desc);
+
+create table if not exists notifications (
+  notification_id uuid not null,
+  company_id uuid,
+  recipient_user_id uuid not null,
+  actor_user_id uuid,
+  notification_type text not null,
+  source_event_id uuid not null,
+  entity_type text not null,
+  entity_id text not null,
+  title text not null,
+  body_preview text not null default '',
+  read_timestamp timestamptz,
+  created_timestamp timestamptz not null default now(),
+  constraint notifications_type_nonblank_chk check (btrim(notification_type) <> ''),
+  constraint notifications_entity_type_nonblank_chk check (btrim(entity_type) <> ''),
+  constraint notifications_entity_id_nonblank_chk check (btrim(entity_id) <> ''),
+  constraint notifications_title_nonblank_chk check (btrim(title) <> ''),
+  primary key (notification_id),
+  foreign key (recipient_user_id) references users (user_id) on delete cascade,
+  foreign key (actor_user_id) references users (user_id) on delete set null,
+  foreign key (source_event_id) references notification_events (event_id) on delete cascade
+);
+
+create unique index if not exists idx_notifications_dedupe
+  on notifications(recipient_user_id, source_event_id, notification_type, entity_type, entity_id);
+
+create index if not exists idx_notifications_recipient_created
+  on notifications(recipient_user_id, created_timestamp desc, notification_id desc);
+
+create index if not exists idx_notifications_recipient_company_created
+  on notifications(recipient_user_id, company_id, created_timestamp desc, notification_id desc);
+
+create index if not exists idx_notifications_recipient_unread
+  on notifications(recipient_user_id, created_timestamp desc, notification_id desc)
+  where read_timestamp is null;
+
+create index if not exists idx_notifications_recipient_company_unread
+  on notifications(recipient_user_id, company_id, created_timestamp desc, notification_id desc)
+  where read_timestamp is null;

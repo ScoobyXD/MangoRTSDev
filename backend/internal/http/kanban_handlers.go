@@ -438,6 +438,7 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "kanban_card_update_required")
 			return
 		}
+		beforeCard, columnTitles, hadBeforeCard := s.kanbanCardNotificationSnapshot(req.CompanyID, req.BoardID, cardID)
 		item, err := s.repo.MoveKanbanCard(store.KanbanCardMoveInput{
 			CompanyID: req.CompanyID,
 			BoardID:   req.BoardID,
@@ -461,6 +462,9 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 		})
 		if item.LogicGateID != nil {
 			s.publishKanbanDerivedNodeUpdate(req.CompanyID, item.NodeID)
+			if hadBeforeCard {
+				s.recordKanbanStateNotification(r, beforeCard, item, columnTitles)
+			}
 		}
 		writeJSON(w, http.StatusOK, item)
 		return
