@@ -276,6 +276,9 @@ where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 		if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, card); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
+		if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, nodeID); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
 		node, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
 from nodes n

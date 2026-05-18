@@ -164,6 +164,7 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 		}
 		r.kanbanCards[boardKey(input.CompanyID, board.BoardID)] = append(r.kanbanCards[boardKey(input.CompanyID, board.BoardID)], card)
 		r.syncNodeStatusFromKanbanCardLocked(card)
+		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, input.LogicGateID, nodeID)
 		r.emailNodeLinks[emailNodeLinkKey(input.CompanyID, board.BoardID, card.CardID)] = communicationsEmailNodeLink{
 			CompanyID:        input.CompanyID,
 			UserID:           input.UserID,

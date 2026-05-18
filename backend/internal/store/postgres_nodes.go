@@ -137,6 +137,10 @@ func cleanStringList(values []string) []string {
 }
 
 func (r *PostgresRepo) CreateNode(companyID, title string) (domain.Node, error) {
+	return r.CreateNodeWithAssignee(companyID, title, "")
+}
+
+func (r *PostgresRepo) CreateNodeWithAssignee(companyID, title, assigneeUserID string) (domain.Node, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -144,12 +148,27 @@ func (r *PostgresRepo) CreateNode(companyID, title string) (domain.Node, error) 
 	}
 	defer tx.Rollback()
 
+	assigneeUserID = strings.TrimSpace(assigneeUserID)
+	if assigneeUserID != "" {
+		var ok bool
+		if err := tx.QueryRowContext(ctx, `
+select exists(
+  select 1
+  from company_memberships
+  where company_id=$1 and user_id::text=$2
+)`, companyID, assigneeUserID).Scan(&ok); err != nil {
+			return domain.Node{}, err
+		}
+		if !ok {
+			return domain.Node{}, ErrAssigneeNotInCompany
+		}
+	}
 	item := domain.Node{CompanyID: companyID, NodeID: newUUIDv7String(), Title: title}
 	if _, err := tx.ExecContext(ctx,
-		`insert into nodes (company_id, node_id, title, created_timestamp)
-		 values ($1, $2, $3, now())
+		`insert into nodes (company_id, node_id, title, assignee_user_id, created_timestamp)
+		 values ($1, $2, $3, nullif($4::text, '')::uuid, now())
 		`,
-		item.CompanyID, item.NodeID, item.Title,
+		item.CompanyID, item.NodeID, item.Title, assigneeUserID,
 	); err != nil {
 		return domain.Node{}, err
 	}

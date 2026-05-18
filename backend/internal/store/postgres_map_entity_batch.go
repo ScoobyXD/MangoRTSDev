@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"miraeopus/backend/internal/domain"
+	"strings"
 )
 
 func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityBatchResult, error) {
@@ -24,6 +25,21 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 	targetFolderID := input.FolderID
 	targetFolderKind := input.EntityKind
 	if input.EntityKind == "node" {
+		input.CreatorUserID = strings.TrimSpace(input.CreatorUserID)
+		if input.CreatorUserID != "" {
+			var ok bool
+			if err := tx.QueryRowContext(ctx, `
+select exists(
+  select 1
+  from company_memberships
+  where company_id=$1 and user_id::text=$2
+)`, input.CompanyID, input.CreatorUserID).Scan(&ok); err != nil {
+				return MapEntityBatchResult{}, err
+			}
+			if !ok {
+				return MapEntityBatchResult{}, ErrAssigneeNotInCompany
+			}
+		}
 		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
 		if err != nil {
 			return MapEntityBatchResult{}, err
@@ -53,11 +69,21 @@ func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntit
 				Title:     item.Title,
 			}
 			if err := tx.QueryRowContext(ctx,
-				`insert into nodes (company_id, node_id, title, created_timestamp)
-				 values ($1, $2, $3, now())
+				`insert into nodes (company_id, node_id, title, assignee_user_id, created_timestamp)
+				 values ($1, $2, $3, nullif($4::text, '')::uuid, now())
 				 returning company_id, node_id, title, created_timestamp`,
-				created.CompanyID, created.NodeID, created.Title,
+				created.CompanyID, created.NodeID, created.Title, input.CreatorUserID,
 			).Scan(&created.CompanyID, &created.NodeID, &created.Title, &created.CreatedTimestamp); err != nil {
+				return MapEntityBatchResult{}, err
+			}
+			if input.CreatorUserID != "" {
+				created.AssigneeUserID = &input.CreatorUserID
+			}
+			created, err = scanNode(tx.QueryRowContext(ctx,
+				"select "+nodeSelectColumns+" from nodes n "+nodeStatusJoin+" where n.company_id=$1 and n.node_id=$2",
+				input.CompanyID, created.NodeID,
+			))
+			if err != nil {
 				return MapEntityBatchResult{}, err
 			}
 			result.Nodes = append(result.Nodes, created)

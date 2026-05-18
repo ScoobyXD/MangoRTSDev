@@ -478,12 +478,7 @@ func (r *MemoryRepo) UpsertKanbanCard(input KanbanCardMutationInput) (domain.Kan
 		if board.LogicGateID == nil {
 			return
 		}
-		responsibleUserID := r.responsibleUserIDForLogicGateLocked(input.CompanyID, *board.LogicGateID)
-		if responsibleUserID == "" {
-			return
-		}
-		node.AssigneeUserID = &responsibleUserID
-		r.nodes[nodeKey] = node
+		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, *board.LogicGateID, input.NodeID)
 	}
 	for index, card := range r.kanbanCards[k] {
 		if card.NodeID != input.NodeID {
@@ -540,6 +535,20 @@ func (r *MemoryRepo) responsibleUserIDForLogicGateLocked(companyID, logicGateID 
 		}
 	}
 	return ""
+}
+
+func (r *MemoryRepo) assignNodeToLogicGateResponsibleLocked(companyID, logicGateID, nodeID string) {
+	responsibleUserID := r.responsibleUserIDForLogicGateLocked(companyID, logicGateID)
+	if responsibleUserID == "" {
+		return
+	}
+	nodeKey := key(companyID, nodeID)
+	node, ok := r.nodes[nodeKey]
+	if !ok {
+		return
+	}
+	node.AssigneeUserID = &responsibleUserID
+	r.nodes[nodeKey] = node
 }
 
 func (r *MemoryRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error) {
