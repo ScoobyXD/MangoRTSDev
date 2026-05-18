@@ -277,6 +277,7 @@ export function HomeMailWorkspace({
           )}
         </div>
         <div
+          className="mango-home-scroll"
           ref={messageListRef}
           style={messageListStyle}
           onScroll={(event) => {
