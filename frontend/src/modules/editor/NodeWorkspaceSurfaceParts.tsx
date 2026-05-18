@@ -38,6 +38,7 @@ import {
   TEXT_BLOCK_PADDING_LEFT,
   TEXT_BLOCK_PADDING_RIGHT,
   TEXT_BLOCK_PADDING_TOP,
+  type MentionableCompanyUser,
   type TextBlockSelectionAnchor,
   type TextBlockSelectionDraft,
   useCloseFloatingMenu,
@@ -792,6 +793,7 @@ type ChatPaneProps = {
   messages: EditorTextBlockChatMessage[];
   selectionAnchor?: TextBlockSelectionAnchor;
   draft: string;
+  companyUsers: MentionableCompanyUser[];
   draftAttachments: EditorChatAttachment[];
   replyTargetID: string;
   heightStorageKey: string;
@@ -815,11 +817,67 @@ type ChatPaneProps = {
   onSubmit: () => void;
 };
 
+type ActiveMentionDraft = {
+  start: number;
+  end: number;
+  query: string;
+};
+
+function mentionUserDisplayName(user: MentionableCompanyUser): string {
+  const name = (user.display_name ?? "").trim();
+  if (name) return name;
+  const email = (user.email ?? "").trim();
+  if (!email) return user.user_id;
+  const atIndex = email.indexOf("@");
+  return atIndex > 0 ? email.slice(0, atIndex) : email;
+}
+
+function mentionUserOptionLabel(user: MentionableCompanyUser): string {
+  const name = (user.display_name ?? "").trim();
+  const email = (user.email ?? "").trim();
+  if (name && email) return `${name} <${email}>`;
+  return name || email || user.user_id;
+}
+
+function normalizedMentionSearch(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function readActiveMentionDraft(value: string, caretIndex: number | null): ActiveMentionDraft | null {
+  if (caretIndex === null || caretIndex < 0 || caretIndex > value.length) return null;
+  const beforeCaret = value.slice(0, caretIndex);
+  const atIndex = beforeCaret.lastIndexOf("@");
+  if (atIndex < 0) return null;
+  const prefix = atIndex > 0 ? value[atIndex - 1] : "";
+  if (prefix && /[A-Za-z0-9_@.-]/.test(prefix)) return null;
+  const query = beforeCaret.slice(atIndex + 1);
+  if (query.includes("\n") || query.includes("\r")) return null;
+  if (/[,;:()[\]{}]/.test(query)) return null;
+  return { start: atIndex, end: caretIndex, query };
+}
+
+function mentionUserMatches(user: MentionableCompanyUser, query: string): boolean {
+  const normalizedQuery = normalizedMentionSearch(query);
+  if (!normalizedQuery) return true;
+  const compactQuery = normalizedQuery.replace(/\s+/g, "");
+  const labels = [
+    mentionUserDisplayName(user),
+    mentionUserDisplayName(user).replace(/\s+/g, ""),
+    user.email ?? "",
+    user.user_id,
+  ];
+  return labels.some((label) => {
+    const normalizedLabel = normalizedMentionSearch(label);
+    return normalizedLabel.includes(normalizedQuery) || normalizedLabel.replace(/\s+/g, "").includes(compactQuery);
+  });
+}
+
 export const ChatPane: React.FC<ChatPaneProps> = ({
   blockID,
   messages,
   selectionAnchor,
   draft,
+  companyUsers,
   draftAttachments,
   replyTargetID,
   heightStorageKey,
@@ -844,6 +902,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const mentionCloseTimerRef = useRef<number | null>(null);
   const threads = useMemo(() => buildChatThreads(messages), [messages]);
   const replyTarget = replyTargetID ? messages.find((message) => message.id === replyTargetID) : undefined;
   const lineCount = Math.min(5, Math.max(1, draft.split(/\r\n|\r|\n/).length));
@@ -852,10 +911,32 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [height, setHeight] = useState(() => readStoredChatPaneHeight(heightStorageKey));
   const [previewAttachment, setPreviewAttachment] = useState<EditorChatAttachment | null>(null);
   const [collapsedThreadIDs, setCollapsedThreadIDs] = useState<Set<string>>(() => new Set());
+  const [activeMentionDraft, setActiveMentionDraft] = useState<ActiveMentionDraft | null>(null);
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const mentionOptions = useMemo(() => {
+    if (!activeMentionDraft) return [];
+    return companyUsers
+      .filter((user) => user.user_id.trim() && mentionUserMatches(user, activeMentionDraft.query))
+      .sort((a, b) => mentionUserOptionLabel(a).localeCompare(mentionUserOptionLabel(b), undefined, { numeric: true, sensitivity: "base" }))
+      .slice(0, 8);
+  }, [activeMentionDraft, companyUsers]);
+  const mentionMenuOpen = activeMentionDraft !== null && mentionOptions.length > 0;
 
   useEffect(() => {
     setHeight(readStoredChatPaneHeight(heightStorageKey));
   }, [heightStorageKey]);
+
+  useEffect(() => () => {
+    if (mentionCloseTimerRef.current !== null) window.clearTimeout(mentionCloseTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    setActiveMentionIndex(0);
+  }, [activeMentionDraft?.start, activeMentionDraft?.query]);
+
+  useEffect(() => {
+    setActiveMentionIndex((current) => Math.min(current, Math.max(0, mentionOptions.length - 1)));
+  }, [mentionOptions.length]);
 
   useEffect(() => {
     const visibleMessageIDs = new Set(messages.map((message) => message.id));
@@ -880,6 +961,25 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const focusComposer = () => {
     onFocus();
     window.requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const refreshMentionDraft = (nextDraft = draft) => {
+    const textarea = textareaRef.current;
+    setActiveMentionDraft(readActiveMentionDraft(nextDraft, textarea?.selectionStart ?? null));
+  };
+
+  const replaceMentionDraft = (mention: ActiveMentionDraft, user: MentionableCompanyUser) => {
+    const insert = `@${mentionUserDisplayName(user)} `;
+    const nextDraft = `${draft.slice(0, mention.start)}${insert}${draft.slice(mention.end)}`;
+    onDraftChange(nextDraft);
+    setActiveMentionDraft(null);
+    window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const nextCaret = mention.start + insert.length;
+      textarea.focus();
+      textarea.setSelectionRange(nextCaret, nextCaret);
+    });
   };
 
   const handleReply = (messageID: string) => {
@@ -984,7 +1084,73 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               onPreviewImage={setPreviewAttachment}
             />
           )}
-          <div style={{ display: "grid", gridTemplateColumns: "32px minmax(0, 1fr) 32px", alignItems: "end", gap: 6 }}>
+          <div style={{ position: "relative", display: "grid", gridTemplateColumns: "32px minmax(0, 1fr) 32px", alignItems: "end", gap: 6 }}>
+            {mentionMenuOpen && activeMentionDraft && (
+              <div
+                role="listbox"
+                aria-label="Mention users"
+                style={{
+                  position: "absolute",
+                  left: 38,
+                  right: 38,
+                  bottom: "calc(100% + 6px)",
+                  zIndex: 20,
+                  display: "grid",
+                  gap: 2,
+                  maxHeight: 206,
+                  overflowY: "auto",
+                  border: `1px solid ${strokeColor}`,
+                  borderRadius: 8,
+                  background: "#ffffff",
+                  boxShadow: "0 14px 34px rgba(0,0,0,0.18)",
+                  padding: 4,
+                }}
+              >
+                {mentionOptions.map((user, index) => {
+                  const selected = index === activeMentionIndex;
+                  const label = mentionUserOptionLabel(user);
+                  const name = mentionUserDisplayName(user);
+                  const email = (user.email ?? "").trim();
+                  return (
+                    <button
+                      key={user.user_id}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      title={label}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        replaceMentionDraft(activeMentionDraft, user);
+                      }}
+                      style={{
+                        width: "100%",
+                        minHeight: 34,
+                        display: "grid",
+                        gridTemplateColumns: "24px minmax(0, 1fr)",
+                        alignItems: "center",
+                        gap: 8,
+                        border: "none",
+                        borderRadius: 6,
+                        background: selected ? "rgba(255, 136, 32, 0.16)" : "transparent",
+                        color: surfaceText,
+                        cursor: "pointer",
+                        padding: "5px 8px",
+                        textAlign: "left",
+                        font: "inherit",
+                      }}
+                    >
+                      <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForName(name), color: "#ffffff", fontSize: 10, fontWeight: 900 }}>
+                        {initialsForName(name)}
+                      </span>
+                      <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800 }}>{name}</span>
+                        {email && <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, fontWeight: 650, color: "rgba(100,116,139,0.86)" }}>{email}</span>}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             <button
               type="button"
               aria-label="Add attachment"
@@ -1002,7 +1168,19 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               value={draft}
               rows={lineCount}
               placeholder={replyTarget ? `↖ Replying to ${replyTarget.authorName}` : ""}
-              onFocus={onFocus}
+              onFocus={(event) => {
+                onFocus();
+                setActiveMentionDraft(readActiveMentionDraft(draft, event.currentTarget.selectionStart));
+              }}
+              onClick={() => refreshMentionDraft()}
+              onKeyUp={() => refreshMentionDraft()}
+              onBlur={() => {
+                if (mentionCloseTimerRef.current !== null) window.clearTimeout(mentionCloseTimerRef.current);
+                mentionCloseTimerRef.current = window.setTimeout(() => {
+                  mentionCloseTimerRef.current = null;
+                  setActiveMentionDraft(null);
+                }, 120);
+              }}
               onPaste={(event) => {
                 if (attachTransferredImages(event.clipboardData)) event.preventDefault();
               }}
@@ -1012,8 +1190,34 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               onDrop={(event) => {
                 if (attachTransferredImages(event.dataTransfer)) event.preventDefault();
               }}
-              onChange={(event) => onDraftChange(event.currentTarget.value)}
+              onChange={(event) => {
+                const nextDraft = event.currentTarget.value;
+                onDraftChange(nextDraft);
+                setActiveMentionDraft(readActiveMentionDraft(nextDraft, event.currentTarget.selectionStart));
+              }}
               onKeyDown={(event) => {
+                if (mentionMenuOpen && activeMentionDraft) {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setActiveMentionIndex((current) => (current + 1) % mentionOptions.length);
+                    return;
+                  }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setActiveMentionIndex((current) => (current - 1 + mentionOptions.length) % mentionOptions.length);
+                    return;
+                  }
+                  if (event.key === "Enter" || event.key === "Tab") {
+                    event.preventDefault();
+                    replaceMentionDraft(activeMentionDraft, mentionOptions[activeMentionIndex] ?? mentionOptions[0]);
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setActiveMentionDraft(null);
+                    return;
+                  }
+                }
                 if (event.key === "Escape" && replyTarget) {
                   event.preventDefault();
                   onClearReply();

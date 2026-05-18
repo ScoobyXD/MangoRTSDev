@@ -373,7 +373,8 @@ export function buildResponsibleInboxGroupsByCell(
     if (priority === null || !status) continue;
     for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
       const logicGate = logicGateByID.get(logicGateID);
-      if (!logicGateHasRaciRole(logicGate, "responsible", currentUserID)) continue;
+      const assignedToCurrentUser = node.assignee_user_id?.trim() === currentUserID.trim();
+      if (!assignedToCurrentUser && !logicGateHasRaciRole(logicGate, "responsible", currentUserID)) continue;
       addRaciInboxGroupNode(byCell, responsibleCellKey(status, priority), logicGateID, node.node_id);
     }
   }

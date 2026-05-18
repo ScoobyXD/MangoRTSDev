@@ -173,6 +173,10 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
+		var beforeAssignments []domain.LogicGateRaciAssignment
+		if beforeGate, err := s.repo.GetLogicGate(req.CompanyID, logicGateID); err == nil {
+			beforeAssignments = beforeGate.RaciAssignments
+		}
 		assignments, err := s.repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
 			CompanyID:   req.CompanyID,
 			LogicGateID: logicGateID,
@@ -200,23 +204,26 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		}
 		s.publishWorkspaceEvent(req.CompanyID, "logic_gate_raci_updated", map[string]any{"logic_gate_id": logicGateID, "raci_assignments": assignments})
 		actorUserID, actorLabel := notificationActorPayload(r)
+		newlyAssignedUserIDs := newlyAssignedLogicGateRaciUserIDs(beforeAssignments, assignments)
 		logicGateTitle := ""
 		if logicGate, err := s.repo.GetLogicGate(req.CompanyID, logicGateID); err == nil {
 			logicGateTitle = logicGate.Header
 		}
-		s.recordNotificationEvent(store.NotificationEventInput{
-			CompanyID:      req.CompanyID,
-			ActorUserID:    actorUserID,
-			Type:           domain.NotificationEventLogicGateRaciUpdated,
-			EntityType:     "logic_gate",
-			EntityID:       logicGateID,
-			IdempotencyKey: "logic-gate-raci:" + req.CompanyID + ":" + logicGateID + ":" + logicGateRaciFingerprint(assignments),
-			Payload: map[string]any{
-				"assignment_user_ids": logicGateRaciAssignmentUserIDs(assignments),
-				"actor_display_name":  actorLabel,
-				"logic_gate_title":    logicGateTitle,
-			},
-		})
+		if len(newlyAssignedUserIDs) > 0 {
+			s.recordNotificationEvent(store.NotificationEventInput{
+				CompanyID:      req.CompanyID,
+				ActorUserID:    actorUserID,
+				Type:           domain.NotificationEventLogicGateRaciUpdated,
+				EntityType:     "logic_gate",
+				EntityID:       logicGateID,
+				IdempotencyKey: "logic-gate-raci:" + req.CompanyID + ":" + logicGateID + ":" + logicGateRaciFingerprint(assignments),
+				Payload: map[string]any{
+					"assignment_user_ids": newlyAssignedUserIDs,
+					"actor_display_name":  actorLabel,
+					"logic_gate_title":    logicGateTitle,
+				},
+			})
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"company_id":       req.CompanyID,
 			"logic_gate_id":    logicGateID,

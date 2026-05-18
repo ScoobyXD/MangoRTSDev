@@ -10,6 +10,7 @@ export type NodeWorkspaceSurfaceProps = {
   companyID: string;
   nodeID: string;
   projections: NodeProjectionItem[];
+  companyUsers: MentionableCompanyUser[];
   topPx: number;
   accent: string;
   surfaceText: string;
@@ -22,6 +23,14 @@ export type NodeWorkspaceSurfaceProps = {
   requestJSON: RequestJSON;
   onProjectionMutation: () => void;
   onError: (message: string) => void;
+};
+
+export type MentionableCompanyUser = {
+  company_id?: string;
+  user_id: string;
+  email?: string;
+  display_name?: string;
+  role?: string;
 };
 
 export type TextBlockState = {

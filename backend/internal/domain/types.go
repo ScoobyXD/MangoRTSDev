@@ -371,6 +371,8 @@ type KanbanCard struct {
 const (
 	NotificationEventLogicGateStateChanged = "logic_gate.state_changed"
 	NotificationEventLogicGateRaciUpdated  = "logic_gate.raci_updated"
+	NotificationEventNodeAssigned          = "node.assigned"
+	NotificationEventNodeFieldsChanged     = "node.fields_changed"
 	NotificationEventNodeCommentCreated    = "node.comment_created"
 	NotificationEventMentionCreated        = "mention.created"
 	NotificationEventACIInboxChanged       = "aci_inbox.changed"

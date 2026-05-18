@@ -279,6 +279,50 @@ func logicGateRaciAssignmentUserIDs(assignments []domain.LogicGateRaciAssignment
 	return out
 }
 
+func newlyAssignedLogicGateRaciUserIDs(before, after []domain.LogicGateRaciAssignment) []string {
+	beforeRoles := highestLogicGateRaciRolesByUser(before)
+	afterRoles := highestLogicGateRaciRolesByUser(after)
+	out := make([]string, 0, len(afterRoles))
+	for userID, role := range afterRoles {
+		if role == "" || beforeRoles[userID] == role {
+			continue
+		}
+		out = append(out, userID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func highestLogicGateRaciRolesByUser(assignments []domain.LogicGateRaciAssignment) map[string]string {
+	out := map[string]string{}
+	for _, assignment := range assignments {
+		userID := strings.TrimSpace(assignment.UserID)
+		role, ok := store.NormalizeLogicGateRaciRole(assignment.Role)
+		if !ok || userID == "" {
+			continue
+		}
+		if raciNotificationRoleRank(role) > raciNotificationRoleRank(out[userID]) {
+			out[userID] = role
+		}
+	}
+	return out
+}
+
+func raciNotificationRoleRank(role string) int {
+	switch strings.TrimSpace(role) {
+	case domain.LogicGateRaciRoleResponsible:
+		return 4
+	case domain.LogicGateRaciRoleAccountable:
+		return 3
+	case domain.LogicGateRaciRoleConsulted:
+		return 2
+	case domain.LogicGateRaciRoleInformed:
+		return 1
+	default:
+		return 0
+	}
+}
+
 func sharedInboxRaciAssignmentUserIDs(assignments []domain.SharedInboxRaciAssignment) []string {
 	out := make([]string, 0, len(assignments))
 	seen := map[string]struct{}{}
@@ -294,6 +338,83 @@ func sharedInboxRaciAssignmentUserIDs(assignments []domain.SharedInboxRaciAssign
 		out = append(out, userID)
 	}
 	return out
+}
+
+func cleanNodeAssigneeUserID(node domain.Node) string {
+	if node.AssigneeUserID == nil {
+		return ""
+	}
+	return strings.TrimSpace(*node.AssigneeUserID)
+}
+
+func nodeUpdateChangedNotificationFields(input store.UpdateNodeInput, before, after domain.Node) []string {
+	fields := make([]string, 0, 3)
+	if input.StatusSet && optionalStringValue(before.Status) != optionalStringValue(after.Status) {
+		fields = append(fields, "status")
+	}
+	if input.DueDateSet && optionalStringValue(before.DueDate) != optionalStringValue(after.DueDate) {
+		fields = append(fields, "due date")
+	}
+	if input.PrioritySet && optionalIntValue(before.Priority) != optionalIntValue(after.Priority) {
+		fields = append(fields, "priority")
+	}
+	return fields
+}
+
+func optionalStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
+}
+
+func optionalIntValue(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func (s *Server) recordNodeUpdateNotifications(r *http.Request, input store.UpdateNodeInput, before, after domain.Node) {
+	afterAssignee := cleanNodeAssigneeUserID(after)
+	if afterAssignee == "" {
+		return
+	}
+	beforeAssignee := cleanNodeAssigneeUserID(before)
+	actorUserID, actorLabel := notificationActorPayload(r)
+	assignedToNewUser := input.AssigneeUserIDSet && afterAssignee != beforeAssignee
+	if assignedToNewUser {
+		s.recordNotificationEvent(store.NotificationEventInput{
+			CompanyID:   input.CompanyID,
+			ActorUserID: actorUserID,
+			Type:        domain.NotificationEventNodeAssigned,
+			EntityType:  "node",
+			EntityID:    after.NodeID,
+			Payload: map[string]any{
+				"recipient_user_ids": []string{afterAssignee},
+				"actor_display_name": actorLabel,
+				"node_title":         after.Title,
+			},
+		})
+		return
+	}
+	changedFields := nodeUpdateChangedNotificationFields(input, before, after)
+	if len(changedFields) == 0 {
+		return
+	}
+	s.recordNotificationEvent(store.NotificationEventInput{
+		CompanyID:   input.CompanyID,
+		ActorUserID: actorUserID,
+		Type:        domain.NotificationEventNodeFieldsChanged,
+		EntityType:  "node",
+		EntityID:    after.NodeID,
+		Payload: map[string]any{
+			"recipient_user_ids": []string{afterAssignee},
+			"actor_display_name": actorLabel,
+			"node_title":         after.Title,
+			"changed_fields":     changedFields,
+		},
+	})
 }
 
 func logicGateRaciFingerprint(assignments []domain.LogicGateRaciAssignment) string {

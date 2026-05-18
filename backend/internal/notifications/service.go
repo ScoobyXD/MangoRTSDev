@@ -132,20 +132,55 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 		if logicGateID == "" {
 			logicGateID = event.EntityID
 		}
+		assignmentUserIDs := payloadStringSlice(payload, "assignment_user_ids")
 		roles, err := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
 		if err == nil && len(roles) > 0 {
-			for userID, role := range roles {
-				addRecipient(userID, notificationMetaForLogicGateRole(role, logicGateID, ""))
+			for _, userID := range assignmentUserIDs {
+				addRecipient(userID, notificationMetaForLogicGateRole(roles[strings.TrimSpace(userID)], logicGateID, ""))
 			}
 		} else {
-			addRecipients(payloadStringSlice(payload, "assignment_user_ids"), notificationRecipientMeta{LogicGateID: logicGateID})
+			addRecipients(assignmentUserIDs, notificationRecipientMeta{LogicGateID: logicGateID})
 		}
 		gateTitle := payloadString(payload, "logic_gate_title")
 		if gateTitle == "" {
 			gateTitle = "a Logic Gate"
 		}
-		title = "Logic Gate responsibilities updated"
-		body = "Your responsibility assignment changed on " + gateTitle + "."
+		title = "Logic Gate assigned to you"
+		body = "You were assigned to " + gateTitle + "."
+	case domain.NotificationEventNodeAssigned:
+		node, err := s.Repo.GetNode(event.CompanyID, event.EntityID)
+		if err != nil {
+			return nil, err
+		}
+		addRecipients(payloadStringSlice(payload, "recipient_user_ids"), notificationMetaForNode(node))
+		if len(recipients) == 0 && node.AssigneeUserID != nil {
+			addRecipient(*node.AssigneeUserID, notificationMetaForNode(node))
+		}
+		nodeTitle := strings.TrimSpace(node.Title)
+		if nodeTitle == "" {
+			nodeTitle = "a node"
+		}
+		title = "Node assigned to you"
+		body = nodeTitle + " was assigned to you."
+	case domain.NotificationEventNodeFieldsChanged:
+		node, err := s.Repo.GetNode(event.CompanyID, event.EntityID)
+		if err != nil {
+			return nil, err
+		}
+		addRecipients(payloadStringSlice(payload, "recipient_user_ids"), notificationMetaForNode(node))
+		if len(recipients) == 0 && node.AssigneeUserID != nil {
+			addRecipient(*node.AssigneeUserID, notificationMetaForNode(node))
+		}
+		nodeTitle := strings.TrimSpace(node.Title)
+		if nodeTitle == "" {
+			nodeTitle = "A node"
+		}
+		changedFields := payloadStringSlice(payload, "changed_fields")
+		if len(changedFields) == 0 {
+			changedFields = []string{"details"}
+		}
+		title = "Assigned node updated"
+		body = nodeTitle + " changed: " + strings.Join(changedFields, ", ") + "."
 	case domain.NotificationEventNodeCommentCreated:
 		node, err := s.Repo.GetNode(event.CompanyID, event.EntityID)
 		if err != nil {
@@ -211,36 +246,9 @@ func (s *Service) notificationCandidates(event domain.NotificationEvent) ([]stor
 		title = actorLabel + " mentioned you"
 		body = compactPreview(payloadString(payload, "comment"), 180)
 	case domain.NotificationEventACIInboxChanged:
-		addRecipients(payloadStringSlice(payload, "recipient_user_ids"), notificationRecipientMeta{Surface: domain.NotificationSurfaceMyTriage})
-		if folderID := payloadString(payload, "folder_id"); folderID != "" {
-			roles, err := s.sharedInboxRaciRecipientRoles(event.CompanyID, folderID)
-			if err != nil {
-				return nil, err
-			}
-			for userID, role := range roles {
-				addRecipient(userID, notificationRecipientMeta{Surface: domain.NotificationSurfaceSharedTriage, Role: normalizeRaciRole(role)})
-			}
-		}
-		title = "ACI inbox changed"
-		if body == "" {
-			body = payloadString(payload, "change_summary")
-		}
+		return []store.NotificationCreateInput{}, nil
 	case domain.NotificationEventACIInboxRaciUpdated:
-		folderID := event.EntityID
-		roles, err := s.sharedInboxRaciRecipientRoles(event.CompanyID, folderID)
-		if err == nil && len(roles) > 0 {
-			for userID, role := range roles {
-				addRecipient(userID, notificationRecipientMeta{Surface: domain.NotificationSurfaceSharedTriage, Role: normalizeRaciRole(role)})
-			}
-		} else {
-			addRecipients(payloadStringSlice(payload, "assignment_user_ids"), notificationRecipientMeta{Surface: domain.NotificationSurfaceSharedTriage})
-		}
-		folderName := payloadString(payload, "folder_name")
-		if folderName == "" {
-			folderName = "a shared inbox"
-		}
-		title = "Shared inbox responsibilities updated"
-		body = "Your responsibility assignment changed on " + folderName + "."
+		return []store.NotificationCreateInput{}, nil
 	default:
 		return nil, nil
 	}
@@ -425,6 +433,15 @@ func notificationMetaForLogicGateRole(role, logicGateID, nodeID string) notifica
 		meta.Surface = domain.NotificationSurfaceACIInbox
 	}
 	return meta
+}
+
+func notificationMetaForNode(node domain.Node) notificationRecipientMeta {
+	return notificationRecipientMeta{
+		Surface:     domain.NotificationSurfaceRInbox,
+		Role:        domain.LogicGateRaciRoleResponsible,
+		LogicGateID: firstCleanString(node.LogicGateIDs),
+		NodeID:      node.NodeID,
+	}
 }
 
 func mergeNotificationRecipientMeta(current, next notificationRecipientMeta) notificationRecipientMeta {
