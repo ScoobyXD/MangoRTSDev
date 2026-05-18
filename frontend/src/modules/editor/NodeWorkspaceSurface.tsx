@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { getNodeTitle as getLogicGateTitle, type LogicGateRecord } from "../logic-gate-map/shared";
+import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
+import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockContentPayload,
@@ -90,9 +92,77 @@ function sortLogicGateOptions(items: LogicGateRecord[]): LogicGateRecord[] {
   ));
 }
 
+type LogicGateOptionGroup = {
+  key: string;
+  label: string;
+  logicGates: LogicGateRecord[];
+};
+
+function folderPathLabel(folderByID: Map<string, CompanyExplorerFolder>, folderID: string): string {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let currentID = folderID;
+  while (currentID && !seen.has(currentID)) {
+    seen.add(currentID);
+    const folder = folderByID.get(currentID);
+    if (!folder) break;
+    names.push(folder.name);
+    currentID = folder.parent_folder_id ?? "";
+  }
+  return names.reverse().join(" / ") || "Logic Gates";
+}
+
+function buildLogicGateOptionGroups(input: {
+  logicGates: LogicGateRecord[];
+  folders: CompanyExplorerFolder[];
+  folderItems: CompanyExplorerFolderItem[];
+}): LogicGateOptionGroup[] {
+  const folderByID = new Map(input.folders.map((folder) => [folder.folder_id, folder]));
+  const folderIDByLogicGateID = new Map(
+    input.folderItems
+      .filter((item) => item.item_type === "logic_gate")
+      .map((item) => [item.item_id, item.folder_id]),
+  );
+  const groupByKey = new Map<string, LogicGateOptionGroup>();
+  for (const logicGate of sortLogicGateOptions(input.logicGates)) {
+    const folderID = folderIDByLogicGateID.get(logicGate.logic_gate_id) ?? "";
+    const key = folderID || "unfiled";
+    const group = groupByKey.get(key) ?? {
+      key,
+      label: folderID ? folderPathLabel(folderByID, folderID) : "Unfiled Logic Gates",
+      logicGates: [],
+    };
+    group.logicGates.push(logicGate);
+    groupByKey.set(key, group);
+  }
+  return Array.from(groupByKey.values()).sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+function uniqueLogicGateOptions(items: LogicGateRecord[]): LogicGateRecord[] {
+  const byID = new Map<string, LogicGateRecord>();
+  for (const item of items) {
+    if (!item.logic_gate_id || byID.has(item.logic_gate_id)) continue;
+    byID.set(item.logic_gate_id, item);
+  }
+  return Array.from(byID.values());
+}
+
+function focusContentEditableAtEnd(element: HTMLElement | null) {
+  if (!element) return;
+  element.focus({ preventScroll: true });
+  const selection = element.ownerDocument.getSelection();
+  if (!selection) return;
+  const range = element.ownerDocument.createRange();
+  range.selectNodeContents(element);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
 export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   companyID,
   nodeID,
+  assignedLogicGateIDs,
   projections,
   companyUsers,
   projectionsLoaded,
@@ -134,10 +204,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [logicGateAssignerOpen, setLogicGateAssignerOpen] = useState(false);
   const [logicGateSearch, setLogicGateSearch] = useState("");
   const [logicGateOptions, setLogicGateOptions] = useState<LogicGateRecord[]>([]);
+  const [logicGateFolders, setLogicGateFolders] = useState<CompanyExplorerFolder[]>([]);
+  const [logicGateFolderItems, setLogicGateFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
   const [logicGateOptionsLoading, setLogicGateOptionsLoading] = useState(false);
   const [logicGateSearchResults, setLogicGateSearchResults] = useState<LogicGateRecord[]>([]);
   const [logicGateSearchLoading, setLogicGateSearchLoading] = useState(false);
   const [assigningLogicGateID, setAssigningLogicGateID] = useState("");
+  const [lastAssignedLogicGateID, setLastAssignedLogicGateID] = useState("");
+  const [lastAssignedLogicGateLabel, setLastAssignedLogicGateLabel] = useState("");
   const [logicGateAssignStatus, setLogicGateAssignStatus] = useState("");
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
@@ -147,6 +221,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const autoCreatedTextBlockNodeIDsRef = useRef(new Set<string>());
 
   const projectionIdentity = useMemo(() => projectionsKey(projections), [projections]);
+  const loadedTextBlockProjections = useMemo(() => listEditorTextBlockProjections(projections), [projectionIdentity, projections]);
   const compact = width > 0 && width < 720;
   const editorGridTemplateColumns = compact
     ? "58px minmax(0, 1fr)"
@@ -156,6 +231,33 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     [logicGateOptions],
   );
   const searchedLogicGates = useMemo(() => sortLogicGateOptions(logicGateSearchResults), [logicGateSearchResults]);
+  const myLogicGateGroups = useMemo(() => buildLogicGateOptionGroups({
+    logicGates: myLogicGates,
+    folders: logicGateFolders,
+    folderItems: logicGateFolderItems,
+  }), [logicGateFolderItems, logicGateFolders, myLogicGates]);
+  const searchedLogicGateGroups = useMemo(() => buildLogicGateOptionGroups({
+    logicGates: searchedLogicGates,
+    folders: logicGateFolders,
+    folderItems: logicGateFolderItems,
+  }), [logicGateFolderItems, logicGateFolders, searchedLogicGates]);
+  const logicGateLabelByID = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const logicGate of uniqueLogicGateOptions([...logicGateOptions, ...logicGateSearchResults])) {
+      labels.set(logicGate.logic_gate_id, logicGateOptionLabel(logicGate));
+    }
+    return labels;
+  }, [logicGateOptions, logicGateSearchResults]);
+  const assignedLogicGateIDSet = useMemo(() => new Set(assignedLogicGateIDs.map((id) => id.trim()).filter(Boolean)), [assignedLogicGateIDs]);
+  const assignedLogicGateLabel = useMemo(() => {
+    if (lastAssignedLogicGateLabel.trim()) return lastAssignedLogicGateLabel.trim();
+    for (const logicGateID of assignedLogicGateIDs) {
+      const cleanLogicGateID = logicGateID.trim();
+      if (!cleanLogicGateID) continue;
+      return logicGateLabelByID.get(cleanLogicGateID) ?? cleanLogicGateID;
+    }
+    return "None";
+  }, [assignedLogicGateIDs, lastAssignedLogicGateLabel, logicGateLabelByID]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -172,6 +274,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, []);
 
   useEffect(() => {
+    setLogicGateAssignerOpen(false);
+    setLogicGateSearch("");
+    setAssigningLogicGateID("");
+    setLastAssignedLogicGateID("");
+    setLastAssignedLogicGateLabel("");
+    setLogicGateAssignStatus("");
+  }, [nodeID]);
+
+  useEffect(() => {
     const nextRatio = readStoredTextChatSplitRatio(companyID, nodeID);
     textChatSplitRatioRef.current = nextRatio;
     setTextChatSplitRatio(nextRatio);
@@ -182,7 +293,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [textChatSplitRatio]);
 
   useEffect(() => {
-    const textBlocks = listEditorTextBlockProjections(projections).map((item) => {
+    const textBlocks = loadedTextBlockProjections.map((item) => {
       const content = parseEditorTextBlockContent(item.information);
       return {
         id: item.information_id,
@@ -224,7 +335,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       return new Set(Array.from(current).filter((id) => blockIDs.has(id)));
     });
     setFocusedTextBlockID((current) => (nodeChanged || !blockIDs.has(current) ? "" : current));
-  }, [nodeID, projectionIdentity, projections]);
+  }, [loadedTextBlockProjections, nodeID, projectionIdentity, projections]);
 
   useEffect(() => {
     let cancelled = false;
@@ -245,9 +356,19 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     let cancelled = false;
     setLogicGateOptionsLoading(true);
     const params = new URLSearchParams({ company_id: companyID, assigned_to_me: "1" });
-    void requestJSON<{ logic_gates?: LogicGateRecord[] }>(`/v1/logic-gates?${params.toString()}`)
-      .then((payload) => {
-        if (!cancelled) setLogicGateOptions(payload.logic_gates ?? []);
+    const folderParams = new URLSearchParams({ company_id: companyID, folder_kind: "logic_gate" });
+    const folderItemParams = new URLSearchParams({ company_id: companyID, item_type: "logic_gate" });
+    void Promise.all([
+      requestJSON<{ logic_gates?: LogicGateRecord[] }>(`/v1/logic-gates?${params.toString()}`),
+      requestJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?${folderParams.toString()}`),
+      requestJSON<{ folder_items?: CompanyExplorerFolderItem[] }>(`/v1/company-explorer/folder-items?${folderItemParams.toString()}`),
+    ])
+      .then(([logicGatePayload, folderPayload, folderItemPayload]) => {
+        if (!cancelled) {
+          setLogicGateOptions(logicGatePayload.logic_gates ?? []);
+          setLogicGateFolders(folderPayload.folders ?? []);
+          setLogicGateFolderItems(folderItemPayload.folder_items ?? []);
+        }
       })
       .catch((cause) => {
         if (!cancelled) onError(cause instanceof Error ? cause.message : "failed_to_load_logic_gates");
@@ -297,7 +418,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     focusBlockIDRef.current = "";
     window.requestAnimationFrame(() => {
       const editor = rootRef.current?.querySelector<HTMLElement>(`[data-node-text-block-id="${blockID}"]`);
-      editor?.focus({ preventScroll: true });
+      focusContentEditableAtEnd(editor ?? null);
     });
   }, [blocks.length]);
 
@@ -368,10 +489,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [persistTextBlock]);
 
   useEffect(() => {
-    if (!projectionsLoaded || !nodeID || blocks.length > 0 || autoCreatedTextBlockNodeIDsRef.current.has(nodeID)) return;
+    if (!projectionsLoaded || !nodeID || loadedTextBlockProjections.length > 0 || blocks.length > 0 || autoCreatedTextBlockNodeIDsRef.current.has(nodeID)) return;
     autoCreatedTextBlockNodeIDsRef.current.add(nodeID);
     createTextBlock();
-  }, [blocks.length, createTextBlock, nodeID, projectionsLoaded]);
+  }, [blocks.length, createTextBlock, loadedTextBlockProjections.length, nodeID, projectionsLoaded]);
 
   const updateTextBlockContent = useCallback((blockID: string, patch: Partial<EditorTextBlockContent>) => {
     const existing = contentByBlockRef.current.get(blockID) ?? { title: "", document: "" };
@@ -757,16 +878,20 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [attachedEmails, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
-  const assignToLogicGate = useCallback(async (logicGateID: string) => {
-    const cleanLogicGateID = logicGateID.trim();
+  const assignToLogicGate = useCallback(async (logicGate: LogicGateRecord) => {
+    const cleanLogicGateID = logicGate.logic_gate_id.trim();
     if (!cleanLogicGateID || assigningLogicGateID) return;
+    const label = logicGateOptionLabel(logicGate);
     setAssigningLogicGateID(cleanLogicGateID);
-    setLogicGateAssignStatus("");
+    setLastAssignedLogicGateID(cleanLogicGateID);
+    setLastAssignedLogicGateLabel(label);
+    setLogicGateAssignStatus(`Assign to logic gate: ${label}`);
     try {
       await onAssignToLogicGate(cleanLogicGateID);
-      setLogicGateAssignStatus("Assigned to Pending.");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "failed_to_assign_logic_gate";
+      setLastAssignedLogicGateID("");
+      setLastAssignedLogicGateLabel("");
       setLogicGateAssignStatus(message);
       onError(message);
     } finally {
@@ -864,6 +989,61 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     );
   };
 
+  const renderLogicGateTile = (logicGate: LogicGateRecord, keyPrefix: string) => {
+    const logicGateID = logicGate.logic_gate_id;
+    const selected = assignedLogicGateIDSet.has(logicGateID) || lastAssignedLogicGateID === logicGateID;
+    const busy = assigningLogicGateID === logicGateID;
+    return (
+      <button
+        key={`${keyPrefix}-${logicGateID}`}
+        type="button"
+        disabled={Boolean(assigningLogicGateID)}
+        onClick={() => { void assignToLogicGate(logicGate); }}
+        title={logicGateOptionLabel(logicGate)}
+        style={{
+          position: "relative",
+          minHeight: 82,
+          display: "grid",
+          alignContent: "center",
+          justifyItems: "center",
+          gap: 7,
+          border: `1px solid ${selected || busy ? accent : "rgba(255, 136, 32, 0.28)"}`,
+          borderRadius: 7,
+          background: busy ? "rgba(255,136,32,0.16)" : selected ? "#fff2e0" : "#fffaf3",
+          color: surfaceText,
+          cursor: assigningLogicGateID ? "default" : "pointer",
+          font: "inherit",
+          padding: "10px 8px",
+          minWidth: 0,
+          boxShadow: selected ? "0 0 0 2px rgba(255, 136, 32, 0.12) inset" : "none",
+        }}
+      >
+        <span aria-hidden="true" style={{ width: 28, height: 28, display: "grid", placeItems: "center", transform: "scale(1.3)" }}>
+          <ExplorerRowIcon kind="logic_gate" />
+        </span>
+        <span style={{ maxWidth: "100%", minWidth: 0, overflow: "hidden", display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflowWrap: "anywhere", textAlign: "center", fontSize: 11, fontWeight: 800, lineHeight: 1.2 }}>
+          {logicGateOptionLabel(logicGate)}
+        </span>
+      </button>
+    );
+  };
+
+  const renderLogicGateGroups = (groups: LogicGateOptionGroup[], keyPrefix: string) => (
+    <div style={{ display: "grid", alignContent: "start", gap: 10 }}>
+      {groups.map((group) => (
+        <div key={`${keyPrefix}-group-${group.key}`} style={{ display: "grid", gap: 7, minWidth: 0 }}>
+          <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 6, color: surfaceText, opacity: 0.76, fontSize: 11, fontWeight: 800 }}>
+            <ExplorerRowIcon kind="folder" />
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{group.label}</span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))", gap: 8 }}>
+            {group.logicGates.map((logicGate) => renderLogicGateTile(logicGate, keyPrefix))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <div
       ref={rootRef}
@@ -887,7 +1067,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       <div style={{ display: "grid", gridTemplateColumns: editorGridTemplateColumns, columnGap: 8, rowGap: 12, alignItems: "start", minWidth: 0 }}>
         <div aria-hidden="true" style={{ minHeight: 32, padding: "2px 0 10px", background: "inherit" }} />
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0 10px", background: "inherit" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "2px 0 10px", background: "inherit" }}>
           <button
             type="button"
             title="Add text box"
@@ -951,8 +1131,25 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               letterSpacing: 0,
             }}
           >
+            <ExplorerRowIcon kind="logic_gate" />
             Assign to logic gate
           </button>
+          <div
+            title={`Assign to logic gate: ${assignedLogicGateLabel}`}
+            style={{
+              minWidth: 0,
+              maxWidth: compact ? "100%" : 320,
+              color: surfaceText,
+              fontSize: 11,
+              fontWeight: 700,
+              lineHeight: 1.2,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Assign to logic gate: <strong>{assignedLogicGateLabel}</strong>
+          </div>
         </div>
 
         {!compact && <div aria-hidden="true" />}
@@ -963,49 +1160,52 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         {logicGateAssignerOpen && (
           <>
             <div aria-hidden="true" />
-            <div style={{ minWidth: 0, display: "grid", gap: 8, border: `1px solid ${strokeColor}`, borderRadius: 8, background: panelBackground, padding: 9 }}>
+            <div style={{ minWidth: 0, display: "grid", gap: 10, border: `1px solid ${strokeColor}`, borderRadius: 8, background: panelBackground, padding: 10, boxShadow: "0 10px 24px rgba(15,23,42,0.08)" }}>
+              <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, color: surfaceText }}>
+                  <ExplorerRowIcon kind="logic_gate" />
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>Assign to logic gate: {assignedLogicGateLabel}</span>
+                </div>
+                {logicGateOptionsLoading && <span style={{ flex: "0 0 auto", fontSize: 11, color: surfaceText, opacity: 0.64, fontWeight: 800 }}>Loading</span>}
+              </div>
+
               <div style={{ display: "grid", gap: 6 }}>
                 <div style={{ fontSize: 11, fontWeight: 900, color: surfaceText }}>My Logic Gates</div>
-                <div style={{ display: "grid", gap: 5, maxHeight: 132, overflowY: "auto", paddingRight: 2 }}>
+                <div style={{ maxHeight: 222, overflowY: "auto", paddingRight: 2 }}>
                   {logicGateOptionsLoading && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64 }}>Loading...</div>}
-                  {!logicGateOptionsLoading && myLogicGates.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64 }}>No assigned logic gates</div>}
-                  {myLogicGates.map((logicGate) => (
-                    <button
-                      key={`mine-${logicGate.logic_gate_id}`}
-                      type="button"
-                      disabled={Boolean(assigningLogicGateID)}
-                      onClick={() => { void assignToLogicGate(logicGate.logic_gate_id); }}
-                      style={{ minHeight: 30, border: `1px solid ${strokeColor}`, borderRadius: 6, background: assigningLogicGateID === logicGate.logic_gate_id ? "rgba(255,136,32,0.16)" : "#ffffff", color: surfaceText, cursor: assigningLogicGateID ? "default" : "pointer", padding: "6px 8px", textAlign: "left", fontSize: 11, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                    >
-                      {logicGateOptionLabel(logicGate)}
-                    </button>
-                  ))}
+                  {!logicGateOptionsLoading && myLogicGateGroups.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64 }}>No assigned logic gates</div>}
+                  {!logicGateOptionsLoading && myLogicGateGroups.length > 0 && renderLogicGateGroups(myLogicGateGroups, "mine")}
                 </div>
               </div>
-              <input
-                value={logicGateSearch}
-                onChange={(event) => setLogicGateSearch(event.currentTarget.value)}
-                placeholder="Search logic gates"
-                style={{ width: "100%", minHeight: 30, border: `1px solid ${strokeColor}`, borderRadius: 6, outline: "none", background: "#ffffff", color: surfaceText, padding: "0 9px", boxSizing: "border-box", fontSize: 12, fontWeight: 700, letterSpacing: 0 }}
-              />
+
+              <div style={{ position: "relative", minWidth: 0 }}>
+                <input
+                  value={logicGateSearch}
+                  onChange={(event) => setLogicGateSearch(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setLogicGateSearch("");
+                      event.currentTarget.blur();
+                    }
+                  }}
+                  placeholder="Search logic gates"
+                  aria-label="Search logic gates"
+                  style={{ width: "100%", minHeight: 32, border: `1px solid ${logicGateSearch.trim() ? accent : strokeColor}`, borderRadius: 7, outline: "none", background: "#ffffff", color: surfaceText, padding: "0 31px 0 10px", boxSizing: "border-box", fontSize: 12, fontWeight: 700, letterSpacing: 0, boxShadow: logicGateSearch.trim() ? "0 0 0 2px rgba(255,136,32,0.10)" : "none" }}
+                />
+                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ position: "absolute", right: 10, top: 9, color: accent, pointerEvents: "none" }}>
+                  <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                  <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </div>
               {logicGateSearch.trim() && (
-                <div style={{ display: "grid", gap: 5, maxHeight: 160, overflowY: "auto", paddingRight: 2 }}>
+                <div role="listbox" aria-label="Logic gate search results" style={{ display: "grid", gap: 8, maxHeight: 220, overflowY: "auto", padding: 8, border: `1px solid ${strokeColor}`, borderRadius: 8, background: "#ffffff", boxShadow: "0 14px 30px rgba(15,23,42,0.14)" }}>
                   {logicGateSearchLoading && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64 }}>Searching...</div>}
-                  {!logicGateSearchLoading && searchedLogicGates.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64 }}>No matches</div>}
-                  {searchedLogicGates.map((logicGate) => (
-                    <button
-                      key={`search-${logicGate.logic_gate_id}`}
-                      type="button"
-                      disabled={Boolean(assigningLogicGateID)}
-                      onClick={() => { void assignToLogicGate(logicGate.logic_gate_id); }}
-                      style={{ minHeight: 30, border: `1px solid ${strokeColor}`, borderRadius: 6, background: assigningLogicGateID === logicGate.logic_gate_id ? "rgba(255,136,32,0.16)" : "#ffffff", color: surfaceText, cursor: assigningLogicGateID ? "default" : "pointer", padding: "6px 8px", textAlign: "left", fontSize: 11, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                    >
-                      {logicGateOptionLabel(logicGate)}
-                    </button>
-                  ))}
+                  {!logicGateSearchLoading && searchedLogicGateGroups.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64 }}>No matches</div>}
+                  {!logicGateSearchLoading && searchedLogicGateGroups.length > 0 && renderLogicGateGroups(searchedLogicGateGroups, "search")}
                 </div>
               )}
-              {logicGateAssignStatus && <div style={{ fontSize: 11, fontWeight: 800, color: logicGateAssignStatus === "Assigned to Pending." ? accent : "#b42318" }}>{logicGateAssignStatus}</div>}
+              {logicGateAssignStatus && <div style={{ fontSize: 11, fontWeight: 800, color: logicGateAssignStatus.startsWith("Assign to logic gate:") ? accent : "#b42318" }}>{logicGateAssignStatus}</div>}
             </div>
             {!compact && <div aria-hidden="true" />}
             {!compact && <div aria-hidden="true" />}

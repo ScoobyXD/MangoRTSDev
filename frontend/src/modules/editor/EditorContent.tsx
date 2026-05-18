@@ -232,6 +232,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [linkedNodeInfoPreview, setLinkedNodeInfoPreview] = useState<string[]>([]);
   const [linkedNodeMetadataRows, setLinkedNodeMetadataRows] = useState<Array<{ label: string; value: string }>>([]);
   const [linkedNodeHistoryRows, setLinkedNodeHistoryRows] = useState<string[]>([]);
+  const [nodeLogicGateIDs, setNodeLogicGateIDs] = useState<string[]>([]);
   const [nodeWorkspaceProjections, setNodeWorkspaceProjections] = useState<NodeProjectionItem[]>([]);
   const [nodeWorkspaceLoadedNodeID, setNodeWorkspaceLoadedNodeID] = useState("");
   const [nodeStatus, setNodeStatus] = useState("");
@@ -992,8 +993,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setNodeStatusColor(details.node.status_color ?? "");
     setNodePriorityDraft(details.node.priority == null ? "" : String(details.node.priority));
     setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
+    setNodeLogicGateIDs(details.node.logic_gate_ids ?? []);
     syncNodeAssignee(details.node.assignee_user_id);
     upsertNodeRelationshipGraphNode(apiBase, companyID, details.node);
+    invalidateWorkspaceSnapshot(apiBase, companyID);
   }, [apiBase, companyID, linkedEntityKind, linkedNodeID, linkedNodeTitle, syncNodeAssignee]);
 
   const updateNodePresetPatch = useCallback(async (patch: Record<string, unknown>) => {
@@ -1388,6 +1391,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setLinkedNodeInfoPreview([]);
       setLinkedNodeMetadataRows([]);
       setLinkedNodeHistoryRows([]);
+      setNodeLogicGateIDs([]);
       setNodeWorkspaceProjections([]);
       setNodeWorkspaceLoadedNodeID("");
       setNodeStatus("");
@@ -1415,6 +1419,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       return;
     }
     setNodeWorkspaceLoadedNodeID("");
+    setNodeLogicGateIDs([]);
     (async () => {
       try {
         setError("");
@@ -1429,6 +1434,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodeStatusColor("");
           setNodePriorityDraft("");
           setNodeDueDateDraft("");
+          setNodeLogicGateIDs([]);
           syncNodeAssignee("");
           setLogicGateRaciAssignments(details.logic_gate.raci_assignments ?? []);
           setNodeWorkspaceProjections([]);
@@ -1463,6 +1469,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodeStatusColor(details.node.status_color ?? "");
         setNodePriorityDraft(details.node.priority == null ? "" : String(details.node.priority));
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
+        setNodeLogicGateIDs(details.node.logic_gate_ids ?? []);
         syncNodeAssignee(details.node.assignee_user_id);
         setLogicGateRaciAssignments([]);
         setNodeWorkspaceProjections(projections);
@@ -1650,6 +1657,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           <NodeWorkspaceSurface
             companyID={companyID}
             nodeID={linkedNodeID}
+            assignedLogicGateIDs={nodeLogicGateIDs}
             projections={nodeWorkspaceProjections}
             companyUsers={companyUsers}
             projectionsLoaded={nodeWorkspaceLoadedNodeID === linkedNodeID}

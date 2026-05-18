@@ -9,6 +9,7 @@ export type RequestJSON = <T,>(path: string, init?: RequestInit) => Promise<T>;
 export type NodeWorkspaceSurfaceProps = {
   companyID: string;
   nodeID: string;
+  assignedLogicGateIDs: string[];
   projections: NodeProjectionItem[];
   companyUsers: MentionableCompanyUser[];
   projectionsLoaded: boolean;
