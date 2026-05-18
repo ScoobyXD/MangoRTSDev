@@ -1,6 +1,30 @@
 import React from "react";
 import { HOME_ROW_RESIZER_HEIGHT, INBOX_PRIORITIES } from "./homeConstants";
 import { normalizeResponsibleInboxStatus, responsibleStatusColor } from "./homeUtils";
+
+export const HOME_CYAN = "rgb(0, 233, 255)";
+const HOME_CYAN_FAINT = "rgba(0, 233, 255, 0.10)";
+const HOME_CYAN_SOFT = "rgba(0, 233, 255, 0.16)";
+const HOME_CYAN_MEDIUM = "rgba(0, 233, 255, 0.28)";
+const HOME_CYAN_BORDER = "rgba(0, 233, 255, 0.72)";
+const HOME_BLACK = "#000000";
+const HOME_BLACK_SOFT = "rgba(0, 0, 0, 0.18)";
+
+export function homeColorWithAlpha(color: string, alpha: number): string {
+  const trimmed = color.trim();
+  const hexMatch = trimmed.match(/^#([0-9a-f]{6})$/i);
+  if (hexMatch) {
+    const value = hexMatch[1];
+    const red = Number.parseInt(value.slice(0, 2), 16);
+    const green = Number.parseInt(value.slice(2, 4), 16);
+    const blue = Number.parseInt(value.slice(4, 6), 16);
+    return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+  }
+  const rgbMatch = trimmed.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (rgbMatch) return `rgba(${rgbMatch[1]}, ${rgbMatch[2]}, ${rgbMatch[3]}, ${alpha})`;
+  return trimmed;
+}
+
 export const pageStyle: React.CSSProperties = {
   height: "100vh",
   overflow: "hidden",
@@ -17,7 +41,7 @@ export const headerStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 14,
   padding: "0 18px",
-  borderBottom: "1px solid rgba(255, 136, 32, 0.25)",
+  borderBottom: `1px solid ${HOME_BLACK}`,
   background: "#ffffff",
 };
 
@@ -37,7 +61,7 @@ export const titleStyle: React.CSSProperties = {
 export const headerDividerStyle: React.CSSProperties = {
   width: 1,
   height: 22,
-  background: "rgba(255, 136, 32, 0.25)",
+  background: HOME_BLACK,
 };
 
 export const userPillStyle: React.CSSProperties = {
@@ -77,7 +101,7 @@ export const columnResizeGripStyle: React.CSSProperties = {
   width: 2,
   minHeight: 0,
   borderRadius: 2,
-  background: "rgba(255, 136, 32, 0.2)",
+  background: HOME_BLACK,
 };
 
 export const railRowResizeHandleStyle: React.CSSProperties = {
@@ -98,7 +122,7 @@ export const railRowResizeGripStyle: React.CSSProperties = {
   width: "100%",
   height: 2,
   borderRadius: 2,
-  background: "rgba(255, 136, 32, 0.24)",
+  background: HOME_BLACK,
 };
 
 export const sidebarStyle: React.CSSProperties = {
@@ -108,7 +132,7 @@ export const sidebarStyle: React.CSSProperties = {
   alignContent: "start",
   gap: 8,
   padding: 8,
-  border: "1px solid rgba(255, 136, 32, 0.18)",
+  border: `1px solid ${HOME_BLACK}`,
   background: "#ffffff",
   borderRadius: 8,
   overflow: "hidden",
@@ -142,9 +166,9 @@ export function sharedInboxFolderRowStyle(depth: number, active: boolean, dropPl
     gridTemplateColumns: "18px 17px minmax(0, 1fr)",
     alignItems: "center",
     gap: 5,
-    border: `1px solid ${active ? "rgba(255, 136, 32, 0.72)" : dropPlacement === "inside" ? "rgba(255, 136, 32, 0.52)" : "transparent"}`,
+    border: `1px solid ${active ? HOME_CYAN_BORDER : dropPlacement === "inside" ? HOME_CYAN_BORDER : "transparent"}`,
     borderRadius: 6,
-    background: active ? "#fff2e0" : dropPlacement === "inside" ? "#fff7eb" : "#ffffff",
+    background: active ? HOME_CYAN_SOFT : dropPlacement === "inside" ? HOME_CYAN_FAINT : "#ffffff",
     color: "#24120a",
     cursor: "grab",
     font: "inherit",
@@ -154,9 +178,9 @@ export function sharedInboxFolderRowStyle(depth: number, active: boolean, dropPl
     textAlign: "left",
     minWidth: 0,
     boxShadow: dropPlacement === "before"
-      ? "inset 0 2px 0 #ff8820"
+      ? `inset 0 2px 0 ${HOME_CYAN}`
       : dropPlacement === "after"
-        ? "inset 0 -2px 0 #ff8820"
+        ? `inset 0 -2px 0 ${HOME_CYAN}`
         : undefined,
   };
 }
@@ -177,7 +201,7 @@ export const sharedInboxRenameInputStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
   height: 23,
-  border: "1px solid #ff8820",
+  border: `1px solid ${HOME_CYAN}`,
   borderRadius: 5,
   background: "#ffffff",
   color: "#24120a",
@@ -210,9 +234,9 @@ export function navButtonStyle(active: boolean): React.CSSProperties {
     gridTemplateColumns: "minmax(0, 1fr) auto",
     alignItems: "center",
     gap: 8,
-    border: `1px solid ${active ? "rgba(255, 136, 32, 0.72)" : "rgba(255, 136, 32, 0.16)"}`,
+    border: `1px solid ${active ? HOME_CYAN_BORDER : HOME_BLACK_SOFT}`,
     borderRadius: 6,
-    background: active ? "#fff2e0" : "#ffffff",
+    background: active ? HOME_CYAN_SOFT : "#ffffff",
     color: "#24120a",
     cursor: "pointer",
     font: "inherit",
@@ -262,7 +286,7 @@ export const sharedInboxInputStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
   height: 30,
-  border: "1px solid rgba(255, 136, 32, 0.22)",
+  border: `1px solid ${HOME_BLACK_SOFT}`,
   borderRadius: 6,
   padding: "0 8px",
   font: "inherit",
@@ -272,7 +296,7 @@ export const sharedInboxInputStyle: React.CSSProperties = {
 export const sharedInboxCreateButtonStyle: React.CSSProperties = {
   width: 30,
   height: 30,
-  border: "1px solid rgba(255, 136, 32, 0.42)",
+  border: `1px solid ${HOME_CYAN_BORDER}`,
   borderRadius: 6,
   background: "#ffffff",
   color: "#24120a",
@@ -289,7 +313,7 @@ export const panelStyle: React.CSSProperties = {
   gridTemplateRows: "auto",
   gap: 10,
   padding: 10,
-  border: "1px solid rgba(255, 136, 32, 0.22)",
+  border: `1px solid ${HOME_BLACK}`,
   background: "#ffffff",
   borderRadius: 8,
   overflow: "hidden",
@@ -326,7 +350,7 @@ export const logicGateRailSectionStyle: React.CSSProperties = {
   gridTemplateRows: "auto minmax(0, 1fr)",
   gap: 8,
   padding: 10,
-  border: "1px solid rgba(255, 136, 32, 0.22)",
+  border: `1px solid ${HOME_BLACK}`,
   background: "#ffffff",
   borderRadius: 8,
   overflow: "hidden",
@@ -379,15 +403,15 @@ export function myLogicGateTileStyle(selected: boolean): React.CSSProperties {
     alignContent: "center",
     justifyItems: "center",
     gap: 7,
-    border: `1px solid ${selected ? "rgba(255, 136, 32, 0.72)" : "rgba(255, 136, 32, 0.28)"}`,
+    border: `1px solid ${selected ? HOME_CYAN_BORDER : HOME_CYAN_MEDIUM}`,
     borderRadius: 7,
-    background: selected ? "#fff2e0" : "#fffaf3",
+    background: selected ? HOME_CYAN_SOFT : HOME_CYAN_FAINT,
     color: "#24120a",
     cursor: "grab",
     font: "inherit",
     padding: "10px 8px",
     minWidth: 0,
-    boxShadow: selected ? "0 0 0 2px rgba(255, 136, 32, 0.12) inset" : "none",
+    boxShadow: selected ? `0 0 0 2px ${HOME_CYAN_SOFT} inset` : "none",
   };
 }
 
@@ -396,6 +420,8 @@ export const myLogicGateTileIconStyle: React.CSSProperties = {
   height: 28,
   display: "grid",
   placeItems: "center",
+  borderRadius: 6,
+  background: HOME_CYAN_SOFT,
   transform: "scale(1.35)",
 };
 
@@ -443,9 +469,9 @@ export function logicGateTreeRowStyle(depth: number, selected: boolean, isDropTa
     display: "flex",
     alignItems: "center",
     gap: 6,
-    border: `1px solid ${selected ? "rgba(255, 136, 32, 0.6)" : "transparent"}`,
+    border: `1px solid ${selected ? HOME_CYAN_BORDER : "transparent"}`,
     borderRadius: 6,
-    background: selected ? "#fff2e0" : isDropTarget ? "#ffffff" : "transparent",
+    background: selected ? HOME_CYAN_SOFT : isDropTarget ? "#ffffff" : "transparent",
     color: "#24120a",
     cursor: "pointer",
     padding: `3px 7px 3px ${6 + depth * 14}px`,
@@ -482,7 +508,7 @@ export const logicGateRaciPanelStyle: React.CSSProperties = {
   gridTemplateRows: "auto minmax(0, 1fr)",
   gap: 8,
   padding: 10,
-  border: "1px solid rgba(255, 136, 32, 0.22)",
+  border: `1px solid ${HOME_BLACK}`,
   background: "#ffffff",
   borderRadius: 8,
   overflow: "hidden",
@@ -510,8 +536,8 @@ export const logicGateRaciScrollStyle: React.CSSProperties = {
   minHeight: 0,
   overflow: "auto",
   padding: "0 2px 4px 0",
-  ["--kanban-board-scroll-accent" as string]: "rgb(255, 136, 32)",
-  ["--kanban-board-scroll-track" as string]: "rgba(255, 136, 32, 0.08)",
+  ["--kanban-board-scroll-accent" as string]: HOME_CYAN,
+  ["--kanban-board-scroll-track" as string]: HOME_CYAN_FAINT,
 };
 
 export function inboxMatrixGridStyle(columnCount: number): React.CSSProperties {
@@ -527,8 +553,8 @@ export function inboxMatrixGridStyle(columnCount: number): React.CSSProperties {
 export const logicGateRaciCornerStyle: React.CSSProperties = {
   gridColumn: 1,
   gridRow: 1,
-  borderRight: "1px solid rgba(255, 136, 32, 0.18)",
-  borderBottom: "1px solid rgba(255, 136, 32, 0.18)",
+  borderRight: `1px solid ${HOME_BLACK}`,
+  borderBottom: `1px solid ${HOME_BLACK}`,
 };
 
 export const logicGateRaciColumnHeaderStyle: React.CSSProperties = {
@@ -536,9 +562,9 @@ export const logicGateRaciColumnHeaderStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  borderBottom: "1px solid rgba(255, 136, 32, 0.24)",
-  borderRight: "1px solid rgba(255, 136, 32, 0.18)",
-  background: "#fff8ef",
+  borderBottom: `1px solid ${HOME_BLACK}`,
+  borderRight: `1px solid ${HOME_BLACK}`,
+  background: "#ffffff",
   padding: "0 10px",
 };
 
@@ -547,9 +573,9 @@ export const logicGateRaciColumnLetterStyle: React.CSSProperties = {
   height: 24,
   display: "grid",
   placeItems: "center",
-  border: "1px solid rgba(255, 136, 32, 0.42)",
+  border: `1px solid ${HOME_CYAN_BORDER}`,
   borderRadius: 5,
-  color: "#ff8820",
+  color: HOME_CYAN,
   fontSize: 13,
   fontWeight: 800,
   flexShrink: 0,
@@ -568,8 +594,8 @@ export const logicGateRaciPriorityHeaderStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   alignItems: "start",
-  borderRight: "1px solid rgba(255, 136, 32, 0.18)",
-  borderBottom: "1px solid rgba(255, 136, 32, 0.16)",
+  borderRight: `1px solid ${HOME_BLACK}`,
+  borderBottom: `1px solid ${HOME_BLACK}`,
   color: "rgba(36, 18, 10, 0.66)",
   fontSize: 11,
   fontWeight: 700,
@@ -585,10 +611,10 @@ export function logicGateRaciCellStyle(activeDrop: boolean): React.CSSProperties
     display: "grid",
     alignContent: "start",
     gap: 7,
-    borderRight: "1px solid rgba(255, 136, 32, 0.18)",
-    borderBottom: "1px solid rgba(255, 136, 32, 0.16)",
-    background: activeDrop ? "#fff2e0" : "#ffffff",
-    boxShadow: activeDrop ? "inset 0 0 0 2px rgba(255, 136, 32, 0.34)" : "none",
+    borderRight: `1px solid ${HOME_BLACK}`,
+    borderBottom: `1px solid ${HOME_BLACK}`,
+    background: activeDrop ? HOME_CYAN_FAINT : "#ffffff",
+    boxShadow: activeDrop ? `inset 0 0 0 2px ${HOME_CYAN_MEDIUM}` : "none",
     padding: 8,
     transition: "background 120ms ease, box-shadow 120ms ease",
   };
@@ -599,9 +625,9 @@ export const logicGateInboxGroupStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   gridTemplateRows: "30px minmax(0, auto)",
-  border: "1px solid rgba(255, 136, 32, 0.28)",
+  border: `1px solid ${HOME_BLACK}`,
   borderRadius: 7,
-  background: "#fffdf9",
+  background: "#ffffff",
   overflow: "hidden",
   boxShadow: "0 2px 7px rgba(36, 18, 10, 0.05)",
 };
@@ -625,10 +651,11 @@ export const logicGateInboxGroupResizeGripStyle: React.CSSProperties = {
   height: 2,
   marginBottom: 2,
   borderRadius: 2,
-  background: "rgba(255, 136, 32, 0.34)",
+  background: HOME_BLACK,
 };
 
-export function logicGateInboxGroupHeaderStyle(interactive: boolean): React.CSSProperties {
+export function logicGateInboxGroupHeaderStyle(interactive: boolean, color?: string): React.CSSProperties {
+  const tint = color ? homeColorWithAlpha(color, 0.13) : "#ffffff";
   return {
     width: "100%",
     height: 30,
@@ -637,8 +664,8 @@ export function logicGateInboxGroupHeaderStyle(interactive: boolean): React.CSSP
     alignItems: "center",
     gap: 6,
     border: "none",
-    borderBottom: "1px solid rgba(255, 136, 32, 0.20)",
-    background: "#fff4e6",
+    borderBottom: `1px solid ${HOME_BLACK}`,
+    background: tint,
     color: "#24120a",
     cursor: interactive ? "pointer" : "default",
     padding: "0 8px",
@@ -687,7 +714,7 @@ function inboxNotificationRoleColors(role: string): { background: string; border
     case "informed":
       return { background: "#e0f2fe", border: "rgba(2, 132, 199, 0.32)", color: "#0369a1" };
     default:
-      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
+      return { background: HOME_CYAN_FAINT, border: HOME_CYAN_MEDIUM, color: "#042028" };
   }
 }
 export const logicGateInboxGroupCountStyle: React.CSSProperties = {
@@ -695,7 +722,7 @@ export const logicGateInboxGroupCountStyle: React.CSSProperties = {
   height: 18,
   display: "grid",
   placeItems: "center",
-  border: "1px solid rgba(255, 136, 32, 0.24)",
+  border: `1px solid ${HOME_BLACK_SOFT}`,
   borderRadius: 4,
   background: "rgba(255, 255, 255, 0.78)",
   color: "rgba(36, 18, 10, 0.62)",
@@ -713,7 +740,9 @@ export const logicGateInboxNodeListStyle: React.CSSProperties = {
   overflowY: "auto",
   overflowX: "hidden",
   padding: "5px 5px 6px 7px",
-  background: "#fffdf9",
+  background: "#ffffff",
+  ["--kanban-board-scroll-accent" as string]: HOME_CYAN,
+  ["--kanban-board-scroll-track" as string]: HOME_CYAN_FAINT,
 };
 
 export function logicGateInboxNodeRowStyle(selected: boolean): React.CSSProperties {
@@ -724,21 +753,21 @@ export function logicGateInboxNodeRowStyle(selected: boolean): React.CSSProperti
     gridTemplateColumns: "10px 16px minmax(0, 1fr) auto",
     alignItems: "center",
     gap: 5,
-    border: `1px solid ${selected ? "rgba(255, 136, 32, 0.72)" : "rgba(255, 136, 32, 0.16)"}`,
+    border: `1px solid ${selected ? HOME_CYAN_BORDER : HOME_BLACK_SOFT}`,
     borderRadius: 5,
-    background: selected ? "#fff2e0" : "#ffffff",
+    background: selected ? HOME_CYAN_SOFT : "#ffffff",
     color: "#24120a",
     cursor: "grab",
     padding: "3px 4px 3px 0",
-    boxShadow: selected ? "0 0 0 2px rgba(255, 136, 32, 0.10) inset" : "none",
+    boxShadow: selected ? `0 0 0 2px ${HOME_CYAN_FAINT} inset` : "none",
   };
 }
 
 export const logicGateInboxNodeGuideStyle: React.CSSProperties = {
   width: 10,
   height: "100%",
-  borderLeft: "1px solid rgba(255, 136, 32, 0.28)",
-  borderBottom: "1px solid rgba(255, 136, 32, 0.18)",
+  borderLeft: `1px solid ${HOME_BLACK_SOFT}`,
+  borderBottom: `1px solid ${HOME_BLACK_SOFT}`,
   justifySelf: "end",
 };
 
@@ -1082,9 +1111,9 @@ export function mailArchiveActionButtonStyle(active: boolean): React.CSSProperti
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     fontWeight: 700,
-    borderColor: active ? "#ff8820" : smallButtonStyle.borderColor,
-    background: active ? "#fff2e0" : smallButtonStyle.background,
-    color: active ? "#8a3d00" : smallButtonStyle.color,
+    borderColor: active ? HOME_CYAN : smallButtonStyle.borderColor,
+    background: active ? HOME_CYAN_SOFT : smallButtonStyle.background,
+    color: active ? "#042028" : smallButtonStyle.color,
   };
 }
 
@@ -1139,9 +1168,9 @@ export function messageRowStyle(active: boolean, unread: boolean): React.CSSProp
     display: "grid",
     gap: 4,
     minHeight: 78,
-    border: `1px solid ${active ? "#ff8820" : unread ? "rgba(255, 136, 32, 0.62)" : "rgba(255, 136, 32, 0.16)"}`,
+    border: `1px solid ${active ? HOME_CYAN : unread ? HOME_CYAN_BORDER : HOME_BLACK_SOFT}`,
     borderRadius: 7,
-    background: active ? "#fff2e0" : unread ? "#fff4e8" : "#ffffff",
+    background: active ? HOME_CYAN_SOFT : unread ? HOME_CYAN_FAINT : "#ffffff",
     cursor: "pointer",
     color: "#24120a",
     font: "inherit",
@@ -1160,9 +1189,9 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
     gap: 9,
     alignItems: "start",
     minHeight: 82,
-    border: `1px solid ${pendingAutoArchive ? "rgba(36, 18, 10, 0.26)" : active ? "#ff8820" : unread ? "rgba(255, 136, 32, 0.48)" : "rgba(255, 136, 32, 0.16)"}`,
+    border: `1px solid ${pendingAutoArchive ? "rgba(36, 18, 10, 0.26)" : active ? HOME_CYAN : unread ? HOME_CYAN_MEDIUM : HOME_BLACK_SOFT}`,
     borderRadius: 7,
-    background: pendingAutoArchive ? "#e7e7e7" : active ? "#fff2e0" : unread ? "#fff8ef" : "#ffffff",
+    background: pendingAutoArchive ? "#e7e7e7" : active ? HOME_CYAN_SOFT : unread ? HOME_CYAN_FAINT : "#ffffff",
     cursor: draggable ? "grab" : "pointer",
     color: pendingAutoArchive ? "rgba(36, 18, 10, 0.72)" : "#24120a",
     font: "inherit",
@@ -1180,8 +1209,8 @@ export function messageSelectDotStyle(active: boolean, unread: boolean): React.C
     height: 9,
     marginTop: 4,
     borderRadius: 9,
-    background: active ? "#ff8820" : unread ? "rgba(255, 136, 32, 0.72)" : "rgba(36, 18, 10, 0.16)",
-    boxShadow: active ? "0 0 0 3px rgba(255, 136, 32, 0.14)" : undefined,
+    background: active ? HOME_CYAN : unread ? HOME_CYAN_BORDER : "rgba(36, 18, 10, 0.16)",
+    boxShadow: active ? `0 0 0 3px ${HOME_CYAN_SOFT}` : undefined,
   };
 }
 
@@ -1192,7 +1221,7 @@ export function messagePlacementIconStyle(active: boolean): React.CSSProperties 
     marginTop: 0,
     display: "grid",
     placeItems: "center",
-    color: active ? "#24120a" : "#ff8820",
+    color: active ? "#24120a" : HOME_CYAN,
     transform: "scale(1.05)",
   };
 }

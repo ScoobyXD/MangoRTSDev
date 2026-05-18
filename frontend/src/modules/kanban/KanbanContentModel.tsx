@@ -133,8 +133,8 @@ export const ARENA_GROUP_COLUMN_WIDTH_PX = 300;
 export const ARENA_GROUP_ROW_LABEL_WIDTH_PX = 104;
 export const ARENA_GROUP_MIN_CELL_HEIGHT_PX = 86;
 export const ARENA_GROUP_FRAME_BACKGROUND = "#ffffff";
-export const ARENA_GROUP_GLASS_BORDER_LIGHT = "rgba(255, 136, 32, 0.32)";
-export const ARENA_GROUP_GLASS_BORDER_DARK = "rgba(255, 136, 32, 0.28)";
+export const ARENA_GROUP_GLASS_BORDER_LIGHT = "#000000";
+export const ARENA_GROUP_GLASS_BORDER_DARK = "#000000";
 export const ARENA_GROUP_FRAME_SHADOW = "0 1px 2px rgba(15,23,42,0.06)";
 
 export const KanbanDisclosureIcon: React.FC<{ color: string }> = ({ color }) => (
