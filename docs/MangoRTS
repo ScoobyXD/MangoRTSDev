@@ -61,24 +61,41 @@ LATER: need to do an audit on how well equiped the app is for multiple people us
 2. theres also a bug with the resizing on the my triage page when you first load into dev site. idk its really weird, and then it goes back to normal and works. who knows.
 
 
-1. no way for a newly created node from the node page to be assigned to a logic gate, and also its spamming the explorer.
-2. Left hand bar 1 scroll bar
-3. shared email should be able to have assigned emails lol
-4. ui refresh (less orange!)
-5. By default when you open a node a text box is already open for you.
+
 remember the original vision: as few clicks as possible, 3 axis notification management (i really think this is where agents shine)
-6. on my nodes in aci inbox, have it strucutred by logic gate folder.
-7. when a node goes into a logic gate, it should automatically be assigned to whoever is responsible for that logic gate?
-8. I really really get the feeling that users will want to edit and change stuff with the logic gate and node from the ACI and R Inbox.
-	like you multiselect a buunch of nodes or logic gates, right click, and give them all assignments, change priority, status, change due date, etc.
-9. There is a problem in the ACI inbox where when i select a logic gate it doesn't display that logic gate in the logic gate arena view.
 10. each color in raci matrix should be color coded.
-11. Might be able to delete My Nodes on the ACI Inbox and R inbox section
-12. On the all nodes folder structure, i should be able to click drag nodes into a logic gate in a cell and it automatically inherits those features.
-13. On nodes i should be able to select a picture and make a node or a chat comment out of that lol.
-14. also on the logic gate list of nodes, need a way collapse it and minimize it on ACI and R inbox.
-15. On ACI and R inbox titles put (Logic gates assigned to me) and on my nodes write (nodes assigned to me)
-16. My nodes view on ACI and R should only be nodes assigned to me, not the nodes that are in these logic gates.
+
+
+email:
+Notifications:
+1. Clearing notifications
+2. @ mentions notifications should be its own clickable row on the left hand column below R inbox. and on the right side mention the number of mentions, i click on the box and i see a list, and when i click on one i go to that @ mention, so very similar to the view notificaiton thing already in ACI inbox and R inbox.
+
+RACI:
+1. On the RACI matrixes there is no way to see how the relationships between the different nodes in the logic gate list.
+	a. also i think we used the logic gates wrong, they should be parent nodes, and the list stuff are peer or child nodes, and the actual logic gate should be called development or something.
+
+UI:
+1. ui refresh (less orange!)
+2. Different color schema for RACI (based on notifications)
+
+
+RACI: (these failed multiple times)
+1. on my logic gates section in my triage or shared triage, it should only display the logic gates that iave been assigned to in any of the RACI matrix assignments for the logic gate.
+2. On R inbox and probably ACI inbox too, when i de-assign myself from a logic gate, that logic gate still shows up on the ACI or R inbox. Even after refreshing!
+3. I should be able to click drag nodes from my nodes and all nodes section in ACI/R inbox and drag it to a logic gate in the matrix and drop it in there and it inherits the priority, assigned to of the cell of that logic gate is in the matrix. if we dropped the node into R inbox then the node inherits the status as well of the column it got dropped into
+4. There is an issue with confusion between a node's Person In Charge and the Logic Gate's RACI matrix.
+	a. Right now if i de-assign myself from person in charge for the node, it removes that node from the R inbox. However, the way it works should be still in the R inbox because it's in the logic gate where I am assigned R responsible, so it will just be in my 0 unassigned section instead of disappearing.
+	
+Nodes:
+1. Node needs to go into History folder in Explorer if Status == DONE, it should not be based on the due date.
+2. The success message of being assigned to another logic gate should be green.
+3. If something does not have a Person in Charge field filled out, its by defauly 0 unassigned, and vise versa. But the moment a person is assigned to it, then default give it 5 very low priority.
+4. When displaying the Assigned to logic gate: text, it should give me the acvtual english name of the logic gate, not the UUID
+
+Header Tab:
+1. change logic gate arena top right collapse icon to a flat line that we already have for nodes.
+
 ===============
 Notes to tell tim:
 1. We do need to advise users on a system on who gets to drag nodes to different status, should it be done automatically or wait for permission
@@ -88,51 +105,25 @@ notes:
 	b. So consciously, I'm using the art inbox as a list of things to do, whether it be pending or in progress. If I have something in the done section, subconsciously I still think of it as something that I have to do. 
 	
 	
-The #1 thing for customer service is having a dedicated logic gate called customer support and having customers put node tickets in there and some dev admin checks it out and fixes it. This is 100% nexessary. 
-Go live notes:
-Monday go live: 
 
-
-
-notifications, state change, @ mentions
-Idea where multiple people do group huddle on node with each their own textbox
-
-
-======================
-
-there should be by default a "customer support" logic gate, its our embedded customer support logic gate kanban board (non editable) where customers can just put in nodes (tickets) into the kanban board and thats the customer support ticket.
+1. there should be by default a "customer support" logic gate, its our embedded customer support logic gate kanban board (non editable) where customers can just put in nodes (tickets) into the kanban board and thats the customer support ticket.
 	a. So, there is a minimum number of clicks required for customers to report to us a bug, something they'd like to change, or some kind of support ticket. 
-
-ACI/R Inbox
-
-Node Editor changes
 1. Outbound email when node is done.
 2. @ mentions summoning or notifying user.
 4. The control z still sucks ass
-
-
+5. Internal and external read receipts.
 4. RACI inboxes should be public view.
-7. @ mentions, only if part of raci matrix.
 1. We need to capture history of what email from primary moved to what triage and then to what logic gate so we can fine tune hermes agent
 3. I think we put wayyyyy too much code in the communications page alone and needs to be broken apart. also for nodes.
 	a. for example nodeworkspacesurface keeps getting a merge conflict.
 	a. and call logic gate inbox into logic gate triage.
-6. archive feature. ususally business guys press archive to remove emails from the email list
-7. shared inbox read receipts internal and external.
 8. Some of the original visions didnt make it to the final product, like the birds eye manager view when they wake up in the morning and the email being triaged into urgency, informative, action axis.
-	
 1. When you have successfuly accepted invite and you are now a user, you should get some kind of confirmation email saying you have successfully signed up with <name of company>
-
-after that:
-2. mentions with @
-4. Shared inboxes and email sharing
-5. Internal and external read receipts.
-
-
-Things to do bar:
-1. Have a pinned node section.
 2. There should be a notion board like thing where you can see all nodes in a timeline view. 
 3. the bottom of the page should be the thing to do task bar which is chronologically ordered left to right for the day today. basically its a schedule bar
+4. Idea where multiple people do group huddle on node with each their own textbox
+
+==================================
 
 General Bugs:
 3.  On another note when I have multi-select on for node or logic gates and I right-click, I should not automatically select one node or logic gate. I should keep all of the selected stuff selected. I should only be able to deselect when I single-click on another part of the map without dragging. 

@@ -65,6 +65,7 @@ type ExplorerEntityActivatedDetail = {
   kind?: string;
   id?: string;
   label?: string;
+  nodeID?: string;
 };
 type NodeEditorPopupState = {
   nodeID: string;
@@ -1055,6 +1056,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           companyID: detail.companyID || companyID,
           logicGateID: id,
           label,
+          nodeID: typeof detail.nodeID === "string" && detail.nodeID.trim() ? detail.nodeID.trim() : undefined,
         });
         selectPrimaryPage("logic-gate-arena");
         return;

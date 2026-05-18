@@ -159,6 +159,10 @@ func createCompanyExplorerDefaultFolderTreeSQL(ctx context.Context, tx *sql.Tx, 
 }
 
 func ensureCompanyExplorerDefaultFoldersSQL(ctx context.Context, tx *sql.Tx, companyID string) error {
+	if _, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(hashtext('mangorts_company_explorer_default_folders'), hashtext($1))`, companyID); err != nil {
+		return err
+	}
+
 	var insertedSystemSeed string
 	err := tx.QueryRowContext(ctx,
 		`insert into company_explorer_default_folder_seeds

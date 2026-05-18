@@ -24,6 +24,7 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 		}
 		items, err := s.repo.ListCompanyExplorerFolders(companyID, folderKind)
 		if err != nil {
+			log.Printf("company explorer folders: failed to list folders company_id=%s folder_kind=%s: %v", companyID, folderKind, err)
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
 		}

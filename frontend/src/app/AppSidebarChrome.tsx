@@ -88,6 +88,7 @@ type AppSidebarProps = {
 
 type SidebarNotificationMenuFilter = {
   title: string;
+  type?: string;
   surface?: NotificationSurface;
   role?: NotificationRaciRole;
 };
@@ -233,6 +234,10 @@ export function AppSidebar({
     () => notificationSummaryRoleCount(notificationSummary, "r_inbox", "responsible"),
     [notificationSummary],
   );
+  const mentionNotificationCount = useMemo(
+    () => notificationSummaryTypeCount(notificationSummary, "mention.created"),
+    [notificationSummary],
+  );
   const myTriageNotificationCount = useMemo(
     () => mailUnreadCounts.myTriage,
     [mailUnreadCounts.myTriage],
@@ -274,7 +279,7 @@ export function AppSidebar({
       items: [],
     };
     setNotificationMenu(nextMenu);
-    fetchNotifications({ companyID, unreadOnly: true, limit: 100 })
+    fetchNotifications({ companyID, type: filter.type, unreadOnly: true, limit: 100 })
       .then((items) => {
         const filtered = items.filter((item) => sidebarNotificationMatchesFilter(item, filter));
         setNotificationMenu((current) => (
@@ -302,6 +307,19 @@ export function AppSidebar({
 
     const nodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
     const logicGateID = notification.logic_gate_id?.trim() || (notification.entity_type === "logic_gate" ? notification.entity_id.trim() : "");
+    if (notification.type === "mention.created" && logicGateID) {
+      emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
+        companyID: notification.company_id || companyID,
+        sourceFrameID: "app-sidebar-notifications",
+        kind: "logic_gate",
+        id: logicGateID,
+        label: notification.title || logicGateID,
+        nodeID: nodeID || undefined,
+        selectedTreeID: `logic-gate-${logicGateID}`,
+        changedAt: Date.now(),
+      });
+      return;
+    }
     if (nodeID) {
       emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
         companyID: notification.company_id || companyID,
@@ -808,6 +826,19 @@ export function AppSidebar({
           }]} />}
           onClick={() => onHomeViewSelect("r-inbox")}
         />
+        <AppSidebarButton
+          label="@ Mentions"
+          active={notificationMenu?.type === "mention.created"}
+          trailing={<SidebarNotificationBadges badges={[{
+            key: "mentions",
+            count: mentionNotificationCount,
+            tone: "mention",
+            title: "Unread mention notifications",
+            showZero: true,
+            onClick: (event) => openNotificationMenu(event, { title: "@ Mentions", type: "mention.created" }),
+          }]} />}
+          onClick={(event) => openNotificationMenu(event, { title: "@ Mentions", type: "mention.created" })}
+        />
       </section>
 
       <section
@@ -1032,13 +1063,14 @@ export function AppSidebar({
   );
 }
 
-type SidebarNotificationBadgeTone = NotificationRaciRole | "mail";
+type SidebarNotificationBadgeTone = NotificationRaciRole | "mail" | "mention";
 
 type SidebarNotificationBadge = {
   key: string;
   count: number;
   tone: SidebarNotificationBadgeTone;
   title: string;
+  showZero?: boolean;
   onClick?: (event: React.MouseEvent) => void;
 };
 
@@ -1048,7 +1080,16 @@ function notificationSummaryRoleCount(summary: NotificationSummary, surface: Not
   ), 0);
 }
 
+function notificationSummaryTypeCount(summary: NotificationSummary, type: string): number {
+  const cleanType = type.trim();
+  if (!cleanType) return 0;
+  return (summary.type_counts ?? []).reduce((count, item) => (
+    item.type === cleanType ? count + normalizeSidebarNotificationCount(item.count) : count
+  ), 0);
+}
+
 function sidebarNotificationMatchesFilter(item: NotificationItem, filter: SidebarNotificationMenuFilter): boolean {
+  if (filter.type && item.type !== filter.type) return false;
   if (filter.surface && item.surface !== filter.surface) return false;
   if (filter.role && item.role !== filter.role) return false;
   return true;
@@ -1059,7 +1100,7 @@ function normalizeSidebarNotificationCount(value: unknown): number {
 }
 
 function SidebarNotificationBadges({ badges }: { badges: SidebarNotificationBadge[] }): React.ReactElement | null {
-  const visible = badges.filter((badge) => normalizeSidebarNotificationCount(badge.count) > 0);
+  const visible = badges.filter((badge) => badge.showZero || normalizeSidebarNotificationCount(badge.count) > 0);
   if (visible.length === 0) return null;
   return (
     <span style={appSidebarBadgeStripStyle} aria-label="Notification counts">
@@ -1111,7 +1152,7 @@ function AppSidebarButton({
   active: boolean;
   icon?: React.ReactNode;
   trailing?: React.ReactNode;
-  onClick: () => void;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onPointerEnter?: () => void;
   onFocus?: () => void;
   onPointerDown?: () => void;
@@ -1520,6 +1561,8 @@ function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone): { b
       return { background: "#dcfce7", border: "rgba(22, 163, 74, 0.34)", color: "#15803d" };
     case "informed":
       return { background: "#e0f2fe", border: "rgba(2, 132, 199, 0.32)", color: "#0369a1" };
+    case "mention":
+      return { background: "#f5f3ff", border: "rgba(124, 58, 237, 0.32)", color: "#6d28d9" };
     case "mail":
     default:
       return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
