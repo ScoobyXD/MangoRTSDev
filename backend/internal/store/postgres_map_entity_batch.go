@@ -10,9 +10,6 @@ import (
 
 func (r *PostgresRepo) CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityBatchResult, error) {
 	ctx := context.Background()
-	if err := r.ensureCompanyExplorerSharedInboxSchema(ctx); err != nil {
-		return MapEntityBatchResult{}, err
-	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return MapEntityBatchResult{}, err

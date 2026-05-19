@@ -22,7 +22,7 @@ Source architecture:
 | 1. Read Plane | Partial / yellow | Scoped workspace snapshots and cheap event ETags exist, but several scopes can still be unbounded and the app lacks first-class read models for inboxes and windows. |
 | 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Mutation plus event append is still not atomic across the app, and fanout/gap policy is not production-grade. |
 | 3. Work Ownership / Commands | Confirmed / red | Current Logic Gate work state is mostly Kanban-card backed, but command ownership is missing and frontend flows still orchestrate multi-step writes. |
-| 4. Hot Path Discipline | Ready / red | The first fix is clear: remove GET/runtime-DDL side effects before broader context, auth-cache, batch, and metrics work. |
+| 4. Hot Path Discipline | First branch complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth/context/batch/metrics remain follow-up branches. |
 | 5. Frontend Structure / API Contract | Ready / yellow | Shared `requestJSON` exists, but hot modules duplicate wrappers, broad invalidation is scattered, and large components still own workflow logic. |
 
 ## 1. Read Plane
@@ -187,6 +187,9 @@ Target architecture:
 
 First branch:
 `platform/hot-path-read-discipline`
+
+Branch progress:
+- 2026-05-19: Removed Company Explorer read-time default seeding/runtime DDL and Logic Gate Arena GET board/column repair. Default folders now belong to company provisioning plus the migration backfill; missing Arena board/columns now return explicit errors instead of being repaired by GET.
 
 Scope:
 - Remove default-folder seeding and runtime DDL from Company Explorer reads.

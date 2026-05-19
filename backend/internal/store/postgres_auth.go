@@ -150,15 +150,31 @@ func (r *PostgresRepo) CreateCompany(name string) (domain.Company, error) {
 		return domain.Company{}, ErrInvalid
 	}
 
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Company{}, err
+	}
+	defer tx.Rollback()
+
 	var company domain.Company
-	err := r.db.QueryRow(
+	err = tx.QueryRowContext(ctx,
 		`insert into companies (company_id, name, created_timestamp, updated_timestamp)
 		 values ($1, $2, now(), now())
 		 returning company_id, name, created_timestamp, updated_timestamp`,
 		newUUIDv7String(),
 		name,
 	).Scan(&company.CompanyID, &company.Name, &company.CreatedTimestamp, &company.UpdatedTimestamp)
-	return company, err
+	if err != nil {
+		return domain.Company{}, err
+	}
+	if err := ensureCompanyExplorerDefaultFoldersSQL(ctx, tx, company.CompanyID); err != nil {
+		return domain.Company{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Company{}, err
+	}
+	return company, nil
 }
 
 func (r *PostgresRepo) ListCompanies(query string, limit int) ([]domain.Company, error) {

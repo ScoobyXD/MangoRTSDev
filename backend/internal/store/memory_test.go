@@ -325,6 +325,64 @@ func mustFindKanbanColumn(t *testing.T, columns []domain.KanbanColumn, title str
 	return domain.KanbanColumn{}
 }
 
+func TestMemoryRepo_CompanyProvisioningCreatesCompanyExplorerDefaults(t *testing.T) {
+	assertProvisioned := func(t *testing.T, repo *MemoryRepo, companyID string) {
+		t.Helper()
+		nodeFolders, err := repo.ListCompanyExplorerFolders(companyID, "node")
+		if err != nil {
+			t.Fatalf("ListCompanyExplorerFolders node failed: %v", err)
+		}
+		logicFolders, err := repo.ListCompanyExplorerFolders(companyID, "logic_gate")
+		if err != nil {
+			t.Fatalf("ListCompanyExplorerFolders logic_gate failed: %v", err)
+		}
+		communicationsFolders, err := repo.ListCompanyExplorerFolders(companyID, "communications")
+		if err != nil {
+			t.Fatalf("ListCompanyExplorerFolders communications failed: %v", err)
+		}
+
+		systemKeys := map[string]bool{}
+		for _, folder := range nodeFolders {
+			if folder.SystemKey != nil {
+				systemKeys[*folder.SystemKey] = true
+			}
+		}
+		if !systemKeys[CompanyExplorerSystemActiveNodesKey] || !systemKeys[CompanyExplorerSystemHistoryKey] {
+			t.Fatalf("system folder keys = %+v, want active and history", systemKeys)
+		}
+
+		logicRootID := ""
+		logicChildren := map[string]bool{}
+		for _, folder := range logicFolders {
+			if folder.Name == "Logic Gates" && folder.ParentFolderID == nil {
+				logicRootID = folder.FolderID
+			}
+		}
+		for _, folder := range logicFolders {
+			if folder.ParentFolderID != nil && *folder.ParentFolderID == logicRootID {
+				logicChildren[folder.Name] = true
+			}
+		}
+		if logicRootID == "" || len(logicChildren) != len(companyExplorerDefaultLogicGateChildFolderNames) {
+			t.Fatalf("logic defaults root=%q children=%+v", logicRootID, logicChildren)
+		}
+		if len(communicationsFolders) != 21 {
+			t.Fatalf("communications default folders = %d, want 21", len(communicationsFolders))
+		}
+	}
+
+	repo := NewMemoryRepo()
+	created, err := repo.CreateCompany("Provisioned Company")
+	if err != nil {
+		t.Fatalf("CreateCompany failed: %v", err)
+	}
+	assertProvisioned(t, repo, created.CompanyID)
+
+	ensuredID := "22222222-2222-4222-8222-222222222222"
+	repo.EnsureCompany(ensuredID, "Ensured Company")
+	assertProvisioned(t, repo, ensuredID)
+}
+
 func TestMemoryRepo_CreateLogicGateCreatesAttachedKanbanBoard(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"

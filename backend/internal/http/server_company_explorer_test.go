@@ -18,6 +18,7 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	server := NewServer(repo)
 	handler := server.Routes()
 	companyID := "company-folder-api-test"
+	repo.EnsureCompany(companyID, "Folder API Company")
 
 	node, err := repo.CreateNode(companyID, "Foldered node")
 	if err != nil {
@@ -256,6 +257,39 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	}
 }
 
+func TestCompanyExplorerFolderGETDoesNotSeedDefaults(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-folder-get-read-only-test"
+
+	listFolders := func() []domain.CompanyExplorerFolder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET folders status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var payload struct {
+			Folders []domain.CompanyExplorerFolder `json:"folders"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode folders: %v", err)
+		}
+		return payload.Folders
+	}
+
+	if folders := listFolders(); len(folders) != 0 {
+		t.Fatalf("first GET returned %d folders, want no read-time default seeding: %+v", len(folders), folders)
+	}
+	if folders := listFolders(); len(folders) != 0 {
+		t.Fatalf("second GET returned %d folders, want no read-time default seeding: %+v", len(folders), folders)
+	}
+}
+
 func TestCompanyExplorerDefaultFoldersSeedOnceAndProtectSystemFolders(t *testing.T) {
 	t.Parallel()
 
@@ -263,6 +297,7 @@ func TestCompanyExplorerDefaultFoldersSeedOnceAndProtectSystemFolders(t *testing
 	server := NewServer(repo)
 	handler := server.Routes()
 	companyID := "company-default-folder-seed-test"
+	repo.EnsureCompany(companyID, "Default Folder Seed Company")
 
 	listFolders := func() []struct {
 		FolderID       string  `json:"folder_id"`
@@ -356,6 +391,7 @@ func TestCompanyExplorerCommunicationsDefaultFoldersSeedOnceAndAreMutable(t *tes
 	server := NewServer(repo)
 	handler := server.Routes()
 	companyID := "company-communications-folder-seed-test"
+	repo.EnsureCompany(companyID, "Communications Folder Seed Company")
 
 	type folderPayload struct {
 		FolderID       string  `json:"folder_id"`

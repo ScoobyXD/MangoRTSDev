@@ -154,9 +154,6 @@ func (r *PostgresRepo) ConvertCommunicationsTriageItems(input CommunicationsTria
 	}
 
 	ctx := context.Background()
-	if err := r.ensureCompanyExplorerSharedInboxSchema(ctx); err != nil {
-		return CommunicationsTriageConversionResult{}, err
-	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return CommunicationsTriageConversionResult{}, err

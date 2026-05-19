@@ -1145,6 +1145,113 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 	}
 }
 
+type noRepairLogicGateArenaRepo struct {
+	store.Repository
+	hideArenaBoards  bool
+	dropArenaColumns bool
+	ensureCalls      int
+}
+
+func (r *noRepairLogicGateArenaRepo) EnsureLogicGateKanbanBoard(companyID, logicGateID, title string) (domain.KanbanBoard, error) {
+	r.ensureCalls++
+	return domain.KanbanBoard{}, fmt.Errorf("unexpected Logic Gate Arena repair for %s/%s", companyID, logicGateID)
+}
+
+func (r *noRepairLogicGateArenaRepo) ListKanbanBoards(companyID string, query store.KanbanBoardQuery) ([]domain.KanbanBoard, error) {
+	if r.hideArenaBoards && query.LogicGateID != "" {
+		return []domain.KanbanBoard{}, nil
+	}
+	return r.Repository.ListKanbanBoards(companyID, query)
+}
+
+func (r *noRepairLogicGateArenaRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
+	if r.dropArenaColumns {
+		return []domain.KanbanColumn{}, nil
+	}
+	return r.Repository.ListKanbanColumns(companyID, boardID)
+}
+
+func TestLogicGateArenaGETLoadsExistingBoardWithoutRepair(t *testing.T) {
+	t.Parallel()
+
+	backing := store.NewMemoryRepo()
+	companyID := "company-arena-existing-read-only-test"
+	logicGate, err := backing.CreateLogicGate(companyID, "Existing Arena Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate failed: %v", err)
+	}
+	repo := &noRepairLogicGateArenaRepo{Repository: backing}
+	server := NewServer(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/logic-gate-arena?company_id="+companyID+"&logic_gate_id="+logicGate.LogicGateID, nil)
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET arena status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if repo.ensureCalls != 0 {
+		t.Fatalf("GET arena called EnsureLogicGateKanbanBoard %d times, want 0", repo.ensureCalls)
+	}
+	var payload struct {
+		Board struct {
+			BoardID string `json:"board_id"`
+		} `json:"board"`
+		Columns []domain.KanbanColumn `json:"columns"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode arena payload: %v", err)
+	}
+	if payload.Board.BoardID != store.LogicGateKanbanBoardID(logicGate.LogicGateID) || len(payload.Columns) != 3 {
+		t.Fatalf("arena payload board=%q columns=%d, want existing provisioned board and columns", payload.Board.BoardID, len(payload.Columns))
+	}
+}
+
+func TestLogicGateArenaGETDoesNotProvisionMissingBoard(t *testing.T) {
+	t.Parallel()
+
+	backing := store.NewMemoryRepo()
+	companyID := "company-arena-missing-board-read-only-test"
+	logicGate, err := backing.CreateLogicGate(companyID, "Missing Board Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate failed: %v", err)
+	}
+	repo := &noRepairLogicGateArenaRepo{Repository: backing, hideArenaBoards: true}
+	server := NewServer(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/logic-gate-arena?company_id="+companyID+"&logic_gate_id="+logicGate.LogicGateID, nil)
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "logic_gate_arena_board_not_found") {
+		t.Fatalf("GET missing-board arena status = %d body=%s, want explicit missing board", rec.Code, rec.Body.String())
+	}
+	if repo.ensureCalls != 0 {
+		t.Fatalf("GET missing-board arena called EnsureLogicGateKanbanBoard %d times, want 0", repo.ensureCalls)
+	}
+}
+
+func TestLogicGateArenaGETDoesNotRepairMissingDefaultColumns(t *testing.T) {
+	t.Parallel()
+
+	backing := store.NewMemoryRepo()
+	companyID := "company-arena-missing-columns-read-only-test"
+	logicGate, err := backing.CreateLogicGate(companyID, "Missing Columns Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate failed: %v", err)
+	}
+	repo := &noRepairLogicGateArenaRepo{Repository: backing, dropArenaColumns: true}
+	server := NewServer(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/logic-gate-arena?company_id="+companyID+"&logic_gate_id="+logicGate.LogicGateID, nil)
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "logic_gate_arena_columns_not_provisioned") {
+		t.Fatalf("GET missing-column arena status = %d body=%s, want explicit missing columns", rec.Code, rec.Body.String())
+	}
+	if repo.ensureCalls != 0 {
+		t.Fatalf("GET missing-column arena called EnsureLogicGateKanbanBoard %d times, want 0", repo.ensureCalls)
+	}
+}
+
 func TestWorkspaceSnapshotReturnsNotModifiedWhenDataUnchanged(t *testing.T) {
 	t.Parallel()
 

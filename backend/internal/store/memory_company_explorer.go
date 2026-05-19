@@ -197,7 +197,6 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 }
 
 func (r *MemoryRepo) ensureCompanyExplorerSystemFolderLocked(companyID, systemKey string) (domain.CompanyExplorerFolder, bool) {
-	r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
 	for _, folder := range r.folders {
 		if folder.CompanyID == companyID && folder.SystemKey != nil && *folder.SystemKey == systemKey {
 			return folder, true
@@ -320,10 +319,8 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 }
 
 func (r *MemoryRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	items := make([]domain.CompanyExplorerFolder, 0)
 	for _, folder := range r.folders {
@@ -390,9 +387,8 @@ func (r *MemoryRepo) ListCompanyExplorerFolderSubtree(companyID, folderID, folde
 	if folderID == "" {
 		return r.ListCompanyExplorerFolders(companyID, folderKind)
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	ids := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, strings.TrimSpace(folderKind))
 	items := make([]domain.CompanyExplorerFolder, 0, len(ids))
 	for _, folder := range r.folders {
