@@ -79,6 +79,7 @@ import {
 } from "./shared";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppDockTab } from "../../app/appDockTabs";
+import { createRequestJSON } from "../api/requestJSON";
 
 import {
   cardDropPlacement,
@@ -173,14 +174,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const boardRefreshRequestRef = useRef(0);
   const lastLocalBoardSelectionChangedAtRef = useRef(0);
 
-  const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
-    const headers = new Headers(init?.headers);
-    if (init?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    const response = await fetch(`${apiBase}${path}`, { ...init, headers });
-    if (!response.ok) throw new Error(await response.text() || `Request failed (${response.status})`);
-    if (response.status === 204) return undefined as T;
-    return response.json() as Promise<T>;
-  }, [apiBase]);
+  const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
 
   useEffect(() => {
     let cancelled = false;
@@ -215,17 +209,16 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const resolveActiveNodesFolderID = useCallback(async (): Promise<string> => {
     const currentActiveFolder = explorerFolders.find((folder) => folder.folder_kind === "node" && folder.system_key === "active_nodes");
     if (currentActiveFolder?.folder_id) return currentActiveFolder.folder_id;
-    const response = await fetch(`${apiBase}/v1/company-explorer/folders?company_id=${encodeURIComponent(companyID)}&folder_kind=node`);
-    if (!response.ok) return "";
-    const payload = await response.json() as { folders?: CompanyExplorerFolder[] };
-    const folders = payload.folders ?? [];
+    const payload = await requestJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?company_id=${encodeURIComponent(companyID)}&folder_kind=node`).catch(() => null);
+    const folders = payload?.folders ?? [];
+    if (folders.length === 0) return "";
     setExplorerFolders((previous) => {
       const byID = new Map(previous.map((folder) => [folder.folder_id, folder]));
       for (const folder of folders) byID.set(folder.folder_id, folder);
       return Array.from(byID.values());
     });
     return folders.find((folder) => folder.folder_kind === "node" && folder.system_key === "active_nodes")?.folder_id ?? "";
-  }, [apiBase, companyID, explorerFolders]);
+  }, [companyID, explorerFolders, requestJSON]);
 
   useEffect(() => {
     setActiveBoardID(frameBoardID);
@@ -507,26 +500,20 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     try {
       const [nextBoards, folderPayload, folderItemPayload] = await Promise.all([
         listKanbanBoards(apiBase, companyID, 200),
-        fetch(`${apiBase}/v1/company-explorer/folders?company_id=${encodeURIComponent(companyID)}`),
-        fetch(`${apiBase}/v1/company-explorer/folder-items?company_id=${encodeURIComponent(companyID)}&item_type=kanban`),
+        requestJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?company_id=${encodeURIComponent(companyID)}`).catch(() => null),
+        requestJSON<{ folder_items?: CompanyExplorerFolderItem[] }>(`/v1/company-explorer/folder-items?company_id=${encodeURIComponent(companyID)}&item_type=kanban`).catch(() => null),
       ]);
       const sortedBoards = sortKanbanBoards(nextBoards);
       boardsRef.current = sortedBoards;
       setBoards(sortedBoards);
-      if (folderPayload.ok) {
-        const parsed = await folderPayload.json() as { folders?: CompanyExplorerFolder[] };
-        setExplorerFolders(parsed.folders ?? []);
-      }
-      if (folderItemPayload.ok) {
-        const parsed = await folderItemPayload.json() as { folder_items?: CompanyExplorerFolderItem[] };
-        setExplorerFolderItems(parsed.folder_items ?? []);
-      }
+      if (folderPayload) setExplorerFolders(folderPayload.folders ?? []);
+      if (folderItemPayload) setExplorerFolderItems(folderItemPayload.folder_items ?? []);
     } catch {
       setError("Kanban board list API unavailable");
     } finally {
       setBoardsLoading(false);
     }
-  }, [apiBase, companyID]);
+  }, [apiBase, companyID, requestJSON]);
 
   const saveCurrentBoardView = useCallback(async () => {
     setError("");

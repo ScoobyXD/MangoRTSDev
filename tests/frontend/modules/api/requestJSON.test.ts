@@ -1,0 +1,117 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { requestJSON } from "../../../../frontend/src/modules/api/requestJSON.js";
+
+function jsonResponse(payload: unknown, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers);
+  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  return new Response(JSON.stringify(payload), { ...init, headers });
+}
+
+test("requestJSON serializes json bodies and default JSON headers", async () => {
+  let seenURL = "";
+  let seenBody: BodyInit | null | undefined;
+  let seenHeaders = new Headers();
+  const payload = await requestJSON<{ ok: boolean }>("https://api.example.test", "/v1/widgets", {
+    auth: false,
+    fetchImpl: async (input, init) => {
+      seenURL = input.toString();
+      seenBody = init?.body;
+      seenHeaders = new Headers(init?.headers);
+      return jsonResponse({ ok: true });
+    },
+    json: { title: "Alpha" },
+    method: "POST",
+  });
+
+  assert.deepEqual(payload, { ok: true });
+  assert.equal(seenURL, "https://api.example.test/v1/widgets");
+  assert.equal(seenBody, JSON.stringify({ title: "Alpha" }));
+  assert.equal(seenHeaders.get("Content-Type"), "application/json");
+  assert.equal(seenHeaders.get("Accept"), "application/json");
+});
+
+test("requestJSON aborts requests when timeout elapses", async () => {
+  let sawAbort = false;
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    const signal = init?.signal;
+    if (!signal) throw new Error("missing_abort_signal");
+    return new Promise<Response>((_resolve, reject) => {
+      signal.addEventListener("abort", () => {
+        sawAbort = true;
+        reject(signal.reason);
+      }, { once: true });
+    });
+  };
+
+  await assert.rejects(
+    requestJSON("https://api.example.test", "/v1/slow", { auth: false, fetchImpl, timeoutMs: 1 }),
+    (error: unknown) => error instanceof DOMException && error.name === "TimeoutError",
+  );
+  assert.equal(sawAbort, true);
+});
+
+test("requestJSON parses structured API errors", async () => {
+  await assert.rejects(
+    requestJSON("https://api.example.test", "/v1/widgets", {
+      auth: false,
+      fetchImpl: async () => jsonResponse({ error: "widget_not_found" }, { status: 404, statusText: "Not Found" }),
+    }),
+    /widget_not_found/,
+  );
+});
+
+test("requestJSON returns undefined for 204 responses", async () => {
+  const payload = await requestJSON<unknown>("https://api.example.test", "/v1/widgets/1", {
+    auth: false,
+    fetchImpl: async () => new Response(null, { status: 204 }),
+  });
+
+  assert.equal(payload, undefined);
+});
+
+test("requestJSON adds bearer auth when an API token is available", async () => {
+  let tokenRequests = 0;
+  let authorizationHeader = "";
+  await requestJSON("https://api.example.test", "/v1/widgets", {
+    fetchImpl: async (_input, init) => {
+      authorizationHeader = new Headers(init?.headers).get("Authorization") ?? "";
+      return jsonResponse({ ok: true });
+    },
+    getAccessToken: async () => {
+      tokenRequests += 1;
+      return "access-token-1";
+    },
+  });
+
+  assert.equal(tokenRequests, 1);
+  assert.equal(authorizationHeader, "Bearer access-token-1");
+});
+
+test("requestJSON preserves caller Authorization headers", async () => {
+  let tokenRequests = 0;
+  let authorizationHeader = "";
+  await requestJSON("https://api.example.test", "/v1/widgets", {
+    fetchImpl: async (_input, init) => {
+      authorizationHeader = new Headers(init?.headers).get("Authorization") ?? "";
+      return jsonResponse({ ok: true });
+    },
+    getAccessToken: async () => {
+      tokenRequests += 1;
+      return "access-token-1";
+    },
+    headers: { Authorization: "Bearer caller-token" },
+  });
+
+  assert.equal(tokenRequests, 0);
+  assert.equal(authorizationHeader, "Bearer caller-token");
+});
+
+test("requestJSON treats future 304 responses as empty successful reads", async () => {
+  const payload = await requestJSON<unknown>("https://api.example.test", "/v1/widgets", {
+    auth: false,
+    fetchImpl: async () => new Response(null, { status: 304 }),
+  });
+
+  assert.equal(payload, undefined);
+});

@@ -49,6 +49,7 @@ import { buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findC
 import { useCompanyExplorerFolderShares } from "./useCompanyExplorerFolderShares";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
+import { createRequestJSON } from "../api/requestJSON";
 import {
   buildDeleteConfirmationSummary,
   findProtectedSystemFolderInDeleteTargets,
@@ -581,22 +582,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     if (Math.abs(viewport.scrollTop - nextScrollTop) > 1) viewport.scrollTop = nextScrollTop;
   }, [treeRows.length, treeScrollTop, useParentScroll]);
 
-  const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
-    const headers = new Headers(init?.headers);
-    if (init?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    const response = await fetch(`${apiBase}${path}`, { ...init, headers });
-    if (!response.ok) {
-      let reason = `request_failed_${response.status}`;
-      try {
-        const payload = await response.json();
-        if (payload?.error) reason = payload.error;
-      } catch {
-        // keep status fallback
-      }
-      throw new Error(reason);
-    }
-    return response.json() as Promise<T>;
-  }, [apiBase]);
+  const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
 
   const {
     closeFolderShareDialog,

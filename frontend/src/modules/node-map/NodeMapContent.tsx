@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MINI_GRID, NODE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, NODE_H, NODE_W, NodeDetails, NodeDirection, NodePosition, NodeRecord, NodeRelationship, PersistedMapPosition, RelationshipAnchor, buildPlusGridBackgroundStyle, clamp, getNodeTitle, persistedMapPositionsToNodePositions, reconcileNodeMapPositions, resolveOpenNodeMapPosition, snapToGrid, trimOrEmpty } from "./shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED, EVENT_NODE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_SELECTION_UPDATED } from "./eventbus";
 import { hasExplicitExplorerSelectionContext, hasPendingContextStorageUpdate, nextLocalContextSequence, type ContextMutationEnvelope } from "../contextSyncContract";
@@ -23,6 +23,7 @@ import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStor
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
+import { createRequestJSON } from "../api/requestJSON";
 
 type NodeMapEntityBatchResponse = {
   entity_mappings?: Array<{ client_id: string; entity_id: string }>;
@@ -370,36 +371,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
   }, [canvasSize.height, canvasSize.width, mapScope, nodePositions, nodeSizes, nodes, allNodes, zoom]);
 
   // Shared API request helper for node CRUD, details, and relationship operations.
-  const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
-    const headers = new Headers(init?.headers);
-    // Avoid setting Content-Type on GET/HEAD requests; this reduces cross-origin preflights.
-    if (init?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    const response = await fetch(`${apiBase}${path}`, {
-      ...init,
-      headers,
-    });
-
-    if (!response.ok) {
-      let reason = `request_failed_${response.status}`;
-      try {
-        const payload = await response.json();
-        if (payload?.error) reason = payload.error;
-      } catch {
-        try {
-          const fallbackText = (await response.text()).trim();
-          if (fallbackText) reason = `${reason}:${fallbackText.slice(0, 120)}`;
-        } catch {
-          // no-op
-        }
-      }
-      throw new Error(reason);
-    }
-
-    if (response.status === 204) {
-      return {} as T;
-    }
-    return response.json() as Promise<T>;
-  }, [apiBase]);
+  const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
 
   const applyServerMapPositions = useNodeMapGraphPersistence({
     companyID,

@@ -20,7 +20,7 @@ import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../no
 import { buildLinkedNodePayloadFromSourceSide } from "../node-map/relationshipProjection";
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches } from "../logic-gate-map/LogicGateRecordStore";
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
-import { sanitizeAPIErrorMessage } from "../api/requestJSON";
+import { createRequestJSON } from "../api/requestJSON";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
 import { getEditorDocumentIsolationState, type EditorRelatedNodeCreationKind, type EditorTabID } from "./editorTabs";
@@ -370,14 +370,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     });
   }, []);
 
-  const requestJSON = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
-    const headers = new Headers(init?.headers);
-    if (init?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    const response = await fetch(`${apiBase}${path}`, { ...init, headers });
-    if (!response.ok) throw new Error(sanitizeAPIErrorMessage(response.status, response.statusText, await response.text()));
-    if (response.status === 204) return undefined as T;
-    return response.json() as Promise<T>;
-  }, [apiBase]);
+  const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
 
   useEffect(() => {
     let cancelled = false;

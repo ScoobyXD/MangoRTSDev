@@ -1,13 +1,27 @@
+import { getApiAccessToken } from "../../auth/cognitoAuth.js";
+
 export type RequestJSONInit = RequestInit & {
   json?: unknown;
   timeoutMs?: number;
+  auth?: boolean;
+  getAccessToken?: () => Promise<string>;
+  fetchImpl?: typeof fetch;
 };
+
+export type BoundRequestJSON = <T>(path: string, init?: RequestJSONInit) => Promise<T>;
 
 const DEFAULT_API_TIMEOUT_MS = 15_000;
 const MAX_API_ERROR_MESSAGE_CHARS = 280;
 
 export async function requestJSON<T>(apiBase: string, path: string, init: RequestJSONInit = {}): Promise<T> {
-  const { json, timeoutMs = DEFAULT_API_TIMEOUT_MS, ...requestInit } = init;
+  const {
+    auth = true,
+    fetchImpl = globalThis.fetch.bind(globalThis),
+    getAccessToken = getApiAccessToken,
+    json,
+    timeoutMs = DEFAULT_API_TIMEOUT_MS,
+    ...requestInit
+  } = init;
   const headers = new Headers(requestInit.headers);
   let body = requestInit.body;
   if (json !== undefined) {
@@ -17,16 +31,25 @@ export async function requestJSON<T>(apiBase: string, path: string, init: Reques
     headers.set("Content-Type", "application/json");
   }
   if (!headers.has("Accept")) headers.set("Accept", "application/json");
+  if (auth && !headers.has("Authorization")) {
+    const token = await getAccessToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+  }
 
   const { signal, cleanup } = timeoutSignal(requestInit.signal, timeoutMs);
   try {
-    const response = await fetch(`${apiBase}${path}`, { ...requestInit, headers, body, signal });
+    const response = await fetchImpl(`${apiBase}${path}`, { ...requestInit, headers, body, signal });
+    if (response.status === 304) return undefined as T;
     if (!response.ok) throw new Error(sanitizeAPIErrorMessage(response.status, response.statusText, await response.text()));
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
   } finally {
     cleanup();
   }
+}
+
+export function createRequestJSON(apiBase: string): BoundRequestJSON {
+  return <T>(path: string, init?: RequestJSONInit): Promise<T> => requestJSON<T>(apiBase, path, init);
 }
 
 function timeoutSignal(signal: AbortSignal | null | undefined, timeoutMs: number): { signal?: AbortSignal; cleanup: () => void } {
