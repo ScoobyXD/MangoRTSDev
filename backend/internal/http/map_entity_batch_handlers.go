@@ -170,7 +170,7 @@ func buildMapEntityBatchInput(
 
 func publishMapEntityBatchEvents(s *Server, result store.MapEntityBatchResult) {
 	for _, item := range result.FolderItems {
-		s.publishWorkspaceEvent(result.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_item": item})
+		s.publishWorkspaceEvent(result.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_id": item.FolderID, "item_type": item.ItemType, "item_id": item.ItemID, "folder_item": item})
 	}
 	for _, item := range result.Nodes {
 		s.publishWorkspaceEvent(result.CompanyID, "node_created", map[string]any{"node_id": item.NodeID, "node": item})

@@ -90,7 +90,7 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_created", map[string]any{"folder_id": item.FolderID, "folder": item})
+	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_created", map[string]any{"folder_id": item.FolderID, "folder_kind": item.FolderKind, "folder": item})
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -198,7 +198,7 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, "company_explorer_folder_update_required")
 			return
 		}
-		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_updated", map[string]any{"folder_id": item.FolderID, "folder": item})
+		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_updated", map[string]any{"folder_id": item.FolderID, "folder_kind": item.FolderKind, "folder": item})
 		writeJSON(w, http.StatusOK, item)
 		return
 	}
@@ -297,7 +297,7 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 		writeError(w, http.StatusInternalServerError, "failed_to_update_shared_inbox_raci")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "communications_shared_inbox_raci_updated", map[string]any{"folder_id": folderID, "raci_assignments": assignments})
+	s.publishWorkspaceEvent(req.CompanyID, "communications_shared_inbox_raci_updated", map[string]any{"folder_id": folderID, "folder_kind": "communications", "raci_assignments": assignments})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"company_id":       req.CompanyID,
 		"folder_id":        folderID,
@@ -696,7 +696,7 @@ func (s *Server) publishCompanyExplorerDeletedTargets(companyID string, targets 
 	for _, target := range targets {
 		switch target.Kind {
 		case "folder":
-			s.publishWorkspaceEvent(companyID, "company_explorer_folder_deleted", map[string]any{"folder_id": target.ID})
+			s.publishWorkspaceEvent(companyID, "company_explorer_folder_deleted", map[string]any{"folder_id": target.ID, "folder_kind": target.FolderKind})
 		case "node":
 			s.publishWorkspaceEvent(companyID, "node_deleted", map[string]any{"node_id": target.ID})
 		case "logic_gate":
@@ -758,7 +758,7 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 			writeError(w, http.StatusInternalServerError, "failed_to_assign_company_explorer_folder_item")
 			return
 		}
-		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_item": item})
+		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_id": item.FolderID, "item_type": item.ItemType, "item_id": item.ItemID, "folder_item": item})
 		for _, relationshipID := range deletedRelationshipIDs {
 			if req.ItemType == "node" {
 				s.publishWorkspaceEvent(req.CompanyID, "relationship_deleted", map[string]any{"node_relationship_id": relationshipID})
@@ -836,7 +836,7 @@ func (s *Server) handleCompanyExplorerFolderItemsBatch(w http.ResponseWriter, r 
 		return
 	}
 	for _, item := range items {
-		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_item": item})
+		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_id": item.FolderID, "item_type": item.ItemType, "item_id": item.ItemID, "folder_item": item})
 	}
 	for _, result := range deleted {
 		for _, relationshipID := range result.RelationshipIDs {

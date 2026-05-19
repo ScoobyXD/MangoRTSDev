@@ -110,15 +110,55 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) workspaceSnapshotETag(r *http.Request, companyID, scope string) (string, error) {
-	sequence, err := s.repo.CurrentDomainEventSequence(store.DomainEventStreamQuery{
-		CompanyID:  companyID,
-		StreamType: workspaceDomainStreamType,
-		StreamID:   companyID,
-	})
-	if err != nil {
-		return "", err
+	return s.workspaceEventETag(r, companyID, "workspace-snapshot:"+scope, workspaceSnapshotVersionQueries(r, scope))
+}
+
+func workspaceSnapshotVersionQueries(r *http.Request, scope string) []store.DomainEventStreamQuery {
+	switch scope {
+	case "node_map":
+		return []store.DomainEventStreamQuery{
+			workspaceEventQuery(nodeListWorkspaceEventTypes...),
+			workspaceEventQuery(nodeRelationshipWorkspaceEventTypes...),
+			workspaceEventQuery(nodeMapPositionWorkspaceEventTypes...),
+			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("node")),
+			workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("node")),
+		}
+	case "logic_gate_map":
+		return []store.DomainEventStreamQuery{
+			workspaceEventQuery(logicGateListWorkspaceEventTypes...),
+			workspaceEventQuery(logicGateRelationshipWorkspaceEventTypes...),
+			workspaceEventQuery(logicGateMapPositionWorkspaceEventTypes...),
+			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("logic_gate")),
+			workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("logic_gate")),
+		}
+	case "company_explorer":
+		folderKind := strings.TrimSpace(r.URL.Query().Get("folder_kind"))
+		queries := []store.DomainEventStreamQuery{
+			workspaceEventQuery(nodeListWorkspaceEventTypes...),
+			workspaceEventQuery(logicGateListWorkspaceEventTypes...),
+			workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("node")),
+			workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("logic_gate")),
+		}
+		if folderKind == "" {
+			for _, kind := range []string{"node", "logic_gate"} {
+				queries = append(queries, workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload(kind)))
+			}
+		} else {
+			queries = append(queries, workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload(folderKind)))
+		}
+		return queries
+	case "kanban":
+		boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
+		if boardID == "" {
+			return nil
+		}
+		return []store.DomainEventStreamQuery{
+			workspaceEventQueryPayload(kanbanColumnWorkspaceEventTypes, boardIDPayload(boardID)),
+			workspaceEventQueryPayload(kanbanCardWorkspaceEventTypes, boardIDPayload(boardID)),
+		}
+	default:
+		return nil
 	}
-	return strongETagFromString("workspace-snapshot:" + companyID + ":" + scope + ":" + r.URL.Query().Encode() + ":" + strconv.FormatInt(sequence, 10)), nil
 }
 func (s *Server) handleScopedWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, scope, etag string) {
 	switch scope {
@@ -298,7 +338,7 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 		}
 	} else {
 		if folderKind == "" {
-			for _, kind := range []string{"node", "logic_gate", "communications"} {
+			for _, kind := range []string{"node", "logic_gate"} {
 				items, listErr := s.repo.ListCompanyExplorerFolders(companyID, kind)
 				if listErr != nil {
 					err = listErr

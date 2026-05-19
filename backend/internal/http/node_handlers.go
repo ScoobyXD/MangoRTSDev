@@ -18,12 +18,22 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
+		etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "nodes", []store.DomainEventStreamQuery{
+			workspaceEventQuery(nodeListWorkspaceEventTypes...),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
+			return
+		}
+		if notModified {
+			return
+		}
 		items, err := s.repo.ListNodes(companyID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
 			return
 		}
-		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"nodes": items})
+		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"nodes": items}, etag)
 		return
 	}
 

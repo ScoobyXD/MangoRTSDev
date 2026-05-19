@@ -44,13 +44,23 @@ func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 			}
 			query.AssignedUserID = actor.User.UserID
 		}
+		etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "logic-gates", []store.DomainEventStreamQuery{
+			workspaceEventQuery(logicGateListWorkspaceEventTypes...),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
+			return
+		}
+		if notModified {
+			return
+		}
 		if query.Search != "" || query.AssignedUserID != "" || query.Limit > 0 {
 			items, err := s.repo.QueryLogicGates(companyID, query)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_query_logic_gates")
 				return
 			}
-			writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"logic_gates": items})
+			writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"logic_gates": items}, etag)
 			return
 		}
 		items, err := s.repo.ListLogicGates(companyID)
@@ -58,7 +68,7 @@ func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
 			return
 		}
-		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"logic_gates": items})
+		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"logic_gates": items}, etag)
 		return
 	}
 
