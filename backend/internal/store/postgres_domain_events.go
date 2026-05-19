@@ -48,8 +48,7 @@ func scanDomainEvent(row interface{ Scan(dest ...any) error }) (domain.DomainEve
 	return item, nil
 }
 
-func (r *PostgresRepo) AppendDomainEvent(input DomainEventInput) (domain.DomainEvent, error) {
-	ctx := context.Background()
+func normalizePostgresDomainEventInput(input DomainEventInput) (DomainEventInput, []byte, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.StreamType = strings.TrimSpace(input.StreamType)
 	input.StreamID = strings.TrimSpace(input.StreamID)
@@ -57,19 +56,39 @@ func (r *PostgresRepo) AppendDomainEvent(input DomainEventInput) (domain.DomainE
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	if input.CompanyID == "" || input.StreamType == "" || input.StreamID == "" || input.Type == "" {
-		return domain.DomainEvent{}, ErrInvalid
+		return DomainEventInput{}, nil, ErrInvalid
 	}
 
 	payloadBytes, err := json.Marshal(cloneDomainEventPayload(input.Payload))
 	if err != nil {
-		return domain.DomainEvent{}, err
+		return DomainEventInput{}, nil, err
 	}
+	return input, payloadBytes, nil
+}
 
+func (r *PostgresRepo) AppendDomainEvent(input DomainEventInput) (domain.DomainEvent, error) {
+	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.DomainEvent{}, err
 	}
 	defer tx.Rollback()
+
+	item, err := r.appendDomainEventTx(ctx, tx, input)
+	if err != nil {
+		return domain.DomainEvent{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.DomainEvent{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) appendDomainEventTx(ctx context.Context, tx *sql.Tx, input DomainEventInput) (domain.DomainEvent, error) {
+	input, payloadBytes, err := normalizePostgresDomainEventInput(input)
+	if err != nil {
+		return domain.DomainEvent{}, err
+	}
 
 	if _, err := tx.ExecContext(ctx,
 		`select pg_advisory_xact_lock(hashtext($1), hashtext($2 || ':' || $3))`,
@@ -78,7 +97,7 @@ func (r *PostgresRepo) AppendDomainEvent(input DomainEventInput) (domain.DomainE
 		return domain.DomainEvent{}, err
 	}
 
-	item, err := scanDomainEvent(tx.QueryRowContext(ctx, `
+	return scanDomainEvent(tx.QueryRowContext(ctx, `
 with next_sequence as (
   select coalesce(max(sequence), 0) + 1 as sequence
   from domain_events
@@ -97,13 +116,6 @@ do update set idempotency_key=domain_events.idempotency_key
 returning `+domainEventSelectColumns,
 		newUUIDv7String(), input.CompanyID, input.ActorUserID, input.StreamType, input.StreamID, input.Type, input.IdempotencyKey, string(payloadBytes),
 	))
-	if err != nil {
-		return domain.DomainEvent{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.DomainEvent{}, err
-	}
-	return item, nil
 }
 
 func (r *PostgresRepo) ListPendingDomainEvents(limit int) ([]domain.DomainEvent, error) {

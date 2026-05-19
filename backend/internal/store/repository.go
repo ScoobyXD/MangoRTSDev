@@ -71,20 +71,25 @@ type CommunicationsRepository interface {
 type WorkGraphRepository interface {
 	CreateNode(companyID, title string) (domain.Node, error)
 	CreateNodeWithAssignee(companyID, title, assigneeUserID string) (domain.Node, error)
+	CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title, assigneeUserID string) (domain.Node, domain.DomainEvent, error)
 	UpdateNode(input UpdateNodeInput) (domain.Node, error)
+	UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.Node, domain.DomainEvent, error)
 	UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error)
 	ListNodes(companyID string) ([]domain.Node, error)
 	ListNodesInFolderSubtree(companyID, folderID string) ([]domain.Node, error)
 	ListNodeRelationships(companyID string) ([]domain.NodeRelationship, error)
 	ListNodeRelationshipsInFolderSubtree(companyID, folderID string) ([]domain.NodeRelationship, error)
 	DeleteNodeRelationship(companyID, relationshipID string) error
+	DeleteNodeRelationshipAndWorkspaceEvent(companyID, relationshipID string) (domain.DomainEvent, error)
 	GetNode(companyID, nodeID string) (domain.Node, error)
 	DeleteNode(companyID, nodeID string) error
+	DeleteNodeAndWorkspaceEvent(companyID, nodeID string) (domain.DomainEvent, error)
 	GetNodeDetails(companyID, nodeID string) (domain.NodeDetails, error)
 	AddNodeInformation(companyID, nodeID, infoType, information, informationID string) (domain.NodeInformation, error)
 	ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error)
 	DeleteNodeProjection(companyID, nodeID, informationID string) error
 	CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error)
+	CreateNodeRelationshipAndWorkspaceEvent(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, domain.DomainEvent, error)
 }
 
 type LogicGateRepository interface {

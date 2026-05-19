@@ -616,11 +616,16 @@ func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[str
 		log.Printf("failed to append workspace domain event company_id=%s type=%s: %v", companyID, eventType, err)
 		return
 	}
+	s.publishCommittedWorkspaceEvent(event)
+}
+
+func (s *Server) publishCommittedWorkspaceEvent(event domain.DomainEvent) {
 	payload, err := json.Marshal(workspaceEventEnvelopeFromDomainEvent(event))
 	if err != nil {
+		log.Printf("failed to marshal committed workspace event company_id=%s sequence=%d event_id=%s: %v", event.CompanyID, event.Sequence, event.EventID, err)
 		return
 	}
-	s.hub.publish(companyID, payload)
+	s.hub.publish(event.CompanyID, payload)
 }
 
 func workspaceEventEnvelopeFromDomainEvent(event domain.DomainEvent) workspaceEventEnvelope {

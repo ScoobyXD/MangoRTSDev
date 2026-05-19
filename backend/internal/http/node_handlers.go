@@ -55,7 +55,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		if actor, ok := authenticatedActor(r); ok && strings.TrimSpace(actor.User.UserID) != "" {
 			assigneeUserID = strings.TrimSpace(actor.User.UserID)
 		}
-		item, err := s.repo.CreateNodeWithAssignee(req.CompanyID, strings.TrimSpace(req.Title), assigneeUserID)
+		item, event, err := s.repo.CreateNodeWithAssigneeAndWorkspaceEvent(req.CompanyID, strings.TrimSpace(req.Title), assigneeUserID)
 		if errors.Is(err, store.ErrAssigneeNotInCompany) {
 			writeError(w, http.StatusBadRequest, "assignee_user_not_in_company")
 			return
@@ -64,7 +64,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_create_node")
 			return
 		}
-		s.publishWorkspaceEvent(req.CompanyID, "node_created", map[string]any{"node_id": item.NodeID, "node": item})
+		s.publishCommittedWorkspaceEvent(event)
 		writeJSON(w, http.StatusCreated, item)
 		return
 	}
@@ -211,7 +211,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			beforeNode, beforeNodeErr := s.repo.GetNode(input.CompanyID, nodeID)
-			item, err := s.repo.UpdateNode(input)
+			item, event, err := s.repo.UpdateNodeAndWorkspaceEvent(input)
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "node_not_found")
 				return
@@ -228,7 +228,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed_to_update_node")
 				return
 			}
-			s.publishWorkspaceEvent(input.CompanyID, "node_updated", map[string]any{"node_id": nodeID, "node": item})
+			s.publishCommittedWorkspaceEvent(event)
 			if beforeNodeErr == nil {
 				s.recordNodeUpdateNotifications(r, input, beforeNode, item)
 			}
@@ -241,14 +241,15 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "company_id_required")
 				return
 			}
-			if err := s.repo.DeleteNode(companyID, nodeID); errors.Is(err, store.ErrNotFound) {
+			event, err := s.repo.DeleteNodeAndWorkspaceEvent(companyID, nodeID)
+			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "node_not_found")
 				return
 			} else if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_delete_node")
 				return
 			}
-			s.publishWorkspaceEvent(companyID, "node_deleted", map[string]any{"node_id": nodeID})
+			s.publishCommittedWorkspaceEvent(event)
 			writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 			return
 		}

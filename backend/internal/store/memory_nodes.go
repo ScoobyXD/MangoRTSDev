@@ -14,7 +14,27 @@ func (r *MemoryRepo) CreateNode(companyID, title string) (domain.Node, error) {
 func (r *MemoryRepo) CreateNodeWithAssignee(companyID, title, assigneeUserID string) (domain.Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.createNodeWithAssigneeLocked(companyID, title, assigneeUserID)
+}
 
+func (r *MemoryRepo) CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title, assigneeUserID string) (domain.Node, domain.DomainEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	snapshot := r.snapshotNodeGraphEventStateLocked()
+	item, err := r.createNodeWithAssigneeLocked(companyID, title, assigneeUserID)
+	if err != nil {
+		r.restoreNodeGraphEventStateLocked(snapshot)
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	event, err := r.appendDomainEventLocked(nodeCreatedWorkspaceEventInput(item))
+	if err != nil {
+		r.restoreNodeGraphEventStateLocked(snapshot)
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	return item, event, nil
+}
+
+func (r *MemoryRepo) createNodeWithAssigneeLocked(companyID, title, assigneeUserID string) (domain.Node, error) {
 	assigneeUserID = strings.TrimSpace(assigneeUserID)
 	if assigneeUserID != "" {
 		if _, ok := r.memberships[membershipKey(companyID, assigneeUserID)]; !ok {
@@ -126,6 +146,27 @@ func (r *MemoryRepo) withNodeReadModelLocked(node domain.Node) domain.Node {
 func (r *MemoryRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.updateNodeLocked(input)
+}
+
+func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.Node, domain.DomainEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	snapshot := r.snapshotNodeGraphEventStateLocked()
+	item, err := r.updateNodeLocked(input)
+	if err != nil {
+		r.restoreNodeGraphEventStateLocked(snapshot)
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	event, err := r.appendDomainEventLocked(nodeUpdatedWorkspaceEventInput(item))
+	if err != nil {
+		r.restoreNodeGraphEventStateLocked(snapshot)
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	return item, event, nil
+}
+
+func (r *MemoryRepo) updateNodeLocked(input UpdateNodeInput) (domain.Node, error) {
 	k := key(input.CompanyID, input.NodeID)
 	node, ok := r.nodes[k]
 	if !ok {
@@ -268,6 +309,22 @@ func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
 	defer r.mu.Unlock()
 
 	return r.deleteNodeLocked(companyID, nodeID)
+}
+
+func (r *MemoryRepo) DeleteNodeAndWorkspaceEvent(companyID, nodeID string) (domain.DomainEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	snapshot := r.snapshotNodeGraphEventStateLocked()
+	if err := r.deleteNodeLocked(companyID, nodeID); err != nil {
+		r.restoreNodeGraphEventStateLocked(snapshot)
+		return domain.DomainEvent{}, err
+	}
+	event, err := r.appendDomainEventLocked(nodeDeletedWorkspaceEventInput(companyID, nodeID))
+	if err != nil {
+		r.restoreNodeGraphEventStateLocked(snapshot)
+		return domain.DomainEvent{}, err
+	}
+	return event, nil
 }
 
 func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
@@ -448,7 +505,27 @@ func (r *MemoryRepo) DeleteNodeProjection(companyID, nodeID, informationID strin
 func (r *MemoryRepo) CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.createNodeRelationshipLocked(companyID, nodeIDA, nodeIDB, aPosition, bPosition)
+}
 
+func (r *MemoryRepo) CreateNodeRelationshipAndWorkspaceEvent(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, domain.DomainEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	snapshot := r.snapshotNodeGraphEventStateLocked()
+	item, err := r.createNodeRelationshipLocked(companyID, nodeIDA, nodeIDB, aPosition, bPosition)
+	if err != nil {
+		r.restoreNodeGraphEventStateLocked(snapshot)
+		return domain.NodeRelationship{}, domain.DomainEvent{}, err
+	}
+	event, err := r.appendDomainEventLocked(relationshipCreatedWorkspaceEventInput(item))
+	if err != nil {
+		r.restoreNodeGraphEventStateLocked(snapshot)
+		return domain.NodeRelationship{}, domain.DomainEvent{}, err
+	}
+	return item, event, nil
+}
+
+func (r *MemoryRepo) createNodeRelationshipLocked(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error) {
 	if _, ok := r.nodes[key(companyID, nodeIDA)]; !ok {
 		return domain.NodeRelationship{}, ErrNotFound
 	}
@@ -472,7 +549,26 @@ func (r *MemoryRepo) CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPositi
 func (r *MemoryRepo) DeleteNodeRelationship(companyID, relationshipID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.deleteNodeRelationshipLocked(companyID, relationshipID)
+}
 
+func (r *MemoryRepo) DeleteNodeRelationshipAndWorkspaceEvent(companyID, relationshipID string) (domain.DomainEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	snapshot := r.snapshotNodeGraphEventStateLocked()
+	if err := r.deleteNodeRelationshipLocked(companyID, relationshipID); err != nil {
+		r.restoreNodeGraphEventStateLocked(snapshot)
+		return domain.DomainEvent{}, err
+	}
+	event, err := r.appendDomainEventLocked(relationshipDeletedWorkspaceEventInput(companyID, relationshipID))
+	if err != nil {
+		r.restoreNodeGraphEventStateLocked(snapshot)
+		return domain.DomainEvent{}, err
+	}
+	return event, nil
+}
+
+func (r *MemoryRepo) deleteNodeRelationshipLocked(companyID, relationshipID string) error {
 	items := r.nodeRels[companyID]
 	filtered := make([]domain.NodeRelationship, 0, len(items))
 	deleted := false

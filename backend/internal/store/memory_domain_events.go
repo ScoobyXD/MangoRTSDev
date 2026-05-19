@@ -20,6 +20,12 @@ func domainEventMemoryKey(companyID, eventID string) string {
 }
 
 func (r *MemoryRepo) AppendDomainEvent(input DomainEventInput) (domain.DomainEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.appendDomainEventLocked(input)
+}
+
+func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.DomainEvent, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.StreamType = strings.TrimSpace(input.StreamType)
 	input.StreamID = strings.TrimSpace(input.StreamID)
@@ -29,9 +35,9 @@ func (r *MemoryRepo) AppendDomainEvent(input DomainEventInput) (domain.DomainEve
 	if input.CompanyID == "" || input.StreamType == "" || input.StreamID == "" || input.Type == "" {
 		return domain.DomainEvent{}, ErrInvalid
 	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	if r.domainEventAppendErr != nil {
+		return domain.DomainEvent{}, r.domainEventAppendErr
+	}
 
 	if input.IdempotencyKey != "" {
 		for _, existing := range r.domainEvents {

@@ -67,7 +67,7 @@ func (s *Server) handleNodeRelationships(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	item, err := s.repo.CreateNodeRelationship(req.CompanyID, req.NodeIDA, req.NodeIDB, req.APosition, req.BPosition)
+	item, event, err := s.repo.CreateNodeRelationshipAndWorkspaceEvent(req.CompanyID, req.NodeIDA, req.NodeIDB, req.APosition, req.BPosition)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "node_not_found")
 		return
@@ -76,7 +76,7 @@ func (s *Server) handleNodeRelationships(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_create_node_relationship")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "relationship_created", map[string]any{"node_relationship_id": item.NodeRelationshipID, "node_id_a": item.NodeIDA, "node_id_b": item.NodeIDB, "relationship": item})
+	s.publishCommittedWorkspaceEvent(event)
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -105,13 +105,14 @@ func (s *Server) handleNodeRelationshipByID(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	if err := s.repo.DeleteNodeRelationship(companyID, relationshipID); errors.Is(err, store.ErrNotFound) {
+	event, err := s.repo.DeleteNodeRelationshipAndWorkspaceEvent(companyID, relationshipID)
+	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "relationship_not_found")
 		return
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_delete_node_relationship")
 		return
 	}
-	s.publishWorkspaceEvent(companyID, "relationship_deleted", map[string]any{"node_relationship_id": relationshipID})
+	s.publishCommittedWorkspaceEvent(event)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

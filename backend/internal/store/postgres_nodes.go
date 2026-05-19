@@ -148,6 +148,39 @@ func (r *PostgresRepo) CreateNodeWithAssignee(companyID, title, assigneeUserID s
 	}
 	defer tx.Rollback()
 
+	item, err := r.createNodeWithAssigneeTx(ctx, tx, companyID, title, assigneeUserID)
+	if err != nil {
+		return domain.Node{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Node{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title, assigneeUserID string) (domain.Node, domain.DomainEvent, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	defer tx.Rollback()
+
+	item, err := r.createNodeWithAssigneeTx(ctx, tx, companyID, title, assigneeUserID)
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	event, err := r.appendDomainEventTx(ctx, tx, nodeCreatedWorkspaceEventInput(item))
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	return item, event, nil
+}
+
+func (r *PostgresRepo) createNodeWithAssigneeTx(ctx context.Context, tx *sql.Tx, companyID, title, assigneeUserID string) (domain.Node, error) {
 	assigneeUserID = strings.TrimSpace(assigneeUserID)
 	if assigneeUserID != "" {
 		var ok bool
@@ -179,10 +212,11 @@ select exists(
 	if _, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, activeFolder.FolderID, "node", item.NodeID, 0); err != nil {
 		return domain.Node{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return domain.Node{}, err
-	}
-	return r.GetNode(companyID, item.NodeID)
+	return scanNode(tx.QueryRowContext(ctx, `
+select `+nodeSelectColumns+`
+from nodes n
+`+nodeStatusJoin+`
+where n.company_id=$1 and n.node_id=$2`, companyID, item.NodeID))
 }
 
 func (r *PostgresRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {
@@ -193,6 +227,39 @@ func (r *PostgresRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {
 	}
 	defer tx.Rollback()
 
+	item, err := r.updateNodeTx(ctx, tx, input)
+	if err != nil {
+		return domain.Node{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Node{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.Node, domain.DomainEvent, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	defer tx.Rollback()
+
+	item, err := r.updateNodeTx(ctx, tx, input)
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	event, err := r.appendDomainEventTx(ctx, tx, nodeUpdatedWorkspaceEventInput(item))
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	return item, event, nil
+}
+
+func (r *PostgresRepo) updateNodeTx(ctx context.Context, tx *sql.Tx, input UpdateNodeInput) (domain.Node, error) {
 	dueDate := (*string)(nil)
 	if input.DueDate != nil {
 		value := strings.TrimSpace(*input.DueDate)
@@ -227,7 +294,7 @@ select exists(
 			return domain.Node{}, ErrAssigneeNotInCompany
 		}
 	}
-	_, err = tx.ExecContext(ctx, `
+	_, err := tx.ExecContext(ctx, `
 update nodes
 set title = case when $4 then $3 else title end,
     status = case when $6 then nullif($5::text, '') else status end,
@@ -273,9 +340,6 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 		return domain.Node{}, ErrNotFound
 	}
 	if err != nil {
-		return domain.Node{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return domain.Node{}, err
 	}
 	return item, nil
@@ -455,7 +519,41 @@ func (r *PostgresRepo) ListNodeRelationshipsInFolderSubtree(companyID, folderID 
 }
 func (r *PostgresRepo) DeleteNodeRelationship(companyID, relationshipID string) error {
 	ctx := context.Background()
-	deleted, err := r.db.ExecContext(ctx,
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := postgresDeleteNodeRelationshipTx(ctx, tx, companyID, relationshipID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *PostgresRepo) DeleteNodeRelationshipAndWorkspaceEvent(companyID, relationshipID string) (domain.DomainEvent, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.DomainEvent{}, err
+	}
+	defer tx.Rollback()
+
+	if err := postgresDeleteNodeRelationshipTx(ctx, tx, companyID, relationshipID); err != nil {
+		return domain.DomainEvent{}, err
+	}
+	event, err := r.appendDomainEventTx(ctx, tx, relationshipDeletedWorkspaceEventInput(companyID, relationshipID))
+	if err != nil {
+		return domain.DomainEvent{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.DomainEvent{}, err
+	}
+	return event, nil
+}
+
+func postgresDeleteNodeRelationshipTx(ctx context.Context, tx *sql.Tx, companyID, relationshipID string) error {
+	deleted, err := tx.ExecContext(ctx,
 		`delete from node_relationships
 		 where company_id=$1 and node_relationship_id=$2`,
 		companyID, relationshipID,
@@ -499,71 +597,31 @@ func (r *PostgresRepo) DeleteNode(companyID, nodeID string) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx,
-		`delete from node_relationships
-		 where company_id=$1 and (node_id_a=$2 or node_id_b=$2)`,
-		companyID, nodeID,
-	); err != nil {
+	if err := postgresDeleteNodeTx(ctx, tx, companyID, nodeID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from company_explorer_folder_items
-		 where company_id=$1 and item_type='node' and item_id=$2`,
-		companyID, nodeID,
-	); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from kanban_cards
-		 where company_id=$1 and node_id=$2`,
-		companyID, nodeID,
-	); err != nil {
-		return err
-	}
-
-	if _, err := tx.ExecContext(ctx,
-		`delete from node_information
-		 where company_id=$1 and node_id=$2`,
-		companyID, nodeID,
-	); err != nil {
-		return err
-	}
-
-	// Projection rows also reference nodes directly. Remove them before deleting the node row
-	// so FK checks pass for nodes that have editor/node information history.
-	if _, err := tx.ExecContext(ctx,
-		`delete from node_projection_table
-		 where company_id=$1 and node_id=$2`,
-		companyID, nodeID,
-	); err != nil {
-		return err
-	}
-
-	if _, err := tx.ExecContext(ctx,
-		`delete from node_map_positions
-		 where company_id=$1 and node_id=$2`,
-		companyID, nodeID,
-	); err != nil {
-		return err
-	}
-
-	deletedNode, err := tx.ExecContext(ctx,
-		`delete from nodes
-		 where company_id=$1 and node_id=$2`,
-		companyID, nodeID,
-	)
-	if err != nil {
-		return err
-	}
-	affected, err := deletedNode.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return ErrNotFound
-	}
-
 	return tx.Commit()
+}
+
+func (r *PostgresRepo) DeleteNodeAndWorkspaceEvent(companyID, nodeID string) (domain.DomainEvent, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.DomainEvent{}, err
+	}
+	defer tx.Rollback()
+
+	if err := postgresDeleteNodeTx(ctx, tx, companyID, nodeID); err != nil {
+		return domain.DomainEvent{}, err
+	}
+	event, err := r.appendDomainEventTx(ctx, tx, nodeDeletedWorkspaceEventInput(companyID, nodeID))
+	if err != nil {
+		return domain.DomainEvent{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.DomainEvent{}, err
+	}
+	return event, nil
 }
 
 func (r *PostgresRepo) ListNodeMapPositions(companyID string) ([]domain.NodeMapPosition, error) {
@@ -885,6 +943,39 @@ func (r *PostgresRepo) CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosi
 	}
 	defer tx.Rollback()
 
+	item, err := r.createNodeRelationshipTx(ctx, tx, companyID, nodeIDA, nodeIDB, aPosition, bPosition)
+	if err != nil {
+		return domain.NodeRelationship{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.NodeRelationship{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) CreateNodeRelationshipAndWorkspaceEvent(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, domain.DomainEvent, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.NodeRelationship{}, domain.DomainEvent{}, err
+	}
+	defer tx.Rollback()
+
+	item, err := r.createNodeRelationshipTx(ctx, tx, companyID, nodeIDA, nodeIDB, aPosition, bPosition)
+	if err != nil {
+		return domain.NodeRelationship{}, domain.DomainEvent{}, err
+	}
+	event, err := r.appendDomainEventTx(ctx, tx, relationshipCreatedWorkspaceEventInput(item))
+	if err != nil {
+		return domain.NodeRelationship{}, domain.DomainEvent{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.NodeRelationship{}, domain.DomainEvent{}, err
+	}
+	return item, event, nil
+}
+
+func (r *PostgresRepo) createNodeRelationshipTx(ctx context.Context, tx *sql.Tx, companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error) {
 	for _, candidate := range []string{nodeIDA, nodeIDB} {
 		var exists bool
 		if err := tx.QueryRowContext(ctx,
@@ -921,10 +1012,6 @@ func (r *PostgresRepo) CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosi
 		&item.BPosition,
 		&item.CreatedTimestamp,
 	); err != nil {
-		return domain.NodeRelationship{}, err
-	}
-
-	if err := tx.Commit(); err != nil {
 		return domain.NodeRelationship{}, err
 	}
 	return item, nil
