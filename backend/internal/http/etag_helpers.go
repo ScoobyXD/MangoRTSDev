@@ -21,6 +21,7 @@ var (
 	nodeRelationshipWorkspaceEventTypes = []string{
 		"relationship_created",
 		"relationship_deleted",
+		"node_deleted",
 	}
 	logicGateListWorkspaceEventTypes = []string{
 		"logic_gate_created",
@@ -31,6 +32,7 @@ var (
 	logicGateRelationshipWorkspaceEventTypes = []string{
 		"logic_gate_relationship_created",
 		"logic_gate_relationship_deleted",
+		"logic_gate_deleted",
 	}
 	nodeMapPositionWorkspaceEventTypes = []string{
 		"node_map_positions_updated",
@@ -52,12 +54,14 @@ var (
 		"kanban_board_saved",
 		"kanban_board_updated",
 		"kanban_board_deleted",
+		"logic_gate_deleted",
 	}
 	kanbanColumnWorkspaceEventTypes = []string{
 		"kanban_column_created",
 		"kanban_column_updated",
 		"kanban_column_deleted",
 		"kanban_board_deleted",
+		"logic_gate_deleted",
 	}
 	kanbanCardWorkspaceEventTypes = []string{
 		"kanban_card_upserted",
@@ -65,6 +69,8 @@ var (
 		"kanban_card_deleted",
 		"kanban_column_deleted",
 		"kanban_board_deleted",
+		"node_deleted",
+		"logic_gate_deleted",
 	}
 )
 
