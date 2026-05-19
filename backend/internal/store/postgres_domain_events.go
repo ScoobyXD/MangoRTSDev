@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"miraeopus/backend/internal/domain"
+	"sort"
 	"strings"
 )
 
@@ -164,19 +166,41 @@ limit $5`, query.CompanyID, query.StreamType, query.StreamID, query.AfterSequenc
 	return items, rows.Err()
 }
 func (r *PostgresRepo) CurrentDomainEventSequence(query DomainEventStreamQuery) (int64, error) {
-	query.CompanyID = strings.TrimSpace(query.CompanyID)
-	query.StreamType = strings.TrimSpace(query.StreamType)
-	query.StreamID = strings.TrimSpace(query.StreamID)
-	if query.CompanyID == "" || query.StreamType == "" || query.StreamID == "" {
-		return 0, ErrInvalid
+	query, err := normalizeDomainEventStreamQuery(query)
+	if err != nil {
+		return 0, err
 	}
+
+	args := []any{query.CompanyID, query.StreamType, query.StreamID}
+	where := []string{"company_id=$1::uuid", "stream_type=$2", "stream_id=$3"}
+	if len(query.EventTypes) > 0 {
+		eventTypePredicates := make([]string, 0, len(query.EventTypes))
+		for _, eventType := range query.EventTypes {
+			args = append(args, eventType)
+			eventTypePredicates = append(eventTypePredicates, fmt.Sprintf("event_type=$%d", len(args)))
+		}
+		where = append(where, "("+strings.Join(eventTypePredicates, " or ")+")")
+	}
+	if len(query.PayloadEquals) > 0 {
+		keys := make([]string, 0, len(query.PayloadEquals))
+		for key := range query.PayloadEquals {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			args = append(args, key)
+			keyParam := len(args)
+			args = append(args, query.PayloadEquals[key])
+			valueParam := len(args)
+			where = append(where, fmt.Sprintf("payload->>$%d = $%d", keyParam, valueParam))
+		}
+	}
+
 	var sequence int64
-	err := r.db.QueryRowContext(context.Background(), `
+	err = r.db.QueryRowContext(context.Background(), `
 select coalesce(max(sequence), 0)
 from domain_events
-where company_id=$1::uuid
-  and stream_type=$2
-  and stream_id=$3`, query.CompanyID, query.StreamType, query.StreamID).Scan(&sequence)
+where `+strings.Join(where, "\n  and "), args...).Scan(&sequence)
 	return sequence, err
 }
 func (r *PostgresRepo) MarkDomainEventPublished(companyID, eventID string) error {

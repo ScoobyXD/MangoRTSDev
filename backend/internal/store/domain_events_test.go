@@ -115,3 +115,78 @@ func TestMemoryDomainEventsReplayAfterSequence(t *testing.T) {
 		t.Fatalf("replay sequences = %d,%d want 2,3", replay[0].Sequence, replay[1].Sequence)
 	}
 }
+
+func TestMemoryDomainEventsCurrentSequenceFiltersEventType(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+	for _, eventType := range []string{"workspace.snapshot_changed", "workspace.notification_sent", "workspace.snapshot_changed"} {
+		if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: eventType}); err != nil {
+			t.Fatalf("AppendDomainEvent %s: %v", eventType, err)
+		}
+	}
+
+	sequence, err := repo.CurrentDomainEventSequence(DomainEventStreamQuery{
+		CompanyID:  companyID,
+		StreamType: "workspace",
+		StreamID:   companyID,
+		EventTypes: []string{"workspace.notification_sent"},
+	})
+	if err != nil {
+		t.Fatalf("CurrentDomainEventSequence filtered: %v", err)
+	}
+	if sequence != 2 {
+		t.Fatalf("filtered sequence = %d, want 2", sequence)
+	}
+
+	sequence, err = repo.CurrentDomainEventSequence(DomainEventStreamQuery{CompanyID: companyID, StreamType: "workspace", StreamID: companyID})
+	if err != nil {
+		t.Fatalf("CurrentDomainEventSequence unfiltered: %v", err)
+	}
+	if sequence != 3 {
+		t.Fatalf("unfiltered sequence = %d, want 3", sequence)
+	}
+}
+
+func TestMemoryDomainEventsCurrentSequenceFiltersPayloadBoardID(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+	inputs := []DomainEventInput{
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "kanban.card_moved", Payload: map[string]any{"board_id": "board-a"}},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "kanban.card_moved", Payload: map[string]any{"board_id": "board-b"}},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "kanban.column_updated", Payload: map[string]any{"board_id": "board-a"}},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "kanban.card_moved", Payload: map[string]any{"board_id": "board-a"}},
+	}
+	for index, input := range inputs {
+		if _, err := repo.AppendDomainEvent(input); err != nil {
+			t.Fatalf("AppendDomainEvent %d: %v", index, err)
+		}
+	}
+
+	sequence, err := repo.CurrentDomainEventSequence(DomainEventStreamQuery{
+		CompanyID:     companyID,
+		StreamType:    "workspace",
+		StreamID:      companyID,
+		EventTypes:    []string{"kanban.card_moved"},
+		PayloadEquals: map[string]string{"board_id": "board-a"},
+	})
+	if err != nil {
+		t.Fatalf("CurrentDomainEventSequence board filtered: %v", err)
+	}
+	if sequence != 4 {
+		t.Fatalf("board filtered sequence = %d, want 4", sequence)
+	}
+
+	sequence, err = repo.CurrentDomainEventSequence(DomainEventStreamQuery{
+		CompanyID:     companyID,
+		StreamType:    "workspace",
+		StreamID:      companyID,
+		EventTypes:    []string{"kanban.card_moved"},
+		PayloadEquals: map[string]string{"board_id": "board-b"},
+	})
+	if err != nil {
+		t.Fatalf("CurrentDomainEventSequence other board filtered: %v", err)
+	}
+	if sequence != 2 {
+		t.Fatalf("other board filtered sequence = %d, want 2", sequence)
+	}
+}
