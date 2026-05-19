@@ -70,6 +70,8 @@ email:
 Notifications:
 1. Clearing notifications
 2. @ mentions notifications should be its own clickable row on the left hand column below R inbox. and on the right side mention the number of mentions, i click on the box and i see a list, and when i click on one i go to that @ mention, so very similar to the view notificaiton thing already in ACI inbox and R inbox.
+3. Also changing priority on a node does not notify you, but i think it should
+4. Also the ACI inbox doesnt have different colored notifications based on what ACI letter its relevant too? maybe i dont need that. 
 
 RACI:
 1. On the RACI matrixes there is no way to see how the relationships between the different nodes in the logic gate list.
@@ -86,13 +88,16 @@ RACI: (these failed multiple times)
 3. I should be able to click drag nodes from my nodes and all nodes section in ACI/R inbox and drag it to a logic gate in the matrix and drop it in there and it inherits the priority, assigned to of the cell of that logic gate is in the matrix. if we dropped the node into R inbox then the node inherits the status as well of the column it got dropped into
 4. There is an issue with confusion between a node's Person In Charge and the Logic Gate's RACI matrix.
 	a. Right now if i de-assign myself from person in charge for the node, it removes that node from the R inbox. However, the way it works should be still in the R inbox because it's in the logic gate where I am assigned R responsible, so it will just be in my 0 unassigned section instead of disappearing.
-	
+5. On the ACIO and R nodes you need to be able to right click and create node or logic gate OR ADD and node or logic gate.
+	a. anytime i am anywhere, i should be able to right click something and add something to this, or add this to something else. ALWAYS
+6. I think i wrote this already but there needs to be a way to display relationships structures on the ACIO and R nodes.
+
 Nodes:
 1. Node needs to go into History folder in Explorer if Status == DONE, it should not be based on the due date.
 2. The success message of being assigned to another logic gate should be green.
 3. If something does not have a Person in Charge field filled out, its by defauly 0 unassigned, and vise versa. But the moment a person is assigned to it, then default give it 5 very low priority.
 4. When displaying the Assigned to logic gate: text, it should give me the acvtual english name of the logic gate, not the UUID
-
+5. There is an arugemtn that the datetime on the node should be on the left hand side near the circles and lines and not the nodes.
 Header Tab:
 1. change logic gate arena top right collapse icon to a flat line that we already have for nodes.
 
@@ -138,6 +143,8 @@ Company Explorer:
 2. The search bar needs to be better at searching the first and second words.
 
 Map:
+1. Rename Map into company map, and have it mostly be logic gates, but can use it for nodes as well.
+2. Be able to add different stuff from explorer onto the map.
 
 Text Editor Changes
 NEED TO TEST:I need editor to be able to be worked on by multiple people at the same time, like google docs.
