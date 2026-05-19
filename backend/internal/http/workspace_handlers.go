@@ -27,11 +27,10 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	scope := strings.TrimSpace(r.URL.Query().Get("scope"))
-	snapshotScope := scope
-	if snapshotScope == "" {
-		snapshotScope = "full"
+	if scope == "" {
+		scope = "company_explorer"
 	}
-	etag, err := s.workspaceSnapshotETag(r, companyID, snapshotScope)
+	etag, err := s.workspaceSnapshotETag(r, companyID, scope)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
 		return
@@ -39,7 +38,7 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 	if writeNotModifiedWithETag(w, r, etag) {
 		return
 	}
-	if scope != "" {
+	if scope != "full" {
 		s.handleScopedWorkspaceSnapshot(w, r, companyID, scope, etag)
 		return
 	}
@@ -320,6 +319,16 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 			return
 		}
 	}
+	nodes, err := s.repo.ListCompanyExplorerNodeSummaries(companyID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_node_summaries")
+		return
+	}
+	logicGates, err := s.repo.ListCompanyExplorerLogicGateSummaries(companyID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_summaries")
+		return
+	}
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
 		"scope":        "company_explorer",
 		"company_id":   companyID,
@@ -327,6 +336,8 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 		"folder_id":    folderID,
 		"folders":      folders,
 		"folder_items": folderItems,
+		"nodes":        nodes,
+		"logic_gates":  logicGates,
 	}, etag)
 }
 func (s *Server) handleKanbanWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, etag string) {

@@ -1461,6 +1461,66 @@ order by item.position asc, item.created_timestamp asc`, companyID, folderID, it
 	}
 	return items, rows.Err()
 }
+
+func (r *PostgresRepo) ListCompanyExplorerNodeSummaries(companyID string) ([]domain.Node, error) {
+	rows, err := r.db.QueryContext(context.Background(), `
+select company_id, node_id, title, due_date::text, created_timestamp
+from nodes
+where company_id=$1
+order by created_timestamp asc`, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.Node, 0)
+	for rows.Next() {
+		var item domain.Node
+		var dueDate sql.NullString
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.NodeID,
+			&item.Title,
+			&dueDate,
+			&item.CreatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		if dueDate.Valid {
+			item.DueDate = &dueDate.String
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) ListCompanyExplorerLogicGateSummaries(companyID string) ([]domain.LogicGate, error) {
+	rows, err := r.db.QueryContext(context.Background(), `
+select company_id, logic_gate_id, header, created_timestamp
+from logic_gates
+where company_id=$1
+order by created_timestamp asc`, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.LogicGate, 0)
+	for rows.Next() {
+		var item domain.LogicGate
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.LogicGateID,
+			&item.Header,
+			&item.CreatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *PostgresRepo) RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error {
 	ctx := context.Background()
 	deleted, err := r.db.ExecContext(ctx,

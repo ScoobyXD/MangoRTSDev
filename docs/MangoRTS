@@ -49,6 +49,7 @@ New Features:
 30. Every so often, it's important that you have an audit on the company. For example, when I crashed out at how shitty the Wispr Phone app is. It's important to always be vigilant and make sure to fan out to your entire user base and to see. Ask yourself this question: Could anyone else be crashing out over our shitty UI while using Mango? 
 31. Do we want positions of all the modules, columns, resizing to be stored in database per user? or just browser based.
 32. need to be able to use with excel and other files.
+33. Really like google's idea of using mouse cursor to direct ai agents.
 ========
 General changes:
 1. the caching still doesnt work well on company explorer logic gate arena, it doesnt work for nodes in logic gate arena kanban board, i still get whenever i move around pages including email. 

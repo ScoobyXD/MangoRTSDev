@@ -122,6 +122,8 @@ type CompanyExplorerRepository interface {
 	AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error)
 	AssignCompanyExplorerFolderItems(companyID string, assignments []CompanyExplorerFolderItemAssignmentInput) ([]domain.CompanyExplorerFolderItem, []CompanyExplorerRelationshipDeleteResult, error)
 	ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error)
+	ListCompanyExplorerNodeSummaries(companyID string) ([]domain.Node, error)
+	ListCompanyExplorerLogicGateSummaries(companyID string) ([]domain.LogicGate, error)
 	ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error)
 	RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error
 }

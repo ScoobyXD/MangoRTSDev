@@ -976,6 +976,74 @@ func TestWorkspaceSnapshotReturnsNotModifiedWhenDataUnchanged(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSnapshotDefaultUsesLightweightCompanyExplorerReadModel(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-explorer-light-snapshot-test"
+
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Work")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder() error = %v", err)
+	}
+	nodeA, err := repo.CreateNode(companyID, "alpha")
+	if err != nil {
+		t.Fatalf("CreateNode alpha error = %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "beta")
+	if err != nil {
+		t.Fatalf("CreateNode beta error = %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate() error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", nodeA.NodeID, 1000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem() error = %v", err)
+	}
+	if _, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeB.NodeID, "Peer", "Peer"); err != nil {
+		t.Fatalf("CreateNodeRelationship() error = %v", err)
+	}
+	if _, err := repo.UpsertNodeMapPositions(companyID, []domain.NodeMapPosition{{NodeID: nodeA.NodeID, X: 10, Y: 20}}); err != nil {
+		t.Fatalf("UpsertNodeMapPositions() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("company explorer snapshot status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	raw := map[string]json.RawMessage{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw snapshot: %v", err)
+	}
+	for _, key := range []string{"relationships", "logic_gate_relationships", "node_map_positions", "logic_gate_map_positions", "kanban_boards"} {
+		if _, ok := raw[key]; ok {
+			t.Fatalf("company_explorer snapshot unexpectedly included %q", key)
+		}
+	}
+
+	var payload struct {
+		Scope      string                             `json:"scope"`
+		Nodes      []domain.Node                      `json:"nodes"`
+		LogicGates []domain.LogicGate                 `json:"logic_gates"`
+		Folders    []domain.CompanyExplorerFolder     `json:"folders"`
+		Items      []domain.CompanyExplorerFolderItem `json:"folder_items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode typed snapshot: %v", err)
+	}
+	if payload.Scope != "company_explorer" || len(payload.Nodes) != 2 || len(payload.LogicGates) != 1 || len(payload.Folders) == 0 || len(payload.Items) == 0 {
+		t.Fatalf("company explorer snapshot payload = scope:%q nodes:%d logic_gates:%d folders:%d items:%d, want lightweight explorer data", payload.Scope, len(payload.Nodes), len(payload.LogicGates), len(payload.Folders), len(payload.Items))
+	}
+	if payload.LogicGates[0].LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("logic gate summary id = %q, want %q", payload.LogicGates[0].LogicGateID, logicGate.LogicGateID)
+	}
+}
 func TestMapLayoutPositionAPIAndWorkspaceSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -1047,7 +1115,7 @@ func TestMapLayoutPositionAPIAndWorkspaceSnapshot(t *testing.T) {
 		t.Fatalf("node map positions = %+v, want saved node position", readPayload.Positions)
 	}
 
-	snapshotReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID, nil)
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=full", nil)
 	snapshotRec := httptest.NewRecorder()
 	handler.ServeHTTP(snapshotRec, snapshotReq)
 	if snapshotRec.Code != http.StatusOK {

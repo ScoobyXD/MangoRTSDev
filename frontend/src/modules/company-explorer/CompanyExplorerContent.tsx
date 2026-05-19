@@ -2,14 +2,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type NodeRecord } from "../node-map/shared";
 import { LogicGateRecord as LogicGateApiRecord, NodeRecord as LogicGateRecord, toLogicGateCanvasRecord } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_LOGIC_GATE_MAP_FOCUS_REQUESTED, EVENT_NODE_MAP_FOCUS_REQUESTED } from "../node-map/eventbus";
-import { getNodeRelationshipGraphSnapshot, hasNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, removeNodeRelationshipGraphRelationshipsForNode, subscribeNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
-import { getLogicGateRelationshipGraphSnapshot, hasLogicGateRelationshipGraphSnapshot, refreshLogicGateRelationshipGraphSnapshot, removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, removeLogicGateRelationshipGraphRelationshipsForLogicGate, subscribeLogicGateRelationshipGraph, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
+import { removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, removeNodeRelationshipGraphRelationshipsForNode, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
+import { removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, removeLogicGateRelationshipGraphRelationshipsForLogicGate, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { type ExplorerSelectionState } from "./explorerSync";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerItemType, type CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders";
 import { invalidateKanbanBoardListCache, listKanbanBoards } from "../kanban/kanbanApi";
 import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntityDragItem, type KanbanBoard, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
 import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
+import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchResults, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
@@ -61,6 +62,37 @@ import {
 } from "./CompanyExplorerContentModel";
 
 const scopedRootCreationKeys = new Set<string>();
+
+type CompanyExplorerSnapshotPayload = {
+  nodes?: NodeRecord[];
+  logic_gates?: LogicGateApiRecord[];
+  folders?: CompanyExplorerFolder[];
+  folder_items?: CompanyExplorerFolderItem[];
+};
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object");
+}
+
+function asNodeRecord(value: unknown): NodeRecord | null {
+  if (!isObjectRecord(value) || typeof value.node_id !== "string" || typeof value.title !== "string" || typeof value.created_timestamp !== "string") return null;
+  return value as NodeRecord;
+}
+
+function asLogicGateApiRecord(value: unknown): LogicGateApiRecord | null {
+  if (!isObjectRecord(value) || typeof value.logic_gate_id !== "string" || typeof value.header !== "string" || typeof value.created_timestamp !== "string") return null;
+  return value as LogicGateApiRecord;
+}
+
+function asCompanyExplorerFolder(value: unknown): CompanyExplorerFolder | null {
+  if (!isObjectRecord(value) || typeof value.folder_id !== "string" || typeof value.folder_kind !== "string" || typeof value.name !== "string") return null;
+  return value as CompanyExplorerFolder;
+}
+
+function asCompanyExplorerFolderItem(value: unknown): CompanyExplorerFolderItem | null {
+  if (!isObjectRecord(value) || typeof value.folder_id !== "string" || typeof value.item_type !== "string" || typeof value.item_id !== "string") return null;
+  return value as CompanyExplorerFolderItem;
+}
 
 function findParentScrollContainer(element: HTMLElement): HTMLElement {
   let current = element.parentElement;
@@ -116,6 +148,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const expandedRef = useRef(expanded);
   const defaultExpansionAppliedRef = useRef(false);
   const treeRowsRef = useRef<ExplorerTreeNode[]>([]);
+  const foldersRef = useRef<CompanyExplorerFolder[]>([]);
   const pendingScrollTreeIDRef = useRef("");
   const [renaming, setRenaming] = useState<ExplorerRenameDraft | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
@@ -154,68 +187,27 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
 
   useEffect(() => {
     let cancelled = false;
+    setFolderSnapshotLoaded(false);
+    setNodes([]);
+    setLogicGates([]);
+    setFolders([]);
+    setFolderItems([]);
     (async () => {
       try {
-        if (!hasNodeRelationshipGraphSnapshot(apiBase, companyID)) {
-          await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
-        }
-        if (cancelled) return;
-        const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+        const result = await fetchWorkspaceSnapshot(apiBase, companyID, { scope: "company_explorer" });
+        if (cancelled || !result.payload) return;
+        const snapshot = result.payload as CompanyExplorerSnapshotPayload;
         setNodes(snapshot.nodes ?? []);
+        setLogicGates((snapshot.logic_gates ?? []).map(toLogicGateCanvasRecord));
         setFolders(snapshot.folders ?? []);
         setFolderItems(snapshot.folder_items ?? []);
         setFolderSnapshotLoaded(true);
       } catch {
-        // ignore initial load failures; subscription updates can still hydrate state later
+        // Explorer bootstrap stays independent from map graph snapshots; stream deltas can still catch up.
       }
     })();
     return () => { cancelled = true; };
   }, [apiBase, companyID]);
-
-  useEffect(() => {
-    return subscribeNodeRelationshipGraph(apiBase, companyID, () => {
-      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-      setNodes(snapshot.nodes ?? []);
-      setFolders(snapshot.folders ?? []);
-      setFolderItems(snapshot.folder_items ?? []);
-      setFolderSnapshotLoaded(true);
-    });
-  }, [apiBase, companyID]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        if (!hasLogicGateRelationshipGraphSnapshot(apiBase, companyID)) {
-          await refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-        }
-        if (cancelled) return;
-        const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-        setLogicGates(snapshot.nodes ?? []);
-        if ((snapshot.folders ?? []).length > 0 || (snapshot.folder_items ?? []).length > 0) {
-          setFolders(snapshot.folders ?? []);
-          setFolderItems(snapshot.folder_items ?? []);
-        }
-        setFolderSnapshotLoaded(true);
-      } catch {
-        // Logic Gate Map has its own graph cache; subscription updates can still hydrate later.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [apiBase, companyID]);
-
-  useEffect(() => {
-    return subscribeLogicGateRelationshipGraph(apiBase, companyID, () => {
-      const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-      setLogicGates(snapshot.nodes ?? []);
-      if ((snapshot.folders ?? []).length > 0 || (snapshot.folder_items ?? []).length > 0) {
-        setFolders(snapshot.folders ?? []);
-        setFolderItems(snapshot.folder_items ?? []);
-      }
-      setFolderSnapshotLoaded(true);
-    });
-  }, [apiBase, companyID]);
-
   const refreshKanbanBoards = useCallback(async () => {
     try {
       // The Explorer tree renders a bounded first window. Board creation and
@@ -264,6 +256,70 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           const envelope = JSON.parse(event.data) as WorkspaceStreamEnvelope;
           if (envelope.company_id !== companyID) return;
           const data = envelope.data ?? {};
+
+          if (envelope.type === "node_created" || envelope.type === "node_updated") {
+            const node = asNodeRecord(data.node);
+            if (!node) return;
+            setNodes((previous) => previous.some((item) => item.node_id === node.node_id)
+              ? previous.map((item) => (item.node_id === node.node_id ? node : item))
+              : [...previous, node]);
+            return;
+          }
+          if (envelope.type === "node_deleted") {
+            const nodeID = typeof data.node_id === "string" ? data.node_id : "";
+            if (!nodeID) return;
+            setNodes((previous) => previous.filter((node) => node.node_id !== nodeID));
+            setFolderItems((previous) => previous.filter((item) => item.item_type !== "node" || item.item_id !== nodeID));
+            return;
+          }
+          if (envelope.type === "logic_gate_created" || envelope.type === "logic_gate_updated") {
+            const logicGate = asLogicGateApiRecord(data.logic_gate);
+            if (!logicGate) return;
+            const canvasRecord = toLogicGateCanvasRecord(logicGate);
+            setLogicGates((previous) => previous.some((item) => item.logic_gate_id === canvasRecord.logic_gate_id)
+              ? previous.map((item) => (item.logic_gate_id === canvasRecord.logic_gate_id ? canvasRecord : item))
+              : [...previous, canvasRecord]);
+            return;
+          }
+          if (envelope.type === "logic_gate_deleted") {
+            const logicGateID = typeof data.logic_gate_id === "string" ? data.logic_gate_id : "";
+            if (!logicGateID) return;
+            setLogicGates((previous) => previous.filter((logicGate) => logicGate.logic_gate_id !== logicGateID));
+            setFolderItems((previous) => previous.filter((item) => item.item_type !== "logic_gate" || item.item_id !== logicGateID));
+            return;
+          }
+          if (envelope.type === "company_explorer_folder_created" || envelope.type === "company_explorer_folder_moved" || envelope.type === "company_explorer_folder_updated") {
+            const folder = asCompanyExplorerFolder(data.folder);
+            if (!folder) return;
+            setFolders((previous) => previous.some((item) => item.folder_id === folder.folder_id)
+              ? previous.map((item) => (item.folder_id === folder.folder_id ? folder : item))
+              : [...previous, folder]);
+            return;
+          }
+          if (envelope.type === "company_explorer_folder_deleted") {
+            const folderID = typeof data.folder_id === "string" ? data.folder_id : "";
+            if (!folderID) return;
+            const deletedFolderIDs = collectFolderSubtreeIDs(foldersRef.current, folderID);
+            if (deletedFolderIDs.size === 0) deletedFolderIDs.add(folderID);
+            setFolders((previous) => previous.filter((folder) => !deletedFolderIDs.has(folder.folder_id)));
+            setFolderItems((previous) => previous.filter((item) => !deletedFolderIDs.has(item.folder_id)));
+            return;
+          }
+          if (envelope.type === "company_explorer_folder_item_assigned") {
+            const folderItem = asCompanyExplorerFolderItem(data.folder_item);
+            if (!folderItem) return;
+            setFolderItems((previous) => previous.some((item) => item.item_type === folderItem.item_type && item.item_id === folderItem.item_id)
+              ? previous.map((item) => (item.item_type === folderItem.item_type && item.item_id === folderItem.item_id ? folderItem : item))
+              : [...previous, folderItem]);
+            return;
+          }
+          if (envelope.type === "company_explorer_folder_item_removed") {
+            const itemType = typeof data.item_type === "string" ? data.item_type : "";
+            const itemID = typeof data.item_id === "string" ? data.item_id : "";
+            if (!itemType || !itemID) return;
+            setFolderItems((previous) => previous.filter((item) => item.item_type !== itemType || item.item_id !== itemID));
+            return;
+          }
           if (envelope.type === "kanban_board_saved" || envelope.type === "kanban_board_updated") {
             const board = data.board as KanbanBoard | undefined;
             if (!board || typeof board.board_id !== "string") return;
@@ -290,7 +346,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       },
     });
   }, [apiBase, companyID]);
-
   const scopedRootName = scopedRootFolderName.trim();
   const scopedKind = scopedRootName ? (scopedRootFolderKind ?? "logic_gate") : undefined;
   const scopedExplorerActive = Boolean(scopedKind && scopedRootName);
@@ -406,6 +461,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   useEffect(() => {
     treeRowsRef.current = treeRows;
   }, [treeRows]);
+
+  useEffect(() => {
+    foldersRef.current = folders;
+  }, [folders]);
 
   useEffect(() => {
     latestSelectionRef.current = { selectedNodeID, selectedTreeID };

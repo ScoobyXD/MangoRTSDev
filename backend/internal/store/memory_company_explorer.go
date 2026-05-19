@@ -895,6 +895,52 @@ func (r *MemoryRepo) ListCompanyExplorerFolderItemsInFolderSubtree(companyID, fo
 	})
 	return items, nil
 }
+
+func (r *MemoryRepo) ListCompanyExplorerNodeSummaries(companyID string) ([]domain.Node, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.Node, 0)
+	for _, node := range r.nodes {
+		if node.CompanyID != companyID {
+			continue
+		}
+		items = append(items, domain.Node{
+			CompanyID:        node.CompanyID,
+			NodeID:           node.NodeID,
+			Title:            node.Title,
+			DueDate:          node.DueDate,
+			CreatedTimestamp: node.CreatedTimestamp,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
+	return items, nil
+}
+
+func (r *MemoryRepo) ListCompanyExplorerLogicGateSummaries(companyID string) ([]domain.LogicGate, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.LogicGate, 0)
+	for _, gate := range r.logicGates {
+		if gate.CompanyID != companyID {
+			continue
+		}
+		items = append(items, domain.LogicGate{
+			CompanyID:        gate.CompanyID,
+			LogicGateID:      gate.LogicGateID,
+			Header:           gate.Header,
+			CreatedTimestamp: gate.CreatedTimestamp,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
+	return items, nil
+}
+
 func (r *MemoryRepo) RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
