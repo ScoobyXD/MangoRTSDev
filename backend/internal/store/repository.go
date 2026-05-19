@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"math"
 	"miraeopus/backend/internal/domain"
 	"strings"
 	"time"
@@ -78,6 +79,7 @@ type WorkGraphRepository interface {
 	UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error)
 	ListNodes(companyID string) ([]domain.Node, error)
 	ListNodesInFolderSubtree(companyID, folderID string) ([]domain.Node, error)
+	ListNodeMapWindow(query NodeMapWindowQuery) (NodeMapWindowResult, error)
 	ListNodeRelationships(companyID string) ([]domain.NodeRelationship, error)
 	ListNodeRelationshipsInFolderSubtree(companyID, folderID string) ([]domain.NodeRelationship, error)
 	DeleteNodeRelationship(companyID, relationshipID string) error
@@ -98,6 +100,7 @@ type LogicGateRepository interface {
 	UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error)
 	ListLogicGates(companyID string) ([]domain.LogicGate, error)
 	ListLogicGatesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error)
+	ListLogicGateMapWindow(query LogicGateMapWindowQuery) (LogicGateMapWindowResult, error)
 	QueryLogicGates(companyID string, query LogicGateQuery) ([]domain.LogicGate, error)
 	SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUpdateInput) ([]domain.LogicGateRaciAssignment, error)
 	ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error)
@@ -149,9 +152,11 @@ type CompanyExplorerRepository interface {
 type MapLayoutRepository interface {
 	ListNodeMapPositions(companyID string) ([]domain.NodeMapPosition, error)
 	ListNodeMapPositionsInFolderSubtree(companyID, folderID string) ([]domain.NodeMapPosition, error)
+	ListNodeMapPositionsWindow(query NodeMapWindowQuery) ([]domain.NodeMapPosition, error)
 	UpsertNodeMapPositions(companyID string, positions []domain.NodeMapPosition) ([]domain.NodeMapPosition, error)
 	ListLogicGateMapPositions(companyID string) ([]domain.LogicGateMapPosition, error)
 	ListLogicGateMapPositionsInFolderSubtree(companyID, folderID string) ([]domain.LogicGateMapPosition, error)
+	ListLogicGateMapPositionsWindow(query LogicGateMapWindowQuery) ([]domain.LogicGateMapPosition, error)
 	UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error)
 	CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityBatchResult, error)
 }
@@ -207,6 +212,14 @@ const MapEntityBatchMaxItems = 200
 const MapEntityBatchMaxRelationships = 500
 
 const CompanyExplorerFolderItemBatchMaxItems = 200
+
+const NodeMapWindowDefaultLimit = 500
+
+const NodeMapWindowMaxLimit = 1000
+
+const LogicGateMapWindowDefaultLimit = 500
+
+const LogicGateMapWindowMaxLimit = 1000
 
 const LogicGateSearchDefaultLimit = 12
 
@@ -291,6 +304,96 @@ type MapEntityBatchResult struct {
 	FolderItems            []domain.CompanyExplorerFolderItem `json:"folder_items,omitempty"`
 	NodeMapPositions       []domain.NodeMapPosition           `json:"node_map_positions,omitempty"`
 	LogicGateMapPositions  []domain.LogicGateMapPosition      `json:"logic_gate_map_positions,omitempty"`
+}
+type NodeMapWindowBounds struct {
+	MinX float64 `json:"min_x"`
+	MinY float64 `json:"min_y"`
+	MaxX float64 `json:"max_x"`
+	MaxY float64 `json:"max_y"`
+}
+
+type NodeMapWindowQuery struct {
+	CompanyID string
+	FolderID  string
+	Window    NodeMapWindowBounds
+	Limit     int
+}
+
+type NodeMapWindowResult struct {
+	CompanyID        string                             `json:"company_id"`
+	FolderID         string                             `json:"folder_id"`
+	Window           NodeMapWindowBounds                `json:"window"`
+	Limit            int                                `json:"nodes_limit"`
+	Nodes            []domain.Node                      `json:"nodes"`
+	Relationships    []domain.NodeRelationship          `json:"relationships"`
+	Folders          []domain.CompanyExplorerFolder     `json:"folders"`
+	FolderItems      []domain.CompanyExplorerFolderItem `json:"folder_items"`
+	NodeMapPositions []domain.NodeMapPosition           `json:"node_map_positions"`
+}
+
+func NormalizeNodeMapWindowQuery(query NodeMapWindowQuery) (NodeMapWindowQuery, error) {
+	query.CompanyID = strings.TrimSpace(query.CompanyID)
+	query.FolderID = strings.TrimSpace(query.FolderID)
+	if query.CompanyID == "" || query.FolderID == "" {
+		return NodeMapWindowQuery{}, ErrInvalid
+	}
+	for _, value := range []float64{query.Window.MinX, query.Window.MinY, query.Window.MaxX, query.Window.MaxY} {
+		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			return NodeMapWindowQuery{}, ErrInvalid
+		}
+	}
+	if query.Window.MinX > query.Window.MaxX || query.Window.MinY > query.Window.MaxY {
+		return NodeMapWindowQuery{}, ErrInvalid
+	}
+	if query.Limit <= 0 {
+		query.Limit = NodeMapWindowDefaultLimit
+	}
+	if query.Limit > NodeMapWindowMaxLimit {
+		query.Limit = NodeMapWindowMaxLimit
+	}
+	return query, nil
+}
+
+type LogicGateMapWindowQuery struct {
+	CompanyID string
+	FolderID  string
+	Window    NodeMapWindowBounds
+	Limit     int
+}
+
+type LogicGateMapWindowResult struct {
+	CompanyID             string                             `json:"company_id"`
+	FolderID              string                             `json:"folder_id"`
+	Window                NodeMapWindowBounds                `json:"window"`
+	Limit                 int                                `json:"logic_gates_limit"`
+	LogicGates            []domain.LogicGate                 `json:"logic_gates"`
+	Relationships         []domain.LogicGateRelationship     `json:"logic_gate_relationships"`
+	Folders               []domain.CompanyExplorerFolder     `json:"folders"`
+	FolderItems           []domain.CompanyExplorerFolderItem `json:"folder_items"`
+	LogicGateMapPositions []domain.LogicGateMapPosition      `json:"logic_gate_map_positions"`
+}
+
+func NormalizeLogicGateMapWindowQuery(query LogicGateMapWindowQuery) (LogicGateMapWindowQuery, error) {
+	query.CompanyID = strings.TrimSpace(query.CompanyID)
+	query.FolderID = strings.TrimSpace(query.FolderID)
+	if query.CompanyID == "" || query.FolderID == "" {
+		return LogicGateMapWindowQuery{}, ErrInvalid
+	}
+	for _, value := range []float64{query.Window.MinX, query.Window.MinY, query.Window.MaxX, query.Window.MaxY} {
+		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			return LogicGateMapWindowQuery{}, ErrInvalid
+		}
+	}
+	if query.Window.MinX > query.Window.MaxX || query.Window.MinY > query.Window.MaxY {
+		return LogicGateMapWindowQuery{}, ErrInvalid
+	}
+	if query.Limit <= 0 {
+		query.Limit = LogicGateMapWindowDefaultLimit
+	}
+	if query.Limit > LogicGateMapWindowMaxLimit {
+		query.Limit = LogicGateMapWindowMaxLimit
+	}
+	return query, nil
 }
 
 type CompanyExplorerFolderItemAssignmentInput struct {

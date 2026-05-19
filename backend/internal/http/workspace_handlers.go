@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"miraeopus/backend/internal/domain"
@@ -116,7 +117,7 @@ func (s *Server) workspaceSnapshotETag(r *http.Request, companyID, scope string)
 
 func workspaceSnapshotVersionQueries(r *http.Request, scope string) []store.DomainEventStreamQuery {
 	switch scope {
-	case "node_map":
+	case "node_map", "node_map_window":
 		return []store.DomainEventStreamQuery{
 			workspaceEventQuery(nodeListWorkspaceEventTypes...),
 			workspaceEventQuery(nodeRelationshipWorkspaceEventTypes...),
@@ -124,7 +125,7 @@ func workspaceSnapshotVersionQueries(r *http.Request, scope string) []store.Doma
 			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("node")),
 			workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("node")),
 		}
-	case "logic_gate_map":
+	case "logic_gate_map", "logic_gate_map_window":
 		return []store.DomainEventStreamQuery{
 			workspaceEventQuery(logicGateListWorkspaceEventTypes...),
 			workspaceEventQuery(logicGateRelationshipWorkspaceEventTypes...),
@@ -178,8 +179,12 @@ func (s *Server) handleScopedWorkspaceSnapshot(w http.ResponseWriter, r *http.Re
 	switch scope {
 	case "node_map":
 		s.handleNodeMapWorkspaceSnapshot(w, r, companyID, etag)
+	case "node_map_window":
+		s.handleNodeMapWindowWorkspaceSnapshot(w, r, companyID, etag)
 	case "logic_gate_map":
 		s.handleLogicGateMapWorkspaceSnapshot(w, r, companyID, etag)
+	case "logic_gate_map_window":
+		s.handleLogicGateMapWindowWorkspaceSnapshot(w, r, companyID, etag)
 	case "company_explorer":
 		s.handleCompanyExplorerWorkspaceSnapshot(w, r, companyID, etag)
 	case "kanban":
@@ -260,6 +265,196 @@ func (s *Server) handleNodeMapWorkspaceSnapshot(w http.ResponseWriter, r *http.R
 		"folder_items":       folderItems,
 		"node_map_positions": positions,
 	}, etag)
+}
+func nodeMapWindowQueryParamPresent(r *http.Request) bool {
+	for _, key := range []string{"folder_id", "min_x", "min_y", "max_x", "max_y"} {
+		if _, ok := r.URL.Query()[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func parseNodeMapWindowFloatParam(r *http.Request, key string) (float64, bool) {
+	values, ok := r.URL.Query()[key]
+	if !ok || len(values) == 0 || strings.TrimSpace(values[0]) == "" {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(strings.TrimSpace(values[0]), 64)
+	if err != nil || !validMapLayoutCoordinate(value) {
+		return 0, false
+	}
+	return value, true
+}
+
+func parseNodeMapWindowQuery(r *http.Request, companyID string) (store.NodeMapWindowQuery, string, bool) {
+	folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
+	if folderID == "" {
+		return store.NodeMapWindowQuery{}, "folder_id_required", false
+	}
+	if !isValidCompanyExplorerResourceID(folderID) {
+		return store.NodeMapWindowQuery{}, "invalid_folder_id", false
+	}
+	minX, ok := parseNodeMapWindowFloatParam(r, "min_x")
+	if !ok {
+		return store.NodeMapWindowQuery{}, "invalid_window", false
+	}
+	minY, ok := parseNodeMapWindowFloatParam(r, "min_y")
+	if !ok {
+		return store.NodeMapWindowQuery{}, "invalid_window", false
+	}
+	maxX, ok := parseNodeMapWindowFloatParam(r, "max_x")
+	if !ok {
+		return store.NodeMapWindowQuery{}, "invalid_window", false
+	}
+	maxY, ok := parseNodeMapWindowFloatParam(r, "max_y")
+	if !ok {
+		return store.NodeMapWindowQuery{}, "invalid_window", false
+	}
+	if minX > maxX || minY > maxY {
+		return store.NodeMapWindowQuery{}, "invalid_window", false
+	}
+	limit, ok := parsePositiveLimit(r.URL.Query().Get("limit"), store.NodeMapWindowDefaultLimit, store.NodeMapWindowMaxLimit)
+	if !ok {
+		return store.NodeMapWindowQuery{}, "invalid_limit", false
+	}
+	return store.NodeMapWindowQuery{
+		CompanyID: companyID,
+		FolderID:  folderID,
+		Window: store.NodeMapWindowBounds{
+			MinX: minX,
+			MinY: minY,
+			MaxX: maxX,
+			MaxY: maxY,
+		},
+		Limit: limit,
+	}, "", true
+}
+
+func nodeMapWindowSnapshotPayload(result store.NodeMapWindowResult) map[string]any {
+	return map[string]any{
+		"scope":              "node_map_window",
+		"company_id":         result.CompanyID,
+		"folder_id":          result.FolderID,
+		"window":             result.Window,
+		"nodes_limit":        result.Limit,
+		"nodes":              result.Nodes,
+		"relationships":      result.Relationships,
+		"folders":            result.Folders,
+		"folder_items":       result.FolderItems,
+		"node_map_positions": result.NodeMapPositions,
+	}
+}
+
+func (s *Server) handleNodeMapWindowWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, etag string) {
+	query, errCode, ok := parseNodeMapWindowQuery(r, companyID)
+	if !ok {
+		writeError(w, http.StatusBadRequest, errCode)
+		return
+	}
+	result, err := s.repo.ListNodeMapWindow(query)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+		return
+	}
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_window")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_window")
+		return
+	}
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, nodeMapWindowSnapshotPayload(result), etag)
+}
+func logicGateMapWindowQueryParamPresent(r *http.Request) bool {
+	for _, key := range []string{"folder_id", "min_x", "min_y", "max_x", "max_y"} {
+		if _, ok := r.URL.Query()[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func parseLogicGateMapWindowQuery(r *http.Request, companyID string) (store.LogicGateMapWindowQuery, string, bool) {
+	folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
+	if folderID == "" {
+		return store.LogicGateMapWindowQuery{}, "folder_id_required", false
+	}
+	if !isValidCompanyExplorerResourceID(folderID) {
+		return store.LogicGateMapWindowQuery{}, "invalid_folder_id", false
+	}
+	minX, ok := parseNodeMapWindowFloatParam(r, "min_x")
+	if !ok {
+		return store.LogicGateMapWindowQuery{}, "invalid_window", false
+	}
+	minY, ok := parseNodeMapWindowFloatParam(r, "min_y")
+	if !ok {
+		return store.LogicGateMapWindowQuery{}, "invalid_window", false
+	}
+	maxX, ok := parseNodeMapWindowFloatParam(r, "max_x")
+	if !ok {
+		return store.LogicGateMapWindowQuery{}, "invalid_window", false
+	}
+	maxY, ok := parseNodeMapWindowFloatParam(r, "max_y")
+	if !ok {
+		return store.LogicGateMapWindowQuery{}, "invalid_window", false
+	}
+	if minX > maxX || minY > maxY {
+		return store.LogicGateMapWindowQuery{}, "invalid_window", false
+	}
+	limit, ok := parsePositiveLimit(r.URL.Query().Get("limit"), store.LogicGateMapWindowDefaultLimit, store.LogicGateMapWindowMaxLimit)
+	if !ok {
+		return store.LogicGateMapWindowQuery{}, "invalid_limit", false
+	}
+	return store.LogicGateMapWindowQuery{
+		CompanyID: companyID,
+		FolderID:  folderID,
+		Window: store.NodeMapWindowBounds{
+			MinX: minX,
+			MinY: minY,
+			MaxX: maxX,
+			MaxY: maxY,
+		},
+		Limit: limit,
+	}, "", true
+}
+
+func logicGateMapWindowSnapshotPayload(result store.LogicGateMapWindowResult) map[string]any {
+	return map[string]any{
+		"scope":                    "logic_gate_map_window",
+		"company_id":               result.CompanyID,
+		"folder_id":                result.FolderID,
+		"window":                   result.Window,
+		"logic_gates_limit":        result.Limit,
+		"logic_gates":              result.LogicGates,
+		"logic_gate_relationships": result.Relationships,
+		"folders":                  result.Folders,
+		"folder_items":             result.FolderItems,
+		"logic_gate_map_positions": result.LogicGateMapPositions,
+	}
+}
+
+func (s *Server) handleLogicGateMapWindowWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, etag string) {
+	query, errCode, ok := parseLogicGateMapWindowQuery(r, companyID)
+	if !ok {
+		writeError(w, http.StatusBadRequest, errCode)
+		return
+	}
+	result, err := s.repo.ListLogicGateMapWindow(query)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+		return
+	}
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_window")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_window")
+		return
+	}
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, logicGateMapWindowSnapshotPayload(result), etag)
 }
 func (s *Server) handleLogicGateMapWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, etag string) {
 	folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))

@@ -63,6 +63,55 @@ left join lateral (
   ) gate
 ) node_logic_gates on true`
 
+const postgresNodeMapWindowCTE = `
+with recursive folder_scope as (
+  select company_id, folder_id
+  from company_explorer_folders
+  where company_id=$1
+    and folder_id=$2::uuid
+    and folder_kind='node'
+  union all
+  select child.company_id, child.folder_id
+  from company_explorer_folders child
+  join folder_scope parent
+    on child.company_id=parent.company_id
+   and child.parent_folder_id=parent.folder_id
+  where child.folder_kind='node'
+), windowed_positions as (
+  select position.company_id, position.node_id, position.x, position.y, position.updated_timestamp
+  from node_map_positions position
+  join company_explorer_folder_items item
+    on item.company_id=position.company_id
+   and item.item_type='node'
+   and item.item_id=position.node_id::text
+  join folder_scope folder
+    on folder.folder_id=item.folder_id
+  where position.company_id=$1
+    and position.x >= $3
+    and position.x <= $4
+    and position.y >= $5
+    and position.y <= $6
+  order by position.x asc, position.y asc, position.node_id asc
+  limit $7
+)
+`
+
+func postgresNodeMapWindowArgs(query NodeMapWindowQuery) []any {
+	return []any{query.CompanyID, query.FolderID, query.Window.MinX, query.Window.MaxX, query.Window.MinY, query.Window.MaxY, query.Limit}
+}
+
+func (r *PostgresRepo) nodeMapWindowFolderExists(ctx context.Context, query NodeMapWindowQuery) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx, `
+select exists(
+  select 1
+  from company_explorer_folders
+  where company_id=$1
+    and folder_id=$2::uuid
+    and folder_kind='node'
+)`, query.CompanyID, query.FolderID).Scan(&exists)
+	return exists, err
+}
 func scanNode(row interface {
 	Scan(dest ...any) error
 }) (domain.Node, error) {
@@ -684,6 +733,151 @@ order by position.node_id asc`, companyID, folderID)
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+func (r *PostgresRepo) ListNodeMapPositionsWindow(query NodeMapWindowQuery) ([]domain.NodeMapPosition, error) {
+	query, err := NormalizeNodeMapWindowQuery(query)
+	if err != nil {
+		return nil, err
+	}
+	ctx := context.Background()
+	exists, err := r.nodeMapWindowFolderExists(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+	rows, err := r.db.QueryContext(ctx, postgresNodeMapWindowCTE+`
+select company_id, node_id, x, y, updated_timestamp
+from windowed_positions
+order by x asc, y asc, node_id asc`, postgresNodeMapWindowArgs(query)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.NodeMapPosition, 0)
+	for rows.Next() {
+		var item domain.NodeMapPosition
+		if err := rows.Scan(&item.CompanyID, &item.NodeID, &item.X, &item.Y, &item.UpdatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) ListNodeMapWindow(query NodeMapWindowQuery) (NodeMapWindowResult, error) {
+	query, err := NormalizeNodeMapWindowQuery(query)
+	if err != nil {
+		return NodeMapWindowResult{}, err
+	}
+	folders, err := r.ListCompanyExplorerFolderSubtree(query.CompanyID, query.FolderID, "node")
+	if err != nil {
+		return NodeMapWindowResult{}, err
+	}
+	if len(folders) == 0 {
+		return NodeMapWindowResult{}, ErrNotFound
+	}
+	positions, err := r.ListNodeMapPositionsWindow(query)
+	if err != nil {
+		return NodeMapWindowResult{}, err
+	}
+	result := NodeMapWindowResult{
+		CompanyID:        query.CompanyID,
+		FolderID:         query.FolderID,
+		Window:           query.Window,
+		Limit:            query.Limit,
+		Nodes:            []domain.Node{},
+		Relationships:    []domain.NodeRelationship{},
+		Folders:          folders,
+		FolderItems:      []domain.CompanyExplorerFolderItem{},
+		NodeMapPositions: positions,
+	}
+	args := postgresNodeMapWindowArgs(query)
+	ctx := context.Background()
+
+	nodeRows, err := r.db.QueryContext(ctx, postgresNodeMapWindowCTE+`
+select `+nodeSelectColumns+`
+from nodes n
+join windowed_positions visible on visible.node_id=n.node_id
+`+nodeStatusJoin+`
+where n.company_id=$1
+order by n.created_timestamp asc`, args...)
+	if err != nil {
+		return NodeMapWindowResult{}, err
+	}
+	defer nodeRows.Close()
+	for nodeRows.Next() {
+		item, err := scanNode(nodeRows)
+		if err != nil {
+			return NodeMapWindowResult{}, err
+		}
+		result.Nodes = append(result.Nodes, item)
+	}
+	if err := nodeRows.Err(); err != nil {
+		return NodeMapWindowResult{}, err
+	}
+
+	relationshipRows, err := r.db.QueryContext(ctx, postgresNodeMapWindowCTE+`
+select rel.company_id, rel.node_relationship_id, rel.node_id_a, rel.node_id_b, rel.a_position::text, rel.b_position::text, rel.created_timestamp
+from node_relationships rel
+join windowed_positions a on a.node_id=rel.node_id_a
+join windowed_positions b on b.node_id=rel.node_id_b
+where rel.company_id=$1
+order by rel.created_timestamp asc`, args...)
+	if err != nil {
+		return NodeMapWindowResult{}, err
+	}
+	defer relationshipRows.Close()
+	for relationshipRows.Next() {
+		var item domain.NodeRelationship
+		if err := relationshipRows.Scan(
+			&item.CompanyID,
+			&item.NodeRelationshipID,
+			&item.NodeIDA,
+			&item.NodeIDB,
+			&item.APosition,
+			&item.BPosition,
+			&item.CreatedTimestamp,
+		); err != nil {
+			return NodeMapWindowResult{}, err
+		}
+		result.Relationships = append(result.Relationships, item)
+	}
+	if err := relationshipRows.Err(); err != nil {
+		return NodeMapWindowResult{}, err
+	}
+
+	itemRows, err := r.db.QueryContext(ctx, postgresNodeMapWindowCTE+`
+select item.company_id, item.folder_id, item.item_type, item.item_id, item.position, item.created_timestamp, item.updated_timestamp
+from company_explorer_folder_items item
+join windowed_positions visible on visible.node_id::text=item.item_id
+where item.company_id=$1
+  and item.item_type='node'
+order by item.position asc, item.created_timestamp asc`, args...)
+	if err != nil {
+		return NodeMapWindowResult{}, err
+	}
+	defer itemRows.Close()
+	for itemRows.Next() {
+		var item domain.CompanyExplorerFolderItem
+		if err := itemRows.Scan(
+			&item.CompanyID,
+			&item.FolderID,
+			&item.ItemType,
+			&item.ItemID,
+			&item.Position,
+			&item.CreatedTimestamp,
+			&item.UpdatedTimestamp,
+		); err != nil {
+			return NodeMapWindowResult{}, err
+		}
+		result.FolderItems = append(result.FolderItems, item)
+	}
+	if err := itemRows.Err(); err != nil {
+		return NodeMapWindowResult{}, err
+	}
+	return result, nil
 }
 func (r *PostgresRepo) UpsertNodeMapPositions(companyID string, positions []domain.NodeMapPosition) ([]domain.NodeMapPosition, error) {
 	ctx := context.Background()

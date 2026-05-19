@@ -20,7 +20,7 @@ Source architecture:
 
 | Theme | Status | Current Read |
 | --- | --- | --- |
-| 1. Read Plane | Company Explorer subtree complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; Company Explorer has a folder-subtree snapshot/list contract; map scopes and version-row validators still need bounded/windowed read models. |
+| 1. Read Plane | Logic Gate map window complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; Company Explorer has a folder-subtree snapshot/list contract; Node Map and Logic Gate Map now have bounded folder+viewport window contracts; version-row validators remain the next read-plane follow-up. |
 | 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph and migrated work-item assignment mutations now append durable workspace events atomically; frontend gap reconciliation now detects missed numeric workspace sequences and triggers scoped surface refreshes. Remaining mutation families and external fanout are still follow-ups. |
 | 3. Work Ownership / Commands | Source migration complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, inbox reads use projection rows, and email conversion now runs through an explicit atomic backend command; RACI/home/inbox command parity remain follow-ups. |
 | 4. Hot Path Discipline | Auth cache complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth now caches derived actor/membership context after per-request token validation; repository context, batch SQL, and metrics remain follow-up branches. |
@@ -95,9 +95,29 @@ Migration/backfill/rollback notes:
 - Backfill: none. Existing folder placement rows are already the source for subtree membership.
 - Rollback: code can return `scope=company_explorer` and the folder/folder-item list endpoints to their previous broad summary behavior. No schema or data rollback is required.
 
+Node map window branch:
+`reads/node-map-window`
+
+Status:
+- 2026-05-19: Complete. Added an explicit `scope=node_map_window` snapshot contract requiring `company_id`, `folder_id`, viewport bounds (`min_x`, `min_y`, `max_x`, `max_y`), and optional `limit`. The read returns only positioned nodes inside the requested folder subtree and viewport, relationships whose endpoints are both visible, matching folder items, subtree folders, and positions. Existing broad `scope=node_map` and `scope=full` compatibility/debug reads remain available.
+
+Migration/backfill/rollback notes:
+- Migration: none. This branch reuses existing `nodes`, `node_relationships`, `node_map_positions`, `company_explorer_folders`, `company_explorer_folder_items`, and `domain_events` rows.
+- Backfill: none. Nodes without existing `node_map_positions` are intentionally absent from viewport-window reads until a normal map placement write records coordinates.
+- Rollback: code can stop using `scope=node_map_window` and the bounded node `GET /v1/map-layout` query parameters and return hot callers to the prior `scope=node_map`/broad map-layout reads. No schema or data rollback is required.
+
+Logic Gate map window branch:
+`reads/logic-gate-map-window`
+
+Status:
+- 2026-05-19: Complete. Added an explicit `scope=logic_gate_map_window` snapshot contract requiring `company_id`, `folder_id`, viewport bounds (`min_x`, `min_y`, `max_x`, `max_y`), and optional `limit`. The read returns only Logic Gates with existing map positions inside the requested folder subtree and viewport, relationships whose endpoints are both visible, matching folder items, subtree folders, and positions. Existing broad `scope=logic_gate_map`, `scope=full`, and unwindowed Logic Gate map-layout reads remain available for compatibility/debug use.
+
+Migration/backfill/rollback notes:
+- Migration: none. This branch reuses existing `logic_gates`, `logic_gate_relationships`, `logic_gate_map_positions`, `company_explorer_folders`, `company_explorer_folder_items`, and `domain_events` rows.
+- Backfill: none. Logic Gates without existing `logic_gate_map_positions` are intentionally absent from viewport-window reads until a normal map placement write records coordinates.
+- Rollback: code can stop using `scope=logic_gate_map_window` and the bounded Logic Gate `GET /v1/map-layout` query parameters and return hot callers to the prior `scope=logic_gate_map`/broad map-layout reads. No schema or data rollback is required.
+
 Follow-up branches:
-- `reads/node-map-window`
-- `reads/logic-gate-map-window`
 - `reads/version-row-etags`
 
 Completion criteria:
@@ -366,10 +386,12 @@ Use this as the default sequencing unless a production incident changes prioriti
 12. `platform/auth-membership-cache`
 13. `reads/company-explorer-subtree`
 14. `work-items/email-conversion-command`
+15. `reads/node-map-window`
+16. `reads/logic-gate-map-window`
 
 ### Next Roadmap
 
-1. reads/node-map-window
+1. reads/version-row-etags
 
 ### Work-Items Follow-Ups
 

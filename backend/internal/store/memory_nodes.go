@@ -398,6 +398,135 @@ func (r *MemoryRepo) ListNodeMapPositionsInFolderSubtree(companyID, folderID str
 	})
 	return items, nil
 }
+func nodeMapPositionInWindow(position domain.NodeMapPosition, window NodeMapWindowBounds) bool {
+	return position.X >= window.MinX && position.X <= window.MaxX && position.Y >= window.MinY && position.Y <= window.MaxY
+}
+
+func sortNodeMapWindowPositions(items []domain.NodeMapPosition) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].X != items[j].X {
+			return items[i].X < items[j].X
+		}
+		if items[i].Y != items[j].Y {
+			return items[i].Y < items[j].Y
+		}
+		return items[i].NodeID < items[j].NodeID
+	})
+}
+
+func (r *MemoryRepo) nodeMapWindowPositionsLocked(query NodeMapWindowQuery, folderIDs map[string]bool) []domain.NodeMapPosition {
+	visibleFolderNodes := map[string]bool{}
+	for _, item := range r.folderItems {
+		if item.CompanyID == query.CompanyID && item.ItemType == "node" && folderIDs[item.FolderID] {
+			visibleFolderNodes[item.ItemID] = true
+		}
+	}
+	items := make([]domain.NodeMapPosition, 0)
+	for _, item := range r.nodeMapPositions {
+		if item.CompanyID == query.CompanyID && visibleFolderNodes[item.NodeID] && nodeMapPositionInWindow(item, query.Window) {
+			items = append(items, item)
+		}
+	}
+	sortNodeMapWindowPositions(items)
+	if len(items) > query.Limit {
+		items = items[:query.Limit]
+	}
+	return items
+}
+
+func (r *MemoryRepo) ListNodeMapPositionsWindow(query NodeMapWindowQuery) ([]domain.NodeMapPosition, error) {
+	query, err := NormalizeNodeMapWindowQuery(query)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, query.CompanyID, query.FolderID, "node")
+	if len(folderIDs) == 0 {
+		return nil, ErrNotFound
+	}
+	return r.nodeMapWindowPositionsLocked(query, folderIDs), nil
+}
+
+func (r *MemoryRepo) ListNodeMapWindow(query NodeMapWindowQuery) (NodeMapWindowResult, error) {
+	query, err := NormalizeNodeMapWindowQuery(query)
+	if err != nil {
+		return NodeMapWindowResult{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, query.CompanyID, query.FolderID, "node")
+	if len(folderIDs) == 0 {
+		return NodeMapWindowResult{}, ErrNotFound
+	}
+
+	positions := r.nodeMapWindowPositionsLocked(query, folderIDs)
+	visibleNodes := map[string]bool{}
+	for _, position := range positions {
+		visibleNodes[position.NodeID] = true
+	}
+
+	result := NodeMapWindowResult{
+		CompanyID:        query.CompanyID,
+		FolderID:         query.FolderID,
+		Window:           query.Window,
+		Limit:            query.Limit,
+		Nodes:            []domain.Node{},
+		Relationships:    []domain.NodeRelationship{},
+		Folders:          []domain.CompanyExplorerFolder{},
+		FolderItems:      []domain.CompanyExplorerFolderItem{},
+		NodeMapPositions: positions,
+	}
+	for _, folder := range r.folders {
+		if !folderIDs[folder.FolderID] {
+			continue
+		}
+		if folder.SystemKey != nil && *folder.SystemKey == "kanban_boards" {
+			continue
+		}
+		result.Folders = append(result.Folders, r.withSharedInboxRaciLocked(folder))
+	}
+	sort.Slice(result.Folders, func(i, j int) bool {
+		if result.Folders[i].Position == result.Folders[j].Position {
+			if !result.Folders[i].CreatedTimestamp.Equal(result.Folders[j].CreatedTimestamp) {
+				return result.Folders[i].CreatedTimestamp.Before(result.Folders[j].CreatedTimestamp)
+			}
+			return result.Folders[i].FolderID < result.Folders[j].FolderID
+		}
+		return result.Folders[i].Position < result.Folders[j].Position
+	})
+	for _, node := range r.nodes {
+		if node.CompanyID == query.CompanyID && visibleNodes[node.NodeID] {
+			result.Nodes = append(result.Nodes, r.withNodeReadModelLocked(node))
+		}
+	}
+	sort.Slice(result.Nodes, func(i, j int) bool {
+		return result.Nodes[i].CreatedTimestamp.Before(result.Nodes[j].CreatedTimestamp)
+	})
+	for _, rel := range r.nodeRels[query.CompanyID] {
+		if visibleNodes[rel.NodeIDA] && visibleNodes[rel.NodeIDB] {
+			result.Relationships = append(result.Relationships, rel)
+		}
+	}
+	sort.Slice(result.Relationships, func(i, j int) bool {
+		return result.Relationships[i].CreatedTimestamp.Before(result.Relationships[j].CreatedTimestamp)
+	})
+	for _, item := range r.folderItems {
+		if item.CompanyID == query.CompanyID && item.ItemType == "node" && folderIDs[item.FolderID] && visibleNodes[item.ItemID] {
+			result.FolderItems = append(result.FolderItems, item)
+		}
+	}
+	sort.Slice(result.FolderItems, func(i, j int) bool {
+		if result.FolderItems[i].Position == result.FolderItems[j].Position {
+			if !result.FolderItems[i].CreatedTimestamp.Equal(result.FolderItems[j].CreatedTimestamp) {
+				return result.FolderItems[i].CreatedTimestamp.Before(result.FolderItems[j].CreatedTimestamp)
+			}
+			return result.FolderItems[i].ItemID < result.FolderItems[j].ItemID
+		}
+		return result.FolderItems[i].Position < result.FolderItems[j].Position
+	})
+	return result, nil
+}
 func (r *MemoryRepo) UpsertNodeMapPositions(companyID string, positions []domain.NodeMapPosition) ([]domain.NodeMapPosition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

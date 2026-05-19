@@ -263,6 +263,56 @@ func (r *PostgresRepo) ListLogicGatesInFolderSubtree(companyID, folderID string)
 	}
 	return r.attachLogicGateRaciAssignments(ctx, companyID, items)
 }
+
+const postgresLogicGateMapWindowCTE = `
+with recursive folder_scope as (
+  select company_id, folder_id
+  from company_explorer_folders
+  where company_id=$1
+    and folder_id=$2::uuid
+    and folder_kind='logic_gate'
+  union all
+  select child.company_id, child.folder_id
+  from company_explorer_folders child
+  join folder_scope parent
+    on child.company_id=parent.company_id
+   and child.parent_folder_id=parent.folder_id
+  where child.folder_kind='logic_gate'
+), windowed_positions as (
+  select position.company_id, position.logic_gate_id, position.x, position.y, position.updated_timestamp
+  from logic_gate_map_positions position
+  join company_explorer_folder_items item
+    on item.company_id=position.company_id
+   and item.item_type='logic_gate'
+   and item.item_id=position.logic_gate_id::text
+  join folder_scope folder
+    on folder.folder_id=item.folder_id
+  where position.company_id=$1
+    and position.x >= $3
+    and position.x <= $4
+    and position.y >= $5
+    and position.y <= $6
+  order by position.x asc, position.y asc, position.logic_gate_id asc
+  limit $7
+)
+`
+
+func postgresLogicGateMapWindowArgs(query LogicGateMapWindowQuery) []any {
+	return []any{query.CompanyID, query.FolderID, query.Window.MinX, query.Window.MaxX, query.Window.MinY, query.Window.MaxY, query.Limit}
+}
+
+func (r *PostgresRepo) logicGateMapWindowFolderExists(ctx context.Context, query LogicGateMapWindowQuery) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx, `
+select exists(
+  select 1
+  from company_explorer_folders
+  where company_id=$1
+    and folder_id=$2::uuid
+    and folder_kind='logic_gate'
+)`, query.CompanyID, query.FolderID).Scan(&exists)
+	return exists, err
+}
 func (r *PostgresRepo) QueryLogicGates(companyID string, query LogicGateQuery) ([]domain.LogicGate, error) {
 	ctx := context.Background()
 	companyID = strings.TrimSpace(companyID)
@@ -631,6 +681,154 @@ order by position.logic_gate_id asc`, companyID, folderID)
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+func (r *PostgresRepo) ListLogicGateMapPositionsWindow(query LogicGateMapWindowQuery) ([]domain.LogicGateMapPosition, error) {
+	query, err := NormalizeLogicGateMapWindowQuery(query)
+	if err != nil {
+		return nil, err
+	}
+	ctx := context.Background()
+	exists, err := r.logicGateMapWindowFolderExists(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+	rows, err := r.db.QueryContext(ctx, postgresLogicGateMapWindowCTE+`
+select company_id, logic_gate_id, x, y, updated_timestamp
+from windowed_positions
+order by x asc, y asc, logic_gate_id asc`, postgresLogicGateMapWindowArgs(query)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.LogicGateMapPosition, 0)
+	for rows.Next() {
+		var item domain.LogicGateMapPosition
+		if err := rows.Scan(&item.CompanyID, &item.LogicGateID, &item.X, &item.Y, &item.UpdatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) ListLogicGateMapWindow(query LogicGateMapWindowQuery) (LogicGateMapWindowResult, error) {
+	query, err := NormalizeLogicGateMapWindowQuery(query)
+	if err != nil {
+		return LogicGateMapWindowResult{}, err
+	}
+	folders, err := r.ListCompanyExplorerFolderSubtree(query.CompanyID, query.FolderID, "logic_gate")
+	if err != nil {
+		return LogicGateMapWindowResult{}, err
+	}
+	if len(folders) == 0 {
+		return LogicGateMapWindowResult{}, ErrNotFound
+	}
+	positions, err := r.ListLogicGateMapPositionsWindow(query)
+	if err != nil {
+		return LogicGateMapWindowResult{}, err
+	}
+	result := LogicGateMapWindowResult{
+		CompanyID:             query.CompanyID,
+		FolderID:              query.FolderID,
+		Window:                query.Window,
+		Limit:                 query.Limit,
+		LogicGates:            []domain.LogicGate{},
+		Relationships:         []domain.LogicGateRelationship{},
+		Folders:               folders,
+		FolderItems:           []domain.CompanyExplorerFolderItem{},
+		LogicGateMapPositions: positions,
+	}
+	args := postgresLogicGateMapWindowArgs(query)
+	ctx := context.Background()
+
+	gateRows, err := r.db.QueryContext(ctx, postgresLogicGateMapWindowCTE+`
+select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
+from logic_gates gate
+join windowed_positions visible on visible.logic_gate_id=gate.logic_gate_id
+where gate.company_id=$1
+order by gate.created_timestamp asc`, args...)
+	if err != nil {
+		return LogicGateMapWindowResult{}, err
+	}
+	defer gateRows.Close()
+	for gateRows.Next() {
+		var item domain.LogicGate
+		if err := gateRows.Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp); err != nil {
+			return LogicGateMapWindowResult{}, err
+		}
+		result.LogicGates = append(result.LogicGates, item)
+	}
+	if err := gateRows.Err(); err != nil {
+		return LogicGateMapWindowResult{}, err
+	}
+	result.LogicGates, err = r.attachLogicGateRaciAssignments(ctx, query.CompanyID, result.LogicGates)
+	if err != nil {
+		return LogicGateMapWindowResult{}, err
+	}
+
+	relationshipRows, err := r.db.QueryContext(ctx, postgresLogicGateMapWindowCTE+`
+select rel.company_id, rel.logic_gate_relationship_id, rel.logic_gate_id_a, rel.logic_gate_id_b, rel.a_position::text, rel.b_position::text, rel.created_timestamp
+from logic_gate_relationships rel
+join windowed_positions a on a.logic_gate_id=rel.logic_gate_id_a
+join windowed_positions b on b.logic_gate_id=rel.logic_gate_id_b
+where rel.company_id=$1
+order by rel.created_timestamp asc`, args...)
+	if err != nil {
+		return LogicGateMapWindowResult{}, err
+	}
+	defer relationshipRows.Close()
+	for relationshipRows.Next() {
+		var item domain.LogicGateRelationship
+		if err := relationshipRows.Scan(
+			&item.CompanyID,
+			&item.LogicGateRelationshipID,
+			&item.LogicGateIDA,
+			&item.LogicGateIDB,
+			&item.APosition,
+			&item.BPosition,
+			&item.CreatedTimestamp,
+		); err != nil {
+			return LogicGateMapWindowResult{}, err
+		}
+		result.Relationships = append(result.Relationships, item)
+	}
+	if err := relationshipRows.Err(); err != nil {
+		return LogicGateMapWindowResult{}, err
+	}
+
+	itemRows, err := r.db.QueryContext(ctx, postgresLogicGateMapWindowCTE+`
+select item.company_id, item.folder_id, item.item_type, item.item_id, item.position, item.created_timestamp, item.updated_timestamp
+from company_explorer_folder_items item
+join windowed_positions visible on visible.logic_gate_id::text=item.item_id
+where item.company_id=$1
+  and item.item_type='logic_gate'
+order by item.position asc, item.created_timestamp asc`, args...)
+	if err != nil {
+		return LogicGateMapWindowResult{}, err
+	}
+	defer itemRows.Close()
+	for itemRows.Next() {
+		var item domain.CompanyExplorerFolderItem
+		if err := itemRows.Scan(
+			&item.CompanyID,
+			&item.FolderID,
+			&item.ItemType,
+			&item.ItemID,
+			&item.Position,
+			&item.CreatedTimestamp,
+			&item.UpdatedTimestamp,
+		); err != nil {
+			return LogicGateMapWindowResult{}, err
+		}
+		result.FolderItems = append(result.FolderItems, item)
+	}
+	if err := itemRows.Err(); err != nil {
+		return LogicGateMapWindowResult{}, err
+	}
+	return result, nil
 }
 func (r *PostgresRepo) UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error) {
 	ctx := context.Background()

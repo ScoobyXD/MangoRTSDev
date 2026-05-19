@@ -366,6 +366,135 @@ func (r *MemoryRepo) ListLogicGateMapPositionsInFolderSubtree(companyID, folderI
 	})
 	return items, nil
 }
+func logicGateMapPositionInWindow(position domain.LogicGateMapPosition, window NodeMapWindowBounds) bool {
+	return position.X >= window.MinX && position.X <= window.MaxX && position.Y >= window.MinY && position.Y <= window.MaxY
+}
+
+func sortLogicGateMapWindowPositions(items []domain.LogicGateMapPosition) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].X != items[j].X {
+			return items[i].X < items[j].X
+		}
+		if items[i].Y != items[j].Y {
+			return items[i].Y < items[j].Y
+		}
+		return items[i].LogicGateID < items[j].LogicGateID
+	})
+}
+
+func (r *MemoryRepo) logicGateMapWindowPositionsLocked(query LogicGateMapWindowQuery, folderIDs map[string]bool) []domain.LogicGateMapPosition {
+	visibleFolderGates := map[string]bool{}
+	for _, item := range r.folderItems {
+		if item.CompanyID == query.CompanyID && item.ItemType == "logic_gate" && folderIDs[item.FolderID] {
+			visibleFolderGates[item.ItemID] = true
+		}
+	}
+	items := make([]domain.LogicGateMapPosition, 0)
+	for _, item := range r.logicMapPositions {
+		if item.CompanyID == query.CompanyID && visibleFolderGates[item.LogicGateID] && logicGateMapPositionInWindow(item, query.Window) {
+			items = append(items, item)
+		}
+	}
+	sortLogicGateMapWindowPositions(items)
+	if len(items) > query.Limit {
+		items = items[:query.Limit]
+	}
+	return items
+}
+
+func (r *MemoryRepo) ListLogicGateMapPositionsWindow(query LogicGateMapWindowQuery) ([]domain.LogicGateMapPosition, error) {
+	query, err := NormalizeLogicGateMapWindowQuery(query)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, query.CompanyID, query.FolderID, "logic_gate")
+	if len(folderIDs) == 0 {
+		return nil, ErrNotFound
+	}
+	return r.logicGateMapWindowPositionsLocked(query, folderIDs), nil
+}
+
+func (r *MemoryRepo) ListLogicGateMapWindow(query LogicGateMapWindowQuery) (LogicGateMapWindowResult, error) {
+	query, err := NormalizeLogicGateMapWindowQuery(query)
+	if err != nil {
+		return LogicGateMapWindowResult{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, query.CompanyID, query.FolderID, "logic_gate")
+	if len(folderIDs) == 0 {
+		return LogicGateMapWindowResult{}, ErrNotFound
+	}
+
+	positions := r.logicGateMapWindowPositionsLocked(query, folderIDs)
+	visibleGates := map[string]bool{}
+	for _, position := range positions {
+		visibleGates[position.LogicGateID] = true
+	}
+
+	result := LogicGateMapWindowResult{
+		CompanyID:             query.CompanyID,
+		FolderID:              query.FolderID,
+		Window:                query.Window,
+		Limit:                 query.Limit,
+		LogicGates:            []domain.LogicGate{},
+		Relationships:         []domain.LogicGateRelationship{},
+		Folders:               []domain.CompanyExplorerFolder{},
+		FolderItems:           []domain.CompanyExplorerFolderItem{},
+		LogicGateMapPositions: positions,
+	}
+	for _, folder := range r.folders {
+		if !folderIDs[folder.FolderID] {
+			continue
+		}
+		if folder.SystemKey != nil && *folder.SystemKey == "kanban_boards" {
+			continue
+		}
+		result.Folders = append(result.Folders, r.withSharedInboxRaciLocked(folder))
+	}
+	sort.Slice(result.Folders, func(i, j int) bool {
+		if result.Folders[i].Position == result.Folders[j].Position {
+			if !result.Folders[i].CreatedTimestamp.Equal(result.Folders[j].CreatedTimestamp) {
+				return result.Folders[i].CreatedTimestamp.Before(result.Folders[j].CreatedTimestamp)
+			}
+			return result.Folders[i].FolderID < result.Folders[j].FolderID
+		}
+		return result.Folders[i].Position < result.Folders[j].Position
+	})
+	for _, gate := range r.logicGates {
+		if gate.CompanyID == query.CompanyID && visibleGates[gate.LogicGateID] {
+			result.LogicGates = append(result.LogicGates, r.withLogicGateRaciLocked(gate))
+		}
+	}
+	sort.Slice(result.LogicGates, func(i, j int) bool {
+		return result.LogicGates[i].CreatedTimestamp.Before(result.LogicGates[j].CreatedTimestamp)
+	})
+	for _, rel := range r.logicGateRels[query.CompanyID] {
+		if visibleGates[rel.LogicGateIDA] && visibleGates[rel.LogicGateIDB] {
+			result.Relationships = append(result.Relationships, rel)
+		}
+	}
+	sort.Slice(result.Relationships, func(i, j int) bool {
+		return result.Relationships[i].CreatedTimestamp.Before(result.Relationships[j].CreatedTimestamp)
+	})
+	for _, item := range r.folderItems {
+		if item.CompanyID == query.CompanyID && item.ItemType == "logic_gate" && folderIDs[item.FolderID] && visibleGates[item.ItemID] {
+			result.FolderItems = append(result.FolderItems, item)
+		}
+	}
+	sort.Slice(result.FolderItems, func(i, j int) bool {
+		if result.FolderItems[i].Position == result.FolderItems[j].Position {
+			if !result.FolderItems[i].CreatedTimestamp.Equal(result.FolderItems[j].CreatedTimestamp) {
+				return result.FolderItems[i].CreatedTimestamp.Before(result.FolderItems[j].CreatedTimestamp)
+			}
+			return result.FolderItems[i].ItemID < result.FolderItems[j].ItemID
+		}
+		return result.FolderItems[i].Position < result.FolderItems[j].Position
+	})
+	return result, nil
+}
 func (r *MemoryRepo) UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

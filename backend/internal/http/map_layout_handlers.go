@@ -42,6 +42,41 @@ func (s *Server) handleMapLayout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if mapType == "node" {
+			if nodeMapWindowQueryParamPresent(r) {
+				query, errCode, ok := parseNodeMapWindowQuery(r, companyID)
+				if !ok {
+					writeError(w, http.StatusBadRequest, errCode)
+					return
+				}
+				etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "map-layout:node-window", []store.DomainEventStreamQuery{
+					workspaceEventQuery(nodeMapPositionWorkspaceEventTypes...),
+					workspaceEventQuery("node_deleted"),
+					workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("node")),
+					workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("node")),
+				})
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
+					return
+				}
+				if notModified {
+					return
+				}
+				items, err := s.repo.ListNodeMapPositionsWindow(query)
+				if errors.Is(err, store.ErrNotFound) {
+					writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+					return
+				}
+				if errors.Is(err, store.ErrInvalid) {
+					writeError(w, http.StatusBadRequest, "invalid_window")
+					return
+				}
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_positions")
+					return
+				}
+				writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"company_id": companyID, "map_type": mapType, "folder_id": query.FolderID, "window": query.Window, "nodes_limit": query.Limit, "positions": items}, etag)
+				return
+			}
 			etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "map-layout:node", []store.DomainEventStreamQuery{
 				workspaceEventQuery(nodeMapPositionWorkspaceEventTypes...),
 				workspaceEventQuery("node_deleted"),
@@ -62,6 +97,41 @@ func (s *Server) handleMapLayout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if mapType == "logic_gate" {
+			if logicGateMapWindowQueryParamPresent(r) {
+				query, errCode, ok := parseLogicGateMapWindowQuery(r, companyID)
+				if !ok {
+					writeError(w, http.StatusBadRequest, errCode)
+					return
+				}
+				etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "map-layout:logic_gate-window", []store.DomainEventStreamQuery{
+					workspaceEventQuery(logicGateMapPositionWorkspaceEventTypes...),
+					workspaceEventQuery("logic_gate_deleted"),
+					workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("logic_gate")),
+					workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("logic_gate")),
+				})
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
+					return
+				}
+				if notModified {
+					return
+				}
+				items, err := s.repo.ListLogicGateMapPositionsWindow(query)
+				if errors.Is(err, store.ErrNotFound) {
+					writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+					return
+				}
+				if errors.Is(err, store.ErrInvalid) {
+					writeError(w, http.StatusBadRequest, "invalid_window")
+					return
+				}
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_positions")
+					return
+				}
+				writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"company_id": companyID, "map_type": mapType, "folder_id": query.FolderID, "window": query.Window, "logic_gates_limit": query.Limit, "positions": items}, etag)
+				return
+			}
 			etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "map-layout:logic_gate", []store.DomainEventStreamQuery{
 				workspaceEventQuery(logicGateMapPositionWorkspaceEventTypes...),
 				workspaceEventQuery("logic_gate_deleted"),

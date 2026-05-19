@@ -1585,6 +1585,645 @@ func TestWorkspaceSnapshotNodeMapScopeUsesFolderSubtree(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSnapshotNodeMapWindowBoundsPayloadAndPreservesBroadCompatibility(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "11111111-1111-4111-8111-555555555555"
+
+	parent, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Window parent")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder parent error = %v", err)
+	}
+	child, err := repo.CreateCompanyExplorerFolder(companyID, parent.FolderID, "node", "Window child")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder child error = %v", err)
+	}
+	sibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Window sibling")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder sibling error = %v", err)
+	}
+
+	nodeA, err := repo.CreateNode(companyID, "Window A")
+	if err != nil {
+		t.Fatalf("CreateNode A error = %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "Window B")
+	if err != nil {
+		t.Fatalf("CreateNode B error = %v", err)
+	}
+	nodeOutsideFolder, err := repo.CreateNode(companyID, "Outside folder")
+	if err != nil {
+		t.Fatalf("CreateNode outside folder error = %v", err)
+	}
+	nodeOutsideWindow, err := repo.CreateNode(companyID, "Outside window")
+	if err != nil {
+		t.Fatalf("CreateNode outside window error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", nodeA.NodeID, 1000); err != nil {
+		t.Fatalf("Assign node A error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, child.FolderID, "node", nodeB.NodeID, 2000); err != nil {
+		t.Fatalf("Assign node B error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, sibling.FolderID, "node", nodeOutsideFolder.NodeID, 3000); err != nil {
+		t.Fatalf("Assign outside folder node error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", nodeOutsideWindow.NodeID, 4000); err != nil {
+		t.Fatalf("Assign outside window node error = %v", err)
+	}
+
+	visibleRelationship, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeB.NodeID, "Peer", "Peer")
+	if err != nil {
+		t.Fatalf("CreateNodeRelationship visible error = %v", err)
+	}
+	if _, err := repo.CreateNodeRelationship(companyID, nodeB.NodeID, nodeOutsideFolder.NodeID, "Peer", "Peer"); err != nil {
+		t.Fatalf("CreateNodeRelationship outside folder error = %v", err)
+	}
+	if _, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeOutsideWindow.NodeID, "Peer", "Peer"); err != nil {
+		t.Fatalf("CreateNodeRelationship outside window error = %v", err)
+	}
+	if _, err := repo.UpsertNodeMapPositions(companyID, []domain.NodeMapPosition{
+		{NodeID: nodeA.NodeID, X: 100, Y: 100},
+		{NodeID: nodeB.NodeID, X: 200, Y: 200},
+		{NodeID: nodeOutsideFolder.NodeID, X: 150, Y: 150},
+		{NodeID: nodeOutsideWindow.NodeID, X: 900, Y: 900},
+	}); err != nil {
+		t.Fatalf("UpsertNodeMapPositions error = %v", err)
+	}
+
+	windowURL := "/v1/workspace/snapshot?company_id=" + companyID + "&scope=node_map_window&folder_id=" + parent.FolderID + "&min_x=0&min_y=0&max_x=300&max_y=300&limit=10"
+	req := httptest.NewRequest(http.MethodGet, windowURL, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("node_map_window status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var payload struct {
+		Scope            string                             `json:"scope"`
+		FolderID         string                             `json:"folder_id"`
+		Window           store.NodeMapWindowBounds          `json:"window"`
+		Limit            int                                `json:"nodes_limit"`
+		Nodes            []domain.Node                      `json:"nodes"`
+		Relationships    []domain.NodeRelationship          `json:"relationships"`
+		Folders          []domain.CompanyExplorerFolder     `json:"folders"`
+		FolderItems      []domain.CompanyExplorerFolderItem `json:"folder_items"`
+		NodeMapPositions []domain.NodeMapPosition           `json:"node_map_positions"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode node_map_window payload: %v", err)
+	}
+	if payload.Scope != "node_map_window" || payload.FolderID != parent.FolderID || payload.Limit != 10 || payload.Window.MaxX != 300 || payload.Window.MaxY != 300 {
+		t.Fatalf("window metadata = scope %q folder %q limit %d window %+v", payload.Scope, payload.FolderID, payload.Limit, payload.Window)
+	}
+	assertHTTPNodeMapIDs(t, "window nodes", httpNodeIDs(payload.Nodes), nodeA.NodeID, nodeB.NodeID)
+	assertHTTPNodeMapIDs(t, "window positions", httpPositionNodeIDs(payload.NodeMapPositions), nodeA.NodeID, nodeB.NodeID)
+	assertHTTPNodeMapIDs(t, "window relationships", httpRelationshipIDs(payload.Relationships), visibleRelationship.NodeRelationshipID)
+	assertHTTPNodeMapIDs(t, "window folder_items", httpFolderItemIDs(payload.FolderItems), nodeA.NodeID, nodeB.NodeID)
+	assertHTTPNodeMapIDs(t, "window folders", httpFolderIDs(payload.Folders), parent.FolderID, child.FolderID)
+
+	layoutReq := httptest.NewRequest(http.MethodGet, "/v1/map-layout?company_id="+companyID+"&map_type=node&folder_id="+parent.FolderID+"&min_x=0&min_y=0&max_x=300&max_y=300&limit=10", nil)
+	layoutRec := httptest.NewRecorder()
+	handler.ServeHTTP(layoutRec, layoutReq)
+	if layoutRec.Code != http.StatusOK {
+		t.Fatalf("bounded map-layout status = %d, want %d body=%s", layoutRec.Code, http.StatusOK, layoutRec.Body.String())
+	}
+	var layoutPayload struct {
+		Positions []domain.NodeMapPosition `json:"positions"`
+	}
+	if err := json.NewDecoder(layoutRec.Body).Decode(&layoutPayload); err != nil {
+		t.Fatalf("decode bounded map-layout payload: %v", err)
+	}
+	assertHTTPNodeMapIDs(t, "bounded map-layout positions", httpPositionNodeIDs(layoutPayload.Positions), nodeA.NodeID, nodeB.NodeID)
+
+	broadReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=node_map", nil)
+	broadRec := httptest.NewRecorder()
+	handler.ServeHTTP(broadRec, broadReq)
+	if broadRec.Code != http.StatusOK {
+		t.Fatalf("broad node_map status = %d, want %d body=%s", broadRec.Code, http.StatusOK, broadRec.Body.String())
+	}
+	var broadPayload struct {
+		Scope            string                   `json:"scope"`
+		Nodes            []domain.Node            `json:"nodes"`
+		NodeMapPositions []domain.NodeMapPosition `json:"node_map_positions"`
+	}
+	if err := json.NewDecoder(broadRec.Body).Decode(&broadPayload); err != nil {
+		t.Fatalf("decode broad node_map payload: %v", err)
+	}
+	if broadPayload.Scope != "node_map" {
+		t.Fatalf("broad scope = %q, want node_map", broadPayload.Scope)
+	}
+	assertHTTPNodeMapIDs(t, "broad nodes", httpNodeIDs(broadPayload.Nodes), nodeA.NodeID, nodeB.NodeID, nodeOutsideFolder.NodeID, nodeOutsideWindow.NodeID)
+	assertHTTPNodeMapIDs(t, "broad positions", httpPositionNodeIDs(broadPayload.NodeMapPositions), nodeA.NodeID, nodeB.NodeID, nodeOutsideFolder.NodeID, nodeOutsideWindow.NodeID)
+}
+
+func TestWorkspaceSnapshotNodeMapWindowRejectsInvalidInputsAndDoesNotRepairRows(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "11111111-1111-4111-8111-666666666666"
+	missingFolderID := "22222222-2222-4222-8222-222222222222"
+
+	cases := []struct {
+		name string
+		url  string
+		code int
+		err  string
+	}{
+		{name: "missing folder id", url: "/v1/workspace/snapshot?company_id=" + companyID + "&scope=node_map_window&min_x=0&min_y=0&max_x=100&max_y=100", code: http.StatusBadRequest, err: "folder_id_required"},
+		{name: "invalid folder id", url: "/v1/workspace/snapshot?company_id=" + companyID + "&scope=node_map_window&folder_id=not-a-folder&min_x=0&min_y=0&max_x=100&max_y=100", code: http.StatusBadRequest, err: "invalid_folder_id"},
+		{name: "invalid window", url: "/v1/workspace/snapshot?company_id=" + companyID + "&scope=node_map_window&folder_id=" + missingFolderID + "&min_x=200&min_y=0&max_x=100&max_y=100", code: http.StatusBadRequest, err: "invalid_window"},
+		{name: "missing folder", url: "/v1/workspace/snapshot?company_id=" + companyID + "&scope=node_map_window&folder_id=" + missingFolderID + "&min_x=0&min_y=0&max_x=100&max_y=100", code: http.StatusNotFound, err: "company_explorer_folder_not_found"},
+		{name: "map-layout missing folder", url: "/v1/map-layout?company_id=" + companyID + "&map_type=node&folder_id=" + missingFolderID + "&min_x=0&min_y=0&max_x=100&max_y=100", code: http.StatusNotFound, err: "company_explorer_folder_not_found"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tc.code || !strings.Contains(rec.Body.String(), tc.err) {
+				t.Fatalf("status/body = %d/%s, want %d containing %q", rec.Code, rec.Body.String(), tc.code, tc.err)
+			}
+		})
+	}
+	folders, err := repo.ListCompanyExplorerFolders(companyID, "node")
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerFolders after GETs error = %v", err)
+	}
+	if len(folders) != 0 {
+		t.Fatalf("GET node-map window created folders = %+v, want none", folders)
+	}
+}
+
+type countingNodeMapWindowRepo struct {
+	store.Repository
+	listNodeMapWindowCalls int
+}
+
+func (r *countingNodeMapWindowRepo) ListNodeMapWindow(query store.NodeMapWindowQuery) (store.NodeMapWindowResult, error) {
+	r.listNodeMapWindowCalls++
+	return r.Repository.ListNodeMapWindow(query)
+}
+
+func TestWorkspaceSnapshotNodeMapWindowConditionalGetAndEventFilters(t *testing.T) {
+	base := store.NewMemoryRepo()
+	repo := &countingNodeMapWindowRepo{Repository: base}
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "11111111-1111-4111-8111-777777777777"
+
+	folder, err := base.CreateCompanyExplorerFolder(companyID, "", "node", "Window")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder error = %v", err)
+	}
+	node, err := base.CreateNode(companyID, "Visible")
+	if err != nil {
+		t.Fatalf("CreateNode error = %v", err)
+	}
+	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", node.NodeID, 1000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem error = %v", err)
+	}
+	if _, err := base.UpsertNodeMapPositions(companyID, []domain.NodeMapPosition{{NodeID: node.NodeID, X: 25, Y: 25}}); err != nil {
+		t.Fatalf("UpsertNodeMapPositions error = %v", err)
+	}
+
+	url := "/v1/workspace/snapshot?company_id=" + companyID + "&scope=node_map_window&folder_id=" + folder.FolderID + "&min_x=0&min_y=0&max_x=100&max_y=100"
+	firstReq := httptest.NewRequest(http.MethodGet, url, nil)
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("initial node_map_window status = %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	if repo.listNodeMapWindowCalls != 1 {
+		t.Fatalf("ListNodeMapWindow calls after first request = %d, want 1", repo.listNodeMapWindowCalls)
+	}
+	etag := firstRec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("node_map_window ETag is empty")
+	}
+
+	unchangedReq := httptest.NewRequest(http.MethodGet, url, nil)
+	unchangedReq.Header.Set("If-None-Match", etag)
+	unchangedRec := httptest.NewRecorder()
+	handler.ServeHTTP(unchangedRec, unchangedReq)
+	if unchangedRec.Code != http.StatusNotModified {
+		t.Fatalf("unchanged node_map_window status = %d, want %d body=%s", unchangedRec.Code, http.StatusNotModified, unchangedRec.Body.String())
+	}
+	if repo.listNodeMapWindowCalls != 1 {
+		t.Fatalf("ListNodeMapWindow calls after 304 = %d, want 1", repo.listNodeMapWindowCalls)
+	}
+
+	communicationsBody, _ := json.Marshal(map[string]string{"company_id": companyID, "folder_kind": "communications", "name": "Shared"})
+	communicationsReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(communicationsBody))
+	communicationsReq.Header.Set("Content-Type", "application/json")
+	communicationsRec := httptest.NewRecorder()
+	handler.ServeHTTP(communicationsRec, communicationsReq)
+	if communicationsRec.Code != http.StatusCreated {
+		t.Fatalf("create communications folder status = %d body=%s", communicationsRec.Code, communicationsRec.Body.String())
+	}
+	unrelatedReq := httptest.NewRequest(http.MethodGet, url, nil)
+	unrelatedReq.Header.Set("If-None-Match", etag)
+	unrelatedRec := httptest.NewRecorder()
+	handler.ServeHTTP(unrelatedRec, unrelatedReq)
+	if unrelatedRec.Code != http.StatusNotModified {
+		t.Fatalf("node_map_window after unrelated communications event status = %d, want %d body=%s", unrelatedRec.Code, http.StatusNotModified, unrelatedRec.Body.String())
+	}
+	if repo.listNodeMapWindowCalls != 1 {
+		t.Fatalf("ListNodeMapWindow calls after unrelated 304 = %d, want 1", repo.listNodeMapWindowCalls)
+	}
+
+	writeBody, _ := json.Marshal(map[string]any{"company_id": companyID, "map_type": "node", "positions": []map[string]any{{"entity_id": node.NodeID, "x": 50, "y": 50}}})
+	writeReq := httptest.NewRequest(http.MethodPut, "/v1/map-layout", bytes.NewReader(writeBody))
+	writeReq.Header.Set("Content-Type", "application/json")
+	writeRec := httptest.NewRecorder()
+	handler.ServeHTTP(writeRec, writeReq)
+	if writeRec.Code != http.StatusOK {
+		t.Fatalf("PUT map-layout status = %d body=%s", writeRec.Code, writeRec.Body.String())
+	}
+
+	staleReq := httptest.NewRequest(http.MethodGet, url, nil)
+	staleReq.Header.Set("If-None-Match", etag)
+	staleRec := httptest.NewRecorder()
+	handler.ServeHTTP(staleRec, staleReq)
+	if staleRec.Code != http.StatusOK {
+		t.Fatalf("node_map_window after position update status = %d, want %d body=%s", staleRec.Code, http.StatusOK, staleRec.Body.String())
+	}
+	if staleRec.Header().Get("ETag") == etag {
+		t.Fatalf("node_map_window ETag did not change after node_map_positions_updated")
+	}
+	if repo.listNodeMapWindowCalls != 2 {
+		t.Fatalf("ListNodeMapWindow calls after relevant event = %d, want 2", repo.listNodeMapWindowCalls)
+	}
+}
+
+func assertHTTPNodeMapIDs(t *testing.T, label string, got []string, want ...string) {
+	t.Helper()
+	seen := make(map[string]bool, len(got))
+	for _, id := range got {
+		seen[id] = true
+	}
+	if len(seen) != len(want) {
+		t.Fatalf("%s ids = %v, want %v", label, got, want)
+	}
+	for _, id := range want {
+		if !seen[id] {
+			t.Fatalf("%s ids = %v, missing %s", label, got, id)
+		}
+	}
+}
+
+func httpNodeIDs(items []domain.Node) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.NodeID)
+	}
+	return ids
+}
+
+func httpPositionNodeIDs(items []domain.NodeMapPosition) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.NodeID)
+	}
+	return ids
+}
+
+func httpRelationshipIDs(items []domain.NodeRelationship) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.NodeRelationshipID)
+	}
+	return ids
+}
+
+func httpFolderItemIDs(items []domain.CompanyExplorerFolderItem) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ItemID)
+	}
+	return ids
+}
+
+func httpFolderIDs(items []domain.CompanyExplorerFolder) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.FolderID)
+	}
+	return ids
+}
+func TestWorkspaceSnapshotLogicGateMapWindowBoundsPayloadAndPreservesBroadCompatibility(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "11111111-1111-4111-8111-aaaaaaaaaaaa"
+
+	parent, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Window parent")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder parent error = %v", err)
+	}
+	child, err := repo.CreateCompanyExplorerFolder(companyID, parent.FolderID, "logic_gate", "Window child")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder child error = %v", err)
+	}
+	sibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Window sibling")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder sibling error = %v", err)
+	}
+
+	gateA, err := repo.CreateLogicGate(companyID, "Window A")
+	if err != nil {
+		t.Fatalf("CreateLogicGate A error = %v", err)
+	}
+	gateB, err := repo.CreateLogicGate(companyID, "Window B")
+	if err != nil {
+		t.Fatalf("CreateLogicGate B error = %v", err)
+	}
+	gateOutsideFolder, err := repo.CreateLogicGate(companyID, "Outside folder")
+	if err != nil {
+		t.Fatalf("CreateLogicGate outside folder error = %v", err)
+	}
+	gateOutsideWindow, err := repo.CreateLogicGate(companyID, "Outside window")
+	if err != nil {
+		t.Fatalf("CreateLogicGate outside window error = %v", err)
+	}
+	gateWithoutPosition, err := repo.CreateLogicGate(companyID, "Without position")
+	if err != nil {
+		t.Fatalf("CreateLogicGate without position error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "logic_gate", gateA.LogicGateID, 1000); err != nil {
+		t.Fatalf("Assign gate A error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, child.FolderID, "logic_gate", gateB.LogicGateID, 2000); err != nil {
+		t.Fatalf("Assign gate B error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, sibling.FolderID, "logic_gate", gateOutsideFolder.LogicGateID, 3000); err != nil {
+		t.Fatalf("Assign outside folder gate error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "logic_gate", gateOutsideWindow.LogicGateID, 4000); err != nil {
+		t.Fatalf("Assign outside window gate error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "logic_gate", gateWithoutPosition.LogicGateID, 5000); err != nil {
+		t.Fatalf("Assign unpositioned gate error = %v", err)
+	}
+
+	visibleRelationship, err := repo.CreateLogicGateRelationship(companyID, gateA.LogicGateID, gateB.LogicGateID, "Peer", "Peer")
+	if err != nil {
+		t.Fatalf("CreateLogicGateRelationship visible error = %v", err)
+	}
+	if _, err := repo.CreateLogicGateRelationship(companyID, gateB.LogicGateID, gateOutsideFolder.LogicGateID, "Peer", "Peer"); err != nil {
+		t.Fatalf("CreateLogicGateRelationship outside folder error = %v", err)
+	}
+	if _, err := repo.CreateLogicGateRelationship(companyID, gateA.LogicGateID, gateOutsideWindow.LogicGateID, "Peer", "Peer"); err != nil {
+		t.Fatalf("CreateLogicGateRelationship outside window error = %v", err)
+	}
+	if _, err := repo.CreateLogicGateRelationship(companyID, gateA.LogicGateID, gateWithoutPosition.LogicGateID, "Peer", "Peer"); err != nil {
+		t.Fatalf("CreateLogicGateRelationship unpositioned error = %v", err)
+	}
+	if _, err := repo.UpsertLogicGateMapPositions(companyID, []domain.LogicGateMapPosition{
+		{LogicGateID: gateA.LogicGateID, X: 100, Y: 100},
+		{LogicGateID: gateB.LogicGateID, X: 200, Y: 200},
+		{LogicGateID: gateOutsideFolder.LogicGateID, X: 150, Y: 150},
+		{LogicGateID: gateOutsideWindow.LogicGateID, X: 900, Y: 900},
+	}); err != nil {
+		t.Fatalf("UpsertLogicGateMapPositions error = %v", err)
+	}
+
+	windowURL := "/v1/workspace/snapshot?company_id=" + companyID + "&scope=logic_gate_map_window&folder_id=" + parent.FolderID + "&min_x=0&min_y=0&max_x=300&max_y=300&limit=10"
+	req := httptest.NewRequest(http.MethodGet, windowURL, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("logic_gate_map_window status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var payload struct {
+		Scope                 string                             `json:"scope"`
+		FolderID              string                             `json:"folder_id"`
+		Window                store.NodeMapWindowBounds          `json:"window"`
+		Limit                 int                                `json:"logic_gates_limit"`
+		LogicGates            []domain.LogicGate                 `json:"logic_gates"`
+		Relationships         []domain.LogicGateRelationship     `json:"logic_gate_relationships"`
+		Folders               []domain.CompanyExplorerFolder     `json:"folders"`
+		FolderItems           []domain.CompanyExplorerFolderItem `json:"folder_items"`
+		LogicGateMapPositions []domain.LogicGateMapPosition      `json:"logic_gate_map_positions"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode logic_gate_map_window payload: %v", err)
+	}
+	if payload.Scope != "logic_gate_map_window" || payload.FolderID != parent.FolderID || payload.Limit != 10 || payload.Window.MaxX != 300 || payload.Window.MaxY != 300 {
+		t.Fatalf("window metadata = scope %q folder %q limit %d window %+v", payload.Scope, payload.FolderID, payload.Limit, payload.Window)
+	}
+	assertHTTPNodeMapIDs(t, "window logic_gates", httpLogicGateIDs(payload.LogicGates), gateA.LogicGateID, gateB.LogicGateID)
+	assertHTTPNodeMapIDs(t, "window positions", httpLogicGatePositionIDs(payload.LogicGateMapPositions), gateA.LogicGateID, gateB.LogicGateID)
+	assertHTTPNodeMapIDs(t, "window relationships", httpLogicGateRelationshipIDs(payload.Relationships), visibleRelationship.LogicGateRelationshipID)
+	assertHTTPNodeMapIDs(t, "window folder_items", httpFolderItemIDs(payload.FolderItems), gateA.LogicGateID, gateB.LogicGateID)
+	assertHTTPNodeMapIDs(t, "window folders", httpFolderIDs(payload.Folders), parent.FolderID, child.FolderID)
+
+	layoutReq := httptest.NewRequest(http.MethodGet, "/v1/map-layout?company_id="+companyID+"&map_type=logic_gate&folder_id="+parent.FolderID+"&min_x=0&min_y=0&max_x=300&max_y=300&limit=10", nil)
+	layoutRec := httptest.NewRecorder()
+	handler.ServeHTTP(layoutRec, layoutReq)
+	if layoutRec.Code != http.StatusOK {
+		t.Fatalf("bounded logic gate map-layout status = %d, want %d body=%s", layoutRec.Code, http.StatusOK, layoutRec.Body.String())
+	}
+	var layoutPayload struct {
+		Positions []domain.LogicGateMapPosition `json:"positions"`
+	}
+	if err := json.NewDecoder(layoutRec.Body).Decode(&layoutPayload); err != nil {
+		t.Fatalf("decode bounded logic gate map-layout payload: %v", err)
+	}
+	assertHTTPNodeMapIDs(t, "bounded logic gate map-layout positions", httpLogicGatePositionIDs(layoutPayload.Positions), gateA.LogicGateID, gateB.LogicGateID)
+
+	broadReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=logic_gate_map", nil)
+	broadRec := httptest.NewRecorder()
+	handler.ServeHTTP(broadRec, broadReq)
+	if broadRec.Code != http.StatusOK {
+		t.Fatalf("broad logic_gate_map status = %d, want %d body=%s", broadRec.Code, http.StatusOK, broadRec.Body.String())
+	}
+	var broadPayload struct {
+		Scope                 string                        `json:"scope"`
+		LogicGates            []domain.LogicGate            `json:"logic_gates"`
+		LogicGateMapPositions []domain.LogicGateMapPosition `json:"logic_gate_map_positions"`
+	}
+	if err := json.NewDecoder(broadRec.Body).Decode(&broadPayload); err != nil {
+		t.Fatalf("decode broad logic_gate_map payload: %v", err)
+	}
+	if broadPayload.Scope != "logic_gate_map" {
+		t.Fatalf("broad scope = %q, want logic_gate_map", broadPayload.Scope)
+	}
+	assertHTTPNodeMapIDs(t, "broad logic_gates", httpLogicGateIDs(broadPayload.LogicGates), gateA.LogicGateID, gateB.LogicGateID, gateOutsideFolder.LogicGateID, gateOutsideWindow.LogicGateID, gateWithoutPosition.LogicGateID)
+	assertHTTPNodeMapIDs(t, "broad positions", httpLogicGatePositionIDs(broadPayload.LogicGateMapPositions), gateA.LogicGateID, gateB.LogicGateID, gateOutsideFolder.LogicGateID, gateOutsideWindow.LogicGateID)
+}
+
+func TestWorkspaceSnapshotLogicGateMapWindowRejectsInvalidInputsAndDoesNotRepairRows(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "11111111-1111-4111-8111-bbbbbbbbbbbb"
+	missingFolderID := "22222222-2222-4222-8222-222222222222"
+
+	cases := []struct {
+		name string
+		url  string
+		code int
+		err  string
+	}{
+		{name: "missing company id", url: "/v1/workspace/snapshot?scope=logic_gate_map_window&folder_id=" + missingFolderID + "&min_x=0&min_y=0&max_x=100&max_y=100", code: http.StatusBadRequest, err: "company_id_required"},
+		{name: "missing folder id", url: "/v1/workspace/snapshot?company_id=" + companyID + "&scope=logic_gate_map_window&min_x=0&min_y=0&max_x=100&max_y=100", code: http.StatusBadRequest, err: "folder_id_required"},
+		{name: "invalid folder id", url: "/v1/workspace/snapshot?company_id=" + companyID + "&scope=logic_gate_map_window&folder_id=not-a-folder&min_x=0&min_y=0&max_x=100&max_y=100", code: http.StatusBadRequest, err: "invalid_folder_id"},
+		{name: "invalid window", url: "/v1/workspace/snapshot?company_id=" + companyID + "&scope=logic_gate_map_window&folder_id=" + missingFolderID + "&min_x=200&min_y=0&max_x=100&max_y=100", code: http.StatusBadRequest, err: "invalid_window"},
+		{name: "missing folder", url: "/v1/workspace/snapshot?company_id=" + companyID + "&scope=logic_gate_map_window&folder_id=" + missingFolderID + "&min_x=0&min_y=0&max_x=100&max_y=100", code: http.StatusNotFound, err: "company_explorer_folder_not_found"},
+		{name: "map-layout missing folder", url: "/v1/map-layout?company_id=" + companyID + "&map_type=logic_gate&folder_id=" + missingFolderID + "&min_x=0&min_y=0&max_x=100&max_y=100", code: http.StatusNotFound, err: "company_explorer_folder_not_found"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tc.code || !strings.Contains(rec.Body.String(), tc.err) {
+				t.Fatalf("status/body = %d/%s, want %d containing %q", rec.Code, rec.Body.String(), tc.code, tc.err)
+			}
+		})
+	}
+	folders, err := repo.ListCompanyExplorerFolders(companyID, "logic_gate")
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerFolders after GETs error = %v", err)
+	}
+	if len(folders) != 0 {
+		t.Fatalf("GET logic-gate-map window created folders = %+v, want none", folders)
+	}
+}
+
+type countingLogicGateMapWindowRepo struct {
+	store.Repository
+	listLogicGateMapWindowCalls int
+}
+
+func (r *countingLogicGateMapWindowRepo) ListLogicGateMapWindow(query store.LogicGateMapWindowQuery) (store.LogicGateMapWindowResult, error) {
+	r.listLogicGateMapWindowCalls++
+	return r.Repository.ListLogicGateMapWindow(query)
+}
+
+func TestWorkspaceSnapshotLogicGateMapWindowConditionalGetAndEventFilters(t *testing.T) {
+	base := store.NewMemoryRepo()
+	repo := &countingLogicGateMapWindowRepo{Repository: base}
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "11111111-1111-4111-8111-cccccccccccc"
+
+	folder, err := base.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Window")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder error = %v", err)
+	}
+	logicGate, err := base.CreateLogicGate(companyID, "Visible")
+	if err != nil {
+		t.Fatalf("CreateLogicGate error = %v", err)
+	}
+	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "logic_gate", logicGate.LogicGateID, 1000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem error = %v", err)
+	}
+	if _, err := base.UpsertLogicGateMapPositions(companyID, []domain.LogicGateMapPosition{{LogicGateID: logicGate.LogicGateID, X: 25, Y: 25}}); err != nil {
+		t.Fatalf("UpsertLogicGateMapPositions error = %v", err)
+	}
+
+	url := "/v1/workspace/snapshot?company_id=" + companyID + "&scope=logic_gate_map_window&folder_id=" + folder.FolderID + "&min_x=0&min_y=0&max_x=100&max_y=100"
+	firstReq := httptest.NewRequest(http.MethodGet, url, nil)
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("initial logic_gate_map_window status = %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	if repo.listLogicGateMapWindowCalls != 1 {
+		t.Fatalf("ListLogicGateMapWindow calls after first request = %d, want 1", repo.listLogicGateMapWindowCalls)
+	}
+	etag := firstRec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("logic_gate_map_window ETag is empty")
+	}
+
+	unchangedReq := httptest.NewRequest(http.MethodGet, url, nil)
+	unchangedReq.Header.Set("If-None-Match", etag)
+	unchangedRec := httptest.NewRecorder()
+	handler.ServeHTTP(unchangedRec, unchangedReq)
+	if unchangedRec.Code != http.StatusNotModified {
+		t.Fatalf("unchanged logic_gate_map_window status = %d, want %d body=%s", unchangedRec.Code, http.StatusNotModified, unchangedRec.Body.String())
+	}
+	if repo.listLogicGateMapWindowCalls != 1 {
+		t.Fatalf("ListLogicGateMapWindow calls after 304 = %d, want 1", repo.listLogicGateMapWindowCalls)
+	}
+
+	communicationsBody, _ := json.Marshal(map[string]string{"company_id": companyID, "folder_kind": "communications", "name": "Shared"})
+	communicationsReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(communicationsBody))
+	communicationsReq.Header.Set("Content-Type", "application/json")
+	communicationsRec := httptest.NewRecorder()
+	handler.ServeHTTP(communicationsRec, communicationsReq)
+	if communicationsRec.Code != http.StatusCreated {
+		t.Fatalf("create communications folder status = %d body=%s", communicationsRec.Code, communicationsRec.Body.String())
+	}
+	unrelatedReq := httptest.NewRequest(http.MethodGet, url, nil)
+	unrelatedReq.Header.Set("If-None-Match", etag)
+	unrelatedRec := httptest.NewRecorder()
+	handler.ServeHTTP(unrelatedRec, unrelatedReq)
+	if unrelatedRec.Code != http.StatusNotModified {
+		t.Fatalf("logic_gate_map_window after unrelated communications event status = %d, want %d body=%s", unrelatedRec.Code, http.StatusNotModified, unrelatedRec.Body.String())
+	}
+	if repo.listLogicGateMapWindowCalls != 1 {
+		t.Fatalf("ListLogicGateMapWindow calls after unrelated 304 = %d, want 1", repo.listLogicGateMapWindowCalls)
+	}
+
+	writeBody, _ := json.Marshal(map[string]any{"company_id": companyID, "map_type": "logic_gate", "positions": []map[string]any{{"entity_id": logicGate.LogicGateID, "x": 50, "y": 50}}})
+	writeReq := httptest.NewRequest(http.MethodPut, "/v1/map-layout", bytes.NewReader(writeBody))
+	writeReq.Header.Set("Content-Type", "application/json")
+	writeRec := httptest.NewRecorder()
+	handler.ServeHTTP(writeRec, writeReq)
+	if writeRec.Code != http.StatusOK {
+		t.Fatalf("PUT logic gate map-layout status = %d body=%s", writeRec.Code, writeRec.Body.String())
+	}
+
+	staleReq := httptest.NewRequest(http.MethodGet, url, nil)
+	staleReq.Header.Set("If-None-Match", etag)
+	staleRec := httptest.NewRecorder()
+	handler.ServeHTTP(staleRec, staleReq)
+	if staleRec.Code != http.StatusOK {
+		t.Fatalf("logic_gate_map_window after position update status = %d, want %d body=%s", staleRec.Code, http.StatusOK, staleRec.Body.String())
+	}
+	if staleRec.Header().Get("ETag") == etag {
+		t.Fatalf("logic_gate_map_window ETag did not change after logic_gate_map_positions_updated")
+	}
+	if repo.listLogicGateMapWindowCalls != 2 {
+		t.Fatalf("ListLogicGateMapWindow calls after relevant event = %d, want 2", repo.listLogicGateMapWindowCalls)
+	}
+}
+
+func httpLogicGateIDs(items []domain.LogicGate) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.LogicGateID)
+	}
+	return ids
+}
+
+func httpLogicGatePositionIDs(items []domain.LogicGateMapPosition) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.LogicGateID)
+	}
+	return ids
+}
+
+func httpLogicGateRelationshipIDs(items []domain.LogicGateRelationship) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.LogicGateRelationshipID)
+	}
+	return ids
+}
 func TestWorkspaceSnapshotCompanyExplorerScopeUsesFolderSubtree(t *testing.T) {
 	t.Parallel()
 
