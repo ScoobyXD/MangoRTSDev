@@ -439,6 +439,8 @@ type LogicGateNodeAssignmentInput struct {
 	IsIssue             bool
 	IsIssueSet          bool
 	AssigneePolicy      string
+	ActorUserID         string
+	IdempotencyKey      string
 }
 
 type LogicGateNodeAssignmentMoveInput struct {
@@ -453,6 +455,8 @@ type LogicGateNodeAssignmentMoveInput struct {
 	PrioritySet       bool
 	AssigneePolicy    string
 	AssigneePolicySet bool
+	ActorUserID       string
+	IdempotencyKey    string
 }
 
 type LogicGateNodeAssignmentRemoveInput struct {
@@ -461,23 +465,31 @@ type LogicGateNodeAssignmentRemoveInput struct {
 	NodeID              string
 	FallbackStatus      *string
 	FallbackStatusColor *string
+	ActorUserID         string
+	IdempotencyKey      string
 }
 
 type LogicGateNodeAssignmentIssueInput struct {
-	CompanyID   string
-	LogicGateID string
-	NodeID      string
-	IsIssue     bool
+	CompanyID      string
+	LogicGateID    string
+	NodeID         string
+	IsIssue        bool
+	ActorUserID    string
+	IdempotencyKey string
 }
 
 type LogicGateNodeAssignmentResult struct {
-	Card domain.KanbanCard `json:"card"`
-	Node domain.Node       `json:"node"`
+	Card       domain.KanbanCard              `json:"card"`
+	Node       domain.Node                    `json:"node"`
+	Assignment domain.NodeLogicGateAssignment `json:"-"`
+	Events     []domain.DomainEvent           `json:"-"`
 }
 
 type LogicGateNodeAssignmentRemoveResult struct {
-	Card domain.KanbanCard `json:"card"`
-	Node domain.Node       `json:"node"`
+	Card       domain.KanbanCard              `json:"card"`
+	Node       domain.Node                    `json:"node"`
+	Assignment domain.NodeLogicGateAssignment `json:"-"`
+	Events     []domain.DomainEvent           `json:"-"`
 }
 
 const NotificationListMaxLimit = 100

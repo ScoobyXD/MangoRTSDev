@@ -71,6 +71,17 @@ func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.Dom
 	return cloneDomainEvent(item), nil
 }
 
+func (r *MemoryRepo) appendDomainEventsLocked(inputs []DomainEventInput) ([]domain.DomainEvent, error) {
+	events := make([]domain.DomainEvent, 0, len(inputs))
+	for _, input := range inputs {
+		event, err := r.appendDomainEventLocked(input)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, nil
+}
 func (r *MemoryRepo) ListPendingDomainEvents(limit int) ([]domain.DomainEvent, error) {
 	limit = NormalizeDomainEventListLimit(limit)
 

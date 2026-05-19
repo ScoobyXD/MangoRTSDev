@@ -792,7 +792,7 @@ where company_id=$1 and board_id=$2 and node_id=$3`, input.CompanyID, boardID, i
 	} else if existingTargetIssue.Valid {
 		issueValue = existingTargetIssue.Bool
 	}
-	if _, err := upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
+	assignment, err := upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
 		CompanyID:            input.CompanyID,
 		NodeID:               input.NodeID,
 		LogicGateID:          input.LogicGateID,
@@ -802,7 +802,8 @@ where company_id=$1 and board_id=$2 and node_id=$3`, input.CompanyID, boardID, i
 		Position:             position,
 		CompatibilityBoardID: boardID,
 		CompatibilityCardID:  cardID,
-	}); err != nil {
+	})
+	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -872,10 +873,16 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment}
+	events, err := r.appendDomainEventsTx(ctx, tx, logicGateAssignmentSavedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	result.Events = events
 	if err := tx.Commit(); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	return LogicGateNodeAssignmentResult{Card: card, Node: node}, nil
+	return result, nil
 }
 
 func (r *PostgresRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMoveInput) (LogicGateNodeAssignmentResult, error) {
@@ -952,7 +959,7 @@ from kanban_columns
 where company_id=$1 and board_id=$2 and column_id=$3`, input.CompanyID, card.BoardID, columnID).Scan(&columnTitle); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	if _, err := upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
+	assignment, err = upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
 		AssignmentID:         assignment.AssignmentID,
 		CompanyID:            input.CompanyID,
 		NodeID:               input.NodeID,
@@ -963,7 +970,8 @@ where company_id=$1 and board_id=$2 and column_id=$3`, input.CompanyID, card.Boa
 		Position:             position,
 		CompatibilityBoardID: assignment.CompatibilityBoardID,
 		CompatibilityCardID:  assignment.CompatibilityCardID,
-	}); err != nil {
+	})
+	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
 
@@ -1012,10 +1020,16 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment}
+	events, err := r.appendDomainEventsTx(ctx, tx, logicGateAssignmentMovedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	result.Events = events
 	if err := tx.Commit(); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	return LogicGateNodeAssignmentResult{Card: card, Node: node}, nil
+	return result, nil
 }
 
 func (r *PostgresRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignmentRemoveInput) (LogicGateNodeAssignmentRemoveResult, error) {
@@ -1095,10 +1109,16 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
+	result := LogicGateNodeAssignmentRemoveResult{Card: card, Node: node, Assignment: assignment}
+	events, err := r.appendDomainEventsTx(ctx, tx, logicGateAssignmentRemovedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
+	if err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
+	result.Events = events
 	if err := tx.Commit(); err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
-	return LogicGateNodeAssignmentRemoveResult{Card: card, Node: node}, nil
+	return result, nil
 }
 
 func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignmentIssueInput) (LogicGateNodeAssignmentResult, error) {
@@ -1122,7 +1142,7 @@ func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssign
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	if _, err := upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
+	assignment, err = upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
 		AssignmentID:         assignment.AssignmentID,
 		CompanyID:            input.CompanyID,
 		NodeID:               input.NodeID,
@@ -1133,7 +1153,8 @@ func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssign
 		Position:             assignment.Position,
 		CompatibilityBoardID: assignment.CompatibilityBoardID,
 		CompatibilityCardID:  assignment.CompatibilityCardID,
-	}); err != nil {
+	})
+	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	card, err := scanKanbanCard(tx.QueryRowContext(ctx, `
@@ -1161,10 +1182,16 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment}
+	events, err := r.appendDomainEventsTx(ctx, tx, logicGateAssignmentIssueWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	result.Events = events
 	if err := tx.Commit(); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	return LogicGateNodeAssignmentResult{Card: card, Node: node}, nil
+	return result, nil
 }
 func (r *PostgresRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error) {
 	ctx := context.Background()

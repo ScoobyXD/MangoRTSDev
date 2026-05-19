@@ -14,6 +14,8 @@ func NormalizeLogicGateNodeAssignmentInput(input LogicGateNodeAssignmentInput) (
 	input.ColumnID = strings.TrimSpace(input.ColumnID)
 	input.NodeTitle = strings.TrimSpace(input.NodeTitle)
 	input.DescriptionSnapshot = strings.TrimSpace(input.DescriptionSnapshot)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 
 	policy, ok := NormalizeLogicGateAssignmentAssigneePolicy(input.AssigneePolicy)
 	if !ok {
@@ -37,6 +39,8 @@ func NormalizeLogicGateNodeAssignmentMoveInput(input LogicGateNodeAssignmentMove
 	input.NodeID = strings.TrimSpace(input.NodeID)
 	input.Status = NormalizeLogicGateAssignmentStatusTitle(input.Status)
 	input.ColumnID = strings.TrimSpace(input.ColumnID)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 
 	if input.AssigneePolicySet || strings.TrimSpace(input.AssigneePolicy) != "" {
 		policy, ok := NormalizeLogicGateAssignmentAssigneePolicy(input.AssigneePolicy)
@@ -67,6 +71,8 @@ func NormalizeLogicGateNodeAssignmentRemoveInput(input LogicGateNodeAssignmentRe
 	input.NodeID = strings.TrimSpace(input.NodeID)
 	input.FallbackStatus = normalizeOptionalStringPointer(input.FallbackStatus)
 	input.FallbackStatusColor = normalizeOptionalStringPointer(input.FallbackStatusColor)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	if input.CompanyID == "" || input.NodeID == "" {
 		return LogicGateNodeAssignmentRemoveInput{}, ErrInvalid
 	}
@@ -77,6 +83,8 @@ func NormalizeLogicGateNodeAssignmentIssueInput(input LogicGateNodeAssignmentIss
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
 	input.NodeID = strings.TrimSpace(input.NodeID)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	if input.CompanyID == "" || input.NodeID == "" {
 		return LogicGateNodeAssignmentIssueInput{}, ErrInvalid
 	}

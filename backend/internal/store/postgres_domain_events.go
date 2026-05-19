@@ -118,6 +118,17 @@ returning `+domainEventSelectColumns,
 	))
 }
 
+func (r *PostgresRepo) appendDomainEventsTx(ctx context.Context, tx *sql.Tx, inputs []DomainEventInput) ([]domain.DomainEvent, error) {
+	events := make([]domain.DomainEvent, 0, len(inputs))
+	for _, input := range inputs {
+		event, err := r.appendDomainEventTx(ctx, tx, input)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, nil
+}
 func (r *PostgresRepo) ListPendingDomainEvents(limit int) ([]domain.DomainEvent, error) {
 	ctx := context.Background()
 	limit = NormalizeDomainEventListLimit(limit)

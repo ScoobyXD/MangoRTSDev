@@ -62,6 +62,17 @@ func parseRequiredBoolJSONField(fields map[string]json.RawMessage, key string) (
 	return value, true, true
 }
 
+func workItemAssignmentRequestEventMetadata(r *http.Request) (string, string) {
+	actorUserID := ""
+	if actor, ok := authenticatedActor(r); ok {
+		actorUserID = strings.TrimSpace(actor.User.UserID)
+	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		idempotencyKey = strings.TrimSpace(r.Header.Get("X-Idempotency-Key"))
+	}
+	return actorUserID, idempotencyKey
+}
 func optionalStringPointer(value *string) *string {
 	if value == nil {
 		return nil
@@ -184,6 +195,7 @@ func (s *Server) handleWorkItemLogicGateAssignments(w http.ResponseWriter, r *ht
 		input.IsIssueSet = true
 	}
 
+	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
 	result, err := s.kanban.AssignNodeToLogicGateStatus(input)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_assignment")
@@ -197,12 +209,7 @@ func (s *Server) handleWorkItemLogicGateAssignments(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusInternalServerError, "failed_to_assign_logic_gate_node")
 		return
 	}
-	s.publishWorkspaceEvent(input.CompanyID, "kanban_card_upserted", map[string]any{
-		"board_id": result.Card.BoardID,
-		"card_id":  result.Card.CardID,
-		"card":     result.Card,
-	})
-	s.publishWorkspaceEvent(input.CompanyID, "node_updated", map[string]any{"node_id": result.Node.NodeID, "node": result.Node})
+	s.publishCommittedWorkspaceEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -285,6 +292,7 @@ func (s *Server) handleWorkItemLogicGateAssignmentMove(w http.ResponseWriter, r 
 	}
 
 	beforeCard, columnTitles, hadBeforeCard := s.logicGateAssignmentNotificationSnapshot(input.CompanyID, input.LogicGateID, input.NodeID)
+	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
 	result, err := s.kanban.MoveLogicGateNodeAssignment(input)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_assignment_move")
@@ -298,7 +306,7 @@ func (s *Server) handleWorkItemLogicGateAssignmentMove(w http.ResponseWriter, r 
 		writeError(w, http.StatusInternalServerError, "failed_to_move_logic_gate_assignment")
 		return
 	}
-	s.publishLogicGateAssignmentWorkspaceEvents(input.CompanyID, "kanban_card_moved", result)
+	s.publishCommittedWorkspaceEvents(result.Events)
 	if hadBeforeCard {
 		s.recordKanbanStateNotification(r, beforeCard, result.Card, columnTitles)
 	}
@@ -354,6 +362,7 @@ func (s *Server) handleWorkItemLogicGateAssignmentRemove(w http.ResponseWriter, 
 		input.FallbackStatusColor = optionalStringPointer(fallbackColor)
 	}
 
+	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
 	result, err := s.kanban.RemoveLogicGateNodeAssignment(input)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_assignment_remove")
@@ -367,11 +376,7 @@ func (s *Server) handleWorkItemLogicGateAssignmentRemove(w http.ResponseWriter, 
 		writeError(w, http.StatusInternalServerError, "failed_to_remove_logic_gate_assignment")
 		return
 	}
-	s.publishWorkspaceEvent(input.CompanyID, "kanban_card_deleted", map[string]any{
-		"board_id": result.Card.BoardID,
-		"card_id":  result.Card.CardID,
-	})
-	s.publishWorkspaceEvent(input.CompanyID, "node_updated", map[string]any{"node_id": result.Node.NodeID, "node": result.Node})
+	s.publishCommittedWorkspaceEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -421,6 +426,7 @@ func (s *Server) handleWorkItemLogicGateAssignmentIssue(w http.ResponseWriter, r
 		input.LogicGateID = *logicGateID
 	}
 
+	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
 	result, err := s.kanban.SetLogicGateNodeAssignmentIssue(input)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_assignment_issue")
@@ -434,6 +440,6 @@ func (s *Server) handleWorkItemLogicGateAssignmentIssue(w http.ResponseWriter, r
 		writeError(w, http.StatusInternalServerError, "failed_to_update_logic_gate_assignment_issue")
 		return
 	}
-	s.publishLogicGateAssignmentWorkspaceEvents(input.CompanyID, "kanban_card_moved", result)
+	s.publishCommittedWorkspaceEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }

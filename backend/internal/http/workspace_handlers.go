@@ -619,6 +619,11 @@ func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[str
 	s.publishCommittedWorkspaceEvent(event)
 }
 
+func (s *Server) publishCommittedWorkspaceEvents(events []domain.DomainEvent) {
+	for _, event := range events {
+		s.publishCommittedWorkspaceEvent(event)
+	}
+}
 func (s *Server) publishCommittedWorkspaceEvent(event domain.DomainEvent) {
 	payload, err := json.Marshal(workspaceEventEnvelopeFromDomainEvent(event))
 	if err != nil {

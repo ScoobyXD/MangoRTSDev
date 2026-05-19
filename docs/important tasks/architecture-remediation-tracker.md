@@ -21,7 +21,7 @@ Source architecture:
 | Theme | Status | Current Read |
 | --- | --- | --- |
 | 1. Read Plane | Projection slice complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; scoped workspace snapshots and cheap event ETags exist, but several broad map/explorer scopes still need bounded read models. |
-| 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Mutation plus event append is still not atomic across the app, and fanout/gap policy is not production-grade. |
+| 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph and migrated work-item assignment mutations now append durable workspace events atomically; remaining mutation families and frontend gap policy are still follow-ups. |
 | 3. Work Ownership / Commands | Source migration complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, and inbox reads use projection rows; frontend parity and event atomicity remain follow-ups. |
 | 4. Hot Path Discipline | First branch complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth/context/batch/metrics remain follow-up branches. |
 | 5. Frontend Structure / API Contract | Ready / yellow | Shared `requestJSON` exists, but hot modules duplicate wrappers, broad invalidation is scattered, and large components still own workflow logic. |
@@ -118,6 +118,14 @@ Target architecture:
 
 First branch:
 `events/atomic-workspace-outbox-node-graph`
+
+Branch progress:
+- 2026-05-19: Completed `events/atomic-work-item-assignment-events`. Migrated node-to-Logic-Gate assignment save/move/remove/issue commands now append semantic `work_item.*` workspace events and compatibility Kanban/node events in the same store transaction as the assignment source mutation, and HTTP handlers publish those committed events to the in-process hub only after commit.
+
+Migration/backfill/rollback notes:
+- Migration: none. This branch uses the existing `domain_events` outbox and existing `node_logic_gate_assignments` source table.
+- Backfill: none. Historical assignment events are not synthesized; current state remains rebuildable from `node_logic_gate_assignments`, nodes, RACI, and compatibility Kanban rows.
+- Rollback: code can return handlers to the previous post-mutation `publishWorkspaceEvent` path while leaving already-appended `work_item.*` events in `domain_events`. No source-of-truth data is stored only in these events; replay consumers should tolerate the extra event types during rollback.
 
 Scope:
 - Convert one vertical slice first: node create/update/delete and node relationship create/delete.
@@ -318,14 +326,14 @@ Use this as the default sequencing unless a production incident changes prioriti
 7. `reads/inbox-read-model-contract`
 8. `work-items/node-logic-gate-assignment-source`
 9. `reads/work-item-inbox-projection`
+10. `events/atomic-work-item-assignment-events`
 
 ### Next Roadmap
 
-1. events/atomic-work-item-assignment-events
-2. events/frontend-gap-reconciliation
-3. platform/auth-membership-cache
-4. reads/company-explorer-subtree
-5. work-items/email-conversion-command
+1. events/frontend-gap-reconciliation
+2. platform/auth-membership-cache
+3. reads/company-explorer-subtree
+4. work-items/email-conversion-command
 
 ### Work-Items Follow-Ups
 

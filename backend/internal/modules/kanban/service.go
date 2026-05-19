@@ -62,22 +62,6 @@ func (s *Service) AssignNodeToLogicGateStatus(input store.LogicGateNodeAssignmen
 	if err != nil {
 		return store.LogicGateNodeAssignmentResult{}, err
 	}
-	payload := map[string]any{
-		"board_id":        result.Card.BoardID,
-		"card_id":         result.Card.CardID,
-		"column_id":       result.Card.ColumnID,
-		"logic_gate_id":   normalized.LogicGateID,
-		"node_id":         result.Card.NodeID,
-		"assignee_policy": normalized.AssigneePolicy,
-	}
-	if normalized.PrioritySet {
-		payload["priority_set"] = true
-		payload["priority"] = normalized.Priority
-	}
-	if normalized.IsIssueSet {
-		payload["is_issue"] = normalized.IsIssue
-	}
-	s.appendCardEvent(result.Card, "work_item.logic_gate_assignment_saved", payload)
 	return result, nil
 }
 
@@ -90,22 +74,6 @@ func (s *Service) MoveLogicGateNodeAssignment(input store.LogicGateNodeAssignmen
 	if err != nil {
 		return store.LogicGateNodeAssignmentResult{}, err
 	}
-	payload := map[string]any{
-		"board_id":      result.Card.BoardID,
-		"card_id":       result.Card.CardID,
-		"column_id":     result.Card.ColumnID,
-		"logic_gate_id": result.Card.LogicGateID,
-		"node_id":       result.Card.NodeID,
-		"position":      result.Card.Position,
-	}
-	if normalized.PrioritySet {
-		payload["priority_set"] = true
-		payload["priority"] = normalized.Priority
-	}
-	if normalized.AssigneePolicySet {
-		payload["assignee_policy"] = normalized.AssigneePolicy
-	}
-	s.appendCardEvent(result.Card, "work_item.logic_gate_assignment_moved", payload)
 	return result, nil
 }
 
@@ -118,13 +86,6 @@ func (s *Service) RemoveLogicGateNodeAssignment(input store.LogicGateNodeAssignm
 	if err != nil {
 		return store.LogicGateNodeAssignmentRemoveResult{}, err
 	}
-	s.appendCardEvent(result.Card, "work_item.logic_gate_assignment_removed", map[string]any{
-		"board_id":      result.Card.BoardID,
-		"card_id":       result.Card.CardID,
-		"column_id":     result.Card.ColumnID,
-		"logic_gate_id": result.Card.LogicGateID,
-		"node_id":       result.Card.NodeID,
-	})
 	return result, nil
 }
 
@@ -137,14 +98,6 @@ func (s *Service) SetLogicGateNodeAssignmentIssue(input store.LogicGateNodeAssig
 	if err != nil {
 		return store.LogicGateNodeAssignmentResult{}, err
 	}
-	s.appendCardEvent(result.Card, "work_item.logic_gate_issue_toggled", map[string]any{
-		"board_id":      result.Card.BoardID,
-		"card_id":       result.Card.CardID,
-		"column_id":     result.Card.ColumnID,
-		"logic_gate_id": result.Card.LogicGateID,
-		"node_id":       result.Card.NodeID,
-		"is_issue":      result.Card.IsIssue,
-	})
 	return result, nil
 }
 func (s *Service) withDerivedNode(card domain.KanbanCard) CardCommandResult {
