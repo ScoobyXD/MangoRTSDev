@@ -369,6 +369,22 @@ type KanbanCard struct {
 	UpdatedTimestamp    time.Time `json:"updated_timestamp"`
 }
 
+type NodeLogicGateAssignment struct {
+	AssignmentID         string    `json:"assignment_id"`
+	CompanyID            string    `json:"company_id"`
+	NodeID               string    `json:"node_id"`
+	LogicGateID          string    `json:"logic_gate_id"`
+	StatusKey            string    `json:"status_key"`
+	ColumnID             string    `json:"column_id"`
+	IsIssue              bool      `json:"is_issue"`
+	Position             int       `json:"position"`
+	CompatibilityBoardID string    `json:"compatibility_board_id"`
+	CompatibilityCardID  string    `json:"compatibility_card_id"`
+	Version              int64     `json:"version"`
+	CreatedTimestamp     time.Time `json:"created_timestamp"`
+	UpdatedTimestamp     time.Time `json:"updated_timestamp"`
+}
+
 const (
 	NotificationEventLogicGateStateChanged = "logic_gate.state_changed"
 	NotificationEventLogicGateRaciUpdated  = "logic_gate.raci_updated"

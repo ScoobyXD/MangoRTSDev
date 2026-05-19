@@ -393,6 +393,11 @@ func (r *MemoryRepo) DeleteKanbanColumn(companyID, boardID, columnID string) err
 	r.kanbanColumns[k] = nextColumns
 
 	cards := r.kanbanCards[k]
+	for _, card := range cards {
+		if card.ColumnID == columnID && card.LogicGateID != nil {
+			return ErrInvalid
+		}
+	}
 	nextCards := make([]domain.KanbanCard, 0, len(cards))
 	for _, card := range cards {
 		if card.ColumnID == columnID {
@@ -506,13 +511,20 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		card.UpdatedTimestamp = now
 		r.kanbanCards[k][index] = card
 		assignResponsible()
+		if card.LogicGateID != nil {
+			r.upsertNodeLogicGateAssignmentFromCardLocked(card)
+		}
 		r.syncNodeStatusFromKanbanCardLocked(card)
 		return card, nil
+	}
+	cardID := strings.TrimSpace(input.CardID)
+	if cardID == "" {
+		cardID = newUUIDv7String()
 	}
 	card := domain.KanbanCard{
 		CompanyID:           input.CompanyID,
 		BoardID:             input.BoardID,
-		CardID:              newUUIDv7String(),
+		CardID:              cardID,
 		ColumnID:            input.ColumnID,
 		NodeID:              input.NodeID,
 		LogicGateID:         nil,
@@ -529,6 +541,9 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 	}
 	r.kanbanCards[k] = append(r.kanbanCards[k], card)
 	assignResponsible()
+	if card.LogicGateID != nil {
+		r.upsertNodeLogicGateAssignmentFromCardLocked(card)
+	}
 	r.syncNodeStatusFromKanbanCardLocked(card)
 	return card, nil
 }
@@ -677,12 +692,19 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	if !ok {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
+	assignment, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
+	if !ok {
+		return LogicGateNodeAssignmentResult{}, ErrNotFound
+	}
 	locations := r.logicGateAssignmentCardLocationsLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if len(locations) == 0 {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
 	location := locations[0]
 	card := location.card
+	if assignment.CompatibilityBoardID != card.BoardID || assignment.CompatibilityCardID != card.CardID {
+		return LogicGateNodeAssignmentResult{}, ErrNotFound
+	}
 
 	columnID := card.ColumnID
 	if input.ColumnID != "" || input.Status != "" {
@@ -705,6 +727,19 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		card.NodeTitle = node.Title
 	}
 	card.UpdatedTimestamp = time.Now().UTC()
+	column, _ := r.kanbanColumnLocked(input.CompanyID, card.BoardID, columnID)
+	r.upsertNodeLogicGateAssignmentLocked(nodeLogicGateAssignmentMutation{
+		CompanyID:            input.CompanyID,
+		NodeID:               input.NodeID,
+		LogicGateID:          input.LogicGateID,
+		ColumnID:             columnID,
+		StatusKey:            logicGateAssignmentStatusKey(column.Title),
+		IsIssue:              card.IsIssue,
+		Position:             position,
+		CompatibilityBoardID: card.BoardID,
+		CompatibilityCardID:  card.CardID,
+		UpdatedTimestamp:     card.UpdatedTimestamp,
+	})
 	r.kanbanCards[location.mapKey][location.index] = card
 	if input.AssigneePolicySet {
 		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, input.LogicGateID, input.NodeID)
@@ -740,11 +775,19 @@ func (r *MemoryRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 	if _, ok := r.nodes[nodeKey]; !ok {
 		return LogicGateNodeAssignmentRemoveResult{}, ErrNotFound
 	}
+	assignment, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
+	if !ok {
+		return LogicGateNodeAssignmentRemoveResult{}, ErrNotFound
+	}
 	locations := r.logicGateAssignmentCardLocationsLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if len(locations) == 0 {
 		return LogicGateNodeAssignmentRemoveResult{}, ErrNotFound
 	}
 	location := locations[0]
+	if assignment.CompatibilityBoardID != location.card.BoardID || assignment.CompatibilityCardID != location.card.CardID {
+		return LogicGateNodeAssignmentRemoveResult{}, ErrNotFound
+	}
+	delete(r.nodeLogicGateAssignments, nodeLogicGateAssignmentKey(input.CompanyID, input.NodeID))
 	cards := r.kanbanCards[location.mapKey]
 	r.kanbanCards[location.mapKey] = append(cards[:location.index], cards[location.index+1:]...)
 	r.applyNodeStatusAfterLogicGateAssignmentRemovalLocked(input.CompanyID, input.NodeID, input.FallbackStatus, input.FallbackStatusColor)
@@ -768,14 +811,33 @@ func (r *MemoryRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignme
 	if _, ok := r.nodes[nodeKey]; !ok {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
+	assignment, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
+	if !ok {
+		return LogicGateNodeAssignmentResult{}, ErrNotFound
+	}
 	locations := r.logicGateAssignmentCardLocationsLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if len(locations) == 0 {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
 	location := locations[0]
 	card := location.card
+	if assignment.CompatibilityBoardID != card.BoardID || assignment.CompatibilityCardID != card.CardID {
+		return LogicGateNodeAssignmentResult{}, ErrNotFound
+	}
 	card.IsIssue = input.IsIssue
 	card.UpdatedTimestamp = time.Now().UTC()
+	r.upsertNodeLogicGateAssignmentLocked(nodeLogicGateAssignmentMutation{
+		CompanyID:            input.CompanyID,
+		NodeID:               input.NodeID,
+		LogicGateID:          assignment.LogicGateID,
+		ColumnID:             assignment.ColumnID,
+		StatusKey:            assignment.StatusKey,
+		IsIssue:              input.IsIssue,
+		Position:             assignment.Position,
+		CompatibilityBoardID: assignment.CompatibilityBoardID,
+		CompatibilityCardID:  assignment.CompatibilityCardID,
+		UpdatedTimestamp:     card.UpdatedTimestamp,
+	})
 	r.kanbanCards[location.mapKey][location.index] = card
 	r.syncNodeStatusFromKanbanCardLocked(card)
 
@@ -813,6 +875,9 @@ func (r *MemoryRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCar
 		}
 		card.UpdatedTimestamp = now
 		r.kanbanCards[k][index] = card
+		if card.LogicGateID != nil {
+			r.upsertNodeLogicGateAssignmentFromCardLocked(card)
+		}
 		r.syncNodeStatusFromKanbanCardLocked(card)
 		return card, nil
 	}
@@ -826,9 +891,11 @@ func (r *MemoryRepo) DeleteKanbanCard(companyID, boardID, cardID string) error {
 	cards := r.kanbanCards[k]
 	next := make([]domain.KanbanCard, 0, len(cards))
 	deleted := false
+	var deletedCard domain.KanbanCard
 	for _, card := range cards {
 		if card.CardID == cardID {
 			deleted = true
+			deletedCard = card
 			continue
 		}
 		next = append(next, card)
@@ -837,5 +904,9 @@ func (r *MemoryRepo) DeleteKanbanCard(companyID, boardID, cardID string) error {
 		return ErrNotFound
 	}
 	r.kanbanCards[k] = next
+	if deletedCard.LogicGateID != nil {
+		r.deleteNodeLogicGateAssignmentForCardLocked(deletedCard)
+		r.applyNodeStatusAfterLogicGateAssignmentRemovalLocked(companyID, deletedCard.NodeID, nil, nil)
+	}
 	return nil
 }

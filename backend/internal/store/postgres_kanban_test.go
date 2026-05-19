@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -74,5 +76,41 @@ func TestEnsureLogicGateKanbanBoardSQL_DefaultColumnsAreConflictSafe(t *testing.
 	}
 	if columnInsertCount != 1 {
 		t.Fatalf("default column insert count = %d, want 1 set-based insert", columnInsertCount)
+	}
+}
+
+func TestNodeLogicGateAssignmentMigrationBackfillsAndGuardsLegacyCards(t *testing.T) {
+	migrationPath := filepath.Join("..", "..", "db", "migrations", "20260519_node_logic_gate_assignments.sql")
+	raw, err := os.ReadFile(migrationPath)
+	if err != nil {
+		t.Fatalf("ReadFile migration: %v", err)
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+	required := []string{
+		"create table if not exists node_logic_gate_assignments",
+		"insert into node_logic_gate_assignments",
+		"from kanban_cards card join kanban_columns",
+		"where card.logic_gate_id is not null",
+		"on conflict (company_id, node_id)",
+		"create trigger trg_sync_node_logic_gate_assignment_from_kanban_card after insert or update or delete on kanban_cards",
+		"delete from node_logic_gate_assignments assignment",
+	}
+	for _, needle := range required {
+		if !strings.Contains(normalized, needle) {
+			t.Fatalf("migration missing %q", needle)
+		}
+	}
+
+	schemaPath := filepath.Join("..", "..", "db", "schema.sql")
+	schemaRaw, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatalf("ReadFile schema: %v", err)
+	}
+	schema := strings.ToLower(strings.Join(strings.Fields(string(schemaRaw)), " "))
+	if !strings.Contains(schema, "create table if not exists node_logic_gate_assignments") {
+		t.Fatal("canonical schema is missing node_logic_gate_assignments")
+	}
+	if !strings.Contains(schema, "create trigger trg_sync_node_logic_gate_assignment_from_kanban_card after insert or update or delete on kanban_cards") {
+		t.Fatal("canonical schema is missing Kanban-card assignment sync trigger")
 	}
 }

@@ -287,6 +287,7 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 	delete(r.logicGateInfo, k)
 	delete(r.logicGateText, k)
 	delete(r.logicGateRaci, k)
+	r.deleteNodeLogicGateAssignmentsForLogicGateLocked(companyID, logicGateID)
 	delete(r.folderItems, folderItemKey(companyID, "logic_gate", logicGateID))
 	delete(r.logicMapPositions, k)
 	for boardKeyValue, board := range r.kanbanBoards {

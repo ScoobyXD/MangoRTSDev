@@ -325,6 +325,42 @@ func mustFindKanbanColumn(t *testing.T, columns []domain.KanbanColumn, title str
 	return domain.KanbanColumn{}
 }
 
+func assertMemoryLogicGateAssignmentSource(t *testing.T, repo *MemoryRepo, companyID, nodeID, logicGateID string, card domain.KanbanCard, isIssue bool) domain.NodeLogicGateAssignment {
+	t.Helper()
+	assignments, err := repo.ListNodeLogicGateAssignments(companyID, nodeID)
+	if err != nil {
+		t.Fatalf("ListNodeLogicGateAssignments failed: %v", err)
+	}
+	if len(assignments) != 1 {
+		t.Fatalf("assignments = %+v, want one source row", assignments)
+	}
+	assignment := assignments[0]
+	if assignment.LogicGateID != logicGateID {
+		t.Fatalf("assignment logic_gate_id = %q, want %q", assignment.LogicGateID, logicGateID)
+	}
+	if assignment.ColumnID != card.ColumnID || assignment.Position != card.Position {
+		t.Fatalf("assignment placement = %q/%d, want card %q/%d", assignment.ColumnID, assignment.Position, card.ColumnID, card.Position)
+	}
+	if assignment.CompatibilityBoardID != card.BoardID || assignment.CompatibilityCardID != card.CardID {
+		t.Fatalf("assignment compatibility link = %q/%q, want %q/%q", assignment.CompatibilityBoardID, assignment.CompatibilityCardID, card.BoardID, card.CardID)
+	}
+	if assignment.IsIssue != isIssue {
+		t.Fatalf("assignment is_issue = %v, want %v", assignment.IsIssue, isIssue)
+	}
+	return assignment
+}
+
+func assertMemoryNoLogicGateAssignmentSource(t *testing.T, repo *MemoryRepo, companyID, nodeID string) {
+	t.Helper()
+	assignments, err := repo.ListNodeLogicGateAssignments(companyID, nodeID)
+	if err != nil {
+		t.Fatalf("ListNodeLogicGateAssignments failed: %v", err)
+	}
+	if len(assignments) != 0 {
+		t.Fatalf("assignments = %+v, want none", assignments)
+	}
+}
+
 func TestMemoryRepo_CompanyProvisioningCreatesCompanyExplorerDefaults(t *testing.T) {
 	assertProvisioned := func(t *testing.T, repo *MemoryRepo, companyID string) {
 		t.Helper()
@@ -482,6 +518,10 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 	if len(loadedNode.LogicGateIDs) != 1 || loadedNode.LogicGateIDs[0] != firstGate.LogicGateID {
 		t.Fatalf("logic_gate_ids = %+v, want first gate", loadedNode.LogicGateIDs)
 	}
+	assignment := assertMemoryLogicGateAssignmentSource(t, repo, companyID, node.NodeID, firstGate.LogicGateID, card, false)
+	if assignment.StatusKey != "pending" {
+		t.Fatalf("assignment status_key = %q, want pending", assignment.StatusKey)
+	}
 	if loadedNode.AssigneeUserID == nil || *loadedNode.AssigneeUserID != responsibleUser.UserID {
 		t.Fatalf("assignee_user_id = %+v, want responsible user", loadedNode.AssigneeUserID)
 	}
@@ -506,6 +546,7 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 	if loadedNode.Status == nil || *loadedNode.Status != "Issue" {
 		t.Fatalf("status after issue = %+v, want Issue", loadedNode.Status)
 	}
+	assertMemoryLogicGateAssignmentSource(t, repo, companyID, node.NodeID, firstGate.LogicGateID, moved, true)
 
 	secondBoardID := LogicGateKanbanBoardID(secondGate.LogicGateID)
 	secondColumns, err := repo.ListKanbanColumns(companyID, secondBoardID)
@@ -513,13 +554,14 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 		t.Fatalf("ListKanbanColumns second failed: %v", err)
 	}
 	done := mustFindKanbanColumn(t, secondColumns, "Done")
-	if _, err := repo.UpsertKanbanCard(KanbanCardMutationInput{
+	secondCard, err := repo.UpsertKanbanCard(KanbanCardMutationInput{
 		CompanyID: companyID,
 		BoardID:   secondBoardID,
 		ColumnID:  done.ColumnID,
 		NodeID:    node.NodeID,
 		NodeTitle: node.Title,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("UpsertKanbanCard second failed: %v", err)
 	}
 	firstCards, err := repo.ListKanbanCards(companyID, firstBoardID, KanbanCardQuery{Limit: 20})
@@ -538,6 +580,10 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 	}
 	if len(loadedNode.LogicGateIDs) != 1 || loadedNode.LogicGateIDs[0] != secondGate.LogicGateID {
 		t.Fatalf("logic_gate_ids after supersede = %+v, want second gate", loadedNode.LogicGateIDs)
+	}
+	assignment = assertMemoryLogicGateAssignmentSource(t, repo, companyID, node.NodeID, secondGate.LogicGateID, secondCard, false)
+	if assignment.StatusKey != "done" {
+		t.Fatalf("assignment status_key after supersede = %q, want done", assignment.StatusKey)
 	}
 
 	dueDate := "2026-05-06"
@@ -558,6 +604,54 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 	}
 }
 
+func TestMemoryRepo_LogicGateKanbanRawDeleteRemovesAssignmentSourceAndColumnDeleteIsGuarded(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-222222222222"
+	repo.EnsureCompany(companyID, "Raw Delete Placement Company")
+
+	logicGate, err := repo.CreateLogicGate(companyID, "Delete Guard Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate failed: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Delete guard node")
+	if err != nil {
+		t.Fatalf("CreateNode failed: %v", err)
+	}
+	boardID := LogicGateKanbanBoardID(logicGate.LogicGateID)
+	columns, err := repo.ListKanbanColumns(companyID, boardID)
+	if err != nil {
+		t.Fatalf("ListKanbanColumns failed: %v", err)
+	}
+	pending := mustFindKanbanColumn(t, columns, "Pending")
+	card, err := repo.UpsertKanbanCard(KanbanCardMutationInput{
+		CompanyID: companyID,
+		BoardID:   boardID,
+		ColumnID:  pending.ColumnID,
+		NodeID:    node.NodeID,
+		NodeTitle: node.Title,
+	})
+	if err != nil {
+		t.Fatalf("UpsertKanbanCard failed: %v", err)
+	}
+	assertMemoryLogicGateAssignmentSource(t, repo, companyID, node.NodeID, logicGate.LogicGateID, card, false)
+
+	if err := repo.DeleteKanbanColumn(companyID, boardID, pending.ColumnID); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("DeleteKanbanColumn with active assignment error = %v, want ErrInvalid", err)
+	}
+	assertMemoryLogicGateAssignmentSource(t, repo, companyID, node.NodeID, logicGate.LogicGateID, card, false)
+
+	if err := repo.DeleteKanbanCard(companyID, boardID, card.CardID); err != nil {
+		t.Fatalf("DeleteKanbanCard failed: %v", err)
+	}
+	assertMemoryNoLogicGateAssignmentSource(t, repo, companyID, node.NodeID)
+	loaded, err := repo.GetNode(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetNode after card delete failed: %v", err)
+	}
+	if loaded.Status != nil || loaded.StatusColor != nil || len(loaded.LogicGateIDs) != 0 {
+		t.Fatalf("node after raw assignment delete = status %+v color %+v gates %+v, want cleared", loaded.Status, loaded.StatusColor, loaded.LogicGateIDs)
+	}
+}
 func TestMemoryRepoUserEmailConnectionLifecycle(t *testing.T) {
 	t.Parallel()
 

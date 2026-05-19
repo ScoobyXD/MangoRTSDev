@@ -6,72 +6,74 @@ import (
 )
 
 type MemoryRepo struct {
-	mu                   sync.RWMutex
-	nodes                map[string]domain.Node
-	nodeInfo             map[string][]domain.NodeInformation
-	nodeText             map[string]map[string]domain.NodeProjection
-	nodeRels             map[string][]domain.NodeRelationship
-	logicGates           map[string]domain.LogicGate
-	logicGateInfo        map[string][]domain.LogicGateInformation
-	logicGateText        map[string]map[string]domain.LogicGateProjection
-	logicGateRels        map[string][]domain.LogicGateRelationship
-	logicGateRaci        map[string][]domain.LogicGateRaciAssignment
-	sharedInboxRaci      map[string][]domain.SharedInboxRaciAssignment
-	folders              map[string]domain.CompanyExplorerFolder
-	folderItems          map[string]domain.CompanyExplorerFolderItem
-	folderShares         map[string]domain.CompanyExplorerFolderShare
-	defaultFolderSeed    map[string]bool
-	nodeMapPositions     map[string]domain.NodeMapPosition
-	logicMapPositions    map[string]domain.LogicGateMapPosition
-	kanbanBoards         map[string]domain.KanbanBoard
-	kanbanColumns        map[string][]domain.KanbanColumn
-	kanbanCards          map[string][]domain.KanbanCard
-	users                map[string]domain.User
-	companies            map[string]domain.Company
-	memberships          map[string]domain.CompanyMembership
-	invitations          map[string]domain.Invitation
-	emailConnections     map[string]domain.UserEmailConnection
-	triageItems          map[string]domain.CommunicationsTriageItem
-	emailNodeLinks       map[string]communicationsEmailNodeLink
-	logicGateShortcuts   map[string]domain.UserLogicGateShortcut
-	domainEvents         map[string]domain.DomainEvent
-	domainEventAppendErr error
-	notificationEvents   map[string]domain.NotificationEvent
-	notifications        map[string]domain.Notification
+	mu                       sync.RWMutex
+	nodes                    map[string]domain.Node
+	nodeInfo                 map[string][]domain.NodeInformation
+	nodeText                 map[string]map[string]domain.NodeProjection
+	nodeRels                 map[string][]domain.NodeRelationship
+	logicGates               map[string]domain.LogicGate
+	logicGateInfo            map[string][]domain.LogicGateInformation
+	logicGateText            map[string]map[string]domain.LogicGateProjection
+	logicGateRels            map[string][]domain.LogicGateRelationship
+	logicGateRaci            map[string][]domain.LogicGateRaciAssignment
+	sharedInboxRaci          map[string][]domain.SharedInboxRaciAssignment
+	folders                  map[string]domain.CompanyExplorerFolder
+	folderItems              map[string]domain.CompanyExplorerFolderItem
+	folderShares             map[string]domain.CompanyExplorerFolderShare
+	defaultFolderSeed        map[string]bool
+	nodeMapPositions         map[string]domain.NodeMapPosition
+	logicMapPositions        map[string]domain.LogicGateMapPosition
+	kanbanBoards             map[string]domain.KanbanBoard
+	kanbanColumns            map[string][]domain.KanbanColumn
+	kanbanCards              map[string][]domain.KanbanCard
+	nodeLogicGateAssignments map[string]domain.NodeLogicGateAssignment
+	users                    map[string]domain.User
+	companies                map[string]domain.Company
+	memberships              map[string]domain.CompanyMembership
+	invitations              map[string]domain.Invitation
+	emailConnections         map[string]domain.UserEmailConnection
+	triageItems              map[string]domain.CommunicationsTriageItem
+	emailNodeLinks           map[string]communicationsEmailNodeLink
+	logicGateShortcuts       map[string]domain.UserLogicGateShortcut
+	domainEvents             map[string]domain.DomainEvent
+	domainEventAppendErr     error
+	notificationEvents       map[string]domain.NotificationEvent
+	notifications            map[string]domain.Notification
 }
 
 func NewMemoryRepo() *MemoryRepo {
 	return &MemoryRepo{
-		nodes:              map[string]domain.Node{},
-		nodeInfo:           map[string][]domain.NodeInformation{},
-		nodeText:           map[string]map[string]domain.NodeProjection{},
-		nodeRels:           map[string][]domain.NodeRelationship{},
-		logicGates:         map[string]domain.LogicGate{},
-		logicGateInfo:      map[string][]domain.LogicGateInformation{},
-		logicGateText:      map[string]map[string]domain.LogicGateProjection{},
-		logicGateRels:      map[string][]domain.LogicGateRelationship{},
-		logicGateRaci:      map[string][]domain.LogicGateRaciAssignment{},
-		sharedInboxRaci:    map[string][]domain.SharedInboxRaciAssignment{},
-		folders:            map[string]domain.CompanyExplorerFolder{},
-		folderItems:        map[string]domain.CompanyExplorerFolderItem{},
-		folderShares:       map[string]domain.CompanyExplorerFolderShare{},
-		defaultFolderSeed:  map[string]bool{},
-		nodeMapPositions:   map[string]domain.NodeMapPosition{},
-		logicMapPositions:  map[string]domain.LogicGateMapPosition{},
-		kanbanBoards:       map[string]domain.KanbanBoard{},
-		kanbanColumns:      map[string][]domain.KanbanColumn{},
-		kanbanCards:        map[string][]domain.KanbanCard{},
-		users:              map[string]domain.User{},
-		companies:          map[string]domain.Company{},
-		memberships:        map[string]domain.CompanyMembership{},
-		invitations:        map[string]domain.Invitation{},
-		emailConnections:   map[string]domain.UserEmailConnection{},
-		triageItems:        map[string]domain.CommunicationsTriageItem{},
-		emailNodeLinks:     map[string]communicationsEmailNodeLink{},
-		logicGateShortcuts: map[string]domain.UserLogicGateShortcut{},
-		domainEvents:       map[string]domain.DomainEvent{},
-		notificationEvents: map[string]domain.NotificationEvent{},
-		notifications:      map[string]domain.Notification{},
+		nodes:                    map[string]domain.Node{},
+		nodeInfo:                 map[string][]domain.NodeInformation{},
+		nodeText:                 map[string]map[string]domain.NodeProjection{},
+		nodeRels:                 map[string][]domain.NodeRelationship{},
+		logicGates:               map[string]domain.LogicGate{},
+		logicGateInfo:            map[string][]domain.LogicGateInformation{},
+		logicGateText:            map[string]map[string]domain.LogicGateProjection{},
+		logicGateRels:            map[string][]domain.LogicGateRelationship{},
+		logicGateRaci:            map[string][]domain.LogicGateRaciAssignment{},
+		sharedInboxRaci:          map[string][]domain.SharedInboxRaciAssignment{},
+		folders:                  map[string]domain.CompanyExplorerFolder{},
+		folderItems:              map[string]domain.CompanyExplorerFolderItem{},
+		folderShares:             map[string]domain.CompanyExplorerFolderShare{},
+		defaultFolderSeed:        map[string]bool{},
+		nodeMapPositions:         map[string]domain.NodeMapPosition{},
+		logicMapPositions:        map[string]domain.LogicGateMapPosition{},
+		kanbanBoards:             map[string]domain.KanbanBoard{},
+		kanbanColumns:            map[string][]domain.KanbanColumn{},
+		kanbanCards:              map[string][]domain.KanbanCard{},
+		nodeLogicGateAssignments: map[string]domain.NodeLogicGateAssignment{},
+		users:                    map[string]domain.User{},
+		companies:                map[string]domain.Company{},
+		memberships:              map[string]domain.CompanyMembership{},
+		invitations:              map[string]domain.Invitation{},
+		emailConnections:         map[string]domain.UserEmailConnection{},
+		triageItems:              map[string]domain.CommunicationsTriageItem{},
+		emailNodeLinks:           map[string]communicationsEmailNodeLink{},
+		logicGateShortcuts:       map[string]domain.UserLogicGateShortcut{},
+		domainEvents:             map[string]domain.DomainEvent{},
+		notificationEvents:       map[string]domain.NotificationEvent{},
+		notifications:            map[string]domain.Notification{},
 	}
 }
 
@@ -89,6 +91,10 @@ func folderShareKey(companyID, folderID, email string) string {
 
 func boardKey(companyID, boardID string) string {
 	return companyID + ":" + boardID
+}
+
+func nodeLogicGateAssignmentKey(companyID, nodeID string) string {
+	return companyID + ":" + nodeID
 }
 
 func membershipKey(companyID, userID string) string {

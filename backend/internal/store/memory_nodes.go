@@ -59,32 +59,28 @@ func (r *MemoryRepo) createNodeWithAssigneeLocked(companyID, title, assigneeUser
 }
 
 func (r *MemoryRepo) deriveNodeStatusLocked(companyID, nodeID string) (*string, *string) {
-	for _, cards := range r.kanbanCards {
-		for _, card := range cards {
-			if card.CompanyID != companyID || card.NodeID != nodeID || card.LogicGateID == nil {
-				continue
-			}
-			status := ""
-			statusColor := ""
-			if card.IsIssue {
-				status = "Issue"
-				statusColor = "#ffd400"
-			} else if title, ok := r.kanbanColumnTitleLocked(companyID, card.BoardID, card.ColumnID); ok {
-				status = title
-				if column, found := r.kanbanColumnLocked(companyID, card.BoardID, card.ColumnID); found {
-					statusColor = column.ItemColor
-				}
-			}
-			if status == "" {
-				status = "Unknown"
-			}
-			if statusColor == "" {
-				statusColor = "#fbb152"
-			}
-			return &status, &statusColor
+	assignment, ok := r.nodeLogicGateAssignmentLocked(companyID, nodeID, "")
+	if !ok {
+		return nil, nil
+	}
+	status := ""
+	statusColor := ""
+	if assignment.IsIssue {
+		status = "Issue"
+		statusColor = "#ffd400"
+	} else if title, ok := r.kanbanColumnTitleLocked(companyID, assignment.CompatibilityBoardID, assignment.ColumnID); ok {
+		status = title
+		if column, found := r.kanbanColumnLocked(companyID, assignment.CompatibilityBoardID, assignment.ColumnID); found {
+			statusColor = column.ItemColor
 		}
 	}
-	return nil, nil
+	if status == "" {
+		status = "Unknown"
+	}
+	if statusColor == "" {
+		statusColor = "#fbb152"
+	}
+	return &status, &statusColor
 }
 
 func (r *MemoryRepo) withDerivedNodeStatusLocked(node domain.Node) domain.Node {
@@ -100,15 +96,11 @@ func (r *MemoryRepo) withDerivedNodeStatusLocked(node domain.Node) domain.Node {
 
 func (r *MemoryRepo) nodeLogicGateIDsLocked(companyID, nodeID string) []string {
 	seen := map[string]bool{}
-	for _, cards := range r.kanbanCards {
-		for _, card := range cards {
-			if card.CompanyID != companyID || card.NodeID != nodeID || card.LogicGateID == nil {
-				continue
-			}
-			logicGateID := strings.TrimSpace(*card.LogicGateID)
-			if logicGateID != "" {
-				seen[logicGateID] = true
-			}
+	assignment, ok := r.nodeLogicGateAssignmentLocked(companyID, nodeID, "")
+	if ok {
+		logicGateID := strings.TrimSpace(assignment.LogicGateID)
+		if logicGateID != "" {
+			seen[logicGateID] = true
 		}
 	}
 	ids := make([]string, 0, len(seen))
@@ -338,6 +330,7 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	delete(r.nodeText, k)
 	delete(r.folderItems, folderItemKey(companyID, "node", nodeID))
 	delete(r.nodeMapPositions, k)
+	delete(r.nodeLogicGateAssignments, nodeLogicGateAssignmentKey(companyID, nodeID))
 	for linkKey, link := range r.emailNodeLinks {
 		if link.CompanyID == companyID && link.NodeID == nodeID {
 			delete(r.emailNodeLinks, linkKey)

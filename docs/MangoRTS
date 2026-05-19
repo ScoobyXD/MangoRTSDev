@@ -54,7 +54,7 @@ New Features:
 ========
 
 backend fixes:
-1. We have to give logic gate fields in the database.
+1. We have to give logic gate fields in the database. i really dont like using kanban boards.
 2. assignment, ownership
 3. scope, caching
 

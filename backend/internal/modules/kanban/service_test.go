@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestAssignNodeToLogicGateStatusUsesKanbanCardAsWorkModel(t *testing.T) {
+func TestAssignNodeToLogicGateStatusWritesAssignmentSourceAndKanbanProjection(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	service := NewService(repo)
 	companyID := "11111111-1111-4111-8111-aaaaaaaaaaaa"
@@ -88,8 +88,9 @@ func TestAssignNodeToLogicGateStatusUsesKanbanCardAsWorkModel(t *testing.T) {
 		t.Fatalf("assigned node assignee = %+v, want responsible user", assigned.Node.AssigneeUserID)
 	}
 	if len(assigned.Node.LogicGateIDs) != 1 || assigned.Node.LogicGateIDs[0] != logicGate.LogicGateID {
-		t.Fatalf("assigned node logic_gate_ids = %+v, want card-derived Logic Gate", assigned.Node.LogicGateIDs)
+		t.Fatalf("assigned node logic_gate_ids = %+v, want assignment-derived Logic Gate", assigned.Node.LogicGateIDs)
 	}
+	assertLogicGateAssignmentSource(t, repo, companyID, node.NodeID, logicGate.LogicGateID, assigned.Card, false)
 
 	directOverride := "Direct override"
 	if _, err := repo.UpdateNode(store.UpdateNodeInput{
@@ -105,7 +106,7 @@ func TestAssignNodeToLogicGateStatusUsesKanbanCardAsWorkModel(t *testing.T) {
 		t.Fatalf("GetNode after direct override: %v", err)
 	}
 	if loaded.Status == nil || *loaded.Status != "In Progress" {
-		t.Fatalf("status after direct override = %+v, want card-derived In Progress", loaded.Status)
+		t.Fatalf("status after direct override = %+v, want assignment-derived In Progress", loaded.Status)
 	}
 
 	issue := true
@@ -129,6 +130,7 @@ func TestAssignNodeToLogicGateStatusUsesKanbanCardAsWorkModel(t *testing.T) {
 	if issueResult.Node.StatusColor == nil || *issueResult.Node.StatusColor != "#ffd400" {
 		t.Fatalf("issue node status_color = %+v, want issue color", issueResult.Node.StatusColor)
 	}
+	assertLogicGateAssignmentSource(t, repo, companyID, node.NodeID, logicGate.LogicGateID, issueResult.Card, true)
 }
 
 func TestAssignNodeToLogicGateStatusDoesNotPatchNodeWhenPlacementFails(t *testing.T) {
@@ -191,6 +193,7 @@ func TestLogicGateAssignmentMoveIssueAndRemoveCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
+	assertLogicGateAssignmentSource(t, repo, companyID, node.NodeID, logicGate.LogicGateID, assigned.Card, false)
 
 	moved, err := service.MoveLogicGateNodeAssignment(store.LogicGateNodeAssignmentMoveInput{
 		CompanyID:   companyID,
@@ -210,6 +213,7 @@ func TestLogicGateAssignmentMoveIssueAndRemoveCommands(t *testing.T) {
 	if moved.Node.Priority == nil || *moved.Node.Priority != priority {
 		t.Fatalf("moved node priority = %+v, want unchanged %d", moved.Node.Priority, priority)
 	}
+	assertLogicGateAssignmentSource(t, repo, companyID, node.NodeID, logicGate.LogicGateID, moved.Card, false)
 
 	issueOn, err := service.SetLogicGateNodeAssignmentIssue(store.LogicGateNodeAssignmentIssueInput{
 		CompanyID:   companyID,
@@ -223,6 +227,7 @@ func TestLogicGateAssignmentMoveIssueAndRemoveCommands(t *testing.T) {
 	if issueOn.Node.Status == nil || *issueOn.Node.Status != "Issue" {
 		t.Fatalf("issue node status = %+v, want Issue", issueOn.Node.Status)
 	}
+	assertLogicGateAssignmentSource(t, repo, companyID, node.NodeID, logicGate.LogicGateID, issueOn.Card, true)
 
 	issueOff, err := service.SetLogicGateNodeAssignmentIssue(store.LogicGateNodeAssignmentIssueInput{
 		CompanyID:   companyID,
@@ -236,6 +241,7 @@ func TestLogicGateAssignmentMoveIssueAndRemoveCommands(t *testing.T) {
 	if issueOff.Node.Status == nil || *issueOff.Node.Status != "Done" {
 		t.Fatalf("cleared issue node status = %+v, want column-derived Done", issueOff.Node.Status)
 	}
+	assertLogicGateAssignmentSource(t, repo, companyID, node.NodeID, logicGate.LogicGateID, issueOff.Card, false)
 
 	removed, err := service.RemoveLogicGateNodeAssignment(store.LogicGateNodeAssignmentRemoveInput{
 		CompanyID:   companyID,
@@ -254,6 +260,7 @@ func TestLogicGateAssignmentMoveIssueAndRemoveCommands(t *testing.T) {
 	if len(removed.Node.LogicGateIDs) != 0 {
 		t.Fatalf("removed node logic_gate_ids = %+v, want none", removed.Node.LogicGateIDs)
 	}
+	assertNoLogicGateAssignmentSource(t, repo, companyID, node.NodeID)
 	cards, err := repo.ListKanbanCards(companyID, store.LogicGateKanbanBoardID(logicGate.LogicGateID), store.KanbanCardQuery{Limit: 20})
 	if err != nil {
 		t.Fatalf("ListKanbanCards after remove: %v", err)
@@ -426,4 +433,40 @@ func setupLogicGateAssignmentCommandTest(t *testing.T, companySuffix string) (*s
 		t.Fatalf("CreateNode: %v", err)
 	}
 	return repo, service, companyID, logicGate, node
+}
+
+func assertLogicGateAssignmentSource(t *testing.T, repo *store.MemoryRepo, companyID, nodeID, logicGateID string, card domain.KanbanCard, isIssue bool) domain.NodeLogicGateAssignment {
+	t.Helper()
+	assignments, err := repo.ListNodeLogicGateAssignments(companyID, nodeID)
+	if err != nil {
+		t.Fatalf("ListNodeLogicGateAssignments: %v", err)
+	}
+	if len(assignments) != 1 {
+		t.Fatalf("assignments = %+v, want exactly one", assignments)
+	}
+	assignment := assignments[0]
+	if assignment.LogicGateID != logicGateID {
+		t.Fatalf("assignment logic_gate_id = %q, want %q", assignment.LogicGateID, logicGateID)
+	}
+	if assignment.ColumnID != card.ColumnID || assignment.Position != card.Position {
+		t.Fatalf("assignment placement = column %q position %d, want column %q position %d", assignment.ColumnID, assignment.Position, card.ColumnID, card.Position)
+	}
+	if assignment.CompatibilityBoardID != card.BoardID || assignment.CompatibilityCardID != card.CardID {
+		t.Fatalf("assignment compatibility link = %q/%q, want %q/%q", assignment.CompatibilityBoardID, assignment.CompatibilityCardID, card.BoardID, card.CardID)
+	}
+	if assignment.IsIssue != isIssue {
+		t.Fatalf("assignment is_issue = %v, want %v", assignment.IsIssue, isIssue)
+	}
+	return assignment
+}
+
+func assertNoLogicGateAssignmentSource(t *testing.T, repo *store.MemoryRepo, companyID, nodeID string) {
+	t.Helper()
+	assignments, err := repo.ListNodeLogicGateAssignments(companyID, nodeID)
+	if err != nil {
+		t.Fatalf("ListNodeLogicGateAssignments: %v", err)
+	}
+	if len(assignments) != 0 {
+		t.Fatalf("assignments after remove = %+v, want none", assignments)
+	}
 }

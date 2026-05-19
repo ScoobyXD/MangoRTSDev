@@ -15,14 +15,14 @@ n.node_id,
 n.title,
 coalesce(
   case
-    when card.is_issue then 'Issue'
+    when assignment.is_issue then 'Issue'
     else column_row.title
   end,
   nullif(n.status, '')
 ) as status,
 coalesce(
   case
-    when card.is_issue then '#ffd400'
+    when assignment.is_issue then '#ffd400'
     else column_row.item_color
   end,
   nullif(n.status_color, '')
@@ -37,18 +37,17 @@ coalesce(node_logic_gates.logic_gate_ids_json, '[]') as logic_gate_ids_json`
 
 const nodeStatusJoin = `
 left join lateral (
-  select card.*
-  from kanban_cards card
-  where card.company_id = n.company_id
-    and card.node_id = n.node_id
-    and card.logic_gate_id is not null
-  order by card.updated_timestamp desc, card.created_timestamp desc, card.card_id desc
+  select assignment.*
+  from node_logic_gate_assignments assignment
+  where assignment.company_id = n.company_id
+    and assignment.node_id = n.node_id
+  order by assignment.updated_timestamp desc, assignment.created_timestamp desc, assignment.assignment_id desc
   limit 1
-) card on true
+) assignment on true
 left join kanban_columns column_row
-  on column_row.company_id = card.company_id
- and column_row.board_id = card.board_id
- and column_row.column_id = card.column_id
+  on column_row.company_id = assignment.company_id
+ and column_row.board_id = assignment.compatibility_board_id
+ and column_row.column_id = assignment.column_id
 left join company_memberships assignee_membership
   on assignee_membership.company_id = n.company_id
  and assignee_membership.user_id = n.assignee_user_id
@@ -57,11 +56,10 @@ left join users assignee
 left join lateral (
   select coalesce(jsonb_agg(gate.logic_gate_id order by gate.logic_gate_id), '[]'::jsonb)::text as logic_gate_ids_json
   from (
-    select distinct card.logic_gate_id::text as logic_gate_id
-    from kanban_cards card
-    where card.company_id = n.company_id
-      and card.node_id = n.node_id
-      and card.logic_gate_id is not null
+    select distinct assignment.logic_gate_id::text as logic_gate_id
+    from node_logic_gate_assignments assignment
+    where assignment.company_id = n.company_id
+      and assignment.node_id = n.node_id
   ) gate
 ) node_logic_gates on true`
 

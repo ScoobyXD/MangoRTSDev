@@ -510,6 +510,7 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
 			return
 		}
+		beforeCard, _, hadBeforeCard := s.kanbanCardNotificationSnapshot(companyID, boardID, cardID)
 		err := s.repo.DeleteKanbanCard(companyID, boardID, cardID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "kanban_card_not_found")
@@ -523,6 +524,9 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			"board_id": boardID,
 			"card_id":  cardID,
 		})
+		if hadBeforeCard && beforeCard.LogicGateID != nil {
+			s.publishKanbanDerivedNodeUpdate(companyID, beforeCard.NodeID)
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}

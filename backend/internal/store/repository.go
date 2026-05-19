@@ -164,6 +164,7 @@ type KanbanRepository interface {
 	ListKanbanCards(companyID, boardID string, query KanbanCardQuery) ([]domain.KanbanCard, error)
 	UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error)
 	MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error)
+	ListNodeLogicGateAssignments(companyID, nodeID string) ([]domain.NodeLogicGateAssignment, error)
 	AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentInput) (LogicGateNodeAssignmentResult, error)
 	MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMoveInput) (LogicGateNodeAssignmentResult, error)
 	RemoveLogicGateNodeAssignment(input LogicGateNodeAssignmentRemoveInput) (LogicGateNodeAssignmentRemoveResult, error)
@@ -407,6 +408,7 @@ type KanbanCardMutationInput struct {
 	Position            int
 	IsIssue             bool
 	IsIssueSet          bool
+	CardID              string
 }
 
 type KanbanCardMoveInput struct {

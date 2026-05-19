@@ -20,9 +20,9 @@ Source architecture:
 
 | Theme | Status | Current Read |
 | --- | --- | --- |
-| 1. Read Plane | Partial / yellow | Scoped workspace snapshots and cheap event ETags exist, but several scopes can still be unbounded and the app lacks first-class read models for inboxes and windows. |
+| 1. Read Plane | Partial / yellow | Inbox read contracts now exist, scoped workspace snapshots and cheap event ETags exist, but several scopes can still be unbounded and hot inbox reads may need projection-backed rows. |
 | 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Mutation plus event append is still not atomic across the app, and fanout/gap policy is not production-grade. |
-| 3. Work Ownership / Commands | Confirmed / red | Current Logic Gate work state is mostly Kanban-card backed, but command ownership is missing and frontend flows still orchestrate multi-step writes. |
+| 3. Work Ownership / Commands | Source migration complete / yellow | Node-to-Logic-Gate assignment source rows now exist and Kanban cards are compatibility/projection rows; frontend parity, event atomicity, and inbox projection remain follow-ups. |
 | 4. Hot Path Discipline | First branch complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth/context/batch/metrics remain follow-up branches. |
 | 5. Frontend Structure / API Contract | Ready / yellow | Shared `requestJSON` exists, but hot modules duplicate wrappers, broad invalidation is scattered, and large components still own workflow logic. |
 
@@ -36,7 +36,7 @@ Evidence:
 - `scope=full` still loads nodes, relationships, Logic Gates, explorer folders/items, map positions, and Kanban data in one response.
 - `scope=node_map` without `folder_id` still lists all nodes, relationships, positions, folders, and folder items.
 - `scope=company_explorer` can list broad folders/items plus node and Logic Gate summaries.
-- ACI/R inboxes are still largely browser-derived from loaded nodes and Logic Gates rather than authoritative read APIs.
+- ACI/R inboxes were browser-derived from loaded nodes and Logic Gates; the first read-contract branch adds authoritative APIs, but the hot path still needs frontend adoption, gap reconciliation, and possibly projection-backed reads.
 
 Target architecture:
 - Read APIs are surface-specific and bounded.
@@ -47,6 +47,9 @@ Target architecture:
 First branch:
 `reads/inbox-read-model-contract`
 
+Branch progress:
+- 2026-05-19: Completed the first inbox read contract slice. Responsible Inbox, ACI Inbox, My Nodes, and My Logic Gates now have backend read contracts backed by current tables. Projection tables are intentionally deferred until the contracts are stable and the frontend/reconciliation paths consume them.
+
 Scope:
 - Define server response contracts for:
   - Responsible Inbox
@@ -56,7 +59,23 @@ Scope:
 - Add read-only endpoints backed by current tables first.
 - Do not introduce a large projection system in the first branch unless the endpoint needs it.
 
+Projection follow-up:
+`reads/work-item-inbox-projection`
+
+Scope:
+- Add one rebuildable read-model/projection table, likely `work_item_inbox_entries`, if join-backed inbox reads are too broad or too slow after frontend adoption.
+- Do not add separate `aci_inbox` or `r_inbox` source-of-truth tables.
+- Keep source of truth normalized:
+  - `node_logic_gate_assignments` owns node-to-Logic-Gate placement/status/issue/position.
+  - `nodes` currently owns priority and assignee.
+  - `logic_gate_raci_assignments` owns R/A/C/I membership.
+- Store already-expanded per-user inbox rows such as company, user, role, Logic Gate, node, Kanban card, column, status, priority, assignee, cached display labels, and update/version metadata.
+- Backfill/rebuild from `nodes`, `node_logic_gate_assignments`, compatibility `kanban_cards`/`kanban_columns`, `logic_gates`, and `logic_gate_raci_assignments`.
+- Serve the existing inbox read contracts from the projection without changing frontend response shape.
+- Add migration, backfill, rollback notes, and tests proving projection-backed reads match join-backed behavior.
+
 Follow-up branches:
+- `reads/work-item-inbox-projection`
 - `reads/company-explorer-subtree`
 - `reads/node-map-window`
 - `reads/logic-gate-map-window`
@@ -115,22 +134,24 @@ Everyday work state has no single owner. Node status, priority, assignee, Logic 
 
 Evidence:
 - Nodes have direct fields such as `status`, `status_color`, `priority`, and `assignee_user_id`.
-- Node reads derive `logic_gate_ids` from Kanban/Logic Gate placement.
-- Kanban persistence updates node status/color and assigns the first responsible Logic Gate user as side effects.
+- Node reads derive `logic_gate_ids` from `node_logic_gate_assignments` rather than directly from Kanban cards.
+- Work-item assignment commands update `node_logic_gate_assignments` first, then sync Kanban compatibility cards and derived node status/color; first responsible Logic Gate user assignment still writes to `nodes.assignee_user_id`.
 - Home and Kanban flows still perform multi-step client orchestration.
 - Logic Gate RACI and shared inbox RACI use full-replace update patterns.
 - Email triage conversion creates nodes, folder items, positions, Kanban cards, email links, projections, deletes triage rows, syncs status, and assigns responsible users in one store-level transaction.
 
 Current truth model:
-- Logic Gate work assignment/status is mostly Kanban-card backed today.
+- Logic Gate work assignment/status/issue/position now lives in `node_logic_gate_assignments`; Logic Gate `kanban_cards` remain compatibility/projection rows for existing board UI.
 - Node status is fallback or derived state for nodes that are not on a Logic Gate board.
 - Assignee still lives directly on `nodes.assignee_user_id`, with Kanban placement auto-assigning the first Responsible RACI user.
 - This is usable as a migration starting point, but it needs one command owner.
 
 Target architecture:
 - A backend command owns "node assigned to Logic Gate/status/priority/person/position."
-- The first implementation can use existing Kanban card plus node fields as the persistence model.
-- A later design can decide whether to introduce `work_items` or `node_logic_gate_assignments` as the long-term source table.
+- The first implementation used existing Kanban card plus node fields as the persistence model.
+- Kanban-backed assignment was a migration bridge, not the preferred final model.
+- `node_logic_gate_assignments` is now the durable node-to-Logic-Gate relationship table; it was pulled forward before inbox projection so future read models have the right source.
+- Kanban cards are now a projection/compatibility surface for board layout instead of the durable node-to-Logic-Gate link.
 - Kanban, Home, Inbox, Arena, and agent APIs call the same commands.
 - RACI changes are idempotent add/remove commands with version checks, not full replacement.
 - Email-to-work is a product command with explicit existing/new Logic Gate modes and provenance.
@@ -153,7 +174,7 @@ Scope:
 - Define table shape, backfill plan, compatibility reads, command list, and event taxonomy only if a new table is justified.
 
 Decision document:
-- `docs/important tasks/work-items-source-of-truth-design.md` recommends staying Kanban-card-backed for now and finishing command parity before adding any new work-item source table.
+- `docs/important tasks/work-items-source-of-truth-design.md` recommends staying Kanban-card-backed for now and finishing command parity before adding any new work-item source table. This is a near-term sequencing decision, not a permanent endorsement of Kanban as the only node-to-Logic-Gate source.
 
 Follow-up branches:
 - `work-items/assignment-command-parity-existing-model`
@@ -161,6 +182,25 @@ Follow-up branches:
 - `work-items/home-drop-command`
 - `work-items/email-conversion-command`
 - `work-items/inbox-command-parity`
+
+Source migration branch:
+`work-items/node-logic-gate-assignment-source`
+
+Status:
+- 2026-05-19: Complete. Added `node_logic_gate_assignments` as the durable node-to-Logic-Gate assignment source, with Logic Gate Kanban cards kept as compatibility/projection rows for the current board UI.
+
+Scope completed:
+- Added an additive migration and canonical schema update for `node_logic_gate_assignments`.
+- Backfilled from existing Logic Gate `kanban_cards` where `logic_gate_id is not null`, preserving one active assignment per node.
+- Made work-item assign/move/remove/issue commands write assignment rows first and sync Kanban compatibility cards.
+- Made node reads derive `logic_gate_ids` and assignment-derived status from `node_logic_gate_assignments`.
+- Added app-level raw Kanban sync/guards and a database trigger so legacy Logic Gate card writes cannot silently drift from assignment truth.
+- Kept `logic_gate_raci_assignments` as RACI truth and did not add role columns directly to `logic_gates`.
+
+Migration/backfill/rollback notes:
+- Migration: `backend/db/migrations/20260519_node_logic_gate_assignments.sql` creates the source table, indexes, backfills from current Logic Gate cards, and installs `trg_sync_node_logic_gate_assignment_from_kanban_card` for raw/legacy compatibility writes.
+- Backfill picks the latest Logic Gate card per `(company_id, node_id)` using `updated_timestamp`, `created_timestamp`, then `card_id`, matching the existing one-active-card behavior.
+- Rollback: Kanban compatibility cards are preserved. A code rollback can return to Kanban-backed reads. A DB rollback should drop the trigger/function and table only after confirming no new assignment-only data needs to be preserved.
 
 Completion criteria:
 - One backend command can assign a node to Logic Gate, status, priority, and responsible user atomically.
@@ -266,14 +306,17 @@ Use this as the default sequencing unless a production incident changes prioriti
 4. `work-items/assignment-command-existing-model`
 5. `work-items/source-of-truth-design`
 6. `work-items/assignment-command-parity-existing-model`
+7. `reads/inbox-read-model-contract`
+8. `work-items/node-logic-gate-assignment-source`
 
 ### Next Roadmap
 
-1. `reads/inbox-read-model-contract`
-2. `events/frontend-gap-reconciliation`
-3. `platform/auth-membership-cache`
-4. `reads/company-explorer-subtree`
-5. `work-items/email-conversion-command`
+1. reads/work-item-inbox-projection
+2. events/atomic-work-item-assignment-events
+3. events/frontend-gap-reconciliation
+4. platform/auth-membership-cache
+5. reads/company-explorer-subtree
+6. work-items/email-conversion-command
 
 ### Work-Items Follow-Ups
 

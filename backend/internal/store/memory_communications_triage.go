@@ -163,6 +163,7 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			UpdatedTimestamp:    now,
 		}
 		r.kanbanCards[boardKey(input.CompanyID, board.BoardID)] = append(r.kanbanCards[boardKey(input.CompanyID, board.BoardID)], card)
+		r.upsertNodeLogicGateAssignmentFromCardLocked(card)
 		r.syncNodeStatusFromKanbanCardLocked(card)
 		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, input.LogicGateID, nodeID)
 		r.emailNodeLinks[emailNodeLinkKey(input.CompanyID, board.BoardID, card.CardID)] = communicationsEmailNodeLink{
@@ -223,6 +224,7 @@ func (r *MemoryRepo) RevertCommunicationsTriageNode(input CommunicationsTriageRe
 		}
 	}
 	r.kanbanCards[boardKey(input.CompanyID, input.BoardID)] = nextCards
+	delete(r.nodeLogicGateAssignments, nodeLogicGateAssignmentKey(input.CompanyID, link.NodeID))
 	delete(r.emailNodeLinks, linkKey)
 	delete(r.nodes, key(input.CompanyID, link.NodeID))
 	delete(r.nodeInfo, key(input.CompanyID, link.NodeID))

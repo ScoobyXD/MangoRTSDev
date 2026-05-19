@@ -257,6 +257,19 @@ returning `+kanbanCardSelectColumns,
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
+		if _, err := upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
+			CompanyID:            input.CompanyID,
+			NodeID:               nodeID,
+			LogicGateID:          input.LogicGateID,
+			StatusKey:            logicGateAssignmentStatusKey("Pending"),
+			ColumnID:             pendingColumnID,
+			IsIssue:              false,
+			Position:             card.Position,
+			CompatibilityBoardID: board.BoardID,
+			CompatibilityCardID:  card.CardID,
+		}); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
 		if _, err := tx.ExecContext(ctx, `
 insert into communications_email_nodes (
   company_id, user_id, message_id, node_id, board_id, card_id, logic_gate_id,
@@ -426,6 +439,14 @@ returning user_id::text, message_id, message, created_timestamp, updated_timesta
 	if _, err := tx.ExecContext(ctx, `
 delete from communications_email_nodes
 where company_id=$1 and board_id=$2 and card_id=$3`, input.CompanyID, input.BoardID, input.CardID); err != nil {
+		return CommunicationsTriageRevertResult{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from node_logic_gate_assignments
+where company_id=$1
+  and node_id=$2
+  and compatibility_board_id=$3
+  and compatibility_card_id=$4`, input.CompanyID, link.NodeID, input.BoardID, input.CardID); err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
