@@ -23,7 +23,7 @@ Source architecture:
 | 1. Read Plane | Projection slice complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; scoped workspace snapshots and cheap event ETags exist, but several broad map/explorer scopes still need bounded read models. |
 | 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph and migrated work-item assignment mutations now append durable workspace events atomically; frontend gap reconciliation now detects missed numeric workspace sequences and triggers scoped surface refreshes. Remaining mutation families and external fanout are still follow-ups. |
 | 3. Work Ownership / Commands | Source migration complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, and inbox reads use projection rows; frontend parity and event atomicity remain follow-ups. |
-| 4. Hot Path Discipline | First branch complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth/context/batch/metrics remain follow-up branches. |
+| 4. Hot Path Discipline | Auth cache complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth now caches derived actor/membership context after per-request token validation; repository context, batch SQL, and metrics remain follow-up branches. |
 | 5. Frontend Structure / API Contract | Ready / yellow | Shared `requestJSON` exists, but hot modules duplicate wrappers, broad invalidation is scattered, and large components still own workflow logic. |
 
 ## 1. Read Plane
@@ -235,7 +235,7 @@ The backend still allows production-hostile work on request paths.
 Evidence:
 - Company Explorer read paths still call runtime schema helpers and default folder seeding.
 - Logic Gate Arena GET can create or repair its Kanban board before returning.
-- Auth middleware validates token, upserts the user, lists memberships, and infers company scope on many requests.
+- Auth middleware previously validated token, upserted the user, listed memberships, and inferred company scope on many requests; this branch now caches the derived actor/membership context after validation.
 - Many repository methods use `context.Background()` instead of request context.
 - Some batch/write paths loop row-by-row instead of using set-based SQL.
 - Observability does not yet prove hot-path latency, DB query time, event lag/drop, or frontend interaction SLOs.
@@ -254,15 +254,20 @@ First branch:
 
 Branch progress:
 - 2026-05-19: Removed Company Explorer read-time default seeding/runtime DDL and Logic Gate Arena GET board/column repair. Default folders now belong to company provisioning plus the migration backfill; missing Arena board/columns now return explicit errors instead of being repaired by GET.
+- 2026-05-19: Completed `platform/auth-membership-cache`. Auth middleware still validates JWTs on every request, then reuses a bounded short-TTL in-process actor/membership context keyed by subject, email, and display name claims. Successful company creation clears the cache; invitation acceptance and company user deletion invalidate affected subject/user/company entries.
 
 Scope:
 - Remove default-folder seeding and runtime DDL from Company Explorer reads.
 - Stop Logic Gate Arena GET from repairing missing boards/columns; move repair to creation or explicit command.
 - Add tests that GET paths do not create rows.
-- Leave repository-wide context propagation, metrics, auth caching, and batch SQL rewrites to follow-up branches.
+- Leave repository-wide context propagation, metrics, and batch SQL rewrites to follow-up branches.
+
+Migration/backfill/rollback notes:
+- Auth membership cache migration: none. This branch is code-only and uses the existing `users` and `company_memberships` tables.
+- Backfill: none. Cache entries are populated lazily after successful token validation and expire quickly.
+- Rollback: code can return middleware to direct `UpsertAuthUser` plus `ListUserMemberships` on every authenticated request. No data lives only in the cache, and no database rollback is required.
 
 Follow-up branches:
-- `platform/auth-membership-cache`
 - `platform/repository-context-slice`
 - `platform/bulk-map-layout-upserts`
 - `platform/hot-path-metrics`
@@ -330,12 +335,12 @@ Use this as the default sequencing unless a production incident changes prioriti
 9. `reads/work-item-inbox-projection`
 10. `events/atomic-work-item-assignment-events`
 11. `events/frontend-gap-reconciliation`
+12. `platform/auth-membership-cache`
 
 ### Next Roadmap
 
-1. platform/auth-membership-cache
-2. reads/company-explorer-subtree
-3. work-items/email-conversion-command
+1. reads/company-explorer-subtree
+2. work-items/email-conversion-command
 
 ### Work-Items Follow-Ups
 

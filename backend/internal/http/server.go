@@ -8,7 +8,12 @@ import (
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"os"
+	"time"
 )
+
+type AuthTokenValidator interface {
+	Validate(ctx context.Context, token string) (auth.Claims, error)
+}
 
 type CognitoAdminClient interface {
 	AdminCreateUser(ctx context.Context, email string) error
@@ -29,7 +34,8 @@ type Server struct {
 	commCache       *communicationsCache
 	nylasGate       *nylasRequestGate
 	nylasWebhooks   *nylasWebhookReceiptCache
-	authValidator   *auth.Validator
+	authValidator   AuthTokenValidator
+	authCache       *authMembershipCache
 	cognitoAdmin    CognitoAdminClient
 	emailSender     AuthEmailSender
 	nylasClient     NylasClient
@@ -38,12 +44,14 @@ type Server struct {
 }
 
 type ServerOptions struct {
-	AuthValidator       *auth.Validator
-	CognitoAdmin        CognitoAdminClient
-	EmailSender         AuthEmailSender
-	NylasClient         NylasClient
-	NylasConfig         NylasConfig
-	MaxRequestBodyBytes int64
+	AuthValidator                 AuthTokenValidator
+	AuthMembershipCacheTTL        time.Duration
+	AuthMembershipCacheMaxEntries int
+	CognitoAdmin                  CognitoAdminClient
+	EmailSender                   AuthEmailSender
+	NylasClient                   NylasClient
+	NylasConfig                   NylasConfig
+	MaxRequestBodyBytes           int64
 }
 
 func NewServer(repo store.Repository) *Server {
@@ -62,6 +70,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		nylasGate:       newNylasRequestGate(communicationsNylasMinRequestInterval),
 		nylasWebhooks:   newNylasWebhookReceiptCache(),
 		authValidator:   options.AuthValidator,
+		authCache:       newAuthMembershipCache(options.AuthMembershipCacheTTL, options.AuthMembershipCacheMaxEntries),
 		cognitoAdmin:    options.CognitoAdmin,
 		emailSender:     options.EmailSender,
 		nylasClient:     options.NylasClient,

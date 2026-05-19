@@ -75,6 +75,7 @@ func (s *Server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_company")
 		return
 	}
+	s.authCache.clear()
 	writeJSON(w, http.StatusCreated, company)
 }
 
@@ -145,6 +146,9 @@ func (s *Server) handleCompanySubresource(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed_to_delete_company_user")
 		return
 	}
+	s.authCache.invalidateSubject(result.User.CognitoSubject)
+	s.authCache.invalidateUser(result.User.UserID)
+	s.authCache.invalidateCompany(companyID)
 	cognitoDeleted := false
 	if result.DeleteExternalIdentity {
 		if s.cognitoAdmin == nil {
@@ -296,6 +300,8 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed_to_accept_invitation")
 		return
 	}
+	s.authCache.invalidateSubject(claims.Subject)
+	s.authCache.invalidateCompany(invitation.CompanyID)
 	emailStatus := "not_configured"
 	if s.emailSender != nil {
 		emailStatus = "sent"

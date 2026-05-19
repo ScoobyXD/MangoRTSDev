@@ -56,26 +56,30 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
-		user, err := s.repo.UpsertAuthUser(claims.Subject, claims.Email, claims.Name)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_record_authenticated_user")
-			return
-		}
-		memberships, err := s.repo.ListUserMemberships(user.UserID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_load_memberships")
-			return
-		}
-		actor := ActorContext{
-			Claims:      claims,
-			User:        user,
-			Memberships: normalizeMembershipRoles(memberships),
-		}
-		for _, membership := range actor.Memberships {
-			if membership.Role == domain.RoleDevAdmin {
-				actor.IsDevAdmin = true
-				break
+		actor, ok := s.authCache.get(claims)
+		if !ok {
+			user, err := s.repo.UpsertAuthUser(claims.Subject, claims.Email, claims.Name)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_record_authenticated_user")
+				return
 			}
+			memberships, err := s.repo.ListUserMemberships(user.UserID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_load_memberships")
+				return
+			}
+			actor = ActorContext{
+				Claims:      claims,
+				User:        user,
+				Memberships: normalizeMembershipRoles(memberships),
+			}
+			for _, membership := range actor.Memberships {
+				if membership.Role == domain.RoleDevAdmin {
+					actor.IsDevAdmin = true
+					break
+				}
+			}
+			s.authCache.set(claims, actor)
 		}
 
 		companyID, err := requestCompanyID(r)
