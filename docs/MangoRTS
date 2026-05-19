@@ -51,6 +51,12 @@ New Features:
 32. need to be able to use with excel and other files.
 33. Really like google's idea of using mouse cursor to direct ai agents.
 ========
+
+backend fixes:
+1. We have to give logic gate fields in the database.
+2. assignment, ownership
+3. scope, caching
+
 General changes:
 1. the caching still doesnt work well on company explorer logic gate arena, it doesnt work for nodes in logic gate arena kanban board, i still get whenever i move around pages including email. 
 2. We seriously need to figure out proper caching + displaying updated info for all our pages and all node popups and stuff

@@ -256,20 +256,32 @@ Completion criteria:
 
 ## Recommended Branch Order
 
-Use this as the default sequencing unless a production incident changes priorities.
+Use this as the default sequencing unless a production incident changes priorities. The first three are foundation branches and should remain mostly serial because they touch shared contracts. Work-items and read-model branches can run in parallel only when their write sets do not overlap.
+
+### Completed Or In Flight
 
 1. `platform/hot-path-read-discipline`
 2. `events/atomic-workspace-outbox-node-graph`
 3. `frontend/api-client-contract`
 4. `work-items/assignment-command-existing-model`
 5. `work-items/source-of-truth-design`
-6. `reads/inbox-read-model-contract`
-7. `events/frontend-gap-reconciliation`
-8. `platform/auth-membership-cache`
-9. `reads/company-explorer-subtree`
-10. `work-items/email-conversion-command`
+6. `work-items/assignment-command-parity-existing-model`
 
-The first three are foundation branches. Run them mostly serially because they touch shared contracts. After that, work-items and read-model branches can run in parallel when their write sets do not overlap.
+### Next Roadmap
+
+1. `reads/inbox-read-model-contract`
+2. `events/frontend-gap-reconciliation`
+3. `platform/auth-membership-cache`
+4. `reads/company-explorer-subtree`
+5. `work-items/email-conversion-command`
+
+### Work-Items Follow-Ups
+
+These remain valid, but they should not displace the next read-plane branch unless they are blocking a user or agent workflow.
+
+1. `work-items/raci-add-remove-commands`
+2. `work-items/home-drop-command`
+3. `work-items/inbox-command-parity`
 
 ## Agent Work Plan
 
