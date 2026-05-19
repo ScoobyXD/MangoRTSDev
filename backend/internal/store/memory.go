@@ -34,6 +34,7 @@ type MemoryRepo struct {
 	triageItems        map[string]domain.CommunicationsTriageItem
 	emailNodeLinks     map[string]communicationsEmailNodeLink
 	logicGateShortcuts map[string]domain.UserLogicGateShortcut
+	domainEvents       map[string]domain.DomainEvent
 	notificationEvents map[string]domain.NotificationEvent
 	notifications      map[string]domain.Notification
 }
@@ -67,6 +68,7 @@ func NewMemoryRepo() *MemoryRepo {
 		triageItems:        map[string]domain.CommunicationsTriageItem{},
 		emailNodeLinks:     map[string]communicationsEmailNodeLink{},
 		logicGateShortcuts: map[string]domain.UserLogicGateShortcut{},
+		domainEvents:       map[string]domain.DomainEvent{},
 		notificationEvents: map[string]domain.NotificationEvent{},
 		notifications:      map[string]domain.Notification{},
 	}

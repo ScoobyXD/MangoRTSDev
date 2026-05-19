@@ -192,6 +192,21 @@ Required companion architecture:
 Non-negotiable rule:
 - **Events are canonical for writes/history; projections are canonical for hot reads.**
 
+### Modular Monolith Boundary Migration (Current)
+
+The backend remains one deployable Go service for now. This is intentional: the current scale risk is not process count, it is unclear ownership and shared hot-path coupling.
+
+Current migration rule:
+- Keep one service until module contracts, event ordering, read models, and SLOs are real.
+- Split backend ownership by bounded context first: Identity, Communications, Work Graph, Logic Gates, Company Explorer, Map Layout, Kanban, Notifications, and Domain Events.
+- New backend work should depend on the narrowest context port possible, not the full compatibility repository.
+- Cross-context side effects should move out of persistence helpers and into command/application services that append domain events transactionally.
+
+First implementation slice:
+- `store.Repository` has been decomposed into smaller context interfaces while preserving the existing compatibility interface.
+- A generic `domain_events` outbox table and repository port now define the future ordered event stream shape: company, stream type, stream id, per-stream sequence, event type, actor, idempotency key, payload, publish marker, and timestamps.
+- Existing mutation handlers are not yet fully wired to this outbox. Until that is complete, in-memory SSE remains a best-effort live hint and database snapshots/projections remain the recovery authority.
+
 ## Core Architectural Rules
 
 ## 1) No N+1 on Hot Paths
@@ -340,7 +355,7 @@ Status legend:
 - 🟡 partial / implemented but not yet at target architecture intent
 - ⛔ not started / blocked
 
-Last reviewed: 2026-04-22
+Last reviewed: 2026-05-19
 
 ### Hot Path Contracts
 - ⛔ Defined SLOs for every hot path endpoint (p50/p95/p99)
@@ -361,14 +376,14 @@ Blockers:
 - No committed EXPLAIN artifacts/checks for hot routes.
 
 ### Event Log + Projection Hard Requirements
-- ⛔ Canonical `events` table contract finalized (columns, sequence scope, idempotency, producer identity format)
+- 🟡 Canonical `events` table contract defined for the first backend slice (`domain_events` outbox + repository port); command wiring, projection ownership, and replay semantics still pending.
 - 🟡 Projection/read-model tables defined for hot module reads (node and logic-gate editor projections exist; full graph/explorer projections still pending)
 - ⛔ Projection updater contract defined (ordered delta emission + sequence handling)
 - ⛔ Scoped reconciliation protocol implemented for sequence gaps/drift
 - ⛔ Hot API reads audited to confirm projection-backed access (no raw event scans on hot paths)
 
 Blockers:
-- Event envelope naming/format and sequence ownership scope not yet locked in schema docs.
+- Event envelope naming/format and per-stream sequence ownership now have an initial schema shape, but command-by-command event contracts are not yet locked.
 - Dedicated graph/explorer projection DDL and index packages are still pending beyond the current node and logic-gate projections.
 - No enforced SLO for stream lag/reconciliation lag in CI gates.
 

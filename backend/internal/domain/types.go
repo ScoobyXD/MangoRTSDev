@@ -400,6 +400,20 @@ type NotificationEvent struct {
 	CreatedTimestamp   time.Time      `json:"created_timestamp"`
 }
 
+type DomainEvent struct {
+	EventID            string         `json:"event_id"`
+	CompanyID          string         `json:"company_id"`
+	StreamType         string         `json:"stream_type"`
+	StreamID           string         `json:"stream_id"`
+	Sequence           int64          `json:"sequence"`
+	Type               string         `json:"type"`
+	ActorUserID        *string        `json:"actor_user_id,omitempty"`
+	IdempotencyKey     string         `json:"idempotency_key,omitempty"`
+	Payload            map[string]any `json:"payload,omitempty"`
+	PublishedTimestamp *time.Time     `json:"published_timestamp,omitempty"`
+	CreatedTimestamp   time.Time      `json:"created_timestamp"`
+}
+
 type Notification struct {
 	NotificationID   string     `json:"notification_id"`
 	CompanyID        string     `json:"company_id,omitempty"`

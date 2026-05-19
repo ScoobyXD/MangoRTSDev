@@ -22,6 +22,18 @@ var (
 )
 
 type Repository interface {
+	IdentityRepository
+	CommunicationsRepository
+	WorkGraphRepository
+	LogicGateRepository
+	CompanyExplorerRepository
+	MapLayoutRepository
+	KanbanRepository
+	NotificationRepository
+	DomainEventRepository
+}
+
+type IdentityRepository interface {
 	UpsertAuthUser(cognitoSubject, email, displayName string) (domain.User, error)
 	GetAuthUser(cognitoSubject string) (domain.User, error)
 	GetAuthUserByEmail(email string) (domain.User, error)
@@ -42,6 +54,9 @@ type Repository interface {
 	UpsertUserEmailConnection(input UserEmailConnectionInput) (domain.UserEmailConnection, error)
 	UpdateUserEmailConnectionStatus(userID, status string) (domain.UserEmailConnection, error)
 	DeleteUserEmailConnection(userID string) error
+}
+
+type CommunicationsRepository interface {
 	ListCommunicationsTriageItems(userID string) ([]domain.CommunicationsTriageItem, error)
 	UpsertCommunicationsTriageItem(userID string, message domain.EmailMessageSnapshot) (domain.CommunicationsTriageItem, error)
 	DeleteCommunicationsTriageItem(userID, messageID string) error
@@ -51,6 +66,9 @@ type Repository interface {
 	ListUserLogicGateShortcuts(userID, companyID string) ([]domain.UserLogicGateShortcut, error)
 	UpsertUserLogicGateShortcuts(userID, companyID string, logicGateIDs []string) ([]domain.UserLogicGateShortcut, error)
 	DeleteUserLogicGateShortcut(userID, companyID, logicGateID string) error
+}
+
+type WorkGraphRepository interface {
 	CreateNode(companyID, title string) (domain.Node, error)
 	CreateNodeWithAssignee(companyID, title, assigneeUserID string) (domain.Node, error)
 	UpdateNode(input UpdateNodeInput) (domain.Node, error)
@@ -65,6 +83,9 @@ type Repository interface {
 	ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error)
 	DeleteNodeProjection(companyID, nodeID, informationID string) error
 	CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error)
+}
+
+type LogicGateRepository interface {
 	CreateLogicGate(companyID, header string) (domain.LogicGate, error)
 	UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error)
 	ListLogicGates(companyID string) ([]domain.LogicGate, error)
@@ -79,6 +100,9 @@ type Repository interface {
 	ListLogicGateProjections(companyID, logicGateID string) ([]domain.LogicGateProjection, error)
 	DeleteLogicGateProjection(companyID, logicGateID, informationID string) error
 	CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error)
+}
+
+type CompanyExplorerRepository interface {
 	CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error)
 	ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error)
 	MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error)
@@ -94,11 +118,17 @@ type Repository interface {
 	AssignCompanyExplorerFolderItems(companyID string, assignments []CompanyExplorerFolderItemAssignmentInput) ([]domain.CompanyExplorerFolderItem, []CompanyExplorerRelationshipDeleteResult, error)
 	ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error)
 	RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error
+}
+
+type MapLayoutRepository interface {
 	ListNodeMapPositions(companyID string) ([]domain.NodeMapPosition, error)
 	UpsertNodeMapPositions(companyID string, positions []domain.NodeMapPosition) ([]domain.NodeMapPosition, error)
 	ListLogicGateMapPositions(companyID string) ([]domain.LogicGateMapPosition, error)
 	UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error)
 	CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityBatchResult, error)
+}
+
+type KanbanRepository interface {
 	ListKanbanBoards(companyID string, query KanbanBoardQuery) ([]domain.KanbanBoard, error)
 	EnsureLogicGateKanbanBoard(companyID, logicGateID, title string) (domain.KanbanBoard, error)
 	CreateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error)
@@ -112,6 +142,9 @@ type Repository interface {
 	UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error)
 	MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error)
 	DeleteKanbanCard(companyID, boardID, cardID string) error
+}
+
+type NotificationRepository interface {
 	CreateNotificationEvent(input NotificationEventInput) (domain.NotificationEvent, error)
 	ListPendingNotificationEvents(limit int) ([]domain.NotificationEvent, error)
 	MarkNotificationEventProcessed(eventID string) error
@@ -121,6 +154,12 @@ type Repository interface {
 	CountUnreadNotifications(userID, companyID string) (int, error)
 	MarkNotificationRead(userID, notificationID string, read bool) (domain.Notification, error)
 	MarkAllNotificationsRead(userID, companyID string) (int, error)
+}
+
+type DomainEventRepository interface {
+	AppendDomainEvent(input DomainEventInput) (domain.DomainEvent, error)
+	ListPendingDomainEvents(limit int) ([]domain.DomainEvent, error)
+	MarkDomainEventPublished(companyID, eventID string) error
 }
 
 type DeleteCompanyUserResult struct {

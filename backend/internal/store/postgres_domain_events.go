@@ -1,0 +1,153 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"miraeopus/backend/internal/domain"
+	"strings"
+)
+
+const domainEventSelectColumns = `
+event_id::text, company_id::text, stream_type, stream_id, sequence, event_type,
+actor_user_id::text, idempotency_key, payload, published_timestamp, created_timestamp`
+
+func scanDomainEvent(row interface{ Scan(dest ...any) error }) (domain.DomainEvent, error) {
+	var item domain.DomainEvent
+	var actorUserID sql.NullString
+	var payloadBytes []byte
+	err := row.Scan(
+		&item.EventID,
+		&item.CompanyID,
+		&item.StreamType,
+		&item.StreamID,
+		&item.Sequence,
+		&item.Type,
+		&actorUserID,
+		&item.IdempotencyKey,
+		&payloadBytes,
+		&item.PublishedTimestamp,
+		&item.CreatedTimestamp,
+	)
+	if err != nil {
+		return domain.DomainEvent{}, err
+	}
+	if actorUserID.Valid {
+		item.ActorUserID = &actorUserID.String
+	}
+	if len(payloadBytes) > 0 {
+		if err := json.Unmarshal(payloadBytes, &item.Payload); err != nil {
+			return domain.DomainEvent{}, err
+		}
+	}
+	if item.Payload == nil {
+		item.Payload = map[string]any{}
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) AppendDomainEvent(input DomainEventInput) (domain.DomainEvent, error) {
+	ctx := context.Background()
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.StreamType = strings.TrimSpace(input.StreamType)
+	input.StreamID = strings.TrimSpace(input.StreamID)
+	input.Type = strings.TrimSpace(input.Type)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
+	if input.CompanyID == "" || input.StreamType == "" || input.StreamID == "" || input.Type == "" {
+		return domain.DomainEvent{}, ErrInvalid
+	}
+
+	payloadBytes, err := json.Marshal(cloneDomainEventPayload(input.Payload))
+	if err != nil {
+		return domain.DomainEvent{}, err
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.DomainEvent{}, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx,
+		`select pg_advisory_xact_lock(hashtext($1), hashtext($2 || ':' || $3))`,
+		input.CompanyID, input.StreamType, input.StreamID,
+	); err != nil {
+		return domain.DomainEvent{}, err
+	}
+
+	item, err := scanDomainEvent(tx.QueryRowContext(ctx, `
+with next_sequence as (
+  select coalesce(max(sequence), 0) + 1 as sequence
+  from domain_events
+  where company_id=$2::uuid
+    and stream_type=$4
+    and stream_id=$5
+)
+insert into domain_events (
+  event_id, company_id, actor_user_id, stream_type, stream_id, sequence,
+  event_type, idempotency_key, payload, created_timestamp
+)
+select $1::uuid, $2::uuid, nullif($3, '')::uuid, $4, $5, sequence, $6, $7, $8::jsonb, now()
+from next_sequence
+on conflict (company_id, idempotency_key) where btrim(idempotency_key) <> ''
+do update set idempotency_key=domain_events.idempotency_key
+returning `+domainEventSelectColumns,
+		newUUIDv7String(), input.CompanyID, input.ActorUserID, input.StreamType, input.StreamID, input.Type, input.IdempotencyKey, string(payloadBytes),
+	))
+	if err != nil {
+		return domain.DomainEvent{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.DomainEvent{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) ListPendingDomainEvents(limit int) ([]domain.DomainEvent, error) {
+	ctx := context.Background()
+	limit = NormalizeDomainEventListLimit(limit)
+	rows, err := r.db.QueryContext(ctx, `
+select `+domainEventSelectColumns+`
+from domain_events
+where published_timestamp is null
+order by created_timestamp asc, company_id asc, event_id asc
+limit $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.DomainEvent, 0)
+	for rows.Next() {
+		item, err := scanDomainEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) MarkDomainEventPublished(companyID, eventID string) error {
+	companyID = strings.TrimSpace(companyID)
+	eventID = strings.TrimSpace(eventID)
+	if companyID == "" || eventID == "" {
+		return ErrInvalid
+	}
+	result, err := r.db.Exec(`
+update domain_events
+set published_timestamp=coalesce(published_timestamp, now())
+where company_id=$1::uuid and event_id=$2::uuid`, companyID, eventID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

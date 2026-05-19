@@ -1,0 +1,118 @@
+package store
+
+import (
+	"miraeopus/backend/internal/domain"
+	"slices"
+	"strings"
+	"time"
+)
+
+func domainEventStringPtr(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func domainEventMemoryKey(companyID, eventID string) string {
+	return companyID + ":" + eventID
+}
+
+func (r *MemoryRepo) AppendDomainEvent(input DomainEventInput) (domain.DomainEvent, error) {
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.StreamType = strings.TrimSpace(input.StreamType)
+	input.StreamID = strings.TrimSpace(input.StreamID)
+	input.Type = strings.TrimSpace(input.Type)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
+	if input.CompanyID == "" || input.StreamType == "" || input.StreamID == "" || input.Type == "" {
+		return domain.DomainEvent{}, ErrInvalid
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if input.IdempotencyKey != "" {
+		for _, existing := range r.domainEvents {
+			if existing.CompanyID == input.CompanyID && existing.IdempotencyKey == input.IdempotencyKey {
+				return cloneDomainEvent(existing), nil
+			}
+		}
+	}
+
+	sequence := int64(1)
+	for _, existing := range r.domainEvents {
+		if existing.CompanyID == input.CompanyID && existing.StreamType == input.StreamType && existing.StreamID == input.StreamID && existing.Sequence >= sequence {
+			sequence = existing.Sequence + 1
+		}
+	}
+
+	now := time.Now().UTC()
+	item := domain.DomainEvent{
+		EventID:          newUUIDv7String(),
+		CompanyID:        input.CompanyID,
+		StreamType:       input.StreamType,
+		StreamID:         input.StreamID,
+		Sequence:         sequence,
+		Type:             input.Type,
+		ActorUserID:      domainEventStringPtr(input.ActorUserID),
+		IdempotencyKey:   input.IdempotencyKey,
+		Payload:          cloneDomainEventPayload(input.Payload),
+		CreatedTimestamp: now,
+	}
+	r.domainEvents[domainEventMemoryKey(item.CompanyID, item.EventID)] = item
+	return cloneDomainEvent(item), nil
+}
+
+func (r *MemoryRepo) ListPendingDomainEvents(limit int) ([]domain.DomainEvent, error) {
+	limit = NormalizeDomainEventListLimit(limit)
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.DomainEvent, 0)
+	for _, item := range r.domainEvents {
+		if item.PublishedTimestamp != nil {
+			continue
+		}
+		items = append(items, cloneDomainEvent(item))
+	}
+	slices.SortFunc(items, func(a, b domain.DomainEvent) int {
+		if a.CreatedTimestamp.Before(b.CreatedTimestamp) {
+			return -1
+		}
+		if a.CreatedTimestamp.After(b.CreatedTimestamp) {
+			return 1
+		}
+		if a.CompanyID != b.CompanyID {
+			return strings.Compare(a.CompanyID, b.CompanyID)
+		}
+		return strings.Compare(a.EventID, b.EventID)
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
+func (r *MemoryRepo) MarkDomainEventPublished(companyID, eventID string) error {
+	companyID = strings.TrimSpace(companyID)
+	eventID = strings.TrimSpace(eventID)
+	if companyID == "" || eventID == "" {
+		return ErrInvalid
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := domainEventMemoryKey(companyID, eventID)
+	item, ok := r.domainEvents[key]
+	if !ok {
+		return ErrNotFound
+	}
+	now := time.Now().UTC()
+	item.PublishedTimestamp = &now
+	r.domainEvents[key] = item
+	return nil
+}
