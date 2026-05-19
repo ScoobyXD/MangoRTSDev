@@ -15,6 +15,7 @@ import (
 
 const workspaceDomainStreamType = "workspace"
 const workspaceReplayLimit = 500
+const workspaceCatchupInterval = 250 * time.Millisecond
 
 func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -421,10 +422,19 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	afterSequence, ok := workspaceReplayAfterSequence(r)
+	afterSequence, explicitCursor, ok := workspaceReplayAfterSequence(r)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid_after_sequence")
 		return
+	}
+	if !explicitCursor {
+		sequence, err := s.repo.CurrentDomainEventSequence(store.DomainEventStreamQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID})
+		if err != nil {
+			log.Printf("workspace stream baseline failed company_id=%s: %v", companyID, err)
+			writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
+			return
+		}
+		afterSequence = sequence
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -440,20 +450,17 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "event: ready\ndata: {\"company_id\":%q,\"after_sequence\":%d}\n\n", companyID, afterSequence)
 	flusher.Flush()
 
-	if afterSequence > 0 {
-		replay, err := s.repo.ListDomainEventsAfter(store.DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: afterSequence, Limit: workspaceReplayLimit})
-		if err != nil {
+	lastSentSequence := afterSequence
+	if explicitCursor {
+		if err := s.writeWorkspaceDurableCatchup(w, flusher, companyID, &lastSentSequence); err != nil {
 			log.Printf("workspace stream replay failed company_id=%s after_sequence=%d: %v", companyID, afterSequence, err)
-		} else {
-			for _, event := range replay {
-				writeWorkspaceSSE(w, event)
-				flusher.Flush()
-			}
 		}
 	}
 
 	heartbeat := time.NewTicker(sseHeartbeatInterval)
 	defer heartbeat.Stop()
+	catchup := time.NewTicker(workspaceCatchupInterval)
+	defer catchup.Stop()
 
 	for {
 		select {
@@ -462,30 +469,69 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 		case <-heartbeat.C:
 			fmt.Fprint(w, "event: ping\ndata: {}\n\n")
 			flusher.Flush()
-		case payload := <-ch:
-			if sequence := workspacePayloadSequence(payload); sequence > 0 {
-				fmt.Fprintf(w, "id: %d\nevent: workspace\ndata: %s\n\n", sequence, payload)
-			} else {
-				fmt.Fprintf(w, "event: workspace\ndata: %s\n\n", payload)
+		case <-catchup.C:
+			if err := s.writeWorkspaceDurableCatchup(w, flusher, companyID, &lastSentSequence); err != nil {
+				log.Printf("workspace stream catch-up failed company_id=%s after_sequence=%d: %v", companyID, lastSentSequence, err)
 			}
-			flusher.Flush()
+		case payload := <-ch:
+			sequence := workspacePayloadSequence(payload)
+			if sequence > 0 && sequence <= lastSentSequence {
+				continue
+			}
+			if err := s.writeWorkspaceDurableCatchup(w, flusher, companyID, &lastSentSequence); err != nil {
+				log.Printf("workspace stream hub catch-up failed company_id=%s after_sequence=%d payload_sequence=%d: %v", companyID, lastSentSequence, sequence, err)
+			}
 		}
 	}
 }
 
-func workspaceReplayAfterSequence(r *http.Request) (int64, bool) {
-	raw := strings.TrimSpace(r.URL.Query().Get("after_sequence"))
-	if raw == "" {
-		raw = strings.TrimSpace(r.Header.Get("Last-Event-ID"))
+func workspaceReplayAfterSequence(r *http.Request) (int64, bool, bool) {
+	if values, hasAfterSequence := r.URL.Query()["after_sequence"]; hasAfterSequence {
+		raw := ""
+		if len(values) > 0 {
+			raw = strings.TrimSpace(values[0])
+		}
+		value, ok := parseWorkspaceStreamSequence(raw)
+		return value, true, ok
 	}
+	raw := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
 	if raw == "" {
-		return 0, true
+		return 0, false, true
 	}
+	value, ok := parseWorkspaceStreamSequence(raw)
+	return value, true, ok
+}
+
+func parseWorkspaceStreamSequence(raw string) (int64, bool) {
 	value, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || value < 0 {
 		return 0, false
 	}
 	return value, true
+}
+
+func (s *Server) writeWorkspaceDurableCatchup(w http.ResponseWriter, flusher http.Flusher, companyID string, lastSentSequence *int64) error {
+	for {
+		replay, err := s.repo.ListDomainEventsAfter(store.DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: *lastSentSequence, Limit: workspaceReplayLimit})
+		if err != nil {
+			return err
+		}
+		if len(replay) == 0 {
+			return nil
+		}
+		for _, event := range replay {
+			if event.Sequence <= *lastSentSequence {
+				continue
+			}
+			if writeWorkspaceSSE(w, event) {
+				*lastSentSequence = event.Sequence
+			}
+		}
+		flusher.Flush()
+		if len(replay) < workspaceReplayLimit {
+			return nil
+		}
+	}
 }
 
 func workspacePayloadSequence(payload []byte) int64 {
@@ -568,10 +614,6 @@ func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[str
 	})
 	if err != nil {
 		log.Printf("failed to append workspace domain event company_id=%s type=%s: %v", companyID, eventType, err)
-		payload, marshalErr := json.Marshal(workspaceEventEnvelope{CompanyID: companyID, Type: eventType, TS: time.Now().UTC(), Data: data})
-		if marshalErr == nil {
-			s.hub.publish(companyID, payload)
-		}
 		return
 	}
 	payload, err := json.Marshal(workspaceEventEnvelopeFromDomainEvent(event))
@@ -594,10 +636,12 @@ func workspaceEventEnvelopeFromDomainEvent(event domain.DomainEvent) workspaceEv
 	}
 }
 
-func writeWorkspaceSSE(w http.ResponseWriter, event domain.DomainEvent) {
+func writeWorkspaceSSE(w http.ResponseWriter, event domain.DomainEvent) bool {
 	payload, err := json.Marshal(workspaceEventEnvelopeFromDomainEvent(event))
 	if err != nil {
-		return
+		log.Printf("failed to marshal workspace event company_id=%s sequence=%d event_id=%s: %v", event.CompanyID, event.Sequence, event.EventID, err)
+		return false
 	}
 	fmt.Fprintf(w, "id: %d\nevent: workspace\ndata: %s\n\n", event.Sequence, payload)
+	return true
 }
