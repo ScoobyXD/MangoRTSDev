@@ -4,7 +4,26 @@ import (
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
+	"time"
 )
+
+const (
+	memoryWorkItemInboxEntryKindNode      = "node"
+	memoryWorkItemInboxEntryKindLogicGate = "logic_gate"
+	memoryWorkItemInboxRoleAssignee       = "assignee"
+)
+
+type memoryWorkItemInboxEntry struct {
+	CompanyID                 string
+	UserID                    string
+	EntryKind                 string
+	Role                      string
+	Node                      domain.Node
+	LogicGateID               string
+	LogicGateHeader           string
+	LogicGateCreatedTimestamp time.Time
+	RaciAssignment            domain.LogicGateRaciAssignment
+}
 
 func (r *MemoryRepo) ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
 	return r.listAssignedWorkItemInboxNodes(query)
@@ -14,17 +33,44 @@ func (r *MemoryRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error
 	return r.listAssignedWorkItemInboxNodes(query)
 }
 
+func (r *MemoryRepo) RebuildWorkItemInboxEntries(companyID string) error {
+	companyID = strings.TrimSpace(companyID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rebuildWorkItemInboxEntriesForCompanyLocked(companyID)
+	return nil
+}
+
+func (r *MemoryRepo) RebuildWorkItemInboxEntriesForNode(companyID, nodeID string) error {
+	companyID = strings.TrimSpace(companyID)
+	nodeID = strings.TrimSpace(nodeID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rebuildWorkItemInboxEntriesForNodeLocked(companyID, nodeID)
+	return nil
+}
+
+func (r *MemoryRepo) RebuildWorkItemInboxEntriesForLogicGate(companyID, logicGateID string) error {
+	companyID = strings.TrimSpace(companyID)
+	logicGateID = strings.TrimSpace(logicGateID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rebuildWorkItemInboxEntriesForLogicGateLocked(companyID, logicGateID)
+	return nil
+}
+
 func (r *MemoryRepo) listAssignedWorkItemInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
 	query = NormalizeWorkItemInboxQuery(query)
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
+	r.rebuildWorkItemInboxEntriesForCompanyLocked(query.CompanyID)
 	items := make([]domain.Node, 0)
-	for _, node := range r.nodes {
-		if node.CompanyID != query.CompanyID || node.AssigneeUserID == nil || strings.TrimSpace(*node.AssigneeUserID) != query.UserID {
+	for _, entry := range r.workItemInboxEntries {
+		if entry.CompanyID != query.CompanyID || entry.UserID != query.UserID || entry.EntryKind != memoryWorkItemInboxEntryKindNode {
 			continue
 		}
-		items = append(items, r.withNodeReadModelLocked(node))
+		items = append(items, entry.Node)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
@@ -52,28 +98,52 @@ func (r *MemoryRepo) ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogic
 
 func (r *MemoryRepo) listWorkItemLogicGateInboxItems(query WorkItemInboxQuery, allowedRoles map[string]bool) ([]WorkItemLogicGateInboxItem, error) {
 	query = NormalizeWorkItemInboxQuery(query)
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	items := make([]WorkItemLogicGateInboxItem, 0)
-	for _, gate := range r.logicGates {
-		if gate.CompanyID != query.CompanyID {
+	r.rebuildWorkItemInboxEntriesForCompanyLocked(query.CompanyID)
+	itemsByGate := map[string]*WorkItemLogicGateInboxItem{}
+	seenRolesByGate := map[string]map[string]bool{}
+	for _, entry := range r.workItemInboxEntries {
+		if entry.CompanyID != query.CompanyID || entry.UserID != query.UserID || entry.EntryKind != memoryWorkItemInboxEntryKindLogicGate {
 			continue
 		}
-		assignments := r.logicGateRaci[key(gate.CompanyID, gate.LogicGateID)]
-		roles := workItemInboxRolesForUser(assignments, query.UserID, allowedRoles)
-		if len(roles) == 0 {
+		if allowedRoles != nil && !allowedRoles[entry.Role] {
 			continue
 		}
-		gate = r.withLogicGateRaciLocked(gate)
-		items = append(items, WorkItemLogicGateInboxItem{
-			CompanyID:        gate.CompanyID,
-			LogicGateID:      gate.LogicGateID,
-			Header:           gate.Header,
-			Roles:            roles,
-			RaciAssignments:  gate.RaciAssignments,
-			CreatedTimestamp: gate.CreatedTimestamp,
+		item := itemsByGate[entry.LogicGateID]
+		if item == nil {
+			item = &WorkItemLogicGateInboxItem{
+				CompanyID:        entry.CompanyID,
+				LogicGateID:      entry.LogicGateID,
+				Header:           entry.LogicGateHeader,
+				Roles:            []string{},
+				RaciAssignments:  []domain.LogicGateRaciAssignment{},
+				CreatedTimestamp: entry.LogicGateCreatedTimestamp,
+			}
+			itemsByGate[entry.LogicGateID] = item
+			seenRolesByGate[entry.LogicGateID] = map[string]bool{}
+		}
+		if !seenRolesByGate[entry.LogicGateID][entry.Role] {
+			item.Roles = append(item.Roles, entry.Role)
+			seenRolesByGate[entry.LogicGateID][entry.Role] = true
+		}
+	}
+
+	assignmentsByGate := r.projectedLogicGateRaciAssignmentsByGateLocked(query.CompanyID)
+	items := make([]WorkItemLogicGateInboxItem, 0, len(itemsByGate))
+	for gateID, item := range itemsByGate {
+		sort.Slice(item.Roles, func(i, j int) bool {
+			if raciRoleSortValue(item.Roles[i]) != raciRoleSortValue(item.Roles[j]) {
+				return raciRoleSortValue(item.Roles[i]) < raciRoleSortValue(item.Roles[j])
+			}
+			return item.Roles[i] < item.Roles[j]
 		})
+		item.RaciAssignments = assignmentsByGate[gateID]
+		if item.RaciAssignments == nil {
+			item.RaciAssignments = []domain.LogicGateRaciAssignment{}
+		}
+		items = append(items, *item)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		left := strings.ToLower(strings.TrimSpace(items[i].Header))
@@ -87,6 +157,96 @@ func (r *MemoryRepo) listWorkItemLogicGateInboxItems(query WorkItemInboxQuery, a
 		items = items[:query.Limit]
 	}
 	return items, nil
+}
+
+func (r *MemoryRepo) rebuildWorkItemInboxEntriesForCompanyLocked(companyID string) {
+	for entryKey, entry := range r.workItemInboxEntries {
+		if entry.CompanyID == companyID {
+			delete(r.workItemInboxEntries, entryKey)
+		}
+	}
+	for _, node := range r.nodes {
+		if node.CompanyID == companyID {
+			r.rebuildWorkItemInboxEntriesForNodeLocked(companyID, node.NodeID)
+		}
+	}
+	for _, gate := range r.logicGates {
+		if gate.CompanyID == companyID {
+			r.rebuildWorkItemInboxEntriesForLogicGateLocked(companyID, gate.LogicGateID)
+		}
+	}
+}
+
+func (r *MemoryRepo) rebuildWorkItemInboxEntriesForNodeLocked(companyID, nodeID string) {
+	for entryKey, entry := range r.workItemInboxEntries {
+		if entry.CompanyID == companyID && entry.EntryKind == memoryWorkItemInboxEntryKindNode && entry.Node.NodeID == nodeID {
+			delete(r.workItemInboxEntries, entryKey)
+		}
+	}
+	node, ok := r.nodes[key(companyID, nodeID)]
+	if !ok || node.AssigneeUserID == nil || strings.TrimSpace(*node.AssigneeUserID) == "" {
+		return
+	}
+	node = r.withNodeReadModelLocked(node)
+	userID := strings.TrimSpace(*node.AssigneeUserID)
+	entry := memoryWorkItemInboxEntry{
+		CompanyID: companyID,
+		UserID:    userID,
+		EntryKind: memoryWorkItemInboxEntryKindNode,
+		Role:      memoryWorkItemInboxRoleAssignee,
+		Node:      node,
+	}
+	r.workItemInboxEntries[workItemInboxProjectionKey(companyID, memoryWorkItemInboxEntryKindNode, nodeID, userID, memoryWorkItemInboxRoleAssignee)] = entry
+}
+
+func (r *MemoryRepo) rebuildWorkItemInboxEntriesForLogicGateLocked(companyID, logicGateID string) {
+	for entryKey, entry := range r.workItemInboxEntries {
+		if entry.CompanyID == companyID && entry.EntryKind == memoryWorkItemInboxEntryKindLogicGate && entry.LogicGateID == logicGateID {
+			delete(r.workItemInboxEntries, entryKey)
+		}
+	}
+	gate, ok := r.logicGates[key(companyID, logicGateID)]
+	if !ok {
+		return
+	}
+	assignments := append([]domain.LogicGateRaciAssignment{}, r.logicGateRaci[key(companyID, logicGateID)]...)
+	sortLogicGateRaciAssignments(assignments)
+	for _, assignment := range assignments {
+		userID := strings.TrimSpace(assignment.UserID)
+		role := strings.TrimSpace(assignment.Role)
+		if userID == "" || role == "" {
+			continue
+		}
+		entry := memoryWorkItemInboxEntry{
+			CompanyID:                 companyID,
+			UserID:                    userID,
+			EntryKind:                 memoryWorkItemInboxEntryKindLogicGate,
+			Role:                      role,
+			LogicGateID:               logicGateID,
+			LogicGateHeader:           gate.Header,
+			LogicGateCreatedTimestamp: gate.CreatedTimestamp,
+			RaciAssignment:            assignment,
+		}
+		r.workItemInboxEntries[workItemInboxProjectionKey(companyID, memoryWorkItemInboxEntryKindLogicGate, logicGateID, userID, role)] = entry
+	}
+}
+
+func (r *MemoryRepo) projectedLogicGateRaciAssignmentsByGateLocked(companyID string) map[string][]domain.LogicGateRaciAssignment {
+	assignmentsByGate := map[string][]domain.LogicGateRaciAssignment{}
+	for _, entry := range r.workItemInboxEntries {
+		if entry.CompanyID != companyID || entry.EntryKind != memoryWorkItemInboxEntryKindLogicGate {
+			continue
+		}
+		assignmentsByGate[entry.LogicGateID] = append(assignmentsByGate[entry.LogicGateID], entry.RaciAssignment)
+	}
+	for gateID := range assignmentsByGate {
+		sortLogicGateRaciAssignments(assignmentsByGate[gateID])
+	}
+	return assignmentsByGate
+}
+
+func workItemInboxProjectionKey(companyID, entryKind, entityID, userID, role string) string {
+	return companyID + ":" + entryKind + ":" + entityID + ":" + userID + ":" + role
 }
 
 func workItemInboxRolesForUser(assignments []domain.LogicGateRaciAssignment, userID string, allowedRoles map[string]bool) []string {

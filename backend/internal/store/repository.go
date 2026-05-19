@@ -117,6 +117,9 @@ type WorkItemReadRepository interface {
 	ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 	ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error)
 	ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
+	RebuildWorkItemInboxEntries(companyID string) error
+	RebuildWorkItemInboxEntriesForNode(companyID, nodeID string) error
+	RebuildWorkItemInboxEntriesForLogicGate(companyID, logicGateID string) error
 }
 
 type CompanyExplorerRepository interface {

@@ -27,6 +27,7 @@ type MemoryRepo struct {
 	kanbanColumns            map[string][]domain.KanbanColumn
 	kanbanCards              map[string][]domain.KanbanCard
 	nodeLogicGateAssignments map[string]domain.NodeLogicGateAssignment
+	workItemInboxEntries     map[string]memoryWorkItemInboxEntry
 	users                    map[string]domain.User
 	companies                map[string]domain.Company
 	memberships              map[string]domain.CompanyMembership
@@ -63,6 +64,7 @@ func NewMemoryRepo() *MemoryRepo {
 		kanbanColumns:            map[string][]domain.KanbanColumn{},
 		kanbanCards:              map[string][]domain.KanbanCard{},
 		nodeLogicGateAssignments: map[string]domain.NodeLogicGateAssignment{},
+		workItemInboxEntries:     map[string]memoryWorkItemInboxEntry{},
 		users:                    map[string]domain.User{},
 		companies:                map[string]domain.Company{},
 		memberships:              map[string]domain.CompanyMembership{},

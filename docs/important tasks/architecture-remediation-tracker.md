@@ -20,9 +20,9 @@ Source architecture:
 
 | Theme | Status | Current Read |
 | --- | --- | --- |
-| 1. Read Plane | Partial / yellow | Inbox read contracts now exist, scoped workspace snapshots and cheap event ETags exist, but several scopes can still be unbounded and hot inbox reads may need projection-backed rows. |
+| 1. Read Plane | Projection slice complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; scoped workspace snapshots and cheap event ETags exist, but several broad map/explorer scopes still need bounded read models. |
 | 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Mutation plus event append is still not atomic across the app, and fanout/gap policy is not production-grade. |
-| 3. Work Ownership / Commands | Source migration complete / yellow | Node-to-Logic-Gate assignment source rows now exist and Kanban cards are compatibility/projection rows; frontend parity, event atomicity, and inbox projection remain follow-ups. |
+| 3. Work Ownership / Commands | Source migration complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, and inbox reads use projection rows; frontend parity and event atomicity remain follow-ups. |
 | 4. Hot Path Discipline | First branch complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth/context/batch/metrics remain follow-up branches. |
 | 5. Frontend Structure / API Contract | Ready / yellow | Shared `requestJSON` exists, but hot modules duplicate wrappers, broad invalidation is scattered, and large components still own workflow logic. |
 
@@ -49,6 +49,7 @@ First branch:
 
 Branch progress:
 - 2026-05-19: Completed the first inbox read contract slice. Responsible Inbox, ACI Inbox, My Nodes, and My Logic Gates now have backend read contracts backed by current tables. Projection tables are intentionally deferred until the contracts are stable and the frontend/reconciliation paths consume them.
+- 2026-05-19: Completed `reads/work-item-inbox-projection`. The four work-item inbox read contracts now serve from rebuildable `work_item_inbox_entries` projection rows derived from node assignment, node assignee/priority, Logic Gate, and RACI sources without changing API response shape.
 
 Scope:
 - Define server response contracts for:
@@ -74,8 +75,16 @@ Scope:
 - Serve the existing inbox read contracts from the projection without changing frontend response shape.
 - Add migration, backfill, rollback notes, and tests proving projection-backed reads match join-backed behavior.
 
+Status:
+- 2026-05-19: Complete. Added one rebuildable `work_item_inbox_entries` projection table and switched Responsible Inbox, ACI Inbox, My Nodes, and My Logic Gates read paths to projection-backed store queries.
+
+Migration/backfill/rollback notes:
+- Migration: `backend/db/migrations/20260519_work_item_inbox_entries.sql` creates `work_item_inbox_entries`, indexes, source-derived rebuild functions, and triggers on `nodes`, `node_logic_gate_assignments`, `logic_gates`, `logic_gate_raci_assignments`, `company_memberships`, `users`, and compatibility `kanban_columns` display metadata.
+- Backfill: the migration calls `rebuild_work_item_inbox_entries_for_company(company_id)` for each existing company. Node rows derive status/issue/position from `node_logic_gate_assignments` plus Kanban column display metadata, priority and assignee from `nodes`, and labels from `users` through `company_memberships`. Logic Gate rows derive roles from `logic_gate_raci_assignments` and labels from memberships/users.
+- Rebuild helpers: store helpers can rebuild all entries for a company or focused entries for one node or one Logic Gate; the projection remains disposable and source-derived.
+- Rollback: a code rollback can return to the prior join-backed reads while leaving the projection table unused. A DB rollback should drop the projection triggers/functions/indexes/table after confirming no rollout still calls the projection-backed read path; no source-of-truth data lives only in `work_item_inbox_entries`.
+
 Follow-up branches:
-- `reads/work-item-inbox-projection`
 - `reads/company-explorer-subtree`
 - `reads/node-map-window`
 - `reads/logic-gate-map-window`
@@ -308,15 +317,15 @@ Use this as the default sequencing unless a production incident changes prioriti
 6. `work-items/assignment-command-parity-existing-model`
 7. `reads/inbox-read-model-contract`
 8. `work-items/node-logic-gate-assignment-source`
+9. `reads/work-item-inbox-projection`
 
 ### Next Roadmap
 
-1. reads/work-item-inbox-projection
-2. events/atomic-work-item-assignment-events
-3. events/frontend-gap-reconciliation
-4. platform/auth-membership-cache
-5. reads/company-explorer-subtree
-6. work-items/email-conversion-command
+1. events/atomic-work-item-assignment-events
+2. events/frontend-gap-reconciliation
+3. platform/auth-membership-cache
+4. reads/company-explorer-subtree
+5. work-items/email-conversion-command
 
 ### Work-Items Follow-Ups
 

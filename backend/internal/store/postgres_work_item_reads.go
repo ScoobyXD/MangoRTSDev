@@ -16,19 +16,47 @@ func (r *PostgresRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, err
 	return r.listAssignedWorkItemInboxNodes(query)
 }
 
+func (r *PostgresRepo) RebuildWorkItemInboxEntries(companyID string) error {
+	ctx := context.Background()
+	_, err := r.db.ExecContext(ctx, `select rebuild_work_item_inbox_entries_for_company($1::uuid)`, strings.TrimSpace(companyID))
+	return err
+}
+
+func (r *PostgresRepo) RebuildWorkItemInboxEntriesForNode(companyID, nodeID string) error {
+	ctx := context.Background()
+	_, err := r.db.ExecContext(ctx, `select rebuild_work_item_inbox_entries_for_node($1::uuid, $2::uuid)`, strings.TrimSpace(companyID), strings.TrimSpace(nodeID))
+	return err
+}
+
+func (r *PostgresRepo) RebuildWorkItemInboxEntriesForLogicGate(companyID, logicGateID string) error {
+	ctx := context.Background()
+	_, err := r.db.ExecContext(ctx, `select rebuild_work_item_inbox_entries_for_logic_gate($1::uuid, $2::uuid)`, strings.TrimSpace(companyID), strings.TrimSpace(logicGateID))
+	return err
+}
+
 func (r *PostgresRepo) listAssignedWorkItemInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
 	query = NormalizeWorkItemInboxQuery(query)
 	ctx := context.Background()
-	rows, err := r.db.QueryContext(ctx,
-		`select `+nodeSelectColumns+`
-from nodes n
-`+nodeStatusJoin+`
-where n.company_id=$1
-  and n.assignee_user_id::text=$2
-order by n.created_timestamp asc, n.node_id::text asc
-limit $3`,
-		query.CompanyID, query.UserID, query.Limit,
-	)
+	rows, err := r.db.QueryContext(ctx, `
+select
+  entry.company_id::text,
+  entry.node_id::text,
+  entry.node_title,
+  entry.status,
+  entry.status_color,
+  entry.due_date::text,
+  entry.priority,
+  entry.assignee_user_id::text,
+  nullif(entry.assignee_display_name, ''),
+  nullif(entry.assignee_email, ''),
+  entry.node_created_timestamp,
+  entry.logic_gate_ids::text
+from work_item_inbox_entries entry
+where entry.entry_kind='node'
+  and entry.company_id=$1
+  and entry.user_id::text=$2
+order by entry.node_created_timestamp asc, entry.node_id::text asc
+limit $3`, query.CompanyID, query.UserID, query.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -42,10 +70,7 @@ limit $3`,
 		}
 		items = append(items, item)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+	return items, rows.Err()
 }
 
 func (r *PostgresRepo) ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
@@ -61,16 +86,16 @@ func (r *PostgresRepo) listWorkItemLogicGateInboxItems(query WorkItemInboxQuery,
 	ctx := context.Background()
 	roleFilter := ""
 	if aciOnly {
-		roleFilter = "\n  and assignment.role in ('accountable', 'consulted', 'informed')"
+		roleFilter = "\n  and entry.role in ('accountable', 'consulted', 'informed')"
 	}
 	rows, err := r.db.QueryContext(ctx, `
 select
-  logic_gate.company_id::text,
-  logic_gate.logic_gate_id::text,
-  logic_gate.header,
-  logic_gate.created_timestamp,
-  coalesce(jsonb_agg(assignment.role order by
-    case assignment.role
+  entry.company_id::text,
+  entry.logic_gate_id::text,
+  entry.logic_gate_header,
+  entry.logic_gate_created_timestamp,
+  coalesce(jsonb_agg(entry.role order by
+    case entry.role
       when 'responsible' then 1
       when 'accountable' then 2
       when 'consulted' then 3
@@ -78,19 +103,14 @@ select
       else 5
     end
   ), '[]'::jsonb)::text as roles_json
-from logic_gates logic_gate
-join logic_gate_raci_assignments assignment
-  on assignment.company_id = logic_gate.company_id
- and assignment.logic_gate_id = logic_gate.logic_gate_id
-where logic_gate.company_id=$1
-  and assignment.user_id::text=$2`+roleFilter+`
-group by logic_gate.company_id, logic_gate.logic_gate_id, logic_gate.header, logic_gate.created_timestamp
-order by lower(logic_gate.header) asc, logic_gate.logic_gate_id::text asc
+from work_item_inbox_entries entry
+where entry.entry_kind='logic_gate'
+  and entry.company_id=$1
+  and entry.user_id::text=$2`+roleFilter+`
+group by entry.company_id, entry.logic_gate_id, entry.logic_gate_header, entry.logic_gate_created_timestamp
+order by lower(entry.logic_gate_header) asc, entry.logic_gate_id::text asc
 limit $3`, query.CompanyID, query.UserID, query.Limit)
 	if err != nil {
-		if isPostgresUndefinedTable(err, "logic_gate_raci_assignments") {
-			return []WorkItemLogicGateInboxItem{}, nil
-		}
 		return nil, err
 	}
 	defer rows.Close()
@@ -118,7 +138,7 @@ limit $3`, query.CompanyID, query.UserID, query.Limit)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	assignmentsByGate, err := r.listLogicGateRaciAssignments(ctx, query.CompanyID, ids)
+	assignmentsByGate, err := r.listProjectedLogicGateRaciAssignments(ctx, query.CompanyID, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -129,4 +149,46 @@ limit $3`, query.CompanyID, query.UserID, query.Limit)
 		}
 	}
 	return items, nil
+}
+
+func (r *PostgresRepo) listProjectedLogicGateRaciAssignments(ctx context.Context, companyID string, logicGateIDs []string) (map[string][]domain.LogicGateRaciAssignment, error) {
+	assignmentsByGate := map[string][]domain.LogicGateRaciAssignment{}
+	if len(logicGateIDs) == 0 {
+		return assignmentsByGate, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+select
+  entry.company_id::text,
+  entry.logic_gate_id::text,
+  entry.role,
+  entry.user_id::text,
+  nullif(entry.raci_user_display_name, ''),
+  nullif(entry.raci_user_email, ''),
+  entry.raci_created_timestamp
+from work_item_inbox_entries entry
+where entry.entry_kind = 'logic_gate'
+  and entry.company_id = $1
+  and entry.logic_gate_id = any(string_to_array($2, ',')::uuid[])
+order by entry.logic_gate_id::text asc,
+  case entry.role
+    when 'responsible' then 1
+    when 'accountable' then 2
+    when 'consulted' then 3
+    when 'informed' then 4
+    else 5
+  end,
+  lower(coalesce(nullif(entry.raci_user_display_name, ''), nullif(entry.raci_user_email, ''), entry.user_id::text)) asc,
+  entry.user_id::text asc`, companyID, strings.Join(logicGateIDs, ","))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		item, err := scanLogicGateRaciAssignment(rows)
+		if err != nil {
+			return nil, err
+		}
+		assignmentsByGate[item.LogicGateID] = append(assignmentsByGate[item.LogicGateID], item)
+	}
+	return assignmentsByGate, rows.Err()
 }
