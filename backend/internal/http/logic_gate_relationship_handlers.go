@@ -15,12 +15,22 @@ func (s *Server) handleLogicGateRelationships(w http.ResponseWriter, r *http.Req
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
+		etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "logic-gate-relationships", []store.DomainEventStreamQuery{
+			workspaceEventQuery(logicGateRelationshipWorkspaceEventTypes...),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
+			return
+		}
+		if notModified {
+			return
+		}
 		items, err := s.repo.ListLogicGateRelationships(companyID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships")
 			return
 		}
-		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"logic_gate_relationships": items})
+		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"logic_gate_relationships": items}, etag)
 		return
 	}
 	if r.Method != http.MethodPost {

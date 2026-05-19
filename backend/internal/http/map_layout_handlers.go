@@ -42,21 +42,43 @@ func (s *Server) handleMapLayout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if mapType == "node" {
+			etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "map-layout:node", []store.DomainEventStreamQuery{
+				workspaceEventQuery(nodeMapPositionWorkspaceEventTypes...),
+				workspaceEventQuery("node_deleted"),
+			})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
+				return
+			}
+			if notModified {
+				return
+			}
 			items, err := s.repo.ListNodeMapPositions(companyID)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_positions")
 				return
 			}
-			writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"company_id": companyID, "map_type": mapType, "positions": items})
+			writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"company_id": companyID, "map_type": mapType, "positions": items}, etag)
 			return
 		}
 		if mapType == "logic_gate" {
+			etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "map-layout:logic_gate", []store.DomainEventStreamQuery{
+				workspaceEventQuery(logicGateMapPositionWorkspaceEventTypes...),
+				workspaceEventQuery("logic_gate_deleted"),
+			})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
+				return
+			}
+			if notModified {
+				return
+			}
 			items, err := s.repo.ListLogicGateMapPositions(companyID)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_positions")
 				return
 			}
-			writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"company_id": companyID, "map_type": mapType, "positions": items})
+			writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"company_id": companyID, "map_type": mapType, "positions": items}, etag)
 			return
 		}
 		writeError(w, http.StatusBadRequest, "invalid_map_type")

@@ -1548,3 +1548,169 @@ func TestRequestBodyLimitRejectsOversizedPayload(t *testing.T) {
 		t.Fatalf("error = %q, want request_body_too_large", payload.Error)
 	}
 }
+
+type countingListNodesRepo struct {
+	store.Repository
+	listNodesCalls int
+}
+
+func (r *countingListNodesRepo) ListNodes(companyID string) ([]domain.Node, error) {
+	r.listNodesCalls++
+	return r.Repository.ListNodes(companyID)
+}
+
+func TestNodesConditionalGetSkipsListWhenWorkspaceTokenMatches(t *testing.T) {
+	base := store.NewMemoryRepo()
+	repo := &countingListNodesRepo{Repository: base}
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-node-list-etag-test"
+
+	if _, err := base.CreateNode(companyID, "alpha"); err != nil {
+		t.Fatalf("CreateNode() error = %v", err)
+	}
+
+	firstReq := httptest.NewRequest(http.MethodGet, "/v1/nodes?company_id="+companyID, nil)
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("first node list status = %d, want %d body=%s", firstRec.Code, http.StatusOK, firstRec.Body.String())
+	}
+	if repo.listNodesCalls != 1 {
+		t.Fatalf("ListNodes calls after first request = %d, want 1", repo.listNodesCalls)
+	}
+	etag := firstRec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("node list ETag is empty")
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/v1/nodes?company_id="+companyID, nil)
+	secondReq.Header.Set("If-None-Match", etag)
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusNotModified {
+		t.Fatalf("second node list status = %d, want %d body=%s", secondRec.Code, http.StatusNotModified, secondRec.Body.String())
+	}
+	if repo.listNodesCalls != 1 {
+		t.Fatalf("ListNodes calls after matching conditional request = %d, want 1", repo.listNodesCalls)
+	}
+}
+
+func TestWorkspaceSnapshotScopesIgnoreUnrelatedCompanyExplorerFolderChanges(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-scoped-etag-unrelated-test"
+
+	urls := []string{
+		"/v1/workspace/snapshot?company_id=" + companyID + "&scope=node_map",
+		"/v1/workspace/snapshot?company_id=" + companyID + "&scope=logic_gate_map",
+		"/v1/workspace/snapshot?company_id=" + companyID + "&scope=kanban&board_id=board-a",
+	}
+	etags := make(map[string]string, len(urls))
+	for _, url := range urls {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("initial snapshot %s status = %d, want %d body=%s", url, rec.Code, http.StatusOK, rec.Body.String())
+		}
+		etag := rec.Header().Get("ETag")
+		if etag == "" {
+			t.Fatalf("initial snapshot %s ETag is empty", url)
+		}
+		etags[url] = etag
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"company_id":  companyID,
+		"folder_kind": "communications",
+		"name":        "Shared inbox",
+	})
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(body))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create communications folder status = %d, want %d body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
+	}
+
+	for _, url := range urls {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req.Header.Set("If-None-Match", etags[url])
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotModified {
+			t.Fatalf("snapshot %s after unrelated folder status = %d, want %d body=%s", url, rec.Code, http.StatusNotModified, rec.Body.String())
+		}
+	}
+}
+
+func TestWorkspaceSnapshotScopesInvalidateForRelevantEvents(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-scoped-etag-relevant-test"
+
+	nodeMapURL := "/v1/workspace/snapshot?company_id=" + companyID + "&scope=node_map"
+	firstNodeReq := httptest.NewRequest(http.MethodGet, nodeMapURL, nil)
+	firstNodeRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstNodeRec, firstNodeReq)
+	if firstNodeRec.Code != http.StatusOK {
+		t.Fatalf("initial node_map snapshot status = %d body=%s", firstNodeRec.Code, firstNodeRec.Body.String())
+	}
+	nodeMapETag := firstNodeRec.Header().Get("ETag")
+
+	nodeBody, _ := json.Marshal(map[string]string{"company_id": companyID, "title": "Relevant node"})
+	createNodeReq := httptest.NewRequest(http.MethodPost, "/v1/nodes", bytes.NewReader(nodeBody))
+	createNodeReq.Header.Set("Content-Type", "application/json")
+	createNodeRec := httptest.NewRecorder()
+	handler.ServeHTTP(createNodeRec, createNodeReq)
+	if createNodeRec.Code != http.StatusCreated {
+		t.Fatalf("create node status = %d body=%s", createNodeRec.Code, createNodeRec.Body.String())
+	}
+
+	staleNodeReq := httptest.NewRequest(http.MethodGet, nodeMapURL, nil)
+	staleNodeReq.Header.Set("If-None-Match", nodeMapETag)
+	staleNodeRec := httptest.NewRecorder()
+	handler.ServeHTTP(staleNodeRec, staleNodeReq)
+	if staleNodeRec.Code != http.StatusOK {
+		t.Fatalf("node_map after node create status = %d, want %d body=%s", staleNodeRec.Code, http.StatusOK, staleNodeRec.Body.String())
+	}
+	if staleNodeRec.Header().Get("ETag") == nodeMapETag {
+		t.Fatalf("node_map ETag did not change after node create")
+	}
+
+	boardID := "board-relevant"
+	if _, err := repo.CreateKanbanBoard(companyID, boardID, "Board", 1000); err != nil {
+		t.Fatalf("CreateKanbanBoard() error = %v", err)
+	}
+	kanbanURL := "/v1/workspace/snapshot?company_id=" + companyID + "&scope=kanban&board_id=" + boardID
+	firstKanbanReq := httptest.NewRequest(http.MethodGet, kanbanURL, nil)
+	firstKanbanRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstKanbanRec, firstKanbanReq)
+	if firstKanbanRec.Code != http.StatusOK {
+		t.Fatalf("initial kanban snapshot status = %d body=%s", firstKanbanRec.Code, firstKanbanRec.Body.String())
+	}
+	kanbanETag := firstKanbanRec.Header().Get("ETag")
+
+	columnBody, _ := json.Marshal(map[string]any{"company_id": companyID, "board_id": boardID, "title": "Todo", "position": 1000})
+	createColumnReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/columns", bytes.NewReader(columnBody))
+	createColumnReq.Header.Set("Content-Type", "application/json")
+	createColumnRec := httptest.NewRecorder()
+	handler.ServeHTTP(createColumnRec, createColumnReq)
+	if createColumnRec.Code != http.StatusCreated {
+		t.Fatalf("create kanban column status = %d body=%s", createColumnRec.Code, createColumnRec.Body.String())
+	}
+
+	staleKanbanReq := httptest.NewRequest(http.MethodGet, kanbanURL, nil)
+	staleKanbanReq.Header.Set("If-None-Match", kanbanETag)
+	staleKanbanRec := httptest.NewRecorder()
+	handler.ServeHTTP(staleKanbanRec, staleKanbanReq)
+	if staleKanbanRec.Code != http.StatusOK {
+		t.Fatalf("kanban snapshot after column create status = %d, want %d body=%s", staleKanbanRec.Code, http.StatusOK, staleKanbanRec.Body.String())
+	}
+	if staleKanbanRec.Header().Get("ETag") == kanbanETag {
+		t.Fatalf("kanban ETag did not change after column create")
+	}
+}

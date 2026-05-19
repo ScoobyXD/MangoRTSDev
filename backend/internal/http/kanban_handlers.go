@@ -90,12 +90,22 @@ func (s *Server) handleKanbanBoards(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
+		etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "kanban-boards", []store.DomainEventStreamQuery{
+			workspaceEventQuery(kanbanBoardWorkspaceEventTypes...),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
+			return
+		}
+		if notModified {
+			return
+		}
 		items, err := s.repo.ListKanbanBoards(companyID, query)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_boards")
 			return
 		}
-		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"boards": items})
+		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"boards": items}, etag)
 		return
 	}
 
@@ -202,12 +212,22 @@ func (s *Server) handleKanbanColumns(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
 			return
 		}
+		etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "kanban-columns", []store.DomainEventStreamQuery{
+			workspaceEventQueryPayload(kanbanColumnWorkspaceEventTypes, boardIDPayload(boardID)),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
+			return
+		}
+		if notModified {
+			return
+		}
 		items, err := s.repo.ListKanbanColumns(companyID, boardID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_columns")
 			return
 		}
-		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"columns": items})
+		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"columns": items}, etag)
 		return
 	}
 
@@ -331,6 +351,16 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "company_id_and_board_id_required")
 			return
 		}
+		etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "kanban-cards", []store.DomainEventStreamQuery{
+			workspaceEventQueryPayload(kanbanCardWorkspaceEventTypes, boardIDPayload(boardID)),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
+			return
+		}
+		if notModified {
+			return
+		}
 		items, err := s.repo.ListKanbanCards(companyID, boardID, query)
 		if errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_kanban_card_query")
@@ -340,7 +370,7 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_cards")
 			return
 		}
-		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"cards": items})
+		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"cards": items}, etag)
 		return
 	}
 
