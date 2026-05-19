@@ -191,6 +191,31 @@ func (r *MemoryRepo) ListNodes(companyID string) ([]domain.Node, error) {
 	return items, nil
 }
 
+func (r *MemoryRepo) ListNodesInFolderSubtree(companyID, folderID string) ([]domain.Node, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListNodes(companyID)
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "node")
+	visible := map[string]bool{}
+	for _, item := range r.folderItems {
+		if item.CompanyID == companyID && item.ItemType == "node" && folderIDs[item.FolderID] {
+			visible[item.ItemID] = true
+		}
+	}
+	items := make([]domain.Node, 0, len(visible))
+	for _, node := range r.nodes {
+		if node.CompanyID == companyID && visible[node.NodeID] {
+			items = append(items, r.withNodeReadModelLocked(node))
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
+	return items, nil
+}
 func (r *MemoryRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -213,6 +238,31 @@ func (r *MemoryRepo) ListNodeRelationships(companyID string) ([]domain.NodeRelat
 	return items, nil
 }
 
+func (r *MemoryRepo) ListNodeRelationshipsInFolderSubtree(companyID, folderID string) ([]domain.NodeRelationship, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListNodeRelationships(companyID)
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "node")
+	visible := map[string]bool{}
+	for _, item := range r.folderItems {
+		if item.CompanyID == companyID && item.ItemType == "node" && folderIDs[item.FolderID] {
+			visible[item.ItemID] = true
+		}
+	}
+	items := make([]domain.NodeRelationship, 0)
+	for _, rel := range r.nodeRels[companyID] {
+		if visible[rel.NodeIDA] && visible[rel.NodeIDB] {
+			items = append(items, rel)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
+	return items, nil
+}
 func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -273,6 +323,31 @@ func (r *MemoryRepo) ListNodeMapPositions(companyID string) ([]domain.NodeMapPos
 	return items, nil
 }
 
+func (r *MemoryRepo) ListNodeMapPositionsInFolderSubtree(companyID, folderID string) ([]domain.NodeMapPosition, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListNodeMapPositions(companyID)
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "node")
+	visible := map[string]bool{}
+	for _, item := range r.folderItems {
+		if item.CompanyID == companyID && item.ItemType == "node" && folderIDs[item.FolderID] {
+			visible[item.ItemID] = true
+		}
+	}
+	items := make([]domain.NodeMapPosition, 0)
+	for _, item := range r.nodeMapPositions {
+		if item.CompanyID == companyID && visible[item.NodeID] {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].NodeID < items[j].NodeID
+	})
+	return items, nil
+}
 func (r *MemoryRepo) UpsertNodeMapPositions(companyID string, positions []domain.NodeMapPosition) ([]domain.NodeMapPosition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

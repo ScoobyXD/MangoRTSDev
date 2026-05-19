@@ -65,10 +65,11 @@ export function useNodeMapGraphLoader({
     setLoading(true);
     setError("");
     try {
-      if (!hasNodeRelationshipGraphSnapshot(apiBase, companyID)) {
-        await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+      const scope = { folderID: activeFolderIDRef.current };
+      if (!hasNodeRelationshipGraphSnapshot(apiBase, companyID, scope)) {
+        await refreshNodeRelationshipGraphSnapshot(apiBase, companyID, scope);
       }
-      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID, scope);
       const snapshotNodes = snapshot.nodes ?? [];
       const nextNodes = applyFolderScope(snapshotNodes, snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? [], activeFolderIDRef.current);
       applyServerMapPositions(snapshot.node_map_positions ?? []);
@@ -98,26 +99,28 @@ export function useNodeMapGraphLoader({
       setRelationships([]);
       return;
     }
-    const payload = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+    const payload = getNodeRelationshipGraphSnapshot(apiBase, companyID, { folderID: activeFolderIDRef.current });
     setRelationships(projectVisibleRelationships(graphNodes, payload.relationships ?? []));
   };
 
   useEffect(() => {
     void loadNodes();
-  }, []);
-
-  useEffect(() => {
-    return subscribeNodeRelationshipGraph(apiBase, companyID, () => {
-      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-      applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? []);
-      applyServerMapPositions(snapshot.node_map_positions ?? []);
-    });
   }, [apiBase, companyID, activeFolderID]);
 
   useEffect(() => {
-    const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-    applyFolderScope(snapshot.nodes ?? allNodes, snapshot.relationships ?? [], snapshot.folders ?? folders, snapshot.folder_items ?? folderItems);
-  }, [activeFolderID]);
+    return subscribeNodeRelationshipGraph(apiBase, companyID, () => {
+      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID, { folderID: activeFolderID });
+      applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? [], activeFolderID);
+      applyServerMapPositions(snapshot.node_map_positions ?? []);
+    }, { folderID: activeFolderID });
+  }, [apiBase, companyID, activeFolderID]);
+
+  useEffect(() => {
+    const scope = { folderID: activeFolderID };
+    if (!hasNodeRelationshipGraphSnapshot(apiBase, companyID, scope)) return;
+    const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID, scope);
+    applyFolderScope(snapshot.nodes ?? allNodes, snapshot.relationships ?? [], snapshot.folders ?? folders, snapshot.folder_items ?? folderItems, activeFolderID);
+  }, [apiBase, companyID, activeFolderID]);
 
   return { loadGraphRelationshipsFromSnapshot };
 }

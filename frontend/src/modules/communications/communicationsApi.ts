@@ -3,7 +3,7 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folder
 import type { KanbanBoard, KanbanCard } from "../kanban/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
 import type { LogicGateRaciAssignment, LogicGateRaciRole, LogicGateRecord } from "../logic-gate-map/shared.js";
-import { fetchWorkspaceSnapshot, invalidateWorkspaceSnapshot, markWorkspaceSnapshotStale } from "../workspace/workspaceSnapshotCache.js";
+import { invalidateWorkspaceSnapshot, markWorkspaceSnapshotStale } from "../workspace/workspaceSnapshotCache.js";
 
 export type EmailProvider = "google" | "microsoft";
 
@@ -565,22 +565,23 @@ export async function removeMyLogicGateShortcut(companyID: string, logicGateID: 
 
 export async function fetchCommunicationsWorkspacePanel(companyID: string): Promise<CommunicationsWorkspacePanel> {
   const cleanCompanyID = companyID.trim();
-  const apiBase = readAuthConfig().apiBase;
-  const [snapshotResult, shortcuts] = await Promise.all([
-    fetchWorkspaceSnapshot(apiBase, cleanCompanyID, { maxAgeMs: WORKSPACE_PANEL_CACHE_TTL_MS }),
+  const [logicGateFolders, logicGateFolderItems, logicGates, shortcuts, nodeFolders, nodeFolderItems, nodes] = await Promise.all([
+    listLogicGateFolders(cleanCompanyID),
+    listLogicGateFolderItems(cleanCompanyID),
+    listLogicGates(cleanCompanyID),
     listMyLogicGateShortcuts(cleanCompanyID),
+    listNodeFolders(cleanCompanyID),
+    listNodeFolderItems(cleanCompanyID),
+    listNodes(cleanCompanyID),
   ]);
-  const payload = snapshotResult.payload ?? {};
-  const folders = cloneCompanyExplorerFolders(snapshotItems<CompanyExplorerFolder>(payload.folders));
-  const folderItems = cloneCompanyExplorerFolderItems(snapshotItems<CompanyExplorerFolderItem>(payload.folder_items));
   return {
-    logicGateFolders: folders.filter((folder) => folder.folder_kind === "logic_gate"),
-    logicGateFolderItems: folderItems.filter((item) => item.item_type === "logic_gate"),
-    logicGates: cloneLogicGates(snapshotItems<LogicGateRecord>(payload.logic_gates)),
+    logicGateFolders,
+    logicGateFolderItems,
+    logicGates,
     myLogicGateShortcuts: cloneLogicGateShortcuts(shortcuts),
-    nodeFolders: folders.filter((folder) => folder.folder_kind === "node"),
-    nodeFolderItems: folderItems.filter((item) => item.item_type === "node"),
-    nodes: cloneNodes(snapshotItems<NodeRecord>(payload.nodes)),
+    nodeFolders,
+    nodeFolderItems,
+    nodes,
   };
 }
 
@@ -948,9 +949,6 @@ function clearWorkspacePanelReadCache(cleanCompanyID: string): void {
   }
 }
 
-function snapshotItems<T>(value: unknown[] | undefined): T[] {
-  return Array.isArray(value) ? value.map((item) => item as T) : [];
-}
 
 function readCache<T>(entry: CacheEntry<T> | null, maxAgeMs: number, clone: (value: T) => T): T | null {
   if (!entry || Date.now() - entry.fetchedAt > maxAgeMs) return null;

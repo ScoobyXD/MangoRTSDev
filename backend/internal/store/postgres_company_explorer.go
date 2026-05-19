@@ -396,6 +396,67 @@ func (r *PostgresRepo) ListCompanyExplorerFolders(companyID, folderKind string) 
 	return r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
 }
 
+func (r *PostgresRepo) ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
+	if strings.TrimSpace(folderID) == "" {
+		return r.ListCompanyExplorerFolders(companyID, folderKind)
+	}
+	ctx := context.Background()
+	if err := r.ensureCompanyExplorerSharedInboxSchema(ctx); err != nil {
+		return nil, err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err := ensureCompanyExplorerDefaultFoldersSQL(ctx, tx, companyID); err != nil {
+		return nil, err
+	}
+	var kindParam any
+	if strings.TrimSpace(folderKind) != "" {
+		kindParam = strings.TrimSpace(folderKind)
+	}
+	rows, err := tx.QueryContext(ctx, `
+with recursive subtree as (
+  select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp
+  from company_explorer_folders
+  where company_id=$1
+    and folder_id=$2::uuid
+    and ($3::text is null or folder_kind=$3)
+  union all
+  select child.company_id, child.folder_id, child.parent_folder_id, child.folder_kind, child.system_key, child.name, child.account_email, child.position, child.created_timestamp, child.updated_timestamp
+  from company_explorer_folders child
+  join subtree parent
+    on child.company_id=parent.company_id
+   and child.parent_folder_id=parent.folder_id
+  where ($3::text is null or child.folder_kind=$3)
+)
+select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, position, created_timestamp, updated_timestamp
+from subtree
+where system_key is null or system_key <> 'kanban_boards'
+order by position asc, created_timestamp asc`, companyID, strings.TrimSpace(folderID), kindParam)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]domain.CompanyExplorerFolder, 0)
+	for rows.Next() {
+		item, err := scanCompanyExplorerFolder(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
+}
 func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error) {
 	ctx := context.Background()
 	if err := r.ensureCompanyExplorerSharedInboxSchema(ctx); err != nil {
@@ -1347,6 +1408,59 @@ func (r *PostgresRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemT
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListCompanyExplorerFolderItems(companyID, "", itemType)
+	}
+	if itemType == "kanban" {
+		return []domain.CompanyExplorerFolderItem{}, nil
+	}
+	var itemTypeParam any
+	if strings.TrimSpace(itemType) != "" {
+		itemTypeParam = strings.TrimSpace(itemType)
+	}
+	rows, err := r.db.QueryContext(context.Background(), `
+with recursive subtree as (
+  select folder_id
+  from company_explorer_folders
+  where company_id=$1
+    and folder_id=$2::uuid
+  union all
+  select child.folder_id
+  from company_explorer_folders child
+  join subtree parent on child.parent_folder_id=parent.folder_id
+  where child.company_id=$1
+)
+select item.company_id, item.folder_id, item.item_type, item.item_id, item.position, item.created_timestamp, item.updated_timestamp
+from company_explorer_folder_items item
+join subtree folder_scope on folder_scope.folder_id=item.folder_id
+where item.company_id=$1
+  and ($3::text is null or item.item_type=$3)
+  and item.item_type <> 'kanban'
+order by item.position asc, item.created_timestamp asc`, companyID, folderID, itemTypeParam)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.CompanyExplorerFolderItem, 0)
+	for rows.Next() {
+		var item domain.CompanyExplorerFolderItem
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.FolderID,
+			&item.ItemType,
+			&item.ItemID,
+			&item.Position,
+			&item.CreatedTimestamp,
+			&item.UpdatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
 func (r *PostgresRepo) RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error {
 	ctx := context.Background()
 	deleted, err := r.db.ExecContext(ctx,

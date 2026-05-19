@@ -350,6 +350,71 @@ func (r *MemoryRepo) ListCompanyExplorerFolders(companyID, folderKind string) ([
 	return items, nil
 }
 
+func companyExplorerFolderSubtreeIDsLocked(folders map[string]domain.CompanyExplorerFolder, companyID, folderID, folderKind string) map[string]bool {
+	ids := map[string]bool{}
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return ids
+	}
+	for _, folder := range folders {
+		if folder.CompanyID != companyID || folder.FolderID != folderID {
+			continue
+		}
+		if folderKind != "" && folder.FolderKind != folderKind {
+			return ids
+		}
+		ids[folder.FolderID] = true
+		break
+	}
+	changed := true
+	for changed {
+		changed = false
+		for _, folder := range folders {
+			if folder.CompanyID != companyID || folder.ParentFolderID == nil {
+				continue
+			}
+			if folderKind != "" && folder.FolderKind != folderKind {
+				continue
+			}
+			if ids[*folder.ParentFolderID] && !ids[folder.FolderID] {
+				ids[folder.FolderID] = true
+				changed = true
+			}
+		}
+	}
+	return ids
+}
+
+func (r *MemoryRepo) ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListCompanyExplorerFolders(companyID, folderKind)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
+	ids := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, strings.TrimSpace(folderKind))
+	items := make([]domain.CompanyExplorerFolder, 0, len(ids))
+	for _, folder := range r.folders {
+		if !ids[folder.FolderID] {
+			continue
+		}
+		if folder.SystemKey != nil && *folder.SystemKey == "kanban_boards" {
+			continue
+		}
+		items = append(items, r.withSharedInboxRaciLocked(folder))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Position == items[j].Position {
+			if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+				return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+			}
+			return items[i].FolderID < items[j].FolderID
+		}
+		return items[i].Position < items[j].Position
+	})
+	return items, nil
+}
 func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -795,6 +860,41 @@ func (r *MemoryRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemTyp
 	return items, nil
 }
 
+func (r *MemoryRepo) ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListCompanyExplorerFolderItems(companyID, "", itemType)
+	}
+	if itemType == "kanban" {
+		return []domain.CompanyExplorerFolderItem{}, nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ids := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "")
+	items := make([]domain.CompanyExplorerFolderItem, 0)
+	for _, item := range r.folderItems {
+		if item.CompanyID != companyID || item.ItemType == "kanban" || !ids[item.FolderID] {
+			continue
+		}
+		if itemType != "" && item.ItemType != itemType {
+			continue
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Position == items[j].Position {
+			if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+				return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+			}
+			if items[i].ItemType == items[j].ItemType {
+				return items[i].ItemID < items[j].ItemID
+			}
+			return items[i].ItemType < items[j].ItemType
+		}
+		return items[i].Position < items[j].Position
+	})
+	return items, nil
+}
 func (r *MemoryRepo) RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

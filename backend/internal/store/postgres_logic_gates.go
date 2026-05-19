@@ -215,6 +215,54 @@ func (r *PostgresRepo) ListLogicGates(companyID string) ([]domain.LogicGate, err
 	return r.attachLogicGateRaciAssignments(ctx, companyID, items)
 }
 
+func (r *PostgresRepo) ListLogicGatesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListLogicGates(companyID)
+	}
+	ctx := context.Background()
+	rows, err := r.db.QueryContext(ctx,
+		`with recursive folder_scope as (
+		   select company_id, folder_id
+		   from company_explorer_folders
+		   where company_id=$1 and folder_id=$2::uuid and folder_kind='logic_gate'
+		   union all
+		   select child.company_id, child.folder_id
+		   from company_explorer_folders child
+		   join folder_scope parent
+		     on child.company_id=parent.company_id
+		    and child.parent_folder_id=parent.folder_id
+		   where child.folder_kind='logic_gate'
+		 ), visible_gates as (
+		   select item.item_id::uuid as logic_gate_id
+		   from company_explorer_folder_items item
+		   join folder_scope folder on folder.folder_id=item.folder_id
+		   where item.company_id=$1 and item.item_type='logic_gate'
+		 )
+		 select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
+		 from logic_gates gate
+		 join visible_gates visible on visible.logic_gate_id=gate.logic_gate_id
+		 where gate.company_id=$1
+		 order by gate.created_timestamp asc`,
+		companyID, folderID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.LogicGate, 0)
+	for rows.Next() {
+		var item domain.LogicGate
+		if err := rows.Scan(&item.CompanyID, &item.LogicGateID, &item.Header, &item.CreatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return r.attachLogicGateRaciAssignments(ctx, companyID, items)
+}
 func (r *PostgresRepo) QueryLogicGates(companyID string, query LogicGateQuery) ([]domain.LogicGate, error) {
 	ctx := context.Background()
 	companyID = strings.TrimSpace(companyID)
@@ -542,6 +590,48 @@ order by logic_gate_id asc`, companyID)
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) ListLogicGateMapPositionsInFolderSubtree(companyID, folderID string) ([]domain.LogicGateMapPosition, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListLogicGateMapPositions(companyID)
+	}
+	rows, err := r.db.Query(`
+with recursive folder_scope as (
+  select company_id, folder_id
+  from company_explorer_folders
+  where company_id=$1 and folder_id=$2::uuid and folder_kind='logic_gate'
+  union all
+  select child.company_id, child.folder_id
+  from company_explorer_folders child
+  join folder_scope parent
+    on child.company_id=parent.company_id
+   and child.parent_folder_id=parent.folder_id
+  where child.folder_kind='logic_gate'
+), visible_gates as (
+  select item.item_id::uuid as logic_gate_id
+  from company_explorer_folder_items item
+  join folder_scope folder on folder.folder_id=item.folder_id
+  where item.company_id=$1 and item.item_type='logic_gate'
+)
+select position.company_id, position.logic_gate_id, position.x, position.y, position.updated_timestamp
+from logic_gate_map_positions position
+join visible_gates visible on visible.logic_gate_id=position.logic_gate_id
+where position.company_id=$1
+order by position.logic_gate_id asc`, companyID, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.LogicGateMapPosition, 0)
+	for rows.Next() {
+		var item domain.LogicGateMapPosition
+		if err := rows.Scan(&item.CompanyID, &item.LogicGateID, &item.X, &item.Y, &item.UpdatedTimestamp); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
 func (r *PostgresRepo) UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -611,6 +701,60 @@ func (r *PostgresRepo) ListLogicGateRelationships(companyID string) ([]domain.Lo
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) ListLogicGateRelationshipsInFolderSubtree(companyID, folderID string) ([]domain.LogicGateRelationship, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListLogicGateRelationships(companyID)
+	}
+	ctx := context.Background()
+	rows, err := r.db.QueryContext(ctx,
+		`with recursive folder_scope as (
+		   select company_id, folder_id
+		   from company_explorer_folders
+		   where company_id=$1 and folder_id=$2::uuid and folder_kind='logic_gate'
+		   union all
+		   select child.company_id, child.folder_id
+		   from company_explorer_folders child
+		   join folder_scope parent
+		     on child.company_id=parent.company_id
+		    and child.parent_folder_id=parent.folder_id
+		   where child.folder_kind='logic_gate'
+		 ), visible_gates as (
+		   select item.item_id::uuid as logic_gate_id
+		   from company_explorer_folder_items item
+		   join folder_scope folder on folder.folder_id=item.folder_id
+		   where item.company_id=$1 and item.item_type='logic_gate'
+		 )
+		 select rel.company_id, rel.logic_gate_relationship_id, rel.logic_gate_id_a, rel.logic_gate_id_b, rel.a_position::text, rel.b_position::text, rel.created_timestamp
+		 from logic_gate_relationships rel
+		 join visible_gates a on a.logic_gate_id=rel.logic_gate_id_a
+		 join visible_gates b on b.logic_gate_id=rel.logic_gate_id_b
+		 where rel.company_id=$1
+		 order by rel.created_timestamp asc`,
+		companyID, folderID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.LogicGateRelationship, 0)
+	for rows.Next() {
+		var item domain.LogicGateRelationship
+		if err := rows.Scan(
+			&item.CompanyID,
+			&item.LogicGateRelationshipID,
+			&item.LogicGateIDA,
+			&item.LogicGateIDB,
+			&item.APosition,
+			&item.BPosition,
+			&item.CreatedTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
 func (r *PostgresRepo) CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)

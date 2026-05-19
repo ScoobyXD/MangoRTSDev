@@ -1072,6 +1072,140 @@ func TestMapLayoutPositionAPIAndWorkspaceSnapshot(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSnapshotNodeMapScopeUsesFolderSubtree(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-snapshot-node-map-scope-test"
+
+	parent, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Scoped parent")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder parent error = %v", err)
+	}
+	child, err := repo.CreateCompanyExplorerFolder(companyID, parent.FolderID, "node", "Scoped child")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder child error = %v", err)
+	}
+	sibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Sibling")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder sibling error = %v", err)
+	}
+
+	nodeA, err := repo.CreateNode(companyID, "Scoped A")
+	if err != nil {
+		t.Fatalf("CreateNode A error = %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "Scoped B")
+	if err != nil {
+		t.Fatalf("CreateNode B error = %v", err)
+	}
+	nodeC, err := repo.CreateNode(companyID, "Outside C")
+	if err != nil {
+		t.Fatalf("CreateNode C error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", nodeA.NodeID, 1000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem A error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, child.FolderID, "node", nodeB.NodeID, 2000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem B error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, sibling.FolderID, "node", nodeC.NodeID, 3000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem C error = %v", err)
+	}
+
+	scopedRelationship, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeB.NodeID, "Peer", "Peer")
+	if err != nil {
+		t.Fatalf("CreateNodeRelationship scoped error = %v", err)
+	}
+	if _, err := repo.CreateNodeRelationship(companyID, nodeB.NodeID, nodeC.NodeID, "Peer", "Peer"); err != nil {
+		t.Fatalf("CreateNodeRelationship outside error = %v", err)
+	}
+	if _, err := repo.UpsertNodeMapPositions(companyID, []domain.NodeMapPosition{
+		{NodeID: nodeA.NodeID, X: 100, Y: 100},
+		{NodeID: nodeB.NodeID, X: 200, Y: 200},
+		{NodeID: nodeC.NodeID, X: 300, Y: 300},
+	}); err != nil {
+		t.Fatalf("UpsertNodeMapPositions error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=node_map&folder_id="+parent.FolderID, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("workspace scoped snapshot status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var payload struct {
+		Scope            string                             `json:"scope"`
+		FolderID         string                             `json:"folder_id"`
+		Nodes            []domain.Node                      `json:"nodes"`
+		Relationships    []domain.NodeRelationship          `json:"relationships"`
+		Folders          []domain.CompanyExplorerFolder     `json:"folders"`
+		FolderItems      []domain.CompanyExplorerFolderItem `json:"folder_items"`
+		NodeMapPositions []domain.NodeMapPosition           `json:"node_map_positions"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode scoped workspace snapshot: %v", err)
+	}
+	if payload.Scope != "node_map" || payload.FolderID != parent.FolderID {
+		t.Fatalf("snapshot scope=%q folder_id=%q, want node_map %q", payload.Scope, payload.FolderID, parent.FolderID)
+	}
+	assertIDs := func(label string, got []string, want ...string) {
+		t.Helper()
+		seen := make(map[string]bool, len(got))
+		for _, id := range got {
+			seen[id] = true
+		}
+		if len(seen) != len(want) {
+			t.Fatalf("%s ids = %v, want %v", label, got, want)
+		}
+		for _, id := range want {
+			if !seen[id] {
+				t.Fatalf("%s ids = %v, missing %s", label, got, id)
+			}
+		}
+	}
+	nodeIDs := make([]string, 0, len(payload.Nodes))
+	for _, node := range payload.Nodes {
+		nodeIDs = append(nodeIDs, node.NodeID)
+	}
+	assertIDs("nodes", nodeIDs, nodeA.NodeID, nodeB.NodeID)
+	relationshipIDs := make([]string, 0, len(payload.Relationships))
+	for _, relationship := range payload.Relationships {
+		relationshipIDs = append(relationshipIDs, relationship.NodeRelationshipID)
+	}
+	assertIDs("relationships", relationshipIDs, scopedRelationship.NodeRelationshipID)
+	positionIDs := make([]string, 0, len(payload.NodeMapPositions))
+	for _, position := range payload.NodeMapPositions {
+		positionIDs = append(positionIDs, position.NodeID)
+	}
+	assertIDs("node_map_positions", positionIDs, nodeA.NodeID, nodeB.NodeID)
+	folderIDs := make([]string, 0, len(payload.Folders))
+	for _, folder := range payload.Folders {
+		folderIDs = append(folderIDs, folder.FolderID)
+	}
+	assertIDs("folders", folderIDs, parent.FolderID, child.FolderID)
+	folderItemIDs := make([]string, 0, len(payload.FolderItems))
+	for _, item := range payload.FolderItems {
+		folderItemIDs = append(folderItemIDs, item.ItemID)
+	}
+	assertIDs("folder_items", folderItemIDs, nodeA.NodeID, nodeB.NodeID)
+
+	etag := rec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatalf("scoped snapshot did not return ETag")
+	}
+	notModifiedReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=node_map&folder_id="+parent.FolderID, nil)
+	notModifiedReq.Header.Set("If-None-Match", etag)
+	notModifiedRec := httptest.NewRecorder()
+	handler.ServeHTTP(notModifiedRec, notModifiedReq)
+	if notModifiedRec.Code != http.StatusNotModified {
+		t.Fatalf("workspace scoped snapshot with If-None-Match status = %d, want %d body=%s", notModifiedRec.Code, http.StatusNotModified, notModifiedRec.Body.String())
+	}
+}
+
 func TestMapEntityBatchCreatesNodesRelationshipsAndPositions(t *testing.T) {
 	t.Parallel()
 

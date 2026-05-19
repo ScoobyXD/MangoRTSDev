@@ -354,10 +354,11 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
     setLoading(true);
     setError("");
     try {
-      if (!hasLogicGateRelationshipGraphSnapshot(apiBase, companyID)) {
-        await refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+      const scope = { folderID: activeFolderIDRef.current };
+      if (!hasLogicGateRelationshipGraphSnapshot(apiBase, companyID, scope)) {
+        await refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID, scope);
       }
-      const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+      const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID, scope);
       const snapshotNodes = snapshot.nodes ?? [];
       const nextNodes = applyFolderScope(snapshotNodes, snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? [], activeFolderIDRef.current);
       applyServerMapPositions(snapshot.logic_gate_map_positions ?? []);
@@ -390,27 +391,29 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       setRelationships([]);
       return;
     }
-    const payload = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+    const payload = getLogicGateRelationshipGraphSnapshot(apiBase, companyID, { folderID: activeFolderIDRef.current });
     setRelationships(projectVisibleRelationships(graphNodes, payload.relationships ?? []));
   };
 
 
   useEffect(() => {
     void loadNodes();
-  }, []);
-
-  useEffect(() => {
-    return subscribeLogicGateRelationshipGraph(apiBase, companyID, () => {
-      const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-      applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? []);
-      applyServerMapPositions(snapshot.logic_gate_map_positions ?? []);
-    });
   }, [apiBase, companyID, activeFolderID]);
 
   useEffect(() => {
-    const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-    applyFolderScope(snapshot.nodes ?? allNodes, snapshot.relationships ?? [], snapshot.folders ?? folders, snapshot.folder_items ?? folderItems);
-  }, [activeFolderID]);
+    return subscribeLogicGateRelationshipGraph(apiBase, companyID, () => {
+      const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID, { folderID: activeFolderID });
+      applyFolderScope(snapshot.nodes ?? [], snapshot.relationships ?? [], snapshot.folders ?? [], snapshot.folder_items ?? [], activeFolderID);
+      applyServerMapPositions(snapshot.logic_gate_map_positions ?? []);
+    }, { folderID: activeFolderID });
+  }, [apiBase, companyID, activeFolderID]);
+
+  useEffect(() => {
+    const scope = { folderID: activeFolderID };
+    if (!hasLogicGateRelationshipGraphSnapshot(apiBase, companyID, scope)) return;
+    const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID, scope);
+    applyFolderScope(snapshot.nodes ?? allNodes, snapshot.relationships ?? [], snapshot.folders ?? folders, snapshot.folder_items ?? folderItems, activeFolderID);
+  }, [apiBase, companyID, activeFolderID]);
 
   useEffect(() => {
     setSelectedRelationshipIDs((previous) => {
@@ -1088,7 +1091,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       for (const id of unique) removeLogicGateRelationshipGraphNode(apiBase, companyID, id);
       setDetails((current) => (current && unique.includes(current.node.node_id) ? null : current));
       if (detailsPanelNodeID && unique.includes(detailsPanelNodeID)) setDetailsPanelNodeID("");
-      const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+      const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID, { folderID: activeFolderIDRef.current });
       const fallback = (snapshot.nodes ?? [])[0]?.node_id ?? "";
       setSelectedNodeID(fallback);
       setSelectedNodeIDs(new Set());
@@ -1138,8 +1141,9 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
       if (summary.failed.length > 0) {
         const failure = summary.failed[0];
         if (failure?.reason === "logic_gate_relationship_not_found" || failure?.reason === "relationship_not_found" || failure?.reason.startsWith("request_failed_404")) {
-          await refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-          const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+          const scope = { folderID: activeFolderIDRef.current };
+          await refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID, scope);
+          const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID, scope);
           setRelationships(projectVisibleRelationships(nodes, snapshot.relationships ?? []));
         }
         setError(failure?.reason ?? "failed_to_delete_relationship");

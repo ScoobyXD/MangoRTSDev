@@ -26,11 +26,17 @@ export type LogicGateRelationshipGraphSnapshot = {
 };
 
 type Subscriber = () => void;
+type LogicGateRelationshipGraphScopeOptions = {
+  folderID?: string;
+};
 type CacheEntry = {
   snapshot: LogicGateRelationshipGraphSnapshot;
   subscribers: Set<Subscriber>;
   loading: boolean;
   hydrated: boolean;
+  folderID: string;
+};
+type StreamEntry = {
   unsubscribeStream?: () => void;
   refreshAfterStreamReconnect?: boolean;
 };
@@ -44,13 +50,40 @@ type WorkspaceStreamEnvelope = {
 
 const EMPTY_SNAPSHOT: LogicGateRelationshipGraphSnapshot = { nodes: [], relationships: [] };
 const logicGateRelationshipGraphCache = new Map<string, CacheEntry>();
+const logicGateRelationshipGraphStreams = new Map<string, StreamEntry>();
 
-function getEntry(key: string): CacheEntry {
+function normalizeGraphFolderID(options: LogicGateRelationshipGraphScopeOptions = {}): string {
+  return options.folderID?.trim() ?? "";
+}
+
+function graphCacheKey(apiBase: string, companyID: string, options: LogicGateRelationshipGraphScopeOptions = {}): string {
+  return `${apiBase}:${companyID}:logic_gate_map:${encodeURIComponent(normalizeGraphFolderID(options))}`;
+}
+
+function graphStreamKey(apiBase: string, companyID: string): string {
+  return `${apiBase}:${companyID}:logic_gate_map`;
+}
+
+function getEntry(apiBase: string, companyID: string, options: LogicGateRelationshipGraphScopeOptions = {}): CacheEntry {
+  const folderID = normalizeGraphFolderID(options);
+  const key = graphCacheKey(apiBase, companyID, { folderID });
   const existing = logicGateRelationshipGraphCache.get(key);
   if (existing) return existing;
-  const created: CacheEntry = { snapshot: EMPTY_SNAPSHOT, subscribers: new Set(), loading: false, hydrated: false };
+  const created: CacheEntry = { snapshot: EMPTY_SNAPSHOT, subscribers: new Set(), loading: false, hydrated: false, folderID };
   logicGateRelationshipGraphCache.set(key, created);
   return created;
+}
+
+function getCompanyEntries(apiBase: string, companyID: string): CacheEntry[] {
+  const prefix = `${apiBase}:${companyID}:logic_gate_map:`;
+  return Array.from(logicGateRelationshipGraphCache.entries())
+    .filter(([key]) => key.startsWith(prefix))
+    .map(([, entry]) => entry);
+}
+
+function getMutationEntries(apiBase: string, companyID: string): CacheEntry[] {
+  const entries = getCompanyEntries(apiBase, companyID);
+  return entries.length > 0 ? entries : [getEntry(apiBase, companyID)];
 }
 
 function notify(entry: CacheEntry): void {
@@ -58,10 +91,10 @@ function notify(entry: CacheEntry): void {
 }
 
 export function invalidateLogicGateRelationshipGraphSnapshot(apiBase: string, companyID: string): void {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  entry.hydrated = false;
-  if (entry.subscribers.size > 0) void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+  for (const entry of getCompanyEntries(apiBase, companyID)) {
+    entry.hydrated = false;
+    if (entry.subscribers.size > 0) void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID, { folderID: entry.folderID });
+  }
 }
 
 function isNonLogicGateGraphWorkspaceEvent(eventType: string): boolean {
@@ -69,99 +102,105 @@ function isNonLogicGateGraphWorkspaceEvent(eventType: string): boolean {
 }
 
 export function upsertLogicGateRelationshipGraphNode(apiBase: string, companyID: string, logicGate: NodeRecord): void {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  const currentNodes = entry.snapshot.nodes ?? [];
-  const exists = currentNodes.some((item) => item.node_id === logicGate.node_id);
-  entry.snapshot = {
-    ...entry.snapshot,
-    nodes: exists ? currentNodes.map((item) => (item.node_id === logicGate.node_id ? logicGate : item)) : [...currentNodes, logicGate],
-    relationships: entry.snapshot.relationships ?? [],
-    folders: entry.snapshot.folders ?? [],
-    folder_items: entry.snapshot.folder_items ?? [],
-    generated_at: new Date().toISOString(),
-  };
-  notify(entry);
+  const generatedAt = new Date().toISOString();
+  for (const entry of getMutationEntries(apiBase, companyID)) {
+    const currentNodes = entry.snapshot.nodes ?? [];
+    const exists = currentNodes.some((item) => item.node_id === logicGate.node_id);
+    entry.snapshot = {
+      ...entry.snapshot,
+      nodes: exists ? currentNodes.map((item) => (item.node_id === logicGate.node_id ? logicGate : item)) : [...currentNodes, logicGate],
+      relationships: entry.snapshot.relationships ?? [],
+      folders: entry.snapshot.folders ?? [],
+      folder_items: entry.snapshot.folder_items ?? [],
+      generated_at: generatedAt,
+    };
+    notify(entry);
+  }
 }
 
 export function removeLogicGateRelationshipGraphNode(apiBase: string, companyID: string, logicGateID: string): void {
   if (!logicGateID) return;
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  const currentNodes = entry.snapshot.nodes ?? [];
-  const currentRelationships = entry.snapshot.relationships ?? [];
-  const nextNodes = currentNodes.filter((item) => item.node_id !== logicGateID);
-  const nextRelationships = currentRelationships.filter((item) => item.node_id_a !== logicGateID && item.node_id_b !== logicGateID);
-  if (nextNodes.length === currentNodes.length && nextRelationships.length === currentRelationships.length) return;
-  entry.snapshot = {
-    ...entry.snapshot,
-    nodes: nextNodes,
-    relationships: nextRelationships,
-    folders: entry.snapshot.folders ?? [],
-    folder_items: (entry.snapshot.folder_items ?? []).filter((item) => item.item_type !== "logic_gate" || item.item_id !== logicGateID),
-    logic_gate_map_positions: (entry.snapshot.logic_gate_map_positions ?? []).filter((position) => (position.logic_gate_id || position.entity_id) !== logicGateID),
-    generated_at: new Date().toISOString(),
-  };
-  notify(entry);
+  const generatedAt = new Date().toISOString();
+  for (const entry of getMutationEntries(apiBase, companyID)) {
+    const currentNodes = entry.snapshot.nodes ?? [];
+    const currentRelationships = entry.snapshot.relationships ?? [];
+    const nextNodes = currentNodes.filter((item) => item.node_id !== logicGateID);
+    const nextRelationships = currentRelationships.filter((item) => item.node_id_a !== logicGateID && item.node_id_b !== logicGateID);
+    if (nextNodes.length === currentNodes.length && nextRelationships.length === currentRelationships.length) continue;
+    entry.snapshot = {
+      ...entry.snapshot,
+      nodes: nextNodes,
+      relationships: nextRelationships,
+      folders: entry.snapshot.folders ?? [],
+      folder_items: (entry.snapshot.folder_items ?? []).filter((item) => item.item_type !== "logic_gate" || item.item_id !== logicGateID),
+      logic_gate_map_positions: (entry.snapshot.logic_gate_map_positions ?? []).filter((position) => (position.logic_gate_id || position.entity_id) !== logicGateID),
+      generated_at: generatedAt,
+    };
+    notify(entry);
+  }
 }
 
 export function removeLogicGateRelationshipGraphRelationshipsForLogicGate(apiBase: string, companyID: string, logicGateID: string): void {
   if (!logicGateID) return;
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  const currentRelationships = entry.snapshot.relationships ?? [];
-  const nextRelationships = currentRelationships.filter((item) => item.node_id_a !== logicGateID && item.node_id_b !== logicGateID);
-  if (nextRelationships.length === currentRelationships.length) return;
-  entry.snapshot = {
-    ...entry.snapshot,
-    relationships: nextRelationships,
-    generated_at: new Date().toISOString(),
-  };
-  notify(entry);
+  const generatedAt = new Date().toISOString();
+  for (const entry of getMutationEntries(apiBase, companyID)) {
+    const currentRelationships = entry.snapshot.relationships ?? [];
+    const nextRelationships = currentRelationships.filter((item) => item.node_id_a !== logicGateID && item.node_id_b !== logicGateID);
+    if (nextRelationships.length === currentRelationships.length) continue;
+    entry.snapshot = {
+      ...entry.snapshot,
+      relationships: nextRelationships,
+      generated_at: generatedAt,
+    };
+    notify(entry);
+  }
 }
 
 export function upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase: string, companyID: string, item: CompanyExplorerFolderItem): void {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  const current = entry.snapshot.folder_items ?? [];
-  const exists = current.some((row) => row.item_type === item.item_type && row.item_id === item.item_id);
-  entry.snapshot = {
-    ...entry.snapshot,
-    folder_items: exists
-      ? current.map((row) => (row.item_type === item.item_type && row.item_id === item.item_id ? item : row))
-      : [...current, item],
-    generated_at: new Date().toISOString(),
-  };
-  notify(entry);
+  const generatedAt = new Date().toISOString();
+  for (const entry of getMutationEntries(apiBase, companyID)) {
+    const current = entry.snapshot.folder_items ?? [];
+    const exists = current.some((row) => row.item_type === item.item_type && row.item_id === item.item_id);
+    entry.snapshot = {
+      ...entry.snapshot,
+      folder_items: exists
+        ? current.map((row) => (row.item_type === item.item_type && row.item_id === item.item_id ? item : row))
+        : [...current, item],
+      generated_at: generatedAt,
+    };
+    notify(entry);
+  }
 }
 
 export function upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase: string, companyID: string, folder: CompanyExplorerFolder): void {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  const current = entry.snapshot.folders ?? [];
-  const exists = current.some((row) => row.folder_id === folder.folder_id);
-  entry.snapshot = {
-    ...entry.snapshot,
-    folders: exists ? current.map((row) => (row.folder_id === folder.folder_id ? folder : row)) : [...current, folder],
-    generated_at: new Date().toISOString(),
-  };
-  notify(entry);
+  const generatedAt = new Date().toISOString();
+  for (const entry of getMutationEntries(apiBase, companyID)) {
+    const current = entry.snapshot.folders ?? [];
+    const exists = current.some((row) => row.folder_id === folder.folder_id);
+    entry.snapshot = {
+      ...entry.snapshot,
+      folders: exists ? current.map((row) => (row.folder_id === folder.folder_id ? folder : row)) : [...current, folder],
+      generated_at: generatedAt,
+    };
+    notify(entry);
+  }
 }
 
 export function removeCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase: string, companyID: string, folderID: string): void {
   if (!folderID) return;
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  const folders = entry.snapshot.folders ?? [];
-  const deletedFolderIDs = collectDeletedFolderIDs(folders, folderID);
-  if (deletedFolderIDs.size === 0) return;
-  entry.snapshot = {
-    ...entry.snapshot,
-    folders: folders.filter((folder) => !deletedFolderIDs.has(folder.folder_id)),
-    folder_items: (entry.snapshot.folder_items ?? []).filter((item) => !deletedFolderIDs.has(item.folder_id)),
-    generated_at: new Date().toISOString(),
-  };
-  notify(entry);
+  const generatedAt = new Date().toISOString();
+  for (const entry of getMutationEntries(apiBase, companyID)) {
+    const folders = entry.snapshot.folders ?? [];
+    const deletedFolderIDs = collectDeletedFolderIDs(folders, folderID);
+    if (deletedFolderIDs.size === 0) continue;
+    entry.snapshot = {
+      ...entry.snapshot,
+      folders: folders.filter((folder) => !deletedFolderIDs.has(folder.folder_id)),
+      folder_items: (entry.snapshot.folder_items ?? []).filter((item) => !deletedFolderIDs.has(item.folder_id)),
+      generated_at: generatedAt,
+    };
+    notify(entry);
+  }
 }
 
 function collectDeletedFolderIDs(folders: CompanyExplorerFolder[], rootFolderID: string): Set<string> {
@@ -368,13 +407,16 @@ function applyLogicGateRelationshipGraphDelta(entry: CacheEntry, envelope: Works
   return false;
 }
 
-export async function refreshLogicGateRelationshipGraphSnapshot(apiBase: string, companyID: string): Promise<void> {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
+export async function refreshLogicGateRelationshipGraphSnapshot(apiBase: string, companyID: string, options: LogicGateRelationshipGraphScopeOptions = {}): Promise<void> {
+  const folderID = normalizeGraphFolderID(options);
+  const entry = getEntry(apiBase, companyID, { folderID });
   if (entry.loading) return;
   entry.loading = true;
   try {
-    const result = await fetchWorkspaceSnapshot(apiBase, companyID);
+    const result = await fetchWorkspaceSnapshot(apiBase, companyID, {
+      scope: "logic_gate_map",
+      folderID: folderID || undefined,
+    });
     if (!result.payload) return;
     if (!result.changed && entry.hydrated) {
       entry.hydrated = true;
@@ -398,23 +440,45 @@ export async function refreshLogicGateRelationshipGraphSnapshot(apiBase: string,
   }
 }
 
+function refreshSubscribedLogicGateRelationshipGraphSnapshots(apiBase: string, companyID: string): void {
+  for (const entry of getCompanyEntries(apiBase, companyID)) {
+    if (entry.subscribers.size > 0) void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID, { folderID: entry.folderID });
+  }
+}
+
+function hasLogicGateRelationshipGraphSubscribers(apiBase: string, companyID: string): boolean {
+  return getCompanyEntries(apiBase, companyID).some((entry) => entry.subscribers.size > 0);
+}
+
+function closeLogicGateRelationshipGraphStreamIfIdle(apiBase: string, companyID: string): void {
+  if (hasLogicGateRelationshipGraphSubscribers(apiBase, companyID)) return;
+  const key = graphStreamKey(apiBase, companyID);
+  const stream = logicGateRelationshipGraphStreams.get(key);
+  stream?.unsubscribeStream?.();
+  logicGateRelationshipGraphStreams.delete(key);
+}
+
 function ensureStream(apiBase: string, companyID: string): void {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  if (entry.unsubscribeStream) return;
-  entry.unsubscribeStream = subscribeWorkspaceStream(apiBase, companyID, {
+  const key = graphStreamKey(apiBase, companyID);
+  let stream = logicGateRelationshipGraphStreams.get(key);
+  if (!stream) {
+    stream = {};
+    logicGateRelationshipGraphStreams.set(key, stream);
+  }
+  if (stream.unsubscribeStream) return;
+  stream.unsubscribeStream = subscribeWorkspaceStream(apiBase, companyID, {
     onEvent(event) {
       if (event.event === "ready") {
-        if (entry.refreshAfterStreamReconnect) {
-          entry.refreshAfterStreamReconnect = false;
-          void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+        if (stream?.refreshAfterStreamReconnect) {
+          stream.refreshAfterStreamReconnect = false;
+          refreshSubscribedLogicGateRelationshipGraphSnapshots(apiBase, companyID);
         }
         return;
       }
       if (event.event !== "workspace") return;
       const payload = event.data;
       if (payload.length === 0) {
-        void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+        refreshSubscribedLogicGateRelationshipGraphSnapshots(apiBase, companyID);
         return;
       }
       try {
@@ -422,44 +486,42 @@ function ensureStream(apiBase: string, companyID: string): void {
         if (envelope.company_id !== companyID) return;
         if (isNonLogicGateGraphWorkspaceEvent(envelope.type)) return;
         if (!envelope.type.startsWith("logic_gate_") && !envelope.type.startsWith("company_explorer_folder_")) return;
-        const applied = applyLogicGateRelationshipGraphDelta(entry, envelope);
-        if (applied) notify(entry);
-        else void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+        for (const entry of getCompanyEntries(apiBase, companyID)) {
+          const applied = applyLogicGateRelationshipGraphDelta(entry, envelope);
+          if (applied) notify(entry);
+          else if (entry.subscribers.size > 0) void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID, { folderID: entry.folderID });
+        }
       } catch {
-        void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+        refreshSubscribedLogicGateRelationshipGraphSnapshots(apiBase, companyID);
       }
     },
     onError() {
-      entry.refreshAfterStreamReconnect = true;
+      if (stream) stream.refreshAfterStreamReconnect = true;
     },
   });
 }
 
-export function subscribeLogicGateRelationshipGraph(apiBase: string, companyID: string, subscriber: Subscriber): () => void {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
+export function subscribeLogicGateRelationshipGraph(apiBase: string, companyID: string, subscriber: Subscriber, options: LogicGateRelationshipGraphScopeOptions = {}): () => void {
+  const folderID = normalizeGraphFolderID(options);
+  const key = graphCacheKey(apiBase, companyID, { folderID });
+  const entry = getEntry(apiBase, companyID, { folderID });
   entry.subscribers.add(subscriber);
   if (!entry.hydrated) {
-    void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID);
+    void refreshLogicGateRelationshipGraphSnapshot(apiBase, companyID, { folderID });
   }
   ensureStream(apiBase, companyID);
   return () => {
     const current = logicGateRelationshipGraphCache.get(key);
     if (!current) return;
     current.subscribers.delete(subscriber);
-    if (current.subscribers.size === 0) {
-      current.unsubscribeStream?.();
-      current.unsubscribeStream = undefined;
-    }
+    closeLogicGateRelationshipGraphStreamIfIdle(apiBase, companyID);
   };
 }
 
-export function getLogicGateRelationshipGraphSnapshot(apiBase: string, companyID: string): LogicGateRelationshipGraphSnapshot {
-  const key = `${apiBase}:${companyID}`;
-  return getEntry(key).snapshot;
+export function getLogicGateRelationshipGraphSnapshot(apiBase: string, companyID: string, options: LogicGateRelationshipGraphScopeOptions = {}): LogicGateRelationshipGraphSnapshot {
+  return getEntry(apiBase, companyID, options).snapshot;
 }
 
-export function hasLogicGateRelationshipGraphSnapshot(apiBase: string, companyID: string): boolean {
-  const key = `${apiBase}:${companyID}`;
-  return getEntry(key).hydrated;
+export function hasLogicGateRelationshipGraphSnapshot(apiBase: string, companyID: string, options: LogicGateRelationshipGraphScopeOptions = {}): boolean {
+  return getEntry(apiBase, companyID, options).hydrated;
 }

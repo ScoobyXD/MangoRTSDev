@@ -74,7 +74,9 @@ type WorkGraphRepository interface {
 	UpdateNode(input UpdateNodeInput) (domain.Node, error)
 	UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error)
 	ListNodes(companyID string) ([]domain.Node, error)
+	ListNodesInFolderSubtree(companyID, folderID string) ([]domain.Node, error)
 	ListNodeRelationships(companyID string) ([]domain.NodeRelationship, error)
+	ListNodeRelationshipsInFolderSubtree(companyID, folderID string) ([]domain.NodeRelationship, error)
 	DeleteNodeRelationship(companyID, relationshipID string) error
 	GetNode(companyID, nodeID string) (domain.Node, error)
 	DeleteNode(companyID, nodeID string) error
@@ -89,9 +91,11 @@ type LogicGateRepository interface {
 	CreateLogicGate(companyID, header string) (domain.LogicGate, error)
 	UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error)
 	ListLogicGates(companyID string) ([]domain.LogicGate, error)
+	ListLogicGatesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error)
 	QueryLogicGates(companyID string, query LogicGateQuery) ([]domain.LogicGate, error)
 	SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUpdateInput) ([]domain.LogicGateRaciAssignment, error)
 	ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error)
+	ListLogicGateRelationshipsInFolderSubtree(companyID, folderID string) ([]domain.LogicGateRelationship, error)
 	DeleteLogicGateRelationship(companyID, relationshipID string) error
 	GetLogicGate(companyID, logicGateID string) (domain.LogicGate, error)
 	DeleteLogicGate(companyID, logicGateID string) error
@@ -105,6 +109,7 @@ type LogicGateRepository interface {
 type CompanyExplorerRepository interface {
 	CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error)
 	ListCompanyExplorerFolders(companyID, folderKind string) ([]domain.CompanyExplorerFolder, error)
+	ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind string) ([]domain.CompanyExplorerFolder, error)
 	MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error)
 	RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error)
 	DeleteCompanyExplorerFolder(companyID, folderID string) error
@@ -117,13 +122,16 @@ type CompanyExplorerRepository interface {
 	AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error)
 	AssignCompanyExplorerFolderItems(companyID string, assignments []CompanyExplorerFolderItemAssignmentInput) ([]domain.CompanyExplorerFolderItem, []CompanyExplorerRelationshipDeleteResult, error)
 	ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error)
+	ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error)
 	RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error
 }
 
 type MapLayoutRepository interface {
 	ListNodeMapPositions(companyID string) ([]domain.NodeMapPosition, error)
+	ListNodeMapPositionsInFolderSubtree(companyID, folderID string) ([]domain.NodeMapPosition, error)
 	UpsertNodeMapPositions(companyID string, positions []domain.NodeMapPosition) ([]domain.NodeMapPosition, error)
 	ListLogicGateMapPositions(companyID string) ([]domain.LogicGateMapPosition, error)
+	ListLogicGateMapPositionsInFolderSubtree(companyID, folderID string) ([]domain.LogicGateMapPosition, error)
 	UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error)
 	CreateMapEntityBatch(input MapEntityBatchInput) (MapEntityBatchResult, error)
 }
@@ -160,6 +168,7 @@ type DomainEventRepository interface {
 	AppendDomainEvent(input DomainEventInput) (domain.DomainEvent, error)
 	ListPendingDomainEvents(limit int) ([]domain.DomainEvent, error)
 	ListDomainEventsAfter(query DomainEventReplayQuery) ([]domain.DomainEvent, error)
+	CurrentDomainEventSequence(query DomainEventStreamQuery) (int64, error)
 	MarkDomainEventPublished(companyID, eventID string) error
 }
 

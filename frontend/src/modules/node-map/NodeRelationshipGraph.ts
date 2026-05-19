@@ -14,11 +14,17 @@ export type NodeRelationshipGraphSnapshot = {
 };
 
 type Subscriber = () => void;
+type NodeRelationshipGraphScopeOptions = {
+  folderID?: string;
+};
 type CacheEntry = {
   snapshot: NodeRelationshipGraphSnapshot;
   subscribers: Set<Subscriber>;
   loading: boolean;
   hydrated: boolean;
+  folderID: string;
+};
+type StreamEntry = {
   unsubscribeStream?: () => void;
   refreshAfterStreamReconnect?: boolean;
 };
@@ -33,14 +39,41 @@ type NodeRelationshipGraphStreamEnvelope = {
 // Initial cache snapshot so subscribers always receive a consistent shape.
 const EMPTY_SNAPSHOT: NodeRelationshipGraphSnapshot = { nodes: [], relationships: [] };
 const nodeRelationshipGraphCache = new Map<string, CacheEntry>();
+const nodeRelationshipGraphStreams = new Map<string, StreamEntry>();
 
 // Cache entry resolver: creates per-company workspace cache bucket on demand.
-function getEntry(key: string): CacheEntry {
+function normalizeGraphFolderID(options: NodeRelationshipGraphScopeOptions = {}): string {
+  return options.folderID?.trim() ?? "";
+}
+
+function graphCacheKey(apiBase: string, companyID: string, options: NodeRelationshipGraphScopeOptions = {}): string {
+  return `${apiBase}:${companyID}:node_map:${encodeURIComponent(normalizeGraphFolderID(options))}`;
+}
+
+function graphStreamKey(apiBase: string, companyID: string): string {
+  return `${apiBase}:${companyID}:node_map`;
+}
+
+function getEntry(apiBase: string, companyID: string, options: NodeRelationshipGraphScopeOptions = {}): CacheEntry {
+  const folderID = normalizeGraphFolderID(options);
+  const key = graphCacheKey(apiBase, companyID, { folderID });
   const existing = nodeRelationshipGraphCache.get(key);
   if (existing) return existing;
-  const created: CacheEntry = { snapshot: EMPTY_SNAPSHOT, subscribers: new Set(), loading: false, hydrated: false };
+  const created: CacheEntry = { snapshot: EMPTY_SNAPSHOT, subscribers: new Set(), loading: false, hydrated: false, folderID };
   nodeRelationshipGraphCache.set(key, created);
   return created;
+}
+
+function getCompanyEntries(apiBase: string, companyID: string): CacheEntry[] {
+  const prefix = `${apiBase}:${companyID}:node_map:`;
+  return Array.from(nodeRelationshipGraphCache.entries())
+    .filter(([key]) => key.startsWith(prefix))
+    .map(([, entry]) => entry);
+}
+
+function getMutationEntries(apiBase: string, companyID: string): CacheEntry[] {
+  const entries = getCompanyEntries(apiBase, companyID);
+  return entries.length > 0 ? entries : [getEntry(apiBase, companyID)];
 }
 
 // Fan-out notifier for Company Explorer / Node Map subscribers.
@@ -49,10 +82,10 @@ function notify(entry: CacheEntry): void {
 }
 
 export function invalidateNodeRelationshipGraphSnapshot(apiBase: string, companyID: string): void {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  entry.hydrated = false;
-  if (entry.subscribers.size > 0) void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+  for (const entry of getCompanyEntries(apiBase, companyID)) {
+    entry.hydrated = false;
+    if (entry.subscribers.size > 0) void refreshNodeRelationshipGraphSnapshot(apiBase, companyID, { folderID: entry.folderID });
+  }
 }
 
 // Some graph events are intentionally non-relationship mutations (e.g. node information writes).
@@ -64,143 +97,152 @@ function isNonGraphWorkspaceEvent(eventType: string): boolean {
 // Local mutation helper: lets hot-path UI actions apply immediate cache updates without
 // forcing a full snapshot refetch. SSE + periodic snapshot refresh remain the source of truth.
 export function upsertNodeRelationshipGraphNode(apiBase: string, companyID: string, node: NodeRecord): void {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  const currentNodes = entry.snapshot.nodes ?? [];
-  const exists = currentNodes.some((item) => item.node_id === node.node_id);
-  entry.snapshot = {
-    ...entry.snapshot,
-    nodes: exists ? currentNodes.map((item) => (item.node_id === node.node_id ? node : item)) : [...currentNodes, node],
-    relationships: entry.snapshot.relationships ?? [],
-    folders: entry.snapshot.folders ?? [],
-    folder_items: entry.snapshot.folder_items ?? [],
-    generated_at: new Date().toISOString(),
-  };
-  notify(entry);
+  const generatedAt = new Date().toISOString();
+  for (const entry of getMutationEntries(apiBase, companyID)) {
+    const currentNodes = entry.snapshot.nodes ?? [];
+    const exists = currentNodes.some((item) => item.node_id === node.node_id);
+    entry.snapshot = {
+      ...entry.snapshot,
+      nodes: exists ? currentNodes.map((item) => (item.node_id === node.node_id ? node : item)) : [...currentNodes, node],
+      relationships: entry.snapshot.relationships ?? [],
+      folders: entry.snapshot.folders ?? [],
+      folder_items: entry.snapshot.folder_items ?? [],
+      generated_at: generatedAt,
+    };
+    notify(entry);
+  }
 }
 
 export function upsertNodeRelationshipGraphRelationship(apiBase: string, companyID: string, relationship: NodeRelationship): void {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  const currentRelationships = entry.snapshot.relationships ?? [];
-  const exists = currentRelationships.some((item) => item.node_relationship_id === relationship.node_relationship_id);
-  entry.snapshot = {
-    ...entry.snapshot,
-    nodes: entry.snapshot.nodes ?? [],
-    relationships: exists
-      ? currentRelationships.map((item) => (item.node_relationship_id === relationship.node_relationship_id ? relationship : item))
-      : [...currentRelationships, relationship],
-    folders: entry.snapshot.folders ?? [],
-    folder_items: entry.snapshot.folder_items ?? [],
-    generated_at: new Date().toISOString(),
-  };
-  notify(entry);
+  const generatedAt = new Date().toISOString();
+  for (const entry of getMutationEntries(apiBase, companyID)) {
+    const currentRelationships = entry.snapshot.relationships ?? [];
+    const exists = currentRelationships.some((item) => item.node_relationship_id === relationship.node_relationship_id);
+    entry.snapshot = {
+      ...entry.snapshot,
+      nodes: entry.snapshot.nodes ?? [],
+      relationships: exists
+        ? currentRelationships.map((item) => (item.node_relationship_id === relationship.node_relationship_id ? relationship : item))
+        : [...currentRelationships, relationship],
+      folders: entry.snapshot.folders ?? [],
+      folder_items: entry.snapshot.folder_items ?? [],
+      generated_at: generatedAt,
+    };
+    notify(entry);
+  }
 }
 
 // Local mutation helper for delete flows so successful node deletes converge immediately without
 // forcing a full snapshot reload on hot paths.
 export function removeNodeRelationshipGraphNode(apiBase: string, companyID: string, nodeID: string): void {
   if (!nodeID) return;
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  const currentNodes = entry.snapshot.nodes ?? [];
-  const nextNodes = currentNodes.filter((item) => item.node_id !== nodeID);
-  const nextRelationships = (entry.snapshot.relationships ?? []).filter((item) => item.node_id_a !== nodeID && item.node_id_b !== nodeID);
-  const nextFolderItems = (entry.snapshot.folder_items ?? []).filter((item) => item.item_type !== "node" || item.item_id !== nodeID);
-  if (nextNodes.length === currentNodes.length && nextRelationships.length === (entry.snapshot.relationships ?? []).length) return;
-  entry.snapshot = {
-    ...entry.snapshot,
-    nodes: nextNodes,
-    relationships: nextRelationships,
-    folders: entry.snapshot.folders ?? [],
-    folder_items: nextFolderItems,
-    node_map_positions: (entry.snapshot.node_map_positions ?? []).filter((position) => (position.node_id || position.entity_id) !== nodeID),
-    generated_at: new Date().toISOString(),
-  };
-  notify(entry);
+  const generatedAt = new Date().toISOString();
+  for (const entry of getMutationEntries(apiBase, companyID)) {
+    const currentNodes = entry.snapshot.nodes ?? [];
+    const currentRelationships = entry.snapshot.relationships ?? [];
+    const nextNodes = currentNodes.filter((item) => item.node_id !== nodeID);
+    const nextRelationships = currentRelationships.filter((item) => item.node_id_a !== nodeID && item.node_id_b !== nodeID);
+    const nextFolderItems = (entry.snapshot.folder_items ?? []).filter((item) => item.item_type !== "node" || item.item_id !== nodeID);
+    if (nextNodes.length === currentNodes.length && nextRelationships.length === currentRelationships.length) continue;
+    entry.snapshot = {
+      ...entry.snapshot,
+      nodes: nextNodes,
+      relationships: nextRelationships,
+      folders: entry.snapshot.folders ?? [],
+      folder_items: nextFolderItems,
+      node_map_positions: (entry.snapshot.node_map_positions ?? []).filter((position) => (position.node_id || position.entity_id) !== nodeID),
+      generated_at: generatedAt,
+    };
+    notify(entry);
+  }
 }
 
 export function removeNodeRelationshipGraphRelationshipsForNode(apiBase: string, companyID: string, nodeID: string): void {
   if (!nodeID) return;
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  const currentRelationships = entry.snapshot.relationships ?? [];
-  const nextRelationships = currentRelationships.filter((item) => item.node_id_a !== nodeID && item.node_id_b !== nodeID);
-  if (nextRelationships.length === currentRelationships.length) return;
-  entry.snapshot = {
-    ...entry.snapshot,
-    relationships: nextRelationships,
-    generated_at: new Date().toISOString(),
-  };
-  notify(entry);
+  const generatedAt = new Date().toISOString();
+  for (const entry of getMutationEntries(apiBase, companyID)) {
+    const currentRelationships = entry.snapshot.relationships ?? [];
+    const nextRelationships = currentRelationships.filter((item) => item.node_id_a !== nodeID && item.node_id_b !== nodeID);
+    if (nextRelationships.length === currentRelationships.length) continue;
+    entry.snapshot = {
+      ...entry.snapshot,
+      relationships: nextRelationships,
+      generated_at: generatedAt,
+    };
+    notify(entry);
+  }
 }
 
 export function upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase: string, companyID: string, item: CompanyExplorerFolderItem): void {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  const current = entry.snapshot.folder_items ?? [];
-  const exists = current.some((row) => row.item_type === item.item_type && row.item_id === item.item_id);
-  entry.snapshot = {
-    ...entry.snapshot,
-    folder_items: exists
-      ? current.map((row) => (row.item_type === item.item_type && row.item_id === item.item_id ? item : row))
-      : [...current, item],
-    generated_at: new Date().toISOString(),
-  };
-  notify(entry);
+  const generatedAt = new Date().toISOString();
+  for (const entry of getMutationEntries(apiBase, companyID)) {
+    const current = entry.snapshot.folder_items ?? [];
+    const exists = current.some((row) => row.item_type === item.item_type && row.item_id === item.item_id);
+    entry.snapshot = {
+      ...entry.snapshot,
+      folder_items: exists
+        ? current.map((row) => (row.item_type === item.item_type && row.item_id === item.item_id ? item : row))
+        : [...current, item],
+      generated_at: generatedAt,
+    };
+    notify(entry);
+  }
 }
 
 export function upsertNodeMapPositionsInNodeRelationshipGraph(apiBase: string, companyID: string, positions: PersistedMapPosition[]): void {
   if (positions.length === 0) return;
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  const nextByID = new Map((entry.snapshot.node_map_positions ?? []).map((position) => [position.node_id || position.entity_id || "", position]));
-  for (const position of positions) {
-    const id = position.node_id || position.entity_id || "";
-    if (!id || !Number.isFinite(position.x) || !Number.isFinite(position.y)) continue;
-    nextByID.set(id, {
-      entity_id: id,
-      node_id: id,
-      x: position.x,
-      y: position.y,
-      updated_timestamp: position.updated_timestamp ?? new Date().toISOString(),
-    });
+  const generatedAt = new Date().toISOString();
+  for (const entry of getMutationEntries(apiBase, companyID)) {
+    const nextByID = new Map((entry.snapshot.node_map_positions ?? []).map((position) => [position.node_id || position.entity_id || "", position]));
+    for (const position of positions) {
+      const id = position.node_id || position.entity_id || "";
+      if (!id || !Number.isFinite(position.x) || !Number.isFinite(position.y)) continue;
+      nextByID.set(id, {
+        entity_id: id,
+        node_id: id,
+        x: position.x,
+        y: position.y,
+        updated_timestamp: position.updated_timestamp ?? generatedAt,
+      });
+    }
+    entry.snapshot = {
+      ...entry.snapshot,
+      node_map_positions: Array.from(nextByID.values()).filter((position) => position.node_id || position.entity_id),
+      generated_at: generatedAt,
+    };
+    notify(entry);
   }
-  entry.snapshot = {
-    ...entry.snapshot,
-    node_map_positions: Array.from(nextByID.values()).filter((position) => position.node_id || position.entity_id),
-    generated_at: new Date().toISOString(),
-  };
-  notify(entry);
 }
 
 export function upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase: string, companyID: string, folder: CompanyExplorerFolder): void {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  const current = entry.snapshot.folders ?? [];
-  const exists = current.some((row) => row.folder_id === folder.folder_id);
-  entry.snapshot = {
-    ...entry.snapshot,
-    folders: exists ? current.map((row) => (row.folder_id === folder.folder_id ? folder : row)) : [...current, folder],
-    generated_at: new Date().toISOString(),
-  };
-  notify(entry);
+  const generatedAt = new Date().toISOString();
+  for (const entry of getMutationEntries(apiBase, companyID)) {
+    const current = entry.snapshot.folders ?? [];
+    const exists = current.some((row) => row.folder_id === folder.folder_id);
+    entry.snapshot = {
+      ...entry.snapshot,
+      folders: exists ? current.map((row) => (row.folder_id === folder.folder_id ? folder : row)) : [...current, folder],
+      generated_at: generatedAt,
+    };
+    notify(entry);
+  }
 }
 
 export function removeCompanyExplorerFolderInNodeRelationshipGraph(apiBase: string, companyID: string, folderID: string): void {
   if (!folderID) return;
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  const folders = entry.snapshot.folders ?? [];
-  const deletedFolderIDs = collectDeletedFolderIDs(folders, folderID);
-  if (deletedFolderIDs.size === 0) return;
-  entry.snapshot = {
-    ...entry.snapshot,
-    folders: folders.filter((folder) => !deletedFolderIDs.has(folder.folder_id)),
-    folder_items: (entry.snapshot.folder_items ?? []).filter((item) => !deletedFolderIDs.has(item.folder_id)),
-    generated_at: new Date().toISOString(),
-  };
-  notify(entry);
+  const generatedAt = new Date().toISOString();
+  for (const entry of getMutationEntries(apiBase, companyID)) {
+    const folders = entry.snapshot.folders ?? [];
+    const deletedFolderIDs = collectDeletedFolderIDs(folders, folderID);
+    if (deletedFolderIDs.size === 0) continue;
+    entry.snapshot = {
+      ...entry.snapshot,
+      folders: folders.filter((folder) => !deletedFolderIDs.has(folder.folder_id)),
+      folder_items: (entry.snapshot.folder_items ?? []).filter((item) => !deletedFolderIDs.has(item.folder_id)),
+      generated_at: generatedAt,
+    };
+    notify(entry);
+  }
 }
 
 function collectDeletedFolderIDs(folders: CompanyExplorerFolder[], rootFolderID: string): Set<string> {
@@ -425,13 +467,16 @@ function applyNodeRelationshipGraphDelta(entry: CacheEntry, envelope: NodeRelati
 }
 
 // Snapshot fetcher with ETag support; keeps hot-path reads light and cache-friendly.
-export async function refreshNodeRelationshipGraphSnapshot(apiBase: string, companyID: string): Promise<void> {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
+export async function refreshNodeRelationshipGraphSnapshot(apiBase: string, companyID: string, options: NodeRelationshipGraphScopeOptions = {}): Promise<void> {
+  const folderID = normalizeGraphFolderID(options);
+  const entry = getEntry(apiBase, companyID, { folderID });
   if (entry.loading) return;
   entry.loading = true;
   try {
-    const result = await fetchWorkspaceSnapshot(apiBase, companyID);
+    const result = await fetchWorkspaceSnapshot(apiBase, companyID, {
+      scope: "node_map",
+      folderID: folderID || undefined,
+    });
     if (!result.payload) return;
     if (!result.changed && entry.hydrated) {
       entry.hydrated = true;
@@ -454,69 +499,90 @@ export async function refreshNodeRelationshipGraphSnapshot(apiBase: string, comp
 }
 
 // SSE stream bootstrap: keeps modules synchronized in near real-time without polling loops.
+function refreshSubscribedNodeRelationshipGraphSnapshots(apiBase: string, companyID: string): void {
+  for (const entry of getCompanyEntries(apiBase, companyID)) {
+    if (entry.subscribers.size > 0) void refreshNodeRelationshipGraphSnapshot(apiBase, companyID, { folderID: entry.folderID });
+  }
+}
+
+function hasNodeRelationshipGraphSubscribers(apiBase: string, companyID: string): boolean {
+  return getCompanyEntries(apiBase, companyID).some((entry) => entry.subscribers.size > 0);
+}
+
+function closeNodeRelationshipGraphStreamIfIdle(apiBase: string, companyID: string): void {
+  if (hasNodeRelationshipGraphSubscribers(apiBase, companyID)) return;
+  const key = graphStreamKey(apiBase, companyID);
+  const stream = nodeRelationshipGraphStreams.get(key);
+  stream?.unsubscribeStream?.();
+  nodeRelationshipGraphStreams.delete(key);
+}
+
+// SSE stream bootstrap: keeps modules synchronized in near real-time without polling loops.
 function ensureStream(apiBase: string, companyID: string): void {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
-  if (entry.unsubscribeStream) return;
-  entry.unsubscribeStream = subscribeWorkspaceStream(apiBase, companyID, {
+  const key = graphStreamKey(apiBase, companyID);
+  let stream = nodeRelationshipGraphStreams.get(key);
+  if (!stream) {
+    stream = {};
+    nodeRelationshipGraphStreams.set(key, stream);
+  }
+  if (stream.unsubscribeStream) return;
+  stream.unsubscribeStream = subscribeWorkspaceStream(apiBase, companyID, {
     onEvent(event) {
       if (event.event === "ready") {
-        if (entry.refreshAfterStreamReconnect) {
-          entry.refreshAfterStreamReconnect = false;
-          void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+        if (stream?.refreshAfterStreamReconnect) {
+          stream.refreshAfterStreamReconnect = false;
+          refreshSubscribedNodeRelationshipGraphSnapshots(apiBase, companyID);
         }
         return;
       }
       if (event.event !== "workspace") return;
       const payload = event.data;
       if (payload.length === 0) {
-        void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+        refreshSubscribedNodeRelationshipGraphSnapshots(apiBase, companyID);
         return;
       }
       try {
         const envelope = JSON.parse(payload) as NodeRelationshipGraphStreamEnvelope;
         if (envelope.company_id !== companyID) return;
         if (isNonGraphWorkspaceEvent(envelope.type)) return;
-        const applied = applyNodeRelationshipGraphDelta(entry, envelope);
-        if (applied) notify(entry);
-        else void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+        for (const entry of getCompanyEntries(apiBase, companyID)) {
+          const applied = applyNodeRelationshipGraphDelta(entry, envelope);
+          if (applied) notify(entry);
+          else if (entry.subscribers.size > 0) void refreshNodeRelationshipGraphSnapshot(apiBase, companyID, { folderID: entry.folderID });
+        }
       } catch {
-        void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+        refreshSubscribedNodeRelationshipGraphSnapshots(apiBase, companyID);
       }
     },
     onError() {
-      entry.refreshAfterStreamReconnect = true;
+      if (stream) stream.refreshAfterStreamReconnect = true;
     },
   });
 }
 
 // Public subscription API used by UI modules for workspace snapshot updates.
-export function subscribeNodeRelationshipGraph(apiBase: string, companyID: string, subscriber: Subscriber): () => void {
-  const key = `${apiBase}:${companyID}`;
-  const entry = getEntry(key);
+export function subscribeNodeRelationshipGraph(apiBase: string, companyID: string, subscriber: Subscriber, options: NodeRelationshipGraphScopeOptions = {}): () => void {
+  const folderID = normalizeGraphFolderID(options);
+  const key = graphCacheKey(apiBase, companyID, { folderID });
+  const entry = getEntry(apiBase, companyID, { folderID });
   entry.subscribers.add(subscriber);
   if (!entry.hydrated) {
-    void refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
+    void refreshNodeRelationshipGraphSnapshot(apiBase, companyID, { folderID });
   }
   ensureStream(apiBase, companyID);
   return () => {
     const current = nodeRelationshipGraphCache.get(key);
     if (!current) return;
     current.subscribers.delete(subscriber);
-    if (current.subscribers.size === 0) {
-      current.unsubscribeStream?.();
-      current.unsubscribeStream = undefined;
-    }
+    closeNodeRelationshipGraphStreamIfIdle(apiBase, companyID);
   };
 }
 
 // Synchronous snapshot getter for render paths that need latest cached workspace data.
-export function getNodeRelationshipGraphSnapshot(apiBase: string, companyID: string): NodeRelationshipGraphSnapshot {
-  const key = `${apiBase}:${companyID}`;
-  return getEntry(key).snapshot;
+export function getNodeRelationshipGraphSnapshot(apiBase: string, companyID: string, options: NodeRelationshipGraphScopeOptions = {}): NodeRelationshipGraphSnapshot {
+  return getEntry(apiBase, companyID, options).snapshot;
 }
 
-export function hasNodeRelationshipGraphSnapshot(apiBase: string, companyID: string): boolean {
-  const key = `${apiBase}:${companyID}`;
-  return getEntry(key).hydrated;
+export function hasNodeRelationshipGraphSnapshot(apiBase: string, companyID: string, options: NodeRelationshipGraphScopeOptions = {}): boolean {
+  return getEntry(apiBase, companyID, options).hydrated;
 }

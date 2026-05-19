@@ -163,6 +163,22 @@ limit $5`, query.CompanyID, query.StreamType, query.StreamID, query.AfterSequenc
 	}
 	return items, rows.Err()
 }
+func (r *PostgresRepo) CurrentDomainEventSequence(query DomainEventStreamQuery) (int64, error) {
+	query.CompanyID = strings.TrimSpace(query.CompanyID)
+	query.StreamType = strings.TrimSpace(query.StreamType)
+	query.StreamID = strings.TrimSpace(query.StreamID)
+	if query.CompanyID == "" || query.StreamType == "" || query.StreamID == "" {
+		return 0, ErrInvalid
+	}
+	var sequence int64
+	err := r.db.QueryRowContext(context.Background(), `
+select coalesce(max(sequence), 0)
+from domain_events
+where company_id=$1::uuid
+  and stream_type=$2
+  and stream_id=$3`, query.CompanyID, query.StreamType, query.StreamID).Scan(&sequence)
+	return sequence, err
+}
 func (r *PostgresRepo) MarkDomainEventPublished(companyID, eventID string) error {
 	companyID = strings.TrimSpace(companyID)
 	eventID = strings.TrimSpace(eventID)

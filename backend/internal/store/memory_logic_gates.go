@@ -135,6 +135,31 @@ func (r *MemoryRepo) ListLogicGates(companyID string) ([]domain.LogicGate, error
 	return items, nil
 }
 
+func (r *MemoryRepo) ListLogicGatesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListLogicGates(companyID)
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "logic_gate")
+	visible := map[string]bool{}
+	for _, item := range r.folderItems {
+		if item.CompanyID == companyID && item.ItemType == "logic_gate" && folderIDs[item.FolderID] {
+			visible[item.ItemID] = true
+		}
+	}
+	items := make([]domain.LogicGate, 0, len(visible))
+	for _, gate := range r.logicGates {
+		if gate.CompanyID == companyID && visible[gate.LogicGateID] {
+			items = append(items, r.withLogicGateRaciLocked(gate))
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
+	return items, nil
+}
 func logicGateMatchesQuery(gate domain.LogicGate, query string) bool {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
@@ -315,6 +340,31 @@ func (r *MemoryRepo) ListLogicGateMapPositions(companyID string) ([]domain.Logic
 	return items, nil
 }
 
+func (r *MemoryRepo) ListLogicGateMapPositionsInFolderSubtree(companyID, folderID string) ([]domain.LogicGateMapPosition, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListLogicGateMapPositions(companyID)
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "logic_gate")
+	visible := map[string]bool{}
+	for _, item := range r.folderItems {
+		if item.CompanyID == companyID && item.ItemType == "logic_gate" && folderIDs[item.FolderID] {
+			visible[item.ItemID] = true
+		}
+	}
+	items := make([]domain.LogicGateMapPosition, 0)
+	for _, item := range r.logicMapPositions {
+		if item.CompanyID == companyID && visible[item.LogicGateID] {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].LogicGateID < items[j].LogicGateID
+	})
+	return items, nil
+}
 func (r *MemoryRepo) UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -348,6 +398,31 @@ func (r *MemoryRepo) ListLogicGateRelationships(companyID string) ([]domain.Logi
 	return items, nil
 }
 
+func (r *MemoryRepo) ListLogicGateRelationshipsInFolderSubtree(companyID, folderID string) ([]domain.LogicGateRelationship, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListLogicGateRelationships(companyID)
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "logic_gate")
+	visible := map[string]bool{}
+	for _, item := range r.folderItems {
+		if item.CompanyID == companyID && item.ItemType == "logic_gate" && folderIDs[item.FolderID] {
+			visible[item.ItemID] = true
+		}
+	}
+	items := make([]domain.LogicGateRelationship, 0)
+	for _, rel := range r.logicGateRels[companyID] {
+		if visible[rel.LogicGateIDA] && visible[rel.LogicGateIDB] {
+			items = append(items, rel)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
+	return items, nil
+}
 func (r *MemoryRepo) CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -27,8 +27,20 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	scope := strings.TrimSpace(r.URL.Query().Get("scope"))
+	snapshotScope := scope
+	if snapshotScope == "" {
+		snapshotScope = "full"
+	}
+	etag, err := s.workspaceSnapshotETag(r, companyID, snapshotScope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
+		return
+	}
+	if writeNotModifiedWithETag(w, r, etag) {
+		return
+	}
 	if scope != "" {
-		s.handleScopedWorkspaceSnapshot(w, r, companyID, scope)
+		s.handleScopedWorkspaceSnapshot(w, r, companyID, scope, etag)
 		return
 	}
 	nodes, err := s.repo.ListNodes(companyID)
@@ -84,7 +96,7 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_boards")
 		return
 	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
 		"scope":                    "full",
 		"nodes":                    nodes,
 		"relationships":            relationships,
@@ -95,141 +107,229 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		"node_map_positions":       nodeMapPositions,
 		"logic_gate_map_positions": logicGateMapPositions,
 		"kanban_boards":            kanbanBoards,
-	})
+	}, etag)
 }
 
-func (s *Server) handleScopedWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, scope string) {
+func (s *Server) workspaceSnapshotETag(r *http.Request, companyID, scope string) (string, error) {
+	sequence, err := s.repo.CurrentDomainEventSequence(store.DomainEventStreamQuery{
+		CompanyID:  companyID,
+		StreamType: workspaceDomainStreamType,
+		StreamID:   companyID,
+	})
+	if err != nil {
+		return "", err
+	}
+	return strongETagFromString("workspace-snapshot:" + companyID + ":" + scope + ":" + r.URL.Query().Encode() + ":" + strconv.FormatInt(sequence, 10)), nil
+}
+func (s *Server) handleScopedWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, scope, etag string) {
 	switch scope {
 	case "node_map":
-		s.handleNodeMapWorkspaceSnapshot(w, r, companyID)
+		s.handleNodeMapWorkspaceSnapshot(w, r, companyID, etag)
 	case "logic_gate_map":
-		s.handleLogicGateMapWorkspaceSnapshot(w, r, companyID)
+		s.handleLogicGateMapWorkspaceSnapshot(w, r, companyID, etag)
 	case "company_explorer":
-		s.handleCompanyExplorerWorkspaceSnapshot(w, r, companyID)
+		s.handleCompanyExplorerWorkspaceSnapshot(w, r, companyID, etag)
 	case "kanban":
-		s.handleKanbanWorkspaceSnapshot(w, r, companyID)
+		s.handleKanbanWorkspaceSnapshot(w, r, companyID, etag)
 	default:
 		writeError(w, http.StatusBadRequest, "invalid_workspace_snapshot_scope")
 	}
 }
 
-func (s *Server) handleNodeMapWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID string) {
+func (s *Server) handleNodeMapWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, etag string) {
 	folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
-	nodes, err := s.repo.ListNodes(companyID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
-		return
-	}
-	relationships, err := s.repo.ListNodeRelationships(companyID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_node_relationships")
-		return
-	}
-	positions, err := s.repo.ListNodeMapPositions(companyID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_positions")
-		return
-	}
-	folderItems := []domain.CompanyExplorerFolderItem{}
-	if folderID != "" {
-		folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, folderID, "node")
+	var nodes []domain.Node
+	var relationships []domain.NodeRelationship
+	var positions []domain.NodeMapPosition
+	var folders []domain.CompanyExplorerFolder
+	var folderItems []domain.CompanyExplorerFolderItem
+	var err error
+	if folderID == "" {
+		nodes, err = s.repo.ListNodes(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
+			return
+		}
+		relationships, err = s.repo.ListNodeRelationships(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_node_relationships")
+			return
+		}
+		positions, err = s.repo.ListNodeMapPositions(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_positions")
+			return
+		}
+		folders, err = s.repo.ListCompanyExplorerFolders(companyID, "node")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
+			return
+		}
+		folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", "node")
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 			return
 		}
-		visible := folderItemIDSet(folderItems)
-		nodes = filterNodesByID(nodes, visible)
-		relationships = filterNodeRelationshipsByVisibleEndpoints(relationships, visible)
-		positions = filterNodePositionsByID(positions, visible)
+	} else {
+		nodes, err = s.repo.ListNodesInFolderSubtree(companyID, folderID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_nodes")
+			return
+		}
+		relationships, err = s.repo.ListNodeRelationshipsInFolderSubtree(companyID, folderID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_node_relationships")
+			return
+		}
+		positions, err = s.repo.ListNodeMapPositionsInFolderSubtree(companyID, folderID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_node_map_positions")
+			return
+		}
+		folders, err = s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, "node")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
+			return
+		}
+		folderItems, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, "node")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
+			return
+		}
 	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
 		"scope":              "node_map",
 		"company_id":         companyID,
 		"folder_id":          folderID,
 		"nodes":              nodes,
 		"relationships":      relationships,
+		"folders":            folders,
 		"folder_items":       folderItems,
 		"node_map_positions": positions,
-	})
+	}, etag)
 }
-
-func (s *Server) handleLogicGateMapWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID string) {
+func (s *Server) handleLogicGateMapWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, etag string) {
 	folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
-	logicGates, err := s.repo.ListLogicGates(companyID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
-		return
-	}
-	relationships, err := s.repo.ListLogicGateRelationships(companyID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships")
-		return
-	}
-	positions, err := s.repo.ListLogicGateMapPositions(companyID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_positions")
-		return
-	}
-	folderItems := []domain.CompanyExplorerFolderItem{}
-	if folderID != "" {
-		folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, folderID, "logic_gate")
+	var logicGates []domain.LogicGate
+	var relationships []domain.LogicGateRelationship
+	var positions []domain.LogicGateMapPosition
+	var folders []domain.CompanyExplorerFolder
+	var folderItems []domain.CompanyExplorerFolderItem
+	var err error
+	if folderID == "" {
+		logicGates, err = s.repo.ListLogicGates(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
+			return
+		}
+		relationships, err = s.repo.ListLogicGateRelationships(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships")
+			return
+		}
+		positions, err = s.repo.ListLogicGateMapPositions(companyID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_positions")
+			return
+		}
+		folders, err = s.repo.ListCompanyExplorerFolders(companyID, "logic_gate")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
+			return
+		}
+		folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", "logic_gate")
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 			return
 		}
-		visible := folderItemIDSet(folderItems)
-		logicGates = filterLogicGatesByID(logicGates, visible)
-		relationships = filterLogicGateRelationshipsByVisibleEndpoints(relationships, visible)
-		positions = filterLogicGatePositionsByID(positions, visible)
+	} else {
+		logicGates, err = s.repo.ListLogicGatesInFolderSubtree(companyID, folderID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gates")
+			return
+		}
+		relationships, err = s.repo.ListLogicGateRelationshipsInFolderSubtree(companyID, folderID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships")
+			return
+		}
+		positions, err = s.repo.ListLogicGateMapPositionsInFolderSubtree(companyID, folderID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_map_positions")
+			return
+		}
+		folders, err = s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, "logic_gate")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
+			return
+		}
+		folderItems, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, "logic_gate")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
+			return
+		}
 	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
 		"scope":                    "logic_gate_map",
 		"company_id":               companyID,
 		"folder_id":                folderID,
 		"logic_gates":              logicGates,
 		"logic_gate_relationships": relationships,
+		"folders":                  folders,
 		"folder_items":             folderItems,
 		"logic_gate_map_positions": positions,
-	})
+	}, etag)
 }
-
-func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID string) {
+func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, etag string) {
 	folderKind := strings.TrimSpace(r.URL.Query().Get("folder_kind"))
 	folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
 	folders := []domain.CompanyExplorerFolder{}
+	var folderItems []domain.CompanyExplorerFolderItem
 	var err error
-	if folderKind == "" {
-		for _, kind := range []string{"node", "logic_gate", "communications"} {
-			items, listErr := s.repo.ListCompanyExplorerFolders(companyID, kind)
-			if listErr != nil {
-				err = listErr
-				break
-			}
-			folders = append(folders, items...)
+	if folderID != "" {
+		folders, err = s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
+			return
+		}
+		folderItems, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, "")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
+			return
 		}
 	} else {
-		folders, err = s.repo.ListCompanyExplorerFolders(companyID, folderKind)
+		if folderKind == "" {
+			for _, kind := range []string{"node", "logic_gate", "communications"} {
+				items, listErr := s.repo.ListCompanyExplorerFolders(companyID, kind)
+				if listErr != nil {
+					err = listErr
+					break
+				}
+				folders = append(folders, items...)
+			}
+		} else {
+			folders, err = s.repo.ListCompanyExplorerFolders(companyID, folderKind)
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
+			return
+		}
+		folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", "")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
+			return
+		}
 	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
-		return
-	}
-	folderItems, err := s.repo.ListCompanyExplorerFolderItems(companyID, folderID, "")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
-		return
-	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
 		"scope":        "company_explorer",
 		"company_id":   companyID,
 		"folder_kind":  folderKind,
 		"folder_id":    folderID,
 		"folders":      folders,
 		"folder_items": folderItems,
-	})
+	}, etag)
 }
-
-func (s *Server) handleKanbanWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID string) {
+func (s *Server) handleKanbanWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, etag string) {
 	boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
 	if boardID == "" {
 		writeError(w, http.StatusBadRequest, "board_id_required")
@@ -250,84 +350,14 @@ func (s *Server) handleKanbanWorkspaceSnapshot(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_cards")
 		return
 	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
 		"scope":       "kanban",
 		"company_id":  companyID,
 		"board_id":    boardID,
 		"columns":     columns,
 		"cards":       cards,
 		"cards_limit": cardQuery.Limit,
-	})
-}
-
-func folderItemIDSet(items []domain.CompanyExplorerFolderItem) map[string]bool {
-	visible := make(map[string]bool, len(items))
-	for _, item := range items {
-		if strings.TrimSpace(item.ItemID) != "" {
-			visible[item.ItemID] = true
-		}
-	}
-	return visible
-}
-
-func filterNodesByID(items []domain.Node, visible map[string]bool) []domain.Node {
-	out := make([]domain.Node, 0, len(items))
-	for _, item := range items {
-		if visible[item.NodeID] {
-			out = append(out, item)
-		}
-	}
-	return out
-}
-
-func filterNodeRelationshipsByVisibleEndpoints(items []domain.NodeRelationship, visible map[string]bool) []domain.NodeRelationship {
-	out := make([]domain.NodeRelationship, 0, len(items))
-	for _, item := range items {
-		if visible[item.NodeIDA] && visible[item.NodeIDB] {
-			out = append(out, item)
-		}
-	}
-	return out
-}
-
-func filterNodePositionsByID(items []domain.NodeMapPosition, visible map[string]bool) []domain.NodeMapPosition {
-	out := make([]domain.NodeMapPosition, 0, len(items))
-	for _, item := range items {
-		if visible[item.NodeID] {
-			out = append(out, item)
-		}
-	}
-	return out
-}
-
-func filterLogicGatesByID(items []domain.LogicGate, visible map[string]bool) []domain.LogicGate {
-	out := make([]domain.LogicGate, 0, len(items))
-	for _, item := range items {
-		if visible[item.LogicGateID] {
-			out = append(out, item)
-		}
-	}
-	return out
-}
-
-func filterLogicGateRelationshipsByVisibleEndpoints(items []domain.LogicGateRelationship, visible map[string]bool) []domain.LogicGateRelationship {
-	out := make([]domain.LogicGateRelationship, 0, len(items))
-	for _, item := range items {
-		if visible[item.LogicGateIDA] && visible[item.LogicGateIDB] {
-			out = append(out, item)
-		}
-	}
-	return out
-}
-
-func filterLogicGatePositionsByID(items []domain.LogicGateMapPosition, visible map[string]bool) []domain.LogicGateMapPosition {
-	out := make([]domain.LogicGateMapPosition, 0, len(items))
-	for _, item := range items {
-		if visible[item.LogicGateID] {
-			out = append(out, item)
-		}
-	}
-	return out
+	}, etag)
 }
 
 func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {

@@ -12,6 +12,12 @@ type DomainEventReplayQuery struct {
 	Limit         int
 }
 
+type DomainEventStreamQuery struct {
+	CompanyID  string
+	StreamType string
+	StreamID   string
+}
+
 type DomainEventInput struct {
 	CompanyID      string
 	StreamType     string

@@ -1143,7 +1143,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
       for (const id of unique) removeNodeRelationshipGraphNode(apiBase, companyID, id);
       setDetails((current) => (current && unique.includes(current.node.node_id) ? null : current));
       if (detailsPanelNodeID && unique.includes(detailsPanelNodeID)) setDetailsPanelNodeID("");
-      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID, { folderID: activeFolderIDRef.current });
       const fallback = (snapshot.nodes ?? [])[0]?.node_id ?? "";
       setSelectedNodeID(fallback);
       setSelectedNodeIDs(new Set());
@@ -1196,8 +1196,9 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
       if (summary.failed.length > 0) {
         const failure = summary.failed[0];
         if (failure?.reason === "relationship_not_found" || failure?.reason.startsWith("request_failed_404")) {
-          await refreshNodeRelationshipGraphSnapshot(apiBase, companyID);
-          const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
+          const scope = { folderID: activeFolderIDRef.current };
+          await refreshNodeRelationshipGraphSnapshot(apiBase, companyID, scope);
+          const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID, scope);
           setRelationships(projectVisibleRelationships(nodes, snapshot.relationships ?? []));
         }
         setError(failure?.reason ?? "failed_to_delete_relationship");
