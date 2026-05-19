@@ -156,6 +156,10 @@ type KanbanRepository interface {
 	ListKanbanCards(companyID, boardID string, query KanbanCardQuery) ([]domain.KanbanCard, error)
 	UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error)
 	MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error)
+	AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentInput) (LogicGateNodeAssignmentResult, error)
+	MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMoveInput) (LogicGateNodeAssignmentResult, error)
+	RemoveLogicGateNodeAssignment(input LogicGateNodeAssignmentRemoveInput) (LogicGateNodeAssignmentRemoveResult, error)
+	SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignmentIssueInput) (LogicGateNodeAssignmentResult, error)
 	DeleteKanbanCard(companyID, boardID, cardID string) error
 }
 
@@ -365,6 +369,8 @@ type KanbanCardMutationInput struct {
 	NodeTitle           string
 	DescriptionSnapshot string
 	Position            int
+	IsIssue             bool
+	IsIssueSet          bool
 }
 
 type KanbanCardMoveInput struct {
@@ -374,6 +380,63 @@ type KanbanCardMoveInput struct {
 	ColumnID  string
 	Position  int
 	IsIssue   *bool
+}
+
+const LogicGateAssignmentAssigneePolicyFirstResponsible = "first_responsible"
+
+type LogicGateNodeAssignmentInput struct {
+	CompanyID           string
+	LogicGateID         string
+	NodeID              string
+	Status              string
+	ColumnID            string
+	NodeTitle           string
+	DescriptionSnapshot string
+	Position            int
+	Priority            *int
+	PrioritySet         bool
+	IsIssue             bool
+	IsIssueSet          bool
+	AssigneePolicy      string
+}
+
+type LogicGateNodeAssignmentMoveInput struct {
+	CompanyID         string
+	LogicGateID       string
+	FromLogicGateID   string
+	NodeID            string
+	Status            string
+	ColumnID          string
+	Position          int
+	Priority          *int
+	PrioritySet       bool
+	AssigneePolicy    string
+	AssigneePolicySet bool
+}
+
+type LogicGateNodeAssignmentRemoveInput struct {
+	CompanyID           string
+	LogicGateID         string
+	NodeID              string
+	FallbackStatus      *string
+	FallbackStatusColor *string
+}
+
+type LogicGateNodeAssignmentIssueInput struct {
+	CompanyID   string
+	LogicGateID string
+	NodeID      string
+	IsIssue     bool
+}
+
+type LogicGateNodeAssignmentResult struct {
+	Card domain.KanbanCard `json:"card"`
+	Node domain.Node       `json:"node"`
+}
+
+type LogicGateNodeAssignmentRemoveResult struct {
+	Card domain.KanbanCard `json:"card"`
+	Node domain.Node       `json:"node"`
 }
 
 const NotificationListMaxLimit = 100

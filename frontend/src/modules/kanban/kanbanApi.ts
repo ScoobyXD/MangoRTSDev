@@ -1,4 +1,5 @@
 import { requestJSON } from "../api/requestJSON.js";
+import type { NodeRecord } from "../node-map/shared.js";
 import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache.js";
 import { logicGateIDFromKanbanBoardID } from "./shared.js";
 import type { KanbanBoard, KanbanCard, KanbanColumn, LogicGateArenaView } from "./shared.js";
@@ -167,6 +168,127 @@ export async function upsertKanbanCard(args: {
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateIDFromKanbanBoardID(args.boardID));
   invalidateWorkspaceSnapshot(args.apiBase, args.companyID);
   return card;
+}
+
+export type LogicGateAssignmentCommandResult = { card: KanbanCard; node: NodeRecord };
+
+export async function assignNodeToLogicGateStatus(args: {
+  apiBase: string;
+  companyID: string;
+  logicGateID: string;
+  nodeID: string;
+  status?: string;
+  columnID?: string;
+  priority?: number | null;
+  nodeTitle?: string;
+  position?: number;
+  isIssue?: boolean;
+}): Promise<LogicGateAssignmentCommandResult> {
+  const payload = await fetchJSON<{ card: KanbanCard; node: NodeRecord }>(args.apiBase, "/v1/work-items/logic-gate-assignments", {
+    method: "POST",
+    body: {
+      company_id: args.companyID,
+      logic_gate_id: args.logicGateID,
+      node_id: args.nodeID,
+      status: args.status,
+      column_id: args.columnID,
+      priority: args.priority,
+      node_title: args.nodeTitle,
+      position: args.position,
+      is_issue: args.isIssue,
+      assignee_policy: "first_responsible",
+    },
+  });
+  invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
+  invalidateWorkspaceSnapshot(args.apiBase, args.companyID);
+  return {
+    card: { ...payload.card },
+    node: { ...payload.node },
+  };
+}
+
+export async function moveLogicGateAssignment(args: {
+  apiBase: string;
+  companyID: string;
+  logicGateID: string;
+  nodeID: string;
+  fromLogicGateID?: string;
+  status?: string;
+  columnID?: string;
+  position?: number;
+  priority?: number | null;
+  assigneePolicy?: string;
+}): Promise<LogicGateAssignmentCommandResult> {
+  const payload = await fetchJSON<LogicGateAssignmentCommandResult>(args.apiBase, "/v1/work-items/logic-gate-assignments/move", {
+    method: "POST",
+    body: {
+      company_id: args.companyID,
+      logic_gate_id: args.logicGateID,
+      from_logic_gate_id: args.fromLogicGateID,
+      node_id: args.nodeID,
+      status: args.status,
+      column_id: args.columnID,
+      position: args.position,
+      priority: args.priority,
+      assignee_policy: args.assigneePolicy,
+    },
+  });
+  invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
+  invalidateWorkspaceSnapshot(args.apiBase, args.companyID);
+  return {
+    card: { ...payload.card },
+    node: { ...payload.node },
+  };
+}
+
+export async function removeLogicGateAssignment(args: {
+  apiBase: string;
+  companyID: string;
+  logicGateID?: string;
+  nodeID: string;
+  fallbackStatus?: string | null;
+  fallbackStatusColor?: string | null;
+}): Promise<LogicGateAssignmentCommandResult> {
+  const payload = await fetchJSON<LogicGateAssignmentCommandResult>(args.apiBase, "/v1/work-items/logic-gate-assignments/remove", {
+    method: "POST",
+    body: {
+      company_id: args.companyID,
+      logic_gate_id: args.logicGateID,
+      node_id: args.nodeID,
+      fallback_status: args.fallbackStatus,
+      fallback_status_color: args.fallbackStatusColor,
+    },
+  });
+  invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
+  invalidateWorkspaceSnapshot(args.apiBase, args.companyID);
+  return {
+    card: { ...payload.card },
+    node: { ...payload.node },
+  };
+}
+
+export async function setLogicGateAssignmentIssue(args: {
+  apiBase: string;
+  companyID: string;
+  logicGateID?: string;
+  nodeID: string;
+  isIssue: boolean;
+}): Promise<LogicGateAssignmentCommandResult> {
+  const payload = await fetchJSON<LogicGateAssignmentCommandResult>(args.apiBase, "/v1/work-items/logic-gate-assignments/issue", {
+    method: "POST",
+    body: {
+      company_id: args.companyID,
+      logic_gate_id: args.logicGateID,
+      node_id: args.nodeID,
+      is_issue: args.isIssue,
+    },
+  });
+  invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
+  invalidateWorkspaceSnapshot(args.apiBase, args.companyID);
+  return {
+    card: { ...payload.card },
+    node: { ...payload.node },
+  };
 }
 
 export async function moveKanbanCard(args: {

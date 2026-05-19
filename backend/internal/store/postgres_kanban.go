@@ -626,6 +626,10 @@ where company_id=$1
 		}
 	}
 
+	issueValue := false
+	if input.IsIssueSet {
+		issueValue = input.IsIssue
+	}
 	var item domain.KanbanCard
 	item, err = scanKanbanCard(tx.QueryRowContext(ctx, `
 update kanban_cards
@@ -634,10 +638,11 @@ set column_id=$4,
     node_title=$6,
     description_snapshot=case when $7 <> '' then $7 else description_snapshot end,
     position=$8,
+    is_issue=case when $9 then $10 else is_issue end,
     updated_timestamp=now()
 where company_id=$1 and board_id=$2 and node_id=$3
 returning `+kanbanCardSelectColumns,
-		input.CompanyID, input.BoardID, input.NodeID, input.ColumnID, boardLogicGateID, nodeTitle, descriptionSnapshot, input.Position,
+		input.CompanyID, input.BoardID, input.NodeID, input.ColumnID, boardLogicGateID, nodeTitle, descriptionSnapshot, input.Position, input.IsIssueSet, issueValue,
 	))
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return domain.KanbanCard{}, err
@@ -647,10 +652,10 @@ returning `+kanbanCardSelectColumns,
 insert into kanban_cards (
   company_id, board_id, card_id, column_id, node_id, logic_gate_id, node_title,
   description_snapshot, is_issue, position, created_timestamp, updated_timestamp
-) values ($1,$2,$3,$4,$5,$6::uuid,$7,$8,false,$9,now(),now())
+) values ($1,$2,$3,$4,$5,$6::uuid,$7,$8,$9,$10,now(),now())
 returning `+kanbanCardSelectColumns,
 			input.CompanyID, input.BoardID, newUUIDv7String(), input.ColumnID,
-			input.NodeID, boardLogicGateID, nodeTitle, descriptionSnapshot, input.Position,
+			input.NodeID, boardLogicGateID, nodeTitle, descriptionSnapshot, issueValue, input.Position,
 		))
 		if err != nil {
 			return domain.KanbanCard{}, err
@@ -670,6 +675,408 @@ returning `+kanbanCardSelectColumns,
 	return item, nil
 }
 
+func (r *PostgresRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentInput) (LogicGateNodeAssignmentResult, error) {
+	input, err := NormalizeLogicGateNodeAssignmentInput(input)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	defer tx.Rollback()
+
+	boardID := LogicGateKanbanBoardID(input.LogicGateID)
+	rows, err := tx.QueryContext(ctx, `
+select kc.company_id, kc.board_id, kc.column_id, kc.title, kc.position, kc.width_px, kc.height_px, kc.item_color, kc.created_timestamp, kc.updated_timestamp
+from kanban_boards kb
+join kanban_columns kc on kc.company_id=kb.company_id and kc.board_id=kb.board_id
+where kb.company_id=$1
+  and kb.board_id=$2
+  and kb.logic_gate_id::text=$3
+order by kc.position asc, kc.created_timestamp asc, kc.column_id asc`, input.CompanyID, boardID, input.LogicGateID)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	columns := make([]domain.KanbanColumn, 0)
+	for rows.Next() {
+		column, err := scanKanbanColumn(rows)
+		if err != nil {
+			rows.Close()
+			return LogicGateNodeAssignmentResult{}, err
+		}
+		columns = append(columns, column)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+
+	column, err := resolveLogicGateAssignmentColumn(columns, input.ColumnID, input.Status)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+
+	var canonicalNodeTitle string
+	if err := tx.QueryRowContext(ctx, `
+select title
+from nodes
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canonicalNodeTitle); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return LogicGateNodeAssignmentResult{}, ErrNotFound
+		}
+		return LogicGateNodeAssignmentResult{}, err
+	}
+
+	position := input.Position
+	if position <= 0 {
+		if err := tx.QueryRowContext(ctx, `
+select coalesce(max(position), 0) + 1000
+from kanban_cards
+where company_id=$1 and board_id=$2 and column_id=$3`, input.CompanyID, boardID, column.ColumnID).Scan(&position); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	}
+
+	nodeTitle := strings.TrimSpace(canonicalNodeTitle)
+	if nodeTitle == "" {
+		nodeTitle = normalizeKanbanBoardTitle(input.NodeID, input.NodeTitle)
+	}
+	descriptionSnapshot := strings.TrimSpace(input.DescriptionSnapshot)
+	if _, err := tx.ExecContext(ctx, `
+delete from kanban_cards
+where company_id=$1
+  and node_id=$2
+  and board_id<>$3
+  and logic_gate_id is not null`, input.CompanyID, input.NodeID, boardID); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+
+	issueValue := false
+	if input.IsIssueSet {
+		issueValue = input.IsIssue
+	}
+
+	var card domain.KanbanCard
+	card, err = scanKanbanCard(tx.QueryRowContext(ctx, `
+update kanban_cards
+set column_id=$4,
+    logic_gate_id=$5::uuid,
+    node_title=$6,
+    description_snapshot=case when $7 <> '' then $7 else description_snapshot end,
+    position=$8,
+    is_issue=case when $9 then $10 else is_issue end,
+    updated_timestamp=now()
+where company_id=$1 and board_id=$2 and node_id=$3
+returning `+kanbanCardSelectColumns,
+		input.CompanyID, boardID, input.NodeID, column.ColumnID, input.LogicGateID, nodeTitle, descriptionSnapshot, position, input.IsIssueSet, issueValue,
+	))
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		card, err = scanKanbanCard(tx.QueryRowContext(ctx, `
+insert into kanban_cards (
+  company_id, board_id, card_id, column_id, node_id, logic_gate_id, node_title,
+  description_snapshot, is_issue, position, created_timestamp, updated_timestamp
+) values ($1,$2,$3,$4,$5,$6::uuid,$7,$8,$9,$10,now(),now())
+returning `+kanbanCardSelectColumns,
+			input.CompanyID, boardID, newUUIDv7String(), column.ColumnID,
+			input.NodeID, input.LogicGateID, nodeTitle, descriptionSnapshot, issueValue, position,
+		))
+		if err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	}
+	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, card); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	if input.PrioritySet {
+		var priority any
+		if input.Priority != nil {
+			priority = *input.Priority
+		}
+		if _, err := tx.ExecContext(ctx, `
+update nodes
+set priority=$3::smallint
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, priority); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	}
+
+	node, err := scanNode(tx.QueryRowContext(ctx, `
+select `+nodeSelectColumns+`
+from nodes n
+`+nodeStatusJoin+`
+where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	return LogicGateNodeAssignmentResult{Card: card, Node: node}, nil
+}
+
+type kanbanCardQueryRower interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func logicGateAssignmentCardByNodeSQL(ctx context.Context, queryer kanbanCardQueryRower, companyID, nodeID, logicGateID string) (domain.KanbanCard, error) {
+	item, err := scanKanbanCard(queryer.QueryRowContext(ctx, `
+select `+kanbanCardSelectColumns+`
+from kanban_cards
+where company_id=$1
+  and node_id=$2
+  and logic_gate_id is not null
+  and ($3 = '' or logic_gate_id::text = $3)
+order by updated_timestamp desc, created_timestamp desc, card_id desc
+limit 1`, companyID, nodeID, logicGateID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.KanbanCard{}, ErrNotFound
+	}
+	return item, err
+}
+
+func (r *PostgresRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMoveInput) (LogicGateNodeAssignmentResult, error) {
+	input, err := NormalizeLogicGateNodeAssignmentMoveInput(input)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	defer tx.Rollback()
+
+	card, err := logicGateAssignmentCardByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+
+	columnID := card.ColumnID
+	if input.ColumnID != "" || input.Status != "" {
+		rows, err := tx.QueryContext(ctx, `
+select company_id, board_id, column_id, title, position, width_px, height_px, item_color, created_timestamp, updated_timestamp
+from kanban_columns
+where company_id=$1 and board_id=$2
+order by position asc, created_timestamp asc, column_id asc`, input.CompanyID, card.BoardID)
+		if err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+		columns := make([]domain.KanbanColumn, 0)
+		for rows.Next() {
+			column, err := scanKanbanColumn(rows)
+			if err != nil {
+				rows.Close()
+				return LogicGateNodeAssignmentResult{}, err
+			}
+			columns = append(columns, column)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return LogicGateNodeAssignmentResult{}, err
+		}
+		if err := rows.Close(); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+		column, err := resolveLogicGateAssignmentColumn(columns, input.ColumnID, input.Status)
+		if err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+		columnID = column.ColumnID
+	}
+
+	position := card.Position
+	if input.Position > 0 {
+		position = input.Position
+	} else if columnID != card.ColumnID {
+		if err := tx.QueryRowContext(ctx, `
+select coalesce(max(position), 0) + 1000
+from kanban_cards
+where company_id=$1 and board_id=$2 and column_id=$3`, input.CompanyID, card.BoardID, columnID).Scan(&position); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	}
+
+	card, err = scanKanbanCard(tx.QueryRowContext(ctx, `
+update kanban_cards
+set column_id=$4,
+    node_title=coalesce((select title from nodes where company_id=$1 and node_id=kanban_cards.node_id), node_title),
+    position=$5,
+    updated_timestamp=now()
+where company_id=$1 and board_id=$2 and card_id=$3
+returning `+kanbanCardSelectColumns,
+		input.CompanyID, card.BoardID, card.CardID, columnID, position,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return LogicGateNodeAssignmentResult{}, ErrNotFound
+	}
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, card); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	if input.AssigneePolicySet {
+		if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	}
+	if input.PrioritySet {
+		var priority any
+		if input.Priority != nil {
+			priority = *input.Priority
+		}
+		if _, err := tx.ExecContext(ctx, `
+update nodes
+set priority=$3::smallint
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, priority); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+	}
+
+	node, err := scanNode(tx.QueryRowContext(ctx, `
+select `+nodeSelectColumns+`
+from nodes n
+`+nodeStatusJoin+`
+where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	return LogicGateNodeAssignmentResult{Card: card, Node: node}, nil
+}
+
+func (r *PostgresRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignmentRemoveInput) (LogicGateNodeAssignmentRemoveResult, error) {
+	input, err := NormalizeLogicGateNodeAssignmentRemoveInput(input)
+	if err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
+
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
+	defer tx.Rollback()
+
+	card, err := logicGateAssignmentCardByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
+	if err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
+	deleted, err := tx.ExecContext(ctx, `
+delete from kanban_cards
+where company_id=$1 and board_id=$2 and card_id=$3`, input.CompanyID, card.BoardID, card.CardID)
+	if err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
+	affected, err := deleted.RowsAffected()
+	if err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
+	if affected == 0 {
+		return LogicGateNodeAssignmentRemoveResult{}, ErrNotFound
+	}
+
+	remaining, err := logicGateAssignmentCardByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, "")
+	if err == nil {
+		if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, remaining); err != nil {
+			return LogicGateNodeAssignmentRemoveResult{}, err
+		}
+	} else if errors.Is(err, ErrNotFound) {
+		var fallbackStatus any
+		var fallbackStatusColor any
+		if input.FallbackStatus != nil {
+			fallbackStatus = *input.FallbackStatus
+		}
+		if input.FallbackStatusColor != nil {
+			fallbackStatusColor = *input.FallbackStatusColor
+		}
+		if _, err := tx.ExecContext(ctx, `
+update nodes
+set status=$3::text,
+    status_color=$4::text
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, fallbackStatus, fallbackStatusColor); err != nil {
+			return LogicGateNodeAssignmentRemoveResult{}, err
+		}
+	} else if err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
+
+	node, err := scanNode(tx.QueryRowContext(ctx, `
+select `+nodeSelectColumns+`
+from nodes n
+`+nodeStatusJoin+`
+where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
+	if err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return LogicGateNodeAssignmentRemoveResult{}, err
+	}
+	return LogicGateNodeAssignmentRemoveResult{Card: card, Node: node}, nil
+}
+
+func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignmentIssueInput) (LogicGateNodeAssignmentResult, error) {
+	input, err := NormalizeLogicGateNodeAssignmentIssueInput(input)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	defer tx.Rollback()
+
+	current, err := logicGateAssignmentCardByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	card, err := scanKanbanCard(tx.QueryRowContext(ctx, `
+update kanban_cards
+set is_issue=$4,
+    updated_timestamp=now()
+where company_id=$1 and board_id=$2 and card_id=$3
+returning `+kanbanCardSelectColumns,
+		input.CompanyID, current.BoardID, current.CardID, input.IsIssue,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return LogicGateNodeAssignmentResult{}, ErrNotFound
+	}
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	if err := syncNodeStatusFromKanbanCardSQL(ctx, tx, card); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	node, err := scanNode(tx.QueryRowContext(ctx, `
+select `+nodeSelectColumns+`
+from nodes n
+`+nodeStatusJoin+`
+where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	return LogicGateNodeAssignmentResult{Card: card, Node: node}, nil
+}
 func (r *PostgresRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)

@@ -13,6 +13,7 @@ Source architecture:
 - Serialize changes to shared contracts: repository interfaces, migrations, workspace handlers, auth middleware, event publishing, and the shared frontend API client.
 - Prefer additive migrations: add the new command/read/event path, switch one surface, then remove the old path after it is no longer hot.
 - A branch is done only when it has tests, migration/backfill notes when needed, and a clear rollback story.
+- Any branch that adds or changes SQL schema/migrations must include a copy-paste migration run command in the final response. Prefer PowerShell for the local Windows workflow, and include Bash when useful. Assume the developer may already have a backend terminal running from `.\scripts\start_local_cognito_backend.ps1 -AwsProfile mangorts-dev -StopExisting`, so DB credentials may already be present in that terminal environment.
 - Full-company convenience reads are compatibility/admin/debug paths only. Product hot paths should use bounded read models.
 
 ## Progress Summary
@@ -151,7 +152,11 @@ Scope:
 - Decide whether existing Kanban-card-backed ownership is enough or whether the app needs `work_items` / `node_logic_gate_assignments`.
 - Define table shape, backfill plan, compatibility reads, command list, and event taxonomy only if a new table is justified.
 
+Decision document:
+- `docs/important tasks/work-items-source-of-truth-design.md` recommends staying Kanban-card-backed for now and finishing command parity before adding any new work-item source table.
+
 Follow-up branches:
+- `work-items/assignment-command-parity-existing-model`
 - `work-items/raci-add-remove-commands`
 - `work-items/home-drop-command`
 - `work-items/email-conversion-command`

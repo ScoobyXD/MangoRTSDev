@@ -62,7 +62,7 @@ import { invalidateNodeRecordStoreCaches } from "../../modules/node-map/NodeReco
 import { upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
 import { upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
-import { getLogicGateArenaView, invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, upsertKanbanCard } from "../../modules/kanban/kanbanApi";
+import { assignNodeToLogicGateStatus, invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, moveLogicGateAssignment } from "../../modules/kanban/kanbanApi";
 import { subscribeWorkspaceStream } from "../../modules/workspace/workspaceStream";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
 import type { NotificationItem } from "../../modules/notifications/notificationsApi";
@@ -81,16 +81,6 @@ import { AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH
 import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, collectSharedInboxSubtreeIDs, emailAddressListContains, filterExplorerRowsForSearch, filterSharedInboxesForUser, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, normalizeResponsibleInboxStatus, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
-
-function responsibleInboxStatusTitle(status: ResponsibleInboxStatus): string {
-  if (status === "in_progress") return "In Progress";
-  if (status === "done") return "Done";
-  return "Pending";
-}
-
-function firstResponsibleUserID(logicGate: LogicGateRecord | undefined): string {
-  return (logicGate?.raci_assignments ?? []).find((assignment) => assignment.role === "responsible")?.user_id?.trim() ?? "";
-}
 
 function sharedInboxIDForHomeView(viewID: HomeViewID): string {
   return viewID.startsWith("shared:") ? viewID.slice("shared:".length).trim() : "";
@@ -1658,14 +1648,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     }
     setBulkEditMenu({ x: event.clientX, y: event.clientY, kind: "logic_gate", ids });
   }, [logicGateByID, selectedLogicGateRowIDs]);
-  const findLogicGateColumnID = useCallback(async (logicGateID: string, status: ResponsibleInboxStatus): Promise<{ boardID: string; columnID: string } | null> => {
-    const view = await getLogicGateArenaView(apiBase, companyID, logicGateID);
-    const sortedColumns = [...(view.columns ?? [])].sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp) || a.column_id.localeCompare(b.column_id));
-    const wantedTitle = responsibleInboxStatusTitle(status).toLowerCase();
-    const column = sortedColumns.find((item) => item.title.trim().toLowerCase() === wantedTitle) ?? sortedColumns[0];
-    if (!column) return null;
-    return { boardID: view.board.board_id, columnID: column.column_id };
-  }, [apiBase, companyID]);
   const dropNodesIntoInboxLogicGate = useCallback(async (input: { logicGateID: string; nodeIDs: string[]; priority: InboxPriority; status?: ResponsibleInboxStatus }) => {
     const logicGateID = input.logicGateID.trim();
     const nodeIDs = cleanIDList(input.nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
@@ -1673,39 +1655,23 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setBusy("inbox-node-drop");
     setError("");
     try {
-      const responsibleUserID = firstResponsibleUserID(logicGateByID.get(logicGateID));
-      const columnCache = new Map<ResponsibleInboxStatus, Promise<{ boardID: string; columnID: string } | null>>();
-      const columnForStatus = (status: ResponsibleInboxStatus) => {
-        const existing = columnCache.get(status);
-        if (existing) return existing;
-        const next = findLogicGateColumnID(logicGateID, status);
-        columnCache.set(status, next);
-        return next;
-      };
+      const priority = input.priority === 0 ? null : input.priority;
       const updatedNodes = await Promise.all(nodeIDs.map(async (nodeID) => {
         const node = nodeByID.get(nodeID);
         if (!node) return null;
         const status = input.status ?? normalizeResponsibleInboxStatus(node.status) ?? "pending";
-        const placement = await columnForStatus(status);
-        if (placement) {
-          await upsertKanbanCard({
-            apiBase,
-            companyID,
-            boardID: placement.boardID,
-            columnID: placement.columnID,
-            nodeID,
-            nodeTitle: nodeTitle(node),
-            position: 0,
-          });
-          invalidateKanbanBoardContentsCache(apiBase, companyID, placement.boardID);
-          invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
-        }
-        const priority = input.priority === 0 ? null : input.priority;
-        const updated = await updateNode(companyID, nodeID, {
+        const result = await assignNodeToLogicGateStatus({
+          apiBase,
+          companyID,
+          logicGateID,
+          nodeID,
+          status,
           priority,
-          ...(responsibleUserID ? { assignee_user_id: responsibleUserID } : {}),
+          nodeTitle: nodeTitle(node),
+          position: 0,
         });
-        return updated;
+        invalidateKanbanBoardContentsCache(apiBase, companyID, result.card.board_id);
+        return result.node;
       }));
       for (const node of updatedNodes) {
         if (node) mergeUpdatedNode(node);
@@ -1716,7 +1682,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, findLogicGateColumnID, logicGateByID, mergeUpdatedNode, nodeByID]);
+  }, [apiBase, companyID, mergeUpdatedNode, nodeByID]);
   const applyBulkNodePatch = useCallback(async (nodeIDs: string[], patch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">>) => {
     const ids = cleanIDList(nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
     if (ids.length === 0) return;
@@ -1727,26 +1693,28 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       const updatedNodes = await Promise.all(ids.map(async (nodeID) => {
         const node = nodeByID.get(nodeID);
         if (!node) return null;
-        if (status) {
-          const logicGateID = cleanIDList(node.logic_gate_ids ?? [])[0] ?? "";
-          if (logicGateID) {
-            const placement = await findLogicGateColumnID(logicGateID, status);
-            if (placement) {
-              await upsertKanbanCard({
-                apiBase,
-                companyID,
-                boardID: placement.boardID,
-                columnID: placement.columnID,
-                nodeID,
-                nodeTitle: nodeTitle(node),
-                position: 0,
-              });
-              invalidateKanbanBoardContentsCache(apiBase, companyID, placement.boardID);
-              invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
-            }
-          }
+        const logicGateID = cleanIDList(node.logic_gate_ids ?? [])[0] ?? "";
+        let commandNode: NodeRecord | null = null;
+        const directPatch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">> = { ...patch };
+        if (status && logicGateID) {
+          const priorityWasSet = Object.prototype.hasOwnProperty.call(patch, "priority");
+          const result = await moveLogicGateAssignment({
+            apiBase,
+            companyID,
+            logicGateID,
+            nodeID,
+            status,
+            position: 0,
+            priority: priorityWasSet ? patch.priority ?? null : undefined,
+          });
+          commandNode = result.node;
+          delete directPatch.status;
+          if (priorityWasSet) delete directPatch.priority;
+          invalidateKanbanBoardContentsCache(apiBase, companyID, result.card.board_id);
+          invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
         }
-        const updated = await updateNode(companyID, nodeID, patch);
+        if (Object.keys(directPatch).length === 0) return commandNode;
+        const updated = await updateNode(companyID, nodeID, directPatch);
         return updated;
       }));
       for (const node of updatedNodes) {
@@ -1759,7 +1727,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       setBusy("");
       setBulkEditMenu(null);
     }
-  }, [apiBase, companyID, findLogicGateColumnID, mergeUpdatedNode, nodeByID]);
+  }, [apiBase, companyID, mergeUpdatedNode, nodeByID]);
   const applyBulkLogicGateRaci = useCallback(async (logicGateIDs: string[], role: CommunicationsSharedInboxRaciRole, userID: string, action: "add" | "remove") => {
     const ids = cleanIDList(logicGateIDs).filter((logicGateID) => logicGateByID.has(logicGateID));
     const cleanUserID = userID.trim();

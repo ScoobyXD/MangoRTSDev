@@ -1082,7 +1082,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setCardContextMenu(null);
     setError("");
     try {
-      await deleteKanbanCardsCommand({ context: kanbanCommandContext, cardIDs: Array.from(ids) });
+      await deleteKanbanCardsCommand({ context: kanbanCommandContext, cards, cardIDs: Array.from(ids) });
     } catch {
       setError("Card delete failed");
       setCards(previousCards);

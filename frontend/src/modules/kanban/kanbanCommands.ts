@@ -1,8 +1,12 @@
 import {
+  assignNodeToLogicGateStatus,
   createKanbanColumn,
   deleteKanbanCard,
   deleteKanbanColumn,
   moveKanbanCard,
+  moveLogicGateAssignment,
+  removeLogicGateAssignment,
+  setLogicGateAssignmentIssue,
   updateKanbanColumn,
   upsertKanbanCard,
 } from "./kanbanApi.js";
@@ -14,6 +18,7 @@ import {
   nextCardPosition,
   nextColumnPosition,
   normalizeKanbanColumnItemColor,
+  logicGateIDFromKanbanBoardID,
   type ExplorerEntityDragItem,
   type KanbanCard,
   type KanbanCardDropPlacement,
@@ -30,22 +35,34 @@ export type KanbanCommandContext = {
 };
 
 export type KanbanCommandClient = {
+  assignNodeToLogicGateStatus: typeof assignNodeToLogicGateStatus;
   createColumn: typeof createKanbanColumn;
   updateColumn: typeof updateKanbanColumn;
   deleteColumn: typeof deleteKanbanColumn;
   moveCard: typeof moveKanbanCard;
   upsertCard: typeof upsertKanbanCard;
   deleteCard: typeof deleteKanbanCard;
+  moveLogicGateAssignment: typeof moveLogicGateAssignment;
+  removeLogicGateAssignment: typeof removeLogicGateAssignment;
+  setLogicGateAssignmentIssue: typeof setLogicGateAssignmentIssue;
 };
 
 const defaultKanbanCommandClient: KanbanCommandClient = {
+  assignNodeToLogicGateStatus,
   createColumn: createKanbanColumn,
   updateColumn: updateKanbanColumn,
   deleteColumn: deleteKanbanColumn,
   moveCard: moveKanbanCard,
   upsertCard: upsertKanbanCard,
   deleteCard: deleteKanbanCard,
+  moveLogicGateAssignment,
+  removeLogicGateAssignment,
+  setLogicGateAssignmentIssue,
 };
+
+function logicGateIDForCard(context: KanbanCommandContext, card?: Pick<KanbanCard, "logic_gate_id" | "board_id"> | null): string {
+  return (card?.logic_gate_id ?? "").trim() || logicGateIDFromKanbanBoardID(card?.board_id ?? context.boardID);
+}
 
 export async function createKanbanColumnCommand(args: {
   context: KanbanCommandContext;
@@ -158,14 +175,30 @@ export async function reorderKanbanCardsCommand(args: {
   const plan = buildCardBatchReorderPlan(cards, cardIDs, columnID, targetCardID, placement);
   if (plan.updates.length === 0) return { cards: plan.cards, updates: [], persistedCards: [] };
   onOptimisticCards?.(plan.cards);
-  const persistedCards = await Promise.all(plan.updates.map((update) => client.moveCard({
-    apiBase: context.apiBase,
-    companyID: context.companyID,
-    boardID: context.boardID,
-    cardID: update.cardID,
-    columnID: update.columnID,
-    position: update.position,
-  })));
+  const cardByID = new Map(cards.map((card) => [card.card_id, card]));
+  const persistedCards = await Promise.all(plan.updates.map(async (update) => {
+    const card = cardByID.get(update.cardID);
+    const logicGateID = logicGateIDForCard(context, card);
+    if (card && logicGateID) {
+      const result = await client.moveLogicGateAssignment({
+        apiBase: context.apiBase,
+        companyID: context.companyID,
+        logicGateID,
+        nodeID: card.node_id,
+        columnID: update.columnID,
+        position: update.position,
+      });
+      return result.card;
+    }
+    return client.moveCard({
+      apiBase: context.apiBase,
+      companyID: context.companyID,
+      boardID: context.boardID,
+      cardID: update.cardID,
+      columnID: update.columnID,
+      position: update.position,
+    });
+  }));
   return { cards: plan.cards, updates: plan.updates, persistedCards };
 }
 
@@ -220,15 +253,31 @@ export async function addExplorerNodesToKanbanColumnCommand(args: {
   const optimisticCardIDs = new Set(optimisticCards.map((card) => card.card_id));
   onOptimisticCards?.(optimisticCards, nodeIDs);
 
-  const savedCards = await Promise.all(dedupedItems.map((item, index) => client.upsertCard({
-    apiBase: context.apiBase,
-    companyID: context.companyID,
-    boardID: context.boardID,
-    columnID,
-    nodeID: item.nodeID,
-    nodeTitle: item.label,
-    position: firstPosition + index * 1000,
-  })));
+  const logicGateID = logicGateIDFromKanbanBoardID(context.boardID);
+  const savedCards = await Promise.all(dedupedItems.map(async (item, index) => {
+    const position = firstPosition + index * 1000;
+    if (logicGateID) {
+      const result = await client.assignNodeToLogicGateStatus({
+        apiBase: context.apiBase,
+        companyID: context.companyID,
+        logicGateID,
+        nodeID: item.nodeID,
+        columnID,
+        nodeTitle: item.label,
+        position,
+      });
+      return result.card;
+    }
+    return client.upsertCard({
+      apiBase: context.apiBase,
+      companyID: context.companyID,
+      boardID: context.boardID,
+      columnID,
+      nodeID: item.nodeID,
+      nodeTitle: item.label,
+      position,
+    });
+  }));
 
   return { optimisticCards, optimisticCardIDs, nodeIDs, savedCards };
 }
@@ -240,6 +289,17 @@ export async function toggleKanbanCardIssueCommand(args: {
   client?: KanbanCommandClient;
 }): Promise<KanbanCard> {
   const { context, card, client = defaultKanbanCommandClient } = args;
+  const logicGateID = logicGateIDForCard(context, card);
+  if (logicGateID) {
+    const result = await client.setLogicGateAssignmentIssue({
+      apiBase: context.apiBase,
+      companyID: context.companyID,
+      logicGateID,
+      nodeID: card.node_id,
+      isIssue: args.isIssue,
+    });
+    return result.card;
+  }
   return client.moveCard({
     apiBase: context.apiBase,
     companyID: context.companyID,
@@ -252,10 +312,25 @@ export async function toggleKanbanCardIssueCommand(args: {
 export async function deleteKanbanCardsCommand(args: {
   context: KanbanCommandContext;
   cardIDs: string[];
+  cards?: KanbanCard[];
   client?: KanbanCommandClient;
 }): Promise<string[]> {
   const { context, client = defaultKanbanCommandClient } = args;
   const uniqueCardIDs = Array.from(new Set(args.cardIDs.map((cardID) => cardID.trim()).filter(Boolean)));
-  await Promise.all(uniqueCardIDs.map((cardID) => client.deleteCard(context.apiBase, context.companyID, context.boardID, cardID)));
+  const cardByID = new Map((args.cards ?? []).map((card) => [card.card_id, card]));
+  await Promise.all(uniqueCardIDs.map(async (cardID) => {
+    const card = cardByID.get(cardID);
+    const logicGateID = logicGateIDForCard(context, card);
+    if (card && logicGateID) {
+      await client.removeLogicGateAssignment({
+        apiBase: context.apiBase,
+        companyID: context.companyID,
+        logicGateID,
+        nodeID: card.node_id,
+      });
+      return;
+    }
+    await client.deleteCard(context.apiBase, context.companyID, context.boardID, cardID);
+  }));
   return uniqueCardIDs;
 }
