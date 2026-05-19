@@ -145,12 +145,9 @@ where user_id=$1 and message_id=$2`, userID, messageID)
 }
 
 func (r *PostgresRepo) ConvertCommunicationsTriageItems(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
-	input.UserID = strings.TrimSpace(input.UserID)
-	input.CompanyID = strings.TrimSpace(input.CompanyID)
-	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
-	messageIDs := normalizeUniqueStrings(input.MessageIDs, CommunicationsTriageBatchMaxItems)
-	if input.UserID == "" || input.CompanyID == "" || input.LogicGateID == "" || len(messageIDs) == 0 {
-		return CommunicationsTriageConversionResult{}, ErrInvalid
+	input, err := NormalizeCommunicationsTriageConversionInput(input)
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
 	}
 
 	ctx := context.Background()
@@ -160,16 +157,50 @@ func (r *PostgresRepo) ConvertCommunicationsTriageItems(input CommunicationsTria
 	}
 	defer tx.Rollback()
 
-	var logicGateTitle string
-	if err := tx.QueryRowContext(ctx, `
-select header
+	var logicGate domain.LogicGate
+	createdLogicGate := false
+	switch input.Target.Mode {
+	case CommunicationsEmailConversionTargetExistingLogicGate:
+		err := tx.QueryRowContext(ctx, `
+select company_id::text, logic_gate_id::text, header, created_timestamp
 from logic_gates
-where company_id=$1 and logic_gate_id=$2`, input.CompanyID, input.LogicGateID).Scan(&logicGateTitle); errors.Is(err, sql.ErrNoRows) {
-		return CommunicationsTriageConversionResult{}, ErrNotFound
-	} else if err != nil {
-		return CommunicationsTriageConversionResult{}, err
+where company_id=$1 and logic_gate_id=$2`, input.CompanyID, input.LogicGateID).Scan(
+			&logicGate.CompanyID,
+			&logicGate.LogicGateID,
+			&logicGate.Header,
+			&logicGate.CreatedTimestamp,
+		)
+		if errors.Is(err, sql.ErrNoRows) {
+			return CommunicationsTriageConversionResult{}, ErrNotFound
+		}
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+	case CommunicationsEmailConversionTargetNewLogicGate:
+		logicGate = domain.LogicGate{CompanyID: input.CompanyID, LogicGateID: newUUIDv7String(), Header: input.NewLogicGateHeader}
+		if err := tx.QueryRowContext(ctx, `
+insert into logic_gates (company_id, logic_gate_id, header, created_timestamp)
+values ($1, $2, $3, now())
+returning company_id::text, logic_gate_id::text, header, created_timestamp`, logicGate.CompanyID, logicGate.LogicGateID, logicGate.Header).Scan(
+			&logicGate.CompanyID,
+			&logicGate.LogicGateID,
+			&logicGate.Header,
+			&logicGate.CreatedTimestamp,
+		); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		input.LogicGateID = logicGate.LogicGateID
+		input.Target.LogicGateID = logicGate.LogicGateID
+		createdLogicGate = true
+	default:
+		return CommunicationsTriageConversionResult{}, ErrInvalid
 	}
-	if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, input.LogicGateID, logicGateTitle); err != nil {
+	input.Target.Header = logicGate.Header
+	if logicGate.RaciAssignments == nil {
+		logicGate.RaciAssignments = []domain.LogicGateRaciAssignment{}
+	}
+
+	if err := ensureLogicGateKanbanBoardSQL(ctx, tx, input.CompanyID, input.LogicGateID, logicGate.Header); err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
 	activeNodeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
@@ -180,33 +211,57 @@ where company_id=$1 and logic_gate_id=$2`, input.CompanyID, input.LogicGateID).S
 	board, err := scanKanbanBoard(tx.QueryRowContext(ctx, `
 select company_id::text, board_id, logic_gate_id::text, title, position, created_timestamp, updated_timestamp
 from kanban_boards
-where company_id=$1 and board_id=$2`, input.CompanyID, LogicGateKanbanBoardID(input.LogicGateID)))
+where company_id=$1 and logic_gate_id=$2::uuid
+order by (board_id=$3) desc, created_timestamp asc, board_id asc
+limit 1`, input.CompanyID, input.LogicGateID, LogicGateKanbanBoardID(input.LogicGateID)))
 	if err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
 
-	var pendingColumnID string
-	if err := tx.QueryRowContext(ctx, `
-select column_id::text
+	rows, err := tx.QueryContext(ctx, `
+select company_id::text, board_id, column_id::text, title, position, width_px, height_px, item_color, created_timestamp, updated_timestamp
 from kanban_columns
-where company_id=$1 and board_id=$2 and lower(btrim(title))='pending'
-order by position asc
-limit 1`, input.CompanyID, board.BoardID).Scan(&pendingColumnID); errors.Is(err, sql.ErrNoRows) {
-		return CommunicationsTriageConversionResult{}, ErrNotFound
-	} else if err != nil {
+where company_id=$1 and board_id=$2
+order by position asc, created_timestamp asc, column_id asc`, input.CompanyID, board.BoardID)
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
+	columns := make([]domain.KanbanColumn, 0)
+	for rows.Next() {
+		column, err := scanKanbanColumn(rows)
+		if err != nil {
+			rows.Close()
+			return CommunicationsTriageConversionResult{}, err
+		}
+		columns = append(columns, column)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return CommunicationsTriageConversionResult{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
+	column, err := resolveLogicGateAssignmentColumn(columns, input.ColumnID, input.Status)
+	if err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
 
 	var nextPosition int
 	if err := tx.QueryRowContext(ctx, `
 select coalesce(max(position), 0) + 1000
-from kanban_cards
-where company_id=$1 and board_id=$2 and column_id=$3`, input.CompanyID, board.BoardID, pendingColumnID).Scan(&nextPosition); err != nil {
+from node_logic_gate_assignments
+where company_id=$1 and compatibility_board_id=$2 and column_id=$3`, input.CompanyID, board.BoardID, column.ColumnID).Scan(&nextPosition); err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
 
-	result := CommunicationsTriageConversionResult{Board: board}
-	for index, messageID := range messageIDs {
+	result := CommunicationsTriageConversionResult{
+		Target:           input.Target,
+		LogicGate:        logicGate,
+		CreatedLogicGate: createdLogicGate,
+		Board:            board,
+	}
+	for index, messageID := range input.MessageIDs {
 		var rawMessage []byte
 		if err := tx.QueryRowContext(ctx, `
 select message
@@ -244,38 +299,43 @@ insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
 values ($1, $2, $3, $4, now())`, input.CompanyID, nodeID, 120+float64(index*28), 120+float64(index*28)); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
+
 		cardID := newUUIDv7String()
+		position := nextPosition + index*1000
+		assignment, err := upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
+			CompanyID:            input.CompanyID,
+			NodeID:               nodeID,
+			LogicGateID:          input.LogicGateID,
+			StatusKey:            logicGateAssignmentStatusKey(column.Title),
+			ColumnID:             column.ColumnID,
+			IsIssue:              false,
+			Position:             position,
+			CompatibilityBoardID: board.BoardID,
+			CompatibilityCardID:  cardID,
+		})
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
 		card, err := scanKanbanCard(tx.QueryRowContext(ctx, `
 insert into kanban_cards (
   company_id, board_id, card_id, column_id, node_id, logic_gate_id, node_title,
   description_snapshot, is_issue, position, created_timestamp, updated_timestamp
 ) values ($1, $2, $3, $4, $5, $6::uuid, $7, $8, false, $9, now(), now())
 returning `+kanbanCardSelectColumns,
-			input.CompanyID, board.BoardID, cardID, pendingColumnID, nodeID, input.LogicGateID, nodeTitle,
-			emailDescriptionSnapshot(message), nextPosition+index*1000,
+			input.CompanyID, board.BoardID, cardID, column.ColumnID, nodeID, input.LogicGateID, nodeTitle,
+			emailDescriptionSnapshot(message), position,
 		))
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if _, err := upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
-			CompanyID:            input.CompanyID,
-			NodeID:               nodeID,
-			LogicGateID:          input.LogicGateID,
-			StatusKey:            logicGateAssignmentStatusKey("Pending"),
-			ColumnID:             pendingColumnID,
-			IsIssue:              false,
-			Position:             card.Position,
-			CompatibilityBoardID: board.BoardID,
-			CompatibilityCardID:  card.CardID,
-		}); err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
-		if _, err := tx.ExecContext(ctx, `
+		placement, err := scanCommunicationsEmailPlacement(tx.QueryRowContext(ctx, `
 insert into communications_email_nodes (
   company_id, user_id, message_id, node_id, board_id, card_id, logic_gate_id,
   message, created_timestamp, updated_timestamp
-) values ($1, $2, $3, $4, $5, $6, $7::uuid, $8::jsonb, now(), now())`,
-			input.CompanyID, input.UserID, messageID, nodeID, board.BoardID, card.CardID, input.LogicGateID, string(rawMessage)); err != nil {
+) values ($1, $2, $3, $4, $5, $6, $7::uuid, $8::jsonb, now(), now())
+returning company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text, created_timestamp, updated_timestamp`,
+			input.CompanyID, input.UserID, messageID, nodeID, board.BoardID, card.CardID, input.LogicGateID, string(rawMessage)))
+		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, nodeID, message, time.Now().UTC()); err != nil {
@@ -300,18 +360,35 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
+		provenance := CommunicationsEmailConversionProvenance{
+			CompanyID:   placement.CompanyID,
+			UserID:      placement.UserID,
+			MessageID:   placement.MessageID,
+			ThreadID:    strings.TrimSpace(message.ThreadID),
+			NodeID:      placement.NodeID,
+			BoardID:     placement.BoardID,
+			CardID:      placement.CardID,
+			LogicGateID: placement.LogicGateID,
+		}
 		result.Nodes = append(result.Nodes, node)
 		result.Cards = append(result.Cards, card)
+		result.Assignments = append(result.Assignments, assignment)
+		result.EmailPlacements = append(result.EmailPlacements, placement)
+		result.EmailProvenance = append(result.EmailProvenance, provenance)
 		result.FolderItems = append(result.FolderItems, folderItem)
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
 
+	events, err := r.appendDomainEventsTx(ctx, tx, communicationsEmailConversionWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
+	result.Events = events
 	if err := tx.Commit(); err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
 	return result, nil
 }
-
 func (r *PostgresRepo) ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error) {
 	userID = strings.TrimSpace(userID)
 	companyID = strings.TrimSpace(companyID)

@@ -113,26 +113,44 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		return
 	}
 	var req struct {
-		CompanyID   string   `json:"company_id"`
-		LogicGateID string   `json:"logic_gate_id"`
-		MessageIDs  []string `json:"message_ids"`
+		CompanyID          string                                     `json:"company_id"`
+		LogicGateID        string                                     `json:"logic_gate_id"`
+		NewLogicGateHeader string                                     `json:"new_logic_gate_header"`
+		Target             store.CommunicationsTriageConversionTarget `json:"target"`
+		Status             string                                     `json:"status"`
+		ColumnID           string                                     `json:"column_id"`
+		MessageIDs         []string                                   `json:"message_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	req.CompanyID = strings.TrimSpace(req.CompanyID)
-	req.LogicGateID = strings.TrimSpace(req.LogicGateID)
-	req.MessageIDs = cleanStringList(req.MessageIDs)
-	if req.CompanyID == "" || req.LogicGateID == "" || len(req.MessageIDs) == 0 {
-		writeError(w, http.StatusBadRequest, "company_logic_gate_and_messages_required")
+	actorUserID, idempotencyKey := workItemAssignmentRequestEventMetadata(r)
+	conversionInput, err := store.NormalizeCommunicationsTriageConversionInput(store.CommunicationsTriageConversionInput{
+		UserID:             connection.UserID,
+		CompanyID:          req.CompanyID,
+		ActorUserID:        actorUserID,
+		IdempotencyKey:     idempotencyKey,
+		LogicGateID:        req.LogicGateID,
+		NewLogicGateHeader: req.NewLogicGateHeader,
+		Target:             req.Target,
+		Status:             req.Status,
+		ColumnID:           req.ColumnID,
+		MessageIDs:         req.MessageIDs,
+	})
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "company_target_and_messages_required")
 		return
 	}
-	if !requireCompanyAccess(w, r, req.CompanyID) {
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_triage_conversion")
+		return
+	}
+	if !requireCompanyAccess(w, r, conversionInput.CompanyID) {
 		return
 	}
 
-	for _, messageID := range req.MessageIDs {
+	for _, messageID := range conversionInput.MessageIDs {
 		message, err := s.communicationsMessage(r.Context(), connection, messageID)
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
@@ -150,12 +168,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		}
 	}
 
-	result, err := s.repo.ConvertCommunicationsTriageItems(store.CommunicationsTriageConversionInput{
-		UserID:      connection.UserID,
-		CompanyID:   req.CompanyID,
-		LogicGateID: req.LogicGateID,
-		MessageIDs:  req.MessageIDs,
-	})
+	result, err := s.repo.ConvertCommunicationsTriageItems(conversionInput)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_triage_conversion")
 		return
@@ -165,28 +178,14 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		return
 	}
 	if err != nil {
-		log.Printf("failed to convert communications triage items user_id=%s company_id=%s logic_gate_id=%s message_count=%d: %v", connection.UserID, req.CompanyID, req.LogicGateID, len(req.MessageIDs), err)
+		log.Printf("failed to convert communications triage items user_id=%s company_id=%s target_mode=%s logic_gate_id=%s message_count=%d: %v", connection.UserID, conversionInput.CompanyID, conversionInput.Target.Mode, conversionInput.LogicGateID, len(conversionInput.MessageIDs), err)
 		writeError(w, http.StatusInternalServerError, "failed_to_convert_triage_items")
 		return
 	}
-	for _, item := range result.FolderItems {
-		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_item": item})
-	}
-	for _, node := range result.Nodes {
-		s.publishWorkspaceEvent(req.CompanyID, "node_created", map[string]any{"node_id": node.NodeID, "node": node})
-		s.publishKanbanDerivedNodeUpdate(req.CompanyID, node.NodeID)
-	}
-	for _, card := range result.Cards {
-		s.publishWorkspaceEvent(req.CompanyID, "kanban_card_upserted", map[string]any{
-			"board_id": card.BoardID,
-			"card_id":  card.CardID,
-			"card":     card,
-		})
-	}
+	s.publishCommittedWorkspaceEvents(result.Events)
 	s.publishCommunicationsEvent(connection.UserID, "triage_changed", "triage.converted", strings.Join(result.DeletedMessageIDs, ","))
 	writeJSON(w, http.StatusCreated, result)
 }
-
 func (s *Server) handleCommunicationsTriageRevert(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

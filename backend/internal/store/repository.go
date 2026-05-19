@@ -341,19 +341,54 @@ type CompanyExplorerRelationshipDeleteResult struct {
 	RelationshipIDs []string `json:"relationship_ids"`
 }
 
+const (
+	CommunicationsEmailConversionTargetExistingLogicGate = "existing_logic_gate"
+	CommunicationsEmailConversionTargetNewLogicGate      = "new_logic_gate"
+)
+
+type CommunicationsTriageConversionTarget struct {
+	Mode        string `json:"mode"`
+	LogicGateID string `json:"logic_gate_id,omitempty"`
+	Header      string `json:"header,omitempty"`
+}
+
+type CommunicationsEmailConversionProvenance struct {
+	CompanyID   string `json:"company_id"`
+	UserID      string `json:"user_id"`
+	MessageID   string `json:"message_id"`
+	ThreadID    string `json:"thread_id,omitempty"`
+	NodeID      string `json:"node_id"`
+	BoardID     string `json:"board_id"`
+	CardID      string `json:"card_id"`
+	LogicGateID string `json:"logic_gate_id"`
+}
+
 type CommunicationsTriageConversionInput struct {
-	UserID      string
-	CompanyID   string
-	LogicGateID string
-	MessageIDs  []string
+	UserID             string
+	CompanyID          string
+	ActorUserID        string
+	IdempotencyKey     string
+	MessageIDs         []string
+	Target             CommunicationsTriageConversionTarget
+	LogicGateID        string
+	NewLogicGateHeader string
+	Status             string
+	ColumnID           string
 }
 
 type CommunicationsTriageConversionResult struct {
-	Board             domain.KanbanBoard                 `json:"board"`
-	Cards             []domain.KanbanCard                `json:"cards"`
-	Nodes             []domain.Node                      `json:"nodes"`
-	FolderItems       []domain.CompanyExplorerFolderItem `json:"folder_items,omitempty"`
-	DeletedMessageIDs []string                           `json:"deleted_message_ids"`
+	Target            CommunicationsTriageConversionTarget      `json:"target"`
+	LogicGate         domain.LogicGate                          `json:"logic_gate"`
+	CreatedLogicGate  bool                                      `json:"created_logic_gate,omitempty"`
+	Board             domain.KanbanBoard                        `json:"board"`
+	Cards             []domain.KanbanCard                       `json:"cards"`
+	Nodes             []domain.Node                             `json:"nodes"`
+	Assignments       []domain.NodeLogicGateAssignment          `json:"assignments,omitempty"`
+	EmailPlacements   []domain.CommunicationsEmailPlacement     `json:"email_placements,omitempty"`
+	EmailProvenance   []CommunicationsEmailConversionProvenance `json:"email_provenance,omitempty"`
+	FolderItems       []domain.CompanyExplorerFolderItem        `json:"folder_items,omitempty"`
+	DeletedMessageIDs []string                                  `json:"deleted_message_ids"`
+	Events            []domain.DomainEvent                      `json:"-"`
 }
 
 type CommunicationsTriageRevertInput struct {

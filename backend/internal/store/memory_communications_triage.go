@@ -21,6 +21,62 @@ type communicationsEmailNodeLink struct {
 	UpdatedTimestamp time.Time
 }
 
+type memoryCommunicationsTriageConversionSnapshot struct {
+	triageItems              map[string]domain.CommunicationsTriageItem
+	logicGates               map[string]domain.LogicGate
+	nodes                    map[string]domain.Node
+	nodeInfo                 map[string][]domain.NodeInformation
+	nodeText                 map[string]map[string]domain.NodeProjection
+	folders                  map[string]domain.CompanyExplorerFolder
+	folderItems              map[string]domain.CompanyExplorerFolderItem
+	defaultFolderSeed        map[string]bool
+	nodeMapPositions         map[string]domain.NodeMapPosition
+	kanbanBoards             map[string]domain.KanbanBoard
+	kanbanColumns            map[string][]domain.KanbanColumn
+	kanbanCards              map[string][]domain.KanbanCard
+	nodeLogicGateAssignments map[string]domain.NodeLogicGateAssignment
+	emailNodeLinks           map[string]communicationsEmailNodeLink
+	domainEvents             map[string]domain.DomainEvent
+}
+
+func (r *MemoryRepo) snapshotCommunicationsTriageConversionStateLocked() memoryCommunicationsTriageConversionSnapshot {
+	return memoryCommunicationsTriageConversionSnapshot{
+		triageItems:              cloneMemoryMap(r.triageItems),
+		logicGates:               cloneMemoryMap(r.logicGates),
+		nodes:                    cloneMemoryMap(r.nodes),
+		nodeInfo:                 cloneMemorySliceMap(r.nodeInfo),
+		nodeText:                 cloneMemoryNodeText(r.nodeText),
+		folders:                  cloneMemoryMap(r.folders),
+		folderItems:              cloneMemoryMap(r.folderItems),
+		defaultFolderSeed:        cloneMemoryMap(r.defaultFolderSeed),
+		nodeMapPositions:         cloneMemoryMap(r.nodeMapPositions),
+		kanbanBoards:             cloneMemoryMap(r.kanbanBoards),
+		kanbanColumns:            cloneMemorySliceMap(r.kanbanColumns),
+		kanbanCards:              cloneMemorySliceMap(r.kanbanCards),
+		nodeLogicGateAssignments: cloneMemoryMap(r.nodeLogicGateAssignments),
+		emailNodeLinks:           cloneMemoryMap(r.emailNodeLinks),
+		domainEvents:             cloneMemoryMap(r.domainEvents),
+	}
+}
+
+func (r *MemoryRepo) restoreCommunicationsTriageConversionStateLocked(snapshot memoryCommunicationsTriageConversionSnapshot) {
+	r.triageItems = snapshot.triageItems
+	r.logicGates = snapshot.logicGates
+	r.nodes = snapshot.nodes
+	r.nodeInfo = snapshot.nodeInfo
+	r.nodeText = snapshot.nodeText
+	r.folders = snapshot.folders
+	r.folderItems = snapshot.folderItems
+	r.defaultFolderSeed = snapshot.defaultFolderSeed
+	r.nodeMapPositions = snapshot.nodeMapPositions
+	r.kanbanBoards = snapshot.kanbanBoards
+	r.kanbanColumns = snapshot.kanbanColumns
+	r.kanbanCards = snapshot.kanbanCards
+	r.nodeLogicGateAssignments = snapshot.nodeLogicGateAssignments
+	r.emailNodeLinks = snapshot.emailNodeLinks
+	r.domainEvents = snapshot.domainEvents
+}
+
 func (r *MemoryRepo) ListCommunicationsTriageItems(userID string) ([]domain.CommunicationsTriageItem, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -94,35 +150,67 @@ func (r *MemoryRepo) DeleteCommunicationsTriageItem(userID, messageID string) er
 }
 
 func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
-	input.UserID = strings.TrimSpace(input.UserID)
-	input.CompanyID = strings.TrimSpace(input.CompanyID)
-	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
-	messageIDs := normalizeUniqueStrings(input.MessageIDs, CommunicationsTriageBatchMaxItems)
-	if input.UserID == "" || input.CompanyID == "" || input.LogicGateID == "" || len(messageIDs) == 0 {
-		return CommunicationsTriageConversionResult{}, ErrInvalid
+	input, err := NormalizeCommunicationsTriageConversionInput(input)
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	logicGate, ok := r.logicGates[key(input.CompanyID, input.LogicGateID)]
-	if !ok {
-		return CommunicationsTriageConversionResult{}, ErrNotFound
+	snapshot := r.snapshotCommunicationsTriageConversionStateLocked()
+	committed := false
+	defer func() {
+		if !committed {
+			r.restoreCommunicationsTriageConversionStateLocked(snapshot)
+		}
+	}()
+
+	logicGate := domain.LogicGate{}
+	createdLogicGate := false
+	switch input.Target.Mode {
+	case CommunicationsEmailConversionTargetExistingLogicGate:
+		var ok bool
+		logicGate, ok = r.logicGates[key(input.CompanyID, input.LogicGateID)]
+		if !ok {
+			return CommunicationsTriageConversionResult{}, ErrNotFound
+		}
+	case CommunicationsEmailConversionTargetNewLogicGate:
+		now := time.Now().UTC()
+		logicGate = domain.LogicGate{
+			CompanyID:        input.CompanyID,
+			LogicGateID:      newUUIDv7String(),
+			Header:           input.NewLogicGateHeader,
+			CreatedTimestamp: now,
+		}
+		r.logicGates[key(input.CompanyID, logicGate.LogicGateID)] = logicGate
+		input.LogicGateID = logicGate.LogicGateID
+		input.Target.LogicGateID = logicGate.LogicGateID
+		createdLogicGate = true
+	default:
+		return CommunicationsTriageConversionResult{}, ErrInvalid
 	}
+	input.Target.Header = logicGate.Header
+
 	activeNodeFolder, ok := r.ensureCompanyExplorerSystemFolderLocked(input.CompanyID, CompanyExplorerSystemActiveNodesKey)
 	if !ok {
 		return CommunicationsTriageConversionResult{}, ErrNotFound
 	}
 	board := r.ensureLogicGateKanbanBoardLocked(input.CompanyID, input.LogicGateID, logicGate.Header)
-	pendingColumnID := r.pendingKanbanColumnIDLocked(input.CompanyID, board.BoardID)
-	if pendingColumnID == "" {
-		return CommunicationsTriageConversionResult{}, ErrNotFound
+	column, err := resolveLogicGateAssignmentColumn(r.kanbanColumns[boardKey(input.CompanyID, board.BoardID)], input.ColumnID, input.Status)
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
 	}
 
 	now := time.Now().UTC()
-	result := CommunicationsTriageConversionResult{Board: board}
-	nextCardPositionValue := nextKanbanCardPosition(r.kanbanCards[boardKey(input.CompanyID, board.BoardID)], pendingColumnID)
-	for index, messageID := range messageIDs {
+	result := CommunicationsTriageConversionResult{
+		Target:           input.Target,
+		LogicGate:        r.withLogicGateRaciLocked(logicGate),
+		CreatedLogicGate: createdLogicGate,
+		Board:            board,
+	}
+	nextCardPositionValue := nextKanbanCardPosition(r.kanbanCards[boardKey(input.CompanyID, board.BoardID)], column.ColumnID)
+	for index, messageID := range input.MessageIDs {
 		triageItem, ok := r.triageItems[triageItemKey(input.UserID, messageID)]
 		if !ok {
 			return CommunicationsTriageConversionResult{}, ErrNotFound
@@ -152,7 +240,7 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			CompanyID:           input.CompanyID,
 			BoardID:             board.BoardID,
 			CardID:              newUUIDv7String(),
-			ColumnID:            pendingColumnID,
+			ColumnID:            column.ColumnID,
 			NodeID:              nodeID,
 			LogicGateID:         &logicGateID,
 			NodeTitle:           node.Title,
@@ -163,10 +251,22 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			UpdatedTimestamp:    now,
 		}
 		r.kanbanCards[boardKey(input.CompanyID, board.BoardID)] = append(r.kanbanCards[boardKey(input.CompanyID, board.BoardID)], card)
-		r.upsertNodeLogicGateAssignmentFromCardLocked(card)
+		assignment := r.upsertNodeLogicGateAssignmentLocked(nodeLogicGateAssignmentMutation{
+			CompanyID:            input.CompanyID,
+			NodeID:               nodeID,
+			LogicGateID:          input.LogicGateID,
+			ColumnID:             column.ColumnID,
+			StatusKey:            logicGateAssignmentStatusKey(column.Title),
+			IsIssue:              false,
+			Position:             card.Position,
+			CompatibilityBoardID: board.BoardID,
+			CompatibilityCardID:  card.CardID,
+			CreatedTimestamp:     now,
+			UpdatedTimestamp:     now,
+		})
 		r.syncNodeStatusFromKanbanCardLocked(card)
 		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, input.LogicGateID, nodeID)
-		r.emailNodeLinks[emailNodeLinkKey(input.CompanyID, board.BoardID, card.CardID)] = communicationsEmailNodeLink{
+		link := communicationsEmailNodeLink{
 			CompanyID:        input.CompanyID,
 			UserID:           input.UserID,
 			MessageID:        messageID,
@@ -178,17 +278,48 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			CreatedTimestamp: now,
 			UpdatedTimestamp: now,
 		}
+		r.emailNodeLinks[emailNodeLinkKey(input.CompanyID, board.BoardID, card.CardID)] = link
 		r.addEmailProjectionLocked(input.CompanyID, nodeID, triageItem.Message, now)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 
-		result.Nodes = append(result.Nodes, r.withNodeReadModelLocked(node))
+		node = r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, nodeID)])
+		placement := domain.CommunicationsEmailPlacement{
+			CompanyID:        link.CompanyID,
+			UserID:           link.UserID,
+			MessageID:        link.MessageID,
+			NodeID:           link.NodeID,
+			BoardID:          link.BoardID,
+			CardID:           link.CardID,
+			LogicGateID:      link.LogicGateID,
+			CreatedTimestamp: link.CreatedTimestamp,
+			UpdatedTimestamp: link.UpdatedTimestamp,
+		}
+		provenance := CommunicationsEmailConversionProvenance{
+			CompanyID:   link.CompanyID,
+			UserID:      link.UserID,
+			MessageID:   link.MessageID,
+			ThreadID:    strings.TrimSpace(triageItem.Message.ThreadID),
+			NodeID:      link.NodeID,
+			BoardID:     link.BoardID,
+			CardID:      link.CardID,
+			LogicGateID: link.LogicGateID,
+		}
+		result.Nodes = append(result.Nodes, node)
 		result.Cards = append(result.Cards, card)
+		result.Assignments = append(result.Assignments, assignment)
+		result.EmailPlacements = append(result.EmailPlacements, placement)
+		result.EmailProvenance = append(result.EmailProvenance, provenance)
 		result.FolderItems = append(result.FolderItems, folderItem)
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
+	events, err := r.appendDomainEventsLocked(communicationsEmailConversionWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
+	result.Events = events
+	committed = true
 	return result, nil
 }
-
 func (r *MemoryRepo) RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error) {
 	input.UserID = strings.TrimSpace(input.UserID)
 	input.CompanyID = strings.TrimSpace(input.CompanyID)

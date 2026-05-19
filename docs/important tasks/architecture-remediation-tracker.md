@@ -22,7 +22,7 @@ Source architecture:
 | --- | --- | --- |
 | 1. Read Plane | Company Explorer subtree complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; Company Explorer has a folder-subtree snapshot/list contract; map scopes and version-row validators still need bounded/windowed read models. |
 | 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph and migrated work-item assignment mutations now append durable workspace events atomically; frontend gap reconciliation now detects missed numeric workspace sequences and triggers scoped surface refreshes. Remaining mutation families and external fanout are still follow-ups. |
-| 3. Work Ownership / Commands | Source migration complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, and inbox reads use projection rows; frontend parity and event atomicity remain follow-ups. |
+| 3. Work Ownership / Commands | Source migration complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, inbox reads use projection rows, and email conversion now runs through an explicit atomic backend command; RACI/home/inbox command parity remain follow-ups. |
 | 4. Hot Path Discipline | Auth cache complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth now caches derived actor/membership context after per-request token validation; repository context, batch SQL, and metrics remain follow-up branches. |
 | 5. Frontend Structure / API Contract | Ready / yellow | Shared `requestJSON` exists, but hot modules duplicate wrappers, broad invalidation is scattered, and large components still own workflow logic. |
 
@@ -231,6 +231,24 @@ Migration/backfill/rollback notes:
 - Backfill picks the latest Logic Gate card per `(company_id, node_id)` using `updated_timestamp`, `created_timestamp`, then `card_id`, matching the existing one-active-card behavior.
 - Rollback: Kanban compatibility cards are preserved. A code rollback can return to Kanban-backed reads. A DB rollback should drop the trigger/function and table only after confirming no new assignment-only data needs to be preserved.
 
+Email conversion command branch:
+`work-items/email-conversion-command`
+
+Status:
+- 2026-05-19: Complete. Email triage conversion now has an explicit backend command contract for company/user scope, selected messages, existing or new Logic Gate targets, assignment status/column, email provenance, and committed workspace events.
+
+Scope completed:
+- Preserved the existing `/v1/communications/triage/convert` response compatibility while adding target, Logic Gate, assignment, email placement, and email provenance fields.
+- Kept `node_logic_gate_assignments` as assignment truth and writes Kanban cards as compatibility rows.
+- Conversion writes nodes, Active Nodes folder placement, node map positions, assignment source rows, Kanban compatibility cards, email links/projections, triage deletion, and durable workspace events in one store transaction.
+- HTTP now publishes committed workspace events returned from the command instead of appending workspace events after the mutation.
+- Added support for an explicit new Logic Gate target mode without requiring frontend multi-request choreography.
+
+Migration/backfill/rollback notes:
+- Migration: none. This branch reuses `communications_triage_items`, `communications_email_nodes`, `nodes`, `node_information`, `node_projection_table`, `node_logic_gate_assignments`, Logic Gate Kanban tables, Company Explorer folder items, and `domain_events`.
+- Backfill: none. Existing converted email provenance remains in `communications_email_nodes` and attached-email node projections; new conversions add durable workspace events going forward only.
+- Rollback: code can return the HTTP handler to the previous post-mutation `publishWorkspaceEvent` path and ignore the additive response fields. No source-of-truth data lives only in the new event payloads; already appended `work_item.email_converted` events should be tolerated by replay consumers.
+
 Completion criteria:
 - One backend command can assign a node to Logic Gate, status, priority, and responsible user atomically.
 - UI no longer needs multi-request choreography for normal work placement.
@@ -347,10 +365,11 @@ Use this as the default sequencing unless a production incident changes prioriti
 11. `events/frontend-gap-reconciliation`
 12. `platform/auth-membership-cache`
 13. `reads/company-explorer-subtree`
+14. `work-items/email-conversion-command`
 
 ### Next Roadmap
 
-1. work-items/email-conversion-command
+1. reads/node-map-window
 
 ### Work-Items Follow-Ups
 
