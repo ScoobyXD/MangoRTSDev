@@ -26,6 +26,7 @@ type Repository interface {
 	CommunicationsRepository
 	WorkGraphRepository
 	LogicGateRepository
+	WorkItemReadRepository
 	CompanyExplorerRepository
 	MapLayoutRepository
 	KanbanRepository
@@ -109,6 +110,13 @@ type LogicGateRepository interface {
 	ListLogicGateProjections(companyID, logicGateID string) ([]domain.LogicGateProjection, error)
 	DeleteLogicGateProjection(companyID, logicGateID, informationID string) error
 	CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error)
+}
+
+type WorkItemReadRepository interface {
+	ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error)
+	ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
+	ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error)
+	ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 }
 
 type CompanyExplorerRepository interface {
@@ -198,14 +206,42 @@ const LogicGateSearchDefaultLimit = 12
 
 const LogicGateSearchMaxLimit = 50
 
+const WorkItemInboxDefaultLimit = 100
+
+const WorkItemInboxMaxLimit = 500
+
 type LogicGateQuery struct {
 	Search         string
 	AssignedUserID string
 	Limit          int
 }
 
+type WorkItemInboxQuery struct {
+	CompanyID string
+	UserID    string
+	Limit     int
+}
+
+type WorkItemLogicGateInboxItem struct {
+	CompanyID        string                           `json:"company_id"`
+	LogicGateID      string                           `json:"logic_gate_id"`
+	Header           string                           `json:"header"`
+	Roles            []string                         `json:"roles"`
+	RaciAssignments  []domain.LogicGateRaciAssignment `json:"raci_assignments,omitempty"`
+	CreatedTimestamp time.Time                        `json:"created_timestamp"`
+}
+
 const CommunicationsTriageBatchMaxItems = 50
 const UserLogicGateShortcutBatchMaxItems = 200
+
+func NormalizeWorkItemInboxQuery(query WorkItemInboxQuery) WorkItemInboxQuery {
+	query.CompanyID = strings.TrimSpace(query.CompanyID)
+	query.UserID = strings.TrimSpace(query.UserID)
+	if query.Limit <= 0 || query.Limit > WorkItemInboxMaxLimit {
+		query.Limit = WorkItemInboxDefaultLimit
+	}
+	return query
+}
 
 type MapEntityBatchItemInput struct {
 	ClientID string
