@@ -46,6 +46,46 @@ Rules:
 - Snapshot `304` handling must happen before payload assembly, marshaling, hashing, and expensive repository reads whenever a version-based validator is available.
 - Full snapshots are allowed only for admin, debug, export, migration, or explicit compatibility paths. They are not frontend hot-path APIs.
 
+### Conditional GET And Scoped ETags
+Conditional HTTP reads are a server-side version check, not just a bandwidth feature.
+
+The old inefficient pattern was:
+
+```text
+request with If-None-Match
+-> query database
+-> build full response object
+-> marshal JSON
+-> hash response bytes
+-> compare ETag
+-> maybe return 304
+```
+
+That saved network transfer, but it did not save the hot-path database, object assembly, marshal, or hash work.
+
+The V2 pattern is:
+
+```text
+request with If-None-Match
+-> read cheap scoped version token
+-> build ETag from that token and request scope
+-> compare ETag
+-> return 304 immediately when unchanged
+-> only then query/build/marshal the full response when changed
+```
+
+Current implementation:
+- Workspace snapshots use scoped workspace event validators before loading snapshot rows.
+- `company_explorer`, `node_map`, `logic_gate_map`, and `kanban` snapshots use different event filters so unrelated changes do not invalidate unrelated scoped snapshots.
+- Kanban snapshot validators are board-scoped with `board_id`.
+- Hot list endpoints for nodes, relationships, logic gates, map layout, and kanban lists use pre-body ETag checks instead of `writeJSONMaybeNotModified`.
+- The validator source is `CurrentDomainEventSequence` with optional event-type and simple payload equality filters, for example `board_id`, `folder_kind`, or `item_type`.
+
+Important distinction:
+- `writeJSONMaybeNotModified` is still acceptable for low-risk small/detail responses where no cheap validator exists.
+- Hot reads must prefer scoped version validators and must return `304` before expensive repository reads whenever correctness can be preserved.
+- Event-token validators rely on API mutation handlers publishing workspace domain events. Direct SQL or repository writes outside those handlers are outside this cache contract unless they also publish equivalent events or bump the relevant read-model version.
+
 ### Targeted Query Endpoints
 Use targeted endpoints when the caller needs a specific collection, filtered list, search result, or page.
 
