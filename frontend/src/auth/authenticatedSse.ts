@@ -12,12 +12,15 @@ export type SseConnection = {
 };
 
 type TimerID = ReturnType<typeof setTimeout>;
+type SseURL = string | (() => string);
 
 type ConnectAuthenticatedSseOptions = {
   onEvent: (event: SseEvent) => void;
   onError?: (error: unknown) => void;
   getAccessToken?: () => Promise<string>;
   fetchImpl?: typeof fetch;
+  lastEventId?: string;
+  shouldStoreLastEventId?: (event: SseEvent) => boolean;
   retryDelayMs?: number;
   maxRetryDelayMs?: number;
   setTimeoutImpl?: (handler: () => void, timeout: number) => TimerID;
@@ -97,19 +100,22 @@ export function createSseParser(): SseParser {
   };
 }
 
-export function connectAuthenticatedSse(url: string, options: ConnectAuthenticatedSseOptions): SseConnection {
+export function connectAuthenticatedSse(url: SseURL, options: ConnectAuthenticatedSseOptions): SseConnection {
   const fetchImpl = options.fetchImpl ?? fetch.bind(window);
   const getAccessToken = options.getAccessToken ?? getApiAccessToken;
   const setTimer = options.setTimeoutImpl ?? setTimeout;
   const clearTimer = options.clearTimeoutImpl ?? clearTimeout;
   const baseRetryDelayMs = Math.max(250, options.retryDelayMs ?? 2000);
   const maxRetryDelayMs = Math.max(baseRetryDelayMs, options.maxRetryDelayMs ?? 30000);
+  const shouldStoreLastEventId = options.shouldStoreLastEventId ?? (() => true);
   let retryDelayMs = baseRetryDelayMs;
+  let lastEventId = options.lastEventId;
   let closed = false;
   let retryTimer: TimerID | null = null;
   let abortController: AbortController | null = null;
   let visibilityListenerInstalled = false;
 
+  const resolveURL = (): string => (typeof url === "function" ? url() : url);
   const isDocumentHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
 
   const installVisibilityListener = () => {
@@ -131,6 +137,12 @@ export function connectAuthenticatedSse(url: string, options: ConnectAuthenticat
   };
 
   const shouldResetRetryDelay = (event: SseEvent): boolean => event.event !== "ready" && event.event !== "ping";
+  const handleEvent = (event: SseEvent) => {
+    if (event.id !== undefined && shouldStoreLastEventId(event)) lastEventId = event.id;
+    if (event.retry !== undefined) retryDelayMs = event.retry;
+    else if (shouldResetRetryDelay(event)) retryDelayMs = baseRetryDelayMs;
+    options.onEvent(event);
+  };
 
   function onVisibilityChange() {
     if (closed) return;
@@ -169,7 +181,8 @@ export function connectAuthenticatedSse(url: string, options: ConnectAuthenticat
         Accept: "text/event-stream",
       });
       if (token) headers.set("Authorization", `Bearer ${token}`);
-      const response = await fetchImpl(url, {
+      if (lastEventId !== undefined) headers.set("Last-Event-ID", lastEventId);
+      const response = await fetchImpl(resolveURL(), {
         cache: "no-store",
         headers,
         signal: abortController.signal,
@@ -183,15 +196,11 @@ export function connectAuthenticatedSse(url: string, options: ConnectAuthenticat
         const { done, value } = await reader.read();
         if (done) break;
         for (const event of parser.push(decoder.decode(value, { stream: true }))) {
-          if (event.retry !== undefined) retryDelayMs = event.retry;
-          else if (shouldResetRetryDelay(event)) retryDelayMs = baseRetryDelayMs;
-          options.onEvent(event);
+          handleEvent(event);
         }
       }
       for (const event of parser.flush()) {
-        if (event.retry !== undefined) retryDelayMs = event.retry;
-        else if (shouldResetRetryDelay(event)) retryDelayMs = baseRetryDelayMs;
-        options.onEvent(event);
+        handleEvent(event);
       }
     } catch (error) {
       const isAbortError = typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError";
