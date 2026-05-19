@@ -1357,15 +1357,7 @@ order by item.position asc, item.created_timestamp asc`, companyID, folderID, it
 	return items, rows.Err()
 }
 
-func (r *PostgresRepo) ListCompanyExplorerNodeSummaries(companyID string) ([]domain.Node, error) {
-	rows, err := r.db.QueryContext(context.Background(), `
-select company_id, node_id, title, due_date::text, created_timestamp
-from nodes
-where company_id=$1
-order by created_timestamp asc`, companyID)
-	if err != nil {
-		return nil, err
-	}
+func scanCompanyExplorerNodeSummaryRows(rows *sql.Rows) ([]domain.Node, error) {
 	defer rows.Close()
 
 	items := make([]domain.Node, 0)
@@ -1389,15 +1381,56 @@ order by created_timestamp asc`, companyID)
 	return items, rows.Err()
 }
 
-func (r *PostgresRepo) ListCompanyExplorerLogicGateSummaries(companyID string) ([]domain.LogicGate, error) {
+func (r *PostgresRepo) ListCompanyExplorerNodeSummaries(companyID string) ([]domain.Node, error) {
 	rows, err := r.db.QueryContext(context.Background(), `
-select company_id, logic_gate_id, header, created_timestamp
-from logic_gates
+select company_id, node_id, title, due_date::text, created_timestamp
+from nodes
 where company_id=$1
 order by created_timestamp asc`, companyID)
 	if err != nil {
 		return nil, err
 	}
+	return scanCompanyExplorerNodeSummaryRows(rows)
+}
+
+func (r *PostgresRepo) ListCompanyExplorerNodeSummariesInFolderSubtree(companyID, folderID string) ([]domain.Node, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListCompanyExplorerNodeSummaries(companyID)
+	}
+	rows, err := r.db.QueryContext(context.Background(), `
+with recursive folder_scope as (
+  select company_id, folder_id
+  from company_explorer_folders
+  where company_id=$1
+    and folder_id=$2::uuid
+    and folder_kind='node'
+  union all
+  select child.company_id, child.folder_id
+  from company_explorer_folders child
+  join folder_scope parent
+    on child.company_id=parent.company_id
+   and child.parent_folder_id=parent.folder_id
+  where child.folder_kind='node'
+), visible_nodes as (
+  select distinct item.item_id::uuid as node_id
+  from company_explorer_folder_items item
+  join folder_scope folder on folder.folder_id=item.folder_id
+  where item.company_id=$1
+    and item.item_type='node'
+)
+select n.company_id, n.node_id, n.title, n.due_date::text, n.created_timestamp
+from nodes n
+join visible_nodes visible on visible.node_id=n.node_id
+where n.company_id=$1
+order by n.created_timestamp asc`, companyID, folderID)
+	if err != nil {
+		return nil, err
+	}
+	return scanCompanyExplorerNodeSummaryRows(rows)
+}
+
+func scanCompanyExplorerLogicGateSummaryRows(rows *sql.Rows) ([]domain.LogicGate, error) {
 	defer rows.Close()
 
 	items := make([]domain.LogicGate, 0)
@@ -1414,6 +1447,55 @@ order by created_timestamp asc`, companyID)
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (r *PostgresRepo) ListCompanyExplorerLogicGateSummaries(companyID string) ([]domain.LogicGate, error) {
+	rows, err := r.db.QueryContext(context.Background(), `
+select company_id, logic_gate_id, header, created_timestamp
+from logic_gates
+where company_id=$1
+order by created_timestamp asc`, companyID)
+	if err != nil {
+		return nil, err
+	}
+	return scanCompanyExplorerLogicGateSummaryRows(rows)
+}
+
+func (r *PostgresRepo) ListCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListCompanyExplorerLogicGateSummaries(companyID)
+	}
+	rows, err := r.db.QueryContext(context.Background(), `
+with recursive folder_scope as (
+  select company_id, folder_id
+  from company_explorer_folders
+  where company_id=$1
+    and folder_id=$2::uuid
+    and folder_kind='logic_gate'
+  union all
+  select child.company_id, child.folder_id
+  from company_explorer_folders child
+  join folder_scope parent
+    on child.company_id=parent.company_id
+   and child.parent_folder_id=parent.folder_id
+  where child.folder_kind='logic_gate'
+), visible_gates as (
+  select distinct item.item_id::uuid as logic_gate_id
+  from company_explorer_folder_items item
+  join folder_scope folder on folder.folder_id=item.folder_id
+  where item.company_id=$1
+    and item.item_type='logic_gate'
+)
+select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
+from logic_gates gate
+join visible_gates visible on visible.logic_gate_id=gate.logic_gate_id
+where gate.company_id=$1
+order by gate.created_timestamp asc`, companyID, folderID)
+	if err != nil {
+		return nil, err
+	}
+	return scanCompanyExplorerLogicGateSummaryRows(rows)
 }
 
 func (r *PostgresRepo) RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error {

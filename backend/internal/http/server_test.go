@@ -1585,6 +1585,219 @@ func TestWorkspaceSnapshotNodeMapScopeUsesFolderSubtree(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSnapshotCompanyExplorerScopeUsesFolderSubtree(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-explorer-subtree-snapshot-test"
+
+	nodeParent, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Node parent")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder node parent error = %v", err)
+	}
+	nodeChild, err := repo.CreateCompanyExplorerFolder(companyID, nodeParent.FolderID, "node", "Node child")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder node child error = %v", err)
+	}
+	nodeSibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Node sibling")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder node sibling error = %v", err)
+	}
+	logicParent, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Logic parent")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder logic parent error = %v", err)
+	}
+	logicChild, err := repo.CreateCompanyExplorerFolder(companyID, logicParent.FolderID, "logic_gate", "Logic child")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder logic child error = %v", err)
+	}
+	logicSibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Logic sibling")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder logic sibling error = %v", err)
+	}
+
+	nodeA, err := repo.CreateNode(companyID, "Node A")
+	if err != nil {
+		t.Fatalf("CreateNode A error = %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "Node B")
+	if err != nil {
+		t.Fatalf("CreateNode B error = %v", err)
+	}
+	nodeOutside, err := repo.CreateNode(companyID, "Node outside")
+	if err != nil {
+		t.Fatalf("CreateNode outside error = %v", err)
+	}
+	gateA, err := repo.CreateLogicGate(companyID, "Gate A")
+	if err != nil {
+		t.Fatalf("CreateLogicGate A error = %v", err)
+	}
+	gateB, err := repo.CreateLogicGate(companyID, "Gate B")
+	if err != nil {
+		t.Fatalf("CreateLogicGate B error = %v", err)
+	}
+	gateOutside, err := repo.CreateLogicGate(companyID, "Gate outside")
+	if err != nil {
+		t.Fatalf("CreateLogicGate outside error = %v", err)
+	}
+
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeParent.FolderID, "node", nodeA.NodeID, 1000); err != nil {
+		t.Fatalf("Assign node A error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeChild.FolderID, "node", nodeB.NodeID, 2000); err != nil {
+		t.Fatalf("Assign node B error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeSibling.FolderID, "node", nodeOutside.NodeID, 3000); err != nil {
+		t.Fatalf("Assign outside node error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, logicParent.FolderID, "logic_gate", gateA.LogicGateID, 1000); err != nil {
+		t.Fatalf("Assign gate A error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, logicChild.FolderID, "logic_gate", gateB.LogicGateID, 2000); err != nil {
+		t.Fatalf("Assign gate B error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, logicSibling.FolderID, "logic_gate", gateOutside.LogicGateID, 3000); err != nil {
+		t.Fatalf("Assign outside gate error = %v", err)
+	}
+
+	assertIDs := func(label string, got []string, want ...string) {
+		t.Helper()
+		seen := make(map[string]bool, len(got))
+		for _, id := range got {
+			seen[id] = true
+		}
+		if len(seen) != len(want) {
+			t.Fatalf("%s ids = %v, want %v", label, got, want)
+		}
+		for _, id := range want {
+			if !seen[id] {
+				t.Fatalf("%s ids = %v, missing %s", label, got, id)
+			}
+		}
+	}
+
+	nodeReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=company_explorer&folder_kind=node&folder_id="+nodeParent.FolderID, nil)
+	nodeRec := httptest.NewRecorder()
+	handler.ServeHTTP(nodeRec, nodeReq)
+	if nodeRec.Code != http.StatusOK {
+		t.Fatalf("node subtree snapshot status = %d, want %d body=%s", nodeRec.Code, http.StatusOK, nodeRec.Body.String())
+	}
+	var nodePayload struct {
+		Scope       string                             `json:"scope"`
+		FolderKind  string                             `json:"folder_kind"`
+		FolderID    string                             `json:"folder_id"`
+		Nodes       []domain.Node                      `json:"nodes"`
+		LogicGates  []domain.LogicGate                 `json:"logic_gates"`
+		Folders     []domain.CompanyExplorerFolder     `json:"folders"`
+		FolderItems []domain.CompanyExplorerFolderItem `json:"folder_items"`
+	}
+	if err := json.NewDecoder(nodeRec.Body).Decode(&nodePayload); err != nil {
+		t.Fatalf("decode node subtree snapshot: %v", err)
+	}
+	if nodePayload.Scope != "company_explorer" || nodePayload.FolderKind != "node" || nodePayload.FolderID != nodeParent.FolderID {
+		t.Fatalf("node subtree identity = scope:%q kind:%q folder:%q", nodePayload.Scope, nodePayload.FolderKind, nodePayload.FolderID)
+	}
+	nodeIDs := make([]string, 0, len(nodePayload.Nodes))
+	for _, node := range nodePayload.Nodes {
+		nodeIDs = append(nodeIDs, node.NodeID)
+	}
+	assertIDs("node summaries", nodeIDs, nodeA.NodeID, nodeB.NodeID)
+	if len(nodePayload.LogicGates) != 0 {
+		t.Fatalf("node subtree logic gates = %+v, want none", nodePayload.LogicGates)
+	}
+	folderIDs := make([]string, 0, len(nodePayload.Folders))
+	for _, folder := range nodePayload.Folders {
+		folderIDs = append(folderIDs, folder.FolderID)
+	}
+	assertIDs("node folders", folderIDs, nodeParent.FolderID, nodeChild.FolderID)
+	folderItemIDs := make([]string, 0, len(nodePayload.FolderItems))
+	for _, item := range nodePayload.FolderItems {
+		folderItemIDs = append(folderItemIDs, item.ItemID)
+	}
+	assertIDs("node folder items", folderItemIDs, nodeA.NodeID, nodeB.NodeID)
+
+	logicReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=company_explorer&folder_kind=logic_gate&folder_id="+logicParent.FolderID, nil)
+	logicRec := httptest.NewRecorder()
+	handler.ServeHTTP(logicRec, logicReq)
+	if logicRec.Code != http.StatusOK {
+		t.Fatalf("logic subtree snapshot status = %d, want %d body=%s", logicRec.Code, http.StatusOK, logicRec.Body.String())
+	}
+	var logicPayload struct {
+		Nodes       []domain.Node                      `json:"nodes"`
+		LogicGates  []domain.LogicGate                 `json:"logic_gates"`
+		Folders     []domain.CompanyExplorerFolder     `json:"folders"`
+		FolderItems []domain.CompanyExplorerFolderItem `json:"folder_items"`
+	}
+	if err := json.NewDecoder(logicRec.Body).Decode(&logicPayload); err != nil {
+		t.Fatalf("decode logic subtree snapshot: %v", err)
+	}
+	if len(logicPayload.Nodes) != 0 {
+		t.Fatalf("logic subtree nodes = %+v, want none", logicPayload.Nodes)
+	}
+	logicGateIDs := make([]string, 0, len(logicPayload.LogicGates))
+	for _, gate := range logicPayload.LogicGates {
+		logicGateIDs = append(logicGateIDs, gate.LogicGateID)
+	}
+	assertIDs("logic gate summaries", logicGateIDs, gateA.LogicGateID, gateB.LogicGateID)
+	logicFolderIDs := make([]string, 0, len(logicPayload.Folders))
+	for _, folder := range logicPayload.Folders {
+		logicFolderIDs = append(logicFolderIDs, folder.FolderID)
+	}
+	assertIDs("logic folders", logicFolderIDs, logicParent.FolderID, logicChild.FolderID)
+	logicFolderItemIDs := make([]string, 0, len(logicPayload.FolderItems))
+	for _, item := range logicPayload.FolderItems {
+		logicFolderItemIDs = append(logicFolderItemIDs, item.ItemID)
+	}
+	assertIDs("logic folder items", logicFolderItemIDs, gateA.LogicGateID, gateB.LogicGateID)
+}
+
+func TestWorkspaceSnapshotCompanyExplorerSubtreeErrorsAndDoesNotSeedRows(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-explorer-subtree-error-test"
+	missingFolderID := "00000000-0000-4000-8000-000000000000"
+
+	invalidReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=company_explorer&folder_kind=node&folder_id=not-a-folder-id", nil)
+	invalidRec := httptest.NewRecorder()
+	handler.ServeHTTP(invalidRec, invalidReq)
+	if invalidRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid folder snapshot status = %d, want %d body=%s", invalidRec.Code, http.StatusBadRequest, invalidRec.Body.String())
+	}
+
+	missingKindReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=company_explorer&folder_id="+missingFolderID, nil)
+	missingKindRec := httptest.NewRecorder()
+	handler.ServeHTTP(missingKindRec, missingKindReq)
+	if missingKindRec.Code != http.StatusBadRequest {
+		t.Fatalf("missing folder kind status = %d, want %d body=%s", missingKindRec.Code, http.StatusBadRequest, missingKindRec.Body.String())
+	}
+
+	beforeFolders, err := repo.ListCompanyExplorerFolders(companyID, "node")
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerFolders before error = %v", err)
+	}
+	missingReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=company_explorer&folder_kind=node&folder_id="+missingFolderID, nil)
+	missingRec := httptest.NewRecorder()
+	handler.ServeHTTP(missingRec, missingReq)
+	if missingRec.Code != http.StatusNotFound {
+		t.Fatalf("missing folder snapshot status = %d, want %d body=%s", missingRec.Code, http.StatusNotFound, missingRec.Body.String())
+	}
+	afterFolders, err := repo.ListCompanyExplorerFolders(companyID, "node")
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerFolders after error = %v", err)
+	}
+	afterItems, err := repo.ListCompanyExplorerFolderItems(companyID, "", "node")
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerFolderItems after error = %v", err)
+	}
+	if len(beforeFolders) != 0 || len(afterFolders) != 0 || len(afterItems) != 0 {
+		t.Fatalf("GET subtree read created rows: before_folders=%d after_folders=%d after_items=%d", len(beforeFolders), len(afterFolders), len(afterItems))
+	}
+}
 func TestMapEntityBatchCreatesNodesRelationshipsAndPositions(t *testing.T) {
 	t.Parallel()
 

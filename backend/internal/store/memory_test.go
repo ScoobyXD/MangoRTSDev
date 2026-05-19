@@ -419,6 +419,109 @@ func TestMemoryRepo_CompanyProvisioningCreatesCompanyExplorerDefaults(t *testing
 	assertProvisioned(t, repo, ensuredID)
 }
 
+func TestMemoryRepo_CompanyExplorerSubtreeSummariesAreBounded(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111111"
+
+	nodeParent, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Node parent")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder node parent failed: %v", err)
+	}
+	nodeChild, err := repo.CreateCompanyExplorerFolder(companyID, nodeParent.FolderID, "node", "Node child")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder node child failed: %v", err)
+	}
+	nodeSibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Node sibling")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder node sibling failed: %v", err)
+	}
+	logicParent, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Logic parent")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder logic parent failed: %v", err)
+	}
+	logicChild, err := repo.CreateCompanyExplorerFolder(companyID, logicParent.FolderID, "logic_gate", "Logic child")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder logic child failed: %v", err)
+	}
+	logicSibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Logic sibling")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder logic sibling failed: %v", err)
+	}
+
+	nodeA, err := repo.CreateNode(companyID, "Node A")
+	if err != nil {
+		t.Fatalf("CreateNode A failed: %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "Node B")
+	if err != nil {
+		t.Fatalf("CreateNode B failed: %v", err)
+	}
+	nodeOutside, err := repo.CreateNode(companyID, "Node outside")
+	if err != nil {
+		t.Fatalf("CreateNode outside failed: %v", err)
+	}
+	if _, err := repo.CreateNode(companyID, "Node unplaced"); err != nil {
+		t.Fatalf("CreateNode unplaced failed: %v", err)
+	}
+	gateA, err := repo.CreateLogicGate(companyID, "Gate A")
+	if err != nil {
+		t.Fatalf("CreateLogicGate A failed: %v", err)
+	}
+	gateB, err := repo.CreateLogicGate(companyID, "Gate B")
+	if err != nil {
+		t.Fatalf("CreateLogicGate B failed: %v", err)
+	}
+	gateOutside, err := repo.CreateLogicGate(companyID, "Gate outside")
+	if err != nil {
+		t.Fatalf("CreateLogicGate outside failed: %v", err)
+	}
+	if _, err := repo.CreateLogicGate(companyID, "Gate unplaced"); err != nil {
+		t.Fatalf("CreateLogicGate unplaced failed: %v", err)
+	}
+
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeParent.FolderID, "node", nodeA.NodeID, 1000); err != nil {
+		t.Fatalf("Assign node A failed: %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeChild.FolderID, "node", nodeB.NodeID, 2000); err != nil {
+		t.Fatalf("Assign node B failed: %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeSibling.FolderID, "node", nodeOutside.NodeID, 3000); err != nil {
+		t.Fatalf("Assign outside node failed: %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, logicParent.FolderID, "logic_gate", gateA.LogicGateID, 1000); err != nil {
+		t.Fatalf("Assign gate A failed: %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, logicChild.FolderID, "logic_gate", gateB.LogicGateID, 2000); err != nil {
+		t.Fatalf("Assign gate B failed: %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, logicSibling.FolderID, "logic_gate", gateOutside.LogicGateID, 3000); err != nil {
+		t.Fatalf("Assign outside gate failed: %v", err)
+	}
+
+	nodes, err := repo.ListCompanyExplorerNodeSummariesInFolderSubtree(companyID, nodeParent.FolderID)
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerNodeSummariesInFolderSubtree failed: %v", err)
+	}
+	nodeIDs := map[string]bool{}
+	for _, node := range nodes {
+		nodeIDs[node.NodeID] = true
+	}
+	if len(nodeIDs) != 2 || !nodeIDs[nodeA.NodeID] || !nodeIDs[nodeB.NodeID] || nodeIDs[nodeOutside.NodeID] {
+		t.Fatalf("node subtree summaries = %+v, want parent and child only", nodes)
+	}
+
+	logicGates, err := repo.ListCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, logicParent.FolderID)
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerLogicGateSummariesInFolderSubtree failed: %v", err)
+	}
+	logicGateIDs := map[string]bool{}
+	for _, gate := range logicGates {
+		logicGateIDs[gate.LogicGateID] = true
+	}
+	if len(logicGateIDs) != 2 || !logicGateIDs[gateA.LogicGateID] || !logicGateIDs[gateB.LogicGateID] || logicGateIDs[gateOutside.LogicGateID] {
+		t.Fatalf("logic gate subtree summaries = %+v, want parent and child only", logicGates)
+	}
+}
 func TestMemoryRepo_CreateLogicGateCreatesAttachedKanbanBoard(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"

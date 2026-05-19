@@ -892,6 +892,22 @@ func (r *MemoryRepo) ListCompanyExplorerFolderItemsInFolderSubtree(companyID, fo
 	return items, nil
 }
 
+func companyExplorerNodeSummary(node domain.Node) domain.Node {
+	return domain.Node{
+		CompanyID:        node.CompanyID,
+		NodeID:           node.NodeID,
+		Title:            node.Title,
+		DueDate:          node.DueDate,
+		CreatedTimestamp: node.CreatedTimestamp,
+	}
+}
+
+func sortCompanyExplorerNodeSummaries(items []domain.Node) {
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+	})
+}
+
 func (r *MemoryRepo) ListCompanyExplorerNodeSummaries(companyID string) ([]domain.Node, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -901,18 +917,51 @@ func (r *MemoryRepo) ListCompanyExplorerNodeSummaries(companyID string) ([]domai
 		if node.CompanyID != companyID {
 			continue
 		}
-		items = append(items, domain.Node{
-			CompanyID:        node.CompanyID,
-			NodeID:           node.NodeID,
-			Title:            node.Title,
-			DueDate:          node.DueDate,
-			CreatedTimestamp: node.CreatedTimestamp,
-		})
+		items = append(items, companyExplorerNodeSummary(node))
 	}
+	sortCompanyExplorerNodeSummaries(items)
+	return items, nil
+}
+
+func (r *MemoryRepo) ListCompanyExplorerNodeSummariesInFolderSubtree(companyID, folderID string) ([]domain.Node, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListCompanyExplorerNodeSummaries(companyID)
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "node")
+	items := make([]domain.Node, 0)
+	seen := map[string]bool{}
+	for _, folderItem := range r.folderItems {
+		if folderItem.CompanyID != companyID || folderItem.ItemType != "node" || !folderIDs[folderItem.FolderID] || seen[folderItem.ItemID] {
+			continue
+		}
+		node, ok := r.nodes[key(companyID, folderItem.ItemID)]
+		if !ok {
+			continue
+		}
+		seen[folderItem.ItemID] = true
+		items = append(items, companyExplorerNodeSummary(node))
+	}
+	sortCompanyExplorerNodeSummaries(items)
+	return items, nil
+}
+
+func companyExplorerLogicGateSummary(gate domain.LogicGate) domain.LogicGate {
+	return domain.LogicGate{
+		CompanyID:        gate.CompanyID,
+		LogicGateID:      gate.LogicGateID,
+		Header:           gate.Header,
+		CreatedTimestamp: gate.CreatedTimestamp,
+	}
+}
+
+func sortCompanyExplorerLogicGateSummaries(items []domain.LogicGate) {
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
 	})
-	return items, nil
 }
 
 func (r *MemoryRepo) ListCompanyExplorerLogicGateSummaries(companyID string) ([]domain.LogicGate, error) {
@@ -924,16 +973,35 @@ func (r *MemoryRepo) ListCompanyExplorerLogicGateSummaries(companyID string) ([]
 		if gate.CompanyID != companyID {
 			continue
 		}
-		items = append(items, domain.LogicGate{
-			CompanyID:        gate.CompanyID,
-			LogicGateID:      gate.LogicGateID,
-			Header:           gate.Header,
-			CreatedTimestamp: gate.CreatedTimestamp,
-		})
+		items = append(items, companyExplorerLogicGateSummary(gate))
 	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
-	})
+	sortCompanyExplorerLogicGateSummaries(items)
+	return items, nil
+}
+
+func (r *MemoryRepo) ListCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error) {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return r.ListCompanyExplorerLogicGateSummaries(companyID)
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "logic_gate")
+	items := make([]domain.LogicGate, 0)
+	seen := map[string]bool{}
+	for _, folderItem := range r.folderItems {
+		if folderItem.CompanyID != companyID || folderItem.ItemType != "logic_gate" || !folderIDs[folderItem.FolderID] || seen[folderItem.ItemID] {
+			continue
+		}
+		gate, ok := r.logicGates[key(companyID, folderItem.ItemID)]
+		if !ok {
+			continue
+		}
+		seen[folderItem.ItemID] = true
+		items = append(items, companyExplorerLogicGateSummary(gate))
+	}
+	sortCompanyExplorerLogicGateSummaries(items)
 	return items, nil
 }
 

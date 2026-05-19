@@ -14,6 +14,7 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 	if r.Method == http.MethodGet {
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		folderKind := strings.TrimSpace(r.URL.Query().Get("folder_kind"))
+		folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
 		if companyID == "" {
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
@@ -22,9 +23,28 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 			writeError(w, http.StatusBadRequest, "invalid_folder_kind")
 			return
 		}
-		items, err := s.repo.ListCompanyExplorerFolders(companyID, folderKind)
+		if folderID != "" && !isValidCompanyExplorerResourceID(folderID) {
+			writeError(w, http.StatusBadRequest, "invalid_folder_id")
+			return
+		}
+
+		var items []domain.CompanyExplorerFolder
+		var err error
+		if folderID != "" {
+			if folderKind == "" {
+				writeError(w, http.StatusBadRequest, "folder_kind_required")
+				return
+			}
+			items, err = s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind)
+			if err == nil && len(items) == 0 {
+				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+				return
+			}
+		} else {
+			items, err = s.repo.ListCompanyExplorerFolders(companyID, folderKind)
+		}
 		if err != nil {
-			log.Printf("company explorer folders: failed to list folders company_id=%s folder_kind=%s: %v", companyID, folderKind, err)
+			log.Printf("company explorer folders: failed to list folders company_id=%s folder_kind=%s folder_id=%s: %v", companyID, folderKind, folderID, err)
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
 		}
@@ -36,7 +56,6 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"folders": items})
 		return
 	}
-
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -712,15 +731,44 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
 		itemType := strings.TrimSpace(r.URL.Query().Get("item_type"))
+		includeDescendants := parseBoolQuery(r.URL.Query().Get("subtree")) || parseBoolQuery(r.URL.Query().Get("include_descendants"))
 		if companyID == "" {
 			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if folderID != "" && !isValidCompanyExplorerResourceID(folderID) {
+			writeError(w, http.StatusBadRequest, "invalid_folder_id")
 			return
 		}
 		if itemType != "" && !isValidCompanyExplorerItemType(itemType) {
 			writeError(w, http.StatusBadRequest, "invalid_item_type")
 			return
 		}
-		items, err := s.repo.ListCompanyExplorerFolderItems(companyID, folderID, itemType)
+
+		var items []domain.CompanyExplorerFolderItem
+		var err error
+		if includeDescendants {
+			if folderID == "" {
+				writeError(w, http.StatusBadRequest, "folder_id_required")
+				return
+			}
+			if itemType == "" {
+				writeError(w, http.StatusBadRequest, "item_type_required")
+				return
+			}
+			folders, listErr := s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, itemType)
+			if listErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
+				return
+			}
+			if len(folders) == 0 {
+				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+				return
+			}
+			items, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType)
+		} else {
+			items, err = s.repo.ListCompanyExplorerFolderItems(companyID, folderID, itemType)
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
 			return
@@ -728,7 +776,6 @@ func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"folder_items": items})
 		return
 	}
-
 	if r.Method == http.MethodPost {
 		var req struct {
 			CompanyID string `json:"company_id"`
@@ -856,4 +903,36 @@ func isValidCompanyExplorerFolderKind(value string) bool {
 
 func isValidCompanyExplorerItemType(value string) bool {
 	return value == "node" || value == "logic_gate"
+}
+
+func companyExplorerItemTypeForFolderKind(folderKind string) string {
+	switch strings.TrimSpace(folderKind) {
+	case "node":
+		return "node"
+	case "logic_gate":
+		return "logic_gate"
+	default:
+		return ""
+	}
+}
+
+func isValidCompanyExplorerResourceID(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != 36 {
+		return false
+	}
+	for index, char := range value {
+		switch index {
+		case 8, 13, 18, 23:
+			if char != '-' {
+				return false
+			}
+		default:
+			if (char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F') {
+				continue
+			}
+			return false
+		}
+	}
+	return true
 }

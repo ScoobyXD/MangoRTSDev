@@ -20,7 +20,7 @@ Source architecture:
 
 | Theme | Status | Current Read |
 | --- | --- | --- |
-| 1. Read Plane | Projection slice complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; scoped workspace snapshots and cheap event ETags exist, but several broad map/explorer scopes still need bounded read models. |
+| 1. Read Plane | Company Explorer subtree complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; Company Explorer has a folder-subtree snapshot/list contract; map scopes and version-row validators still need bounded/windowed read models. |
 | 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph and migrated work-item assignment mutations now append durable workspace events atomically; frontend gap reconciliation now detects missed numeric workspace sequences and triggers scoped surface refreshes. Remaining mutation families and external fanout are still follow-ups. |
 | 3. Work Ownership / Commands | Source migration complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, and inbox reads use projection rows; frontend parity and event atomicity remain follow-ups. |
 | 4. Hot Path Discipline | Auth cache complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth now caches derived actor/membership context after per-request token validation; repository context, batch SQL, and metrics remain follow-up branches. |
@@ -84,8 +84,18 @@ Migration/backfill/rollback notes:
 - Rebuild helpers: store helpers can rebuild all entries for a company or focused entries for one node or one Logic Gate; the projection remains disposable and source-derived.
 - Rollback: a code rollback can return to the prior join-backed reads while leaving the projection table unused. A DB rollback should drop the projection triggers/functions/indexes/table after confirming no rollout still calls the projection-backed read path; no source-of-truth data lives only in `work_item_inbox_entries`.
 
+Company Explorer subtree branch:
+`reads/company-explorer-subtree`
+
+Status:
+- 2026-05-19: Complete. `scope=company_explorer` now supports a bounded `company_id` + `folder_id` + `folder_kind` read that returns only the requested folder subtree, subtree folder items, and node or Logic Gate summaries placed in that subtree. Folder and folder-item list endpoints also expose subtree reads while preserving direct/broad compatibility paths.
+
+Migration/backfill/rollback notes:
+- Migration: none. This branch reuses existing `company_explorer_folders`, `company_explorer_folder_items`, `nodes`, and `logic_gates` rows with recursive subtree reads.
+- Backfill: none. Existing folder placement rows are already the source for subtree membership.
+- Rollback: code can return `scope=company_explorer` and the folder/folder-item list endpoints to their previous broad summary behavior. No schema or data rollback is required.
+
 Follow-up branches:
-- `reads/company-explorer-subtree`
 - `reads/node-map-window`
 - `reads/logic-gate-map-window`
 - `reads/version-row-etags`
@@ -336,11 +346,11 @@ Use this as the default sequencing unless a production incident changes prioriti
 10. `events/atomic-work-item-assignment-events`
 11. `events/frontend-gap-reconciliation`
 12. `platform/auth-membership-cache`
+13. `reads/company-explorer-subtree`
 
 ### Next Roadmap
 
-1. reads/company-explorer-subtree
-2. work-items/email-conversion-command
+1. work-items/email-conversion-command
 
 ### Work-Items Follow-Ups
 

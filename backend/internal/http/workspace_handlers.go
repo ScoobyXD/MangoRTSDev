@@ -134,20 +134,33 @@ func workspaceSnapshotVersionQueries(r *http.Request, scope string) []store.Doma
 		}
 	case "company_explorer":
 		folderKind := strings.TrimSpace(r.URL.Query().Get("folder_kind"))
-		queries := []store.DomainEventStreamQuery{
-			workspaceEventQuery(nodeListWorkspaceEventTypes...),
-			workspaceEventQuery(logicGateListWorkspaceEventTypes...),
-			workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("node")),
-			workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("logic_gate")),
-		}
-		if folderKind == "" {
-			for _, kind := range []string{"node", "logic_gate"} {
-				queries = append(queries, workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload(kind)))
+		switch folderKind {
+		case "node":
+			return []store.DomainEventStreamQuery{
+				workspaceEventQuery(nodeListWorkspaceEventTypes...),
+				workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("node")),
+				workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("node")),
 			}
-		} else {
-			queries = append(queries, workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload(folderKind)))
+		case "logic_gate":
+			return []store.DomainEventStreamQuery{
+				workspaceEventQuery(logicGateListWorkspaceEventTypes...),
+				workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("logic_gate")),
+				workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("logic_gate")),
+			}
+		case "communications":
+			return []store.DomainEventStreamQuery{
+				workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("communications")),
+			}
+		default:
+			return []store.DomainEventStreamQuery{
+				workspaceEventQuery(nodeListWorkspaceEventTypes...),
+				workspaceEventQuery(logicGateListWorkspaceEventTypes...),
+				workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("node")),
+				workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("logic_gate")),
+				workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("node")),
+				workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("logic_gate")),
+			}
 		}
-		return queries
 	case "kanban":
 		boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
 		if boardID == "" {
@@ -323,19 +336,58 @@ func (s *Server) handleLogicGateMapWorkspaceSnapshot(w http.ResponseWriter, r *h
 func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, etag string) {
 	folderKind := strings.TrimSpace(r.URL.Query().Get("folder_kind"))
 	folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
+	if folderKind != "" && !isValidCompanyExplorerFolderKind(folderKind) {
+		writeError(w, http.StatusBadRequest, "invalid_folder_kind")
+		return
+	}
+	if folderID != "" {
+		if !isValidCompanyExplorerResourceID(folderID) {
+			writeError(w, http.StatusBadRequest, "invalid_folder_id")
+			return
+		}
+		if folderKind == "" {
+			writeError(w, http.StatusBadRequest, "folder_kind_required")
+			return
+		}
+	}
+
+	itemType := companyExplorerItemTypeForFolderKind(folderKind)
 	folders := []domain.CompanyExplorerFolder{}
-	var folderItems []domain.CompanyExplorerFolderItem
+	folderItems := []domain.CompanyExplorerFolderItem{}
+	nodes := []domain.Node{}
+	logicGates := []domain.LogicGate{}
 	var err error
+
 	if folderID != "" {
 		folders, err = s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
 		}
-		folderItems, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, "")
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
+		if len(folders) == 0 {
+			writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
 			return
+		}
+		if itemType != "" {
+			folderItems, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
+				return
+			}
+		}
+		switch folderKind {
+		case "node":
+			nodes, err = s.repo.ListCompanyExplorerNodeSummariesInFolderSubtree(companyID, folderID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_list_node_summaries")
+				return
+			}
+		case "logic_gate":
+			logicGates, err = s.repo.ListCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_summaries")
+				return
+			}
 		}
 	} else {
 		if folderKind == "" {
@@ -354,22 +406,40 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
 		}
-		folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", "")
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
-			return
+		if folderKind == "" || itemType != "" {
+			folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", itemType)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
+				return
+			}
+		}
+		switch folderKind {
+		case "":
+			nodes, err = s.repo.ListCompanyExplorerNodeSummaries(companyID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_list_node_summaries")
+				return
+			}
+			logicGates, err = s.repo.ListCompanyExplorerLogicGateSummaries(companyID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_summaries")
+				return
+			}
+		case "node":
+			nodes, err = s.repo.ListCompanyExplorerNodeSummaries(companyID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_list_node_summaries")
+				return
+			}
+		case "logic_gate":
+			logicGates, err = s.repo.ListCompanyExplorerLogicGateSummaries(companyID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_summaries")
+				return
+			}
 		}
 	}
-	nodes, err := s.repo.ListCompanyExplorerNodeSummaries(companyID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_node_summaries")
-		return
-	}
-	logicGates, err := s.repo.ListCompanyExplorerLogicGateSummaries(companyID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_summaries")
-		return
-	}
+
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
 		"scope":        "company_explorer",
 		"company_id":   companyID,

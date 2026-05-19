@@ -846,6 +846,131 @@ func TestCommunicationsSharedInboxAccountEmailAPI(t *testing.T) {
 	}
 }
 
+func TestCompanyExplorerFolderAndItemListEndpointsSupportSubtreeReads(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-folder-list-subtree-test"
+
+	parent, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Parent")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder parent error = %v", err)
+	}
+	child, err := repo.CreateCompanyExplorerFolder(companyID, parent.FolderID, "node", "Child")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder child error = %v", err)
+	}
+	sibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Sibling")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder sibling error = %v", err)
+	}
+	nodeA, err := repo.CreateNode(companyID, "Node A")
+	if err != nil {
+		t.Fatalf("CreateNode A error = %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "Node B")
+	if err != nil {
+		t.Fatalf("CreateNode B error = %v", err)
+	}
+	nodeOutside, err := repo.CreateNode(companyID, "Node outside")
+	if err != nil {
+		t.Fatalf("CreateNode outside error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", nodeA.NodeID, 1000); err != nil {
+		t.Fatalf("Assign node A error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, child.FolderID, "node", nodeB.NodeID, 2000); err != nil {
+		t.Fatalf("Assign node B error = %v", err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, sibling.FolderID, "node", nodeOutside.NodeID, 3000); err != nil {
+		t.Fatalf("Assign outside node error = %v", err)
+	}
+
+	assertIDs := func(label string, got []string, want ...string) {
+		t.Helper()
+		seen := make(map[string]bool, len(got))
+		for _, id := range got {
+			seen[id] = true
+		}
+		if len(seen) != len(want) {
+			t.Fatalf("%s ids = %v, want %v", label, got, want)
+		}
+		for _, id := range want {
+			if !seen[id] {
+				t.Fatalf("%s ids = %v, missing %s", label, got, id)
+			}
+		}
+	}
+
+	foldersReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=node&folder_id="+parent.FolderID, nil)
+	foldersRec := httptest.NewRecorder()
+	handler.ServeHTTP(foldersRec, foldersReq)
+	if foldersRec.Code != http.StatusOK {
+		t.Fatalf("GET folders subtree status = %d, want %d body=%s", foldersRec.Code, http.StatusOK, foldersRec.Body.String())
+	}
+	var foldersPayload struct {
+		Folders []domain.CompanyExplorerFolder `json:"folders"`
+	}
+	if err := json.NewDecoder(foldersRec.Body).Decode(&foldersPayload); err != nil {
+		t.Fatalf("decode folders subtree: %v", err)
+	}
+	folderIDs := make([]string, 0, len(foldersPayload.Folders))
+	for _, folder := range foldersPayload.Folders {
+		folderIDs = append(folderIDs, folder.FolderID)
+	}
+	assertIDs("folders", folderIDs, parent.FolderID, child.FolderID)
+
+	directItemsReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folder-items?company_id="+companyID+"&folder_id="+parent.FolderID+"&item_type=node", nil)
+	directItemsRec := httptest.NewRecorder()
+	handler.ServeHTTP(directItemsRec, directItemsReq)
+	if directItemsRec.Code != http.StatusOK {
+		t.Fatalf("GET direct folder items status = %d, want %d body=%s", directItemsRec.Code, http.StatusOK, directItemsRec.Body.String())
+	}
+	var directItemsPayload struct {
+		Items []domain.CompanyExplorerFolderItem `json:"folder_items"`
+	}
+	if err := json.NewDecoder(directItemsRec.Body).Decode(&directItemsPayload); err != nil {
+		t.Fatalf("decode direct folder items: %v", err)
+	}
+	directItemIDs := make([]string, 0, len(directItemsPayload.Items))
+	for _, item := range directItemsPayload.Items {
+		directItemIDs = append(directItemIDs, item.ItemID)
+	}
+	assertIDs("direct folder items", directItemIDs, nodeA.NodeID)
+
+	subtreeItemsReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folder-items?company_id="+companyID+"&folder_id="+parent.FolderID+"&item_type=node&subtree=true", nil)
+	subtreeItemsRec := httptest.NewRecorder()
+	handler.ServeHTTP(subtreeItemsRec, subtreeItemsReq)
+	if subtreeItemsRec.Code != http.StatusOK {
+		t.Fatalf("GET subtree folder items status = %d, want %d body=%s", subtreeItemsRec.Code, http.StatusOK, subtreeItemsRec.Body.String())
+	}
+	var subtreeItemsPayload struct {
+		Items []domain.CompanyExplorerFolderItem `json:"folder_items"`
+	}
+	if err := json.NewDecoder(subtreeItemsRec.Body).Decode(&subtreeItemsPayload); err != nil {
+		t.Fatalf("decode subtree folder items: %v", err)
+	}
+	subtreeItemIDs := make([]string, 0, len(subtreeItemsPayload.Items))
+	for _, item := range subtreeItemsPayload.Items {
+		subtreeItemIDs = append(subtreeItemIDs, item.ItemID)
+	}
+	assertIDs("subtree folder items", subtreeItemIDs, nodeA.NodeID, nodeB.NodeID)
+
+	missingItemTypeReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folder-items?company_id="+companyID+"&folder_id="+parent.FolderID+"&subtree=true", nil)
+	missingItemTypeRec := httptest.NewRecorder()
+	handler.ServeHTTP(missingItemTypeRec, missingItemTypeReq)
+	if missingItemTypeRec.Code != http.StatusBadRequest {
+		t.Fatalf("GET subtree folder items without item_type status = %d, want %d body=%s", missingItemTypeRec.Code, http.StatusBadRequest, missingItemTypeRec.Body.String())
+	}
+	invalidFolderReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=node&folder_id=bad-folder-id", nil)
+	invalidFolderRec := httptest.NewRecorder()
+	handler.ServeHTTP(invalidFolderRec, invalidFolderReq)
+	if invalidFolderRec.Code != http.StatusBadRequest {
+		t.Fatalf("GET invalid folders subtree status = %d, want %d body=%s", invalidFolderRec.Code, http.StatusBadRequest, invalidFolderRec.Body.String())
+	}
+}
 func TestCompanyExplorerFolderItemBatchAssignsItemsInOneRequest(t *testing.T) {
 	t.Parallel()
 
