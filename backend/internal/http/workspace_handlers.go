@@ -112,7 +112,9 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) workspaceSnapshotETag(r *http.Request, companyID, scope string) (string, error) {
-	return s.workspaceEventETag(r, companyID, "workspace-snapshot:"+scope, workspaceSnapshotVersionQueries(r, scope))
+	resource := "workspace-snapshot:" + scope
+	queries := workspaceSnapshotVersionQueries(r, scope)
+	return s.workspaceEventETagWithReadVersion(r, companyID, resource, queries, workspaceSnapshotReadVersionQuery(r, companyID, scope))
 }
 
 func workspaceSnapshotVersionQueries(r *http.Request, scope string) []store.DomainEventStreamQuery {

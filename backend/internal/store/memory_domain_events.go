@@ -68,6 +68,7 @@ func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.Dom
 		CreatedTimestamp: now,
 	}
 	r.domainEvents[domainEventMemoryKey(item.CompanyID, item.EventID)] = item
+	r.updateWorkspaceReadVersionsLocked(item)
 	return cloneDomainEvent(item), nil
 }
 
@@ -161,6 +162,39 @@ func (r *MemoryRepo) CurrentDomainEventSequence(query DomainEventStreamQuery) (i
 	}
 	return sequence, nil
 }
+
+func (r *MemoryRepo) updateWorkspaceReadVersionsLocked(event domain.DomainEvent) {
+	if !isWorkspaceStreamDomainEvent(event) {
+		return
+	}
+	if r.workspaceReadVersions == nil {
+		r.workspaceReadVersions = map[string]int64{}
+	}
+	for _, row := range WorkspaceReadVersionStaticRows(event.CompanyID) {
+		key := workspaceReadVersionMemoryKey(row.CompanyID, row.Scope, row.ResourceKey)
+		if _, ok := r.workspaceReadVersions[key]; !ok {
+			r.workspaceReadVersions[key] = 0
+		}
+	}
+	for _, row := range workspaceReadVersionRowsForDomainEvent(event) {
+		key := workspaceReadVersionMemoryKey(row.CompanyID, row.Scope, row.ResourceKey)
+		if event.Sequence > r.workspaceReadVersions[key] {
+			r.workspaceReadVersions[key] = event.Sequence
+		}
+	}
+}
+
+func (r *MemoryRepo) CurrentWorkspaceReadVersion(query WorkspaceReadVersionQuery) (int64, bool, error) {
+	query, err := NormalizeWorkspaceReadVersionQuery(query)
+	if err != nil {
+		return 0, false, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	version, ok := r.workspaceReadVersions[workspaceReadVersionMemoryKey(query.CompanyID, query.Scope, query.ResourceKey)]
+	return version, ok, nil
+}
+
 func (r *MemoryRepo) MarkDomainEventPublished(companyID, eventID string) error {
 	companyID = strings.TrimSpace(companyID)
 	eventID = strings.TrimSpace(eventID)

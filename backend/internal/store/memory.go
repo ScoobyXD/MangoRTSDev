@@ -37,6 +37,7 @@ type MemoryRepo struct {
 	emailNodeLinks           map[string]communicationsEmailNodeLink
 	logicGateShortcuts       map[string]domain.UserLogicGateShortcut
 	domainEvents             map[string]domain.DomainEvent
+	workspaceReadVersions    map[string]int64
 	domainEventAppendErr     error
 	notificationEvents       map[string]domain.NotificationEvent
 	notifications            map[string]domain.Notification
@@ -74,6 +75,7 @@ func NewMemoryRepo() *MemoryRepo {
 		emailNodeLinks:           map[string]communicationsEmailNodeLink{},
 		logicGateShortcuts:       map[string]domain.UserLogicGateShortcut{},
 		domainEvents:             map[string]domain.DomainEvent{},
+		workspaceReadVersions:    map[string]int64{},
 		notificationEvents:       map[string]domain.NotificationEvent{},
 		notifications:            map[string]domain.Notification{},
 	}
@@ -117,4 +119,8 @@ func logicGateShortcutKey(userID, companyID, logicGateID string) string {
 
 func sharedInboxRaciKey(companyID, folderID string) string {
 	return companyID + ":" + folderID
+}
+
+func workspaceReadVersionMemoryKey(companyID, scope, resourceKey string) string {
+	return companyID + ":" + scope + ":" + resourceKey
 }

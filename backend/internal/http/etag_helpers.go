@@ -8,78 +8,17 @@ import (
 )
 
 var (
-	nodeListWorkspaceEventTypes = []string{
-		"node_created",
-		"node_updated",
-		"node_deleted",
-		"kanban_card_upserted",
-		"kanban_card_moved",
-		"kanban_card_deleted",
-		"work_item.logic_gate_assignment_saved",
-		"work_item.logic_gate_assignment_moved",
-		"work_item.logic_gate_assignment_removed",
-		"work_item.logic_gate_issue_toggled",
-		"kanban_column_deleted",
-		"kanban_board_deleted",
-	}
-	nodeRelationshipWorkspaceEventTypes = []string{
-		"relationship_created",
-		"relationship_deleted",
-		"node_deleted",
-	}
-	logicGateListWorkspaceEventTypes = []string{
-		"logic_gate_created",
-		"logic_gate_updated",
-		"logic_gate_deleted",
-		"logic_gate_raci_updated",
-	}
-	logicGateRelationshipWorkspaceEventTypes = []string{
-		"logic_gate_relationship_created",
-		"logic_gate_relationship_deleted",
-		"logic_gate_deleted",
-	}
-	nodeMapPositionWorkspaceEventTypes = []string{
-		"node_map_positions_updated",
-	}
-	logicGateMapPositionWorkspaceEventTypes = []string{
-		"logic_gate_map_positions_updated",
-	}
-	companyExplorerFolderWorkspaceEventTypes = []string{
-		"company_explorer_folder_created",
-		"company_explorer_folder_updated",
-		"company_explorer_folder_deleted",
-		"communications_shared_inbox_raci_updated",
-	}
-	companyExplorerFolderItemWorkspaceEventTypes = []string{
-		"company_explorer_folder_item_assigned",
-		"company_explorer_folder_item_removed",
-	}
-	kanbanBoardWorkspaceEventTypes = []string{
-		"kanban_board_saved",
-		"kanban_board_updated",
-		"kanban_board_deleted",
-		"logic_gate_deleted",
-	}
-	kanbanColumnWorkspaceEventTypes = []string{
-		"kanban_column_created",
-		"kanban_column_updated",
-		"kanban_column_deleted",
-		"kanban_board_deleted",
-		"logic_gate_deleted",
-	}
-	kanbanCardWorkspaceEventTypes = []string{
-		"kanban_card_upserted",
-		"kanban_card_moved",
-		"kanban_card_deleted",
-		"work_item.logic_gate_assignment_saved",
-		"work_item.logic_gate_assignment_moved",
-		"work_item.logic_gate_assignment_removed",
-		"work_item.logic_gate_issue_toggled",
-		"kanban_column_deleted",
-		"kanban_board_deleted",
-		"node_deleted",
-		"logic_gate_deleted",
-	}
+	nodeListWorkspaceEventTypes                  = store.NodeListWorkspaceEventTypes
+	nodeRelationshipWorkspaceEventTypes          = store.NodeRelationshipWorkspaceEventTypes
+	logicGateListWorkspaceEventTypes             = store.LogicGateListWorkspaceEventTypes
+	logicGateRelationshipWorkspaceEventTypes     = store.LogicGateRelationshipWorkspaceEventTypes
+	nodeMapPositionWorkspaceEventTypes           = store.NodeMapPositionWorkspaceEventTypes
+	logicGateMapPositionWorkspaceEventTypes      = store.LogicGateMapPositionWorkspaceEventTypes
+	companyExplorerFolderWorkspaceEventTypes     = store.CompanyExplorerFolderWorkspaceEventTypes
+	companyExplorerFolderItemWorkspaceEventTypes = store.CompanyExplorerFolderItemWorkspaceEventTypes
+	kanbanBoardWorkspaceEventTypes               = store.KanbanBoardWorkspaceEventTypes
+	kanbanColumnWorkspaceEventTypes              = store.KanbanColumnWorkspaceEventTypes
+	kanbanCardWorkspaceEventTypes                = store.KanbanCardWorkspaceEventTypes
 )
 
 func workspaceEventQuery(eventTypes ...string) store.DomainEventStreamQuery {
@@ -111,11 +50,85 @@ func (s *Server) workspaceEventVersion(companyID string, queries []store.DomainE
 }
 
 func (s *Server) workspaceEventETag(r *http.Request, companyID, resource string, queries []store.DomainEventStreamQuery) (string, error) {
-	version, err := s.workspaceEventVersion(companyID, queries)
+	version, err := s.workspaceEventVersionWithReadVersion(companyID, workspaceReadVersionQueryForResource(companyID, resource, queries), queries)
 	if err != nil {
 		return "", err
 	}
 	return strongETagFromString("workspace-events:" + companyID + ":" + resource + ":" + r.URL.Path + "?" + r.URL.Query().Encode() + ":" + strconv.FormatInt(version, 10)), nil
+}
+
+func (s *Server) workspaceEventETagWithReadVersion(r *http.Request, companyID, resource string, queries []store.DomainEventStreamQuery, readVersion store.WorkspaceReadVersionQuery) (string, error) {
+	version, err := s.workspaceEventVersionWithReadVersion(companyID, readVersion, queries)
+	if err != nil {
+		return "", err
+	}
+	return strongETagFromString("workspace-events:" + companyID + ":" + resource + ":" + r.URL.Path + "?" + r.URL.Query().Encode() + ":" + strconv.FormatInt(version, 10)), nil
+}
+
+func (s *Server) workspaceEventVersionWithReadVersion(companyID string, readVersion store.WorkspaceReadVersionQuery, queries []store.DomainEventStreamQuery) (int64, error) {
+	if strings.TrimSpace(readVersion.Scope) != "" {
+		version, found, err := s.repo.CurrentWorkspaceReadVersion(readVersion)
+		if err != nil {
+			return 0, err
+		}
+		if found {
+			return version, nil
+		}
+	}
+	return s.workspaceEventVersion(companyID, queries)
+}
+
+func workspaceReadVersionQueryForResource(companyID, resource string, queries []store.DomainEventStreamQuery) store.WorkspaceReadVersionQuery {
+	switch resource {
+	case "nodes", "node-relationships", "logic-gates", "logic-gate-relationships", "map-layout:node", "map-layout:node-window", "map-layout:logic_gate", "map-layout:logic_gate-window", "kanban-boards":
+		return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: resource}
+	case "kanban-columns", "kanban-cards":
+		boardID := workspaceEventQueryPayloadValue(queries, "board_id")
+		if boardID == "" {
+			return store.WorkspaceReadVersionQuery{}
+		}
+		return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: resource, ResourceKey: store.WorkspaceReadVersionResourceKey("board_id", boardID)}
+	default:
+		return store.WorkspaceReadVersionQuery{}
+	}
+}
+
+func workspaceEventQueryPayloadValue(queries []store.DomainEventStreamQuery, key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	for _, query := range queries {
+		if len(query.PayloadEquals) == 0 {
+			continue
+		}
+		if value := strings.TrimSpace(query.PayloadEquals[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func workspaceSnapshotReadVersionQuery(r *http.Request, companyID, scope string) store.WorkspaceReadVersionQuery {
+	switch scope {
+	case "full", "node_map", "node_map_window", "logic_gate_map", "logic_gate_map_window":
+		return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: "workspace-snapshot:" + scope}
+	case "company_explorer":
+		folderKind := strings.TrimSpace(r.URL.Query().Get("folder_kind"))
+		query := store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: "workspace-snapshot:company_explorer"}
+		if folderKind == "node" || folderKind == "logic_gate" || folderKind == "communications" {
+			query.ResourceKey = store.WorkspaceReadVersionResourceKey("folder_kind", folderKind)
+		}
+		return query
+	case "kanban":
+		boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
+		if boardID == "" {
+			return store.WorkspaceReadVersionQuery{}
+		}
+		return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: "workspace-snapshot:kanban", ResourceKey: store.WorkspaceReadVersionResourceKey("board_id", boardID)}
+	default:
+		return store.WorkspaceReadVersionQuery{}
+	}
 }
 
 func (s *Server) writeWorkspaceEventNotModified(w http.ResponseWriter, r *http.Request, companyID, resource string, queries []store.DomainEventStreamQuery) (string, bool, error) {

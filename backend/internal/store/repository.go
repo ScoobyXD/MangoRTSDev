@@ -199,6 +199,7 @@ type DomainEventRepository interface {
 	ListPendingDomainEvents(limit int) ([]domain.DomainEvent, error)
 	ListDomainEventsAfter(query DomainEventReplayQuery) ([]domain.DomainEvent, error)
 	CurrentDomainEventSequence(query DomainEventStreamQuery) (int64, error)
+	CurrentWorkspaceReadVersion(query WorkspaceReadVersionQuery) (int64, bool, error)
 	MarkDomainEventPublished(companyID, eventID string) error
 }
 

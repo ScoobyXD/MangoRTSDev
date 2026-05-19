@@ -2877,3 +2877,271 @@ func TestWorkspaceSnapshotScopesInvalidateForRelevantEvents(t *testing.T) {
 		t.Fatalf("kanban ETag did not change after column create")
 	}
 }
+
+type countingReadVersionNodeMapWindowRepo struct {
+	store.Repository
+	currentReadVersionCalls    int
+	currentDomainSequenceCalls int
+	listNodeMapWindowCalls     int
+}
+
+func (r *countingReadVersionNodeMapWindowRepo) CurrentWorkspaceReadVersion(query store.WorkspaceReadVersionQuery) (int64, bool, error) {
+	r.currentReadVersionCalls++
+	return r.Repository.CurrentWorkspaceReadVersion(query)
+}
+
+func (r *countingReadVersionNodeMapWindowRepo) CurrentDomainEventSequence(query store.DomainEventStreamQuery) (int64, error) {
+	r.currentDomainSequenceCalls++
+	return r.Repository.CurrentDomainEventSequence(query)
+}
+
+func (r *countingReadVersionNodeMapWindowRepo) ListNodeMapWindow(query store.NodeMapWindowQuery) (store.NodeMapWindowResult, error) {
+	r.listNodeMapWindowCalls++
+	return r.Repository.ListNodeMapWindow(query)
+}
+
+func TestWorkspaceSnapshotNodeMapWindowConditionalGetUsesReadVersionRow(t *testing.T) {
+	base := store.NewMemoryRepo()
+	repo := &countingReadVersionNodeMapWindowRepo{Repository: base}
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "11111111-1111-4111-8111-444444444444"
+
+	folder, err := base.CreateCompanyExplorerFolder(companyID, "", "node", "Window")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder error = %v", err)
+	}
+	node, err := base.CreateNode(companyID, "Visible")
+	if err != nil {
+		t.Fatalf("CreateNode error = %v", err)
+	}
+	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", node.NodeID, 1000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem error = %v", err)
+	}
+	if _, err := base.UpsertNodeMapPositions(companyID, []domain.NodeMapPosition{{NodeID: node.NodeID, X: 25, Y: 25}}); err != nil {
+		t.Fatalf("UpsertNodeMapPositions error = %v", err)
+	}
+	if _, err := base.AppendDomainEvent(store.DomainEventInput{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, Type: "node_map_positions_updated"}); err != nil {
+		t.Fatalf("AppendDomainEvent node_map_positions_updated: %v", err)
+	}
+
+	url := "/v1/workspace/snapshot?company_id=" + companyID + "&scope=node_map_window&folder_id=" + folder.FolderID + "&min_x=0&min_y=0&max_x=100&max_y=100"
+	firstReq := httptest.NewRequest(http.MethodGet, url, nil)
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("initial node_map_window status = %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	if repo.currentReadVersionCalls == 0 {
+		t.Fatal("CurrentWorkspaceReadVersion was not called")
+	}
+	if repo.currentDomainSequenceCalls != 0 {
+		t.Fatalf("CurrentDomainEventSequence calls after read-version hit = %d, want 0", repo.currentDomainSequenceCalls)
+	}
+	if repo.listNodeMapWindowCalls != 1 {
+		t.Fatalf("ListNodeMapWindow calls after first request = %d, want 1", repo.listNodeMapWindowCalls)
+	}
+	etag := firstRec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("node_map_window ETag is empty")
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, url, nil)
+	secondReq.Header.Set("If-None-Match", etag)
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusNotModified {
+		t.Fatalf("conditional node_map_window status = %d, want %d body=%s", secondRec.Code, http.StatusNotModified, secondRec.Body.String())
+	}
+	if repo.currentDomainSequenceCalls != 0 {
+		t.Fatalf("CurrentDomainEventSequence calls after conditional read-version hit = %d, want 0", repo.currentDomainSequenceCalls)
+	}
+	if repo.listNodeMapWindowCalls != 1 {
+		t.Fatalf("ListNodeMapWindow calls after 304 = %d, want 1", repo.listNodeMapWindowCalls)
+	}
+}
+
+type countingMapLayoutWindowRepo struct {
+	store.Repository
+	currentDomainSequenceCalls     int
+	listNodeMapPositionsCalls      int
+	listLogicGateMapPositionsCalls int
+}
+
+func (r *countingMapLayoutWindowRepo) CurrentDomainEventSequence(query store.DomainEventStreamQuery) (int64, error) {
+	r.currentDomainSequenceCalls++
+	return r.Repository.CurrentDomainEventSequence(query)
+}
+
+func (r *countingMapLayoutWindowRepo) ListNodeMapPositionsWindow(query store.NodeMapWindowQuery) ([]domain.NodeMapPosition, error) {
+	r.listNodeMapPositionsCalls++
+	return r.Repository.ListNodeMapPositionsWindow(query)
+}
+
+func (r *countingMapLayoutWindowRepo) ListLogicGateMapPositionsWindow(query store.LogicGateMapWindowQuery) ([]domain.LogicGateMapPosition, error) {
+	r.listLogicGateMapPositionsCalls++
+	return r.Repository.ListLogicGateMapPositionsWindow(query)
+}
+
+func TestMapLayoutWindowConditionalGetsUseReadVersionRows(t *testing.T) {
+	base := store.NewMemoryRepo()
+	repo := &countingMapLayoutWindowRepo{Repository: base}
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "11111111-1111-4111-8111-555555555555"
+
+	nodeFolder, err := base.CreateCompanyExplorerFolder(companyID, "", "node", "Node Window")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder node error = %v", err)
+	}
+	node, err := base.CreateNode(companyID, "Visible Node")
+	if err != nil {
+		t.Fatalf("CreateNode error = %v", err)
+	}
+	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, nodeFolder.FolderID, "node", node.NodeID, 1000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem node error = %v", err)
+	}
+	if _, err := base.UpsertNodeMapPositions(companyID, []domain.NodeMapPosition{{NodeID: node.NodeID, X: 25, Y: 25}}); err != nil {
+		t.Fatalf("UpsertNodeMapPositions error = %v", err)
+	}
+	if _, err := base.AppendDomainEvent(store.DomainEventInput{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, Type: "node_map_positions_updated"}); err != nil {
+		t.Fatalf("AppendDomainEvent node_map_positions_updated: %v", err)
+	}
+
+	logicFolder, err := base.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Logic Window")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder logic error = %v", err)
+	}
+	logicGate, err := base.CreateLogicGate(companyID, "Visible Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate error = %v", err)
+	}
+	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, logicFolder.FolderID, "logic_gate", logicGate.LogicGateID, 1000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem logic error = %v", err)
+	}
+	if _, err := base.UpsertLogicGateMapPositions(companyID, []domain.LogicGateMapPosition{{LogicGateID: logicGate.LogicGateID, X: 25, Y: 25}}); err != nil {
+		t.Fatalf("UpsertLogicGateMapPositions error = %v", err)
+	}
+	if _, err := base.AppendDomainEvent(store.DomainEventInput{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, Type: "logic_gate_map_positions_updated"}); err != nil {
+		t.Fatalf("AppendDomainEvent logic_gate_map_positions_updated: %v", err)
+	}
+
+	nodeURL := "/v1/map-layout?company_id=" + companyID + "&map_type=node&folder_id=" + nodeFolder.FolderID + "&min_x=0&min_y=0&max_x=100&max_y=100"
+	assertMapLayoutWindowConditionalGETSkipsPayloadForTest(t, handler, nodeURL, &repo.currentDomainSequenceCalls, func() int { return repo.listNodeMapPositionsCalls })
+	if repo.listNodeMapPositionsCalls != 1 {
+		t.Fatalf("ListNodeMapPositionsWindow calls = %d, want 1", repo.listNodeMapPositionsCalls)
+	}
+
+	logicURL := "/v1/map-layout?company_id=" + companyID + "&map_type=logic_gate&folder_id=" + logicFolder.FolderID + "&min_x=0&min_y=0&max_x=100&max_y=100"
+	assertMapLayoutWindowConditionalGETSkipsPayloadForTest(t, handler, logicURL, &repo.currentDomainSequenceCalls, func() int { return repo.listLogicGateMapPositionsCalls })
+	if repo.listLogicGateMapPositionsCalls != 1 {
+		t.Fatalf("ListLogicGateMapPositionsWindow calls = %d, want 1", repo.listLogicGateMapPositionsCalls)
+	}
+}
+
+func assertMapLayoutWindowConditionalGETSkipsPayloadForTest(t *testing.T, handler http.Handler, url string, domainSequenceCalls *int, payloadCalls func() int) {
+	t.Helper()
+	beforeDomainSequenceCalls := *domainSequenceCalls
+	firstReq := httptest.NewRequest(http.MethodGet, url, nil)
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("initial map-layout window status = %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	if *domainSequenceCalls != beforeDomainSequenceCalls {
+		t.Fatalf("CurrentDomainEventSequence calls after read-version hit = %d, want %d", *domainSequenceCalls, beforeDomainSequenceCalls)
+	}
+	etag := firstRec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("map-layout window ETag is empty")
+	}
+	payloadCallsAfterFirst := payloadCalls()
+
+	secondReq := httptest.NewRequest(http.MethodGet, url, nil)
+	secondReq.Header.Set("If-None-Match", etag)
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusNotModified {
+		t.Fatalf("conditional map-layout window status = %d, want %d body=%s", secondRec.Code, http.StatusNotModified, secondRec.Body.String())
+	}
+	if *domainSequenceCalls != beforeDomainSequenceCalls {
+		t.Fatalf("CurrentDomainEventSequence calls after conditional read-version hit = %d, want %d", *domainSequenceCalls, beforeDomainSequenceCalls)
+	}
+	if payloadCalls() != payloadCallsAfterFirst {
+		t.Fatalf("payload calls after 304 = %d, want %d", payloadCalls(), payloadCallsAfterFirst)
+	}
+}
+
+type missingWorkspaceReadVersionRepo struct {
+	store.Repository
+	currentReadVersionCalls    int
+	currentDomainSequenceCalls int
+	listNodeMapWindowCalls     int
+}
+
+func (r *missingWorkspaceReadVersionRepo) CurrentWorkspaceReadVersion(query store.WorkspaceReadVersionQuery) (int64, bool, error) {
+	r.currentReadVersionCalls++
+	return 0, false, nil
+}
+
+func (r *missingWorkspaceReadVersionRepo) CurrentDomainEventSequence(query store.DomainEventStreamQuery) (int64, error) {
+	r.currentDomainSequenceCalls++
+	return r.Repository.CurrentDomainEventSequence(query)
+}
+
+func (r *missingWorkspaceReadVersionRepo) ListNodeMapWindow(query store.NodeMapWindowQuery) (store.NodeMapWindowResult, error) {
+	r.listNodeMapWindowCalls++
+	return r.Repository.ListNodeMapWindow(query)
+}
+
+func TestWorkspaceSnapshotMissingReadVersionRowFallsBackWithoutPayloadOn304(t *testing.T) {
+	base := store.NewMemoryRepo()
+	repo := &missingWorkspaceReadVersionRepo{Repository: base}
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "11111111-1111-4111-8111-666666666666"
+
+	folder, err := base.CreateCompanyExplorerFolder(companyID, "", "node", "Window")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder error = %v", err)
+	}
+	node, err := base.CreateNode(companyID, "Visible")
+	if err != nil {
+		t.Fatalf("CreateNode error = %v", err)
+	}
+	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", node.NodeID, 1000); err != nil {
+		t.Fatalf("AssignCompanyExplorerFolderItem error = %v", err)
+	}
+	if _, err := base.UpsertNodeMapPositions(companyID, []domain.NodeMapPosition{{NodeID: node.NodeID, X: 25, Y: 25}}); err != nil {
+		t.Fatalf("UpsertNodeMapPositions error = %v", err)
+	}
+
+	url := "/v1/workspace/snapshot?company_id=" + companyID + "&scope=node_map_window&folder_id=" + folder.FolderID + "&min_x=0&min_y=0&max_x=100&max_y=100"
+	firstReq := httptest.NewRequest(http.MethodGet, url, nil)
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("initial node_map_window status = %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	if repo.currentReadVersionCalls == 0 || repo.currentDomainSequenceCalls == 0 {
+		t.Fatalf("fallback calls = read_version:%d domain_sequence:%d, want both nonzero", repo.currentReadVersionCalls, repo.currentDomainSequenceCalls)
+	}
+	if repo.listNodeMapWindowCalls != 1 {
+		t.Fatalf("ListNodeMapWindow calls after first request = %d, want 1", repo.listNodeMapWindowCalls)
+	}
+	etag := firstRec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("node_map_window ETag is empty")
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, url, nil)
+	secondReq.Header.Set("If-None-Match", etag)
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusNotModified {
+		t.Fatalf("conditional node_map_window status = %d, want %d body=%s", secondRec.Code, http.StatusNotModified, secondRec.Body.String())
+	}
+	if repo.listNodeMapWindowCalls != 1 {
+		t.Fatalf("ListNodeMapWindow calls after missing-row fallback 304 = %d, want 1", repo.listNodeMapWindowCalls)
+	}
+}

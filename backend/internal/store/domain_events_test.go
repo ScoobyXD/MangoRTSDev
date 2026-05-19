@@ -190,3 +190,63 @@ func TestMemoryDomainEventsCurrentSequenceFiltersPayloadBoardID(t *testing.T) {
 		t.Fatalf("other board filtered sequence = %d, want 2", sequence)
 	}
 }
+
+func TestMemoryWorkspaceReadVersionsTrackScopedEventSemantics(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-222222222222"
+
+	if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "node_created"}); err != nil {
+		t.Fatalf("AppendDomainEvent node_created: %v", err)
+	}
+	assertWorkspaceReadVersion(t, repo, companyID, "nodes", "", 1, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:node_map_window", "", 1, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:company_explorer", WorkspaceReadVersionResourceKey("folder_kind", "node"), 1, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:logic_gate_map_window", "", 0, true)
+
+	if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "company_explorer_folder_created", Payload: map[string]any{"folder_kind": "communications"}}); err != nil {
+		t.Fatalf("AppendDomainEvent communications folder: %v", err)
+	}
+	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:node_map_window", "", 1, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:company_explorer", WorkspaceReadVersionResourceKey("folder_kind", "communications"), 2, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:full", "", 2, true)
+
+	if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "node_map_positions_updated"}); err != nil {
+		t.Fatalf("AppendDomainEvent node_map_positions_updated: %v", err)
+	}
+	assertWorkspaceReadVersion(t, repo, companyID, "map-layout:node-window", "", 3, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:node_map_window", "", 3, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "nodes", "", 1, true)
+}
+
+func TestMemoryWorkspaceReadVersionsTrackBoardResources(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-333333333333"
+	boardA := WorkspaceReadVersionResourceKey("board_id", "board-a")
+	boardB := WorkspaceReadVersionResourceKey("board_id", "board-b")
+
+	if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "kanban_column_created", Payload: map[string]any{"board_id": "board-a"}}); err != nil {
+		t.Fatalf("AppendDomainEvent kanban_column_created: %v", err)
+	}
+	assertWorkspaceReadVersion(t, repo, companyID, "kanban-columns", boardA, 1, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:kanban", boardA, 1, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "kanban-columns", boardB, 0, false)
+
+	if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "kanban_card_moved", Payload: map[string]any{"board_id": "board-b"}}); err != nil {
+		t.Fatalf("AppendDomainEvent kanban_card_moved: %v", err)
+	}
+	assertWorkspaceReadVersion(t, repo, companyID, "kanban-columns", boardA, 1, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "kanban-cards", boardB, 2, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:kanban", boardB, 2, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "nodes", "", 2, true)
+}
+
+func assertWorkspaceReadVersion(t *testing.T, repo *MemoryRepo, companyID, scope, resourceKey string, want int64, wantFound bool) {
+	t.Helper()
+	version, found, err := repo.CurrentWorkspaceReadVersion(WorkspaceReadVersionQuery{CompanyID: companyID, Scope: scope, ResourceKey: resourceKey})
+	if err != nil {
+		t.Fatalf("CurrentWorkspaceReadVersion(%s,%s): %v", scope, resourceKey, err)
+	}
+	if found != wantFound || version != want {
+		t.Fatalf("CurrentWorkspaceReadVersion(%s,%s) = version %d found %t, want version %d found %t", scope, resourceKey, version, found, want, wantFound)
+	}
+}

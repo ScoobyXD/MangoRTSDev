@@ -20,7 +20,7 @@ Source architecture:
 
 | Theme | Status | Current Read |
 | --- | --- | --- |
-| 1. Read Plane | Logic Gate map window complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; Company Explorer has a folder-subtree snapshot/list contract; Node Map and Logic Gate Map now have bounded folder+viewport window contracts; version-row validators remain the next read-plane follow-up. |
+| 1. Read Plane | Version-row ETags complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; Company Explorer, Node Map, and Logic Gate Map have bounded read contracts; hot bounded ETags now use derived workspace read-version rows with domain-event fallback. |
 | 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph and migrated work-item assignment mutations now append durable workspace events atomically; frontend gap reconciliation now detects missed numeric workspace sequences and triggers scoped surface refreshes. Remaining mutation families and external fanout are still follow-ups. |
 | 3. Work Ownership / Commands | Source migration complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, inbox reads use projection rows, and email conversion now runs through an explicit atomic backend command; RACI/home/inbox command parity remain follow-ups. |
 | 4. Hot Path Discipline | Auth cache complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth now caches derived actor/membership context after per-request token validation; repository context, batch SQL, and metrics remain follow-up branches. |
@@ -117,8 +117,16 @@ Migration/backfill/rollback notes:
 - Backfill: none. Logic Gates without existing `logic_gate_map_positions` are intentionally absent from viewport-window reads until a normal map placement write records coordinates.
 - Rollback: code can stop using `scope=logic_gate_map_window` and the bounded Logic Gate `GET /v1/map-layout` query parameters and return hot callers to the prior `scope=logic_gate_map`/broad map-layout reads. No schema or data rollback is required.
 
-Follow-up branches:
-- `reads/version-row-etags`
+Version-row ETags branch:
+`reads/version-row-etags`
+
+Status:
+- 2026-05-19: Complete. Added derived `workspace_read_versions` rows keyed by company, read scope, and optional resource key so hot workspace snapshot, map-layout, list, and board-scoped reads can validate ETags with a single read-version lookup. Missing rows fall back to the prior `domain_events` sequence-filter validators, and GET paths do not create or repair version rows.
+
+Migration/backfill/rollback notes:
+- Migration: `backend/db/migrations/20260519_workspace_read_versions.sql` creates `workspace_read_versions`, static read-version key helpers, a domain-event-to-read-key mapping function, and an `after insert` trigger on `domain_events`.
+- Backfill: the migration inserts zero-version static rows for existing companies, then backfills each scope/resource to the max matching workspace domain-event sequence. Board-scoped rows are created only for board IDs present in matching domain-event payloads, preserving existing scoped ETag semantics.
+- Rollback: code can fall back to the previous domain-event scan validators when rows are missing. A DB rollback should drop `trg_update_workspace_read_versions`, `trg_update_workspace_read_versions()`, `workspace_read_version_keys_for_domain_event()`, `workspace_static_read_version_keys()`, the read-version index, and `workspace_read_versions` after all deployed code no longer relies on the table.
 
 Completion criteria:
 - No frontend hot path needs `scope=full`.
@@ -388,10 +396,11 @@ Use this as the default sequencing unless a production incident changes prioriti
 14. `work-items/email-conversion-command`
 15. `reads/node-map-window`
 16. `reads/logic-gate-map-window`
+17. `reads/version-row-etags`
 
 ### Next Roadmap
 
-1. reads/version-row-etags
+1. `work-items/raci-add-remove-commands`
 
 ### Work-Items Follow-Ups
 
