@@ -1,9 +1,12 @@
 package httpapi
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,6 +32,120 @@ func readWorkspaceEventForTest(t *testing.T, ch chan []byte) workspaceEventEnvel
 	}
 }
 
+type sseEventForTest struct {
+	ID    string
+	Event string
+	Data  string
+}
+
+type workspaceReadyForTest struct {
+	CompanyID     string `json:"company_id"`
+	AfterSequence int64  `json:"after_sequence"`
+}
+
+func openWorkspaceStreamForTest(t *testing.T, handler http.Handler, target string, configure func(*http.Request)) (*bufio.Reader, context.CancelFunc) {
+	t.Helper()
+	ts := httptest.NewServer(handler)
+	t.Cleanup(ts.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+target, nil)
+	if err != nil {
+		cancel()
+		t.Fatalf("new stream request: %v", err)
+	}
+	if configure != nil {
+		configure(req)
+	}
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		cancel()
+		t.Fatalf("open workspace stream: %v", err)
+	}
+	t.Cleanup(func() {
+		resp.Body.Close()
+		cancel()
+	})
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		cancel()
+		t.Fatalf("workspace stream status = %d body=%s", resp.StatusCode, string(body))
+	}
+	return bufio.NewReader(resp.Body), cancel
+}
+
+func readSSEEventForTest(t *testing.T, reader *bufio.Reader) sseEventForTest {
+	t.Helper()
+	for {
+		event, err := readRawSSEEventForTest(reader)
+		if err != nil {
+			t.Fatalf("read SSE event: %v", err)
+		}
+		if event.ID != "" || event.Event != "" || event.Data != "" {
+			return event
+		}
+	}
+}
+
+func readRawSSEEventForTest(reader *bufio.Reader) (sseEventForTest, error) {
+	var event sseEventForTest
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return event, err
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			return event, nil
+		}
+		switch {
+		case strings.HasPrefix(line, "id:"):
+			event.ID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
+		case strings.HasPrefix(line, "event:"):
+			event.Event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			value := strings.TrimPrefix(line, "data:")
+			value = strings.TrimPrefix(value, " ")
+			if event.Data != "" {
+				event.Data += "\n"
+			}
+			event.Data += value
+		}
+	}
+}
+
+func readWorkspaceReadyForTest(t *testing.T, reader *bufio.Reader) workspaceReadyForTest {
+	t.Helper()
+	event := readSSEEventForTest(t, reader)
+	if event.Event != "ready" {
+		t.Fatalf("first SSE event = %q data=%s, want ready", event.Event, event.Data)
+	}
+	var ready workspaceReadyForTest
+	if err := json.Unmarshal([]byte(event.Data), &ready); err != nil {
+		t.Fatalf("decode ready event: %v", err)
+	}
+	return ready
+}
+
+func readWorkspaceSSEForTest(t *testing.T, reader *bufio.Reader) workspaceEventEnvelope {
+	t.Helper()
+	for {
+		event := readSSEEventForTest(t, reader)
+		switch event.Event {
+		case "workspace":
+			var envelope workspaceEventEnvelope
+			if err := json.Unmarshal([]byte(event.Data), &envelope); err != nil {
+				t.Fatalf("decode workspace SSE event: %v", err)
+			}
+			return envelope
+		case "ready", "ping":
+			continue
+		default:
+			t.Fatalf("unexpected SSE event = %q data=%s", event.Event, event.Data)
+		}
+	}
+}
+
 func requestWithActorForTest(req *http.Request, user domain.User, companyID string) *http.Request {
 	actor := ActorContext{
 		User: user,
@@ -41,6 +158,93 @@ func requestWithActorForTest(req *http.Request, user domain.User, companyID stri
 		CompanyRole: domain.RoleCompanyUser,
 	}
 	return req.WithContext(context.WithValue(req.Context(), actorContextKey{}, actor))
+}
+
+func TestWorkspaceStreamReceivesDurableEventsFromOtherServer(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	serverA := NewServer(repo)
+	serverB := NewServer(repo)
+	companyID := "stream-two-server-company"
+
+	reader, cancel := openWorkspaceStreamForTest(t, serverA.Routes(), "/v1/workspace/stream?company_id="+companyID, nil)
+	defer cancel()
+	ready := readWorkspaceReadyForTest(t, reader)
+	if ready.CompanyID != companyID || ready.AfterSequence != 0 {
+		t.Fatalf("ready = %+v, want company %q after_sequence 0", ready, companyID)
+	}
+
+	serverB.publishWorkspaceEvent(companyID, "node_created", map[string]any{"node_id": "node-from-server-b"})
+	event := readWorkspaceSSEForTest(t, reader)
+	if event.Sequence != 1 || event.Type != "node_created" || event.Data["node_id"] != "node-from-server-b" {
+		t.Fatalf("durable catch-up event = %+v, want server B node_created sequence 1", event)
+	}
+}
+
+func TestWorkspaceStreamReplaysFromLastEventID(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	companyID := "stream-reconnect-company"
+
+	for index := 1; index <= 3; index++ {
+		server.publishWorkspaceEvent(companyID, fmt.Sprintf("reconnect_event_%d", index), map[string]any{"index": index})
+	}
+
+	reader, cancel := openWorkspaceStreamForTest(t, server.Routes(), "/v1/workspace/stream?company_id="+companyID, func(req *http.Request) {
+		req.Header.Set("Last-Event-ID", "1")
+	})
+	defer cancel()
+	ready := readWorkspaceReadyForTest(t, reader)
+	if ready.AfterSequence != 1 {
+		t.Fatalf("ready after_sequence = %d, want 1", ready.AfterSequence)
+	}
+
+	second := readWorkspaceSSEForTest(t, reader)
+	if second.Sequence != 2 || second.Type != "reconnect_event_2" {
+		t.Fatalf("first replay event = %+v, want sequence 2 reconnect_event_2", second)
+	}
+	third := readWorkspaceSSEForTest(t, reader)
+	if third.Sequence != 3 || third.Type != "reconnect_event_3" {
+		t.Fatalf("second replay event = %+v, want sequence 3 reconnect_event_3", third)
+	}
+}
+
+func TestWorkspaceStreamExplicitZeroReplaysPastOneBatch(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	companyID := "stream-backlog-company"
+	total := workspaceReplayLimit + 25
+
+	for index := 1; index <= total; index++ {
+		_, err := repo.AppendDomainEvent(store.DomainEventInput{
+			CompanyID:  companyID,
+			StreamType: workspaceDomainStreamType,
+			StreamID:   companyID,
+			Type:       fmt.Sprintf("backlog_event_%03d", index),
+			Payload:    map[string]any{"index": index},
+		})
+		if err != nil {
+			t.Fatalf("AppendDomainEvent %d: %v", index, err)
+		}
+	}
+
+	reader, cancel := openWorkspaceStreamForTest(t, server.Routes(), "/v1/workspace/stream?company_id="+companyID+"&after_sequence=0", nil)
+	defer cancel()
+	ready := readWorkspaceReadyForTest(t, reader)
+	if ready.AfterSequence != 0 {
+		t.Fatalf("ready after_sequence = %d, want explicit 0", ready.AfterSequence)
+	}
+
+	var last workspaceEventEnvelope
+	for sequence := 1; sequence <= total; sequence++ {
+		last = readWorkspaceSSEForTest(t, reader)
+		if last.Sequence != int64(sequence) {
+			t.Fatalf("replay sequence = %d, want %d", last.Sequence, sequence)
+		}
+	}
+	wantType := fmt.Sprintf("backlog_event_%03d", total)
+	if last.Type != wantType {
+		t.Fatalf("last replay type = %q, want %q", last.Type, wantType)
+	}
 }
 
 func TestIsLegalNodeRelationshipPositionPair(t *testing.T) {
