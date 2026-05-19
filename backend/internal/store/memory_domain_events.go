@@ -130,17 +130,15 @@ func (r *MemoryRepo) ListDomainEventsAfter(query DomainEventReplayQuery) ([]doma
 	return items, nil
 }
 func (r *MemoryRepo) CurrentDomainEventSequence(query DomainEventStreamQuery) (int64, error) {
-	query.CompanyID = strings.TrimSpace(query.CompanyID)
-	query.StreamType = strings.TrimSpace(query.StreamType)
-	query.StreamID = strings.TrimSpace(query.StreamID)
-	if query.CompanyID == "" || query.StreamType == "" || query.StreamID == "" {
-		return 0, ErrInvalid
+	query, err := normalizeDomainEventStreamQuery(query)
+	if err != nil {
+		return 0, err
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var sequence int64
 	for _, item := range r.domainEvents {
-		if item.CompanyID == query.CompanyID && item.StreamType == query.StreamType && item.StreamID == query.StreamID && item.Sequence > sequence {
+		if domainEventMatchesStreamQuery(item, query) && item.Sequence > sequence {
 			sequence = item.Sequence
 		}
 	}

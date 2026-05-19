@@ -1,6 +1,9 @@
 package store
 
-import "miraeopus/backend/internal/domain"
+import (
+	"miraeopus/backend/internal/domain"
+	"strings"
+)
 
 const DomainEventListMaxLimit = 1000
 
@@ -13,9 +16,11 @@ type DomainEventReplayQuery struct {
 }
 
 type DomainEventStreamQuery struct {
-	CompanyID  string
-	StreamType string
-	StreamID   string
+	CompanyID     string
+	StreamType    string
+	StreamID      string
+	EventTypes    []string
+	PayloadEquals map[string]string
 }
 
 type DomainEventInput struct {
@@ -33,6 +38,61 @@ func NormalizeDomainEventListLimit(limit int) int {
 		return 100
 	}
 	return limit
+}
+
+func normalizeDomainEventStreamQuery(query DomainEventStreamQuery) (DomainEventStreamQuery, error) {
+	query.CompanyID = strings.TrimSpace(query.CompanyID)
+	query.StreamType = strings.TrimSpace(query.StreamType)
+	query.StreamID = strings.TrimSpace(query.StreamID)
+	if query.CompanyID == "" || query.StreamType == "" || query.StreamID == "" {
+		return DomainEventStreamQuery{}, ErrInvalid
+	}
+	if len(query.EventTypes) > 0 {
+		eventTypes := make([]string, 0, len(query.EventTypes))
+		for _, eventType := range query.EventTypes {
+			eventType = strings.TrimSpace(eventType)
+			if eventType != "" {
+				eventTypes = append(eventTypes, eventType)
+			}
+		}
+		query.EventTypes = eventTypes
+	}
+	if len(query.PayloadEquals) > 0 {
+		payloadEquals := make(map[string]string, len(query.PayloadEquals))
+		for key, value := range query.PayloadEquals {
+			key = strings.TrimSpace(key)
+			if key != "" {
+				payloadEquals[key] = value
+			}
+		}
+		query.PayloadEquals = payloadEquals
+	}
+	return query, nil
+}
+
+func domainEventMatchesStreamQuery(item domain.DomainEvent, query DomainEventStreamQuery) bool {
+	if item.CompanyID != query.CompanyID || item.StreamType != query.StreamType || item.StreamID != query.StreamID {
+		return false
+	}
+	if len(query.EventTypes) > 0 {
+		matched := false
+		for _, eventType := range query.EventTypes {
+			if item.Type == eventType {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	for key, want := range query.PayloadEquals {
+		got, ok := item.Payload[key].(string)
+		if !ok || got != want {
+			return false
+		}
+	}
+	return true
 }
 
 func cloneDomainEventPayload(payload map[string]any) map[string]any {
