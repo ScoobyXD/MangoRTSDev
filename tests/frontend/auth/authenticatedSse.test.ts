@@ -32,6 +32,7 @@ test("fetch SSE sends bearer token and reconnects after a closed stream", async 
   const events: SseEvent[] = [];
   const authorizationHeaders: Array<string | null> = [];
   const cacheControlHeaders: Array<string | null> = [];
+  const lastEventIDHeaders: Array<string | null> = [];
   let fetchCalls = 0;
   let connection: ReturnType<typeof connectAuthenticatedSse> | null = null;
 
@@ -43,8 +44,10 @@ test("fetch SSE sends bearer token and reconnects after a closed stream", async 
         const headers = new Headers(init?.headers);
         authorizationHeaders.push(headers.get("Authorization"));
         cacheControlHeaders.push(headers.get("Cache-Control"));
+        lastEventIDHeaders.push(headers.get("Last-Event-ID"));
         const data = fetchCalls === 1 ? "one" : "two";
-        return new Response(streamFrom([`event: workspace\ndata: ${data}\n\n`]), {
+        const idLine = fetchCalls === 1 ? "id: 41\n" : "";
+        return new Response(streamFrom([`event: workspace\n${idLine}data: ${data}\n\n`]), {
           status: 200,
           headers: { "Content-Type": "text/event-stream" },
         });
@@ -71,6 +74,8 @@ test("fetch SSE sends bearer token and reconnects after a closed stream", async 
   assert.equal(fetchCalls, 2);
   assert.deepEqual(authorizationHeaders, ["Bearer token-1", "Bearer token-2"]);
   assert.deepEqual(cacheControlHeaders, [null, null]);
+  assert.deepEqual(lastEventIDHeaders, [null, "41"]);
+  assert.equal(events[0].id, "41");
   assert.deepEqual(events.map((event) => event.data), ["one", "two"]);
 });
 
