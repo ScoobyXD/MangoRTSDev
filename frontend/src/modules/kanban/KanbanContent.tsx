@@ -5,7 +5,7 @@ import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subs
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
 import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
-import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
+import { subscribeWorkspaceStream, type WorkspaceStreamGapSignal } from "../workspace/workspaceStream";
 import {
   createKanbanBoard,
   getLogicGateArenaView,
@@ -645,8 +645,54 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     return () => window.removeEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onKanbanBoardContentsUpdated);
   }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoard]);
 
+  const reconcileKanbanGap = useCallback((gap: WorkspaceStreamGapSignal) => {
+    if (gap.companyID !== companyID) return;
+    const boardRefreshes = new Map<string, string>();
+    const nodeIDs = new Set<string>();
+    let refreshBoardList = false;
+
+    const addBoardRefresh = (streamBoardID: string | undefined, logicGateID = "") => {
+      const cleanBoardID = streamBoardID?.trim() ?? "";
+      if (!cleanBoardID) return;
+      boardRefreshes.set(cleanBoardID, logicGateID || boardRefreshes.get(cleanBoardID) || "");
+    };
+
+    for (const scope of gap.scopes) {
+      if (scope.kind === "kanban_board") {
+        addBoardRefresh(scope.boardID, scope.logicGateID);
+      } else if (scope.kind === "kanban_board_list") {
+        refreshBoardList = true;
+        addBoardRefresh(scope.boardID, scope.logicGateID);
+      } else if (scope.kind === "work_item_assignment") {
+        const streamBoardID = scope.boardID || (scope.logicGateID ? logicGateKanbanBoardID(scope.logicGateID) : "");
+        addBoardRefresh(streamBoardID, scope.logicGateID);
+        if (scope.nodeID) nodeIDs.add(scope.nodeID);
+      } else if (scope.kind === "node_graph" && scope.nodeID) {
+        if (cardsRef.current.some((card) => card.node_id === scope.nodeID)) addBoardRefresh(activeBoardIDRef.current);
+        nodeIDs.add(scope.nodeID);
+      } else if (scope.kind === "company_explorer" && scope.itemType === "kanban") {
+        refreshBoardList = true;
+        addBoardRefresh(scope.itemID);
+      } else if (scope.kind === "workspace") {
+        refreshBoardList = true;
+        addBoardRefresh(activeBoardIDRef.current);
+      }
+    }
+
+    for (const nodeID of nodeIDs) invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
+    if (refreshBoardList) {
+      invalidateKanbanBoardListCache(apiBase, companyID);
+      void refreshBoards();
+    }
+    for (const [streamBoardID, logicGateID] of boardRefreshes.entries()) {
+      invalidateArenaViewForBoard(streamBoardID, logicGateID);
+      invalidateKanbanBoardContentsCache(apiBase, companyID, streamBoardID);
+      if (streamBoardID === activeBoardIDRef.current) void refreshBoard(streamBoardID);
+    }
+  }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoard, refreshBoards]);
   useEffect(() => {
     return subscribeWorkspaceStream(apiBase, companyID, {
+      onGap: reconcileKanbanGap,
       onEvent(event) {
         if (event.event !== "workspace" || event.data.length === 0) return;
         try {
@@ -794,7 +840,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         }
       },
     });
-  }, [apiBase, companyID, invalidateArenaViewForBoard, refreshBoard, removeBoardFromList, syncNodeStatusesFromCards, upsertBoardInList]);
+  }, [apiBase, companyID, invalidateArenaViewForBoard, reconcileKanbanGap, refreshBoard, removeBoardFromList, syncNodeStatusesFromCards, upsertBoardInList]);
 
   const syncCardTitlesFromNodeGraph = useCallback(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);

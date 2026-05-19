@@ -1,7 +1,7 @@
 // Node relationship graph cache/sync plane for Node Map + Company Explorer.
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
-import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
+import { subscribeWorkspaceStream, type WorkspaceStreamGapSignal } from "../workspace/workspaceStream";
 import { NodeRecord, NodeRelationship, PersistedMapPosition } from "./shared";
 
 export type NodeRelationshipGraphSnapshot = {
@@ -92,6 +92,15 @@ export function invalidateNodeRelationshipGraphSnapshot(apiBase: string, company
 // For those, refreshing the graph snapshot is unnecessary and adds avoidable hot-path GET load.
 function isNonGraphWorkspaceEvent(eventType: string): boolean {
   return eventType === "node_information_created" || eventType.startsWith("logic_gate_") || eventType.startsWith("kanban_");
+}
+
+function gapTouchesNodeRelationshipGraph(gap: WorkspaceStreamGapSignal): boolean {
+  return gap.scopes.some((scope) => (
+    scope.kind === "node_graph" ||
+    scope.kind === "work_item_assignment" ||
+    scope.kind === "workspace" ||
+    (scope.kind === "company_explorer" && (scope.folderKind === "node" || scope.itemType === "node"))
+  ));
 }
 
 // Local mutation helper: lets hot-path UI actions apply immediate cache updates without
@@ -553,6 +562,10 @@ function ensureStream(apiBase: string, companyID: string): void {
       } catch {
         refreshSubscribedNodeRelationshipGraphSnapshots(apiBase, companyID);
       }
+    },
+    onGap(gap) {
+      if (gap.companyID !== companyID || !gapTouchesNodeRelationshipGraph(gap)) return;
+      refreshSubscribedNodeRelationshipGraphSnapshots(apiBase, companyID);
     },
     onError() {
       if (stream) stream.refreshAfterStreamReconnect = true;

@@ -806,6 +806,25 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   useEffect(() => {
     if (!companyID) return undefined;
     const unsubscribe = subscribeWorkspaceStream(apiBase, companyID, {
+      onGap(gap) {
+        if (gap.companyID !== companyID) return;
+        const touchesSharedInbox = gap.scopes.some((scope) => (
+          scope.eventType === "communications_shared_inbox_raci_updated" ||
+          (scope.kind === "company_explorer" && (!scope.folderKind || scope.folderKind === "node" || scope.folderKind === "logic_gate")) ||
+          scope.kind === "workspace"
+        ));
+        const touchesWorkspacePanel = gap.scopes.some((scope) => (
+          scope.kind === "company_explorer" ||
+          scope.kind === "node_graph" ||
+          scope.kind === "logic_gate_graph" ||
+          scope.kind === "kanban_board" ||
+          scope.kind === "kanban_board_list" ||
+          scope.kind === "work_item_assignment" ||
+          scope.kind === "workspace"
+        ));
+        if (touchesSharedInbox) void loadSharedInboxes();
+        if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
+      },
       onEvent(event) {
         if (event.event !== "workspace") return;
         let envelope: WorkspaceStreamEnvelope;

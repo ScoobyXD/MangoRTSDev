@@ -9,7 +9,7 @@ import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type Compan
 import { invalidateKanbanBoardListCache, listKanbanBoards } from "../kanban/kanbanApi";
 import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntityDragItem, type KanbanBoard, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
-import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
+import { subscribeWorkspaceStream, type WorkspaceStreamGapSignal } from "../workspace/workspaceStream";
 import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../node-map/nodeMapCommands";
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchResults, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
@@ -186,6 +186,31 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const explorerContextSequenceRef = useRef(0);
   const pendingScrollAlignRef = useRef<"nearest" | "center">("nearest");
 
+  const applyCompanyExplorerSnapshot = useCallback((snapshot: CompanyExplorerSnapshotPayload) => {
+    setNodes(snapshot.nodes ?? []);
+    setLogicGates((snapshot.logic_gates ?? []).map(toLogicGateCanvasRecord));
+    setFolders(snapshot.folders ?? []);
+    setFolderItems(snapshot.folder_items ?? []);
+    setFolderSnapshotLoaded(true);
+  }, []);
+
+  const reconcileCompanyExplorerGap = useCallback((gap: WorkspaceStreamGapSignal) => {
+    if (gap.companyID !== companyID) return;
+    const touchesExplorer = gap.scopes.some((scope) => (
+      scope.kind === "company_explorer" ||
+      scope.kind === "kanban_board_list" ||
+      scope.kind === "workspace"
+    ));
+    if (!touchesExplorer) return;
+    void fetchWorkspaceSnapshot(apiBase, companyID, { scope: "company_explorer", force: true })
+      .then((result) => {
+        if (result.payload) applyCompanyExplorerSnapshot(result.payload as CompanyExplorerSnapshotPayload);
+      })
+      .catch(() => {
+        // The next normal Explorer refresh still goes through the bounded snapshot cache.
+      });
+  }, [apiBase, applyCompanyExplorerSnapshot, companyID]);
+
   useEffect(() => {
     let cancelled = false;
     setFolderSnapshotLoaded(false);
@@ -197,18 +222,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       try {
         const result = await fetchWorkspaceSnapshot(apiBase, companyID, { scope: "company_explorer" });
         if (cancelled || !result.payload) return;
-        const snapshot = result.payload as CompanyExplorerSnapshotPayload;
-        setNodes(snapshot.nodes ?? []);
-        setLogicGates((snapshot.logic_gates ?? []).map(toLogicGateCanvasRecord));
-        setFolders(snapshot.folders ?? []);
-        setFolderItems(snapshot.folder_items ?? []);
-        setFolderSnapshotLoaded(true);
+        applyCompanyExplorerSnapshot(result.payload as CompanyExplorerSnapshotPayload);
       } catch {
         // Explorer bootstrap stays independent from map graph snapshots; stream deltas can still catch up.
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, companyID]);
+  }, [apiBase, applyCompanyExplorerSnapshot, companyID]);
   const refreshKanbanBoards = useCallback(async () => {
     try {
       // The Explorer tree renders a bounded first window. Board creation and
@@ -251,6 +271,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
 
   useEffect(() => {
     return subscribeWorkspaceStream(apiBase, companyID, {
+      onGap: reconcileCompanyExplorerGap,
       onEvent(event) {
         if (event.event !== "workspace" || event.data.length === 0) return;
         try {
@@ -346,7 +367,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         }
       },
     });
-  }, [apiBase, companyID]);
+  }, [apiBase, companyID, reconcileCompanyExplorerGap]);
   const scopedRootName = scopedRootFolderName.trim();
   const scopedKind = scopedRootName ? (scopedRootFolderKind ?? "logic_gate") : undefined;
   const scopedExplorerActive = Boolean(scopedKind && scopedRootName);

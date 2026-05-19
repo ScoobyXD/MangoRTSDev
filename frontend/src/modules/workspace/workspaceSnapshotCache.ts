@@ -114,6 +114,23 @@ export function markWorkspaceSnapshotStale(apiBase?: string, companyID?: string)
   }
 }
 
+export function markWorkspaceSnapshotScopeStale(apiBase: string, companyID: string, options: FetchWorkspaceSnapshotOptions = {}): void {
+  const prefix = `${clean(apiBase)}:${clean(companyID)}:`;
+  const expectedScope = options.scope ?? DEFAULT_WORKSPACE_SNAPSHOT_SCOPE;
+  const expectedFolderID = clean(options.folderID);
+  const expectedFolderKind = clean(options.folderKind);
+  const expectedBoardID = clean(options.boardID);
+  for (const [cacheKey, entry] of workspaceSnapshots.entries()) {
+    if (!cacheKey.startsWith(prefix)) continue;
+    const params = new URLSearchParams(cacheKey.slice(prefix.length));
+    if ((params.get("scope") ?? DEFAULT_WORKSPACE_SNAPSHOT_SCOPE) !== expectedScope) continue;
+    if (expectedFolderID && (params.get("folder_id") ?? "") !== expectedFolderID) continue;
+    if (expectedFolderKind && (params.get("folder_kind") ?? "") !== expectedFolderKind) continue;
+    if (expectedBoardID && (params.get("board_id") ?? "") !== expectedBoardID) continue;
+    entry.fetchedAt = undefined;
+  }
+}
+
 export async function fetchWorkspaceSnapshot(apiBase: string, companyID: string, options: FetchWorkspaceSnapshotOptions = {}): Promise<WorkspaceSnapshotResult> {
   const query = snapshotQuery(companyID, options);
   const entry = getEntry(apiBase, companyID, options);

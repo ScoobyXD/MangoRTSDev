@@ -21,7 +21,7 @@ Source architecture:
 | Theme | Status | Current Read |
 | --- | --- | --- |
 | 1. Read Plane | Projection slice complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; scoped workspace snapshots and cheap event ETags exist, but several broad map/explorer scopes still need bounded read models. |
-| 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph and migrated work-item assignment mutations now append durable workspace events atomically; remaining mutation families and frontend gap policy are still follow-ups. |
+| 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph and migrated work-item assignment mutations now append durable workspace events atomically; frontend gap reconciliation now detects missed numeric workspace sequences and triggers scoped surface refreshes. Remaining mutation families and external fanout are still follow-ups. |
 | 3. Work Ownership / Commands | Source migration complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, and inbox reads use projection rows; frontend parity and event atomicity remain follow-ups. |
 | 4. Hot Path Discipline | First branch complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth/context/batch/metrics remain follow-up branches. |
 | 5. Frontend Structure / API Contract | Ready / yellow | Shared `requestJSON` exists, but hot modules duplicate wrappers, broad invalidation is scattered, and large components still own workflow logic. |
@@ -121,11 +121,14 @@ First branch:
 
 Branch progress:
 - 2026-05-19: Completed `events/atomic-work-item-assignment-events`. Migrated node-to-Logic-Gate assignment save/move/remove/issue commands now append semantic `work_item.*` workspace events and compatibility Kanban/node events in the same store transaction as the assignment source mutation, and HTTP handlers publish those committed events to the in-process hub only after commit.
+- 2026-05-19: Completed `events/frontend-gap-reconciliation`. Workspace stream clients now store ready/replay baselines, suppress stale or duplicate numeric workspace events, emit typed sequence-gap reconciliation metadata, and route gap recovery to scoped Kanban, node graph, Logic Gate graph, Company Explorer, and Home panel refresh paths.
 
 Migration/backfill/rollback notes:
 - Migration: none. This branch uses the existing `domain_events` outbox and existing `node_logic_gate_assignments` source table.
 - Backfill: none. Historical assignment events are not synthesized; current state remains rebuildable from `node_logic_gate_assignments`, nodes, RACI, and compatibility Kanban rows.
 - Rollback: code can return handlers to the previous post-mutation `publishWorkspaceEvent` path while leaving already-appended `work_item.*` events in `domain_events`. No source-of-truth data is stored only in these events; replay consumers should tolerate the extra event types during rollback.
+- Frontend gap reconciliation migration/backfill: none. This branch only changes frontend stream cursor handling, cache invalidation, and scoped snapshot/read refresh behavior.
+- Frontend gap reconciliation rollback: revert the `workspaceStream.ts` gap signal and subscriber `onGap` handlers. Durable `domain_events` sequences, SSE replay, and existing in-order event handling remain compatible; rollback only returns clients to ignoring numeric sequence gaps until a normal refresh or reconnect catches up.
 
 Scope:
 - Convert one vertical slice first: node create/update/delete and node relationship create/delete.
@@ -135,7 +138,6 @@ Scope:
 
 Follow-up branches:
 - `events/atomic-kanban-workspace-events`
-- `events/frontend-gap-reconciliation`
 - `events/external-fanout-adapter`
 
 Completion criteria:
@@ -327,13 +329,13 @@ Use this as the default sequencing unless a production incident changes prioriti
 8. `work-items/node-logic-gate-assignment-source`
 9. `reads/work-item-inbox-projection`
 10. `events/atomic-work-item-assignment-events`
+11. `events/frontend-gap-reconciliation`
 
 ### Next Roadmap
 
-1. events/frontend-gap-reconciliation
-2. platform/auth-membership-cache
-3. reads/company-explorer-subtree
-4. work-items/email-conversion-command
+1. platform/auth-membership-cache
+2. reads/company-explorer-subtree
+3. work-items/email-conversion-command
 
 ### Work-Items Follow-Ups
 

@@ -3,7 +3,7 @@ import type {
   CompanyExplorerFolderItem,
 } from "../folders/companyExplorerFolders";
 import { fetchWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
-import { subscribeWorkspaceStream } from "../workspace/workspaceStream";
+import { subscribeWorkspaceStream, type WorkspaceStreamGapSignal } from "../workspace/workspaceStream";
 import {
   LogicGateRecord,
   LogicGateRelationship,
@@ -99,6 +99,14 @@ export function invalidateLogicGateRelationshipGraphSnapshot(apiBase: string, co
 
 function isNonLogicGateGraphWorkspaceEvent(eventType: string): boolean {
   return eventType === "logic_gate_information_created";
+}
+
+function gapTouchesLogicGateRelationshipGraph(gap: WorkspaceStreamGapSignal): boolean {
+  return gap.scopes.some((scope) => (
+    scope.kind === "logic_gate_graph" ||
+    scope.kind === "workspace" ||
+    (scope.kind === "company_explorer" && (scope.folderKind === "logic_gate" || scope.itemType === "logic_gate"))
+  ));
 }
 
 export function upsertLogicGateRelationshipGraphNode(apiBase: string, companyID: string, logicGate: NodeRecord): void {
@@ -494,6 +502,10 @@ function ensureStream(apiBase: string, companyID: string): void {
       } catch {
         refreshSubscribedLogicGateRelationshipGraphSnapshots(apiBase, companyID);
       }
+    },
+    onGap(gap) {
+      if (gap.companyID !== companyID || !gapTouchesLogicGateRelationshipGraph(gap)) return;
+      refreshSubscribedLogicGateRelationshipGraphSnapshots(apiBase, companyID);
     },
     onError() {
       if (stream) stream.refreshAfterStreamReconnect = true;
