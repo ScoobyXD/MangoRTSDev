@@ -205,7 +205,8 @@ Current migration rule:
 First implementation slice:
 - `store.Repository` has been decomposed into smaller context interfaces while preserving the existing compatibility interface.
 - A generic `domain_events` outbox table and repository port now define the future ordered event stream shape: company, stream type, stream id, per-stream sequence, event type, actor, idempotency key, payload, publish marker, and timestamps.
-- Existing mutation handlers are not yet fully wired to this outbox. Until that is complete, in-memory SSE remains a best-effort live hint and database snapshots/projections remain the recovery authority.
+- Workspace mutation broadcasts now append a durable `domain_events` row on the `workspace` stream and SSE clients can replay by `after_sequence` / `Last-Event-ID`. This is still a single-service bridge, not the final multi-instance fanout worker.
+- Kanban card mutation orchestration has started moving into `internal/modules/kanban`; deeper command services should continue moving cross-context rules out of raw HTTP/store coupling.
 
 ## Core Architectural Rules
 
@@ -396,11 +397,12 @@ Blockers:
 - ✅ Removed polling loop from Editor link synchronization
 - ✅ Removed polling loop from Editor selected-node synchronization
 - ✅ Removed polling loop from Explorer -> Canvas context synchronization
-- 🟡 WebSocket/SSE transport introduced for cross-client realtime sync (SSE via `/v1/workspace/stream`; only selected event types currently delta-applied client-side)
+- 🟡 SSE transport introduced for cross-client realtime sync; workspace events are now persisted to `domain_events` with per-company workspace sequence and replay via `after_sequence` / `Last-Event-ID`. Multi-instance fanout and complete client delta coverage remain pending.
 
 Blockers:
 - Delta coverage is not yet complete for all mutation shapes.
-- No versioned event contract yet for long-term compatibility.
+- SSE replay now has sequence-backed catch-up, but there is no external fanout worker for multiple ECS tasks yet.
+- No fully versioned event contract yet for long-term compatibility.
 
 
 
@@ -439,17 +441,18 @@ Blockers:
 - ⛔ Regional/edge read cache implemented for hot APIs
 - ⛔ Redis/Valkey hot read model implemented
 - ✅ ETag + 304 implemented on hot read endpoints
+- ✅ Explicit `Cache-Control` policies added for JSON mutation/error responses (`no-store`) and cacheable ETag reads (`private, max-age=0, must-revalidate`)
 
 ### Data Model / Database
 - ⛔ `company_id`-first indexing audited and fixed
 - ⛔ Sharding/partitioning strategy by `company_id` implemented
-- 🟡 Read model for graph snapshot/delta designed and implemented (initial snapshot endpoint + SSE events exist; dedicated DB read model/materialized structure not yet built)
+- 🟡 Read model for graph snapshot/delta designed and implemented (initial full snapshot, scoped snapshot payloads, and durable workspace SSE sequence exist; dedicated DB read model/materialized structure still pending)
 - ⛔ Any required joins/materialized views added for hot reads
 
 Blockers:
 - No production-scale workload profile (cardinality, fan-out, read/write ratio) captured yet.
 - Partitioning/sharding strategy depends on expected tenant growth and operational constraints.
-- No read-optimized snapshot table/materialized view migration plan drafted yet.
+- Scoped snapshot payloads exist for `node_map`, `logic_gate_map`, `company_explorer`, and `kanban`, but DB-level read-optimized snapshot/materialized view migrations are still pending.
 
 ### Observability + Quality Gates
 - ⛔ Endpoint-level latency dashboards (p50/p95/p99)

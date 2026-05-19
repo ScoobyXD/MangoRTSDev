@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"miraeopus/backend/internal/auth"
+	"miraeopus/backend/internal/modules/kanban"
 	"miraeopus/backend/internal/notifications"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -24,6 +25,7 @@ type Server struct {
 	emailHub        *workspaceEventHub
 	notificationHub *workspaceEventHub
 	notifications   *notifications.Service
+	kanban          *kanban.Service
 	commCache       *communicationsCache
 	nylasGate       *nylasRequestGate
 	nylasWebhooks   *nylasWebhookReceiptCache
@@ -55,6 +57,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		emailHub:        newWorkspaceEventHub(),
 		notificationHub: newWorkspaceEventHub(),
 		notifications:   notifications.NewService(repo),
+		kanban:          kanban.NewService(repo),
 		commCache:       newCommunicationsCache(),
 		nylasGate:       newNylasRequestGate(communicationsNylasMinRequestInterval),
 		nylasWebhooks:   newNylasWebhookReceiptCache(),

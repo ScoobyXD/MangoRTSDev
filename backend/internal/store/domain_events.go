@@ -4,6 +4,14 @@ import "miraeopus/backend/internal/domain"
 
 const DomainEventListMaxLimit = 1000
 
+type DomainEventReplayQuery struct {
+	CompanyID     string
+	StreamType    string
+	StreamID      string
+	AfterSequence int64
+	Limit         int
+}
+
 type DomainEventInput struct {
 	CompanyID      string
 	StreamType     string

@@ -94,3 +94,24 @@ func TestMemoryDomainEventsRejectInvalidInput(t *testing.T) {
 		t.Fatalf("MarkDomainEventPublished invalid err = %v, want ErrInvalid", err)
 	}
 }
+
+func TestMemoryDomainEventsReplayAfterSequence(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+	for _, eventType := range []string{"workspace.node_created", "workspace.node_updated", "workspace.node_deleted"} {
+		if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: eventType}); err != nil {
+			t.Fatalf("AppendDomainEvent %s: %v", eventType, err)
+		}
+	}
+
+	replay, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, AfterSequence: 1, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListDomainEventsAfter: %v", err)
+	}
+	if len(replay) != 2 {
+		t.Fatalf("replay count = %d, want 2", len(replay))
+	}
+	if replay[0].Sequence != 2 || replay[1].Sequence != 3 {
+		t.Fatalf("replay sequences = %d,%d want 2,3", replay[0].Sequence, replay[1].Sequence)
+	}
+}

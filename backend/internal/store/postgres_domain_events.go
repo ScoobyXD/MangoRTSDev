@@ -129,6 +129,40 @@ limit $1`, limit)
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) ListDomainEventsAfter(query DomainEventReplayQuery) ([]domain.DomainEvent, error) {
+	ctx := context.Background()
+	query.CompanyID = strings.TrimSpace(query.CompanyID)
+	query.StreamType = strings.TrimSpace(query.StreamType)
+	query.StreamID = strings.TrimSpace(query.StreamID)
+	query.Limit = NormalizeDomainEventListLimit(query.Limit)
+	if query.CompanyID == "" || query.StreamType == "" || query.StreamID == "" || query.AfterSequence < 0 {
+		return nil, ErrInvalid
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+select `+domainEventSelectColumns+`
+from domain_events
+where company_id=$1::uuid
+  and stream_type=$2
+  and stream_id=$3
+  and sequence > $4
+order by sequence asc, event_id asc
+limit $5`, query.CompanyID, query.StreamType, query.StreamID, query.AfterSequence, query.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.DomainEvent, 0)
+	for rows.Next() {
+		item, err := scanDomainEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
 func (r *PostgresRepo) MarkDomainEventPublished(companyID, eventID string) error {
 	companyID = strings.TrimSpace(companyID)
 	eventID = strings.TrimSpace(eventID)

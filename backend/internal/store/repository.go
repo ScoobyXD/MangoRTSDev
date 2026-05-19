@@ -159,6 +159,7 @@ type NotificationRepository interface {
 type DomainEventRepository interface {
 	AppendDomainEvent(input DomainEventInput) (domain.DomainEvent, error)
 	ListPendingDomainEvents(limit int) ([]domain.DomainEvent, error)
+	ListDomainEventsAfter(query DomainEventReplayQuery) ([]domain.DomainEvent, error)
 	MarkDomainEventPublished(companyID, eventID string) error
 }
 

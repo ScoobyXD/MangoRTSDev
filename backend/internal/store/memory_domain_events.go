@@ -96,6 +96,39 @@ func (r *MemoryRepo) ListPendingDomainEvents(limit int) ([]domain.DomainEvent, e
 	return items, nil
 }
 
+func (r *MemoryRepo) ListDomainEventsAfter(query DomainEventReplayQuery) ([]domain.DomainEvent, error) {
+	query.CompanyID = strings.TrimSpace(query.CompanyID)
+	query.StreamType = strings.TrimSpace(query.StreamType)
+	query.StreamID = strings.TrimSpace(query.StreamID)
+	query.Limit = NormalizeDomainEventListLimit(query.Limit)
+	if query.CompanyID == "" || query.StreamType == "" || query.StreamID == "" || query.AfterSequence < 0 {
+		return nil, ErrInvalid
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]domain.DomainEvent, 0)
+	for _, item := range r.domainEvents {
+		if item.CompanyID != query.CompanyID || item.StreamType != query.StreamType || item.StreamID != query.StreamID || item.Sequence <= query.AfterSequence {
+			continue
+		}
+		items = append(items, cloneDomainEvent(item))
+	}
+	slices.SortFunc(items, func(a, b domain.DomainEvent) int {
+		if a.Sequence < b.Sequence {
+			return -1
+		}
+		if a.Sequence > b.Sequence {
+			return 1
+		}
+		return strings.Compare(a.EventID, b.EventID)
+	})
+	if len(items) > query.Limit {
+		items = items[:query.Limit]
+	}
+	return items, nil
+}
 func (r *MemoryRepo) MarkDomainEventPublished(companyID, eventID string) error {
 	companyID = strings.TrimSpace(companyID)
 	eventID = strings.TrimSpace(eventID)

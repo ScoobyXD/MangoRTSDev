@@ -56,7 +56,7 @@ func parseKanbanCardQueryParams(r *http.Request) (store.KanbanCardQuery, bool, s
 		Limit:    limit,
 	}
 	for key := range r.URL.Query() {
-		if key != "company_id" && key != "board_id" && key != "column_id" && key != "limit" && key != "after_position" {
+		if key != "company_id" && key != "board_id" && key != "column_id" && key != "limit" && key != "after_position" && key != "scope" {
 			return store.KanbanCardQuery{}, false, "unsupported_kanban_card_query_param"
 		}
 	}
@@ -374,7 +374,7 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 	if req.NodeTitle == "" {
 		req.NodeTitle = req.NodeID
 	}
-	item, err := s.repo.UpsertKanbanCard(store.KanbanCardMutationInput{
+	result, err := s.kanban.UpsertCard(store.KanbanCardMutationInput{
 		CompanyID:           req.CompanyID,
 		BoardID:             req.BoardID,
 		ColumnID:            req.ColumnID,
@@ -383,6 +383,7 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 		DescriptionSnapshot: req.DescriptionSnapshot,
 		Position:            req.Position,
 	})
+	item := result.Card
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_kanban_item_type")
 		return
@@ -400,8 +401,8 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 		"card_id":  item.CardID,
 		"card":     item,
 	})
-	if item.LogicGateID != nil {
-		s.publishKanbanDerivedNodeUpdate(req.CompanyID, item.NodeID)
+	if result.DerivedNode != nil {
+		s.publishWorkspaceEvent(req.CompanyID, "node_updated", map[string]any{"node_id": result.DerivedNode.NodeID, "node": result.DerivedNode})
 	}
 	writeJSON(w, http.StatusCreated, item)
 }
@@ -439,7 +440,7 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		beforeCard, columnTitles, hadBeforeCard := s.kanbanCardNotificationSnapshot(req.CompanyID, req.BoardID, cardID)
-		item, err := s.repo.MoveKanbanCard(store.KanbanCardMoveInput{
+		result, err := s.kanban.MoveCard(store.KanbanCardMoveInput{
 			CompanyID: req.CompanyID,
 			BoardID:   req.BoardID,
 			CardID:    cardID,
@@ -447,6 +448,7 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			Position:  req.Position,
 			IsIssue:   req.IsIssue,
 		})
+		item := result.Card
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "kanban_card_or_column_not_found")
 			return
@@ -461,7 +463,9 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			"card":     item,
 		})
 		if item.LogicGateID != nil {
-			s.publishKanbanDerivedNodeUpdate(req.CompanyID, item.NodeID)
+			if result.DerivedNode != nil {
+				s.publishWorkspaceEvent(req.CompanyID, "node_updated", map[string]any{"node_id": result.DerivedNode.NodeID, "node": result.DerivedNode})
+			}
 			if hadBeforeCard {
 				s.recordKanbanStateNotification(r, beforeCard, item, columnTitles)
 			}

@@ -72,7 +72,7 @@ Notifications:
 2. @ mentions notifications should be its own clickable row on the left hand column below R inbox. and on the right side mention the number of mentions, i click on the box and i see a list, and when i click on one i go to that @ mention, so very similar to the view notificaiton thing already in ACI inbox and R inbox.
 3. Also changing priority on a node does not notify you, but i think it should
 4. Also the ACI inbox doesnt have different colored notifications based on what ACI letter its relevant too? maybe i dont need that. 
-
+5. Oh yea the emai list and email information display column should show the time as well
 RACI:
 1. On the RACI matrixes there is no way to see how the relationships between the different nodes in the logic gate list.
 	a. also i think we used the logic gates wrong, they should be parent nodes, and the list stuff are peer or child nodes, and the actual logic gate should be called development or something.
@@ -101,6 +101,8 @@ Nodes:
 Header Tab:
 1. change logic gate arena top right collapse icon to a flat line that we already have for nodes.
 
+UI:
+On bottom right of navigation column, have a light/dark mode setting.
 ===============
 Notes to tell tim:
 1. We do need to advise users on a system on who gets to drag nodes to different status, should it be done automatically or wait for permission
