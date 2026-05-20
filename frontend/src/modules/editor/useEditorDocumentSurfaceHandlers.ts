@@ -290,6 +290,49 @@ function breakEditorMentionsForInput(root: HTMLElement, inputType: string, undoB
   return snapshotBefore;
 }
 
+function isPlainTextKeyboardEdit(event: React.KeyboardEvent<HTMLDivElement>): boolean {
+  return event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey;
+}
+
+function applyMentionBreakingKeyboardEdit(
+  root: HTMLElement,
+  edit: { kind: "deleteBackward" | "deleteForward" | "insertText"; text?: string },
+  documentUndoHistory: EditorDocumentUndoHistory,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+): boolean {
+  const inputType = edit.kind === "deleteBackward"
+    ? "deleteContentBackward"
+    : edit.kind === "deleteForward" ? "deleteContentForward" : "insertText";
+  const mentions = collectMentionElementsForNativeEdit(root, inputType);
+  if (mentions.length === 0) return false;
+
+  const offsets = getEditorSelectionOffsets(root);
+  if (!offsets) return false;
+  const undoBefore = snapshotEditorDocumentRoot(root);
+  for (const mention of mentions) {
+    mention.replaceWith(root.ownerDocument.createTextNode(mention.textContent ?? ""));
+  }
+  setEditorSelectionByOffsets(root, offsets.start, offsets.end);
+
+  let changed = false;
+  if (edit.kind === "insertText") {
+    changed = replaceSelectionWithText(root, edit.text ?? "");
+  } else if (offsets.start !== offsets.end) {
+    changed = deleteTextByOffsets(root, offsets.start, offsets.end);
+  } else {
+    const currentText = readEditorDocumentText(root);
+    const deleteStart = edit.kind === "deleteBackward" ? Math.max(0, offsets.start - 1) : offsets.start;
+    const deleteEnd = edit.kind === "deleteBackward" ? offsets.start : Math.min(currentText.length, offsets.start + 1);
+    changed = deleteStart !== deleteEnd && deleteTextByOffsets(root, deleteStart, deleteEnd, { preserveTrailingNewline: currentText.endsWith("\n") });
+    if (!changed) setEditorSelectionByOffsets(root, offsets.start, offsets.start);
+  }
+
+  recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, edit.kind === "insertText" ? "typing" : "delete");
+  commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+  return true;
+}
+
 function readInlineFontSize(element: HTMLElement): number | null {
   const parsed = Number.parseFloat(element.style.fontSize.trim());
   return Number.isFinite(parsed) ? clampEditorFontSize(parsed) : null;
@@ -1462,6 +1505,26 @@ export function useEditorDocumentSurfaceHandlers({
           scheduleIndentGuideUpdate,
           onSelectionFontSizeChange,
         );
+        return;
+      }
+
+      const mentionKeyboardEdit = event.key === "Backspace"
+        ? { kind: "deleteBackward" as const }
+        : event.key === "Delete" ? { kind: "deleteForward" as const } : isPlainTextKeyboardEdit(event) ? { kind: "insertText" as const, text: event.key } : null;
+      if (mentionKeyboardEdit && applyMentionBreakingKeyboardEdit(
+        root,
+        mentionKeyboardEdit,
+        documentUndoHistoryRef.current,
+        scheduleDocumentSave,
+        scheduleIndentGuideUpdate,
+      )) {
+        event.preventDefault();
+        pendingEditorFontSizeRef.current = null;
+        pendingNativeUndoSnapshotRef.current = null;
+        clearEditorImageSelection(root);
+        activeMentionRootRef.current = null;
+        setActiveMentionDraft(null);
+        syncSelectionFontSize(root, onSelectionFontSizeChange);
         return;
       }
 
