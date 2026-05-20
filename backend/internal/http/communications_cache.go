@@ -402,8 +402,18 @@ func cloneNylasFolders(folders []NylasFolder) []NylasFolder {
 	for i, folder := range folders {
 		out[i] = folder
 		out[i].Attributes = cloneStringSlice(folder.Attributes)
+		out[i].UnreadCount = cloneIntPointer(folder.UnreadCount)
+		out[i].TotalCount = cloneIntPointer(folder.TotalCount)
 	}
 	return out
+}
+
+func cloneIntPointer(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func cloneNylasMessagePage(page NylasMessagePage) NylasMessagePage {

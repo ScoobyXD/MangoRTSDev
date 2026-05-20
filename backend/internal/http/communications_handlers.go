@@ -143,7 +143,23 @@ func (s *Server) handleCommunicationsFolders(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	connection, ok := s.requireConnectedEmail(w, r)
+	for key := range r.URL.Query() {
+		if key != "company_id" && key != "shared_inbox_id" {
+			writeError(w, http.StatusBadRequest, "unsupported_email_query_param")
+			return
+		}
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	sharedInboxID := strings.TrimSpace(r.URL.Query().Get("shared_inbox_id"))
+	if strings.TrimSpace(companyID) != "" && !requireCompanyAccess(w, r, companyID) {
+		return
+	}
+	connection, ok := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID)
 	if !ok {
 		return
 	}

@@ -17,19 +17,20 @@ import (
 )
 
 type fakeNylasClient struct {
-	grant         NylasGrant
-	deletedGrants []string
-	folders       []NylasFolder
-	messages      []NylasMessage
-	message       NylasMessage
-	sent          NylasSendMessageRequest
-	update        NylasMessageUpdate
-	lastQuery     NylasMessageQuery
-	folderCalls   int
-	messageCalls  int
-	detailCalls   int
-	listErr       error
-	exchangeErr   error
+	grant             NylasGrant
+	deletedGrants     []string
+	folders           []NylasFolder
+	messages          []NylasMessage
+	message           NylasMessage
+	sent              NylasSendMessageRequest
+	update            NylasMessageUpdate
+	lastQuery         NylasMessageQuery
+	lastFolderGrantID string
+	folderCalls       int
+	messageCalls      int
+	detailCalls       int
+	listErr           error
+	exchangeErr       error
 }
 
 func (f *fakeNylasClient) ExchangeCode(_ context.Context, _, _ string) (NylasGrant, error) {
@@ -44,8 +45,9 @@ func (f *fakeNylasClient) DeleteGrant(_ context.Context, grantID string) error {
 	return nil
 }
 
-func (f *fakeNylasClient) ListFolders(_ context.Context, _ string) ([]NylasFolder, error) {
+func (f *fakeNylasClient) ListFolders(_ context.Context, grantID string) ([]NylasFolder, error) {
 	f.folderCalls++
+	f.lastFolderGrantID = grantID
 	return f.folders, nil
 }
 
@@ -328,6 +330,61 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/disconnect", "", token, http.StatusOK)
 	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("connection after disconnect error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "company-shared-folders"
+	repo.EnsureCompany(companyID, "Shared Folders Company")
+	actor, err := repo.UpsertAuthUser("actor-subject", "actor@example.com", "Actor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("actor-subject", companyID, "company_user"); err != nil {
+		t.Fatal(err)
+	}
+	sharedUser, err := repo.UpsertAuthUser("shared-subject", "shared@example.com", "Shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("shared-subject", companyID, "company_user"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       sharedUser.UserID,
+		Provider:     "microsoft",
+		AccountEmail: sharedUser.Email,
+		GrantID:      "grant-shared",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Support")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetCommunicationsSharedInboxAccountEmail(companyID, folder.FolderID, sharedUser.Email); err != nil {
+		t.Fatal(err)
+	}
+	totalCount := 42
+	nylas := &fakeNylasClient{
+		folders: []NylasFolder{{ID: "archive", Name: "Archive", Attributes: []string{"\\Archive"}, TotalCount: &totalCount}},
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
+
+	path := "/v1/communications/folders?company_id=" + url.QueryEscape(companyID) + "&shared_inbox_id=" + url.QueryEscape(folder.FolderID)
+	assertJSONStatus(t, handler, http.MethodGet, path, "", token, http.StatusOK)
+	if nylas.lastFolderGrantID != "grant-shared" {
+		t.Fatalf("folder grant = %q, want shared inbox grant", nylas.lastFolderGrantID)
 	}
 }
 

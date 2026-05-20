@@ -15,6 +15,7 @@ import {
   getHomeViewLabel,
   getInboxMatrixGridTemplateColumns,
   getInboxMatrixGridTemplateColumnsWithoutSidebar,
+  mailboxCountsFromFolders,
   mailboxForHomeView,
   nodeIDsFromExplorerPayload,
   resizeHomeColumns,
@@ -90,6 +91,17 @@ test("Home view helpers map labels and mailboxes without changing backend mailbo
   assert.equal(getHomeViewLabel("r-inbox", shared), "R Nodes");
   assert.equal(mailboxForHomeView("aci-inbox"), "all");
   assert.equal(mailboxForHomeView("my-triage"), "primary");
+});
+
+test("mailbox count helper reads provider folder totals for triage tabs", () => {
+  const counts = mailboxCountsFromFolders([
+    { id: "CATEGORY_PERSONAL", name: "CATEGORY_PERSONAL", total_count: 12 },
+    { id: "INBOX", name: "Inbox", attributes: ["\\Inbox"], total_count: 30 },
+    { id: "STARRED", name: "STARRED", total_count: 4 },
+    { id: "archive-folder", name: "Archive", attributes: ["\\Archive"], total_count: 9 },
+  ]);
+
+  assert.deepEqual(counts, { primary: 12, starred: 4, archive: 9 });
 });
 
 test("shared inbox rows are stable, sorted, and nested by parent", () => {

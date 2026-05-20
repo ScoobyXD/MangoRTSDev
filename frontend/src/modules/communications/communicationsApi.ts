@@ -72,6 +72,11 @@ export type ListMessagesParams = {
 
 export type EmailMailbox = "primary" | "sent" | "starred" | "all" | "archive";
 
+export type ListEmailFoldersParams = {
+  companyID?: string;
+  sharedInboxID?: string;
+};
+
 export type CommunicationsSharedInboxRaciRole = LogicGateRaciRole;
 
 export type CommunicationsSharedInboxRaciAssignment = {
@@ -167,13 +172,13 @@ const RECENT_PRIMARY_MESSAGE_TTL_MS = 10 * 60_000;
 export const EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED = "mangorts:communications-shared-inboxes-updated";
 
 let statusCache: CacheEntry<CommunicationsStatus> | null = null;
-let foldersCache: CacheEntry<EmailFolder[]> | null = null;
+const foldersCache = new Map<string, CacheEntry<EmailFolder[]>>();
 const messagePageCache = new Map<string, CacheEntry<MessagePage>>();
 const messageDetailCache = new Map<string, CacheEntry<EmailMessage>>();
 const recentArchivedMessages = new Map<string, CacheEntry<EmailMessage>>();
 const recentPrimaryMessages = new Map<string, CacheEntry<EmailMessage>>();
 let statusInflight: Promise<CommunicationsStatus> | null = null;
-let foldersInflight: Promise<EmailFolder[]> | null = null;
+const foldersInflight = new Map<string, Promise<EmailFolder[]>>();
 const messagePageInflight = new Map<string, Promise<MessagePage>>();
 const messageDetailInflight = new Map<string, Promise<EmailMessage>>();
 const communicationsReadCache = new Map<string, CacheEntry<unknown>>();
@@ -208,20 +213,23 @@ export async function disconnectCommunications(): Promise<void> {
   invalidateCommunicationsCache();
 }
 
-export async function listEmailFolders(): Promise<EmailFolder[]> {
-  const cached = readCache(foldersCache, FOLDERS_CACHE_TTL_MS, cloneFolders);
+export async function listEmailFolders(params: ListEmailFoldersParams = {}): Promise<EmailFolder[]> {
+  const cachePath = `/v1/communications/folders${createFolderQuery(params)}`;
+  const cached = readCache(foldersCache.get(cachePath) ?? null, FOLDERS_CACHE_TTL_MS, cloneFolders);
   if (cached) return cached;
-  if (foldersInflight) return cloneFolders(await foldersInflight);
-  foldersInflight = apiFetchJSON<{ folders?: EmailFolder[] }>("/v1/communications/folders")
+  const existingInflight = foldersInflight.get(cachePath);
+  if (existingInflight) return cloneFolders(await existingInflight);
+  const request = apiFetchJSON<{ folders?: EmailFolder[] }>(cachePath)
     .then((payload) => {
       const folders = cloneFolders(payload.folders ?? []);
-      foldersCache = { value: folders, fetchedAt: Date.now() };
+      foldersCache.set(cachePath, { value: folders, fetchedAt: Date.now() });
       return folders;
     })
     .finally(() => {
-      foldersInflight = null;
+      foldersInflight.delete(cachePath);
     });
-  return cloneFolders(await foldersInflight);
+  foldersInflight.set(cachePath, request);
+  return cloneFolders(await request);
 }
 
 export async function listEmailMessages(params: ListMessagesParams): Promise<MessagePage> {
@@ -917,6 +925,14 @@ export function createMessageQuery(params: ListMessagesParams): string {
   return raw ? `?${raw}` : "";
 }
 
+export function createFolderQuery(params: ListEmailFoldersParams = {}): string {
+  const query = new URLSearchParams();
+  if (params.companyID?.trim()) query.set("company_id", params.companyID.trim());
+  if (params.sharedInboxID?.trim()) query.set("shared_inbox_id", params.sharedInboxID.trim());
+  const raw = query.toString();
+  return raw ? `?${raw}` : "";
+}
+
 export function parseEmailAddressList(raw: string): EmailAddress[] {
   const seen = new Set<string>();
   return raw
@@ -968,8 +984,8 @@ function invalidateCacheKey(key: string): void {
 }
 
 function clearEmailFolderCache(): void {
-  foldersCache = null;
-  foldersInflight = null;
+  foldersCache.clear();
+  foldersInflight.clear();
 }
 
 function clearMessagePageCache(): void {
