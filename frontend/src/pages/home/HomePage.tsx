@@ -63,7 +63,7 @@ import { AciInboxMatrix, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, 
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addSharedInboxRaciUserCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciUserCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, filterExplorerRowsForSearch, filterSharedInboxesForUser, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
@@ -182,10 +182,6 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   const isNarrow = isInboxMatrixView ? viewportWidth < 980 : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!hideNavigation);
   const currentUserID = me?.user.user_id?.trim() ?? "";
   const currentUserHasFullSharedInboxAccess = userHasFullSharedInboxAccess(me, companyID);
-  const visibleSharedInboxes = useMemo(
-    () => filterSharedInboxesForUser(sharedInboxes, currentUserID, currentUserHasFullSharedInboxAccess),
-    [currentUserHasFullSharedInboxAccess, currentUserID, sharedInboxes],
-  );
   const activeSharedInboxFolderID = sharedInboxIDForHomeView(activeViewID);
   const activeSharedInbox = useMemo(
     () => activeSharedInboxFolderID ? sharedInboxes.find((folder) => folder.folder_id === activeSharedInboxFolderID) ?? null : null,
@@ -244,9 +240,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
   }, [activeViewID]);
   useEffect(() => {
     if (!activeSharedInboxFolderID) return;
-    if (visibleSharedInboxes.some((folder) => folder.folder_id === activeSharedInboxFolderID)) return;
+    if (sharedInboxes.some((folder) => folder.folder_id === activeSharedInboxFolderID)) return;
     setActiveViewID("shared-root");
-  }, [activeSharedInboxFolderID, visibleSharedInboxes]);
+  }, [activeSharedInboxFolderID, sharedInboxes]);
   useEffect(() => {
     messagesRef.current = messages;
     setSelectedMessageIDs((previous) => {
@@ -1837,7 +1833,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
             <HomeSidebar
               activeViewID={activeViewID}
               connectedAccountEmail={connection?.account_email}
-              sharedInboxes={visibleSharedInboxes}
+              sharedInboxes={sharedInboxes}
               loadingSharedInboxes={loadingSharedInboxes}
               newSharedInboxName={newSharedInboxName}
               busy={busy}

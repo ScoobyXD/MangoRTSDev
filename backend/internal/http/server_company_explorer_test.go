@@ -1060,80 +1060,67 @@ func TestFilterCommunicationsSharedInboxFoldersForUserIncludesAssignedSubtreeAnd
 	}
 }
 
-func TestCompanyExplorerCreateCommunicationsFolderAssignsNonAdminCreator(t *testing.T) {
+func TestCompanyExplorerCommunicationsFolderListDoesNotApplyRaciFiltering(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
 	handler := server.Routes()
-	companyID := "company-shared-inbox-create-creator-test"
+	companyID := "company-shared-inbox-list-unfiltered-test"
 
-	creator, err := repo.UpsertAuthUser("shared-inbox-creator", "creator@example.com", "Creator")
+	currentUser, err := repo.UpsertAuthUser("shared-inbox-current", "current@example.com", "Current")
 	if err != nil {
-		t.Fatalf("UpsertAuthUser creator error = %v", err)
+		t.Fatalf("UpsertAuthUser current error = %v", err)
 	}
-	if _, err := repo.AddCompanyMembership(creator.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
-		t.Fatalf("AddCompanyMembership creator error = %v", err)
+	if _, err := repo.AddCompanyMembership(currentUser.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership current error = %v", err)
 	}
-	other, err := repo.UpsertAuthUser("shared-inbox-other", "other@example.com", "Other")
+	assignedUser, err := repo.UpsertAuthUser("shared-inbox-assigned", "assigned@example.com", "Assigned")
 	if err != nil {
-		t.Fatalf("UpsertAuthUser other error = %v", err)
+		t.Fatalf("UpsertAuthUser assigned error = %v", err)
 	}
-	if _, err := repo.AddCompanyMembership(other.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
-		t.Fatalf("AddCompanyMembership other error = %v", err)
+	if _, err := repo.AddCompanyMembership(assignedUser.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership assigned error = %v", err)
 	}
 
-	hidden, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Hidden")
+	unassigned, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Unassigned")
 	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder hidden error = %v", err)
+		t.Fatalf("CreateCompanyExplorerFolder unassigned error = %v", err)
+	}
+	assigned, err := repo.CreateCompanyExplorerFolder(companyID, "", "communications", "Assigned")
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerFolder assigned error = %v", err)
 	}
 	if _, err := repo.SetCommunicationsSharedInboxRaciAssignments(store.SharedInboxRaciAssignmentUpdateInput{
 		CompanyID: companyID,
-		FolderID:  hidden.FolderID,
+		FolderID:  assigned.FolderID,
 		Assignments: []store.SharedInboxRaciAssignmentInput{{
 			Role:   domain.LogicGateRaciRoleResponsible,
-			UserID: other.UserID,
+			UserID: assignedUser.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetCommunicationsSharedInboxRaciAssignments hidden error = %v", err)
+		t.Fatalf("SetCommunicationsSharedInboxRaciAssignments assigned error = %v", err)
 	}
 
-	createBody, _ := json.Marshal(map[string]string{
-		"company_id":  companyID,
-		"folder_kind": "communications",
-		"name":        "Mine",
-	})
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(createBody))
-	createReq.Header.Set("Content-Type", "application/json")
-	createReq = requestWithActorForTest(createReq, creator, companyID)
-	createRec := httptest.NewRecorder()
-	handler.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("POST communications folder status = %d, want %d body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
+	req := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=communications", nil)
+	req = requestWithActorForTest(req, currentUser, companyID)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET communications folders status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
-	var created domain.CompanyExplorerFolder
-	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
-		t.Fatalf("decode created communications folder: %v", err)
-	}
-	if len(created.RaciAssignments) != 1 || created.RaciAssignments[0].UserID != creator.UserID || created.RaciAssignments[0].Role != domain.LogicGateRaciRoleResponsible {
-		t.Fatalf("created folder RACI = %+v, want creator responsible", created.RaciAssignments)
-	}
-
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=communications", nil)
-	listReq = requestWithActorForTest(listReq, creator, companyID)
-	listRec := httptest.NewRecorder()
-	handler.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("GET communications folders status = %d, want %d body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
-	}
-	var listPayload struct {
+	var payload struct {
 		Folders []domain.CompanyExplorerFolder `json:"folders"`
 	}
-	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
-		t.Fatalf("decode communications folder list: %v", err)
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode communications folders: %v", err)
 	}
-	if len(listPayload.Folders) != 1 || listPayload.Folders[0].FolderID != created.FolderID {
-		t.Fatalf("visible folders after create = %+v, want only created folder %q", listPayload.Folders, created.FolderID)
+	ids := map[string]bool{}
+	for _, folder := range payload.Folders {
+		ids[folder.FolderID] = true
+	}
+	if !ids[unassigned.FolderID] || !ids[assigned.FolderID] {
+		t.Fatalf("communications folder list IDs = %v, want both %q and %q", ids, unassigned.FolderID, assigned.FolderID)
 	}
 }
 

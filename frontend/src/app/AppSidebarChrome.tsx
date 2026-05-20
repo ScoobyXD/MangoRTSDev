@@ -25,7 +25,6 @@ import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../
 import {
   buildSharedInboxRows,
   collectSharedInboxSubtreeIDs,
-  filterSharedInboxesForUser,
   getSharedInboxChildPosition,
   getSharedInboxSiblingPosition,
   isSharedInboxFolderDescendant,
@@ -70,8 +69,6 @@ type AppSidebarProps = {
   accountChrome?: React.ReactNode;
   activePage: AppSidebarPrimaryPage | null;
   activeHomeView: HomeSidebarView;
-  currentUserHasFullSharedInboxAccess?: boolean;
-  currentUserID?: string;
   pins: SidebarPin[];
   pinDropActive: boolean;
   explorerSelectionTargetFrameIDs: string[];
@@ -178,8 +175,6 @@ export function AppSidebar({
   accountChrome,
   activePage,
   activeHomeView,
-  currentUserHasFullSharedInboxAccess = false,
-  currentUserID = "",
   pins,
   pinDropActive,
   explorerSelectionTargetFrameIDs,
@@ -215,14 +210,10 @@ export function AppSidebar({
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
-  const visibleSharedInboxes = useMemo(
-    () => filterSharedInboxesForUser(sharedInboxes, currentUserID, currentUserHasFullSharedInboxAccess),
-    [currentUserHasFullSharedInboxAccess, currentUserID, sharedInboxes],
-  );
   const cleanConnectedAccountEmail = connectedAccountEmail.trim().toLowerCase();
   const sharedRows = useMemo(
-    () => sharedTriageOpen ? buildSharedInboxRows(visibleSharedInboxes, expandedSharedFolderIDs) : [],
-    [expandedSharedFolderIDs, sharedTriageOpen, visibleSharedInboxes],
+    () => sharedTriageOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [],
+    [expandedSharedFolderIDs, sharedInboxes, sharedTriageOpen],
   );
   const sharedTriageActive = homeActive && (activeHomeView === "shared-root" || activeHomeView.startsWith("shared:"));
   const aciNotificationCounts = useMemo(() => ({
@@ -424,10 +415,10 @@ export function AppSidebar({
 
   useEffect(() => {
     setExpandedSharedFolderIDs((previous) => {
-      if (previous.size > 0 || visibleSharedInboxes.length === 0) return previous;
-      return new Set(visibleSharedInboxes.filter((folder) => !folder.parent_folder_id).map((folder) => folder.folder_id));
+      if (previous.size > 0 || sharedInboxes.length === 0) return previous;
+      return new Set(sharedInboxes.filter((folder) => !folder.parent_folder_id).map((folder) => folder.folder_id));
     });
-  }, [visibleSharedInboxes]);
+  }, [sharedInboxes]);
 
   useEffect(() => {
     const activeFolderID = activeHomeView.startsWith("shared:") ? activeHomeView.slice("shared:".length) : "";
