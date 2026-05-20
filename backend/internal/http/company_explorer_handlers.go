@@ -109,6 +109,32 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
+	if item.FolderKind == "communications" {
+		if actor, ok := authenticatedActor(r); ok && !actorCanManageCompany(actor, req.CompanyID) {
+			assignments, err := s.repo.SetCommunicationsSharedInboxRaciAssignments(store.SharedInboxRaciAssignmentUpdateInput{
+				CompanyID: req.CompanyID,
+				FolderID:  item.FolderID,
+				Assignments: []store.SharedInboxRaciAssignmentInput{{
+					Role:   domain.LogicGateRaciRoleResponsible,
+					UserID: actor.User.UserID,
+				}},
+			})
+			if err != nil {
+				_ = s.repo.DeleteCompanyExplorerFolder(req.CompanyID, item.FolderID)
+				if errors.Is(err, store.ErrAssigneeNotInCompany) {
+					writeError(w, http.StatusForbidden, "company_access_denied")
+					return
+				}
+				if errors.Is(err, store.ErrInvalid) {
+					writeError(w, http.StatusBadRequest, "invalid_shared_inbox_raci_assignment")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "failed_to_assign_shared_inbox_creator")
+				return
+			}
+			item.RaciAssignments = assignments
+		}
+	}
 	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_created", map[string]any{"folder_id": item.FolderID, "folder_kind": item.FolderKind, "folder": item})
 	writeJSON(w, http.StatusCreated, item)
 }
