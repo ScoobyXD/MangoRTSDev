@@ -42,6 +42,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanCommands.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTabs.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorUndoHistory.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorMentions.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/plainTextEditing.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/richTextEditing.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorScroll.test.js"),

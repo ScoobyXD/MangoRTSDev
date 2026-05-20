@@ -3,7 +3,6 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strconv"
@@ -367,27 +366,11 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.publishWorkspaceEvent(req.CompanyID, "node_information_created", map[string]any{"node_id": nodeID, "information_id": item.InformationID})
-		if strings.TrimSpace(req.Type) == "Text block chat" {
-			actorUserID, actorLabel := notificationActorPayload(r)
-			mentionedUserIDs, err := s.notifications.ResolveMentionedUserIDs(req.CompanyID, req.Information)
-			if err == nil && len(mentionedUserIDs) > 0 {
-				payload := map[string]any{
-					"comment":            item.Information,
-					"information_id":     item.InformationID,
-					"mentioned_user_ids": mentionedUserIDs,
-					"actor_display_name": actorLabel,
-				}
-				s.recordNotificationEvent(store.NotificationEventInput{
-					CompanyID:      req.CompanyID,
-					ActorUserID:    actorUserID,
-					Type:           domain.NotificationEventMentionCreated,
-					EntityType:     "node",
-					EntityID:       nodeID,
-					IdempotencyKey: "mention:node:" + item.InformationID,
-					Payload:        payload,
-				})
-			}
+		mentionInformationID := strings.TrimSpace(req.InformationID)
+		if mentionInformationID == "" {
+			mentionInformationID = item.InformationID
 		}
+		s.recordMentionNotifications(r, req.CompanyID, "node", nodeID, mentionInformationID, req.Type, req.Information)
 		writeJSON(w, http.StatusCreated, item)
 		return
 	}

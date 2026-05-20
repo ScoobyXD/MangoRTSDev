@@ -387,24 +387,11 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		s.publishWorkspaceEvent(req.CompanyID, "logic_gate_information_created", map[string]any{"logic_gate_id": logicGateID, "information_id": item.InformationID})
-		actorUserID, actorLabel := notificationActorPayload(r)
-		mentionedUserIDs, err := s.notifications.ResolveMentionedUserIDs(req.CompanyID, req.Information)
-		if err == nil && len(mentionedUserIDs) > 0 {
-			s.recordNotificationEvent(store.NotificationEventInput{
-				CompanyID:      req.CompanyID,
-				ActorUserID:    actorUserID,
-				Type:           domain.NotificationEventMentionCreated,
-				EntityType:     "logic_gate",
-				EntityID:       logicGateID,
-				IdempotencyKey: "mention:logic-gate:" + item.InformationID,
-				Payload: map[string]any{
-					"comment":            item.Information,
-					"information_id":     item.InformationID,
-					"mentioned_user_ids": mentionedUserIDs,
-					"actor_display_name": actorLabel,
-				},
-			})
+		mentionInformationID := strings.TrimSpace(req.InformationID)
+		if mentionInformationID == "" {
+			mentionInformationID = item.InformationID
 		}
+		s.recordMentionNotifications(r, req.CompanyID, "logic_gate", logicGateID, mentionInformationID, req.Type, req.Information)
 		writeJSON(w, http.StatusCreated, item)
 		return
 	}

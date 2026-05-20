@@ -1522,7 +1522,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     rememberCurrentDocumentScroll,
     flushPendingDocumentSave,
     onSelectionFontSizeChange: updateSelectionFontSize,
+    mentionUsers: companyUsers,
+    mentionAccent: accent,
+    mentionSurfaceText: surfaceText,
+    mentionStrokeColor: strokeColor,
   });
+  const { mentionMenu: documentMentionMenu, ...documentSurfaceEventHandlers } = documentSurfaceHandlers;
   const handleNodeWorkspaceProjectionMutation = useCallback(() => {
     if (linkedEntityKind !== "node" || !linkedNodeID) return;
     invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
@@ -1687,9 +1692,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             caretColor={editorPrimaryText}
             scrollbarAccent={scrollbarAccent}
             scrollbarTrack={scrollbarTrack}
-            {...documentSurfaceHandlers}
+            {...documentSurfaceEventHandlers}
           />
         )}
+        {documentMentionMenu}
         {emptyMessage && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: 28, textAlign: "center", fontSize: 13, fontWeight: 700, color: surfaceText, opacity: 0.72 }}>
             {emptyMessage}

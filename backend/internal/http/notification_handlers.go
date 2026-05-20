@@ -3,10 +3,12 @@ package httpapi
 import (
 	"encoding/json"
 	"fmt"
+	htmlpkg "html"
 	"log"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +20,14 @@ type notificationStreamEnvelope struct {
 	Notification domain.Notification `json:"notification"`
 	TS           time.Time           `json:"ts"`
 }
+
+const editorRichTextPrefix = "<!-- mango-editor-html-v1 -->"
+const editorNodeTextBlockPrefix = "<!-- mango-node-text-block-v1 -->"
+
+var (
+	editorHTMLBreakPattern = regexp.MustCompile(`(?i)<br\s*/?>`)
+	editorHTMLTagPattern   = regexp.MustCompile(`<[^>]+>`)
+)
 
 func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -248,6 +258,84 @@ func notificationActorPayload(r *http.Request) (string, string) {
 		label = strings.TrimSpace(actor.User.Email)
 	}
 	return actor.User.UserID, label
+}
+
+func isMentionNotificationInformationType(infoType string) bool {
+	switch strings.TrimSpace(infoType) {
+	case "Text box", "Text block chat":
+		return true
+	default:
+		return false
+	}
+}
+
+func editorMentionCommentPreview(infoType, information string) string {
+	infoType = strings.TrimSpace(infoType)
+	text := strings.TrimSpace(information)
+	if infoType == "Text block chat" {
+		var payload struct {
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(text), &payload); err == nil && strings.TrimSpace(payload.Message) != "" {
+			text = payload.Message
+		}
+	}
+	if strings.HasPrefix(text, editorNodeTextBlockPrefix) {
+		var payload struct {
+			Title    string `json:"title"`
+			Document string `json:"document"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(text, editorNodeTextBlockPrefix)), &payload); err == nil {
+			if strings.TrimSpace(payload.Document) != "" {
+				text = payload.Document
+			} else if strings.TrimSpace(payload.Title) != "" {
+				text = payload.Title
+			}
+		}
+	}
+	if strings.HasPrefix(text, editorRichTextPrefix) {
+		text = strings.TrimPrefix(text, editorRichTextPrefix)
+	}
+	text = editorHTMLBreakPattern.ReplaceAllString(text, "\n")
+	text = editorHTMLTagPattern.ReplaceAllString(text, " ")
+	return strings.TrimSpace(htmlpkg.UnescapeString(text))
+}
+
+func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityType, entityID, informationID, infoType, information string) {
+	companyID = strings.TrimSpace(companyID)
+	entityType = strings.TrimSpace(entityType)
+	entityID = strings.TrimSpace(entityID)
+	informationID = strings.TrimSpace(informationID)
+	if companyID == "" || entityType == "" || entityID == "" || informationID == "" || !isMentionNotificationInformationType(infoType) {
+		return
+	}
+	mentionedUserIDs, err := s.notifications.ResolveMentionedUserIDs(companyID, information)
+	if err != nil || len(mentionedUserIDs) == 0 {
+		return
+	}
+	actorUserID, actorLabel := notificationActorPayload(r)
+	comment := editorMentionCommentPreview(infoType, information)
+	entityKey := strings.ReplaceAll(entityType, "_", "-")
+	for _, userID := range mentionedUserIDs {
+		userID = strings.TrimSpace(userID)
+		if userID == "" {
+			continue
+		}
+		s.recordNotificationEvent(store.NotificationEventInput{
+			CompanyID:      companyID,
+			ActorUserID:    actorUserID,
+			Type:           domain.NotificationEventMentionCreated,
+			EntityType:     entityType,
+			EntityID:       entityID,
+			IdempotencyKey: "mention:" + entityKey + ":" + entityID + ":" + informationID + ":" + userID,
+			Payload: map[string]any{
+				"comment":            comment,
+				"information_id":     informationID,
+				"mentioned_user_ids": []string{userID},
+				"actor_display_name": actorLabel,
+			},
+		})
+	}
 }
 
 func parseBoolQuery(raw string) bool {

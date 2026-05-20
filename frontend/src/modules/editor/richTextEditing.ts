@@ -3,6 +3,11 @@ import {
   EDITOR_IMAGE_NODE_ATTRIBUTE,
   readEditorImageData,
 } from "./editorImages.js";
+import {
+  applyEditorMentionStyle,
+  EDITOR_MENTION_USER_ID_ATTRIBUTE,
+  isEditorMentionElement,
+} from "./editorMentions.js";
 
 export const EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES = 20;
 export const EDITOR_RICH_TEXT_PREFIX = "<!-- mango-editor-html-v1 -->";
@@ -130,6 +135,15 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
     const imageData = readEditorImageData(element);
     if (imageData) {
       target.appendChild(createEditorImageFrame(ownerDocument, imageData));
+      return;
+    }
+    if (isEditorMentionElement(element)) {
+      const span = ownerDocument.createElement("span");
+      applyEditorMentionStyle(span);
+      const userID = element.getAttribute(EDITOR_MENTION_USER_ID_ATTRIBUTE)?.trim() ?? "";
+      if (userID) span.setAttribute(EDITOR_MENTION_USER_ID_ATTRIBUTE, userID);
+      appendSanitizedChildren(element, span, ownerDocument);
+      target.appendChild(span);
       return;
     }
     const span = ownerDocument.createElement("span");

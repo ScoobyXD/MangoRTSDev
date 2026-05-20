@@ -1345,6 +1345,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     nodeID={nodeID}
                     companyID={companyID}
                     currentUserID={author.userID || "local-user"}
+                    companyUsers={companyUsers}
                     documentValue={block.document}
                     chatMessages={messages}
                     activeChatAnchorMessageID={activeChatAnchorMessageID}

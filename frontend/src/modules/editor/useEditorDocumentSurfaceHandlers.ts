@@ -1,5 +1,4 @@
-import { useMemo, useRef } from "react";
-import type React from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EditorDocumentSurfaceProps } from "./EditorDocumentSurface";
 import type { EditorScrollMemory } from "./editorScroll";
 import {
@@ -32,6 +31,15 @@ import {
   EDITOR_DOCUMENT_MAX_FONT_SIZE_PX,
   EDITOR_DOCUMENT_MIN_FONT_SIZE_PX,
 } from "./useEditorPreferences";
+import {
+  buildMentionOptions,
+  createEditorMentionElement,
+  mentionUserDisplayName,
+  mentionUserOptionLabel,
+  readActiveMentionDraft,
+  type ActiveMentionDraft,
+  type MentionableCompanyUser,
+} from "./editorMentions";
 import {
   DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX,
   EDITOR_IMAGE_MAX_WIDTH_INSET_PX,
@@ -81,6 +89,10 @@ export type EditorDocumentSurfaceHandlers = Pick<
   | "onKeyDown"
 >;
 
+export type EditorDocumentSurfaceHandlerResult = EditorDocumentSurfaceHandlers & {
+  mentionMenu: React.ReactNode;
+};
+
 type UseEditorDocumentSurfaceHandlersOptions = {
   restoringScrollRef: React.MutableRefObject<boolean>;
   currentDocumentTargetKeyRef: React.MutableRefObject<string>;
@@ -94,6 +106,10 @@ type UseEditorDocumentSurfaceHandlersOptions = {
   rememberCurrentDocumentScroll: () => void;
   flushPendingDocumentSave: (fallbackText?: string) => void;
   onSelectionFontSizeChange: (fontSize: number) => void;
+  mentionUsers?: MentionableCompanyUser[];
+  mentionAccent?: string;
+  mentionSurfaceText?: string;
+  mentionStrokeColor?: string;
 };
 
 function clampEditorFontSize(value: number): number {
@@ -564,6 +580,89 @@ function applyEditorUndoCommand(
   return true;
 }
 
+type RichTextMentionDraft = ActiveMentionDraft & {
+  left: number;
+  top: number;
+};
+
+function closestMentionElement(root: HTMLElement, node: Node | null): HTMLElement | null {
+  if (!node) return null;
+  const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
+  const mention = element?.closest?.("[data-mango-mention='true']") as HTMLElement | null;
+  return mention && root.contains(mention) ? mention : null;
+}
+
+function getCaretRect(root: HTMLElement, range: Range): DOMRect {
+  const rect = range.getBoundingClientRect();
+  if (Number.isFinite(rect.left) && Number.isFinite(rect.top) && (rect.width > 0 || rect.height > 0)) return rect;
+  const usefulRect = Array.from(range.getClientRects()).find((item) => item.width > 0 || item.height > 0);
+  if (usefulRect) return usefulRect;
+  return root.getBoundingClientRect();
+}
+
+function readRichTextMentionDraft(root: HTMLElement): RichTextMentionDraft | null {
+  const range = getEditorSelectionRange(root);
+  if (!range || !range.collapsed || closestMentionElement(root, range.startContainer)) return null;
+  const beforeRange = range.cloneRange();
+  beforeRange.selectNodeContents(root);
+  beforeRange.setEnd(range.startContainer, range.startOffset);
+  const beforeCaret = beforeRange.toString();
+  const draft = readActiveMentionDraft(beforeCaret, beforeCaret.length);
+  if (!draft) return null;
+
+  const rect = getCaretRect(root, range);
+  const view = root.ownerDocument.defaultView;
+  const viewportWidth = view?.innerWidth ?? 1280;
+  const viewportHeight = view?.innerHeight ?? 720;
+  return {
+    ...draft,
+    left: Math.max(8, Math.min(rect.left, viewportWidth - 348)),
+    top: Math.max(8, Math.min(rect.bottom + 6, viewportHeight - 258)),
+  };
+}
+
+function replaceEditorMentionDraft(
+  root: HTMLElement,
+  mention: ActiveMentionDraft,
+  user: MentionableCompanyUser,
+  documentUndoHistory: EditorDocumentUndoHistory,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+) {
+  const undoBefore = snapshotEditorDocumentRoot(root);
+  removeEditorTerminalBreaks(root);
+  setEditorSelectionByOffsets(root, mention.start, mention.end);
+  const range = getEditorSelectionRange(root);
+  if (!range) return;
+  const mentionElement = createEditorMentionElement(root.ownerDocument, user);
+  const trailingSpace = root.ownerDocument.createTextNode(" ");
+  const fragment = root.ownerDocument.createDocumentFragment();
+  fragment.append(mentionElement, trailingSpace);
+  range.deleteContents();
+  range.insertNode(fragment);
+  range.setStart(trailingSpace, trailingSpace.data.length);
+  range.collapse(true);
+  const selection = root.ownerDocument.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, "typing");
+  commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+}
+
+function initialsForMentionName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]?.[0] ?? "";
+  const second = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : parts[0]?.[1] ?? "";
+  return `${first}${second}`.toUpperCase();
+}
+
+function avatarBackgroundForMentionName(name: string): string {
+  let hash = 0;
+  for (let index = 0; index < name.length; index += 1) hash = (hash * 31 + name.charCodeAt(index)) % 360;
+  return `hsl(${hash}, 68%, 42%)`;
+}
+
 function isEditorUndoShortcut(event: React.KeyboardEvent<HTMLDivElement>): boolean {
   return (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "z" && !event.shiftKey;
 }
@@ -888,9 +987,138 @@ export function useEditorDocumentSurfaceHandlers({
   rememberCurrentDocumentScroll,
   flushPendingDocumentSave,
   onSelectionFontSizeChange,
-}: UseEditorDocumentSurfaceHandlersOptions): EditorDocumentSurfaceHandlers {
+  mentionUsers = [],
+  mentionAccent = "#ff8820",
+  mentionSurfaceText = "#24120a",
+  mentionStrokeColor = "rgba(36,18,10,0.18)",
+}: UseEditorDocumentSurfaceHandlersOptions): EditorDocumentSurfaceHandlerResult {
   const pendingNativeUndoSnapshotRef = useRef<EditorDocumentUndoSnapshot | null>(null);
-  return useMemo(() => ({
+  const activeMentionRootRef = useRef<HTMLElement | null>(null);
+  const [activeMentionDraft, setActiveMentionDraft] = useState<RichTextMentionDraft | null>(null);
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const mentionOptions = useMemo(() => (
+    activeMentionDraft ? buildMentionOptions(mentionUsers, activeMentionDraft.query, 8) : []
+  ), [activeMentionDraft?.query, mentionUsers]);
+  const mentionMenuOpen = activeMentionDraft !== null && mentionOptions.length > 0;
+
+  useEffect(() => {
+    setActiveMentionIndex(0);
+  }, [activeMentionDraft?.start, activeMentionDraft?.query]);
+
+  useEffect(() => {
+    setActiveMentionIndex((current) => Math.min(current, Math.max(0, mentionOptions.length - 1)));
+  }, [mentionOptions.length]);
+
+  const refreshMentionDraft = useCallback((root: HTMLElement) => {
+    if (mentionUsers.length === 0) {
+      activeMentionRootRef.current = null;
+      setActiveMentionDraft(null);
+      return;
+    }
+    const draft = readRichTextMentionDraft(root);
+    activeMentionRootRef.current = draft ? root : null;
+    setActiveMentionDraft(draft);
+  }, [mentionUsers.length]);
+
+  const insertMention = useCallback((root: HTMLElement, mention: ActiveMentionDraft, user: MentionableCompanyUser) => {
+    replaceEditorMentionDraft(root, mention, user, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
+    activeMentionRootRef.current = null;
+    setActiveMentionDraft(null);
+  }, [documentUndoHistoryRef, scheduleDocumentSave, scheduleIndentGuideUpdate]);
+
+  const mentionMenu = mentionMenuOpen && activeMentionDraft
+    ? React.createElement(
+      "div",
+      {
+        role: "listbox",
+        "aria-label": "Mention users",
+        style: {
+        position: "fixed",
+        left: activeMentionDraft.left,
+        top: activeMentionDraft.top,
+        zIndex: 2000,
+        width: 320,
+        maxWidth: "calc(100vw - 16px)",
+        maxHeight: 242,
+        overflowY: "auto",
+        display: "grid",
+        gap: 2,
+        padding: 4,
+        border: `1px solid ${mentionStrokeColor}`,
+        borderRadius: 8,
+        background: "#ffffff",
+        boxShadow: "0 16px 36px rgba(15,23,42,0.20)",
+        color: mentionSurfaceText,
+        fontFamily: "var(--mango-font-family)",
+        } satisfies React.CSSProperties,
+      },
+      mentionOptions.map((user, index) => {
+        const selected = index === activeMentionIndex;
+        const name = mentionUserDisplayName(user);
+        const label = mentionUserOptionLabel(user);
+        const email = (user.email ?? "").trim();
+        return React.createElement(
+          "button",
+          {
+            key: user.user_id,
+            type: "button",
+            role: "option",
+            "aria-selected": selected,
+            title: label,
+            onMouseDown: (event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault(),
+            onClick: () => {
+              const root = activeMentionRootRef.current;
+              if (!root || !activeMentionDraft) return;
+              insertMention(root, activeMentionDraft, user);
+            },
+            style: {
+              width: "100%",
+              minHeight: 34,
+              display: "grid",
+              gridTemplateColumns: "24px minmax(0, 1fr)",
+              alignItems: "center",
+              gap: 8,
+              border: "none",
+              borderRadius: 6,
+              background: selected ? "rgba(255, 136, 32, 0.16)" : "transparent",
+              boxShadow: selected ? `inset 3px 0 0 ${mentionAccent}` : "none",
+              color: mentionSurfaceText,
+              cursor: "pointer",
+              padding: "5px 8px",
+              textAlign: "left",
+              font: "inherit",
+            } satisfies React.CSSProperties,
+          },
+          React.createElement(
+            "span",
+            {
+              "aria-hidden": "true",
+              style: { width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForMentionName(name), color: "#ffffff", fontSize: 10, fontWeight: 900 } satisfies React.CSSProperties,
+            },
+            initialsForMentionName(name),
+          ),
+          React.createElement(
+            "span",
+            { style: { minWidth: 0, display: "grid", gap: 1 } satisfies React.CSSProperties },
+            React.createElement(
+              "span",
+              { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800 } satisfies React.CSSProperties },
+              name,
+            ),
+            email
+              ? React.createElement(
+                "span",
+                { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, fontWeight: 650, color: "rgba(100,116,139,0.86)" } satisfies React.CSSProperties },
+                email,
+              )
+              : null,
+          ),
+        );
+      }),
+    )
+    : null;
+
+  const handlers = useMemo<EditorDocumentSurfaceHandlers>(() => ({
     onBeforeInput(event) {
       const root = event.currentTarget;
       const inputEvent = event.nativeEvent as InputEvent;
@@ -1040,10 +1268,12 @@ export function useEditorDocumentSurfaceHandlers({
       recordEditorDocumentMutation(documentUndoHistoryRef.current, event.currentTarget, undoBefore, "typing");
       commitEditorDocument(event.currentTarget, scheduleDocumentSave, scheduleIndentGuideUpdate);
       syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
+      refreshMentionDraft(event.currentTarget);
     },
     onSelect(event) {
       const range = getEditorSelectionRange(event.currentTarget);
       if (range && !range.collapsed) {
+        setActiveMentionDraft(null);
         pendingEditorFontSizeRef.current = null;
         syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
         return;
@@ -1061,7 +1291,10 @@ export function useEditorDocumentSurfaceHandlers({
       pendingEditorFontSizeRef.current = null;
       syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
       const anchor = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
-      if (!anchor) return;
+      if (!anchor) {
+        refreshMentionDraft(event.currentTarget);
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       if (event.ctrlKey || event.metaKey) window.open(anchor.href, "_blank", "noopener,noreferrer");
@@ -1087,13 +1320,18 @@ export function useEditorDocumentSurfaceHandlers({
         return;
       }
       syncSelectionFontSize(event.currentTarget, onSelectionFontSizeChange);
+      refreshMentionDraft(event.currentTarget);
     },
     onBlur(event) {
+      setActiveMentionDraft(null);
+      activeMentionRootRef.current = null;
       pendingEditorFontSizeRef.current = null;
       rememberCurrentDocumentScroll();
       flushPendingDocumentSave(serializeEditorDocumentHTML(event.currentTarget));
     },
     onScroll(event) {
+      setActiveMentionDraft(null);
+      activeMentionRootRef.current = null;
       if (restoringScrollRef.current) return;
       const targetKey = currentDocumentTargetKeyRef.current;
       if (targetKey) scrollMemoryRef.current.remember(targetKey, event.currentTarget.scrollTop);
@@ -1104,6 +1342,30 @@ export function useEditorDocumentSurfaceHandlers({
     },
     onKeyDown(event) {
       const root = event.currentTarget;
+      if (mentionMenuOpen && activeMentionDraft) {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          setActiveMentionIndex((current) => (current + 1) % mentionOptions.length);
+          return;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          setActiveMentionIndex((current) => (current - 1 + mentionOptions.length) % mentionOptions.length);
+          return;
+        }
+        if (event.key === "Enter" || event.key === "Tab") {
+          event.preventDefault();
+          insertMention(root, activeMentionDraft, mentionOptions[activeMentionIndex] ?? mentionOptions[0]);
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setActiveMentionDraft(null);
+          activeMentionRootRef.current = null;
+          return;
+        }
+      }
+
       if (isEditorUndoShortcut(event) || isEditorRedoShortcut(event)) {
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
@@ -1232,17 +1494,24 @@ export function useEditorDocumentSurfaceHandlers({
       commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
     },
   }), [
+    activeMentionDraft,
+    activeMentionIndex,
     currentDocumentTargetKeyRef,
     documentUndoHistoryRef,
     flushPendingDocumentSave,
+    insertMention,
+    mentionMenuOpen,
+    mentionOptions,
     onSelectionFontSizeChange,
     outlineStyle,
     pendingEditorFontSizeRef,
     rememberCurrentDocumentScroll,
+    refreshMentionDraft,
     restoringScrollRef,
     scheduleDocumentSave,
     scheduleIndentGuideUpdate,
     scrollMemoryRef,
     setDocumentScrollTop,
   ]);
+  return { ...handlers, mentionMenu };
 }

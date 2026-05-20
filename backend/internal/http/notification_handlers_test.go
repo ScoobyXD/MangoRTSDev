@@ -244,6 +244,86 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	}
 }
 
+func TestNodeTextBoxMentionsNotifyNewUsersAcrossSameInformationID(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "55555555-5555-4555-8555-555555555555"
+
+	author, err := repo.UpsertAuthUser("textbox-author-subject", "textbox-author@example.com", "Text Author")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("textbox-author-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	first, err := repo.UpsertAuthUser("textbox-first-subject", "textbox-first@example.com", "First Mention")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("textbox-first-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	second, err := repo.UpsertAuthUser("textbox-second-subject", "textbox-second@example.com", "Second Mention")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("textbox-second-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "Mention box")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	postTextBox := func(information string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{
+			"company_id":     companyID,
+			"type":           "Text box",
+			"information":    information,
+			"information_id": "66666666-6666-4666-8666-666666666666",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+node.NodeID+"/information", bytes.NewReader(body))
+		req = requestWithActorForNotifications(req, author, companyID)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST node text box status = %d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+	postTextBox(`<!-- mango-node-text-block-v1 -->{"title":"Plan","document":"<!-- mango-editor-html-v1 --><span data-mango-mention=\"true\">@First Mention</span> please review."}`)
+	postTextBox(`<!-- mango-node-text-block-v1 -->{"title":"Plan","document":"<!-- mango-editor-html-v1 --><span data-mango-mention=\"true\">@First Mention</span> and <span data-mango-mention=\"true\">@Second Mention</span> please review."}`)
+
+	assertMentionCount := func(user domain.User, want int) {
+		t.Helper()
+		listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
+		listReq = requestWithActorForNotifications(listReq, user, companyID)
+		listRec := httptest.NewRecorder()
+		handler.ServeHTTP(listRec, listReq)
+		if listRec.Code != http.StatusOK {
+			t.Fatalf("GET notifications status = %d body=%s", listRec.Code, listRec.Body.String())
+		}
+		var payload struct {
+			Notifications []domain.Notification `json:"notifications"`
+		}
+		if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode notifications: %v", err)
+		}
+		if len(payload.Notifications) != want {
+			t.Fatalf("notification count for %s = %d, want %d: %+v", user.UserID, len(payload.Notifications), want, payload.Notifications)
+		}
+		if want > 0 && strings.Contains(payload.Notifications[0].BodyPreview, "mango-editor-html") {
+			t.Fatalf("body preview contains raw editor HTML: %q", payload.Notifications[0].BodyPreview)
+		}
+	}
+	assertMentionCount(first, 1)
+	assertMentionCount(second, 1)
+}
+
 func TestNodeChatWithoutMentionDoesNotNotifyAssignee(t *testing.T) {
 	t.Parallel()
 
