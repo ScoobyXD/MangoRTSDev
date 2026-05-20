@@ -103,6 +103,8 @@ type LogicGateRepository interface {
 	ListLogicGateMapWindow(query LogicGateMapWindowQuery) (LogicGateMapWindowResult, error)
 	QueryLogicGates(companyID string, query LogicGateQuery) ([]domain.LogicGate, error)
 	SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUpdateInput) ([]domain.LogicGateRaciAssignment, error)
+	AddLogicGateRaciAssignments(input LogicGateRaciAssignmentCommandInput) (LogicGateRaciAssignmentCommandResult, error)
+	RemoveLogicGateRaciAssignments(input LogicGateRaciAssignmentCommandInput) (LogicGateRaciAssignmentCommandResult, error)
 	ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error)
 	ListLogicGateRelationshipsInFolderSubtree(companyID, folderID string) ([]domain.LogicGateRelationship, error)
 	DeleteLogicGateRelationship(companyID, relationshipID string) error
@@ -711,6 +713,29 @@ type LogicGateRaciAssignmentUpdateInput struct {
 	CompanyID   string
 	LogicGateID string
 	Assignments []LogicGateRaciAssignmentInput
+}
+
+const (
+	LogicGateRaciCommandAdd    = "add"
+	LogicGateRaciCommandRemove = "remove"
+)
+
+type LogicGateRaciAssignmentCommandInput struct {
+	CompanyID      string
+	LogicGateID    string
+	Assignments    []LogicGateRaciAssignmentInput
+	ActorUserID    string
+	IdempotencyKey string
+}
+
+type LogicGateRaciAssignmentCommandResult struct {
+	CompanyID         string                           `json:"company_id"`
+	LogicGateID       string                           `json:"logic_gate_id"`
+	Operation         string                           `json:"operation"`
+	Changed           bool                             `json:"changed"`
+	RaciAssignments   []domain.LogicGateRaciAssignment `json:"raci_assignments"`
+	BeforeAssignments []domain.LogicGateRaciAssignment `json:"-"`
+	Events            []domain.DomainEvent             `json:"-"`
 }
 
 type CreateInvitationInput struct {

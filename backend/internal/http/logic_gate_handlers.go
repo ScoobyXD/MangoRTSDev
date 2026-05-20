@@ -288,6 +288,10 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if len(parts) == 3 && parts[1] == "raci" && (parts[2] == store.LogicGateRaciCommandAdd || parts[2] == store.LogicGateRaciCommandRemove) {
+		s.handleLogicGateRaciCommand(w, r, logicGateID, parts[2])
+		return
+	}
 	if len(parts) == 2 && parts[1] == "projection" {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

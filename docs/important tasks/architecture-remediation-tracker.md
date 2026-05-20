@@ -22,7 +22,7 @@ Source architecture:
 | --- | --- | --- |
 | 1. Read Plane | Version-row ETags complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; Company Explorer, Node Map, and Logic Gate Map have bounded read contracts; hot bounded ETags now use derived workspace read-version rows with domain-event fallback. |
 | 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph and migrated work-item assignment mutations now append durable workspace events atomically; frontend gap reconciliation now detects missed numeric workspace sequences and triggers scoped surface refreshes. Remaining mutation families and external fanout are still follow-ups. |
-| 3. Work Ownership / Commands | Source migration complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, inbox reads use projection rows, and email conversion now runs through an explicit atomic backend command; RACI/home/inbox command parity remain follow-ups. |
+| 3. Work Ownership / Commands | RACI commands complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, inbox reads use projection rows, email conversion runs through an explicit atomic backend command, and Logic Gate RACI now has idempotent add/remove commands; home/inbox command parity remain follow-ups. |
 | 4. Hot Path Discipline | Auth cache complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth now caches derived actor/membership context after per-request token validation; repository context, batch SQL, and metrics remain follow-up branches. |
 | 5. Frontend Structure / API Contract | Ready / yellow | Shared `requestJSON` exists, but hot modules duplicate wrappers, broad invalidation is scattered, and large components still own workflow logic. |
 
@@ -235,7 +235,6 @@ Decision document:
 
 Follow-up branches:
 - `work-items/assignment-command-parity-existing-model`
-- `work-items/raci-add-remove-commands`
 - `work-items/home-drop-command`
 - `work-items/email-conversion-command`
 - `work-items/inbox-command-parity`
@@ -276,6 +275,24 @@ Migration/backfill/rollback notes:
 - Migration: none. This branch reuses `communications_triage_items`, `communications_email_nodes`, `nodes`, `node_information`, `node_projection_table`, `node_logic_gate_assignments`, Logic Gate Kanban tables, Company Explorer folder items, and `domain_events`.
 - Backfill: none. Existing converted email provenance remains in `communications_email_nodes` and attached-email node projections; new conversions add durable workspace events going forward only.
 - Rollback: code can return the HTTP handler to the previous post-mutation `publishWorkspaceEvent` path and ignore the additive response fields. No source-of-truth data lives only in the new event payloads; already appended `work_item.email_converted` events should be tolerated by replay consumers.
+
+RACI add/remove command branch:
+`work-items/raci-add-remove-commands`
+
+Status:
+- 2026-05-20: Complete. Added idempotent `POST /v1/logic-gates/{id}/raci/add` and `POST /v1/logic-gates/{id}/raci/remove` command APIs for one or more assignments while preserving the existing full-replace RACI endpoint.
+
+Scope completed:
+- Kept `logic_gate_raci_assignments` as the single R/A/C/I membership source of truth.
+- Added memory and Postgres command implementations that validate role names and company membership before mutation.
+- Made add/remove no-op-safe: adding an existing assignment and removing a missing assignment return `changed: false` without duplicating rows or emitting unnecessary workspace events.
+- Postgres commands serialize on the Logic Gate row and append `logic_gate_raci_updated` durable workspace events in the same transaction as real RACI row changes.
+- Command responses preserve `company_id`, `logic_gate_id`, and `raci_assignments`, with additive `operation` and `changed` fields.
+
+Migration/backfill/rollback notes:
+- Migration: none. The existing `logic_gate_raci_assignments` primary key already supports idempotent add semantics, and deletes need no new schema.
+- Backfill: none. Existing RACI rows remain valid and are immediately command-compatible.
+- Rollback: code can drop the add/remove command methods and endpoints while keeping all RACI rows. Existing `PUT /v1/logic-gates/{id}/raci` remains compatible throughout rollback.
 
 Completion criteria:
 - One backend command can assign a node to Logic Gate, status, priority, and responsible user atomically.
@@ -397,18 +414,19 @@ Use this as the default sequencing unless a production incident changes prioriti
 15. `reads/node-map-window`
 16. `reads/logic-gate-map-window`
 17. `reads/version-row-etags`
+18. `work-items/raci-add-remove-commands`
 
 ### Next Roadmap
 
-1. `work-items/raci-add-remove-commands`
+1. `events/atomic-kanban-workspace-events`
+2. `events/external-fanout-adapter`
 
 ### Work-Items Follow-Ups
 
-These remain valid, but they should not displace the next read-plane branch unless they are blocking a user or agent workflow.
+These remain valid, but they should not displace the next Events follow-up branch unless they are blocking a user or agent workflow.
 
-1. `work-items/raci-add-remove-commands`
-2. `work-items/home-drop-command`
-3. `work-items/inbox-command-parity`
+1. `work-items/home-drop-command`
+2. `work-items/inbox-command-parity`
 
 ## Agent Work Plan
 

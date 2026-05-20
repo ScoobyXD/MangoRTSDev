@@ -402,15 +402,17 @@ func (r *PostgresRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignment
 	}
 	defer tx.Rollback()
 
-	var exists bool
+	var lockedLogicGateID string
 	if err := tx.QueryRowContext(ctx,
-		`select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`,
+		`select logic_gate_id::text
+		 from logic_gates
+		 where company_id=$1 and logic_gate_id=$2
+		 for update`,
 		companyID, logicGateID,
-	).Scan(&exists); err != nil {
-		return nil, err
-	}
-	if !exists {
+	).Scan(&lockedLogicGateID); errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
+	} else if err != nil {
+		return nil, err
 	}
 
 	type normalizedAssignment struct {
