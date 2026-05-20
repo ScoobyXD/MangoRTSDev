@@ -34,6 +34,7 @@ import {
 import {
   buildMentionOptions,
   createEditorMentionElement,
+  EDITOR_MENTION_ATTRIBUTE,
   mentionUserDisplayName,
   mentionUserOptionLabel,
   readActiveMentionDraft,
@@ -117,6 +118,7 @@ function clampEditorFontSize(value: number): number {
 }
 
 const PENDING_FONT_SIZE_CANCEL_KEYS = new Set(["ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "Backspace", "Delete", "End", "Home", "PageDown", "PageUp"]);
+const EDITOR_MENTION_SELECTOR = `[${EDITOR_MENTION_ATTRIBUTE}="true"]`;
 
 function rootContainsRange(root: HTMLElement, range: Range): boolean {
   const container = range.commonAncestorContainer;
@@ -220,6 +222,72 @@ function setCollapsedSelectionInTextNode(root: HTMLElement, textNode: Text, offs
   const selection = root.ownerDocument.getSelection();
   selection?.removeAllRanges();
   selection?.addRange(range);
+}
+
+function getNodeTextOffsets(root: HTMLElement, node: Node): { start: number; end: number } | null {
+  if (!root.contains(node)) return null;
+  const range = root.ownerDocument.createRange();
+  range.selectNodeContents(root);
+  try {
+    range.setEndBefore(node);
+  } catch {
+    return null;
+  }
+  const start = range.toString().length;
+  return { start, end: start + (node.textContent ?? "").length };
+}
+
+function collectMentionElementsForNativeEdit(root: HTMLElement, inputType: string): HTMLElement[] {
+  const range = getEditorSelectionRange(root);
+  if (!range) return [];
+
+  const mentions = new Set<HTMLElement>();
+  const addClosestMention = (node: Node | null) => {
+    const mention = closestMentionElement(root, node);
+    if (mention) mentions.add(mention);
+  };
+
+  addClosestMention(range.startContainer);
+  addClosestMention(range.endContainer);
+
+  if (!range.collapsed) {
+    root.querySelectorAll(EDITOR_MENTION_SELECTOR).forEach((node) => {
+      try {
+        if (range.intersectsNode(node)) mentions.add(node as HTMLElement);
+      } catch {
+        // Ignore detached nodes or browser range edge cases.
+      }
+    });
+  }
+
+  if (range.collapsed && inputType.startsWith("delete")) {
+    const offsets = getEditorSelectionOffsets(root);
+    if (offsets) {
+      const deleteBackward = inputType.toLowerCase().includes("backward");
+      const deleteForward = inputType.toLowerCase().includes("forward");
+      root.querySelectorAll(EDITOR_MENTION_SELECTOR).forEach((node) => {
+        const mentionOffsets = getNodeTextOffsets(root, node);
+        if (!mentionOffsets) return;
+        if ((deleteBackward && offsets.start === mentionOffsets.end) || (deleteForward && offsets.start === mentionOffsets.start)) {
+          mentions.add(node as HTMLElement);
+        }
+      });
+    }
+  }
+
+  return Array.from(mentions).filter((mention) => root.contains(mention));
+}
+
+function breakEditorMentionsForInput(root: HTMLElement, inputType: string, undoBefore?: EditorDocumentUndoSnapshot): EditorDocumentUndoSnapshot | null {
+  const mentions = collectMentionElementsForNativeEdit(root, inputType);
+  if (mentions.length === 0) return null;
+  const snapshotBefore = undoBefore ?? snapshotEditorDocumentRoot(root);
+  const offsets = getEditorSelectionOffsets(root);
+  for (const mention of mentions) {
+    mention.replaceWith(root.ownerDocument.createTextNode(mention.textContent ?? ""));
+  }
+  if (offsets) setEditorSelectionByOffsets(root, offsets.start, offsets.end);
+  return snapshotBefore;
 }
 
 function readInlineFontSize(element: HTMLElement): number | null {
@@ -1138,6 +1206,12 @@ export function useEditorDocumentSurfaceHandlers({
         return;
       }
 
+      const mentionUndoBefore = breakEditorMentionsForInput(root, inputEvent.inputType);
+      if (mentionUndoBefore) {
+        activeMentionRootRef.current = null;
+        setActiveMentionDraft(null);
+      }
+
       if (
         inputEvent.inputType === "insertText" &&
         typeof inputEvent.data === "string" &&
@@ -1145,7 +1219,7 @@ export function useEditorDocumentSurfaceHandlers({
       ) {
         if (pendingFontSize !== null) {
           event.preventDefault();
-          const undoBefore = snapshotEditorDocumentRoot(root);
+          const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
           if (replaceSelectionWithStyledText(root, inputEvent.data, pendingFontSize)) {
             onSelectionFontSizeChange(pendingFontSize);
             recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
@@ -1163,7 +1237,7 @@ export function useEditorDocumentSurfaceHandlers({
           if (edit) {
             event.preventDefault();
             pendingEditorFontSizeRef.current = null;
-            const undoBefore = snapshotEditorDocumentRoot(root);
+            const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
             replaceDocumentWithPlainText(root, edit.value, edit.selectionStart, edit.selectionEnd);
             recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
             commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
@@ -1175,7 +1249,7 @@ export function useEditorDocumentSurfaceHandlers({
         if (anchor) {
           event.preventDefault();
           pendingEditorFontSizeRef.current = null;
-          const undoBefore = snapshotEditorDocumentRoot(root);
+          const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
           const inserted = isHyperlinkDividerText(inputEvent.data)
             ? insertPlainTextAfterAnchor(root, anchor, inputEvent.data)
             : appendTextToAnchorEnd(root, anchor, inputEvent.data);
@@ -1188,7 +1262,7 @@ export function useEditorDocumentSurfaceHandlers({
       }
 
       if (inputEvent.inputType && inputEvent.inputType !== "insertCompositionText") {
-        pendingNativeUndoSnapshotRef.current = snapshotEditorDocumentRoot(root);
+        pendingNativeUndoSnapshotRef.current = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
       }
     },
     onPaste(event) {
@@ -1218,8 +1292,13 @@ export function useEditorDocumentSurfaceHandlers({
       event.preventDefault();
       pendingEditorFontSizeRef.current = null;
       clearEditorImageSelection(root);
+      const mentionUndoBefore = breakEditorMentionsForInput(root, "insertFromPaste", undoBefore);
+      if (mentionUndoBefore) {
+        activeMentionRootRef.current = null;
+        setActiveMentionDraft(null);
+      }
       if (replaceSelectionWithHTML(root, linkifyEditorPlainTextToHTML(text))) {
-        recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "paste");
+        recordEditorDocumentMutation(documentUndoHistoryRef.current, root, mentionUndoBefore ?? undoBefore, "paste");
         commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
       }
     },
@@ -1257,8 +1336,13 @@ export function useEditorDocumentSurfaceHandlers({
       pendingEditorFontSizeRef.current = null;
       clearEditorImageSelection(root);
       root.focus({ preventScroll: true });
+      const mentionUndoBefore = breakEditorMentionsForInput(root, "insertFromPaste", undoBefore);
+      if (mentionUndoBefore) {
+        activeMentionRootRef.current = null;
+        setActiveMentionDraft(null);
+      }
       if (replaceSelectionWithHTML(root, linkifyEditorPlainTextToHTML(text))) {
-        recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "paste");
+        recordEditorDocumentMutation(documentUndoHistoryRef.current, root, mentionUndoBefore ?? undoBefore, "paste");
         commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
       }
     },
@@ -1420,7 +1504,12 @@ export function useEditorDocumentSurfaceHandlers({
         clearEditorImageSelection(root);
         const offsets = getEditorSelectionOffsets(root);
         if (!offsets) return;
-        const undoBefore = snapshotEditorDocumentRoot(root);
+        const mentionUndoBefore = breakEditorMentionsForInput(root, "insertParagraph");
+        if (mentionUndoBefore) {
+          activeMentionRootRef.current = null;
+          setActiveMentionDraft(null);
+        }
+        const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
         const currentText = readEditorDocumentText(root);
         const edit = insertEditorEnterText(currentText, offsets.start, offsets.end, outlineStyle);
         const insertedText = edit.value.slice(offsets.start, edit.selectionStart);
@@ -1459,7 +1548,12 @@ export function useEditorDocumentSurfaceHandlers({
       clearEditorImageSelection(root);
       const offsets = getEditorSelectionOffsets(root);
       if (!offsets) return;
-      const undoBefore = snapshotEditorDocumentRoot(root);
+      const mentionUndoBefore = breakEditorMentionsForInput(root, "insertText");
+      if (mentionUndoBefore) {
+        activeMentionRootRef.current = null;
+        setActiveMentionDraft(null);
+      }
+      const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
       const anchor = !event.shiftKey ? getCollapsedAnchorAtSelectionEnd(root) : null;
       if (anchor) {
         insertPlainTextAfterAnchor(root, anchor, EDITOR_TAB_TEXT);
