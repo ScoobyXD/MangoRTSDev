@@ -25,22 +25,26 @@ type AuthEmailSender interface {
 }
 
 type Server struct {
-	repo            store.Repository
-	hub             *workspaceEventHub
-	emailHub        *workspaceEventHub
-	notificationHub *workspaceEventHub
-	notifications   *notifications.Service
-	kanban          *kanban.Service
-	commCache       *communicationsCache
-	nylasGate       *nylasRequestGate
-	nylasWebhooks   *nylasWebhookReceiptCache
-	authValidator   AuthTokenValidator
-	authCache       *authMembershipCache
-	cognitoAdmin    CognitoAdminClient
-	emailSender     AuthEmailSender
-	nylasClient     NylasClient
-	nylasConfig     NylasConfig
-	maxBodyBytes    int64
+	repo                     store.Repository
+	hub                      *workspaceEventHub
+	emailHub                 *workspaceEventHub
+	notificationHub          *workspaceEventHub
+	notifications            *notifications.Service
+	kanban                   *kanban.Service
+	workspaceWakeHub         *workspaceEventNotificationHub
+	workspaceFanout          store.WorkspaceEventFanout
+	workspaceFanoutCancel    context.CancelFunc
+	workspaceCatchupInterval time.Duration
+	commCache                *communicationsCache
+	nylasGate                *nylasRequestGate
+	nylasWebhooks            *nylasWebhookReceiptCache
+	authValidator            AuthTokenValidator
+	authCache                *authMembershipCache
+	cognitoAdmin             CognitoAdminClient
+	emailSender              AuthEmailSender
+	nylasClient              NylasClient
+	nylasConfig              NylasConfig
+	maxBodyBytes             int64
 }
 
 type ServerOptions struct {
@@ -52,6 +56,8 @@ type ServerOptions struct {
 	NylasClient                   NylasClient
 	NylasConfig                   NylasConfig
 	MaxRequestBodyBytes           int64
+	WorkspaceEventFanout          store.WorkspaceEventFanout
+	WorkspaceCatchupInterval      time.Duration
 }
 
 func NewServer(repo store.Repository) *Server {
@@ -59,23 +65,38 @@ func NewServer(repo store.Repository) *Server {
 }
 
 func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server {
-	return &Server{
-		repo:            repo,
-		hub:             newWorkspaceEventHub(),
-		emailHub:        newWorkspaceEventHub(),
-		notificationHub: newWorkspaceEventHub(),
-		notifications:   notifications.NewService(repo),
-		kanban:          kanban.NewService(repo),
-		commCache:       newCommunicationsCache(),
-		nylasGate:       newNylasRequestGate(communicationsNylasMinRequestInterval),
-		nylasWebhooks:   newNylasWebhookReceiptCache(),
-		authValidator:   options.AuthValidator,
-		authCache:       newAuthMembershipCache(options.AuthMembershipCacheTTL, options.AuthMembershipCacheMaxEntries),
-		cognitoAdmin:    options.CognitoAdmin,
-		emailSender:     options.EmailSender,
-		nylasClient:     options.NylasClient,
-		nylasConfig:     options.NylasConfig,
-		maxBodyBytes:    options.MaxRequestBodyBytes,
+	catchupInterval := options.WorkspaceCatchupInterval
+	if catchupInterval <= 0 {
+		catchupInterval = workspaceCatchupInterval
+	}
+	server := &Server{
+		repo:                     repo,
+		hub:                      newWorkspaceEventHub(),
+		emailHub:                 newWorkspaceEventHub(),
+		notificationHub:          newWorkspaceEventHub(),
+		notifications:            notifications.NewService(repo),
+		kanban:                   kanban.NewService(repo),
+		workspaceWakeHub:         newWorkspaceEventNotificationHub(),
+		workspaceFanout:          options.WorkspaceEventFanout,
+		workspaceCatchupInterval: catchupInterval,
+		commCache:                newCommunicationsCache(),
+		nylasGate:                newNylasRequestGate(communicationsNylasMinRequestInterval),
+		nylasWebhooks:            newNylasWebhookReceiptCache(),
+		authValidator:            options.AuthValidator,
+		authCache:                newAuthMembershipCache(options.AuthMembershipCacheTTL, options.AuthMembershipCacheMaxEntries),
+		cognitoAdmin:             options.CognitoAdmin,
+		emailSender:              options.EmailSender,
+		nylasClient:              options.NylasClient,
+		nylasConfig:              options.NylasConfig,
+		maxBodyBytes:             options.MaxRequestBodyBytes,
+	}
+	server.startWorkspaceEventFanout()
+	return server
+}
+
+func (s *Server) Close() {
+	if s.workspaceFanoutCancel != nil {
+		s.workspaceFanoutCancel()
 	}
 }
 

@@ -713,6 +713,8 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 
 	ch := s.hub.subscribe(companyID)
 	defer s.hub.unsubscribe(companyID, ch)
+	externalCh := s.workspaceWakeHub.subscribe(companyID)
+	defer s.workspaceWakeHub.unsubscribe(companyID, externalCh)
 
 	fmt.Fprintf(w, "event: ready\ndata: {\"company_id\":%q,\"after_sequence\":%d}\n\n", companyID, afterSequence)
 	flusher.Flush()
@@ -726,7 +728,7 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 
 	heartbeat := time.NewTicker(sseHeartbeatInterval)
 	defer heartbeat.Stop()
-	catchup := time.NewTicker(workspaceCatchupInterval)
+	catchup := time.NewTicker(s.workspaceCatchupInterval)
 	defer catchup.Stop()
 
 	for {
@@ -747,6 +749,13 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := s.writeWorkspaceDurableCatchup(w, flusher, companyID, &lastSentSequence); err != nil {
 				log.Printf("workspace stream hub catch-up failed company_id=%s after_sequence=%d payload_sequence=%d: %v", companyID, lastSentSequence, sequence, err)
+			}
+		case notification := <-externalCh:
+			if notification.Sequence > 0 && notification.Sequence <= lastSentSequence {
+				continue
+			}
+			if err := s.writeWorkspaceDurableCatchup(w, flusher, companyID, &lastSentSequence); err != nil {
+				log.Printf("workspace stream external fanout catch-up failed company_id=%s after_sequence=%d notification_sequence=%d: %v", companyID, lastSentSequence, notification.Sequence, err)
 			}
 		}
 	}
@@ -898,6 +907,7 @@ func (s *Server) publishCommittedWorkspaceEvent(event domain.DomainEvent) {
 		return
 	}
 	s.hub.publish(event.CompanyID, payload)
+	s.notifyWorkspaceEventFanout(event)
 }
 
 func workspaceEventEnvelopeFromDomainEvent(event domain.DomainEvent) workspaceEventEnvelope {

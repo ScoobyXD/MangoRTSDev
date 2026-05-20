@@ -21,7 +21,7 @@ Source architecture:
 | Theme | Status | Current Read |
 | --- | --- | --- |
 | 1. Read Plane | Version-row ETags complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; Company Explorer, Node Map, and Logic Gate Map have bounded read contracts; hot bounded ETags now use derived workspace read-version rows with domain-event fallback. |
-| 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph, migrated work-item assignment mutations, and Kanban board/column/card HTTP mutations now append durable workspace events atomically; frontend gap reconciliation detects missed numeric workspace sequences and triggers scoped surface refreshes. Remaining mutation families and external fanout are still follow-ups. |
+| 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph, migrated work-item assignment mutations, and Kanban board/column/card HTTP mutations now append durable workspace events atomically; frontend gap reconciliation detects missed numeric workspace sequences and triggers scoped surface refreshes. Postgres `LISTEN/NOTIFY` now provides explicit cross-instance wakeup fanout while polling replay remains the correctness fallback. Remaining mutation families are still follow-ups. |
 | 3. Work Ownership / Commands | RACI commands complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, inbox reads use projection rows, email conversion runs through an explicit atomic backend command, and Logic Gate RACI now has idempotent add/remove commands; home/inbox command parity remain follow-ups. |
 | 4. Hot Path Discipline | Auth cache complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth now caches derived actor/membership context after per-request token validation; repository context, batch SQL, and metrics remain follow-up branches. |
 | 5. Frontend Structure / API Contract | Ready / yellow | Shared `requestJSON` exists, but hot modules duplicate wrappers, broad invalidation is scattered, and large components still own workflow logic. |
@@ -145,7 +145,7 @@ Evidence:
 - Frontend workspace stream stores a sequence cursor and reconnects with it.
 - Handlers still commonly mutate via repository methods and then call `publishWorkspaceEvent`.
 - `publishWorkspaceEvent` appends a workspace domain event after the mutation and logs failures.
-- In-process hub delivery is only an optimization; cross-instance delivery depends on polling catch-up, not an external fanout system.
+- In-process hub delivery is only an optimization; cross-instance delivery has an explicit Postgres `LISTEN/NOTIFY` wakeup adapter, while polling catch-up remains the correctness fallback.
 - Frontend suppresses stale/duplicate event IDs but does not yet detect numeric sequence gaps as a first-class reconciliation signal.
 
 Target architecture:
@@ -161,6 +161,7 @@ Branch progress:
 - 2026-05-19: Completed `events/atomic-work-item-assignment-events`. Migrated node-to-Logic-Gate assignment save/move/remove/issue commands now append semantic `work_item.*` workspace events and compatibility Kanban/node events in the same store transaction as the assignment source mutation, and HTTP handlers publish those committed events to the in-process hub only after commit.
 - 2026-05-19: Completed `events/frontend-gap-reconciliation`. Workspace stream clients now store ready/replay baselines, suppress stale or duplicate numeric workspace events, emit typed sequence-gap reconciliation metadata, and route gap recovery to scoped Kanban, node graph, Logic Gate graph, Company Explorer, and Home panel refresh paths.
 - 2026-05-20: Completed `events/atomic-kanban-workspace-events`. Kanban board, column, and card HTTP mutations now call store-level transactional mutation/event append paths and publish only the committed workspace events returned by the store.
+- 2026-05-20: Completed `events/external-fanout-adapter`. Added a narrow committed workspace-event fanout abstraction, wired Postgres `LISTEN/NOTIFY` wakeups for company/sequence notifications, and kept SSE delivery replaying from durable `domain_events` so external fanout is acceleration only.
 
 Migration/backfill/rollback notes:
 - Migration: none. This branch uses the existing `domain_events` outbox and existing `node_logic_gate_assignments` source table.
@@ -171,6 +172,9 @@ Migration/backfill/rollback notes:
 - Kanban workspace event migration: none. This branch uses the existing `domain_events` table, workspace stream type, and existing Kanban workspace event types (`kanban_board_*`, `kanban_column_*`, `kanban_card_*`, plus derived `node_updated` for Logic Gate card status changes).
 - Kanban workspace event backfill: none. Historical Kanban state remains source-derived from `kanban_boards`, `kanban_columns`, `kanban_cards`, and `node_logic_gate_assignments`; historical workspace events are not synthesized.
 - Kanban workspace event rollback: code can return Kanban handlers to the previous post-mutation `publishWorkspaceEvent` calls. Already committed Kanban workspace events remain compatible with current SSE replay/read-version consumers, and no source-of-truth data lives only in the new event path.
+- External fanout adapter migration: none. This branch uses app-level Postgres `pg_notify` on channel `mangorts_workspace_events` after HTTP has a committed workspace event, plus a dedicated `LISTEN` connection; no schema or trigger is required.
+- External fanout adapter backfill: none. Notifications carry only `company_id` and committed workspace `sequence`; streams always catch up from `domain_events`.
+- External fanout adapter rollback: disable or revert the fanout wiring and leave durable replay plus in-process hub delivery in place. No data rollback is required, and polling catch-up continues to recover missed events.
 
 Scope:
 - Convert one vertical slice first: node create/update/delete and node relationship create/delete.
@@ -178,7 +182,7 @@ Scope:
 - Publish to the hub only after commit.
 - Add tests proving committed mutations have events and failed mutations do not.
 
-Follow-up branches:
+Completed follow-up branches:
 - `events/external-fanout-adapter`
 
 Completion criteria:
@@ -419,14 +423,16 @@ Use this as the default sequencing unless a production incident changes prioriti
 17. `reads/version-row-etags`
 18. `work-items/raci-add-remove-commands`
 19. `events/atomic-kanban-workspace-events`
+20. `events/external-fanout-adapter`
 
 ### Next Roadmap
 
-1. `events/external-fanout-adapter`
+1. `work-items/home-drop-command`
+2. `work-items/inbox-command-parity`
 
 ### Work-Items Follow-Ups
 
-These remain valid, but they should not displace the next Events follow-up branch unless they are blocking a user or agent workflow.
+These are the current next roadmap unless a production incident changes priority.
 
 1. `work-items/home-drop-command`
 2. `work-items/inbox-command-parity`
