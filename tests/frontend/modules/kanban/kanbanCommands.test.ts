@@ -64,6 +64,10 @@ function createClient(): {
     upsertCard: unknown[];
     deleteCard: string[];
     deleteColumn: string[];
+    assignNodeToLogicGateStatus: unknown[];
+    moveLogicGateAssignment: unknown[];
+    removeLogicGateAssignment: unknown[];
+    setLogicGateAssignmentIssue: unknown[];
   };
 } {
   const calls = {
@@ -73,6 +77,10 @@ function createClient(): {
     upsertCard: [] as unknown[],
     deleteCard: [] as string[],
     deleteColumn: [] as string[],
+    assignNodeToLogicGateStatus: [] as unknown[],
+    moveLogicGateAssignment: [] as unknown[],
+    removeLogicGateAssignment: [] as unknown[],
+    setLogicGateAssignmentIssue: [] as unknown[],
   };
   const client: KanbanCommandClient = {
     async createColumn(apiBase, companyID, boardID, title, position, widthPx, heightPx, itemColor) {
@@ -121,6 +129,69 @@ function createClient(): {
     },
     async deleteCard(_apiBase, _companyID, _boardID, cardID) {
       calls.deleteCard.push(cardID);
+    },
+    async assignNodeToLogicGateStatus(args) {
+      calls.assignNodeToLogicGateStatus.push(args);
+      return {
+        card: card({
+          card_id: "card-" + args.nodeID,
+          column_id: args.columnID ?? "todo",
+          node_id: args.nodeID,
+          node_title: args.nodeTitle ?? args.nodeID,
+          logic_gate_id: args.logicGateID,
+          position: args.position ?? 1000,
+        }),
+        node: {
+          company_id: args.companyID,
+          node_id: args.nodeID,
+          title: args.nodeTitle ?? args.nodeID,
+          priority: args.priority,
+          created_timestamp: "2026-05-01T00:00:00.000Z",
+        },
+      };
+    },
+    async moveLogicGateAssignment(args) {
+      calls.moveLogicGateAssignment.push(args);
+      return {
+        card: card({
+          card_id: "card-" + args.nodeID,
+          column_id: args.columnID ?? "todo",
+          node_id: args.nodeID,
+          logic_gate_id: args.logicGateID,
+          position: args.position ?? 1000,
+        }),
+        node: {
+          company_id: args.companyID,
+          node_id: args.nodeID,
+          title: args.nodeID,
+          priority: args.priority,
+          created_timestamp: "2026-05-01T00:00:00.000Z",
+        },
+      };
+    },
+    async removeLogicGateAssignment(args) {
+      calls.removeLogicGateAssignment.push(args);
+      return {
+        card: card({ card_id: "card-" + args.nodeID, node_id: args.nodeID, logic_gate_id: args.logicGateID }),
+        node: {
+          company_id: args.companyID,
+          node_id: args.nodeID,
+          title: args.nodeID,
+          created_timestamp: "2026-05-01T00:00:00.000Z",
+        },
+      };
+    },
+    async setLogicGateAssignmentIssue(args) {
+      calls.setLogicGateAssignmentIssue.push(args);
+      return {
+        card: card({ card_id: "card-" + args.nodeID, node_id: args.nodeID, logic_gate_id: args.logicGateID, is_issue: args.isIssue }),
+        node: {
+          company_id: args.companyID,
+          node_id: args.nodeID,
+          title: args.nodeID,
+          created_timestamp: "2026-05-01T00:00:00.000Z",
+        },
+      };
     },
   };
   return { client, calls };

@@ -12,6 +12,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/api/requestJSON.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/communicationsApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeUtils.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeCommands.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/workspace/workspaceStream.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/hooks/keyboardShortcutRouting.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/frameLinking.test.js"),

@@ -29,6 +29,8 @@
     "../modules/communications/communicationsApi.test.ts",
     "../../../frontend/src/pages/home/homeUtils.ts",
     "../pages/home/homeUtils.test.ts",
+    "../../../frontend/src/pages/home/homeCommands.ts",
+    "../pages/home/homeCommands.test.ts",
     "../../../frontend/src/modules/workspace/workspaceStream.ts",
     "../modules/workspace/workspaceStream.test.ts",
     "../../../frontend/src/hooks/keyboardShortcutRouting.ts",

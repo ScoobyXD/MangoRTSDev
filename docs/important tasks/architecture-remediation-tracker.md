@@ -22,7 +22,7 @@ Source architecture:
 | --- | --- | --- |
 | 1. Read Plane | Version-row ETags complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; Company Explorer, Node Map, and Logic Gate Map have bounded read contracts; hot bounded ETags now use derived workspace read-version rows with domain-event fallback. |
 | 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph, migrated work-item assignment mutations, and Kanban board/column/card HTTP mutations now append durable workspace events atomically; frontend gap reconciliation detects missed numeric workspace sequences and triggers scoped surface refreshes. Postgres `LISTEN/NOTIFY` now provides explicit cross-instance wakeup fanout while polling replay remains the correctness fallback. Remaining mutation families are still follow-ups. |
-| 3. Work Ownership / Commands | RACI commands complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, inbox reads use projection rows, email conversion runs through an explicit atomic backend command, and Logic Gate RACI now has idempotent add/remove commands; home/inbox command parity remain follow-ups. |
+| 3. Work Ownership / Commands | Home drop command complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, inbox reads use projection rows, email conversion runs through an explicit atomic backend command, Home node drop/status placement uses the work-item assignment command path, and Logic Gate RACI now has idempotent add/remove commands; inbox command parity remains a follow-up. |
 | 4. Hot Path Discipline | Auth cache complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth now caches derived actor/membership context after per-request token validation; repository context, batch SQL, and metrics remain follow-up branches. |
 | 5. Frontend Structure / API Contract | Ready / yellow | Shared `requestJSON` exists, but hot modules duplicate wrappers, broad invalidation is scattered, and large components still own workflow logic. |
 
@@ -200,7 +200,7 @@ Evidence:
 - Nodes have direct fields such as `status`, `status_color`, `priority`, and `assignee_user_id`.
 - Node reads derive `logic_gate_ids` from `node_logic_gate_assignments` rather than directly from Kanban cards.
 - Work-item assignment commands update `node_logic_gate_assignments` first, then sync Kanban compatibility cards and derived node status/color; first responsible Logic Gate user assignment still writes to `nodes.assignee_user_id`.
-- Home and Kanban flows still perform multi-step client orchestration.
+- Inbox flows still need command parity review for any remaining multi-step client orchestration.
 - Logic Gate RACI and shared inbox RACI use full-replace update patterns.
 - Email triage conversion creates nodes, folder items, positions, Kanban cards, email links, projections, deletes triage rows, syncs status, and assigns responsible users in one store-level transaction.
 
@@ -241,9 +241,6 @@ Decision document:
 - `docs/important tasks/work-items-source-of-truth-design.md` recommends staying Kanban-card-backed for now and finishing command parity before adding any new work-item source table. This is a near-term sequencing decision, not a permanent endorsement of Kanban as the only node-to-Logic-Gate source.
 
 Follow-up branches:
-- `work-items/assignment-command-parity-existing-model`
-- `work-items/home-drop-command`
-- `work-items/email-conversion-command`
 - `work-items/inbox-command-parity`
 
 Source migration branch:
@@ -300,6 +297,24 @@ Migration/backfill/rollback notes:
 - Migration: none. The existing `logic_gate_raci_assignments` primary key already supports idempotent add semantics, and deletes need no new schema.
 - Backfill: none. Existing RACI rows remain valid and are immediately command-compatible.
 - Rollback: code can drop the add/remove command methods and endpoints while keeping all RACI rows. Existing `PUT /v1/logic-gates/{id}/raci` remains compatible throughout rollback.
+
+Home drop command branch:
+`work-items/home-drop-command`
+
+Status:
+- 2026-05-20: Complete. Home node drop/status placement now has an explicit frontend command helper that calls the existing `/v1/work-items/logic-gate-assignments` backend command for assignment, status, priority, first-Responsible assignee policy, Kanban compatibility card sync, derived node read state, and committed workspace events.
+
+Scope completed:
+- Kept `node_logic_gate_assignments` as the assignment source of truth and Logic Gate Kanban cards as compatibility/projection rows.
+- Reused the existing work-item assignment command API instead of adding a new endpoint.
+- Removed Home drop workflow logic from the component body into a focused command helper that does not call Kanban card or node patch endpoints for assignment/status placement.
+- Added focused frontend coverage proving a Home node drop issues one work-item assignment command for the dropped node and preserves status/priority payload semantics.
+- Added focused backend coverage proving the command response, assignment source row, Kanban compatibility card, derived node status/assignee behavior, durable workspace events, and hub publication stay consistent, and failed placement does not partially update state or publish events.
+
+Migration/backfill/rollback notes:
+- Migration: none. This branch reuses `node_logic_gate_assignments`, Logic Gate Kanban compatibility rows, `nodes`, RACI rows, and `domain_events`.
+- Backfill: none. Existing assignments and Home node lists already derive from the current assignment/read models.
+- Rollback: code can inline the Home helper back to the previous frontend call site while continuing to use `/v1/work-items/logic-gate-assignments`. No data rollback is required; already appended `work_item.logic_gate_assignment_saved`, `kanban_card_upserted`, and `node_updated` events remain compatible with workspace replay.
 
 Completion criteria:
 - One backend command can assign a node to Logic Gate, status, priority, and responsible user atomically.
@@ -424,18 +439,17 @@ Use this as the default sequencing unless a production incident changes prioriti
 18. `work-items/raci-add-remove-commands`
 19. `events/atomic-kanban-workspace-events`
 20. `events/external-fanout-adapter`
+21. `work-items/home-drop-command`
 
 ### Next Roadmap
 
-1. `work-items/home-drop-command`
-2. `work-items/inbox-command-parity`
+1. `work-items/inbox-command-parity`
 
 ### Work-Items Follow-Ups
 
 These are the current next roadmap unless a production incident changes priority.
 
-1. `work-items/home-drop-command`
-2. `work-items/inbox-command-parity`
+1. `work-items/inbox-command-parity`
 
 ## Agent Work Plan
 

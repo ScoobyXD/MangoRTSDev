@@ -62,7 +62,7 @@ import { invalidateNodeRecordStoreCaches } from "../../modules/node-map/NodeReco
 import { upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
 import { upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
-import { assignNodeToLogicGateStatus, invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, moveLogicGateAssignment } from "../../modules/kanban/kanbanApi";
+import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, moveLogicGateAssignment } from "../../modules/kanban/kanbanApi";
 import { subscribeWorkspaceStream } from "../../modules/workspace/workspaceStream";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
 import type { NotificationItem } from "../../modules/notifications/notificationsApi";
@@ -78,6 +78,7 @@ import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGa
 import { AciInboxMatrix, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
+import { dropNodesIntoInboxLogicGateCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, collectSharedInboxSubtreeIDs, emailAddressListContains, filterExplorerRowsForSearch, filterSharedInboxesForUser, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, normalizeResponsibleInboxStatus, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
@@ -1674,24 +1675,16 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setBusy("inbox-node-drop");
     setError("");
     try {
-      const priority = input.priority === 0 ? null : input.priority;
-      const updatedNodes = await Promise.all(nodeIDs.map(async (nodeID) => {
-        const node = nodeByID.get(nodeID);
-        if (!node) return null;
-        const status = input.status ?? normalizeResponsibleInboxStatus(node.status) ?? "pending";
-        const result = await assignNodeToLogicGateStatus({
-          apiBase,
-          companyID,
-          logicGateID,
-          nodeID,
-          status,
-          priority,
-          nodeTitle: nodeTitle(node),
-          position: 0,
-        });
-        invalidateKanbanBoardContentsCache(apiBase, companyID, result.card.board_id);
-        return result.node;
-      }));
+      const updatedNodes = await dropNodesIntoInboxLogicGateCommand({
+        apiBase,
+        companyID,
+        logicGateID,
+        nodeIDs,
+        priority: input.priority,
+        status: input.status,
+        nodeByID,
+        invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
+      });
       for (const node of updatedNodes) {
         if (node) mergeUpdatedNode(node);
       }
