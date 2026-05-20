@@ -20,6 +20,18 @@ test("active mention draft keeps the @ start and query before the caret", () => 
   });
 });
 
+test("active mention draft closes after a trailing separator space", () => {
+  assert.equal(readActiveMentionDraft("Please check @Jane Doe ", "Please check @Jane Doe ".length), null);
+});
+
+test("active mention draft can resume after the next typed name character", () => {
+  assert.deepEqual(readActiveMentionDraft("Please check @Jane D", "Please check @Jane D".length), {
+    start: 13,
+    end: 20,
+    query: "Jane D",
+  });
+});
+
 test("mention options match compact names and email aliases", () => {
   assert.equal(buildMentionOptions(users, "janed")[0]?.user_id, "user-jane");
   assert.equal(buildMentionOptions(users, "lee@")[0]?.user_id, "user-lee");

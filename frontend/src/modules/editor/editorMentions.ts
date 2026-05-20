@@ -54,6 +54,7 @@ export function readActiveMentionDraft(value: string, caretIndex: number | null)
   if (prefix && MENTION_BOUNDARY_PATTERN.test(prefix)) return null;
   const query = beforeCaret.slice(atIndex + 1);
   if (query.includes("\n") || query.includes("\r")) return null;
+  if (query.length > 0 && /\s$/.test(query)) return null;
   if (/[,;:()[\]{}]/.test(query)) return null;
   return { start: atIndex, end: caretIndex, query };
 }
