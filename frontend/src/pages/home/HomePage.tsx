@@ -9,8 +9,6 @@ import {
   archiveEmailMessage,
   createCommunicationsSharedInbox,
   addLogicGateRaciAssignments,
-  addMyLogicGateShortcuts,
-  convertTriageMessagesToLogicGate,
   deleteCommunicationsSharedInbox,
   deleteEmailMessage,
   disconnectCommunications,
@@ -32,7 +30,6 @@ import {
   parseEmailAddressList,
   primeEmailMessageCache,
   removeLogicGateRaciAssignments,
-  removeMyLogicGateShortcut,
   removeEmailMessageFromCache,
   sendEmail,
   sortEmailMessagesByDateDescending,
@@ -69,17 +66,14 @@ import type { NotificationItem } from "../../modules/notifications/notifications
 import {
   EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
   EVENT_KANBAN_BOARDS_UPDATED,
-  logicGateKanbanBoardID,
-  type KanbanBoardContentsUpdatedDetail,
-  type KanbanBoardsUpdatedDetail,
 } from "../../modules/kanban/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 import { AciInboxMatrix, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
-import { applyBulkNodePatchCommand, dropNodesIntoInboxLogicGateCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, collectSharedInboxSubtreeIDs, emailAddressListContains, filterExplorerRowsForSearch, filterSharedInboxesForUser, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { addMyLogicGateShortcutsCommand, applyBulkNodePatchCommand, convertMessagesToLogicGateCommand, dropNodesIntoInboxLogicGateCommand, removeMyLogicGateShortcutCommand } from "./homeCommands";
+import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, collectSharedInboxSubtreeIDs, emailAddressListContains, filterExplorerRowsForSearch, filterSharedInboxesForUser, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
@@ -1477,14 +1471,18 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [busy, deleteConfirmation, getSelectedMessageIDsForAction, requestDeleteMessages]);
   const addShortcutsFromExplorerPayload = useCallback(async (payload: ExplorerDragPayload | null) => {
-    const logicGateIDs = logicGateIDsFromExplorerPayload(payload, logicGateFolders, logicGateFolderItems);
-    if (logicGateIDs.length === 0) return;
     setBusy("my-logic-gates");
     setError("");
     try {
-      const shortcuts = await addMyLogicGateShortcuts(companyID, logicGateIDs);
-      setMyLogicGateShortcuts((previous) => mergeLogicGateShortcuts(previous, shortcuts));
-      setNotice(logicGateIDs.length === 1 ? "Added to My Logic Gates." : `${logicGateIDs.length} Logic Gates added.`);
+      const result = await addMyLogicGateShortcutsCommand({
+        companyID,
+        payload,
+        folders: logicGateFolders,
+        folderItems: logicGateFolderItems,
+      });
+      if (!result) return;
+      setMyLogicGateShortcuts((previous) => mergeLogicGateShortcuts(previous, result.shortcuts));
+      setNotice(result.logicGateIDs.length === 1 ? "Added to My Logic Gates." : `${result.logicGateIDs.length} Logic Gates added.`);
     } catch (shortcutError) {
       setError(formatError(shortcutError, "Failed to add My Logic Gates"));
     } finally {
@@ -1492,12 +1490,13 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     }
   }, [companyID, logicGateFolderItems, logicGateFolders]);
   const removeShortcut = useCallback(async (logicGateID: string) => {
-    if (!logicGateID) return;
+    if (!logicGateID.trim()) return;
     setBusy("my-logic-gates");
     setError("");
     try {
-      await removeMyLogicGateShortcut(companyID, logicGateID);
-      setMyLogicGateShortcuts((previous) => previous.filter((shortcut) => shortcut.logic_gate_id !== logicGateID));
+      const removedLogicGateID = await removeMyLogicGateShortcutCommand({ companyID, logicGateID });
+      if (!removedLogicGateID) return;
+      setMyLogicGateShortcuts((previous) => previous.filter((shortcut) => shortcut.logic_gate_id !== removedLogicGateID));
     } catch (shortcutError) {
       setError(formatError(shortcutError, "Failed to remove My Logic Gate"));
     } finally {
@@ -1510,24 +1509,21 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setBusy("triage-convert");
     setError("");
     try {
-      const result = await convertTriageMessagesToLogicGate({ companyID, logicGateID, messageIDs: ids });
-      const boardID = result.board?.board_id?.trim() || logicGateKanbanBoardID(logicGateID);
-      const boardLogicGateID = result.board?.logic_gate_id?.trim() || logicGateID;
-      invalidateKanbanBoardListCache(apiBase, companyID);
-      invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
-      invalidateLogicGateArenaViewCache(apiBase, companyID, boardLogicGateID);
-      window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, board: result.board } }));
-      window.dispatchEvent(new CustomEvent<KanbanBoardContentsUpdatedDetail>(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, { detail: { companyID, boardID, logicGateID: boardLogicGateID } }));
-      for (const node of result.nodes ?? []) {
-        invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
-        upsertNodeRelationshipGraphNode(apiBase, companyID, node);
-      }
-      for (const item of result.folder_items ?? []) {
-        upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
-        upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
-      }
-      const converted = result.deleted_message_ids?.length ? result.deleted_message_ids : ids;
-      invalidateCommunicationsCache({ messagePages: true, messages: true });
+      const conversion = await convertMessagesToLogicGateCommand({
+        apiBase,
+        companyID,
+        logicGateID,
+        messageIDs: ids,
+        invalidateKanbanBoardList: invalidateKanbanBoardListCache,
+        invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
+        invalidateLogicGateArenaView: invalidateLogicGateArenaViewCache,
+        invalidateNodeRecord: invalidateNodeRecordStoreCaches,
+        upsertNodeRelationshipGraphNode,
+        upsertNodeFolderItemInRelationshipGraph: upsertCompanyExplorerFolderItemInNodeRelationshipGraph,
+        upsertLogicGateFolderItemInRelationshipGraph: upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph,
+      });
+      if (!conversion) return;
+      const converted = conversion.convertedMessageIDs;
       setMessages((previous) => previous.map((message) => converted.includes(message.id) ? markMessageSentToLogicGate(message, logicGateID) : message));
       setSelectedMessage((current) => current && converted.includes(current.id) ? markMessageSentToLogicGate(current, logicGateID) : current);
       const title = logicGateByID.get(logicGateID)?.header || "Logic Gate";
@@ -1537,7 +1533,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, logicGateByID, selectedMessageID]);
+  }, [apiBase, companyID, logicGateByID]);
   const selectLogicGateTreeID = useCallback((treeID: string, orderedIDs: string[], event: React.MouseEvent) => {
     const next = resolveExplorerClickSelection({
       orderedIDs,

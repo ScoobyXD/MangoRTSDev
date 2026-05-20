@@ -24,7 +24,7 @@ Source architecture:
 | 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph, migrated work-item assignment mutations, and Kanban board/column/card HTTP mutations now append durable workspace events atomically; frontend gap reconciliation detects missed numeric workspace sequences and triggers scoped surface refreshes. Postgres `LISTEN/NOTIFY` now provides explicit cross-instance wakeup fanout while polling replay remains the correctness fallback. Remaining mutation families are still follow-ups. |
 | 3. Work Ownership / Commands | Inbox command parity complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, inbox reads use projection rows, email conversion runs through an explicit atomic backend command, Home node drop/status placement uses the work-item assignment command path, remaining inbox node status/priority placement uses assignment command helpers, bulk Logic Gate RACI uses idempotent add/remove commands, and direct node patching is reserved for non-placement fields or unassigned fallback nodes. |
 | 4. Hot Path Discipline | Hot-path metrics complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth now caches derived actor/membership context after per-request token validation; work-item inbox GET handlers now pass request context into context-aware repository/database reads; node and Logic Gate map layout position writes now use set-based Postgres bulk upserts; server middleware now records normalized HTTP latency/status/conditional GET metrics and workspace stream replay/catch-up metrics. |
-| 5. Frontend Structure / API Contract | Company Explorer controller/store slice complete / yellow | Shared `requestJSON` covers the frontend API contract; workspace stream gap recovery and live freshness preserve scoped snapshot invalidation; heavy map/editor content is split behind lazy entry points; and Company Explorer snapshot, stream, kanban-board, and optimistic entity state now flow through a pure reducer/store slice. Home workflow extraction remains a follow-up. |
+| 5. Frontend Structure / API Contract | Home workflow command migration slice complete / yellow | Shared `requestJSON` covers the frontend API contract; workspace stream gap recovery and live freshness preserve scoped snapshot invalidation; heavy map/editor content is split behind lazy entry points; Company Explorer state flows through a pure reducer/store slice; and Home My Logic Gate shortcuts plus triage conversion now use command helpers outside React. Remaining Home mail/shared-inbox workflow extraction stays queued. |
 
 ## 1. Read Plane
 
@@ -465,6 +465,22 @@ Migration/backfill/rollback notes:
 - Backfill: none. Existing browser snapshot caches, Company Explorer expanded/scroll/root-order local storage, and linked-frame context storage continue using the same keys and payload shapes.
 - Rollback: code can inline the store reducer logic back into `CompanyExplorerContent` state setters and remove `companyExplorerStore.ts` plus its focused node test. No data rollback is required; stream events and snapshot responses retain the same frontend contracts.
 
+Home workflow command migration branch:
+`frontend/home-workflow-command-migration`
+
+Status:
+- 2026-05-20: Complete. Extracted Home My Logic Gate shortcut add/remove and triage-message-to-Logic-Gate conversion into focused `homeCommands.ts` helpers with injectable API, cache, event, and graph side-effect dependencies. `HomePage` now keeps UI state, notices, and message list updates while command helpers own ID normalization, command API calls, Kanban/cache event fanout, and graph upserts for the migrated workflows.
+
+Scope completed:
+- Kept the slice bounded to two Home workflows: My Logic Gate shortcuts and triage conversion from Home mail/rail drag flows.
+- Preserved existing backend API response shapes, route behavior, selection sync, workspace/Kanban freshness events, graph cache upserts, and communications message cache invalidation.
+- Added focused node tests for shortcut payload resolution/removal and triage conversion command side effects.
+
+Migration/backfill/rollback notes:
+- Migration: none. This branch is frontend-only and does not change backend API response shapes, endpoints, migrations, or schema.
+- Backfill: none. Existing browser message caches, Kanban board caches, node/Logic Gate graph caches, My Logic Gate shortcuts, and local storage keys retain their current shapes and refresh paths.
+- Rollback: code can inline `addMyLogicGateShortcutsCommand`, `removeMyLogicGateShortcutCommand`, and `convertMessagesToLogicGateCommand` back into `HomePage` while leaving existing communications, Kanban, workspace stream, and graph cache contracts unchanged. No data rollback is required.
+
 Scope:
 - Migrate local `requestJSON` wrappers in Kanban, Editor, Node Map, Logic Gate Map, and Company Explorer to the shared helper.
 - Add explicit auth integration to the helper while keeping the global fetch patch temporarily for compatibility.
@@ -472,7 +488,7 @@ Scope:
 - Do not split giant components in this branch.
 
 Follow-up branches:
-- `frontend/home-workflow-command-migration`
+- `frontend/home-mail-workflow-command-migration`
 
 Completion criteria:
 - New frontend API calls use one helper/client by default.
@@ -514,10 +530,11 @@ Use this as the default sequencing unless a production incident changes prioriti
 26. `frontend/scoped-invalidation-policy`
 27. `frontend/mapcontent-lazy-split`
 28. `frontend/company-explorer-controller-store`
+29. `frontend/home-workflow-command-migration`
 
 ### Next Roadmap
 
-1. `frontend/home-workflow-command-migration`
+1. `frontend/home-mail-workflow-command-migration`
 
 ### Work-Items Follow-Ups
 
