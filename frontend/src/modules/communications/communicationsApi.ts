@@ -482,6 +482,47 @@ export async function updateLogicGateRaciAssignments(
   return cloneLogicGateRaciAssignments(payload.raci_assignments ?? []);
 }
 
+export type LogicGateRaciAssignmentCommandResult = {
+  company_id: string;
+  logic_gate_id: string;
+  operation: "add" | "remove";
+  changed: boolean;
+  raci_assignments?: LogicGateRaciAssignment[];
+};
+
+async function commandLogicGateRaciAssignments(
+  companyID: string,
+  logicGateID: string,
+  operation: "add" | "remove",
+  assignments: Array<{ role: LogicGateRaciRole; user_id: string }>,
+): Promise<LogicGateRaciAssignment[]> {
+  const payload = await apiFetchJSON<LogicGateRaciAssignmentCommandResult>(`/v1/logic-gates/${encodeURIComponent(logicGateID)}/raci/${operation}`, {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: companyID,
+      assignments,
+    }),
+  });
+  invalidateWorkspacePanelCache(companyID);
+  return cloneLogicGateRaciAssignments(payload.raci_assignments ?? []);
+}
+
+export function addLogicGateRaciAssignments(
+  companyID: string,
+  logicGateID: string,
+  assignments: Array<{ role: LogicGateRaciRole; user_id: string }>,
+): Promise<LogicGateRaciAssignment[]> {
+  return commandLogicGateRaciAssignments(companyID, logicGateID, "add", assignments);
+}
+
+export function removeLogicGateRaciAssignments(
+  companyID: string,
+  logicGateID: string,
+  assignments: Array<{ role: LogicGateRaciRole; user_id: string }>,
+): Promise<LogicGateRaciAssignment[]> {
+  return commandLogicGateRaciAssignments(companyID, logicGateID, "remove", assignments);
+}
+
 export async function listNodes(companyID: string): Promise<NodeRecord[]> {
   const cleanCompanyID = companyID.trim();
   return cachedRead(`nodes:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {

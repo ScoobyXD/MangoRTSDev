@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  addLogicGateRaciAssignments,
   archiveEmailMessage,
   createMessageQuery,
   emailMessageMatchesListFilters,
@@ -9,6 +10,7 @@ import {
   listEmailMessages,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
+  removeLogicGateRaciAssignments,
   unarchiveEmailMessage,
   type EmailMessage,
 } from "../../../../frontend/src/modules/communications/communicationsApi.js";
@@ -187,6 +189,52 @@ test("message list refresh bypasses stale page cache and replaces the normal cac
   }
 });
 
+test("logic gate RACI helpers call add and remove command endpoints", async () => {
+  invalidateCommunicationsCache();
+  const calls: Array<{ path: string; method: string; body: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      path: input.toString(),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return jsonResponse({
+      operation: input.toString().endsWith("/remove") ? "remove" : "add",
+      changed: true,
+      raci_assignments: [
+        {
+          company_id: "company-1",
+          logic_gate_id: "gate 1",
+          role: "responsible",
+          user_id: "user-1",
+          created_timestamp: "2026-05-20T00:00:00.000Z",
+        },
+      ],
+    });
+  };
+  try {
+    const addResult = await addLogicGateRaciAssignments("company-1", "gate 1", [{ role: "responsible", user_id: "user-1" }]);
+    const removeResult = await removeLogicGateRaciAssignments("company-1", "gate 1", [{ role: "responsible", user_id: "user-1" }]);
+    assert.deepEqual(calls, [
+      {
+        path: "/v1/logic-gates/gate%201/raci/add",
+        method: "POST",
+        body: { company_id: "company-1", assignments: [{ role: "responsible", user_id: "user-1" }] },
+      },
+      {
+        path: "/v1/logic-gates/gate%201/raci/remove",
+        method: "POST",
+        body: { company_id: "company-1", assignments: [{ role: "responsible", user_id: "user-1" }] },
+      },
+    ]);
+    assert.deepEqual(addResult.map((item) => [item.role, item.user_id]), [["responsible", "user-1"]]);
+    assert.deepEqual(removeResult.map((item) => [item.role, item.user_id]), [["responsible", "user-1"]]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
 function message(id: string, patch: Partial<EmailMessage> = {}): EmailMessage {
   return {
     id,

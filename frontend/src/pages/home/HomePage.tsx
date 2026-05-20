@@ -8,6 +8,7 @@ import {
   applyEmailMessageToCachedPages,
   archiveEmailMessage,
   createCommunicationsSharedInbox,
+  addLogicGateRaciAssignments,
   addMyLogicGateShortcuts,
   convertTriageMessagesToLogicGate,
   deleteCommunicationsSharedInbox,
@@ -30,6 +31,7 @@ import {
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
   primeEmailMessageCache,
+  removeLogicGateRaciAssignments,
   removeMyLogicGateShortcut,
   removeEmailMessageFromCache,
   sendEmail,
@@ -38,8 +40,6 @@ import {
   updateEmailMessage,
   updateCommunicationsSharedInbox,
   updateCommunicationsSharedInboxRaciAssignments,
-  updateLogicGateRaciAssignments,
-  updateNode,
   type CompanyUser,
   type CommunicationsSharedInbox,
   type CommunicationsSharedInboxRaciAssignment,
@@ -62,7 +62,7 @@ import { invalidateNodeRecordStoreCaches } from "../../modules/node-map/NodeReco
 import { upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
 import { upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
-import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, moveLogicGateAssignment } from "../../modules/kanban/kanbanApi";
+import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache } from "../../modules/kanban/kanbanApi";
 import { subscribeWorkspaceStream } from "../../modules/workspace/workspaceStream";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
 import type { NotificationItem } from "../../modules/notifications/notificationsApi";
@@ -78,8 +78,8 @@ import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGa
 import { AciInboxMatrix, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, ResponsibleInboxMatrix, SharedInboxRaciSettingsModal } from "./HomeParts";
 import { HomeMailOverlays, HomeMailWorkspace } from "./HomeMailWorkspace";
 import { AUTO_ARCHIVE_SCROLL_DELAY_MS, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
-import { dropNodesIntoInboxLogicGateCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, collectSharedInboxSubtreeIDs, emailAddressListContains, filterExplorerRowsForSearch, filterSharedInboxesForUser, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, normalizeResponsibleInboxStatus, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { applyBulkNodePatchCommand, dropNodesIntoInboxLogicGateCommand } from "./homeCommands";
+import { buildMyLogicGateGroups, buildMyNodeGroups, cleanIDList, collectSharedInboxSubtreeIDs, emailAddressListContains, filterExplorerRowsForSearch, filterSharedInboxesForUser, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateIDFromTreeID, logicGateIDsFromExplorerPayload, logicGateTreeID, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
@@ -1701,36 +1701,21 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setBusy("bulk-node-edit");
     setError("");
     try {
-      const status = normalizeResponsibleInboxStatus(patch.status);
-      const updatedNodes = await Promise.all(ids.map(async (nodeID) => {
-        const node = nodeByID.get(nodeID);
-        if (!node) return null;
-        const logicGateID = cleanIDList(node.logic_gate_ids ?? [])[0] ?? "";
-        let commandNode: NodeRecord | null = null;
-        const directPatch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">> = { ...patch };
-        if (status && logicGateID) {
-          const priorityWasSet = Object.prototype.hasOwnProperty.call(patch, "priority");
-          const result = await moveLogicGateAssignment({
-            apiBase,
-            companyID,
-            logicGateID,
-            nodeID,
-            status,
-            position: 0,
-            priority: priorityWasSet ? patch.priority ?? null : undefined,
-          });
-          commandNode = result.node;
-          delete directPatch.status;
-          if (priorityWasSet) delete directPatch.priority;
-          invalidateKanbanBoardContentsCache(apiBase, companyID, result.card.board_id);
+      const updatedNodes = await applyBulkNodePatchCommand({
+        apiBase,
+        companyID,
+        nodeIDs: ids,
+        patch,
+        nodeByID,
+        invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
+      });
+      for (const node of updatedNodes) {
+        mergeUpdatedNode(node);
+      }
+      for (const node of updatedNodes) {
+        for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
           invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
         }
-        if (Object.keys(directPatch).length === 0) return commandNode;
-        const updated = await updateNode(companyID, nodeID, directPatch);
-        return updated;
-      }));
-      for (const node of updatedNodes) {
-        if (node) mergeUpdatedNode(node);
       }
       setNotice(ids.length === 1 ? "Node updated." : `${ids.length} nodes updated.`);
     } catch (bulkError) {
@@ -1748,17 +1733,9 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
     setError("");
     try {
       const updates = await Promise.all(ids.map(async (logicGateID) => {
-        const current = logicGateByID.get(logicGateID);
-        const existing = current?.raci_assignments ?? [];
-        const nextAssignments = action === "add"
-          ? [
-              ...existing.map((assignment) => ({ role: assignment.role, user_id: assignment.user_id })),
-              { role, user_id: cleanUserID },
-            ]
-          : existing
-              .filter((assignment) => !(assignment.role === role && assignment.user_id === cleanUserID))
-              .map((assignment) => ({ role: assignment.role, user_id: assignment.user_id }));
-        const assignments = await updateLogicGateRaciAssignments(companyID, logicGateID, nextAssignments);
+        const assignments = action === "add"
+          ? await addLogicGateRaciAssignments(companyID, logicGateID, [{ role, user_id: cleanUserID }])
+          : await removeLogicGateRaciAssignments(companyID, logicGateID, [{ role, user_id: cleanUserID }]);
         return { logicGateID, assignments };
       }));
       setLogicGates((previous) => previous.map((logicGate) => {
