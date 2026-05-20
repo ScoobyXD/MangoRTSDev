@@ -11,6 +11,14 @@ import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHand
 import { getEditorDocumentFontFamily } from "./useEditorPreferences";
 import { findEditorImageFrame, readEditorImageData } from "./editorImages";
 import {
+  buildMentionOptions,
+  mentionUserDisplayName,
+  mentionUserOptionLabel,
+  readActiveMentionDraft,
+  splitTextByMentions,
+  type ActiveMentionDraft,
+} from "./editorMentions";
+import {
   ArrowRightIcon,
   avatarBackgroundForName,
   buildChatThreads,
@@ -210,6 +218,7 @@ type NodeTextBlockEditorProps = {
   nodeID: string;
   companyID: string;
   currentUserID: string;
+  companyUsers: MentionableCompanyUser[];
   documentValue: string;
   chatMessages: EditorTextBlockChatMessage[];
   activeChatAnchorMessageID: string;
@@ -392,6 +401,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   nodeID,
   companyID,
   currentUserID,
+  companyUsers,
   documentValue,
   chatMessages,
   activeChatAnchorMessageID,
@@ -552,7 +562,12 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       onDocumentFlush(nextDocument);
     },
     onSelectionFontSizeChange: () => undefined,
+    mentionUsers: companyUsers,
+    mentionAccent: accent,
+    mentionSurfaceText: surfaceText,
+    mentionStrokeColor: indentGuideColor,
   });
+  const { mentionMenu: documentMentionMenu, ...documentSurfaceHandlers } = handlers;
 
   const handleBlur: React.FocusEventHandler<HTMLDivElement> = (event) => {
     handlers.onBlur(event);
@@ -739,29 +754,29 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         suppressContentEditableWarning
         spellCheck
         onFocus={onFocus}
-        onBeforeInput={handlers.onBeforeInput}
-        onPaste={handlers.onPaste}
-        onDrop={handlers.onDrop}
-        onInput={handlers.onInput}
-        onSelect={handlers.onSelect}
-        onClick={handlers.onClick}
+        onBeforeInput={documentSurfaceHandlers.onBeforeInput}
+        onPaste={documentSurfaceHandlers.onPaste}
+        onDrop={documentSurfaceHandlers.onDrop}
+        onInput={documentSurfaceHandlers.onInput}
+        onSelect={documentSurfaceHandlers.onSelect}
+        onClick={documentSurfaceHandlers.onClick}
         onPointerDown={(event) => {
           setSelectionDraft(null);
           const frame = findEditorImageFrame(event.currentTarget, event.target);
           const wrapper = wrapperRef.current;
           setImageDraft(frame && wrapper ? readImageDraftFromFrame(blockID, frame, wrapper) : null);
           if (event.button === 0 && !frame) selectionPointerDownRef.current = true;
-          handlers.onPointerDown(event);
+          documentSurfaceHandlers.onPointerDown(event);
         }}
-        onPointerMove={handlers.onPointerMove}
+        onPointerMove={documentSurfaceHandlers.onPointerMove}
         onKeyUp={(event) => {
-          handlers.onKeyUp(event);
+          documentSurfaceHandlers.onKeyUp(event);
           captureSelectionDraft();
         }}
         onBlur={handleBlur}
-        onScroll={handlers.onScroll}
-        onWheel={handlers.onWheel}
-        onKeyDown={handlers.onKeyDown}
+        onScroll={documentSurfaceHandlers.onScroll}
+        onWheel={documentSurfaceHandlers.onWheel}
+        onKeyDown={documentSurfaceHandlers.onKeyDown}
         style={{
           position: "relative",
           zIndex: 2,
@@ -792,6 +807,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           ["--editor-document-scroll-track" as string]: scrollbarTrack,
         }}
       />
+      {documentMentionMenu}
       {selectionDraft && (
         <button
           type="button"
@@ -912,61 +928,6 @@ type ChatPaneProps = {
   onSubmit: () => void;
 };
 
-type ActiveMentionDraft = {
-  start: number;
-  end: number;
-  query: string;
-};
-
-function mentionUserDisplayName(user: MentionableCompanyUser): string {
-  const name = (user.display_name ?? "").trim();
-  if (name) return name;
-  const email = (user.email ?? "").trim();
-  if (!email) return user.user_id;
-  const atIndex = email.indexOf("@");
-  return atIndex > 0 ? email.slice(0, atIndex) : email;
-}
-
-function mentionUserOptionLabel(user: MentionableCompanyUser): string {
-  const name = (user.display_name ?? "").trim();
-  const email = (user.email ?? "").trim();
-  if (name && email) return `${name} <${email}>`;
-  return name || email || user.user_id;
-}
-
-function normalizedMentionSearch(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-function readActiveMentionDraft(value: string, caretIndex: number | null): ActiveMentionDraft | null {
-  if (caretIndex === null || caretIndex < 0 || caretIndex > value.length) return null;
-  const beforeCaret = value.slice(0, caretIndex);
-  const atIndex = beforeCaret.lastIndexOf("@");
-  if (atIndex < 0) return null;
-  const prefix = atIndex > 0 ? value[atIndex - 1] : "";
-  if (prefix && /[A-Za-z0-9_@.-]/.test(prefix)) return null;
-  const query = beforeCaret.slice(atIndex + 1);
-  if (query.includes("\n") || query.includes("\r")) return null;
-  if (/[,;:()[\]{}]/.test(query)) return null;
-  return { start: atIndex, end: caretIndex, query };
-}
-
-function mentionUserMatches(user: MentionableCompanyUser, query: string): boolean {
-  const normalizedQuery = normalizedMentionSearch(query);
-  if (!normalizedQuery) return true;
-  const compactQuery = normalizedQuery.replace(/\s+/g, "");
-  const labels = [
-    mentionUserDisplayName(user),
-    mentionUserDisplayName(user).replace(/\s+/g, ""),
-    user.email ?? "",
-    user.user_id,
-  ];
-  return labels.some((label) => {
-    const normalizedLabel = normalizedMentionSearch(label);
-    return normalizedLabel.includes(normalizedQuery) || normalizedLabel.replace(/\s+/g, "").includes(compactQuery);
-  });
-}
-
 export const ChatPane: React.FC<ChatPaneProps> = ({
   blockID,
   messages,
@@ -1010,10 +971,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const mentionOptions = useMemo(() => {
     if (!activeMentionDraft) return [];
-    return companyUsers
-      .filter((user) => user.user_id.trim() && mentionUserMatches(user, activeMentionDraft.query))
-      .sort((a, b) => mentionUserOptionLabel(a).localeCompare(mentionUserOptionLabel(b), undefined, { numeric: true, sensitivity: "base" }))
-      .slice(0, 8);
+    return buildMentionOptions(companyUsers, activeMentionDraft.query, 8);
   }, [activeMentionDraft, companyUsers]);
   const mentionMenuOpen = activeMentionDraft !== null && mentionOptions.length > 0;
 
@@ -1151,6 +1109,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               isLastSibling={false}
               currentUserID={currentUserID}
               activeMessageID={activeMessageID}
+              companyUsers={companyUsers}
               accent={accent}
               surfaceText={surfaceText}
               ruleColor={ruleColor}
@@ -1374,6 +1333,7 @@ type ChatThreadItemProps = {
   isLastSibling: boolean;
   currentUserID: string;
   activeMessageID: string;
+  companyUsers: MentionableCompanyUser[];
   accent: string;
   surfaceText: string;
   ruleColor: string;
@@ -1386,7 +1346,26 @@ type ChatThreadItemProps = {
   onPreviewImage: (attachment: EditorChatAttachment) => void;
 };
 
-const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, currentUserID, activeMessageID, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onDelete, onPreviewImage }) => {
+const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompanyUser[]; color: string }> = ({ text, users, color }) => {
+  const segments = useMemo(() => splitTextByMentions(text, users), [text, users]);
+  return (
+    <div style={{ color, fontSize: 12, lineHeight: 1.35, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
+      {segments.map((segment, index) => segment.mention ? (
+        <span
+          key={`${segment.text}:${index}`}
+          title={segment.user ? mentionUserOptionLabel(segment.user) : segment.text}
+          style={{ background: "#fff3a3", color: "#4a3000", borderRadius: 3, padding: "0 2px", fontWeight: 800, boxDecorationBreak: "clone" }}
+        >
+          {segment.text}
+        </span>
+      ) : (
+        <React.Fragment key={`${segment.text}:${index}`}>{segment.text}</React.Fragment>
+      ))}
+    </div>
+  );
+};
+
+const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, currentUserID, activeMessageID, companyUsers, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onDelete, onPreviewImage }) => {
   const { message, children } = node;
   const hasChildren = children.length > 0;
   const collapsed = collapsedThreadIDs.has(message.id);
@@ -1463,7 +1442,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.authorName}</span>
           <span style={{ opacity: 0.58, flex: "0 0 auto" }}>{formatTimestamp(message.createdTimestamp)}</span>
         </div>
-        {message.message && <div style={{ color: surfaceText, fontSize: 12, lineHeight: 1.35, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{message.message}</div>}
+        {message.message && <MentionHighlightedText text={message.message} users={companyUsers} color={surfaceText} />}
         {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} surfaceText={surfaceText} strokeColor={ruleColor} onPreviewImage={onPreviewImage} />}
         <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <button type="button" onClick={(event) => { event.stopPropagation(); onReply(message.id); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: accent, cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}>
@@ -1508,6 +1487,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
               isLastSibling={childIndex === children.length - 1}
               currentUserID={currentUserID}
               activeMessageID={activeMessageID}
+              companyUsers={companyUsers}
               accent={accent}
               surfaceText={surfaceText}
               ruleColor={ruleColor}

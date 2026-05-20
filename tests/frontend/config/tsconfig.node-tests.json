@@ -90,6 +90,8 @@
     "../modules/editor/editorTabs.test.ts",
     "../../../frontend/src/modules/editor/editorUndoHistory.ts",
     "../modules/editor/editorUndoHistory.test.ts",
+    "../../../frontend/src/modules/editor/editorMentions.ts",
+    "../modules/editor/editorMentions.test.ts",
     "../../../frontend/src/modules/editor/plainTextEditing.ts",
     "../modules/editor/plainTextEditing.test.ts",
     "../../../frontend/src/modules/editor/editorImages.ts",

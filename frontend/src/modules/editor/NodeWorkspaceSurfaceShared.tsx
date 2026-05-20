@@ -1,9 +1,11 @@
 import React, { useEffect } from "react";
 import type { EmailAddress, EmailMessage } from "../communications/communicationsApi";
 import type { NodeProjectionItem } from "../node-map/NodeRecordStore";
+import type { MentionableCompanyUser } from "./editorMentions";
 import type { EditorChatAttachment, EditorTextBlockChatMessage } from "./editorProjection";
 import { generateStableInformationID } from "./editorTypes";
 import type { EditorOutlineStyleID } from "./plainTextEditing";
+export type { MentionableCompanyUser } from "./editorMentions";
 export type RequestJSON = <T,>(path: string, init?: RequestInit) => Promise<T>;
 
 export type NodeWorkspaceSurfaceProps = {
@@ -27,14 +29,6 @@ export type NodeWorkspaceSurfaceProps = {
   onCreateNodeFromImage: (request: NodeImageNodeRequest) => Promise<void>;
   onAssignToLogicGate: (logicGateID: string) => Promise<void>;
   onError: (message: string) => void;
-};
-
-export type MentionableCompanyUser = {
-  company_id?: string;
-  user_id: string;
-  email?: string;
-  display_name?: string;
-  role?: string;
 };
 
 export type NodeImageNodeRequest = {
