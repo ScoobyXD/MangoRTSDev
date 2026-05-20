@@ -36,7 +36,6 @@ import {
 import { loadFrameLinks, loadSettings, loadViews, persistFrameLinks, persistFrameRegistry, saveSettings, saveViews } from "./useFramePersistence";
 import { preloadDefaultDashboardModules, preloadHomeSurface, preloadLogicGateArenaSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
 import { LazyHomePage, LazyLogicGateArenaPage } from "../pages/lazyPages";
-import { userHasFullSharedInboxAccess } from "../pages/home/homeUtils";
 import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
 import { AppLiveFreshnessBridge } from "./AppLiveFreshnessBridge";
 import { useFrameDragResize } from "./useFrameDragResize";
@@ -342,7 +341,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
   ), [frames]);
   const isLogicGateArenaView = activeTab?.page === "logic-gate-arena";
   const isHomeView = activePrimaryPage === "home";
-  const currentUserHasFullSharedInboxAccess = userHasFullSharedInboxAccess(me, getActiveCompanyID());
   const isFullPageView = isLogicGateArenaView || isHomeView;
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
 
@@ -1209,8 +1207,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, me, onNavigate, o
           accountChrome={accountChrome}
           activePage={activePrimaryPage}
           activeHomeView={homeViewID}
-          currentUserHasFullSharedInboxAccess={currentUserHasFullSharedInboxAccess}
-          currentUserID={me?.user.user_id}
           pins={sidebarPins}
           pinDropActive={pinDropActive}
           explorerSelectionTargetFrameIDs={sidebarExplorerSelectionTargetFrameIDs}

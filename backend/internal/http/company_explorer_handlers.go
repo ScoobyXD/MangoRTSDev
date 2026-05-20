@@ -48,11 +48,6 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
 			return
 		}
-		if folderKind == "communications" {
-			if actor, ok := authenticatedActor(r); ok && !actorCanManageCompany(actor, companyID) {
-				items = filterCommunicationsSharedInboxFoldersForUser(items, actor.User.UserID)
-			}
-		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"folders": items})
 		return
 	}
@@ -107,32 +102,6 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 			}
 			writeError(w, http.StatusInternalServerError, "failed_to_assign_shared_inbox_account_email")
 			return
-		}
-	}
-	if item.FolderKind == "communications" {
-		if actor, ok := authenticatedActor(r); ok && !actorCanManageCompany(actor, req.CompanyID) {
-			assignments, err := s.repo.SetCommunicationsSharedInboxRaciAssignments(store.SharedInboxRaciAssignmentUpdateInput{
-				CompanyID: req.CompanyID,
-				FolderID:  item.FolderID,
-				Assignments: []store.SharedInboxRaciAssignmentInput{{
-					Role:   domain.LogicGateRaciRoleResponsible,
-					UserID: actor.User.UserID,
-				}},
-			})
-			if err != nil {
-				_ = s.repo.DeleteCompanyExplorerFolder(req.CompanyID, item.FolderID)
-				if errors.Is(err, store.ErrAssigneeNotInCompany) {
-					writeError(w, http.StatusForbidden, "company_access_denied")
-					return
-				}
-				if errors.Is(err, store.ErrInvalid) {
-					writeError(w, http.StatusBadRequest, "invalid_shared_inbox_raci_assignment")
-					return
-				}
-				writeError(w, http.StatusInternalServerError, "failed_to_assign_shared_inbox_creator")
-				return
-			}
-			item.RaciAssignments = assignments
 		}
 	}
 	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_created", map[string]any{"folder_id": item.FolderID, "folder_kind": item.FolderKind, "folder": item})
