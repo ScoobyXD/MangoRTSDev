@@ -15,6 +15,8 @@ import {
   updateEmailMessage as defaultUpdateEmailMessage,
   updateNode as defaultUpdateNode,
 } from "../../modules/communications/communicationsApi.js";
+import { requestJSON as defaultRequestJSON, type RequestJSONInit } from "../../modules/api/requestJSON.js";
+import type { LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 import type {
   CompanyUser,
   CommunicationsSharedInbox,
@@ -41,6 +43,7 @@ import {
   type KanbanBoardsUpdatedDetail,
 } from "../../modules/kanban/shared.js";
 import type { NodeRecord } from "../../modules/node-map/shared.js";
+import { createMapEntityBatchClientID, createMapEntityBatchCommand } from "../../modules/node-map/nodeMapCommands.js";
 import {
   cleanIDList,
   collectSharedInboxSubtreeIDs,
@@ -120,10 +123,32 @@ export type HomeSharedInboxRaciCommandResult = {
   assignments: CommunicationsSharedInboxRaciAssignment[];
 };
 
+export type HomeCreateNodeCommandResult = {
+  node: NodeRecord;
+  folderItems: CompanyExplorerFolderItem[];
+};
+
+export type HomeCreateLogicGateCommandResult = {
+  logicGate: LogicGateRecord;
+  folderItems: CompanyExplorerFolderItem[];
+};
+
+type HomeMapEntityBatchResponse = {
+  nodes?: NodeRecord[];
+  logic_gates?: LogicGateRecord[];
+  folder_items?: CompanyExplorerFolderItem[];
+};
+
 function noopKanbanBoardContentsInvalidator(): void {}
 function noopNodeRecordInvalidator(): void {}
 function noopNodeGraphNodeUpsert(): void {}
 function noopFolderItemGraphUpsert(): void {}
+
+type HomeEntityCreateRequestJSON = <T>(apiBase: string, path: string, init?: RequestJSONInit) => Promise<T>;
+
+function bindHomeEntityCreateRequest(apiBase: string, requestJSON: HomeEntityCreateRequestJSON) {
+  return <T>(path: string, init?: RequestInit): Promise<T> => requestJSON<T>(apiBase, path, init as RequestJSONInit);
+}
 
 function dispatchKanbanBoardsUpdated(detail: KanbanBoardsUpdatedDetail): void {
   if (typeof window === "undefined") return;
@@ -256,6 +281,86 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
     args.invalidateKanbanBoardContents?.(args.apiBase, args.companyID, result.card.board_id);
     return result.node;
   })).then((nodes) => nodes.filter((node): node is NodeRecord => node !== null));
+}
+
+export async function addNodesToLogicGateCommand(args: {
+  apiBase: string;
+  companyID: string;
+  logicGateID: string;
+  nodeIDs: string[];
+  nodeByID: Map<string, NodeRecord>;
+  assignNodeToLogicGateStatus?: HomeDropAssignNodeToLogicGateStatus;
+  invalidateKanbanBoardContents?: HomeKanbanBoardContentsInvalidator;
+}): Promise<NodeRecord[]> {
+  const logicGateID = args.logicGateID.trim();
+  const nodeIDs = cleanIDList(args.nodeIDs).filter((nodeID) => args.nodeByID.has(nodeID));
+  if (!logicGateID || nodeIDs.length === 0) return [];
+
+  const assignNodeToLogicGateStatus = args.assignNodeToLogicGateStatus ?? defaultAssignNodeToLogicGateStatus;
+  return Promise.all(nodeIDs.map(async (nodeID) => {
+    const node = args.nodeByID.get(nodeID);
+    if (!node) return null;
+    const priority = typeof node.priority === "number" && node.priority >= 1 && node.priority <= 5 ? node.priority : null;
+    const status = normalizeResponsibleInboxStatus(node.status) ?? "pending";
+    const result = await assignNodeToLogicGateStatus({
+      apiBase: args.apiBase,
+      companyID: args.companyID,
+      logicGateID,
+      nodeID,
+      status,
+      priority,
+      nodeTitle: nodeTitle(node),
+      position: 0,
+    });
+    args.invalidateKanbanBoardContents?.(args.apiBase, args.companyID, result.card.board_id);
+    return result.node;
+  })).then((nodes) => nodes.filter((node): node is NodeRecord => node !== null));
+}
+
+export async function createHomeNodeCommand(args: {
+  apiBase: string;
+  companyID: string;
+  title?: string;
+  requestJSON?: HomeEntityCreateRequestJSON;
+}): Promise<HomeCreateNodeCommandResult> {
+  const requestJSON = args.requestJSON ?? defaultRequestJSON;
+  const response = await createMapEntityBatchCommand<HomeMapEntityBatchResponse>({
+    companyID: args.companyID,
+    entityKind: "node",
+    items: [{
+      client_id: createMapEntityBatchClientID("home-node"),
+      title: args.title?.trim() || "new node",
+      x: 120,
+      y: 120,
+    }],
+    requestJSON: bindHomeEntityCreateRequest(args.apiBase, requestJSON),
+  });
+  const node = response.nodes?.[0];
+  if (!node) throw new Error("node_batch_create_missing_node");
+  return { node, folderItems: response.folder_items ?? [] };
+}
+
+export async function createHomeLogicGateCommand(args: {
+  apiBase: string;
+  companyID: string;
+  title?: string;
+  requestJSON?: HomeEntityCreateRequestJSON;
+}): Promise<HomeCreateLogicGateCommandResult> {
+  const requestJSON = args.requestJSON ?? defaultRequestJSON;
+  const response = await createMapEntityBatchCommand<HomeMapEntityBatchResponse>({
+    companyID: args.companyID,
+    entityKind: "logic_gate",
+    items: [{
+      client_id: createMapEntityBatchClientID("home-logic-gate"),
+      title: args.title?.trim() || "new logic gate",
+      x: 120,
+      y: 120,
+    }],
+    requestJSON: bindHomeEntityCreateRequest(args.apiBase, requestJSON),
+  });
+  const logicGate = response.logic_gates?.[0];
+  if (!logicGate) throw new Error("logic_gate_batch_create_missing_gate");
+  return { logicGate, folderItems: response.folder_items ?? [] };
 }
 export async function applyBulkNodePatchCommand(args: {
   apiBase: string;

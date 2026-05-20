@@ -13,7 +13,7 @@ import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/compan
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { ACI_COLUMNS, HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RESPONSIBLE_STATUS_COLUMNS } from "./homeConstants";
 import type { AciInboxRole, ComposeState, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, ResponsibleInboxStatus } from "./homeTypes";
-import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, responsibleStatusLetter, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
+import { aciCellKey, buildAciInboxGroupsByCell, buildResponsibleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, readTriageMessageIDs, responsibleCellKey, responsibleStatusColor, responsibleStatusLetter, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
 import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupCountStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeStatusStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, messagePlacementIconStyle, messageSelectDotStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxCreateButtonStyle, sharedInboxCreateStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxInputStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, textareaStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
@@ -86,22 +86,29 @@ function HomePinContextMenu({ menu, onClose }: {
   );
 }
 
-export function HomeBulkEditMenu({ menu, companyUsers, busy, onClose, onApplyNodePatch, onApplyLogicGateRaci }: {
+export function HomeBulkEditMenu({ menu, companyUsers, logicGates, busy, onClose, onApplyNodePatch, onApplyLogicGateRaci, onAddNodesToLogicGate }: {
   menu: { x: number; y: number; kind: "node" | "logic_gate"; ids: string[] } | null;
   companyUsers: CompanyUser[];
+  logicGates: LogicGateRecord[];
   busy: boolean;
   onClose: () => void;
   onApplyNodePatch: (nodeIDs: string[], patch: Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">>) => void;
   onApplyLogicGateRaci: (logicGateIDs: string[], role: CommunicationsSharedInboxRaciRole, userID: string, action: "add" | "remove") => void;
+  onAddNodesToLogicGate: (nodeIDs: string[], logicGateID: string) => void;
 }) {
   const [assignee, setAssignee] = useState("__no_change__");
   const [priority, setPriority] = useState("__no_change__");
   const [status, setStatus] = useState("__no_change__");
   const [dueDateMode, setDueDateMode] = useState<"no_change" | "set" | "clear">("no_change");
   const [dueDate, setDueDate] = useState("");
+  const [targetLogicGateID, setTargetLogicGateID] = useState("");
   const [raciRole, setRaciRole] = useState<CommunicationsSharedInboxRaciRole>("responsible");
   const [raciUserID, setRaciUserID] = useState("");
   const [raciAction, setRaciAction] = useState<"add" | "remove">("add");
+  const sortedLogicGates = useMemo(() => [...logicGates].sort((a, b) => (
+    logicGateTitle(a).localeCompare(logicGateTitle(b), undefined, { numeric: true, sensitivity: "base" })
+    || a.logic_gate_id.localeCompare(b.logic_gate_id)
+  )), [logicGates]);
 
   useEffect(() => {
     setAssignee("__no_change__");
@@ -109,10 +116,11 @@ export function HomeBulkEditMenu({ menu, companyUsers, busy, onClose, onApplyNod
     setStatus("__no_change__");
     setDueDateMode("no_change");
     setDueDate("");
+    setTargetLogicGateID(sortedLogicGates[0]?.logic_gate_id ?? "");
     setRaciRole("responsible");
     setRaciUserID(companyUsers[0]?.user_id ?? "");
     setRaciAction("add");
-  }, [companyUsers, menu?.kind, menu?.ids.join("\u001f")]);
+  }, [companyUsers, menu?.kind, menu?.ids.join("\u001f"), sortedLogicGates]);
 
   if (!menu) return null;
   const title = menu.kind === "node"
@@ -216,6 +224,27 @@ export function HomeBulkEditMenu({ menu, companyUsers, busy, onClose, onApplyNod
               </select>
               {dueDateMode === "set" && <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} style={fieldStyle} />}
             </label>
+            <label style={labelStyle}>
+              Add to Logic Gate
+              <select value={targetLogicGateID} onChange={(event) => setTargetLogicGateID(event.target.value)} style={fieldStyle}>
+                {sortedLogicGates.length === 0 ? (
+                  <option value="">No Logic Gates</option>
+                ) : sortedLogicGates.map((logicGate) => (
+                  <option key={logicGate.logic_gate_id} value={logicGate.logic_gate_id}>{logicGateTitle(logicGate)}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={busy || !targetLogicGateID}
+              style={actionButtonStyle}
+              onClick={() => {
+                if (busy || !targetLogicGateID) return;
+                onAddNodesToLogicGate(menu.ids, targetLogicGateID);
+              }}
+            >
+              Add to Logic Gate
+            </button>
           </>
         ) : (
           <>
@@ -1461,6 +1490,7 @@ export function LogicGateRail({
   myGroups,
   busy,
   getLogicGateDragIDs,
+  shortcutLogicGateIDs,
   onSearchChange,
   onToggleFolder,
   onSelectRow,
@@ -1469,6 +1499,7 @@ export function LogicGateRail({
   onAddShortcuts,
   onRemoveShortcut,
   onConvertMessages,
+  onCreateLogicGate,
 }: {
   loading: boolean;
   logicGateByID: Map<string, LogicGateRecord>;
@@ -1481,6 +1512,7 @@ export function LogicGateRail({
   myGroups: MyLogicGateGroup[];
   busy: boolean;
   getLogicGateDragIDs: (logicGateID: string) => string[];
+  shortcutLogicGateIDs: Set<string>;
   onSearchChange: (value: string) => void;
   onToggleFolder: (rowID: string) => void;
   onSelectRow: (row: ExplorerTreeNode, event: React.MouseEvent) => void;
@@ -1489,15 +1521,24 @@ export function LogicGateRail({
   onAddShortcuts: (payload: ExplorerDragPayload | null) => void;
   onRemoveShortcut: (logicGateID: string) => void;
   onConvertMessages: (logicGateID: string, messageIDs: string[]) => void;
+  onCreateLogicGate: (options?: { assignCurrentUser?: boolean }) => void;
 }) {
   const railSplit = useRailTopResize(HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, 240);
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
+  const [createContextMenu, setCreateContextMenu] = useState<{ x: number; y: number; assignCurrentUser: boolean } | null>(null);
+  const openCreateLogicGateMenu = useCallback((event: React.MouseEvent, assignCurrentUser: boolean) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setPinContextMenu(null);
+    setCreateContextMenu({ x: event.clientX, y: event.clientY, assignCurrentUser });
+  }, []);
 
   return (
     <>
     <aside ref={railSplit.railRef} style={logicGateRailStyle(railSplit.topHeight)}>
       <section
         style={logicGateRailSectionStyle}
+        onContextMenu={(event) => openCreateLogicGateMenu(event, true)}
         onDragOver={(event) => {
           if (!hasExplorerDrag(event.dataTransfer)) return;
           event.preventDefault();
@@ -1516,7 +1557,7 @@ export function LogicGateRail({
         </div>
         <div className="mango-home-scroll" style={myLogicGatesListStyle}>
           {myGroups.length === 0 ? (
-            <div style={emptySmallStyle}>No shortcuts</div>
+            <div style={emptySmallStyle}>No assigned Logic Gates</div>
           ) : myGroups.map((group) => (
             <div key={group.key} style={myLogicGateGroupStyle}>
               <div style={myLogicGateFolderLabelStyle}>
@@ -1532,6 +1573,7 @@ export function LogicGateRail({
                     busy={busy}
                     getLogicGateDragIDs={getLogicGateDragIDs}
                     logicGateByID={logicGateByID}
+                    shortcut={shortcutLogicGateIDs.has(logicGate.logic_gate_id)}
                     onSelectShortcut={onSelectShortcut}
                     onOpenLogicGate={onOpenLogicGate}
                     onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
@@ -1547,7 +1589,7 @@ export function LogicGateRail({
 
       <RailRowResizeHandle onPointerDown={railSplit.startResize} />
 
-      <section style={{ ...logicGateRailSectionStyle, gridTemplateRows: "auto auto minmax(0, 1fr)" }}>
+      <section style={{ ...logicGateRailSectionStyle, gridTemplateRows: "auto auto minmax(0, 1fr)" }} onContextMenu={(event) => openCreateLogicGateMenu(event, false)}>
         <div style={logicGateRailHeaderStyle}>
           <h2 style={panelTitleStyle}>All Logic Gates</h2>
           {loading && <span style={mutedSmallStyle}>Loading</span>}
@@ -1630,6 +1672,21 @@ export function LogicGateRail({
       </section>
     </aside>
     <HomePinContextMenu menu={pinContextMenu} onClose={() => setPinContextMenu(null)} />
+    {createContextMenu && (
+      <FrameRightClickMenu x={createContextMenu.x} y={createContextMenu.y} onClose={() => setCreateContextMenu(null)}>
+        <button
+          type="button"
+          style={sharedInboxContextMenuButtonStyle}
+          onClick={() => {
+            const assignCurrentUser = createContextMenu.assignCurrentUser;
+            setCreateContextMenu(null);
+            onCreateLogicGate({ assignCurrentUser });
+          }}
+        >
+          Create Logic Gate
+        </button>
+      </FrameRightClickMenu>
+    )}
     </>
   );
 }
@@ -1640,6 +1697,7 @@ export function MyLogicGateTile({
   busy,
   logicGateByID,
   getLogicGateDragIDs,
+  shortcut,
   onSelectShortcut,
   onOpenLogicGate,
   onOpenPinContextMenu,
@@ -1651,6 +1709,7 @@ export function MyLogicGateTile({
   busy: boolean;
   logicGateByID: Map<string, LogicGateRecord>;
   getLogicGateDragIDs: (logicGateID: string) => string[];
+  shortcut: boolean;
   onSelectShortcut: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenPinContextMenu: (event: React.MouseEvent, target: Omit<HomePinContextMenuState, "x" | "y">) => void;
@@ -1692,7 +1751,7 @@ export function MyLogicGateTile({
     >
       <span style={myLogicGateTileIconStyle}><ExplorerRowIcon kind="logic_gate" /></span>
       <span style={myLogicGateTileTextStyle}>{logicGateTitle(logicGate)}</span>
-      <span
+      {shortcut && <span
         role="button"
         tabIndex={0}
         aria-label="Remove shortcut"
@@ -1714,7 +1773,7 @@ export function MyLogicGateTile({
         }}
       >
         x
-      </span>
+      </span>}
     </button>
   );
 }
@@ -1734,6 +1793,7 @@ export function NodeInboxRail({
   onSelectNode,
   onOpenNode,
   onOpenNodeBulkMenu,
+  onCreateNode,
 }: {
   loading: boolean;
   nodeByID: Map<string, NodeRecord>;
@@ -1749,15 +1809,23 @@ export function NodeInboxRail({
   onSelectNode: (nodeID: string, orderedIDs: string[], event: React.MouseEvent) => void;
   onOpenNode: (node: NodeRecord) => void;
   onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
+  onCreateNode: () => void;
 }) {
   const myNodeOrderedRowIDs = useMemo(() => myNodeGroups.flatMap((group) => group.nodes.map((node) => nodeTreeID(node.node_id))), [myNodeGroups]);
   const railSplit = useRailTopResize(HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, 220);
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
+  const [createContextMenu, setCreateContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const openCreateNodeMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setPinContextMenu(null);
+    setCreateContextMenu({ x: event.clientX, y: event.clientY });
+  }, []);
 
   return (
     <>
     <aside ref={railSplit.railRef} style={logicGateRailStyle(railSplit.topHeight)}>
-      <section style={logicGateRailSectionStyle}>
+      <section style={logicGateRailSectionStyle} onContextMenu={openCreateNodeMenu}>
         <div style={logicGateRailHeaderStyle}>
           <h2 style={panelTitleStyle}>My Nodes (nodes assigned to me)</h2>
           {loading && <span style={mutedSmallStyle}>Loading</span>}
@@ -1797,7 +1865,7 @@ export function NodeInboxRail({
 
       <RailRowResizeHandle onPointerDown={railSplit.startResize} />
 
-      <section style={{ ...logicGateRailSectionStyle, gridTemplateRows: "auto auto minmax(0, 1fr)" }}>
+      <section style={{ ...logicGateRailSectionStyle, gridTemplateRows: "auto auto minmax(0, 1fr)" }} onContextMenu={openCreateNodeMenu}>
         <div style={logicGateRailHeaderStyle}>
           <h2 style={panelTitleStyle}>All Nodes</h2>
           {loading && <span style={mutedSmallStyle}>Loading</span>}
@@ -1864,6 +1932,20 @@ export function NodeInboxRail({
       </section>
     </aside>
     <HomePinContextMenu menu={pinContextMenu} onClose={() => setPinContextMenu(null)} />
+    {createContextMenu && (
+      <FrameRightClickMenu x={createContextMenu.x} y={createContextMenu.y} onClose={() => setCreateContextMenu(null)}>
+        <button
+          type="button"
+          style={sharedInboxContextMenuButtonStyle}
+          onClick={() => {
+            setCreateContextMenu(null);
+            onCreateNode();
+          }}
+        >
+          Create node
+        </button>
+      </FrameRightClickMenu>
+    )}
     </>
   );
 }
@@ -2134,6 +2216,8 @@ export function AciInboxMatrix({
   onOpenLogicGate,
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
+  onOpenLogicGateBulkMenuAt,
+  onCreateNodeInLogicGate,
   onDropNodes,
 }: {
   loading: boolean;
@@ -2153,6 +2237,8 @@ export function AciInboxMatrix({
   onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
   onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu: (logicGateID: string, event: React.MouseEvent) => void;
+  onOpenLogicGateBulkMenuAt: (logicGateID: string, x: number, y: number) => void;
+  onCreateNodeInLogicGate: (input: InboxNodeDropInput) => void;
   onDropNodes: (input: InboxNodeDropInput) => void;
 }) {
   const cellLogicGateGroups = useMemo(() => buildAciInboxGroupsByCell(nodes, nodeByID, logicGateByID, currentUserID), [currentUserID, logicGateByID, nodeByID, nodes]);
@@ -2276,6 +2362,8 @@ export function AciInboxMatrix({
                           onOpenLogicGate={onOpenLogicGate}
                           onOpenNodeBulkMenu={onOpenNodeBulkMenu}
                           onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
+                          onOpenLogicGateBulkMenuAt={onOpenLogicGateBulkMenuAt}
+                          onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value })}
                           onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value })}
                           dropActive={activeDropKey === resizeKey}
                           onDropActiveChange={(active) => setActiveDropKey(active ? resizeKey : "")}
@@ -2324,6 +2412,8 @@ export function ResponsibleInboxMatrix({
   onOpenLogicGate,
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
+  onOpenLogicGateBulkMenuAt,
+  onCreateNodeInLogicGate,
   onDropNodes,
 }: {
   loading: boolean;
@@ -2343,6 +2433,8 @@ export function ResponsibleInboxMatrix({
   onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
   onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu: (logicGateID: string, event: React.MouseEvent) => void;
+  onOpenLogicGateBulkMenuAt: (logicGateID: string, x: number, y: number) => void;
+  onCreateNodeInLogicGate: (input: InboxNodeDropInput) => void;
   onDropNodes: (input: InboxNodeDropInput) => void;
 }) {
   const cellLogicGateGroups = useMemo(() => buildResponsibleInboxGroupsByCell(nodes, nodeByID, logicGateByID, currentUserID), [currentUserID, logicGateByID, nodeByID, nodes]);
@@ -2469,6 +2561,8 @@ export function ResponsibleInboxMatrix({
                           onOpenLogicGate={onOpenLogicGate}
                           onOpenNodeBulkMenu={onOpenNodeBulkMenu}
                           onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
+                          onOpenLogicGateBulkMenuAt={onOpenLogicGateBulkMenuAt}
+                          onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value, status: column.status })}
                           onDropNodes={(nodeIDs) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value, status: column.status })}
                           dropActive={activeDropKey === resizeKey}
                           onDropActiveChange={(active) => setActiveDropKey(active ? resizeKey : "")}
@@ -2516,6 +2610,8 @@ export function LogicGateInboxNodeGroupCard({
   onOpenLogicGate,
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
+  onOpenLogicGateBulkMenuAt,
+  onCreateNode,
   onDropNodes,
   dropActive = false,
   onDropActiveChange,
@@ -2548,6 +2644,8 @@ export function LogicGateInboxNodeGroupCard({
   onOpenLogicGate: (logicGateID: string, label: string, nodeID: string) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
+  onOpenLogicGateBulkMenuAt?: (logicGateID: string, x: number, y: number) => void;
+  onCreateNode?: () => void;
   onDropNodes?: (nodeIDs: string[]) => void;
   dropActive?: boolean;
   onDropActiveChange?: (active: boolean) => void;
@@ -2567,6 +2665,8 @@ export function LogicGateInboxNodeGroupCard({
 }) {
   const canOpenLogicGate = group.logicGateID !== INBOX_NO_LOGIC_GATE_ID;
   const firstNodeID = group.nodeIDs[0] ?? "";
+  const [groupContextMenu, setGroupContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const selectedNodeIDsForMenu = useMemo(() => cleanIDList(Array.from(selectedRowIDs).map(nodeIDFromTreeID)).filter((nodeID) => nodeByID.has(nodeID)), [nodeByID, selectedRowIDs]);
   const explicitHeight = !collapsed && typeof heightPx === "number" && Number.isFinite(heightPx);
   const groupStyleBase = explicitHeight
     ? { ...logicGateInboxGroupStyle, height: clampInboxGroupHeight(heightPx), gridTemplateRows: "30px minmax(0, 1fr)" }
@@ -2592,10 +2692,17 @@ export function LogicGateInboxNodeGroupCard({
     return nodeIDsFromExplorerPayload(readExplorerDragPayload(dataTransfer), nodeFolders, nodeFolderItems)
       .filter((nodeID) => nodeByID.has(nodeID));
   };
+  const openGroupContextMenu = (event: React.MouseEvent) => {
+    if (!canOpenLogicGate) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setGroupContextMenu({ x: event.clientX, y: event.clientY });
+  };
   return (
     <div
       data-inbox-logic-gate-group-card="true"
       style={groupStyle}
+      onContextMenu={openGroupContextMenu}
       onDragOver={(event) => {
         if (!canOpenLogicGate || !onDropNodes || readDroppedNodeIDs(event.dataTransfer).length === 0) return;
         event.preventDefault();
@@ -2626,17 +2733,11 @@ export function LogicGateInboxNodeGroupCard({
         }}
         onContextMenu={(event) => {
           if (!canOpenLogicGate) return;
-          if (onOpenLogicGateBulkMenu) {
+          if (onOpenLogicGateBulkMenu && !onCreateNode && !onOpenLogicGateBulkMenuAt) {
             onOpenLogicGateBulkMenu(group.logicGateID, event);
             return;
           }
-          if (onOpenPinContextMenu) {
-            onOpenPinContextMenu(event, {
-              kind: "logic_gate",
-              id: group.logicGateID,
-              label: group.label,
-            });
-          }
+          openGroupContextMenu(event);
         }}
         onDoubleClick={(event) => {
           if (!canOpenLogicGate) return;
@@ -2707,6 +2808,58 @@ export function LogicGateInboxNodeGroupCard({
         >
           <span style={logicGateInboxGroupResizeGripStyle} />
         </div>
+      )}
+      {groupContextMenu && (
+        <FrameRightClickMenu x={groupContextMenu.x} y={groupContextMenu.y} onClose={() => setGroupContextMenu(null)}>
+          {onCreateNode && (
+            <button
+              type="button"
+              style={sharedInboxContextMenuButtonStyle}
+              onClick={() => {
+                setGroupContextMenu(null);
+                onCreateNode();
+              }}
+            >
+              Create node
+            </button>
+          )}
+          {onDropNodes && selectedNodeIDsForMenu.length > 0 && (
+            <button
+              type="button"
+              style={sharedInboxContextMenuButtonStyle}
+              onClick={() => {
+                const nodeIDs = selectedNodeIDsForMenu;
+                setGroupContextMenu(null);
+                onDropNodes(nodeIDs);
+              }}
+            >
+              Add selected node{selectedNodeIDsForMenu.length === 1 ? "" : "s"}
+            </button>
+          )}
+          {onOpenLogicGateBulkMenuAt && (
+            <button
+              type="button"
+              style={sharedInboxContextMenuButtonStyle}
+              onClick={() => {
+                const { x, y } = groupContextMenu;
+                setGroupContextMenu(null);
+                onOpenLogicGateBulkMenuAt(group.logicGateID, x, y);
+              }}
+            >
+              Edit Logic Gate assignments
+            </button>
+          )}
+          <button
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            onClick={() => {
+              requestAppSidebarPin({ kind: "logic_gate", id: group.logicGateID, label: group.label });
+              setGroupContextMenu(null);
+            }}
+          >
+            Pin Logic Gate
+          </button>
+        </FrameRightClickMenu>
       )}
     </div>
   );

@@ -6,6 +6,7 @@ import type { LogicGateRecord } from "../../../../frontend/src/modules/logic-gat
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
 import {
   buildAciInboxGroupsByCell,
+  buildMyLogicGateGroups,
   buildMyNodeGroups,
   buildResponsibleInboxGroupsByCell,
   buildSharedInboxRows,
@@ -193,6 +194,44 @@ test("my node groups follow logic gate folders and node drag payloads resolve fo
       explorerFolderItem("folder-growth", "gate-growth", "logic_gate"),
     ],
   ), ["node-root", "node-child"]);
+});
+
+test("my logic gate groups merge shortcuts with RACI-assigned gates", () => {
+  const folders = [
+    explorerFolder("folder-product", "Product"),
+    explorerFolder("folder-growth", "Growth", "folder-product"),
+  ];
+  const folderItems = [
+    explorerFolderItem("folder-growth", "gate-shortcut", "logic_gate"),
+    explorerFolderItem("folder-growth", "gate-assigned", "logic_gate"),
+  ];
+  const shortcut = {
+    user_id: "user-1",
+    company_id: "company-1",
+    logic_gate_id: "gate-shortcut",
+    position: 1000,
+    created_timestamp: "2026-01-01T00:00:00Z",
+    updated_timestamp: "2026-01-01T00:00:00Z",
+  };
+  const shortcutGate = logicGate("gate-shortcut", []);
+  const assignedGate = logicGate("gate-assigned", [{ company_id: "company-1", logic_gate_id: "gate-assigned", role: "consulted", user_id: "user-1", created_timestamp: "2026-01-01T00:00:00Z" }]);
+  const duplicateAssignedGate = logicGate("gate-shortcut", [{ company_id: "company-1", logic_gate_id: "gate-shortcut", role: "responsible", user_id: "user-1", created_timestamp: "2026-01-01T00:00:00Z" }]);
+  const logicGateByID = new Map([
+    [shortcutGate.logic_gate_id, shortcutGate],
+    [assignedGate.logic_gate_id, assignedGate],
+  ]);
+
+  const groups = buildMyLogicGateGroups({
+    shortcuts: [shortcut],
+    assignedLogicGates: [assignedGate, duplicateAssignedGate],
+    logicGateByID,
+    folders,
+    folderItems,
+  });
+
+  assert.deepEqual(groups.map((group) => [group.label, group.logicGates.map((item) => item.logic_gate_id)]), [
+    ["Product / Growth", ["gate-shortcut", "gate-assigned"]],
+  ]);
 });
 
 test("home column sizing keeps generated grid tracks stable", () => {

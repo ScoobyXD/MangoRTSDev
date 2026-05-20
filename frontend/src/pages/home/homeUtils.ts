@@ -533,6 +533,7 @@ export function mergeLogicGateShortcuts(current: UserLogicGateShortcut[], incomi
 
 export function buildMyLogicGateGroups(input: {
   shortcuts: UserLogicGateShortcut[];
+  assignedLogicGates?: LogicGateRecord[];
   logicGateByID: Map<string, LogicGateRecord>;
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
@@ -540,10 +541,21 @@ export function buildMyLogicGateGroups(input: {
   const folderByID = new Map(input.folders.map((folder) => [folder.folder_id, folder]));
   const folderIDByLogicGateID = new Map(input.folderItems.filter((item) => item.item_type === "logic_gate").map((item) => [item.item_id, item.folder_id]));
   const groupByKey = new Map<string, MyLogicGateGroup>();
-  for (const shortcut of sortLogicGateShortcuts(input.shortcuts)) {
-    const logicGate = input.logicGateByID.get(shortcut.logic_gate_id);
+  const seen = new Set<string>();
+  const orderedLogicGates = [
+    ...sortLogicGateShortcuts(input.shortcuts)
+      .map((shortcut) => input.logicGateByID.get(shortcut.logic_gate_id))
+      .filter((logicGate): logicGate is LogicGateRecord => Boolean(logicGate)),
+    ...[...(input.assignedLogicGates ?? [])].sort((a, b) => (
+      logicGateTitle(a).localeCompare(logicGateTitle(b), undefined, { numeric: true, sensitivity: "base" })
+      || a.logic_gate_id.localeCompare(b.logic_gate_id)
+    )),
+  ];
+  for (const logicGate of orderedLogicGates) {
+    if (seen.has(logicGate.logic_gate_id)) continue;
+    seen.add(logicGate.logic_gate_id);
     if (!logicGate) continue;
-    const folderID = folderIDByLogicGateID.get(shortcut.logic_gate_id) ?? "";
+    const folderID = folderIDByLogicGateID.get(logicGate.logic_gate_id) ?? "";
     const key = folderID || "unfiled";
     const group = groupByKey.get(key) ?? {
       key,
