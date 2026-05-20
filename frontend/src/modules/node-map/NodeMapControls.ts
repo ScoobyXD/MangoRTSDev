@@ -361,7 +361,7 @@ export function shouldIgnoreMapDeleteKeyTarget(target: DeleteKeyTargetLike | nul
   if (!target) return false;
   const tag = target.tagName ?? "";
   if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return true;
-  return Boolean(target.closest?.("[contenteditable='true'], textarea, input"));
+  return Boolean(target.closest?.("[contenteditable='true'], textarea, input, [data-mango-copyable-image='true']"));
 }
 
 export function resolveNodeMapDeleteSelection(input: {

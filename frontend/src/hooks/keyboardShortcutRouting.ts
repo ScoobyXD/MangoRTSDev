@@ -17,6 +17,7 @@ type EditableTargetLike = {
 };
 
 const TEXT_EDITING_TARGET_SELECTOR = "input, textarea, select, [contenteditable='true'], [contenteditable=''], [contenteditable='plaintext-only'], [role='textbox']";
+const NATIVE_COPY_TARGET_SELECTOR = "[data-mango-copyable-image='true']";
 
 function isEditableTargetLike(target: unknown): target is EditableTargetLike {
   return typeof target === "object" && target !== null;
@@ -31,7 +32,7 @@ export function shouldDeferToNativeTextEditing(target: unknown): boolean {
   // Editable widgets can contain nested spans/buttons. Checking the closest
   // editable parent keeps browser text undo/copy/paste in charge for the whole
   // editing surface, not just the exact element that received the event.
-  return typeof target.closest === "function" && Boolean(target.closest(TEXT_EDITING_TARGET_SELECTOR));
+  return typeof target.closest === "function" && Boolean(target.closest(`${TEXT_EDITING_TARGET_SELECTOR}, ${NATIVE_COPY_TARGET_SELECTOR}`));
 }
 
 export function resolveGlobalKeyboardShortcut(event: KeyboardShortcutEventLike): GlobalKeyboardCommand | null {

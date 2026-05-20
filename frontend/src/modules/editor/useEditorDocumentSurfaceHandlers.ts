@@ -48,7 +48,6 @@ import {
   clampEditorImageSize,
   clampEditorImageVerticalOffset,
   clearEditorImageSelection,
-  createEditorImageBlob,
   createEditorImageClipboardHTML,
   createEditorImageDataFromFile,
   createEditorImageDataFromSource,
@@ -67,6 +66,8 @@ import {
   readEditorImageFloatSide,
   getSelectedEditorImageFrame,
   selectEditorImageFrame,
+  writeImageClipboardData,
+  writeImageToSystemClipboard,
   type EditorImageClipboardData,
   type EditorImageData,
 } from "./editorImages";
@@ -673,29 +674,14 @@ function isEditorRedoShortcut(event: React.KeyboardEvent<HTMLDivElement>): boole
   return (key === "z" && event.shiftKey) || key === "y";
 }
 
-function copyEditorImageToSystemClipboard(data: EditorImageData, html: string) {
-  const clipboard = typeof navigator !== "undefined" ? navigator.clipboard : undefined;
-  if (!clipboard?.write || typeof ClipboardItem === "undefined") return;
-  const imageBlob = createEditorImageBlob(data.src);
-  if (!imageBlob) return;
-  void clipboard.write([
-    new ClipboardItem({
-      [imageBlob.type]: imageBlob,
-      "text/html": new Blob([html], { type: "text/html" }),
-      "text/plain": new Blob(["Image"], { type: "text/plain" }),
-    }),
-  ]).catch(() => undefined);
-}
-
 function copySelectedEditorImage(root: HTMLElement, clipboardData: DataTransfer): boolean {
   const frame = getSelectedEditorImageFrame(root);
   if (!frame) return false;
   const data = readEditorImageData(frame);
   if (!data) return false;
   const html = createEditorImageClipboardHTML(root.ownerDocument, data);
-  clipboardData.setData("text/html", html);
-  clipboardData.setData("text/plain", "Image");
-  copyEditorImageToSystemClipboard(data, html);
+  writeImageClipboardData(clipboardData, data.src, html);
+  writeImageToSystemClipboard(data.src, html);
   return true;
 }
 

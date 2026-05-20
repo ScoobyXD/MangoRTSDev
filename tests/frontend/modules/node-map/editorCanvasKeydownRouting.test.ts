@@ -20,7 +20,17 @@ test("returns true for textarea editor targets so Tab and Enter stay native to t
   assert.equal(
     shouldIgnoreCanvasKeydownTarget({
       isContentEditable: false,
-      closest: (selector: string) => (selector === "[contenteditable='true'], textarea, input" ? { isContentEditable: false } : null),
+      closest: (selector: string) => (selector.includes("textarea") ? { isContentEditable: false } : null),
+    }),
+    true,
+  );
+});
+
+test("returns true for copyable image targets", () => {
+  assert.equal(
+    shouldIgnoreCanvasKeydownTarget({
+      isContentEditable: false,
+      closest: (selector: string) => (selector.includes("data-mango-copyable-image") ? { isContentEditable: false } : null),
     }),
     true,
   );

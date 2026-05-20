@@ -34,6 +34,17 @@ test("editable descendants also keep native text shortcut handling", () => {
   assert.equal(resolveGlobalKeyboardShortcut(keyEvent({ key: "y", ctrlKey: true, target })), null);
 });
 
+test("copyable image controls keep Ctrl+C out of dashboard frame copy", () => {
+  const target = {
+    tagName: "BUTTON",
+    isContentEditable: false,
+    closest: (selector: string) => selector.includes("data-mango-copyable-image") ? { isContentEditable: false } : null,
+  };
+
+  assert.equal(shouldDeferToNativeTextEditing(target), true);
+  assert.equal(resolveGlobalKeyboardShortcut(keyEvent({ key: "c", ctrlKey: true, target })), null);
+});
+
 test("dashboard undo and redo stay available when focus is not in text editing", () => {
   const target = { tagName: "DIV", isContentEditable: false, closest: () => null };
 

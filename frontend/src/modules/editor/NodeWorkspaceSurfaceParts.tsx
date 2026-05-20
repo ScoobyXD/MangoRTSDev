@@ -9,7 +9,13 @@ import { deserializeEditorDocumentHTML, readEditorDocumentText, serializeEditorD
 import { resolveEditorTextBlockChatAnchorRanges } from "./editorTextBlockChatHighlights";
 import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHandlers";
 import { getEditorDocumentFontFamily } from "./useEditorPreferences";
-import { findEditorImageFrame, readEditorImageData } from "./editorImages";
+import {
+  createStandaloneImageClipboardHTML,
+  findEditorImageFrame,
+  readEditorImageData,
+  writeImageClipboardData,
+  writeImageToSystemClipboard,
+} from "./editorImages";
 import {
   buildMentionOptions,
   mentionUserDisplayName,
@@ -375,6 +381,28 @@ function imageDataURLByteSize(dataURL: string): number {
   const base64 = dataURL.slice(commaIndex + 1).replace(/\s+/g, "");
   const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
   return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
+type CopyShortcutEvent = {
+  key: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  shiftKey?: boolean;
+  altKey?: boolean;
+};
+
+function isCopyShortcut(event: CopyShortcutEvent): boolean {
+  return Boolean((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "c");
+}
+
+function copyImageAttachmentToClipboard(attachment: EditorChatAttachment, clipboardData?: DataTransfer): boolean {
+  if (!isImageAttachment(attachment) || !attachment.dataURL) return false;
+  const label = attachment.name.trim() || "Image";
+  const html = createStandaloneImageClipboardHTML(attachment.dataURL, label);
+  if (!html) return false;
+  const wroteEventClipboard = clipboardData ? writeImageClipboardData(clipboardData, attachment.dataURL, html, label) : false;
+  const wroteSystemClipboard = writeImageToSystemClipboard(attachment.dataURL, html, label);
+  return wroteEventClipboard || wroteSystemClipboard;
 }
 
 function readImageDraftFromFrame(blockID: string, frame: HTMLElement, wrapper: HTMLElement): TextBlockImageDraft | null {
@@ -756,6 +784,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         onFocus={onFocus}
         onBeforeInput={documentSurfaceHandlers.onBeforeInput}
         onPaste={documentSurfaceHandlers.onPaste}
+        onCopy={documentSurfaceHandlers.onCopy}
         onDrop={documentSurfaceHandlers.onDrop}
         onInput={documentSurfaceHandlers.onInput}
         onSelect={documentSurfaceHandlers.onSelect}
@@ -1543,7 +1572,23 @@ const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, su
       };
       if (image) {
         return (
-          <button key={attachment.id} type="button" onClick={() => onPreviewImage(attachment)} style={{ ...style, cursor: "pointer" }}>
+          <button
+            key={attachment.id}
+            type="button"
+            data-mango-copyable-image="true"
+            onCopy={(event) => {
+              if (!copyImageAttachmentToClipboard(attachment, event.clipboardData)) return;
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onKeyDown={(event) => {
+              if (!isCopyShortcut(event) || !copyImageAttachmentToClipboard(attachment)) return;
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={() => onPreviewImage(attachment)}
+            style={{ ...style, cursor: "pointer" }}
+          >
             {content}
           </button>
         );
@@ -1571,7 +1616,23 @@ const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, 
   <div style={{ minWidth: 0, display: "flex", flexWrap: "wrap", gap: 5 }}>
     {attachments.map((attachment) => (
       <span key={attachment.id} style={{ maxWidth: "100%", minHeight: 30, display: "inline-grid", gridTemplateColumns: "24px minmax(0, 1fr) auto 18px", alignItems: "center", gap: 5, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: surfaceText, padding: "3px 4px 3px 5px", fontSize: 10, fontWeight: 800, letterSpacing: 0 }}>
-        <button type="button" aria-label={isImageAttachment(attachment) ? `Preview ${attachment.name}` : attachment.name} onClick={() => { if (isImageAttachment(attachment)) onPreviewImage(attachment); }} style={{ width: 24, height: 24, border: "none", background: "transparent", padding: 0, cursor: isImageAttachment(attachment) ? "pointer" : "default" }}>
+        <button
+          type="button"
+          data-mango-copyable-image={isImageAttachment(attachment) ? "true" : undefined}
+          aria-label={isImageAttachment(attachment) ? `Preview ${attachment.name}` : attachment.name}
+          onCopy={(event) => {
+            if (!copyImageAttachmentToClipboard(attachment, event.clipboardData)) return;
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onKeyDown={(event) => {
+            if (!isCopyShortcut(event) || !copyImageAttachmentToClipboard(attachment)) return;
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={() => { if (isImageAttachment(attachment)) onPreviewImage(attachment); }}
+          style={{ width: 24, height: 24, border: "none", background: "transparent", padding: 0, cursor: isImageAttachment(attachment) ? "pointer" : "default" }}
+        >
           <AttachmentThumb attachment={attachment} />
         </button>
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
@@ -1605,17 +1666,35 @@ type ImageAttachmentPreviewModalProps = {
 const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = ({ attachment, surfaceText, strokeColor, onClose }) => {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (!isCopyShortcut(event)) return;
+      const copied = copyImageAttachmentToClipboard(attachment);
+      if (!copied && typeof document !== "undefined") document.execCommand("copy");
+      event.preventDefault();
+      event.stopPropagation();
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+    const onCopy = (event: ClipboardEvent) => {
+      if (!event.clipboardData || !copyImageAttachmentToClipboard(attachment, event.clipboardData)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("copy", onCopy, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("copy", onCopy, true);
+    };
+  }, [attachment, onClose]);
 
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-label={attachment.name}
+      data-mango-copyable-image="true"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}

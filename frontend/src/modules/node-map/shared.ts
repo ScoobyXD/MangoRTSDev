@@ -363,7 +363,7 @@ type KeydownTargetLike = {
 export function shouldIgnoreCanvasKeydownTarget(target: KeydownTargetLike | null | undefined): boolean {
   if (!target) return false;
   if (target.isContentEditable) return true;
-  return Boolean(target.closest?.("[contenteditable='true'], textarea, input"));
+  return Boolean(target.closest?.("[contenteditable='true'], textarea, input, [data-mango-copyable-image='true']"));
 }
 
 // Relationship anchor helper for opposite-side calculations.
