@@ -308,6 +308,12 @@ export function logicGateHasRaciRole(logicGate: LogicGateRecord | undefined, rol
   return (logicGate.raci_assignments ?? []).some((assignment) => assignment.role === role && assignment.user_id?.trim() === cleanUserID);
 }
 
+export function logicGateHasAnyRaciRole(logicGate: LogicGateRecord | undefined, userID: string): boolean {
+  const cleanUserID = userID.trim();
+  if (!logicGate || !cleanUserID) return false;
+  return (logicGate.raci_assignments ?? []).some((assignment) => assignment.user_id?.trim() === cleanUserID);
+}
+
 export function nodeHasLogicGateRaciRole(node: NodeRecord, logicGateByID: Map<string, LogicGateRecord>, role: LogicGateRaciRole, userID: string): boolean {
   return cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateHasRaciRole(logicGateByID.get(logicGateID), role, userID));
 }
@@ -349,16 +355,15 @@ export function buildAciInboxGroupsByCell(
   for (const node of nodes) {
     const priority = normalizeInboxPriority(node.priority);
     if (priority === null) continue;
+    const assignedToCurrentUser = node.assignee_user_id?.trim() === currentUserID.trim();
     for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
       const logicGate = logicGateByID.get(logicGateID);
-      let matchedAciRole = false;
       for (const column of ACI_COLUMNS) {
         if (!isAciRaciRole(column.role)) continue;
         if (!logicGateHasRaciRole(logicGate, column.role, currentUserID)) continue;
-        matchedAciRole = true;
         addRaciInboxGroupNode(byCell, aciCellKey(column.role, priority), logicGateID, node.node_id);
       }
-      if (!matchedAciRole && logicGateHasRaciRole(logicGate, "responsible", currentUserID)) {
+      if (assignedToCurrentUser && !logicGateHasAnyRaciRole(logicGate, currentUserID)) {
         addRaciInboxGroupNode(byCell, aciCellKey("other", priority), logicGateID, node.node_id);
       }
     }
@@ -384,8 +389,7 @@ export function buildResponsibleInboxGroupsByCell(
     if (status === "done") continue;
     for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
       const logicGate = logicGateByID.get(logicGateID);
-      const assignedToCurrentUser = node.assignee_user_id?.trim() === currentUserID.trim();
-      if (!assignedToCurrentUser && !logicGateHasRaciRole(logicGate, "responsible", currentUserID)) continue;
+      if (!logicGateHasRaciRole(logicGate, "responsible", currentUserID)) continue;
       addRaciInboxGroupNode(byCell, responsibleCellKey(status, priority), logicGateID, node.node_id);
     }
   }

@@ -13,7 +13,7 @@ func (r *PostgresRepo) ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]do
 }
 
 func (r *PostgresRepo) ListResponsibleInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listAssignedWorkItemInboxNodes(ctx, query)
+	return r.listWorkItemInboxNodes(ctx, query, domain.LogicGateRaciRoleResponsible)
 }
 
 func (r *PostgresRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
@@ -21,7 +21,7 @@ func (r *PostgresRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, err
 }
 
 func (r *PostgresRepo) ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listAssignedWorkItemInboxNodes(ctx, query)
+	return r.listWorkItemInboxNodes(ctx, query, "assignee")
 }
 
 func (r *PostgresRepo) RebuildWorkItemInboxEntries(companyID string) error {
@@ -42,7 +42,7 @@ func (r *PostgresRepo) RebuildWorkItemInboxEntriesForLogicGate(companyID, logicG
 	return err
 }
 
-func (r *PostgresRepo) listAssignedWorkItemInboxNodes(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
+func (r *PostgresRepo) listWorkItemInboxNodes(ctx context.Context, query WorkItemInboxQuery, role string) ([]domain.Node, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -65,8 +65,9 @@ from work_item_inbox_entries entry
 where entry.entry_kind='node'
   and entry.company_id=$1
   and entry.user_id::text=$2
+  and entry.role=$3
 order by entry.node_created_timestamp asc, entry.node_id::text asc
-limit $3`, query.CompanyID, query.UserID, query.Limit)
+limit $4`, query.CompanyID, query.UserID, role, query.Limit)
 	if err != nil {
 		return nil, err
 	}

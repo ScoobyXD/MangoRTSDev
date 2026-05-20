@@ -80,12 +80,22 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetLogicGateRaciAssignments aci: %v", err)
 	}
-	node, err := repo.CreateNodeWithAssignee(companyID, "Read API node", user.UserID)
+	aciNode, err := repo.CreateNodeWithAssignee(companyID, "Read API ACI node", user.UserID)
 	if err != nil {
-		t.Fatalf("CreateNodeWithAssignee: %v", err)
+		t.Fatalf("CreateNodeWithAssignee aci: %v", err)
 	}
-	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: aciGate.LogicGateID, NodeID: node.NodeID, Status: "done"}); err != nil {
-		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: aciGate.LogicGateID, NodeID: aciNode.NodeID, Status: "done"}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus aci: %v", err)
+	}
+	responsibleNode, err := repo.CreateNode(companyID, "Read API responsible node")
+	if err != nil {
+		t.Fatalf("CreateNode responsible: %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: responsibleGate.LogicGateID, NodeID: responsibleNode.NodeID, Status: "in progress"}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus responsible: %v", err)
+	}
+	if _, err := repo.UpdateNode(store.UpdateNodeInput{CompanyID: companyID, NodeID: responsibleNode.NodeID, AssigneeUserIDSet: true}); err != nil {
+		t.Fatalf("clear responsible node assignee: %v", err)
 	}
 
 	handler := NewServer(repo).Routes()
@@ -102,11 +112,11 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	if responsiblePayload.CompanyID != companyID || responsiblePayload.UserID != user.UserID || responsiblePayload.Limit != 1 {
 		t.Fatalf("responsible metadata = %+v", responsiblePayload)
 	}
-	if len(responsiblePayload.Nodes) != 1 || responsiblePayload.Nodes[0].Status == nil || *responsiblePayload.Nodes[0].Status != "Done" {
-		t.Fatalf("responsible nodes = %+v, want one card-derived Done node", responsiblePayload.Nodes)
+	if len(responsiblePayload.Nodes) != 1 || responsiblePayload.Nodes[0].NodeID != responsibleNode.NodeID || responsiblePayload.Nodes[0].Status == nil || *responsiblePayload.Nodes[0].Status != "In Progress" {
+		t.Fatalf("responsible nodes = %+v, want one Responsible Logic Gate node", responsiblePayload.Nodes)
 	}
-	if len(responsiblePayload.Nodes[0].LogicGateIDs) != 1 || responsiblePayload.Nodes[0].LogicGateIDs[0] != aciGate.LogicGateID {
-		t.Fatalf("responsible node logic_gate_ids = %+v, want %q", responsiblePayload.Nodes[0].LogicGateIDs, aciGate.LogicGateID)
+	if len(responsiblePayload.Nodes[0].LogicGateIDs) != 1 || responsiblePayload.Nodes[0].LogicGateIDs[0] != responsibleGate.LogicGateID {
+		t.Fatalf("responsible node logic_gate_ids = %+v, want %q", responsiblePayload.Nodes[0].LogicGateIDs, responsibleGate.LogicGateID)
 	}
 
 	myNodesRec := getWorkItemInboxRead(t, handler, "/v1/work-items/my-nodes?"+baseQuery)
@@ -114,7 +124,7 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 		Nodes []domain.Node `json:"nodes"`
 	}
 	decodeWorkItemInboxReadPayload(t, myNodesRec, &myNodesPayload)
-	if len(myNodesPayload.Nodes) != 1 || myNodesPayload.Nodes[0].NodeID != node.NodeID {
+	if len(myNodesPayload.Nodes) != 1 || myNodesPayload.Nodes[0].NodeID != aciNode.NodeID {
 		t.Fatalf("my nodes = %+v, want assigned node", myNodesPayload.Nodes)
 	}
 

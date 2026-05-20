@@ -268,6 +268,7 @@ func (r *MemoryRepo) SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUp
 	}
 	sortLogicGateRaciAssignments(assignments)
 	r.logicGateRaci[key(companyID, logicGateID)] = assignments
+	r.rebuildWorkItemInboxEntriesForLogicGateLocked(companyID, logicGateID)
 	return append([]domain.LogicGateRaciAssignment{}, assignments...), nil
 }
 

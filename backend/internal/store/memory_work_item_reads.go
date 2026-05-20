@@ -31,7 +31,7 @@ func (r *MemoryRepo) ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]doma
 }
 
 func (r *MemoryRepo) ListResponsibleInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listAssignedWorkItemInboxNodes(ctx, query)
+	return r.listWorkItemInboxNodes(ctx, query, domain.LogicGateRaciRoleResponsible)
 }
 
 func (r *MemoryRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
@@ -39,7 +39,7 @@ func (r *MemoryRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error
 }
 
 func (r *MemoryRepo) ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listAssignedWorkItemInboxNodes(ctx, query)
+	return r.listWorkItemInboxNodes(ctx, query, memoryWorkItemInboxRoleAssignee)
 }
 
 func (r *MemoryRepo) RebuildWorkItemInboxEntries(companyID string) error {
@@ -68,7 +68,7 @@ func (r *MemoryRepo) RebuildWorkItemInboxEntriesForLogicGate(companyID, logicGat
 	return nil
 }
 
-func (r *MemoryRepo) listAssignedWorkItemInboxNodes(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
+func (r *MemoryRepo) listWorkItemInboxNodes(ctx context.Context, query WorkItemInboxQuery, role string) ([]domain.Node, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -82,7 +82,7 @@ func (r *MemoryRepo) listAssignedWorkItemInboxNodes(ctx context.Context, query W
 	r.rebuildWorkItemInboxEntriesForCompanyLocked(query.CompanyID)
 	items := make([]domain.Node, 0)
 	for _, entry := range r.workItemInboxEntries {
-		if entry.CompanyID != query.CompanyID || entry.UserID != query.UserID || entry.EntryKind != memoryWorkItemInboxEntryKindNode {
+		if entry.CompanyID != query.CompanyID || entry.UserID != query.UserID || entry.EntryKind != memoryWorkItemInboxEntryKindNode || entry.Role != role {
 			continue
 		}
 		items = append(items, entry.Node)
@@ -213,19 +213,44 @@ func (r *MemoryRepo) rebuildWorkItemInboxEntriesForNodeLocked(companyID, nodeID 
 		}
 	}
 	node, ok := r.nodes[key(companyID, nodeID)]
-	if !ok || node.AssigneeUserID == nil || strings.TrimSpace(*node.AssigneeUserID) == "" {
+	if !ok {
 		return
 	}
 	node = r.withNodeReadModelLocked(node)
-	userID := strings.TrimSpace(*node.AssigneeUserID)
-	entry := memoryWorkItemInboxEntry{
-		CompanyID: companyID,
-		UserID:    userID,
-		EntryKind: memoryWorkItemInboxEntryKindNode,
-		Role:      memoryWorkItemInboxRoleAssignee,
-		Node:      node,
+	if node.AssigneeUserID != nil {
+		userID := strings.TrimSpace(*node.AssigneeUserID)
+		if userID != "" {
+			entry := memoryWorkItemInboxEntry{
+				CompanyID: companyID,
+				UserID:    userID,
+				EntryKind: memoryWorkItemInboxEntryKindNode,
+				Role:      memoryWorkItemInboxRoleAssignee,
+				Node:      node,
+			}
+			r.workItemInboxEntries[workItemInboxProjectionKey(companyID, memoryWorkItemInboxEntryKindNode, nodeID, userID, memoryWorkItemInboxRoleAssignee)] = entry
+		}
 	}
-	r.workItemInboxEntries[workItemInboxProjectionKey(companyID, memoryWorkItemInboxEntryKindNode, nodeID, userID, memoryWorkItemInboxRoleAssignee)] = entry
+	assignment, assigned := r.nodeLogicGateAssignmentLocked(companyID, nodeID, "")
+	if !assigned || strings.TrimSpace(assignment.LogicGateID) == "" {
+		return
+	}
+	for _, raciAssignment := range r.logicGateRaci[key(companyID, assignment.LogicGateID)] {
+		userID := strings.TrimSpace(raciAssignment.UserID)
+		if raciAssignment.Role != domain.LogicGateRaciRoleResponsible || userID == "" {
+			continue
+		}
+		if _, ok := r.memberships[membershipKey(companyID, userID)]; !ok {
+			continue
+		}
+		entry := memoryWorkItemInboxEntry{
+			CompanyID: companyID,
+			UserID:    userID,
+			EntryKind: memoryWorkItemInboxEntryKindNode,
+			Role:      domain.LogicGateRaciRoleResponsible,
+			Node:      node,
+		}
+		r.workItemInboxEntries[workItemInboxProjectionKey(companyID, memoryWorkItemInboxEntryKindNode, nodeID, userID, domain.LogicGateRaciRoleResponsible)] = entry
+	}
 }
 
 func (r *MemoryRepo) rebuildWorkItemInboxEntriesForLogicGateLocked(companyID, logicGateID string) {
@@ -257,6 +282,23 @@ func (r *MemoryRepo) rebuildWorkItemInboxEntriesForLogicGateLocked(companyID, lo
 			RaciAssignment:            assignment,
 		}
 		r.workItemInboxEntries[workItemInboxProjectionKey(companyID, memoryWorkItemInboxEntryKindLogicGate, logicGateID, userID, role)] = entry
+	}
+	r.rebuildWorkItemInboxEntriesForLogicGateNodesLocked(companyID, logicGateID)
+}
+
+func (r *MemoryRepo) rebuildWorkItemInboxEntriesForLogicGateNodesLocked(companyID, logicGateID string) {
+	nodeIDs := make([]string, 0)
+	seen := map[string]bool{}
+	for _, assignment := range r.nodeLogicGateAssignments {
+		if assignment.CompanyID != companyID || assignment.LogicGateID != logicGateID || seen[assignment.NodeID] {
+			continue
+		}
+		seen[assignment.NodeID] = true
+		nodeIDs = append(nodeIDs, assignment.NodeID)
+	}
+	sort.Strings(nodeIDs)
+	for _, nodeID := range nodeIDs {
+		r.rebuildWorkItemInboxEntriesForNodeLocked(companyID, nodeID)
 	}
 }
 

@@ -64,25 +64,25 @@ func TestMemoryRepoWorkItemInboxProjectionBackfillMatchesJoinBackedReads(t *test
 	if err := repo.RebuildWorkItemInboxEntries(companyID); err != nil {
 		t.Fatalf("RebuildWorkItemInboxEntries: %v", err)
 	}
-	assertMemoryProjectionCounts(t, repo, companyID, 2, 4)
+	assertMemoryProjectionCounts(t, repo, companyID, 3, 4)
 
 	query := WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 20}
 	responsibleNodes, err := repo.ListResponsibleInboxNodes(query)
 	if err != nil {
 		t.Fatalf("ListResponsibleInboxNodes: %v", err)
 	}
-	if expected := joinBackedAssignedWorkItemInboxNodesForTest(t, repo, query); !reflect.DeepEqual(responsibleNodes, expected) {
+	if expected := joinBackedResponsibleWorkItemInboxNodesForTest(t, repo, query); !reflect.DeepEqual(responsibleNodes, expected) {
 		t.Fatalf("responsible projection nodes = %+v, want join-backed %+v", responsibleNodes, expected)
 	}
 	myNodes, err := repo.ListMyNodes(query)
 	if err != nil {
 		t.Fatalf("ListMyNodes: %v", err)
 	}
-	if !reflect.DeepEqual(myNodes, responsibleNodes) {
-		t.Fatalf("my nodes = %+v, want responsible node projection %+v", myNodes, responsibleNodes)
+	if expected := joinBackedAssignedWorkItemInboxNodesForTest(t, repo, query); !reflect.DeepEqual(myNodes, expected) {
+		t.Fatalf("my nodes = %+v, want join-backed assigned %+v", myNodes, expected)
 	}
 
-	doneRead := mustFindInboxReadNode(t, responsibleNodes, doneNode.NodeID)
+	doneRead := mustFindInboxReadNode(t, myNodes, doneNode.NodeID)
 	if doneRead.Status == nil || *doneRead.Status != "Done" || doneRead.Priority == nil || *doneRead.Priority != donePriority {
 		t.Fatalf("done projection node = %+v, want Done with priority %d", doneRead, donePriority)
 	}
@@ -152,6 +152,22 @@ func TestWorkItemInboxProjectionMigrationAndPostgresReadsUseProjection(t *testin
 	if strings.Contains(migration, "from kanban_cards") {
 		t.Fatal("projection migration should not derive inbox truth directly from kanban_cards")
 	}
+	responsibleMigrationPath := filepath.Join("..", "..", "db", "migrations", "20260520_responsible_inbox_raci_nodes.sql")
+	responsibleMigrationRaw, err := os.ReadFile(responsibleMigrationPath)
+	if err != nil {
+		t.Fatalf("ReadFile responsible migration: %v", err)
+	}
+	responsibleMigration := strings.ToLower(strings.Join(strings.Fields(string(responsibleMigrationRaw)), " "))
+	for _, needle := range []string{
+		"create unique index if not exists idx_work_item_inbox_entries_node_user_role",
+		"and role = 'responsible'",
+		"create or replace function rebuild_work_item_inbox_entries_for_logic_gate_nodes",
+		"perform rebuild_work_item_inbox_entries_for_logic_gate_nodes",
+	} {
+		if !strings.Contains(responsibleMigration, needle) {
+			t.Fatalf("responsible projection migration missing %q", needle)
+		}
+	}
 
 	schemaPath := filepath.Join("..", "..", "db", "schema.sql")
 	schemaRaw, err := os.ReadFile(schemaPath)
@@ -162,6 +178,8 @@ func TestWorkItemInboxProjectionMigrationAndPostgresReadsUseProjection(t *testin
 	for _, needle := range []string{
 		"create table if not exists work_item_inbox_entries",
 		"create or replace function rebuild_work_item_inbox_entries_for_node",
+		"create unique index if not exists idx_work_item_inbox_entries_node_user_role",
+		"and role = 'responsible'",
 		"create trigger trg_rebuild_work_item_inbox_entries_assignment after insert or update or delete on node_logic_gate_assignments",
 	} {
 		if !strings.Contains(schema, needle) {
@@ -213,6 +231,38 @@ func joinBackedAssignedWorkItemInboxNodesForTest(t *testing.T, repo *MemoryRepo,
 	items := make([]domain.Node, 0)
 	for _, node := range repo.nodes {
 		if node.CompanyID != query.CompanyID || node.AssigneeUserID == nil || strings.TrimSpace(*node.AssigneeUserID) != query.UserID {
+			continue
+		}
+		items = append(items, repo.withNodeReadModelLocked(node))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		}
+		return items[i].NodeID < items[j].NodeID
+	})
+	if len(items) > query.Limit {
+		items = items[:query.Limit]
+	}
+	return items
+}
+
+func joinBackedResponsibleWorkItemInboxNodesForTest(t *testing.T, repo *MemoryRepo, query WorkItemInboxQuery) []domain.Node {
+	t.Helper()
+	query = NormalizeWorkItemInboxQuery(query)
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+	items := make([]domain.Node, 0)
+	for _, node := range repo.nodes {
+		if node.CompanyID != query.CompanyID {
+			continue
+		}
+		assignment, ok := repo.nodeLogicGateAssignmentLocked(node.CompanyID, node.NodeID, "")
+		if !ok {
+			continue
+		}
+		assignments := repo.logicGateRaci[key(node.CompanyID, assignment.LogicGateID)]
+		if len(workItemInboxRolesForUser(assignments, query.UserID, map[string]bool{domain.LogicGateRaciRoleResponsible: true})) == 0 {
 			continue
 		}
 		items = append(items, repo.withNodeReadModelLocked(node))

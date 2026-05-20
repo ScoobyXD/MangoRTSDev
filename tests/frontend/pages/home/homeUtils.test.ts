@@ -123,11 +123,22 @@ test("inbox group builders classify ACI and responsible work by role, status, an
   const gates = new Map([
     ["gate-a", logicGate("gate-a", [{ company_id: "company-1", logic_gate_id: "gate-a", role: "accountable", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" }])],
     ["gate-r", logicGate("gate-r", [{ company_id: "company-1", logic_gate_id: "gate-r", role: "responsible", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" }])],
+    ["gate-all", logicGate("gate-all", [
+      { company_id: "company-1", logic_gate_id: "gate-all", role: "responsible", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" },
+      { company_id: "company-1", logic_gate_id: "gate-all", role: "accountable", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" },
+      { company_id: "company-1", logic_gate_id: "gate-all", role: "consulted", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" },
+      { company_id: "company-1", logic_gate_id: "gate-all", role: "informed", user_id: currentUserID, created_timestamp: "2026-01-01T00:00:00Z" },
+    ])],
+    ["gate-no-r", logicGate("gate-no-r", [])],
     ["gate-other-user", logicGate("gate-other-user", [{ company_id: "company-1", logic_gate_id: "gate-other-user", role: "consulted", user_id: "user-2", created_timestamp: "2026-01-01T00:00:00Z" }])],
   ]);
   const nodes = [
     node("node-a", "ACI node", { logic_gate_ids: ["gate-a"], priority: 1 }),
-    node("node-r", "Responsible node", { logic_gate_ids: ["gate-r"], status: "in_progress", priority: 2 }),
+    node("node-r", "Responsible node", { logic_gate_ids: ["gate-r"], status: "in_progress", priority: 2, assignee_user_id: currentUserID }),
+    node("node-all", "All roles node", { logic_gate_ids: ["gate-all"], status: "pending", priority: 1 }),
+    node("node-r-unassigned", "Responsible unassigned node", { logic_gate_ids: ["gate-r"], status: "pending" }),
+    node("node-assigned-without-r", "Assigned without R node", { logic_gate_ids: ["gate-no-r"], status: "in_progress", priority: 2, assignee_user_id: currentUserID }),
+    node("node-assigned-other-raci", "Assigned other RACI node", { logic_gate_ids: ["gate-other-user"], priority: 3, assignee_user_id: currentUserID }),
     node("node-other-user", "Other user node", { logic_gate_ids: ["gate-other-user"], priority: 3 }),
     node("node-done", "Done node", { logic_gate_ids: ["gate-r"], status: "Done", priority: 1 }),
   ];
@@ -135,11 +146,18 @@ test("inbox group builders classify ACI and responsible work by role, status, an
 
   const aciGroups = buildAciInboxGroupsByCell(nodes, nodeByID, gates, currentUserID);
   assert.deepEqual(ACI_COLUMNS.map((column) => column.role), ["accountable", "consulted", "informed", "other"]);
-  assert.deepEqual(aciGroups.get("accountable:1")?.[0]?.nodeIDs, ["node-a"]);
-  assert.deepEqual(aciGroups.get("other:2")?.[0]?.nodeIDs, ["node-r"]);
-  assert.equal(aciGroups.has("other:3"), false);
+  assert.deepEqual((aciGroups.get("accountable:1") ?? []).flatMap((group) => group.nodeIDs).sort(), ["node-a", "node-all"]);
+  assert.deepEqual(aciGroups.get("consulted:1")?.[0]?.nodeIDs, ["node-all"]);
+  assert.deepEqual(aciGroups.get("informed:1")?.[0]?.nodeIDs, ["node-all"]);
+  assert.deepEqual(aciGroups.get("other:2")?.[0]?.nodeIDs, ["node-assigned-without-r"]);
+  assert.deepEqual(aciGroups.get("other:3")?.[0]?.nodeIDs, ["node-assigned-other-raci"]);
+  assert.equal((aciGroups.get("other:2") ?? []).some((group) => group.nodeIDs.includes("node-r")), false);
   const responsibleGroups = buildResponsibleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID);
   assert.deepEqual(responsibleGroups.get("in_progress:2")?.[0]?.nodeIDs, ["node-r"]);
+  assert.deepEqual((responsibleGroups.get("pending:1") ?? []).flatMap((group) => group.nodeIDs), ["node-all"]);
+  assert.deepEqual(responsibleGroups.get("pending:0")?.[0]?.nodeIDs, ["node-r-unassigned"]);
+  assert.equal(responsibleGroups.get("pending:1")?.some((group) => group.nodeIDs.includes("node-a")), false);
+  assert.equal(responsibleGroups.get("in_progress:2")?.some((group) => group.nodeIDs.includes("node-assigned-without-r")), false);
   assert.equal(responsibleGroups.has("done:1"), false);
   assert.deepEqual(RESPONSIBLE_STATUS_COLUMNS.map((column) => column.status), ["pending", "in_progress"]);
 });

@@ -52,8 +52,13 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	if _, err := repo.CreateNodeWithAssignee(otherCompanyID, "Other company assigned node", user.UserID); err != nil {
 		t.Fatalf("CreateNodeWithAssignee other company: %v", err)
 	}
+	responsibleNode, err := repo.CreateNode(companyID, "Responsible gate node")
+	if err != nil {
+		t.Fatalf("CreateNode responsible gate: %v", err)
+	}
 	setMemoryInboxReadNodeCreatedTimestamp(t, repo, companyID, olderNode.NodeID, time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC))
 	setMemoryInboxReadNodeCreatedTimestamp(t, repo, companyID, newerNode.NodeID, time.Date(2026, 5, 19, 11, 0, 0, 0, time.UTC))
+	setMemoryInboxReadNodeCreatedTimestamp(t, repo, companyID, responsibleNode.NodeID, time.Date(2026, 5, 19, 9, 0, 0, 0, time.UTC))
 
 	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
 		CompanyID:   companyID,
@@ -63,28 +68,45 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
+	responsiblePriority := 4
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: responsibleOnly.LogicGateID,
+		NodeID:      responsibleNode.NodeID,
+		Status:      "in progress",
+		Priority:    &responsiblePriority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus responsible: %v", err)
+	}
+	if _, err := repo.UpdateNode(UpdateNodeInput{CompanyID: companyID, NodeID: responsibleNode.NodeID, AssigneeUserIDSet: true}); err != nil {
+		t.Fatalf("clear responsible node assignee: %v", err)
+	}
 
 	responsibleNodes, err := repo.ListResponsibleInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListResponsibleInboxNodes: %v", err)
 	}
-	if len(responsibleNodes) != 2 {
-		t.Fatalf("responsible nodes = %d, want 2: %+v", len(responsibleNodes), responsibleNodes)
+	if len(responsibleNodes) != 1 || responsibleNodes[0].NodeID != responsibleNode.NodeID {
+		t.Fatalf("responsible nodes = %+v, want responsible Logic Gate node", responsibleNodes)
 	}
-	olderRead := mustFindInboxReadNode(t, responsibleNodes, olderNode.NodeID)
-	if olderRead.Status == nil || *olderRead.Status != "Done" {
-		t.Fatalf("responsible node status = %+v, want card-derived Done", olderRead.Status)
+	responsibleRead := mustFindInboxReadNode(t, responsibleNodes, responsibleNode.NodeID)
+	if responsibleRead.Status == nil || *responsibleRead.Status != "In Progress" {
+		t.Fatalf("responsible node status = %+v, want card-derived In Progress", responsibleRead.Status)
 	}
-	if len(olderRead.LogicGateIDs) != 1 || olderRead.LogicGateIDs[0] != accountableGate.LogicGateID {
-		t.Fatalf("responsible node logic_gate_ids = %+v, want %q", olderRead.LogicGateIDs, accountableGate.LogicGateID)
+	if responsibleRead.Priority == nil || *responsibleRead.Priority != responsiblePriority {
+		t.Fatalf("responsible node priority = %+v, want %d", responsibleRead.Priority, responsiblePriority)
+	}
+	if len(responsibleRead.LogicGateIDs) != 1 || responsibleRead.LogicGateIDs[0] != responsibleOnly.LogicGateID {
+		t.Fatalf("responsible node logic_gate_ids = %+v, want %q", responsibleRead.LogicGateIDs, responsibleOnly.LogicGateID)
 	}
 
 	limitedResponsible, err := repo.ListResponsibleInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 1})
 	if err != nil {
 		t.Fatalf("ListResponsibleInboxNodes limited: %v", err)
 	}
-	if len(limitedResponsible) != 1 || limitedResponsible[0].NodeID != olderNode.NodeID {
-		t.Fatalf("limited responsible nodes = %+v, want older node first", limitedResponsible)
+	if len(limitedResponsible) != 1 || limitedResponsible[0].NodeID != responsibleNode.NodeID {
+		t.Fatalf("limited responsible nodes = %+v, want responsible node first", limitedResponsible)
 	}
 
 	myNodes, err := repo.ListMyNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})
