@@ -61,7 +61,7 @@ func (s *Server) handleWorkItemResponsibleInbox(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	items, err := s.repo.ListResponsibleInboxNodes(query)
+	items, err := s.repo.ListResponsibleInboxNodesContext(r.Context(), query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_responsible_inbox")
 		return
@@ -83,7 +83,7 @@ func (s *Server) handleWorkItemACIInbox(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	items, err := s.repo.ListACIInboxLogicGates(query)
+	items, err := s.repo.ListACIInboxLogicGatesContext(r.Context(), query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_aci_inbox")
 		return
@@ -105,7 +105,7 @@ func (s *Server) handleWorkItemMyNodes(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := s.repo.ListMyNodes(query)
+	items, err := s.repo.ListMyNodesContext(r.Context(), query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_my_nodes")
 		return
@@ -127,7 +127,7 @@ func (s *Server) handleWorkItemMyLogicGates(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	items, err := s.repo.ListMyLogicGates(query)
+	items, err := s.repo.ListMyLogicGatesContext(r.Context(), query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_my_logic_gates")
 		return

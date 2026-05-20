@@ -9,11 +9,19 @@ import (
 )
 
 func (r *PostgresRepo) ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listAssignedWorkItemInboxNodes(query)
+	return r.ListResponsibleInboxNodesContext(context.Background(), query)
+}
+
+func (r *PostgresRepo) ListResponsibleInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
+	return r.listAssignedWorkItemInboxNodes(ctx, query)
 }
 
 func (r *PostgresRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listAssignedWorkItemInboxNodes(query)
+	return r.ListMyNodesContext(context.Background(), query)
+}
+
+func (r *PostgresRepo) ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
+	return r.listAssignedWorkItemInboxNodes(ctx, query)
 }
 
 func (r *PostgresRepo) RebuildWorkItemInboxEntries(companyID string) error {
@@ -34,9 +42,11 @@ func (r *PostgresRepo) RebuildWorkItemInboxEntriesForLogicGate(companyID, logicG
 	return err
 }
 
-func (r *PostgresRepo) listAssignedWorkItemInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
+func (r *PostgresRepo) listAssignedWorkItemInboxNodes(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	query = NormalizeWorkItemInboxQuery(query)
-	ctx := context.Background()
 	rows, err := r.db.QueryContext(ctx, `
 select
   entry.company_id::text,
@@ -74,16 +84,26 @@ limit $3`, query.CompanyID, query.UserID, query.Limit)
 }
 
 func (r *PostgresRepo) ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.listWorkItemLogicGateInboxItems(query, true)
+	return r.ListACIInboxLogicGatesContext(context.Background(), query)
+}
+
+func (r *PostgresRepo) ListACIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
+	return r.listWorkItemLogicGateInboxItems(ctx, query, true)
 }
 
 func (r *PostgresRepo) ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.listWorkItemLogicGateInboxItems(query, false)
+	return r.ListMyLogicGatesContext(context.Background(), query)
 }
 
-func (r *PostgresRepo) listWorkItemLogicGateInboxItems(query WorkItemInboxQuery, aciOnly bool) ([]WorkItemLogicGateInboxItem, error) {
+func (r *PostgresRepo) ListMyLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
+	return r.listWorkItemLogicGateInboxItems(ctx, query, false)
+}
+
+func (r *PostgresRepo) listWorkItemLogicGateInboxItems(ctx context.Context, query WorkItemInboxQuery, aciOnly bool) ([]WorkItemLogicGateInboxItem, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	query = NormalizeWorkItemInboxQuery(query)
-	ctx := context.Background()
 	roleFilter := ""
 	if aciOnly {
 		roleFilter = "\n  and entry.role in ('accountable', 'consulted', 'informed')"

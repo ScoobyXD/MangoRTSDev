@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -140,6 +142,151 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 		t.Fatalf("my logic gates missing accountable role: %+v", myGatesPayload.LogicGates)
 	}
 }
+
+func TestWorkItemInboxReadHandlersUseRequestContext(t *testing.T) {
+	companyID := "11111111-1111-4111-8111-666666666666"
+	userID := "22222222-2222-4222-8222-666666666666"
+	requestValue := "request-context"
+	cases := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "responsible inbox", path: "/v1/work-items/responsible-inbox", want: "responsible"},
+		{name: "aci inbox", path: "/v1/work-items/aci-inbox", want: "aci"},
+		{name: "my nodes", path: "/v1/work-items/my-nodes", want: "my_nodes"},
+		{name: "my logic gates", path: "/v1/work-items/my-logic-gates", want: "my_logic_gates"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &contextRecordingWorkItemReadRepo{Repository: store.NewMemoryRepo(), requestValue: requestValue}
+			handler := NewServer(repo).Routes()
+			ctx := context.WithValue(context.Background(), workItemReadRequestContextKey{}, requestValue)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tc.path+"?company_id="+companyID+"&user_id="+userID, nil).WithContext(ctx)
+
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+			}
+			if repo.called != tc.want {
+				t.Fatalf("called = %q, want %q", repo.called, tc.want)
+			}
+			if !repo.sawRequestValue {
+				t.Fatal("repository did not see the request context value")
+			}
+			if repo.legacyCalled {
+				t.Fatal("handler called legacy no-context repository method")
+			}
+		})
+	}
+}
+
+func TestWorkItemInboxReadHandlerPreservesCancelledRequestContext(t *testing.T) {
+	companyID := "11111111-1111-4111-8111-777777777777"
+	userID := "22222222-2222-4222-8222-777777777777"
+	requestValue := "cancelled-request-context"
+	repo := &contextRecordingWorkItemReadRepo{Repository: store.NewMemoryRepo(), requestValue: requestValue}
+	handler := NewServer(repo).Routes()
+	ctx := context.WithValue(context.Background(), workItemReadRequestContextKey{}, requestValue)
+	ctx, cancel := context.WithCancel(ctx)
+	cancel()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/work-items/responsible-inbox?company_id="+companyID+"&user_id="+userID, nil).WithContext(ctx)
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusInternalServerError, rec.Body.String())
+	}
+	if repo.called != "responsible" {
+		t.Fatalf("called = %q, want responsible", repo.called)
+	}
+	if !errors.Is(repo.sawErr, context.Canceled) {
+		t.Fatalf("repository context error = %v, want context.Canceled", repo.sawErr)
+	}
+	if repo.legacyCalled {
+		t.Fatal("handler called legacy no-context repository method")
+	}
+}
+
+type workItemReadRequestContextKey struct{}
+
+type contextRecordingWorkItemReadRepo struct {
+	store.Repository
+	requestValue    string
+	called          string
+	sawRequestValue bool
+	sawErr          error
+	legacyCalled    bool
+}
+
+func (r *contextRecordingWorkItemReadRepo) recordWorkItemReadContext(ctx context.Context, called string) error {
+	r.called = called
+	r.sawRequestValue = ctx.Value(workItemReadRequestContextKey{}) == r.requestValue
+	r.sawErr = ctx.Err()
+	if !r.sawRequestValue {
+		return errMissingWorkItemReadRequestContext
+	}
+	if r.sawErr != nil {
+		return r.sawErr
+	}
+	return nil
+}
+
+func (r *contextRecordingWorkItemReadRepo) ListResponsibleInboxNodes(store.WorkItemInboxQuery) ([]domain.Node, error) {
+	r.legacyCalled = true
+	return nil, errLegacyWorkItemRead
+}
+
+func (r *contextRecordingWorkItemReadRepo) ListResponsibleInboxNodesContext(ctx context.Context, query store.WorkItemInboxQuery) ([]domain.Node, error) {
+	if err := r.recordWorkItemReadContext(ctx, "responsible"); err != nil {
+		return nil, err
+	}
+	return []domain.Node{}, nil
+}
+
+func (r *contextRecordingWorkItemReadRepo) ListACIInboxLogicGates(store.WorkItemInboxQuery) ([]store.WorkItemLogicGateInboxItem, error) {
+	r.legacyCalled = true
+	return nil, errLegacyWorkItemRead
+}
+
+func (r *contextRecordingWorkItemReadRepo) ListACIInboxLogicGatesContext(ctx context.Context, query store.WorkItemInboxQuery) ([]store.WorkItemLogicGateInboxItem, error) {
+	if err := r.recordWorkItemReadContext(ctx, "aci"); err != nil {
+		return nil, err
+	}
+	return []store.WorkItemLogicGateInboxItem{}, nil
+}
+
+func (r *contextRecordingWorkItemReadRepo) ListMyNodes(store.WorkItemInboxQuery) ([]domain.Node, error) {
+	r.legacyCalled = true
+	return nil, errLegacyWorkItemRead
+}
+
+func (r *contextRecordingWorkItemReadRepo) ListMyNodesContext(ctx context.Context, query store.WorkItemInboxQuery) ([]domain.Node, error) {
+	if err := r.recordWorkItemReadContext(ctx, "my_nodes"); err != nil {
+		return nil, err
+	}
+	return []domain.Node{}, nil
+}
+
+func (r *contextRecordingWorkItemReadRepo) ListMyLogicGates(store.WorkItemInboxQuery) ([]store.WorkItemLogicGateInboxItem, error) {
+	r.legacyCalled = true
+	return nil, errLegacyWorkItemRead
+}
+
+func (r *contextRecordingWorkItemReadRepo) ListMyLogicGatesContext(ctx context.Context, query store.WorkItemInboxQuery) ([]store.WorkItemLogicGateInboxItem, error) {
+	if err := r.recordWorkItemReadContext(ctx, "my_logic_gates"); err != nil {
+		return nil, err
+	}
+	return []store.WorkItemLogicGateInboxItem{}, nil
+}
+
+var (
+	errLegacyWorkItemRead                = errors.New("legacy work item read called")
+	errMissingWorkItemReadRequestContext = errors.New("missing work item read request context")
+)
 
 func getWorkItemInboxRead(t *testing.T, handler http.Handler, path string) *httptest.ResponseRecorder {
 	t.Helper()

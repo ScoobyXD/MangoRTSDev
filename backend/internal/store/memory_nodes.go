@@ -530,12 +530,14 @@ func (r *MemoryRepo) ListNodeMapWindow(query NodeMapWindowQuery) (NodeMapWindowR
 func (r *MemoryRepo) UpsertNodeMapPositions(companyID string, positions []domain.NodeMapPosition) ([]domain.NodeMapPosition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	now := time.Now().UTC()
-	out := make([]domain.NodeMapPosition, 0, len(positions))
 	for _, position := range positions {
 		if _, ok := r.nodes[key(companyID, position.NodeID)]; !ok {
 			return nil, ErrNotFound
 		}
+	}
+	now := time.Now().UTC()
+	out := make([]domain.NodeMapPosition, 0, len(positions))
+	for _, position := range positions {
 		item := domain.NodeMapPosition{
 			CompanyID:        companyID,
 			NodeID:           position.NodeID,

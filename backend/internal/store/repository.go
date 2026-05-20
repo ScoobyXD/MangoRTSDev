@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"math"
 	"miraeopus/backend/internal/domain"
@@ -119,9 +120,13 @@ type LogicGateRepository interface {
 
 type WorkItemReadRepository interface {
 	ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error)
+	ListResponsibleInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error)
 	ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
+	ListACIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 	ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error)
+	ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error)
 	ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
+	ListMyLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 	RebuildWorkItemInboxEntries(companyID string) error
 	RebuildWorkItemInboxEntriesForNode(companyID, nodeID string) error
 	RebuildWorkItemInboxEntriesForLogicGate(companyID, logicGateID string) error

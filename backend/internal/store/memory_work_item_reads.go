@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -26,11 +27,19 @@ type memoryWorkItemInboxEntry struct {
 }
 
 func (r *MemoryRepo) ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listAssignedWorkItemInboxNodes(query)
+	return r.ListResponsibleInboxNodesContext(context.Background(), query)
+}
+
+func (r *MemoryRepo) ListResponsibleInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
+	return r.listAssignedWorkItemInboxNodes(ctx, query)
 }
 
 func (r *MemoryRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listAssignedWorkItemInboxNodes(query)
+	return r.ListMyNodesContext(context.Background(), query)
+}
+
+func (r *MemoryRepo) ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
+	return r.listAssignedWorkItemInboxNodes(ctx, query)
 }
 
 func (r *MemoryRepo) RebuildWorkItemInboxEntries(companyID string) error {
@@ -59,7 +68,13 @@ func (r *MemoryRepo) RebuildWorkItemInboxEntriesForLogicGate(companyID, logicGat
 	return nil
 }
 
-func (r *MemoryRepo) listAssignedWorkItemInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
+func (r *MemoryRepo) listAssignedWorkItemInboxNodes(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	query = NormalizeWorkItemInboxQuery(query)
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -85,7 +100,11 @@ func (r *MemoryRepo) listAssignedWorkItemInboxNodes(query WorkItemInboxQuery) ([
 }
 
 func (r *MemoryRepo) ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.listWorkItemLogicGateInboxItems(query, map[string]bool{
+	return r.ListACIInboxLogicGatesContext(context.Background(), query)
+}
+
+func (r *MemoryRepo) ListACIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
+	return r.listWorkItemLogicGateInboxItems(ctx, query, map[string]bool{
 		domain.LogicGateRaciRoleAccountable: true,
 		domain.LogicGateRaciRoleConsulted:   true,
 		domain.LogicGateRaciRoleInformed:    true,
@@ -93,10 +112,20 @@ func (r *MemoryRepo) ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkIte
 }
 
 func (r *MemoryRepo) ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.listWorkItemLogicGateInboxItems(query, nil)
+	return r.ListMyLogicGatesContext(context.Background(), query)
 }
 
-func (r *MemoryRepo) listWorkItemLogicGateInboxItems(query WorkItemInboxQuery, allowedRoles map[string]bool) ([]WorkItemLogicGateInboxItem, error) {
+func (r *MemoryRepo) ListMyLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
+	return r.listWorkItemLogicGateInboxItems(ctx, query, nil)
+}
+
+func (r *MemoryRepo) listWorkItemLogicGateInboxItems(ctx context.Context, query WorkItemInboxQuery, allowedRoles map[string]bool) ([]WorkItemLogicGateInboxItem, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	query = NormalizeWorkItemInboxQuery(query)
 	r.mu.Lock()
 	defer r.mu.Unlock()

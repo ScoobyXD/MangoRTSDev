@@ -23,7 +23,7 @@ Source architecture:
 | 1. Read Plane | Version-row ETags complete / yellow | Inbox read contracts now serve from `work_item_inbox_entries`; Company Explorer, Node Map, and Logic Gate Map have bounded read contracts; hot bounded ETags now use derived workspace read-version rows with domain-event fallback. |
 | 2. Event Plane | Partial / yellow | `domain_events`, SSE IDs, replay, and frontend cursors exist. Node graph, migrated work-item assignment mutations, and Kanban board/column/card HTTP mutations now append durable workspace events atomically; frontend gap reconciliation detects missed numeric workspace sequences and triggers scoped surface refreshes. Postgres `LISTEN/NOTIFY` now provides explicit cross-instance wakeup fanout while polling replay remains the correctness fallback. Remaining mutation families are still follow-ups. |
 | 3. Work Ownership / Commands | Inbox command parity complete / yellow | Node-to-Logic-Gate assignment source rows now exist, Kanban cards are compatibility/projection rows, inbox reads use projection rows, email conversion runs through an explicit atomic backend command, Home node drop/status placement uses the work-item assignment command path, remaining inbox node status/priority placement uses assignment command helpers, bulk Logic Gate RACI uses idempotent add/remove commands, and direct node patching is reserved for non-placement fields or unassigned fallback nodes. |
-| 4. Hot Path Discipline | Auth cache complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth now caches derived actor/membership context after per-request token validation; repository context, batch SQL, and metrics remain follow-up branches. |
+| 4. Hot Path Discipline | Bulk map layout upserts complete / yellow | Company Explorer and Logic Gate Arena GET repair side effects are removed; auth now caches derived actor/membership context after per-request token validation; work-item inbox GET handlers now pass request context into context-aware repository/database reads; node and Logic Gate map layout position writes now use set-based Postgres bulk upserts; metrics remain a follow-up branch. |
 | 5. Frontend Structure / API Contract | Ready / yellow | Shared `requestJSON` exists, but hot modules duplicate wrappers, broad invalidation is scattered, and large components still own workflow logic. |
 
 ## 1. Read Plane
@@ -369,21 +369,27 @@ First branch:
 Branch progress:
 - 2026-05-19: Removed Company Explorer read-time default seeding/runtime DDL and Logic Gate Arena GET board/column repair. Default folders now belong to company provisioning plus the migration backfill; missing Arena board/columns now return explicit errors instead of being repaired by GET.
 - 2026-05-19: Completed `platform/auth-membership-cache`. Auth middleware still validates JWTs on every request, then reuses a bounded short-TTL in-process actor/membership context keyed by subject, email, and display name claims. Successful company creation clears the cache; invitation acceptance and company user deletion invalidate affected subject/user/company entries.
+- 2026-05-20: Completed `platform/repository-context-slice`. Work-item inbox read handlers now pass `r.Context()` into context-aware repository methods for Responsible Inbox, ACI Inbox, My Nodes, and My Logic Gates, and the Postgres projection queries use that caller context instead of replacing it with `context.Background()`.
+- 2026-05-20: Completed `platform/bulk-map-layout-upserts`. Node and Logic Gate map-layout position writes now use one set-based Postgres `unnest` upsert per request while preserving response ordering, workspace event publication, ETag/read-version behavior, validation limits, and compatibility APIs.
 
 Scope:
 - Remove default-folder seeding and runtime DDL from Company Explorer reads.
 - Stop Logic Gate Arena GET from repairing missing boards/columns; move repair to creation or explicit command.
 - Add tests that GET paths do not create rows.
-- Leave repository-wide context propagation, metrics, and batch SQL rewrites to follow-up branches.
+- Leave repository-wide context propagation, metrics, and unrelated batch SQL rewrites to follow-up branches.
 
 Migration/backfill/rollback notes:
 - Auth membership cache migration: none. This branch is code-only and uses the existing `users` and `company_memberships` tables.
 - Backfill: none. Cache entries are populated lazily after successful token validation and expire quickly.
 - Rollback: code can return middleware to direct `UpsertAuthUser` plus `ListUserMemberships` on every authenticated request. No data lives only in the cache, and no database rollback is required.
+- Repository context slice migration: none. This branch is code-only and reuses the existing `work_item_inbox_entries` projection reads.
+- Repository context slice backfill: none. No persisted data shape changes.
+- Repository context slice rollback: code can return the four work-item inbox read handlers to the legacy no-context repository methods while leaving the context-aware methods in place. No schema or data rollback is required.
+- Bulk map layout upserts migration: none. This branch is code-only and reuses existing `node_map_positions`, `logic_gate_map_positions`, `nodes`, and `logic_gates` tables.
+- Bulk map layout upserts backfill: none. Existing map position rows remain valid; the write path only changes how batches are persisted.
+- Bulk map layout upserts rollback: code can return the Postgres node and Logic Gate map position upserts to the prior row-by-row transactional implementation. No schema or data rollback is required.
 
 Follow-up branches:
-- `platform/repository-context-slice`
-- `platform/bulk-map-layout-upserts`
 - `platform/hot-path-metrics`
 
 Completion criteria:
@@ -460,10 +466,12 @@ Use this as the default sequencing unless a production incident changes prioriti
 20. `events/external-fanout-adapter`
 21. `work-items/home-drop-command`
 22. `work-items/inbox-command-parity`
+23. `platform/repository-context-slice`
+24. `platform/bulk-map-layout-upserts`
 
 ### Next Roadmap
 
-1. `platform/repository-context-slice`
+1. `platform/hot-path-metrics`
 
 ### Work-Items Follow-Ups
 

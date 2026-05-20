@@ -834,36 +834,74 @@ order by item.position asc, item.created_timestamp asc`, args...)
 }
 func (r *PostgresRepo) UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error) {
 	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
+	out := make([]domain.LogicGateMapPosition, 0, len(positions))
+	if len(positions) == 0 {
+		return out, nil
+	}
+
+	logicGateIDs := make([]string, len(positions))
+	xs := make([]float64, len(positions))
+	ys := make([]float64, len(positions))
+	for index, position := range positions {
+		logicGateIDs[index] = position.LogicGateID
+		xs[index] = position.X
+		ys[index] = position.Y
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+with input as (
+  select logic_gate_id::uuid as logic_gate_id, x, y, ordinality
+  from unnest($2::text[], $3::double precision[], $4::double precision[])
+       with ordinality as input(logic_gate_id, x, y, ordinality)
+),
+missing as (
+  select 1
+  from input
+  where not exists (
+    select 1
+    from logic_gates
+    where company_id=$1 and logic_gate_id=input.logic_gate_id
+  )
+  limit 1
+),
+latest_input as (
+  select distinct on (logic_gate_id) logic_gate_id, x, y
+  from input
+  order by logic_gate_id, ordinality desc
+),
+upserted as (
+  insert into logic_gate_map_positions (company_id, logic_gate_id, x, y, updated_timestamp)
+  select $1, latest_input.logic_gate_id, latest_input.x, latest_input.y, now()
+  from latest_input
+  where not exists (select 1 from missing)
+  on conflict (company_id, logic_gate_id) do update
+  set x=excluded.x,
+      y=excluded.y,
+      updated_timestamp=now()
+  returning company_id, logic_gate_id, updated_timestamp
+)
+select upserted.company_id, input.logic_gate_id, input.x, input.y, upserted.updated_timestamp
+from input
+join upserted on upserted.logic_gate_id=input.logic_gate_id
+order by input.ordinality`,
+		companyID, logicGateIDs, xs, ys,
+	)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	out := make([]domain.LogicGateMapPosition, 0, len(positions))
-	for _, position := range positions {
+	defer rows.Close()
+	for rows.Next() {
 		var item domain.LogicGateMapPosition
-		err := tx.QueryRowContext(ctx, `
-insert into logic_gate_map_positions (company_id, logic_gate_id, x, y, updated_timestamp)
-select $1, $2, $3, $4, now()
-where exists (select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)
-on conflict (company_id, logic_gate_id) do update
-set x=excluded.x,
-    y=excluded.y,
-    updated_timestamp=now()
-returning company_id, logic_gate_id, x, y, updated_timestamp`,
-			companyID, position.LogicGateID, position.X, position.Y).Scan(
-			&item.CompanyID, &item.LogicGateID, &item.X, &item.Y, &item.UpdatedTimestamp,
-		)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		if err != nil {
+		if err := rows.Scan(&item.CompanyID, &item.LogicGateID, &item.X, &item.Y, &item.UpdatedTimestamp); err != nil {
 			return nil, err
 		}
 		out = append(out, item)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	if len(out) != len(positions) {
+		return nil, ErrNotFound
 	}
 	return out, nil
 }

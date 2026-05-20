@@ -498,12 +498,14 @@ func (r *MemoryRepo) ListLogicGateMapWindow(query LogicGateMapWindowQuery) (Logi
 func (r *MemoryRepo) UpsertLogicGateMapPositions(companyID string, positions []domain.LogicGateMapPosition) ([]domain.LogicGateMapPosition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	now := time.Now().UTC()
-	out := make([]domain.LogicGateMapPosition, 0, len(positions))
 	for _, position := range positions {
 		if _, ok := r.logicGates[key(companyID, position.LogicGateID)]; !ok {
 			return nil, ErrNotFound
 		}
+	}
+	now := time.Now().UTC()
+	out := make([]domain.LogicGateMapPosition, 0, len(positions))
+	for _, position := range positions {
 		item := domain.LogicGateMapPosition{
 			CompanyID:        companyID,
 			LogicGateID:      position.LogicGateID,
