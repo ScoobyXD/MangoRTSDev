@@ -11,7 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-const postgresUndefinedTableCode = "42P01"
+const (
+	postgresUndefinedTableCode  = "42P01"
+	postgresUndefinedColumnCode = "42703"
+)
 
 func isPostgresUndefinedTable(err error, tableName string) bool {
 	var pgErr *pgconn.PgError
@@ -22,6 +25,17 @@ func isPostgresUndefinedTable(err error, tableName string) bool {
 		return true
 	}
 	return strings.Contains(pgErr.Message, tableName)
+}
+
+func isPostgresUndefinedColumn(err error, columnName string) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != postgresUndefinedColumnCode {
+		return false
+	}
+	if columnName == "" {
+		return true
+	}
+	return strings.Contains(pgErr.Message, columnName)
 }
 
 func scanLogicGateRaciAssignment(row interface {

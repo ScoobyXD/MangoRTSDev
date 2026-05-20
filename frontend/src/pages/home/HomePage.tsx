@@ -795,7 +795,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         if (gap.companyID !== companyID) return;
         const touchesSharedInbox = gap.scopes.some((scope) => (
           scope.eventType === "communications_shared_inbox_raci_updated" ||
-          (scope.kind === "company_explorer" && (!scope.folderKind || scope.folderKind === "node" || scope.folderKind === "logic_gate")) ||
+          (scope.kind === "company_explorer" && (!scope.folderKind || scope.folderKind === "communications")) ||
           scope.kind === "workspace"
         ));
         const touchesWorkspacePanel = gap.scopes.some((scope) => (
@@ -1224,7 +1224,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
       folder.folder_id === folderID ? { ...folder, raci_assignments: assignments } : folder
     ))));
     void loadSharedInboxes();
-    setNotice("Shared Triage RACI updated.");
+    setNotice("Shared Triage access updated.");
   }, [loadSharedInboxes]);
 
   const addSharedInboxRaciUser = useCallback((folderID: string, role: CommunicationsSharedInboxRaciRole, userID: string) => {
@@ -1243,7 +1243,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         if (!result) return;
         updateSharedInboxRaciState(result.folderID, result.assignments);
       } catch (raciError) {
-        setError(formatError(raciError, "Failed to update Shared Triage RACI"));
+        setError(formatError(raciError, "Failed to update Shared Triage access"));
       } finally {
         setBusy("");
       }
@@ -1265,7 +1265,7 @@ export function HomePage({ me, onNavigate, embedded = false, hideNavigation = fa
         if (!result) return;
         updateSharedInboxRaciState(result.folderID, result.assignments);
       } catch (raciError) {
-        setError(formatError(raciError, "Failed to update Shared Triage RACI"));
+        setError(formatError(raciError, "Failed to update Shared Triage access"));
       } finally {
         setBusy("");
       }

@@ -1125,10 +1125,10 @@ export function HomeSidebar({
 }
 
 const SHARED_INBOX_RACI_ROLES: ReadonlyArray<{ role: CommunicationsSharedInboxRaciRole; label: string; help: string }> = [
-  { role: "responsible", label: "Responsible", help: "Can triage and archive" },
-  { role: "accountable", label: "Accountable", help: "Can triage and archive" },
-  { role: "consulted", label: "Consulted", help: "Can view and comment" },
-  { role: "informed", label: "Informed", help: "Can view and comment" },
+  { role: "responsible", label: "Triage", help: "Can triage and archive" },
+  { role: "accountable", label: "Manage", help: "Can triage and archive" },
+  { role: "consulted", label: "Collaborate", help: "Can view and comment" },
+  { role: "informed", label: "View", help: "Can view and comment" },
 ];
 
 function companyUserLabel(user: Pick<CompanyUser, "user_id" | "display_name" | "email">): string {
@@ -1172,11 +1172,11 @@ export function SharedInboxRaciSettingsModal({
 
   return (
     <div style={sharedRaciBackdropStyle}>
-      <section style={sharedRaciModalStyle} aria-modal="true" role="dialog" aria-label={`${folder.name} RACI settings`}>
+      <section style={sharedRaciModalStyle} aria-modal="true" role="dialog" aria-label={`${folder.name} access settings`}>
         <div style={panelHeaderStyle}>
           <div style={{ minWidth: 0 }}>
-            <h2 style={panelTitleStyle}>{folder.name} RACI</h2>
-            <div style={mutedSmallStyle}>Responsible and Accountable can archive. Consulted and Informed are view/comment only.</div>
+            <h2 style={panelTitleStyle}>{folder.name} Access</h2>
+            <div style={mutedSmallStyle}>Triage and Manage can archive. Collaborate and View are view/comment only.</div>
           </div>
           <button type="button" style={smallButtonStyle} disabled={busy} onClick={onClose}>Close</button>
         </div>

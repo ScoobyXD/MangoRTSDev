@@ -355,10 +355,9 @@ export async function listCommunicationsSharedInboxes(companyID: string): Promis
   return cachedRead(`shared-inboxes:${cleanCompanyID}`, SHARED_INBOX_CACHE_TTL_MS, async () => {
     const params = new URLSearchParams({
       company_id: cleanCompanyID,
-      folder_kind: "communications",
     });
-    const payload = await apiFetchJSON<{ folders?: CommunicationsSharedInbox[] }>(`/v1/company-explorer/folders?${params.toString()}`);
-    return cloneSharedInboxes(payload.folders ?? []);
+    const payload = await apiFetchJSON<{ shared_inboxes?: CommunicationsSharedInbox[]; folders?: CommunicationsSharedInbox[] }>(`/v1/communications/shared-inboxes?${params.toString()}`);
+    return cloneSharedInboxes(payload.shared_inboxes ?? payload.folders ?? []);
   }, cloneSharedInboxes);
 }
 
@@ -368,11 +367,10 @@ export async function createCommunicationsSharedInbox(input: {
   parentFolderID?: string;
   accountEmail?: string;
 }): Promise<CommunicationsSharedInbox> {
-  const folder = await apiFetchJSON<CommunicationsSharedInbox>("/v1/company-explorer/folders", {
+  const folder = await apiFetchJSON<CommunicationsSharedInbox>("/v1/communications/shared-inboxes", {
     method: "POST",
     body: JSON.stringify({
       company_id: input.companyID,
-      folder_kind: "communications",
       parent_folder_id: input.parentFolderID?.trim() || undefined,
       name: input.name.trim(),
       account_email: input.accountEmail?.trim() || undefined,
@@ -402,7 +400,7 @@ export async function updateCommunicationsSharedInbox(input: {
     body.account_email = input.accountEmail?.trim() ?? "";
   }
   if (input.position !== undefined && input.position > 0) body.position = Math.round(input.position);
-  const folder = await apiFetchJSON<CommunicationsSharedInbox>(`/v1/company-explorer/folders/${encodeURIComponent(cleanFolderID)}`, {
+  const folder = await apiFetchJSON<CommunicationsSharedInbox>(`/v1/communications/shared-inboxes/${encodeURIComponent(cleanFolderID)}`, {
     method: "PUT",
     body: JSON.stringify(body),
   });
@@ -414,7 +412,7 @@ export async function updateCommunicationsSharedInbox(input: {
 export async function deleteCommunicationsSharedInbox(companyID: string, folderID: string): Promise<void> {
   const cleanCompanyID = companyID.trim();
   const cleanFolderID = folderID.trim();
-  await apiFetchJSON<{ status?: string }>(`/v1/company-explorer/folders/${encodeURIComponent(cleanFolderID)}?company_id=${encodeURIComponent(cleanCompanyID)}`, {
+  await apiFetchJSON<{ status?: string }>(`/v1/communications/shared-inboxes/${encodeURIComponent(cleanFolderID)}?company_id=${encodeURIComponent(cleanCompanyID)}`, {
     method: "DELETE",
   });
   invalidateCacheKey(`shared-inboxes:${cleanCompanyID}`);
@@ -428,7 +426,7 @@ export async function updateCommunicationsSharedInboxRaciAssignments(
 ): Promise<CommunicationsSharedInboxRaciAssignment[]> {
   const cleanCompanyID = companyID.trim();
   const cleanFolderID = folderID.trim();
-  const payload = await apiFetchJSON<{ raci_assignments?: CommunicationsSharedInboxRaciAssignment[] }>(`/v1/company-explorer/folders/${encodeURIComponent(cleanFolderID)}/raci`, {
+  const payload = await apiFetchJSON<{ access_assignments?: CommunicationsSharedInboxRaciAssignment[]; raci_assignments?: CommunicationsSharedInboxRaciAssignment[] }>(`/v1/communications/shared-inboxes/${encodeURIComponent(cleanFolderID)}/access`, {
     method: "PUT",
     body: JSON.stringify({
       company_id: cleanCompanyID,
@@ -437,7 +435,7 @@ export async function updateCommunicationsSharedInboxRaciAssignments(
   });
   invalidateCacheKey(`shared-inboxes:${cleanCompanyID}`);
   dispatchCommunicationsSharedInboxesUpdated(cleanCompanyID);
-  return cloneSharedInboxRaciAssignments(payload.raci_assignments ?? []);
+  return cloneSharedInboxRaciAssignments(payload.access_assignments ?? payload.raci_assignments ?? []);
 }
 
 export async function listCommunicationsTriageItems(): Promise<CommunicationsTriageItem[]> {
@@ -1124,6 +1122,7 @@ function cloneSharedInboxRaciAssignments(assignments: CommunicationsSharedInboxR
 }
 
 function dispatchCommunicationsSharedInboxesUpdated(companyID: string): void {
+  if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED, { detail: { companyID: companyID.trim() } }));
 }
 

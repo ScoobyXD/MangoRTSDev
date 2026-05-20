@@ -205,7 +205,7 @@ export function HomeMailWorkspace({
               <div style={mailListTitleStackStyle}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                   <h2 style={{ ...panelTitleStyle, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{listViewLabel}</h2>
-                  {sharedInboxSettings && <button style={{ ...smallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>RACI</button>}
+                  {sharedInboxSettings && <button style={{ ...smallButtonStyle, flexShrink: 0 }} onClick={sharedInboxSettings.onOpen}>Access</button>}
                 </div>
                 <span style={mutedSmallStyle}>{unreadMessageCount} unread</span>
               </div>
