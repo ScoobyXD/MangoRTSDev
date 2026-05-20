@@ -6,19 +6,36 @@ export type RequestJSONInit = RequestInit & {
   auth?: boolean;
   getAccessToken?: () => Promise<string>;
   fetchImpl?: typeof fetch;
+  throwOnHTTPError?: boolean;
 };
 
 export type BoundRequestJSON = <T>(path: string, init?: RequestJSONInit) => Promise<T>;
+
+export type RequestJSONResponse<T> = {
+  body: T | undefined;
+  status: number;
+  statusText: string;
+  ok: boolean;
+  notModified: boolean;
+  headers: Headers;
+  etag?: string;
+};
 
 const DEFAULT_API_TIMEOUT_MS = 15_000;
 const MAX_API_ERROR_MESSAGE_CHARS = 280;
 
 export async function requestJSON<T>(apiBase: string, path: string, init: RequestJSONInit = {}): Promise<T> {
+  const response = await requestJSONWithMeta<T>(apiBase, path, init);
+  return response.body as T;
+}
+
+export async function requestJSONWithMeta<T>(apiBase: string, path: string, init: RequestJSONInit = {}): Promise<RequestJSONResponse<T>> {
   const {
     auth = true,
     fetchImpl = globalThis.fetch.bind(globalThis),
     getAccessToken = getApiAccessToken,
     json,
+    throwOnHTTPError = true,
     timeoutMs = DEFAULT_API_TIMEOUT_MS,
     ...requestInit
   } = init;
@@ -39,10 +56,33 @@ export async function requestJSON<T>(apiBase: string, path: string, init: Reques
   const { signal, cleanup } = timeoutSignal(requestInit.signal, timeoutMs);
   try {
     const response = await fetchImpl(`${apiBase}${path}`, { ...requestInit, headers, body, signal });
-    if (response.status === 304) return undefined as T;
-    if (!response.ok) throw new Error(sanitizeAPIErrorMessage(response.status, response.statusText, await response.text()));
-    if (response.status === 204) return undefined as T;
-    return response.json() as Promise<T>;
+    const responseHeaders = new Headers(response.headers);
+    const notModified = response.status === 304;
+    const ok = response.ok || notModified;
+    if (!ok) {
+      if (throwOnHTTPError) {
+        throw new Error(sanitizeAPIErrorMessage(response.status, response.statusText, await response.text()));
+      }
+      return {
+        body: undefined,
+        status: response.status,
+        statusText: response.statusText,
+        ok: false,
+        notModified: false,
+        headers: responseHeaders,
+        etag: responseHeaders.get("ETag") ?? undefined,
+      };
+    }
+    const emptyBody = notModified || response.status === 204;
+    return {
+      body: emptyBody ? undefined : await response.json() as T,
+      status: response.status,
+      statusText: response.statusText,
+      ok: true,
+      notModified,
+      headers: responseHeaders,
+      etag: responseHeaders.get("ETag") ?? undefined,
+    };
   } finally {
     cleanup();
   }

@@ -1,4 +1,5 @@
-import { apiFetchJSON, readAuthConfig } from "../../auth/cognitoAuth";
+import { readAuthConfig } from "../../auth/cognitoAuth";
+import { createRequestJSON } from "../api/requestJSON";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { createMapEntityBatchClientID, createMapEntityBatchCommand, type NodeMapCommandRequest } from "./nodeMapCommands";
@@ -94,6 +95,7 @@ export async function createNodeFromSelectionTitle(args: {
   if (!title) throw new Error("selection_node_title_empty");
 
   const apiBase = args.apiBase?.trim() || readAuthConfig().apiBase;
+  const requestJSON = args.requestJSON ?? createRequestJSON(apiBase);
   const companyID = args.companyID.trim();
   if (!companyID) throw new Error("company_id_required");
 
@@ -122,7 +124,7 @@ export async function createNodeFromSelectionTitle(args: {
       a_position: relationshipPayload.a_position,
       b_position: relationshipPayload.b_position,
     }] : undefined,
-    requestJSON: args.requestJSON ?? apiFetchJSON,
+    requestJSON,
   });
   const node = response.nodes?.[0];
   if (!node) throw new Error("selection_node_create_missing_node");

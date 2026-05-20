@@ -18,6 +18,15 @@ const workspaceDomainStreamType = "workspace"
 const workspaceReplayLimit = 500
 const workspaceCatchupInterval = 250 * time.Millisecond
 
+const (
+	workspaceReplaySourceInitial        = "initial_replay"
+	workspaceReplaySourcePoll           = "poll"
+	workspaceReplaySourceHub            = "hub"
+	workspaceReplaySourceExternalFanout = "external_fanout"
+	workspaceReplayOutcomeSuccess       = "success"
+	workspaceReplayOutcomeError         = "error"
+)
+
 func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -721,7 +730,7 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 
 	lastSentSequence := afterSequence
 	if explicitCursor {
-		if err := s.writeWorkspaceDurableCatchup(w, flusher, companyID, &lastSentSequence); err != nil {
+		if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourceInitial, w, flusher, companyID, &lastSentSequence); err != nil {
 			log.Printf("workspace stream replay failed company_id=%s after_sequence=%d: %v", companyID, afterSequence, err)
 		}
 	}
@@ -739,7 +748,7 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, "event: ping\ndata: {}\n\n")
 			flusher.Flush()
 		case <-catchup.C:
-			if err := s.writeWorkspaceDurableCatchup(w, flusher, companyID, &lastSentSequence); err != nil {
+			if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourcePoll, w, flusher, companyID, &lastSentSequence); err != nil {
 				log.Printf("workspace stream catch-up failed company_id=%s after_sequence=%d: %v", companyID, lastSentSequence, err)
 			}
 		case payload := <-ch:
@@ -747,14 +756,14 @@ func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
 			if sequence > 0 && sequence <= lastSentSequence {
 				continue
 			}
-			if err := s.writeWorkspaceDurableCatchup(w, flusher, companyID, &lastSentSequence); err != nil {
+			if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourceHub, w, flusher, companyID, &lastSentSequence); err != nil {
 				log.Printf("workspace stream hub catch-up failed company_id=%s after_sequence=%d payload_sequence=%d: %v", companyID, lastSentSequence, sequence, err)
 			}
 		case notification := <-externalCh:
 			if notification.Sequence > 0 && notification.Sequence <= lastSentSequence {
 				continue
 			}
-			if err := s.writeWorkspaceDurableCatchup(w, flusher, companyID, &lastSentSequence); err != nil {
+			if err := s.writeAndRecordWorkspaceDurableCatchup(workspaceReplaySourceExternalFanout, w, flusher, companyID, &lastSentSequence); err != nil {
 				log.Printf("workspace stream external fanout catch-up failed company_id=%s after_sequence=%d notification_sequence=%d: %v", companyID, lastSentSequence, notification.Sequence, err)
 			}
 		}
@@ -786,14 +795,51 @@ func parseWorkspaceStreamSequence(raw string) (int64, bool) {
 	return value, true
 }
 
-func (s *Server) writeWorkspaceDurableCatchup(w http.ResponseWriter, flusher http.Flusher, companyID string, lastSentSequence *int64) error {
+type workspaceDurableCatchupResult struct {
+	Batches            int
+	Events             int
+	StartAfterSequence int64
+	LastSequence       int64
+}
+
+func (s *Server) writeAndRecordWorkspaceDurableCatchup(source string, w http.ResponseWriter, flusher http.Flusher, companyID string, lastSentSequence *int64) error {
+	start := time.Now()
+	result, err := s.writeWorkspaceDurableCatchup(w, flusher, companyID, lastSentSequence)
+	s.recordWorkspaceReplayMetric(source, result, time.Since(start), err)
+	return err
+}
+
+func (s *Server) recordWorkspaceReplayMetric(source string, result workspaceDurableCatchupResult, duration time.Duration, err error) {
+	if s.metrics == nil {
+		return
+	}
+	outcome := workspaceReplayOutcomeSuccess
+	if err != nil {
+		outcome = workspaceReplayOutcomeError
+	}
+	s.metrics.RecordWorkspaceReplay(WorkspaceReplayMetric{
+		Source:             source,
+		Outcome:            outcome,
+		Duration:           duration,
+		Batches:            result.Batches,
+		Events:             result.Events,
+		StartAfterSequence: result.StartAfterSequence,
+		LastSequence:       result.LastSequence,
+	})
+}
+
+func (s *Server) writeWorkspaceDurableCatchup(w http.ResponseWriter, flusher http.Flusher, companyID string, lastSentSequence *int64) (workspaceDurableCatchupResult, error) {
+	result := workspaceDurableCatchupResult{StartAfterSequence: *lastSentSequence, LastSequence: *lastSentSequence}
 	for {
+		result.Batches++
 		replay, err := s.repo.ListDomainEventsAfter(store.DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: *lastSentSequence, Limit: workspaceReplayLimit})
 		if err != nil {
-			return err
+			result.LastSequence = *lastSentSequence
+			return result, err
 		}
 		if len(replay) == 0 {
-			return nil
+			result.LastSequence = *lastSentSequence
+			return result, nil
 		}
 		for _, event := range replay {
 			if event.Sequence <= *lastSentSequence {
@@ -801,11 +847,13 @@ func (s *Server) writeWorkspaceDurableCatchup(w http.ResponseWriter, flusher htt
 			}
 			if writeWorkspaceSSE(w, event) {
 				*lastSentSequence = event.Sequence
+				result.Events++
 			}
 		}
+		result.LastSequence = *lastSentSequence
 		flusher.Flush()
 		if len(replay) < workspaceReplayLimit {
-			return nil
+			return result, nil
 		}
 	}
 }

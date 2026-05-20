@@ -1,0 +1,267 @@
+package httpapi
+
+import (
+	"bufio"
+	"net"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+)
+
+type MetricsRecorder interface {
+	RecordHTTPRequest(HTTPRequestMetric)
+	RecordWorkspaceReplay(WorkspaceReplayMetric)
+}
+
+type HTTPRequestMetric struct {
+	Method      string
+	Route       string
+	Status      int
+	Duration    time.Duration
+	Conditional bool
+	NotModified bool
+}
+
+type WorkspaceReplayMetric struct {
+	Source             string
+	Outcome            string
+	Duration           time.Duration
+	Batches            int
+	Events             int
+	StartAfterSequence int64
+	LastSequence       int64
+}
+
+type HTTPRequestMetricKey struct {
+	Method      string
+	Route       string
+	Status      int
+	Conditional bool
+	NotModified bool
+}
+
+type HTTPRequestMetricStats struct {
+	Count         int64
+	TotalDuration time.Duration
+	LastDuration  time.Duration
+}
+
+type WorkspaceReplayMetricKey struct {
+	Source  string
+	Outcome string
+}
+
+type WorkspaceReplayMetricStats struct {
+	Count                  int64
+	TotalDuration          time.Duration
+	LastDuration           time.Duration
+	TotalBatches           int64
+	LastBatches            int
+	TotalEvents            int64
+	LastEvents             int
+	LastStartAfterSequence int64
+	LastSequence           int64
+}
+
+type MetricsSnapshot struct {
+	HTTPRequests     map[HTTPRequestMetricKey]HTTPRequestMetricStats
+	WorkspaceReplays map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats
+}
+
+type InMemoryMetricsRecorder struct {
+	mu               sync.Mutex
+	httpRequests     map[HTTPRequestMetricKey]HTTPRequestMetricStats
+	workspaceReplays map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats
+}
+
+func NewInMemoryMetricsRecorder() *InMemoryMetricsRecorder {
+	return &InMemoryMetricsRecorder{
+		httpRequests:     map[HTTPRequestMetricKey]HTTPRequestMetricStats{},
+		workspaceReplays: map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats{},
+	}
+}
+
+func (m *InMemoryMetricsRecorder) RecordHTTPRequest(metric HTTPRequestMetric) {
+	if m == nil {
+		return
+	}
+	key := HTTPRequestMetricKey{
+		Method:      metric.Method,
+		Route:       metric.Route,
+		Status:      metric.Status,
+		Conditional: metric.Conditional,
+		NotModified: metric.NotModified,
+	}
+	m.mu.Lock()
+	stats := m.httpRequests[key]
+	stats.Count++
+	stats.TotalDuration += metric.Duration
+	stats.LastDuration = metric.Duration
+	m.httpRequests[key] = stats
+	m.mu.Unlock()
+}
+
+func (m *InMemoryMetricsRecorder) RecordWorkspaceReplay(metric WorkspaceReplayMetric) {
+	if m == nil {
+		return
+	}
+	key := WorkspaceReplayMetricKey{Source: metric.Source, Outcome: metric.Outcome}
+	m.mu.Lock()
+	stats := m.workspaceReplays[key]
+	stats.Count++
+	stats.TotalDuration += metric.Duration
+	stats.LastDuration = metric.Duration
+	stats.TotalBatches += int64(metric.Batches)
+	stats.LastBatches = metric.Batches
+	stats.TotalEvents += int64(metric.Events)
+	stats.LastEvents = metric.Events
+	stats.LastStartAfterSequence = metric.StartAfterSequence
+	stats.LastSequence = metric.LastSequence
+	m.workspaceReplays[key] = stats
+	m.mu.Unlock()
+}
+
+func (m *InMemoryMetricsRecorder) Snapshot() MetricsSnapshot {
+	snapshot := MetricsSnapshot{
+		HTTPRequests:     map[HTTPRequestMetricKey]HTTPRequestMetricStats{},
+		WorkspaceReplays: map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats{},
+	}
+	if m == nil {
+		return snapshot
+	}
+	m.mu.Lock()
+	for key, stats := range m.httpRequests {
+		snapshot.HTTPRequests[key] = stats
+	}
+	for key, stats := range m.workspaceReplays {
+		snapshot.WorkspaceReplays[key] = stats
+	}
+	m.mu.Unlock()
+	return snapshot
+}
+
+func (s *Server) MetricsSnapshot() MetricsSnapshot {
+	if snapshotter, ok := s.metrics.(interface{ Snapshot() MetricsSnapshot }); ok {
+		return snapshotter.Snapshot()
+	}
+	return MetricsSnapshot{
+		HTTPRequests:     map[HTTPRequestMetricKey]HTTPRequestMetricStats{},
+		WorkspaceReplays: map[WorkspaceReplayMetricKey]WorkspaceReplayMetricStats{},
+	}
+}
+
+func (s *Server) withHTTPMetrics(next http.Handler) http.Handler {
+	if s.metrics == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &metricsResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		s.metrics.RecordHTTPRequest(HTTPRequestMetric{
+			Method:      r.Method,
+			Route:       normalizeHTTPRoute(r),
+			Status:      rec.status,
+			Duration:    time.Since(start),
+			Conditional: r.Method == http.MethodGet && strings.TrimSpace(r.Header.Get("If-None-Match")) != "",
+			NotModified: rec.status == http.StatusNotModified,
+		})
+	})
+}
+
+func normalizeHTTPRoute(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if strings.TrimSpace(r.Pattern) != "" {
+		return r.Pattern
+	}
+	path := strings.TrimSpace(r.URL.Path)
+	if path == "" {
+		return "/"
+	}
+	leadingSlash := strings.HasPrefix(path, "/")
+	trailingSlash := strings.HasSuffix(path, "/")
+	parts := strings.Split(path, "/")
+	for index, part := range parts {
+		if isLikelyRouteIDSegment(part) {
+			parts[index] = "{id}"
+		}
+	}
+	normalized := strings.Join(parts, "/")
+	if leadingSlash && !strings.HasPrefix(normalized, "/") {
+		normalized = "/" + normalized
+	}
+	if trailingSlash && !strings.HasSuffix(normalized, "/") {
+		normalized += "/"
+	}
+	return normalized
+}
+
+func isLikelyRouteIDSegment(segment string) bool {
+	segment = strings.TrimSpace(segment)
+	if segment == "" {
+		return false
+	}
+	if isCanonicalUUID(segment) {
+		return true
+	}
+	if len(segment) < 16 {
+		return false
+	}
+	hasDigit := false
+	hasLetter := false
+	for _, char := range segment {
+		switch {
+		case char >= '0' && char <= '9':
+			hasDigit = true
+		case (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z'):
+			hasLetter = true
+		case char == '-' || char == '_' || char == ':':
+		default:
+			return false
+		}
+	}
+	return hasDigit && hasLetter
+}
+
+type metricsResponseWriter struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func (w *metricsResponseWriter) WriteHeader(status int) {
+	if w.wroteHeader {
+		return
+	}
+	w.status = status
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *metricsResponseWriter) Write(body []byte) (int, error) {
+	if !w.wroteHeader {
+		w.wroteHeader = true
+	}
+	return w.ResponseWriter.Write(body)
+}
+
+func (w *metricsResponseWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (w *metricsResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+func (w *metricsResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return hijacker.Hijack()
+}

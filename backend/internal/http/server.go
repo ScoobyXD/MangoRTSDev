@@ -35,6 +35,7 @@ type Server struct {
 	workspaceFanout          store.WorkspaceEventFanout
 	workspaceFanoutCancel    context.CancelFunc
 	workspaceCatchupInterval time.Duration
+	metrics                  MetricsRecorder
 	commCache                *communicationsCache
 	nylasGate                *nylasRequestGate
 	nylasWebhooks            *nylasWebhookReceiptCache
@@ -58,6 +59,7 @@ type ServerOptions struct {
 	MaxRequestBodyBytes           int64
 	WorkspaceEventFanout          store.WorkspaceEventFanout
 	WorkspaceCatchupInterval      time.Duration
+	Metrics                       MetricsRecorder
 }
 
 func NewServer(repo store.Repository) *Server {
@@ -69,6 +71,10 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	if catchupInterval <= 0 {
 		catchupInterval = workspaceCatchupInterval
 	}
+	metrics := options.Metrics
+	if metrics == nil {
+		metrics = NewInMemoryMetricsRecorder()
+	}
 	server := &Server{
 		repo:                     repo,
 		hub:                      newWorkspaceEventHub(),
@@ -79,6 +85,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		workspaceWakeHub:         newWorkspaceEventNotificationHub(),
 		workspaceFanout:          options.WorkspaceEventFanout,
 		workspaceCatchupInterval: catchupInterval,
+		metrics:                  metrics,
 		commCache:                newCommunicationsCache(),
 		nylasGate:                newNylasRequestGate(communicationsNylasMinRequestInterval),
 		nylasWebhooks:            newNylasWebhookReceiptCache(),
@@ -164,7 +171,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/kanban/columns/", s.handleKanbanColumnByID)
 	mux.HandleFunc("/v1/kanban/cards", s.handleKanbanCards)
 	mux.HandleFunc("/v1/kanban/cards/", s.handleKanbanCardByID)
-	return s.withRequestLimits(s.withAuth(mux))
+	return s.withHTTPMetrics(s.withRequestLimits(s.withAuth(mux)))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

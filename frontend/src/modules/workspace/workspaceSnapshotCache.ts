@@ -1,3 +1,5 @@
+import { requestJSONWithMeta } from "../api/requestJSON.js";
+
 export type WorkspaceSnapshotPayload = {
   scope?: string;
   company_id?: string;
@@ -140,17 +142,23 @@ export async function fetchWorkspaceSnapshot(apiBase: string, companyID: string,
   }
   if (entry.inflight) return entry.inflight;
 
-  entry.inflight = fetch(`${apiBase}/v1/workspace/snapshot?${query.toString()}`, {
-    cache: "no-store",
-    headers: entry.etag ? { "If-None-Match": entry.etag } : undefined,
-  }).then(async (response): Promise<WorkspaceSnapshotResult> => {
-    if (response.status === 304) {
+  entry.inflight = requestJSONWithMeta<WorkspaceSnapshotPayload>(
+    apiBase,
+    `/v1/workspace/snapshot?${query.toString()}`,
+    {
+      cache: "no-store",
+      headers: entry.etag ? { "If-None-Match": entry.etag } : undefined,
+      throwOnHTTPError: false,
+    },
+  ).then((response): WorkspaceSnapshotResult => {
+    if (response.notModified) {
       entry.fetchedAt = Date.now();
       return { payload: entry.payload, changed: false };
     }
     if (!response.ok) return { payload: entry.payload, changed: false };
-    const payload = (await response.json()) as WorkspaceSnapshotPayload;
-    const nextEtag = response.headers.get("ETag") ?? undefined;
+    const payload = response.body;
+    if (!payload) return { payload: entry.payload, changed: false };
+    const nextEtag = response.etag;
     const changed = !nextEtag || entry.etag !== nextEtag;
     entry.payload = payload;
     entry.fetchedAt = Date.now();

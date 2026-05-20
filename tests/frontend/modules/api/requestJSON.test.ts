@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { requestJSON } from "../../../../frontend/src/modules/api/requestJSON.js";
+import { requestJSON, requestJSONWithMeta } from "../../../../frontend/src/modules/api/requestJSON.js";
 
 function jsonResponse(payload: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
@@ -114,4 +114,63 @@ test("requestJSON treats future 304 responses as empty successful reads", async 
   });
 
   assert.equal(payload, undefined);
+});
+
+test("requestJSON propagates caller cancellation", async () => {
+  let sawAbort = false;
+  const controller = new AbortController();
+  const reason = new DOMException("caller cancelled", "AbortError");
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    const signal = init?.signal;
+    if (!signal) throw new Error("missing_abort_signal");
+    return new Promise<Response>((_resolve, reject) => {
+      signal.addEventListener("abort", () => {
+        sawAbort = true;
+        reject(signal.reason);
+      }, { once: true });
+    });
+  };
+
+  const promise = requestJSON("https://api.example.test", "/v1/cancel", {
+    auth: false,
+    fetchImpl,
+    signal: controller.signal,
+    timeoutMs: 0,
+  });
+  controller.abort(reason);
+
+  await assert.rejects(promise, (error: unknown) => error === reason);
+  assert.equal(sawAbort, true);
+});
+
+test("requestJSONWithMeta sends conditional headers and returns 304 metadata", async () => {
+  let seenHeaders = new Headers();
+  const response = await requestJSONWithMeta<unknown>("https://api.example.test", "/v1/widgets", {
+    auth: false,
+    fetchImpl: async (_input, init) => {
+      seenHeaders = new Headers(init?.headers);
+      return new Response(null, { status: 304, headers: { ETag: '"widgets-v1"' } });
+    },
+    headers: { "If-None-Match": '"widgets-v1"' },
+  });
+
+  assert.equal(seenHeaders.get("If-None-Match"), '"widgets-v1"');
+  assert.equal(response.status, 304);
+  assert.equal(response.ok, true);
+  assert.equal(response.notModified, true);
+  assert.equal(response.body, undefined);
+  assert.equal(response.etag, '"widgets-v1"');
+});
+
+test("requestJSONWithMeta can return non-OK responses for cache fallbacks", async () => {
+  const response = await requestJSONWithMeta<unknown>("https://api.example.test", "/v1/widgets", {
+    auth: false,
+    fetchImpl: async () => jsonResponse({ error: "temporarily_unavailable" }, { status: 503, statusText: "Unavailable" }),
+    throwOnHTTPError: false,
+  });
+
+  assert.equal(response.status, 503);
+  assert.equal(response.ok, false);
+  assert.equal(response.notModified, false);
+  assert.equal(response.body, undefined);
 });
