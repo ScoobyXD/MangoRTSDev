@@ -1,11 +1,29 @@
 import {
+  archiveEmailMessage as defaultArchiveEmailMessage,
   addMyLogicGateShortcuts as defaultAddMyLogicGateShortcuts,
   convertTriageMessagesToLogicGate as defaultConvertTriageMessagesToLogicGate,
+  createCommunicationsSharedInbox as defaultCreateCommunicationsSharedInbox,
+  deleteCommunicationsSharedInbox as defaultDeleteCommunicationsSharedInbox,
+  deleteEmailMessage as defaultDeleteEmailMessage,
   invalidateCommunicationsCache as defaultInvalidateCommunicationsCache,
   removeMyLogicGateShortcut as defaultRemoveMyLogicGateShortcut,
+  parseEmailAddressList,
+  sendEmail as defaultSendEmail,
+  unarchiveEmailMessage as defaultUnarchiveEmailMessage,
+  updateCommunicationsSharedInbox as defaultUpdateCommunicationsSharedInbox,
+  updateCommunicationsSharedInboxRaciAssignments as defaultUpdateCommunicationsSharedInboxRaciAssignments,
+  updateEmailMessage as defaultUpdateEmailMessage,
   updateNode as defaultUpdateNode,
 } from "../../modules/communications/communicationsApi.js";
-import type { UserLogicGateShortcut } from "../../modules/communications/communicationsApi.js";
+import type {
+  CompanyUser,
+  CommunicationsSharedInbox,
+  CommunicationsSharedInboxRaciAssignment,
+  CommunicationsSharedInboxRaciRole,
+  EmailMessage,
+  SendEmailInput,
+  UserLogicGateShortcut,
+} from "../../modules/communications/communicationsApi.js";
 import type { ExplorerDragPayload } from "../../modules/company-explorer/companyExplorerTypes.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders.js";
 import {
@@ -23,8 +41,14 @@ import {
   type KanbanBoardsUpdatedDetail,
 } from "../../modules/kanban/shared.js";
 import type { NodeRecord } from "../../modules/node-map/shared.js";
-import { cleanIDList, logicGateIDsFromExplorerPayload, nodeTitle, normalizeResponsibleInboxStatus } from "./homeUtils.js";
-import type { InboxPriority, ResponsibleInboxStatus } from "./homeTypes.js";
+import {
+  cleanIDList,
+  collectSharedInboxSubtreeIDs,
+  logicGateIDsFromExplorerPayload,
+  nodeTitle,
+  normalizeResponsibleInboxStatus,
+} from "./homeUtils.js";
+import type { ComposeState, HomeViewID, InboxPriority, ResponsibleInboxStatus } from "./homeTypes.js";
 
 export type HomeDropAssignNodeToLogicGateStatus = (
   args: Parameters<typeof defaultAssignNodeToLogicGateStatus>[0],
@@ -34,12 +58,22 @@ export type HomeBulkMoveLogicGateAssignment = (
   args: Parameters<typeof defaultMoveLogicGateAssignment>[0],
 ) => Promise<LogicGateAssignmentCommandResult>;
 
+export type HomeArchiveEmailMessage = typeof defaultArchiveEmailMessage;
+export type HomeUnarchiveEmailMessage = typeof defaultUnarchiveEmailMessage;
+export type HomeDeleteEmailMessage = typeof defaultDeleteEmailMessage;
+export type HomeUpdateEmailMessage = typeof defaultUpdateEmailMessage;
+export type HomeSendEmail = typeof defaultSendEmail;
 export type HomeBulkUpdateNode = typeof defaultUpdateNode;
 export type HomeAddMyLogicGateShortcuts = typeof defaultAddMyLogicGateShortcuts;
 export type HomeRemoveMyLogicGateShortcut = typeof defaultRemoveMyLogicGateShortcut;
 export type HomeConvertTriageMessagesToLogicGate = typeof defaultConvertTriageMessagesToLogicGate;
+export type HomeCreateSharedInbox = typeof defaultCreateCommunicationsSharedInbox;
+export type HomeUpdateSharedInbox = typeof defaultUpdateCommunicationsSharedInbox;
+export type HomeDeleteSharedInbox = typeof defaultDeleteCommunicationsSharedInbox;
+export type HomeUpdateSharedInboxRaciAssignments = typeof defaultUpdateCommunicationsSharedInboxRaciAssignments;
 
 export type HomeBulkNodePatch = Partial<Pick<NodeRecord, "assignee_user_id" | "priority" | "status" | "due_date">>;
+export type HomeMailMessageUpdate = { unread?: boolean; starred?: boolean; folders?: string[] };
 
 export type HomeKanbanBoardContentsInvalidator = (apiBase: string, companyID: string, boardID: string) => void;
 export type HomeNodeRecordInvalidator = (apiBase: string, companyID: string, nodeID: string) => void;
@@ -58,6 +92,34 @@ export type HomeTriageConversionCommandResult = {
   convertedMessageIDs: string[];
 };
 
+export type HomeMailMessagesCommandResult = {
+  messageIDs: string[];
+};
+
+export type HomeMailMessageCommandResult = {
+  message: EmailMessage;
+};
+
+export type HomeSendMailCommandResult = {
+  sentMessage: EmailMessage;
+  sentToConnectedAccount: boolean;
+};
+
+export type HomeSharedInboxCommandResult = {
+  folder: CommunicationsSharedInbox;
+  viewID?: HomeViewID;
+  notice?: string;
+};
+
+export type HomeSharedInboxDeleteCommandResult = {
+  deletedFolderIDs: string[];
+};
+
+export type HomeSharedInboxRaciCommandResult = {
+  folderID: string;
+  assignments: CommunicationsSharedInboxRaciAssignment[];
+};
+
 function noopKanbanBoardContentsInvalidator(): void {}
 function noopNodeRecordInvalidator(): void {}
 function noopNodeGraphNodeUpsert(): void {}
@@ -72,7 +134,94 @@ function dispatchKanbanBoardContentsUpdated(detail: KanbanBoardContentsUpdatedDe
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent<KanbanBoardContentsUpdatedDetail>(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, { detail }));
 }
+export async function archiveHomeMailMessagesCommand(args: {
+  companyID: string;
+  sharedInboxID?: string;
+  messageIDs: string[];
+  archiveEmailMessage?: HomeArchiveEmailMessage;
+}): Promise<HomeMailMessagesCommandResult | null> {
+  const messageIDs = cleanIDList(args.messageIDs);
+  if (messageIDs.length === 0) return null;
+  const archiveEmailMessage = args.archiveEmailMessage ?? defaultArchiveEmailMessage;
+  const sharedInboxID = args.sharedInboxID?.trim() || undefined;
+  await Promise.all(messageIDs.map((messageID) => archiveEmailMessage(messageID, sharedInboxID, args.companyID)));
+  return { messageIDs };
+}
 
+export async function unarchiveHomeMailMessagesCommand(args: {
+  companyID: string;
+  sharedInboxID?: string;
+  messageIDs: string[];
+  unarchiveEmailMessage?: HomeUnarchiveEmailMessage;
+}): Promise<HomeMailMessagesCommandResult | null> {
+  const messageIDs = cleanIDList(args.messageIDs);
+  if (messageIDs.length === 0) return null;
+  const unarchiveEmailMessage = args.unarchiveEmailMessage ?? defaultUnarchiveEmailMessage;
+  const sharedInboxID = args.sharedInboxID?.trim() || undefined;
+  await Promise.all(messageIDs.map((messageID) => unarchiveEmailMessage(messageID, sharedInboxID, args.companyID)));
+  return { messageIDs };
+}
+
+export async function deleteHomeMailMessagesCommand(args: {
+  companyID: string;
+  sharedInboxID?: string;
+  messageIDs: string[];
+  deleteEmailMessage?: HomeDeleteEmailMessage;
+}): Promise<HomeMailMessagesCommandResult | null> {
+  const messageIDs = cleanIDList(args.messageIDs);
+  if (messageIDs.length === 0) return null;
+  const deleteEmailMessage = args.deleteEmailMessage ?? defaultDeleteEmailMessage;
+  const sharedInboxID = args.sharedInboxID?.trim() || undefined;
+  await Promise.all(messageIDs.map((messageID) => deleteEmailMessage(messageID, sharedInboxID, args.companyID)));
+  return { messageIDs };
+}
+
+export async function updateHomeMailMessageCommand(args: {
+  companyID: string;
+  sharedInboxID?: string;
+  messageID: string;
+  update: HomeMailMessageUpdate;
+  updateEmailMessage?: HomeUpdateEmailMessage;
+}): Promise<HomeMailMessageCommandResult | null> {
+  const messageID = args.messageID.trim();
+  if (!messageID) return null;
+  const updateEmailMessage = args.updateEmailMessage ?? defaultUpdateEmailMessage;
+  const message = await updateEmailMessage(messageID, args.update, args.sharedInboxID?.trim() || undefined, args.companyID);
+  return { message };
+}
+
+export async function sendHomeMailComposeCommand(args: {
+  compose: Pick<ComposeState, "to" | "cc" | "bcc" | "subject" | "body" | "replyToMessageID">;
+  connectedAccountEmail?: string;
+  sendEmail?: HomeSendEmail;
+}): Promise<HomeSendMailCommandResult> {
+  const to = parseEmailAddressList(args.compose.to);
+  const cc = parseEmailAddressList(args.compose.cc);
+  const bcc = parseEmailAddressList(args.compose.bcc);
+  if (to.length === 0 && cc.length === 0 && bcc.length === 0) {
+    throw new Error("Add at least one recipient.");
+  }
+  const subject = args.compose.subject.trim();
+  const body = args.compose.body.trim();
+  if (!subject && !body) {
+    throw new Error("Add a subject or message body.");
+  }
+  const input: SendEmailInput = {
+    to,
+    cc,
+    bcc,
+    subject,
+    body,
+    reply_to_message_id: args.compose.replyToMessageID || undefined,
+  };
+  const cleanConnectedAccountEmail = args.connectedAccountEmail?.trim().toLowerCase() ?? "";
+  const sentToConnectedAccount = !!cleanConnectedAccountEmail && [...to, ...cc, ...bcc].some((address) => (
+    address.email.trim().toLowerCase() === cleanConnectedAccountEmail
+  ));
+  const sendEmail = args.sendEmail ?? defaultSendEmail;
+  const sentMessage = await sendEmail(input);
+  return { sentMessage, sentToConnectedAccount };
+}
 export async function dropNodesIntoInboxLogicGateCommand(args: {
   apiBase: string;
   companyID: string;
@@ -153,7 +302,164 @@ export async function applyBulkNodePatchCommand(args: {
     return updateNode(args.companyID, nodeID, directPatch);
   })).then((nodes) => nodes.filter((node): node is NodeRecord => node !== null));
 }
+export async function createSharedInboxCommand(args: {
+  companyID: string;
+  parentFolderID: string;
+  rawName?: string;
+  accountEmail?: string;
+  createSharedInbox?: HomeCreateSharedInbox;
+}): Promise<HomeSharedInboxCommandResult | null> {
+  const name = (args.rawName ?? "New Folder").trim();
+  if (!name) return null;
+  const createSharedInbox = args.createSharedInbox ?? defaultCreateCommunicationsSharedInbox;
+  const folder = await createSharedInbox({
+    companyID: args.companyID,
+    name,
+    parentFolderID: args.parentFolderID,
+    accountEmail: args.accountEmail,
+  });
+  return { folder, viewID: `shared:${folder.folder_id}` };
+}
 
+export async function updateSharedInboxAccountEmailCommand(args: {
+  companyID: string;
+  folderID: string;
+  accountEmail: string;
+  updateSharedInbox?: HomeUpdateSharedInbox;
+}): Promise<HomeSharedInboxCommandResult | null> {
+  const folderID = args.folderID.trim();
+  if (!folderID) return null;
+  const updateSharedInbox = args.updateSharedInbox ?? defaultUpdateCommunicationsSharedInbox;
+  const folder = await updateSharedInbox({ companyID: args.companyID, folderID, accountEmail: args.accountEmail });
+  return { folder, notice: folder.account_email ? `Attached ${folder.account_email}.` : "Email detached." };
+}
+
+export async function renameSharedInboxCommand(args: {
+  companyID: string;
+  folderID: string;
+  name: string;
+  updateSharedInbox?: HomeUpdateSharedInbox;
+}): Promise<HomeSharedInboxCommandResult | null> {
+  const folderID = args.folderID.trim();
+  const name = args.name.trim();
+  if (!folderID || !name) return null;
+  const updateSharedInbox = args.updateSharedInbox ?? defaultUpdateCommunicationsSharedInbox;
+  const folder = await updateSharedInbox({ companyID: args.companyID, folderID, name });
+  return { folder };
+}
+
+export async function moveSharedInboxCommand(args: {
+  companyID: string;
+  folderID: string;
+  parentFolderID: string;
+  position: number;
+  updateSharedInbox?: HomeUpdateSharedInbox;
+}): Promise<HomeSharedInboxCommandResult | null> {
+  const folderID = args.folderID.trim();
+  if (!folderID) return null;
+  const updateSharedInbox = args.updateSharedInbox ?? defaultUpdateCommunicationsSharedInbox;
+  const folder = await updateSharedInbox({
+    companyID: args.companyID,
+    folderID,
+    parentFolderID: args.parentFolderID,
+    position: args.position,
+  });
+  return { folder };
+}
+
+export async function deleteSharedInboxCommand(args: {
+  companyID: string;
+  folderID: string;
+  sharedInboxes: CommunicationsSharedInbox[];
+  deleteSharedInbox?: HomeDeleteSharedInbox;
+}): Promise<HomeSharedInboxDeleteCommandResult | null> {
+  const folderID = args.folderID.trim();
+  if (!folderID) return null;
+  const deletedIDs = collectSharedInboxSubtreeIDs(args.sharedInboxes, folderID);
+  if (deletedIDs.size === 0) deletedIDs.add(folderID);
+  const deleteSharedInbox = args.deleteSharedInbox ?? defaultDeleteCommunicationsSharedInbox;
+  await deleteSharedInbox(args.companyID, folderID);
+  return { deletedFolderIDs: Array.from(deletedIDs) };
+}
+
+export async function saveSharedInboxRaciAssignmentsCommand(args: {
+  companyID: string;
+  folderID: string;
+  assignments: CommunicationsSharedInboxRaciAssignment[];
+  updateSharedInboxRaciAssignments?: HomeUpdateSharedInboxRaciAssignments;
+}): Promise<HomeSharedInboxRaciCommandResult | null> {
+  const folderID = args.folderID.trim();
+  if (!folderID) return null;
+  const directAssignments = args.assignments.filter((assignment) => assignment.folder_id === folderID);
+  const updateSharedInboxRaciAssignments = args.updateSharedInboxRaciAssignments ?? defaultUpdateCommunicationsSharedInboxRaciAssignments;
+  const assignments = await updateSharedInboxRaciAssignments(
+    args.companyID,
+    folderID,
+    directAssignments.map((assignment) => ({ role: assignment.role, user_id: assignment.user_id })),
+  );
+  return { folderID, assignments };
+}
+
+export async function addSharedInboxRaciUserCommand(args: {
+  companyID: string;
+  folderID: string;
+  role: CommunicationsSharedInboxRaciRole;
+  userID: string;
+  sharedInboxes: CommunicationsSharedInbox[];
+  companyUsers: CompanyUser[];
+  now?: () => string;
+  updateSharedInboxRaciAssignments?: HomeUpdateSharedInboxRaciAssignments;
+}): Promise<HomeSharedInboxRaciCommandResult | null> {
+  const folderID = args.folderID.trim();
+  const userID = args.userID.trim();
+  if (!folderID || !userID) return null;
+  const folder = args.sharedInboxes.find((item) => item.folder_id === folderID);
+  if (!folder || (folder.raci_assignments ?? []).some((assignment) => assignment.role === args.role && assignment.user_id === userID)) {
+    return null;
+  }
+  const user = args.companyUsers.find((item) => item.user_id === userID);
+  return saveSharedInboxRaciAssignmentsCommand({
+    companyID: args.companyID,
+    folderID,
+    assignments: [
+      ...(folder.raci_assignments ?? []),
+      {
+        company_id: args.companyID,
+        folder_id: folderID,
+        role: args.role,
+        user_id: userID,
+        user_display_name: user?.display_name,
+        user_email: user?.email,
+        created_timestamp: args.now?.() ?? new Date().toISOString(),
+      },
+    ],
+    updateSharedInboxRaciAssignments: args.updateSharedInboxRaciAssignments,
+  });
+}
+
+export async function removeSharedInboxRaciUserCommand(args: {
+  companyID: string;
+  folderID: string;
+  role: CommunicationsSharedInboxRaciRole;
+  userID: string;
+  sharedInboxes: CommunicationsSharedInbox[];
+  updateSharedInboxRaciAssignments?: HomeUpdateSharedInboxRaciAssignments;
+}): Promise<HomeSharedInboxRaciCommandResult | null> {
+  const folderID = args.folderID.trim();
+  const userID = args.userID.trim();
+  if (!folderID || !userID) return null;
+  const folder = args.sharedInboxes.find((item) => item.folder_id === folderID);
+  if (!folder) return null;
+  const directAssignments = (folder.raci_assignments ?? []).filter((assignment) => assignment.folder_id === folderID);
+  const assignments = directAssignments.filter((assignment) => !(assignment.role === args.role && assignment.user_id === userID));
+  if (assignments.length === directAssignments.length) return null;
+  return saveSharedInboxRaciAssignmentsCommand({
+    companyID: args.companyID,
+    folderID,
+    assignments,
+    updateSharedInboxRaciAssignments: args.updateSharedInboxRaciAssignments,
+  });
+}
 export async function addMyLogicGateShortcutsCommand(args: {
   companyID: string;
   payload: ExplorerDragPayload | null;

@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { UserLogicGateShortcut } from "../../../../frontend/src/modules/communications/communicationsApi.js";
+import type { CompanyUser, CommunicationsSharedInbox, CommunicationsSharedInboxRaciAssignment, CommunicationsSharedInboxRaciRole, EmailMessage, SendEmailInput, UserLogicGateShortcut } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
 import type { LogicGateAssignmentCommandResult } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
 import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
-import { addMyLogicGateShortcutsCommand, applyBulkNodePatchCommand, convertMessagesToLogicGateCommand, dropNodesIntoInboxLogicGateCommand, removeMyLogicGateShortcutCommand, type HomeAddMyLogicGateShortcuts, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut } from "../../../../frontend/src/pages/home/homeCommands.js";
+import { addMyLogicGateShortcutsCommand, addSharedInboxRaciUserCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciUserCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxRaciAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
 
 const timestamp = "2026-01-01T00:00:00Z";
 
@@ -80,6 +80,48 @@ function explorerFolderItem(folderID: string, itemID: string, itemType: "node" |
     position: 1000,
     created_timestamp: timestamp,
     updated_timestamp: timestamp,
+  };
+}
+
+function emailMessage(id: string, overrides: Partial<EmailMessage> = {}): EmailMessage {
+  return {
+    id,
+    subject: `Subject ${id}`,
+    unread: true,
+    starred: false,
+    ...overrides,
+  };
+}
+
+function sharedInbox(id: string, overrides: Partial<CommunicationsSharedInbox> = {}): CommunicationsSharedInbox {
+  return {
+    company_id: "company-1",
+    folder_id: id,
+    folder_kind: "communications",
+    name: id,
+    position: 1000,
+    created_timestamp: timestamp,
+    updated_timestamp: timestamp,
+    ...overrides,
+  };
+}
+
+function sharedRaci(folderID: string, role: CommunicationsSharedInboxRaciRole, userID: string): CommunicationsSharedInboxRaciAssignment {
+  return {
+    company_id: "company-1",
+    folder_id: folderID,
+    role,
+    user_id: userID,
+    created_timestamp: timestamp,
+  };
+}
+
+function companyUser(userID: string): CompanyUser {
+  return {
+    company_id: "company-1",
+    user_id: userID,
+    email: `${userID}@example.test`,
+    display_name: `User ${userID}`,
   };
 }
 test("Home node drop uses one work-item assignment command for status and priority placement", async () => {
@@ -322,4 +364,154 @@ test("Home triage conversion command owns cache, event, and graph side effects",
   assert.deepEqual(nodeFolderItems, ["node-1"]);
   assert.deepEqual(logicGateFolderItems, ["node-1"]);
   assert.deepEqual(communicationScopes, [{ messagePages: true, messages: true }]);
+});
+
+test("Home mail message commands normalize ids and pass shared inbox context", async () => {
+  const calls: Array<{ action: string; companyID: string; messageID: string; sharedInboxID?: string; update?: unknown }> = [];
+  const archiveEmailMessage: HomeArchiveEmailMessage = async (messageID, sharedInboxID, companyID) => {
+    calls.push({ action: "archive", companyID: companyID ?? "", messageID, sharedInboxID });
+    return emailMessage(messageID, { folders: ["archive"] });
+  };
+  const unarchiveEmailMessage: HomeUnarchiveEmailMessage = async (messageID, sharedInboxID, companyID) => {
+    calls.push({ action: "unarchive", companyID: companyID ?? "", messageID, sharedInboxID });
+    return emailMessage(messageID, { folders: ["inbox"] });
+  };
+  const deleteEmailMessage: HomeDeleteEmailMessage = async (messageID, sharedInboxID, companyID) => {
+    calls.push({ action: "delete", companyID: companyID ?? "", messageID, sharedInboxID });
+  };
+  const updateEmailMessage: HomeUpdateEmailMessage = async (messageID, update, sharedInboxID, companyID) => {
+    calls.push({ action: "update", companyID: companyID ?? "", messageID, sharedInboxID, update });
+    return emailMessage(messageID, { unread: update.unread ?? true, starred: update.starred ?? false });
+  };
+
+  await archiveHomeMailMessagesCommand({ companyID: "company-1", sharedInboxID: " shared-1 ", messageIDs: [" message-1 ", "message-2", "message-1"], archiveEmailMessage });
+  await unarchiveHomeMailMessagesCommand({ companyID: "company-1", sharedInboxID: "shared-1", messageIDs: ["message-3"], unarchiveEmailMessage });
+  await deleteHomeMailMessagesCommand({ companyID: "company-1", sharedInboxID: "shared-1", messageIDs: ["message-4"], deleteEmailMessage });
+  const updated = await updateHomeMailMessageCommand({ companyID: "company-1", sharedInboxID: "shared-1", messageID: " message-5 ", update: { unread: false }, updateEmailMessage });
+
+  assert.deepEqual(calls, [
+    { action: "archive", companyID: "company-1", messageID: "message-1", sharedInboxID: "shared-1" },
+    { action: "archive", companyID: "company-1", messageID: "message-2", sharedInboxID: "shared-1" },
+    { action: "unarchive", companyID: "company-1", messageID: "message-3", sharedInboxID: "shared-1" },
+    { action: "delete", companyID: "company-1", messageID: "message-4", sharedInboxID: "shared-1" },
+    { action: "update", companyID: "company-1", messageID: "message-5", sharedInboxID: "shared-1", update: { unread: false } },
+  ]);
+  assert.equal(updated?.message.id, "message-5");
+  assert.equal(updated?.message.unread, false);
+});
+
+test("Home compose command validates and normalizes send payloads", async () => {
+  const sentInputs: SendEmailInput[] = [];
+  const sendEmail: HomeSendEmail = async (input) => {
+    sentInputs.push(input);
+    return emailMessage("sent-1", { to: input.to, subject: input.subject, body: input.body });
+  };
+
+  const result = await sendHomeMailComposeCommand({
+    compose: {
+      to: "Owner <owner@example.test>",
+      cc: "",
+      bcc: " teammate@example.test ",
+      subject: " Subject ",
+      body: " Body ",
+      replyToMessageID: "message-1",
+    },
+    connectedAccountEmail: "owner@example.test",
+    sendEmail,
+  });
+
+  assert.equal(result.sentToConnectedAccount, true);
+  assert.equal(result.sentMessage.id, "sent-1");
+  assert.deepEqual(sentInputs, [{
+    to: [{ name: "Owner", email: "owner@example.test" }],
+    cc: [],
+    bcc: [{ email: "teammate@example.test" }],
+    subject: "Subject",
+    body: "Body",
+    reply_to_message_id: "message-1",
+  }]);
+  await assert.rejects(
+    () => sendHomeMailComposeCommand({ compose: { to: "", cc: "", bcc: "", subject: "", body: "Body", replyToMessageID: "" }, sendEmail }),
+    /Add at least one recipient\./,
+  );
+});
+
+test("Home shared inbox commands normalize folder operations", async () => {
+  const updatedCalls: Array<Parameters<HomeUpdateSharedInbox>[0]> = [];
+  const deletedCalls: Array<{ companyID: string; folderID: string }> = [];
+  const createSharedInbox: HomeCreateSharedInbox = async (input) => sharedInbox("child-1", {
+    name: input.name,
+    parent_folder_id: input.parentFolderID,
+    account_email: input.accountEmail,
+  });
+  const updateSharedInbox: HomeUpdateSharedInbox = async (input) => {
+    updatedCalls.push(input);
+    return sharedInbox(input.folderID, {
+      name: input.name ?? "Updated",
+      parent_folder_id: input.parentFolderID,
+      account_email: input.accountEmail,
+      position: input.position ?? 1000,
+    });
+  };
+  const deleteSharedInbox: HomeDeleteSharedInbox = async (companyID, folderID) => {
+    deletedCalls.push({ companyID, folderID });
+  };
+
+  const created = await createSharedInboxCommand({ companyID: "company-1", parentFolderID: "parent-1", rawName: " Team ", accountEmail: "team@example.test", createSharedInbox });
+  const attached = await updateSharedInboxAccountEmailCommand({ companyID: "company-1", folderID: " child-1 ", accountEmail: "team@example.test", updateSharedInbox });
+  await renameSharedInboxCommand({ companyID: "company-1", folderID: "child-1", name: " Renamed ", updateSharedInbox });
+  await moveSharedInboxCommand({ companyID: "company-1", folderID: "child-1", parentFolderID: "parent-2", position: 2000, updateSharedInbox });
+  const deleted = await deleteSharedInboxCommand({
+    companyID: "company-1",
+    folderID: "parent-1",
+    sharedInboxes: [sharedInbox("parent-1"), sharedInbox("child-1", { parent_folder_id: "parent-1" })],
+    deleteSharedInbox,
+  });
+
+  assert.equal(created?.viewID, "shared:child-1");
+  assert.equal(created?.folder.name, "Team");
+  assert.equal(attached?.notice, "Attached team@example.test.");
+  assert.deepEqual(updatedCalls.map((call) => ({ folderID: call.folderID, name: call.name, parentFolderID: call.parentFolderID, position: call.position, accountEmail: call.accountEmail })), [
+    { folderID: "child-1", name: undefined, parentFolderID: undefined, position: undefined, accountEmail: "team@example.test" },
+    { folderID: "child-1", name: "Renamed", parentFolderID: undefined, position: undefined, accountEmail: undefined },
+    { folderID: "child-1", name: undefined, parentFolderID: "parent-2", position: 2000, accountEmail: undefined },
+  ]);
+  assert.deepEqual(deletedCalls, [{ companyID: "company-1", folderID: "parent-1" }]);
+  assert.deepEqual(deleted?.deletedFolderIDs.sort(), ["child-1", "parent-1"]);
+});
+
+test("Home shared inbox RACI commands build direct replacement payloads", async () => {
+  const updateCalls: Array<{ companyID: string; folderID: string; assignments: Array<{ role: CommunicationsSharedInboxRaciRole; user_id: string }> }> = [];
+  const updateSharedInboxRaciAssignments: HomeUpdateSharedInboxRaciAssignments = async (companyID, folderID, assignments) => {
+    updateCalls.push({ companyID, folderID, assignments });
+    return assignments.map((assignment) => sharedRaci(folderID, assignment.role, assignment.user_id));
+  };
+  const existing = sharedRaci("inbox-1", "responsible", "user-1");
+  const inboxes = [sharedInbox("inbox-1", { raci_assignments: [existing] })];
+
+  const added = await addSharedInboxRaciUserCommand({
+    companyID: "company-1",
+    folderID: " inbox-1 ",
+    role: "accountable",
+    userID: " user-2 ",
+    sharedInboxes: inboxes,
+    companyUsers: [companyUser("user-2")],
+    now: () => timestamp,
+    updateSharedInboxRaciAssignments,
+  });
+  const removed = await removeSharedInboxRaciUserCommand({
+    companyID: "company-1",
+    folderID: "inbox-1",
+    role: "responsible",
+    userID: "user-1",
+    sharedInboxes: inboxes,
+    updateSharedInboxRaciAssignments,
+  });
+
+  assert.deepEqual(updateCalls, [
+    { companyID: "company-1", folderID: "inbox-1", assignments: [{ role: "responsible", user_id: "user-1" }, { role: "accountable", user_id: "user-2" }] },
+    { companyID: "company-1", folderID: "inbox-1", assignments: [] },
+  ]);
+  assert.deepEqual(added?.assignments.map((assignment) => [assignment.role, assignment.user_id]), [["responsible", "user-1"], ["accountable", "user-2"]]);
+  assert.deepEqual(removed?.assignments, []);
 });
