@@ -499,7 +499,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     if (!element) return;
     const nextHTML = deserializeEditorDocumentHTML(documentValue);
     const targetChanged = loadedDocumentTargetKeyRef.current !== documentTargetKey;
-    if (!targetChanged && documentValue === lastAppliedDocumentRef.current && element.innerHTML === nextHTML) return;
+    if (!targetChanged && documentValue === lastAppliedDocumentRef.current) return;
     element.innerHTML = nextHTML;
     resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
     lastAppliedDocumentRef.current = documentValue;
