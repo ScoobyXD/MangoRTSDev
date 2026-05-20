@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { sanitizeAPIErrorMessage } from "../../../../frontend/src/modules/api/requestJSON.js";
 import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, deserializeEditorDocumentHTML, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
-import { clampEditorImageVerticalOffset, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isSafeEditorImageSource } from "../../../../frontend/src/modules/editor/editorImages.js";
+import { clampEditorImageVerticalOffset, createStandaloneImageClipboardHTML, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isSafeEditorImageSource } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
   assert.equal(EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, 20);
@@ -58,6 +58,13 @@ test("editor image source sanitizer only accepts raster data images", () => {
   assert.equal(isSafeEditorImageSource("data:image/png;base64,iVBORw0KGgo="), true);
   assert.equal(isSafeEditorImageSource("data:image/svg+xml;base64,PHN2Zy8+"), false);
   assert.equal(isSafeEditorImageSource("https://example.test/image.png"), false);
+});
+
+test("standalone image clipboard HTML uses safe raster sources and escaped alt text", () => {
+  const html = createStandaloneImageClipboardHTML("data:image/png;base64,iVBORw0KGgo=", 'Screen "one" <copy>');
+
+  assert.equal(html, '<img src="data:image/png;base64,iVBORw0KGgo=" alt="Screen &quot;one&quot; &lt;copy&gt;">');
+  assert.equal(createStandaloneImageClipboardHTML("https://example.test/image.png"), "");
 });
 
 test("editor image pointer zones support every edge and corner", () => {

@@ -97,6 +97,39 @@ export function createEditorImageClipboardHTML(ownerDocument: Document, data: Ed
   return frame.outerHTML;
 }
 
+export function createStandaloneImageClipboardHTML(src: string, alt = "Image"): string {
+  if (!isSafeEditorImageSource(src)) return "";
+  return `<img src="${src}" alt="${escapeHTMLAttribute(alt)}">`;
+}
+
+export function writeImageClipboardData(clipboardData: DataTransfer, src: string, html: string, plainText = "Image"): boolean {
+  if (!isSafeEditorImageSource(src) || !html.trim()) return false;
+  clipboardData.setData("text/html", html);
+  clipboardData.setData("text/plain", plainText.trim() || "Image");
+  return true;
+}
+
+export function writeImageToSystemClipboard(src: string, html: string, plainText = "Image"): boolean {
+  const clipboard = typeof navigator !== "undefined" ? navigator.clipboard : undefined;
+  if (!clipboard?.write || typeof ClipboardItem === "undefined") return false;
+  const imageBlob = createEditorImageBlob(src);
+  if (!imageBlob) return false;
+  const supportsType = (ClipboardItem as unknown as { supports?: (type: string) => boolean }).supports;
+  const itemPayload: Record<string, Blob> = {};
+  const addClipboardType = (type: string, blob: Blob) => {
+    if (typeof supportsType === "function" && !supportsType(type)) return;
+    itemPayload[type] = blob;
+  };
+  addClipboardType(imageBlob.type, imageBlob);
+  addClipboardType("text/html", new Blob([html], { type: "text/html" }));
+  addClipboardType("text/plain", new Blob([plainText.trim() || "Image"], { type: "text/plain" }));
+  if (Object.keys(itemPayload).length === 0) return false;
+  void clipboard.write([
+    new ClipboardItem(itemPayload),
+  ]).catch(() => undefined);
+  return true;
+}
+
 export function readEditorImageClipboardDataFromHTML(ownerDocument: Document, html: string): EditorImageClipboardData | null {
   if (!html.trim()) return null;
   const template = ownerDocument.createElement("template");
@@ -295,6 +328,14 @@ function createEditorImageID(): string {
   return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
     : `image-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function escapeHTMLAttribute(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function readSafeStylePixels(value: string, fallback: number, minValue: number, maxValue: number): number {

@@ -5,7 +5,7 @@ import { resolveNodeMapDeleteSelection, shouldIgnoreMapDeleteKeyTarget } from ".
 type DeleteRoutingInput = {
   canvasActive: boolean;
   hasSelection: boolean;
-  target: { tagName?: string; isContentEditable?: boolean } | null;
+  target: { tagName?: string; isContentEditable?: boolean; closest?: (selector: string) => { tagName?: string; isContentEditable?: boolean } | null } | null;
 };
 
 const shouldHandleDelete = (input: DeleteRoutingInput) => {
@@ -35,6 +35,18 @@ test("ignores delete when nothing is selected", () => {
     canvasActive: true,
     hasSelection: false,
     target: null,
+  }), false);
+});
+
+test("ignores delete and canvas copy for copyable image targets", () => {
+  assert.equal(shouldHandleDelete({
+    canvasActive: true,
+    hasSelection: true,
+    target: {
+      tagName: "BUTTON",
+      isContentEditable: false,
+      closest: (selector: string) => selector.includes("data-mango-copyable-image") ? {} : null,
+    },
   }), false);
 });
 
